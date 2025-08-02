@@ -2,9 +2,9 @@
 
 ## Releases
 
-- Sync current `master` with `production`
-  - Create a PR for `master` => `production`
-  - Comment: `/fast-forward` to create fast forward merge into production 
+### CLI Releases
+
+For CLI releases, see [RELEASE.md](./RELEASE.md) for detailed instructions.
 
 ## Getting Started
 

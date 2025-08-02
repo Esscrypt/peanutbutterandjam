@@ -6,8 +6,24 @@
   "bin": {
     "pbnj": "./dist/index.js"
   },
+  "pkg": {
+    "assets": [
+      "dist/**/*"
+    ],
+    "targets": [
+      "node18-linux-x64",
+      "node18-macos-x64",
+      "node18-win-x64"
+    ],
+    "outputPath": "dist/bin",
+    "scripts": [
+      "dist/**/*.js"
+    ]
+  },
   "scripts": {
     "build": "tsc",
+    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --format=cjs",
+    "build:binary": "bun run build:bundle && npx pkg dist/bundle.js --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path dist/bin --public",
     "check": "tsc --pretty --noEmit",
     "test": "vitest run",
     "test:watch": "vitest run --watch",
@@ -20,6 +36,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "esbuild": "^0.20.0",
+    "pkg": "^5.8.1",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vitest": "^2.1.9",

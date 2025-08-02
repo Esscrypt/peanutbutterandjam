@@ -1,6 +1,10 @@
 {
   "extends": "@pbnj/typescript-config/base.json",
   "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
