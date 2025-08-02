@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 
+import { logger } from '@pbnj/core'
 import { Command } from 'commander'
 import { version } from '../package.json'
 import { CommandHandler } from './command-handler'
 import { parseArguments } from './parser'
+
+// Initialize logger at the very beginning
+logger.init()
 
 const program = new Command()
 
