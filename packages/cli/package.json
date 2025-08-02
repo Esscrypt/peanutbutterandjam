@@ -1,0 +1,31 @@
+{
+  "name": "@pbnj/cli",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "pbnj": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --pretty --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest run --watch",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "@pbnj/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9",
+    "@pbnj/typescript-config": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

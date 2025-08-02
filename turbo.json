@@ -1,0 +1,142 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["APP_ENV", "CI", "DEBUG", "NODE_ENV", "GITHUB_TOKEN"],
+  "globalDependencies": [
+    ".eslintignore",
+    ".eslint.js",
+    ".npmrc",
+    ".nvmrc",
+    ".prettierignore",
+    ".prettierrc.js",
+    "tsconfig.json"
+  ],
+  "tasks": {
+    "anvil": {
+      "cache": false,
+      "env": ["ANVIL_BLOCK_NUMBER", "ANVIL_FORK_URL", "ANVIL_PORT"],
+      "persistent": true
+    },
+    "build": {
+      "outputs": [".next/**/*", "!.next/cache/**", ".vercel/**/*", "dist/**/*"],
+      "dependsOn": ["^build", "^generate"],
+      "env": [
+        "ALCHEMY_ID",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "NEXT_PUBLIC_POOLS_API_V0_BASE_URL",
+        "POOLS_API_V0_BASE_URL",
+        "TOKENS_API_V0_BASE_URL",
+        "SWAP_API_V0_BASE_URL",
+        "TOKEN_LIST_PR_WEBHOOK_URL",
+        "OCTOKIT_KEY",
+        "NEXT_PUBLIC_STRAPI_API_URL",
+        "NEXT_PUBLIC_ENV_VARIANT",
+        "NEXT_PUBLIC_VERCEL_ENV",
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_GOOGLE_ANALYTICS"
+      ],
+      "cache": true
+    },
+    "build:bin": {
+      "outputs": ["bin"],
+      "dependsOn": ["^build", "generate"],
+      "cache": true
+    },
+    "clean": {
+      "cache": false
+    },
+    "check": {
+      "dependsOn": ["^build", "generate"],
+      "cache": false
+    },
+    "dev": {
+      "dependsOn": ["^build", "generate"],
+      "env": ["PONDER_RPC_API_KEY_80094", "PONDER_RPC_URL_80094"],
+      "cache": false,
+      "persistent": true
+    },
+    "generate": {
+      "outputs": [
+        ".mesh/**/*",
+        ".graphclient/**/*",
+        "src/generated.ts",
+        "typechain",
+        "migrations/**/*"
+      ],
+      "cache": false
+    },
+    "lint": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "start": {
+      "dependsOn": ["^build", "generate", "export"],
+      "env": [
+        "ALCHEMY_ID",
+        "APP_ENV",
+        "DATABASE_URL",
+        "NEXT_PUBLIC_POOLS_API_V0_BASE_URL",
+        "POOLS_API_V0_BASE_URL",
+        "REDIS_URL",
+        "SWAP_API_V0_BASE_URL",
+        "APP_ENV",
+        "TOKENS_API_V0_BASE_URL",
+        "NEXT_PUBLIC_STRAPI_API_URL",
+        "PONDER_RPC_URL_42161",
+        "PONDER_RPC_URL_80084",
+        "PONDER_RPC_URL_80000",
+        "PONDER_LOG_LEVEL",
+        "NEXT_PUBLIC_ENV_VARIANT",
+        "NEXT_PUBLIC_VERCEL_ENV",
+        "NEXT_PUBLIC_POSTHOG_KEY",
+        "NEXT_PUBLIC_GOOGLE_ANALYTICS",
+        "PONDER_RPC_API_KEY_80094",
+        "PONDER_RPC_URL_80094",
+        "PONDER_RPC_URL_999",
+        "PONDER_SCHEMA",
+        "RAILWAY_DEPLOYMENT_ID"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "start:dev": {
+      "dependsOn": ["^build", "generate", "export"],
+      "env": [
+        "ALCHEMY_ID",
+        "APP_ENV",
+        "DATABASE_URL",
+        "NEXT_PUBLIC_POOLS_API_V0_BASE_URL",
+        "POOLS_API_V0_BASE_URL",
+        "REDIS_URL",
+        "SWAP_API_V0_BASE_URL",
+        "APP_ENV",
+        "TOKENS_API_V0_BASE_URL",
+        "NEXT_PUBLIC_STRAPI_API_URL"
+      ],
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": []
+    },
+    "validate": {
+      "cache": true
+    },
+    "export": {
+      "cache": true
+    },
+    "db:migrate": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
+    "db:migrate:core": {
+      "cache": false,
+      "env": ["DATABASE_URL"]
+    },
+    "withdraw:feeVault": {
+      "cache": false
+    }
+  }
+}

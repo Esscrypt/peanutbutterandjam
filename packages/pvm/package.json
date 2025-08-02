@@ -1,0 +1,25 @@
+{
+  "name": "@pbnj/pvm",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "index.ts",
+  "module": "index.ts",
+  "scripts": {
+    "check": "tsc --pretty --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest run --watch",
+    "clean": "rm -rf .turbo && rm -rf node_modules"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "pino": "^9.6.0",
+    "pino-pretty": "^11.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9",
+    "@pbnj/typescript-config": "workspace:*"
+  },
+  "exports": {
+    ".": "./index.ts"
+  }
+}

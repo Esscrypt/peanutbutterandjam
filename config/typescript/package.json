@@ -1,0 +1,9 @@
+{
+  "name": "@pbnj/typescript-config",
+  "version": "0.0.1",
+  "description": "Peanut Butter and JAM TypeScript Config",
+  "keywords": [
+    "typescript",
+    "config"
+  ]
+}
