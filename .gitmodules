@@ -1,8 +1,8 @@
-[submodule "jamtestvectors"]
-	path = jamtestvectors
+[submodule "submodules/jamtestvectors"]
+	path = submodules/jamtestvectors
 	url = https://github.com/w3f/jamtestvectors.git
-[submodule "graypaper"]
-	path = graypaper
+[submodule "submodules/graypaper"]
+	path = submodules/graypaper
 	url = https://github.com/gavofyork/graypaper.git
 [submodule "submodules/ark-vrf"]
 	path = submodules/ark-vrf
