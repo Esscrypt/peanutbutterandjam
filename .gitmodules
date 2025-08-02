@@ -1,0 +1,6 @@
+[submodule "jamtestvectors"]
+	path = jamtestvectors
+	url = https://github.com/w3f/jamtestvectors.git
+[submodule "graypaper"]
+	path = graypaper
+	url = https://github.com/gavofyork/graypaper.git

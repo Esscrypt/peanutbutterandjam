@@ -1,5 +1,16 @@
 # PeanutButterAndJAM Monorepo
 
+A TypeScript implementation of the JAM (Just Another Machine) protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper).
+
+## Specification Compliance
+
+This project strictly adheres to the [JAM Gray Paper](https://graypaper.com/) specification:
+
+- **Gray Paper**: `graypaper/` submodule - The authoritative JAM protocol specification
+- **Test Vectors**: `jamtestvectors/` submodule - Official test vectors for validation
+- **Implementation Guide**: [JAM Implementation Guide](.cursor/rules/jam-implementation-guide.mdc)
+- **Adherence Rules**: [Gray Paper Adherence Rules](.cursor/rules/graypaper-adherence.mdc)
+
 ## Releases
 
 ### CLI Releases

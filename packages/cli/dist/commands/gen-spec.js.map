@@ -1,0 +1,1 @@
+{"version":3,"file":"gen-spec.js","sourceRoot":"","sources":["../../src/commands/gen-spec.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,MAAM,EAAE,MAAM,YAAY,CAAA;AAInC,MAAM,OAAO,cAAc;IACzB,KAAK,CAAC,OAAO,CAAC,OAAuB;QACnC,uBAAuB;QACvB,MAAM,CAAC,IAAI,CAAC,uCAAuC,EAAE,OAAO,CAAC,CAAA;IAC/D,CAAC;CACF"}

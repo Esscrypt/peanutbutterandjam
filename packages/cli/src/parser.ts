@@ -1,9 +1,4 @@
-export interface GlobalOptions {
-  config?: string
-  logLevel?: string
-  temp?: boolean
-  verbose?: boolean
-}
+import type { GlobalOptions } from './types'
 
 export interface GenKeysOptions extends GlobalOptions {
   // Command-specific options can be added here
@@ -29,6 +24,15 @@ export interface TestStfOptions extends GlobalOptions {
   // Command-specific options can be added here
 }
 
+export interface TestSafroleOptions extends GlobalOptions {
+  vectors?: string
+  vector?: string
+}
+
+export interface TestAllOptions extends GlobalOptions {
+  vectors?: string
+}
+
 export type CommandOptions =
   | GenKeysOptions
   | GenSpecOptions
@@ -36,6 +40,8 @@ export type CommandOptions =
   | PrintSpecOptions
   | RunOptions
   | TestStfOptions
+  | TestSafroleOptions
+  | TestAllOptions
 
 // Interface for commander options
 export interface CommanderOptions {

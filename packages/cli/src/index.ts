@@ -2,7 +2,7 @@
 
 import { Command } from 'commander'
 import { version } from '../package.json'
-import { CommandHandler } from './commands'
+import { CommandHandler } from './command-handler'
 import { parseArguments } from './parser'
 
 const program = new Command()
@@ -78,6 +78,27 @@ program
     const args = parseArguments(options)
     const handler = new CommandHandler()
     await handler.execute('test-stf', args)
+  })
+
+program
+  .command('test-safrole')
+  .description('Test Safrole consensus protocol against JAM test vectors')
+  .option('--vectors <type>', 'Test vector type: tiny or full', 'tiny')
+  .option('--vector <name>', 'Test specific vector by name')
+  .action(async (options) => {
+    const args = parseArguments(options)
+    const handler = new CommandHandler()
+    await handler.execute('test-safrole', args)
+  })
+
+program
+  .command('test-all')
+  .description('Test all JAM protocol components against test vectors')
+  .option('--vectors <type>', 'Test vector type: tiny or full', 'tiny')
+  .action(async (options) => {
+    const args = parseArguments(options)
+    const handler = new CommandHandler()
+    await handler.execute('test-all', args)
   })
 
 // Parse command line arguments

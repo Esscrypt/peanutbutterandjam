@@ -1,0 +1,1 @@
+{"version":3,"file":"run.js","sourceRoot":"","sources":["../../src/commands/run.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,MAAM,EAAE,MAAM,YAAY,CAAA;AAInC,MAAM,OAAO,UAAU;IACrB,KAAK,CAAC,OAAO,CAAC,OAAmB;QAC/B,uBAAuB;QACvB,MAAM,CAAC,IAAI,CAAC,kCAAkC,EAAE,OAAO,CAAC,CAAA;IAC1D,CAAC;CACF"}

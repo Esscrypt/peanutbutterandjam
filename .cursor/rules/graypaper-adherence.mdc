@@ -1,0 +1,132 @@
+# JAM Gray Paper Adherence Rules
+
+## Overview
+
+This project implements the JAM (Just Another Machine) protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). The Gray Paper is the authoritative source for all JAM protocol specifications and must be followed strictly.
+
+## Core Principles
+
+### 1. Gray Paper Authority
+- **The Gray Paper is the definitive specification** for the JAM protocol
+- All implementations must strictly adhere to the formal specifications in the Gray Paper
+- Any discrepancies between implementation and specification must be resolved in favor of the Gray Paper
+- The Gray Paper takes precedence over any other documentation or RFCs
+
+### 2. Protocol Components
+
+#### State Transition Functions (STF)
+- **Safrole**: Consensus protocol implementation must follow `graypaper/text/safrole.tex`
+- **PVM**: Para Virtual Machine must implement specifications from `graypaper/text/pvm.tex`
+- **Work Packages**: Must follow `graypaper/text/work_packages_and_reports.tex`
+- **Assurances**: Implement according to `graypaper/text/reporting_assurance.tex`
+- **Statistics**: Follow `graypaper/text/statistics.tex`
+- **Authorizations**: Implement as specified in `graypaper/text/authorization.tex`
+- **Accumulation**: Follow `graypaper/text/accumulation.tex`
+
+#### Core Infrastructure
+- **Erasure Coding**: Implement according to `graypaper/text/erasure_coding.tex`
+- **Merklization**: Follow `graypaper/text/merklization.tex`
+- **Serialization**: Use specifications from `graypaper/text/serialization.tex`
+- **Accounts**: Implement as specified in `graypaper/text/accounts.tex`
+
+### 3. Implementation Requirements
+
+#### Mathematical Correctness
+- All cryptographic operations must be mathematically correct
+- Bandersnatch VRF implementation must follow `graypaper/text/bandersnatch.tex`
+- Ring proofs must be implemented exactly as specified
+- All mathematical formulas in the Gray Paper must be implemented precisely
+
+#### State Management
+- State transitions must follow the formal judgments in `graypaper/text/judgments.tex`
+- State serialization must match the specifications in `graypaper/text/serialization.tex`
+- All state invariants must be maintained
+
+#### Error Handling
+- Error codes must match those defined in the Gray Paper
+- Error semantics must be implemented exactly as specified
+- No additional error conditions should be introduced without Gray Paper justification
+
+### 4. Testing Requirements
+
+#### Test Vector Compliance
+- All implementations must pass the official JAM test vectors from `jamtestvectors/`
+- Test vectors are derived directly from Gray Paper specifications
+- Any test failures must be resolved by correcting the implementation, not the test vectors
+
+#### Formal Verification
+- Where possible, implementations should be formally verified against Gray Paper specifications
+- Mathematical proofs should be implemented as specified
+- All formal judgments must be correctly implemented
+
+### 5. Documentation Standards
+
+#### Specification References
+- All code must reference specific sections of the Gray Paper
+- Comments should cite relevant Gray Paper sections
+- Documentation must align with Gray Paper terminology
+
+#### Implementation Notes
+- Deviations from Gray Paper must be documented with justification
+- Performance optimizations must not violate protocol semantics
+- All implementation decisions must be traceable to Gray Paper specifications
+
+### 6. Development Workflow
+
+#### Code Review
+- All code changes must be reviewed against Gray Paper specifications
+- Reviewers must verify compliance with relevant Gray Paper sections
+- Any protocol changes require Gray Paper updates first
+
+#### Testing
+- Implementations must pass all test vectors before deployment
+- Continuous integration must include Gray Paper compliance checks
+- Performance tests must not compromise protocol correctness
+
+### 7. Key Gray Paper Sections
+
+#### Essential Reading
+- `graypaper/text/overview.tex` - Protocol overview and architecture
+- `graypaper/text/definitions.tex` - Formal definitions and terminology
+- `graypaper/text/notation.tex` - Mathematical notation and conventions
+- `graypaper/text/intro.tex` - Introduction and context
+
+#### Implementation Guides
+- `graypaper/text/safrole.tex` - Consensus protocol implementation
+- `graypaper/text/pvm.tex` - Para Virtual Machine specification
+- `graypaper/text/serialization.tex` - Data serialization formats
+- `graypaper/text/erasure_coding.tex` - Data availability coding
+
+### 8. Compliance Checklist
+
+Before any implementation is considered complete:
+
+- [ ] All mathematical formulas from Gray Paper are correctly implemented
+- [ ] State transitions follow formal judgments exactly
+- [ ] Error handling matches Gray Paper specifications
+- [ ] Test vectors pass without modification
+- [ ] Documentation references relevant Gray Paper sections
+- [ ] Performance optimizations don't violate protocol semantics
+- [ ] All cryptographic operations are mathematically correct
+- [ ] Serialization formats match Gray Paper specifications
+
+### 9. Resources
+
+- **Gray Paper Repository**: https://github.com/gavofyork/graypaper
+- **Gray Paper Website**: https://graypaper.com/
+- **Test Vectors**: `jamtestvectors/` submodule
+- **Community Documentation**: https://docs.jamcha.in/
+
+### 10. Enforcement
+
+- All code must be reviewed for Gray Paper compliance
+- Test failures must be resolved by fixing implementation, not tests
+- Protocol changes require Gray Paper updates
+- Documentation must reference specific Gray Paper sections
+- Performance optimizations must preserve protocol semantics
+
+Remember: **The Gray Paper is the authoritative source. When in doubt, consult the Gray Paper.**
+description:
+globs:
+alwaysApply: false
+---
