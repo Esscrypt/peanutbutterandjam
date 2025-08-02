@@ -1,11 +1,11 @@
-name: OogaBooga - verify
+name: PeanutButterAndJam - verify
 on:
   pull_request:
     types: [opened, synchronize]
 
-env:
-  TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-  TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+# env:
+#   TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+#   TURBO_TEAM: ${{ vars.TURBO_TEAM }}
 jobs:
   lint:
     name: Lint + Format
@@ -44,5 +44,5 @@ jobs:
         uses: actions/checkout@v4
       - name: Install dependencies
         uses: ./.github/actions/install
-      - name: Run OogaBooga tests
+      - name: Run PeanutButterAndJam tests
         run: bun run test
