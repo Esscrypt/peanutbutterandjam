@@ -1,0 +1,30 @@
+\section{Authorization}\label{sec:authorization}
+
+We have previously discussed the model of work-packages and services in section \ref{sec:coremodelandservices}, however we have yet to make a substantial discussion of exactly how some \emph{coretime} resource may be apportioned to some work-package and its associated service. In the \emph{YP} Ethereum model, the underlying resource, gas, is procured at the point of introduction on-chain and the purchaser is always the same agent who authors the data which describes the work to be done (\ie the transaction). Conversely, in Polkadot the underlying resource, a parachain slot, is procured with a substantial deposit for typically 24 months at a time and the procurer, generally a parachain team, will often have no direct relation to the author of the work to be done (\ie a parachain block).
+
+On a principle of flexibility, we would wish \Jam capable of supporting a range of interaction patterns both Ethereum-style and Polkadot-style. In an effort to do so, we introduce the \emph{authorization system}, a means of disentangling the intention of usage for some coretime from the specification and submission of a particular workload to be executed on it. We are thus able to disassociate the purchase and assignment of coretime from the specific determination of work to be done with it, and so are able to support both Ethereum-style and Polkadot-style interaction patterns.
+
+\subsection{Authorizers and Authorizations}
+
+The authorization system involves three key concepts: \emph{Authorizers}, \emph{Tokens} and \emph{Traces}. A Token is simply a piece of opaque data to be included with a work-package to help make an argument that the work-package should be authorized. Similarly, a Trace is a piece of opaque data which helps characterize or describe some successful authorization. An Authorizer meanwhile, is a piece of logic which executes within some pre-specified and well-known computational limits and determines whether a work-package---including its Token---is authorized for execution on some particular core and yields a Trace on success.
+
+Authorizers are identified as the hash of their \textsc{pvm} code concatenated with their Configuration blob, the latter being, like Tokens and Traces, opaque data meaningful to the \textsc{pvm} code. The process by which work-packages are determined to be authorized (or not) is not the competence of on-chain logic and happens entirely in-core and as such is discussed in section \ref{sec:packagesanditems}. However, on-chain logic must identify each set of authorizers assigned to each core in order to verify that a work-package is legitimately able to utilize that resource. It is this subsystem we will now define.
+
+\subsection{Pool and Queue}
+
+We define the set of authorizers allowable for a particular core $\¬core$ as the \emph{authorizer pool} $\authpool[\¬core]$. To maintain this value, a further portion of state is tracked for each core: the core's current \emph{authorizer queue} $\authqueue[\¬core]$, from which we draw values to fill the pool. Formally:
+\begin{equation}
+  \label{eq:authstatecomposition}
+  \authpool \in \sequence[\Ccorecount]{\sequence[:\Cauthpoolsize]{\hash}}\ , \qquad
+  \authqueue \in \sequence[\Ccorecount]{\sequence[\Cauthqueuesize]{\hash}}
+\end{equation}
+
+Note: The portion of state $\authqueue$ may be altered only through an exogenous call made from the accumulate logic of an appropriately privileged service.
+
+The state transition of a block involves placing a new authorization into the pool from the queue:
+\begin{align}
+  &\forall \¬core \in \coreindex : \authpool'\subb{\¬core} \equiv {\overleftarrow{F(\¬core) \append \cyclic{\authqueue'\subb{\¬core}\subb{\H_\¬timeslot}}}}^{\Cauthpoolsize} \\
+  &F(\¬core) \equiv \begin{cases} \authpool[\¬core] \seqminusl \set{(g_\xg¬workreport)_\wr¬authorizer} &\when \exists g \in \xtguarantees : (g_\xg¬workreport)_\¬core = \¬core \\ \authpool[\¬core] & \otherwise \end{cases}
+\end{align}
+
+Since $\authpool'$ is dependent on $\authqueue'$, practically speaking, this step must be computed after accumulation, the stage in which $\authqueue'$ is defined. Note that we utilize the guarantees extrinsic $\xtguarantees$ to remove the oldest authorizer which has been used to justify a guaranteed work-package in the current block. This is further defined in equation \ref{eq:guaranteesextrinsic}.

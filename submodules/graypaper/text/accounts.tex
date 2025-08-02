@@ -1,0 +1,181 @@
+\section{Service Accounts}\label{sec:accounts}
+
+As we already noted, a service in \Jam is somewhat analogous to a smart contract in Ethereum in that it includes amongst other items, a code component, a storage component and a balance. Unlike Ethereum, the code is split over two isolated entry-points each with their own environmental conditions; one, \emph{Refinement}, is essentially stateless and happens in-core, and the other, \emph{Accumulation}, which is stateful and happens on-chain. It is the latter which we will concern ourselves with now.
+
+Service accounts are held in state under $\accounts$, a partial mapping from a service identifier $\serviceid$ into a tuple of named elements which specify the attributes of the service relevant to the \Jam protocol. Formally:
+\begin{align}\label{eq:serviceaccounts}
+  \serviceid &\equiv \Nbits{32} \\
+  \accounts &\in \dictionary{\serviceid}{\serviceaccount}
+\end{align}
+
+The service account is defined as the tuple of storage dictionary $\sa¬storage$, preimage lookup dictionaries $\sa¬preimages$ and $\sa¬requests$, code hash $\sa¬codehash$, balance $\sa¬balance$ and gratis storage offset $\sa¬gratis$, as well as the two code gas limits $\sa¬minaccgas$ \& $\sa¬minmemogas$. We also record certain usage characteristics concerning the account: the time slot at creation $\sa¬created$, the time slot at the most recent accumulation $\sa¬lastacc$ and the parent service $\sa¬parent$. Formally:
+\begin{align}\label{eq:serviceaccount}
+  \serviceaccount \equiv \tuple{\ \begin{aligned}
+    \sa¬storage &\in \dictionary{\blob}{\blob}\,,\
+    \sa¬preimages \in \dictionary{\hash}{\blob}\,,\\
+    \sa¬requests &\in \dictionary{\tuple{\hash,\bloblength}}{\sequence[:3]{\timeslot}}\,,\\
+    \sa¬gratis &\in \balance\,,\
+    \sa¬codehash \in \hash\,,\
+    \sa¬balance \in \balance\,,\
+    \sa¬minaccgas \in \gas\,,\\
+    \sa¬minmemogas &\in \gas\,,\
+    \sa¬created \in \timeslot\,,\
+    \sa¬lastacc \in \timeslot\,,\
+    \sa¬parent \in \serviceid\\
+    %i, o, f
+  \end{aligned}\,}
+\end{align}
+
+Thus, the balance of the service of index $s$ would be denoted $\accounts\subb{s}_\sa¬balance$ and the storage item of key $\mathbf{k} \in \blob$ for that service is written $\accounts\subb{s}_\sa¬storage\subb{\mathbf{k}}$.
+
+
+
+
+
+
+
+
+\subsection{Code and Gas}
+
+The code and associated metadata of a service account is identified by a hash which, if the service is to be functional, must be present within its preimage lookup (see section \ref{sec:lookups}) and have a preimage which is a proper encoding of the two blobs. We thus define the actual code $\sa¬code$ and metadata $\sa¬metadata$:
+\begin{align}
+  \forall \mathbf{a} \in \serviceaccount : \tup{\mathbf{a}_\sa¬metadata, \mathbf{a}_\sa¬code} \equiv \begin{cases}
+    \tup{\mathbf{m}, \mathbf{c}} &\when \encode{\var{\mathbf{m}}, \mathbf{c}} = \mathbf{a}_\sa¬preimages[\mathbf{a}_\sa¬codehash] \\
+    \tup{\none, \none} &\otherwise
+  \end{cases}
+\end{align}
+
+There are two entry-points in the code:
+\begin{description}
+  \item[0 \texttt{refine}]Refinement, executed in-core and stateless.\footnote{Technically there is some small assumption of state, namely that some modestly recent instance of each service's preimages. The specifics of this are discussed in section \ref{sec:packagesanditems}.}
+  \item[1 \texttt{accumulate}] Accumulation, executed on-chain and stateful.
+\end{description}
+
+Refinement and accumulation are described in more detail in sections \ref{sec:computeworkreport} and \ref{sec:accumulationexecution} respectively.
+
+As stated in appendix \ref{sec:virtualmachine}, execution time in the \Jam virtual machine is measured deterministically in units of \emph{gas}, represented as a natural number less than $2^{64}$ and formally denoted $\gas$. We may also use $\signedgas$ to denote the set $\Z_{-2^{63}\dots2^{63}}$ if the quantity may be negative. There are two limits specified in the account, which determine the minimum gas required in order to execute the \emph{Accumulate} entry-point of the service's code. $\sa¬minaccgas$ is the minimum gas required per work-item, while $\sa¬minmemogas$ is the minimum gas required per deferred-transfer.
+
+
+
+
+
+
+
+
+
+
+\subsection{Preimage Lookups}\label{sec:lookups}
+
+In addition to storing data in arbitrary key/value pairs available only on-chain, an account may also solicit data to be made available also in-core, and thus available to the Refine logic of the service's code. State concerning this facility is held under the service's $\sa¬preimages$ and $\sa¬requests$ components.
+
+There are several differences between preimage-lookups and storage. Firstly, preimage-lookups act as a mapping from a hash to its preimage, whereas general storage maps arbitrary keys to values. Secondly, preimage data is supplied extrinsically, whereas storage data originates as part of the service's accumulation. Thirdly preimage data, once supplied, may not be removed freely; instead it goes through a process of being marked as unavailable, and only after a period of time may it be removed from state. This ensures that historical information on its existence is retained. The final point especially is important since preimage data is designed to be queried in-core, under the Refine logic of the service's code, and thus it is important that the historical availability of the preimage is known.
+
+We begin by reformulating the portion of state concerning our data-lookup system. The purpose of this system is to provide a means of storing static data on-chain such that it may later be made available within the execution of any service code as a function accepting only the hash of the data and its length in octets.
+
+During the on-chain execution of the \emph{Accumulate} function, this is trivial to achieve since there is inherently a state which all validators verifying the block necessarily have complete knowledge of, \ie $\thestate$. However, for the in-core execution of \emph{Refine}, there is no such state inherently available to all validators; we thus name a historical state, the \emph{lookup anchor} which must be considered recently finalized before the work's implications may be accumulated hence providing this guarantee.
+
+By retaining historical information on its availability, we become confident that any validator with a recently finalized view of the chain is able to determine whether any given preimage was available at any time within the period where auditing may occur. This ensures confidence that judgments will be deterministic even without consensus on chain state.
+
+Restated, we must be able to define some \emph{historical} lookup function $\histlookup$ which determines whether the preimage of some hash was available for lookup by some service account at some timeslot, and if so, provide it:
+\begin{equation}
+\begin{aligned}
+  \histlookup\colon \abracegroup[\ ]{
+    \tuple{\serviceaccount, \Nmax{(\H_\¬timeslot - \Cexpungeperiod) \dots \H_\¬timeslot}, \hash} &\to \optional{\blob} \\
+    (\mathbf{a}, t, \blake{\mathbf{p}}) &\mapsto v : v \in \set{ \mathbf{p}, \none }
+  }
+\end{aligned}
+\end{equation}
+
+This function is defined shortly below in equation \ref{eq:historicallookup}.
+
+The preimage lookup for some service of index $s$ is denoted $\accounts\subb{s}_\sa¬preimages$ is a dictionary mapping a hash to its corresponding preimage. Additionally, there is metadata associated with the lookup denoted $\accounts\subb{s}_\sa¬requests$ which is a dictionary mapping some hash and presupposed length into historical information.
+
+\subsubsection{Invariants}
+
+The state of the lookup system naturally satisfies a number of invariants. Firstly, any preimage value must correspond to its hash, equation \ref{eq:preimageconstraints}. Secondly, a preimage value being in state implies that its hash and length pair has some associated status, also in equation \ref{eq:preimageconstraints}. Formally:
+\begin{equation}\label{eq:preimageconstraints}
+  \forall \mathbf{a} \in \serviceaccount, \kv{h}{\mathbf{d}} \in \mathbf{a}_\sa¬preimages \Rightarrow
+    h = \blake{\mathbf{d}}\wedge
+    \tup{h , \len{\mathbf{d}}} \in \keys{\mathbf{a}_\sa¬requests}
+\end{equation}
+
+\subsubsection{Semantics}
+
+The historical status component $h \in \sequence[:3]{\timeslot}$ is a sequence of up to three time slots and the cardinality of this sequence implies one of four modes:
+\begin{itemize}
+  \item{$h = \sequence{}$}: The preimage is \emph{requested}, but has not yet been supplied.
+  \item{$h \in \sequence[1]{\timeslot}$}: The preimage is \emph{available} and has been from time $h_0$.
+  \item{$h \in \sequence[2]{\timeslot}$}: The previously available preimage is now \emph{unavailable} since time $h_1$. It had been available from time $h_0$.
+  \item{$h \in \sequence[3]{\timeslot}$}: The preimage is \emph{available} and has been from time $h_2$. It had previously been available from time $h_0$ until time $h_1$.
+\end{itemize}
+
+The historical lookup function $\histlookup$ may now be defined as:
+\begin{equation}
+  \begin{aligned}\label{eq:historicallookup}
+    &\histlookup\colon \tuple{\serviceaccount, \timeslot, \hash} \to \optional{\blob} \\
+    &\histlookup(\mathbf{a}, t, h) \equiv \begin{cases}
+      \mathbf{a}_\sa¬preimages\subb{h}\!\!\!\! &\when h \in \keys{\mathbf{a}_\sa¬preimages} \wedge I(\mathbf{a}_\sa¬requests\subb{h, \len{\mathbf{a}_\sa¬preimages\subb{h}}}, t) \!\!\!\!\! \\
+      \none &\otherwise
+    \end{cases}\\
+    &\where I(\mathbf{l}, t) = \begin{cases}
+      \bot &\when \sq{} = \mathbf{l} \\
+      x \le t &\when \sq{x} = \mathbf{l} \\
+      x \le t < y &\when \sq{x, y} = \mathbf{l} \\
+      x \le t < y \vee z \le t &\when \sq{x, y, z} = \mathbf{l} \\
+    \end{cases}
+  \end{aligned}
+\end{equation}
+
+
+
+
+
+
+
+\subsection{Account Footprint and Threshold Balance}
+
+We define the dependent values $\sa¬items$ and $\sa¬octets$ as the storage footprint of the service, specifically the number of items in storage and the total number of octets used in storage. They are defined purely in terms of the storage map of a service, and it must be assumed that whenever a service's storage is changed, these change also.
+
+Furthermore, as we will see in the account serialization function in section \ref{sec:serialization}, these are expected to be found explicitly within the Merklized state data. Because of this we make explicit their set.
+
+We may then define a third dependent term $\sa¬minbalance$, the minimum, or \emph{threshold}, balance needed for any given service account in terms of its storage footprint.
+\begin{align}
+  \forall \mathbf{a} \in \values{\accounts}\colon \abracegroup{
+    \mathbf{a}_\sa¬items \in \Nbits{32} &\equiv
+      2\cdot\len{\,\mathbf{a}_\sa¬requests\,} + \len{\,\mathbf{a}_\sa¬storage\,} \\
+    \mathbf{a}_\sa¬octets \in \Nbits{64} &\equiv
+      \sum\limits_{\,\tup{h, z} \in \keys{\mathbf{a}_\sa¬requests}\,} \!\!\!\!81 + z \\
+    &\phantom{\equiv\ } + \sum\limits_{\tup{x, y} \in \mathbf{a}_\sa¬storage} 34 + \len{y} + \len{x} \\
+    \label{eq:deposits}
+    \mathbf{a}_\sa¬minbalance \in \balance &\equiv
+      \max(0,
+        \Cbasedeposit
+        + \Citemdeposit \cdot \mathbf{a}_\sa¬items
+        + \Cbytedeposit \cdot \mathbf{a}_\sa¬octets
+        - \mathbf{a}_\sa¬gratis
+      )
+  }
+\end{align}
+
+
+
+
+\subsection{Service Privileges}
+\Jam includes the ability to bestow privileges on a number of services. The portion of state in which this is held is denoted $\privileges$ and includes five kinds of privilege. The first, $\manager$, is the index of the \emph{manager} service which is the service able to effect an alteration of $\privileges$ from block to block as well as bestow services with storage deposit credits. The next, $\delegator$, is able to set $\stagingset$. Then $\registrar$ alone is able to create new service accounts with indices in the protected range. The following, $\assigners$, are the service indices capable of altering the authorizer queue $\authqueue$, one for each core.
+
+Finally, $\alwaysaccers$ is a small dictionary containing the indices of services which automatically accumulate in each block together with a basic amount of gas with which each accumulates. Formally:
+\begin{align}
+  \label{eq:privilegesspec}
+  \privileges &\equiv \tuple{
+    \manager,
+    \delegator,
+    \registrar,
+    \assigners,
+    \alwaysaccers
+  }\\
+  \manager &\in \serviceid \ ,\qquad
+  \delegator \in \serviceid \ ,\qquad
+  \registrar \in \serviceid \\
+  \assigners &\in \sequence[\Ccorecount]{\serviceid} \ ,\qquad
+  \alwaysaccers \in \dictionary{\serviceid}{\gas}
+\end{align}

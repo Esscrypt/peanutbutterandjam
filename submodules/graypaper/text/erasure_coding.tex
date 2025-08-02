@@ -1,0 +1,166 @@
+\section{Erasure Coding}
+\label{sec:erasurecoding}
+
+\newcommand{\join}{\text{join}}
+\newcommand{\spl}[1]{\text{split}_{#1}}
+
+The foundation of the data-availability and distribution system of \Jam is a systematic Reed-Solomon erasure coding function in \textsc{gf}($2^{16}$) of rate 342:1023, the same transform as done by the algorithm of \cite{lin2014novel}. We use a little-endian $\blob[2]$ form of the 16-bit \textsc{gf} points with a functional equivalence given by $\fnencode[2]$. From this we may assume the encoding function $\fnerasurecode: \sequence[342]{\blob[2]} \to \sequence[1023]{\blob[2]}$ and the recovery function $\fnecrecover: \protoset{\tuple{\blob[2], \Nmax{1023}}}_{342} \to \sequence[342]{\blob[2]}$. Encoding is done by extrapolating a data blob of size 684 octets (provided in $\fnerasurecode$ here as 342 octet pairs) into 1,023 octet pairs. Recovery is done by collecting together any distinct 342 octet pairs, together with their indices, and transforming this into the original sequence of 342 octet pairs.
+
+Practically speaking, this allows for the efficient encoding and recovery of data whose size is a multiple of 684 octets. Data whose length is not divisible by 684 must be padded (we pad with zeroes). We use this erasure-coding in two contexts within the \Jam protocol; one where we encode variable sized (but typically very large) data blobs for the Audit \textsc{da} and block-distribution system, and the other where we encode much smaller fixed-size data \emph{segments} for the Import \textsc{da} system.
+
+For the Import \textsc{da} system, we deal with an input size of 4,104 octets resulting in data-parallelism of order six. We may attain a greater degree of data parallelism if encoding or recovering more than one segment at a time though for recovery, we may be restricted to requiring each segment to be formed from the same set of indices (depending on the specific algorithm).
+
+\subsection{Blob Encoding and Recovery}
+
+We assume some data blob $\mathbf{d} \in \blob[684k], k \in \N$. This blob is split into a whole number of $k$ pieces, each a sequence of 342 octet pairs. Each piece is erasure-coded using $\fnerasurecode$ as above to give 1,023 octet pairs per piece.
+
+The resulting matrix is grouped by its pair-index and concatenated to form 1,023 \emph{chunks}, each of $k$ octet-pairs. Any 342 of these chunks may then be used to reconstruct the original data $\mathbf{d}$.
+
+Formally we begin by defining two utility functions for splitting some large sequence into a number of equal-sized sub-sequences and for reconstituting such subsequences back into a single large sequence:
+\begin{align}
+  \forall n \in \N, k \in \N :\ &\spl{n}(\mathbf{d} \in \blob[kn]) \in \sequence[k]{\blob[n]} \equiv \sq{\mathbf{d}\subrange{0}{n}, \mathbf{d}\subrange{n}{n}, \cdots, \mathbf{d}\subrange{(k-1)n}{n}} \\
+  \forall n \in \N, k \in \N :\ &\join(\mathbf{c} \in \sequence[k]{\blob[n]}) \in \blob[kn] \equiv \mathbf{c}_0 \concat \mathbf{c}_1 \concat \dots
+\end{align}
+
+We define the transposition operator hence:
+\begin{equation}\label{eq:transpose}
+  {}^\text{T}\sq{\sq{\mathbf{x}_{0, 0}, \mathbf{x}_{0, 1}, \mathbf{x}_{0, 2}, \dots}, \sq{\mathbf{x}_{1, 0}, \mathbf{x}_{1, 1}, \dots}, \dots} \equiv \sq{\sq{\mathbf{x}_{0, 0}, \mathbf{x}_{1, 0}, \mathbf{x}_{2, 0}, \dots}, \sq{\mathbf{x}_{0, 1}, \mathbf{x}_{1, 1}, \dots}, \dots}
+\end{equation}
+
+We may then define our erasure-code chunking function which accepts an arbitrary sized data blob whose length divides wholly into 684 octets and results in a sequence of 1,023 smaller blobs:
+\begin{equation}\label{eq:erasurecoding}
+  \fnerasurecode_{k \in \N}\colon\abracegroup{
+    \blob[684k] &\to \sequence[1023]{\blob[2k]} \\
+    \mathbf{d} &\mapsto \join^\#({}^{\text{T}}\sq{\build{\erasurecode{\mathbf{p}}}{\mathbf{p} \orderedin {}^\text{T}\spl{2}^\#(\spl{2k}(\mathbf{d}))}})
+  }
+\end{equation}
+
+The original data may be reconstructed with any 342 of the 1,023 resultant items (along with their indices). If the original 342 items are known then reconstruction is just their concatenation.
+\begin{equation}
+  \label{eq:erasurecodinginv}
+  \fnecrecover_{k \in \N}\colon\abracegroup{
+    \protoset{\tuple{\blob[2k], \Nmax{1023}}}_{342} &\to \blob[684k] \\
+    \mathbf{c} &\mapsto \begin{cases}
+      \encode{\sq{\build{\mathbf{x}}{\tup{\mathbf{x}, i} \orderedin \sqorderby{i}{\tup{\mathbf{x}, i} \in \mathbf{c}}}}} &\when \set{\build{i}{\tup{\mathbf{x}, i} \in \mathbf{c}}} = \Nmax{342}\\
+      \join(\join^\#({}^\text{T}\sq{
+        \build{
+          \ecrecover{{\set{\build{
+           (\spl{2}(\mathbf{x})\sub{p}, i)
+          }{
+            \tup{\mathbf{x}, i} \in \mathbf{c}
+          }}}}
+        }{
+          p \in \Nmax{k}
+        }
+      })) &\text{always}\\
+    \end{cases}
+  }
+\end{equation}
+
+
+
+Segment encoding/decoding may be done using the same functions albeit with a constant $k = 6$.
+
+\subsection{Code Word representation}
+
+For the sake of brevity we call each octet pair a \emph{word}. The code words (including the message words) are treated as element of $\finitefield_{2^{16}}$ finite field. The field is generated as an extension of $\finitefield_2$ using the irreducible polynomial:
+\begin{equation}
+x^{16} + x^5 + x^3 + x^2 + 1
+\end{equation}
+
+Hence:
+\begin{equation}
+\finitefield_{2^{16}} \equiv \frac{\finitefield_2\subb{x}}{x^{16} + x^5 + x^3 + x^2 + 1}
+\end{equation}
+
+We name the generator of $\frac{\finitefield_{2^{16}}}{\finitefield_2}$, the root of the above polynomial, $\authpool$ as such: $\finitefield_{2^{16}} = \finitefield_2(\authpool)$.
+
+Instead of using the standard basis $\set{1, \authpool, \authpool^2, \dots, \authpool^{15}}$, we opt for a representation of $\finitefield_{2^{16}}$ which performs more efficiently for the encoding and the decoding process. To that aim, we name this specific representation of $\finitefield_{2^{16}}$ as $\tilde{\finitefield}_{2^{16}}$ and define it as a vector space generated by the following Cantor basis:
+
+\begin{center}
+  \begin{tabular}{ll}
+    & \\
+    \hline
+    $v_0$ & $1$\\
+    $v_1$ & $\authpool^{15} + \authpool^{13} + \authpool^{11} + \authpool^{10} + \authpool^7
+    + \authpool^6 + \authpool^3 + \authpool$\\
+    $v_2$ & $\authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^{10} + \authpool^3
+    + \authpool^2 + \authpool$\\
+    $v_3$ & $\authpool^{12} + \authpool^{10} + \authpool^9 + \authpool^5 + \authpool^4 +
+    \authpool^3 + \authpool^2 + \authpool$\\
+    $v_4$ & $\authpool^{15} + \authpool^{14} + \authpool^{10} + \authpool^8 + \authpool^7 +
+    \authpool$\\
+    $v_5$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{11} +
+    \authpool^{10} + \authpool^8 + \authpool^5 + \authpool^3 + \authpool^2 + \authpool$\\
+    $v_6$ & $\authpool^{15} + \authpool^{12} + \authpool^8 + \authpool^6 + \authpool^3 +
+    \authpool^2$\\
+    $v_7$ & $\authpool^{14} + \authpool^4 + \authpool$\\
+    $v_8$ & $\authpool^{14} + \authpool^{13} + \authpool^{11} + \authpool^{10} + \authpool^7
+    + \authpool^4 + \authpool^3$\\
+    $v_9$ & $\authpool^{12} + \authpool^7 + \authpool^6 + \authpool^4 + \authpool^3$\\
+    $v_{10}$ & $\authpool^{14} + \authpool^{13} + \authpool^{11} + \authpool^9 + \authpool^6
+    + \authpool^5 + \authpool^4 + \authpool$\\
+    $v_{11}$ & $\authpool^{15} + \authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^8$\\
+    $v_{12}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} + \authpool^{11} + \authpool^{10} + \authpool^8 + \authpool^7 + \authpool^5 + \authpool^4 + \authpool^3$\\
+    $v_{13}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} +
+    \authpool^{11} + \authpool^9 + \authpool^8 + \authpool^5 + \authpool^4 + \authpool^2$\\
+    $v_{14}$ & $\authpool^{15} + \authpool^{14} + \authpool^{13} + \authpool^{12} +
+    \authpool^{11} + \authpool^{10} + \authpool^9 + \authpool^8 + \authpool^5 + \authpool^4 +
+    \authpool^3$\\
+    $v_{15}$ & $\authpool^{15} + \authpool^{12} + \authpool^{11} + \authpool^8 + \authpool^4
+    + \authpool^3 + \authpool^2 + \authpool$\\
+    \hline
+  \end{tabular}
+\end{center}
+
+Every message word $m\sub{i}=m_{i, 15} \ldots m\sub{i, 0}$ consists of 16 bits. As such it could be regarded as binary vector of length 16:
+\begin{equation}
+m\sub{i} = \tup{m\sub{i, 0} \ldots m\sub{i, 15}}
+\end{equation}
+
+Where $m_{i, 0}$ is the least significant bit of message word $m\sub{i}$. Accordingly we consider the field element $\tilde{m}\sub{i} = \sum^{15}_{j = 0} m\sub{i, j} v\sub{j}$ to represent that message word.
+
+Similarly, we assign a unique index to each validator between 0 and 1,022 and we represent validator $i$ with the field element:
+\begin{equation}
+\tilde{i} = \sum^{15}_{j = 0} i\sub{j} v\sub{j}
+\end{equation}
+
+where $i = i_{15} \ldots i_0$ is the binary representation of $i$.
+
+\subsection{The Generator Polynomial}
+
+To erasure code a message of 342 words into 1023 code words, we represent each message as a field element as described in previous section and we interpolate the polynomial $p(y)$ of maximum 341 degree which satisfies the following equalities:
+\begin{equation}
+   \begin{array}{l}
+     p (\tilde{0}) = \widetilde{m_0}\\
+     p (\tilde{1}) = \widetilde{m_1}\\
+     \vdots\\
+     p (\widetilde{341}) = \widetilde{m_{341}}
+   \end{array}
+\end{equation}
+
+After finding $p(y)$ with such properties, we evaluate $p$ at the following points:
+\begin{equation}
+   \begin{array}{l}
+     \widetilde{r_{342}} : = p (\widetilde{342})\\
+     \widetilde{r_{343}} : = p (\widetilde{343})\\
+     \vdots\\
+     \widetilde{r_{1022}} : = p (\widetilde{1022})
+   \end{array}
+\end{equation}
+
+We then distribute the message words and the extra code words among the validators according to their corresponding indices.
+
+%To ensure the availability of work-package data in an adversarial environment, we use a Reed-Solomon code over the field $GF(2^{16})$ with rate of three to get a three times redundant data to be distributed among validators. This ensures that one-third of the validators may be dishonest or malfunctioning and yet any party is still able to reconstruct a work-package once we are assured that two-thirds-plus-one of the validators have each received their set of chunks for said work-package.
+
+%A guarantor is responsible for making such an encoding for any work-package which they report and to ensure it is distributed among each validator. Further, validators 
+
+%Essentially, we define a function:
+
+%Define Reed-Soloman, the base, the 341 and the 1024.
+
+%We divide the WP $\mathbf{p}$ into $c$ chunks of $n*2$ bytes where $c = \ceil{\len{p} / n*2}$ bytes (appending with zeroes as needed for the last chunk), and $c$ chunks each encoded of size $2*3n$ bytes, with each chunk requiring $n*2$ bytes to reconstruct and thus a total of $2cn$ to reconstruct $p$, assuming $2n$ bytes for each decoded chunk (\ie there is correspondence).
+
+%We would send $3 * 2$ bytes to every validator (with $3 * 2$ bytes unsent). Then $1023/3+1$ validators could give us $(1023/3+1)*3*2$ bytes = 1023* 2 bytes, which is enough to reconstruct. In practice of course we'll batch this a lot to divide the $3*(unencoded size)$ data into 1024 chunks, 1 of which we send to each validator.
+
+%The work-report should contain the root of a Merkle tree of these chunks. The guarantors (or validators sending chunks to auditors for reconstruction) should send the Merkle proofs along with the chunks to each validator, which identifies that this chunk comes from this WP for availability voting/reconstruction. An auditor should encode the WP after obtaining it and reconstruct this Merkle root to verify it. (Otherwise, it is possible that another auditor would not be able to reconstruct the same WP from $(1023/3+1)$ chunks with valid Merkle proofs, even if the first auditor reconstructed a WP with a matching WP hash from the report).

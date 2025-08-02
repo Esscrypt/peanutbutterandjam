@@ -4,3 +4,9 @@
 [submodule "graypaper"]
 	path = graypaper
 	url = https://github.com/gavofyork/graypaper.git
+[submodule "submodules/ark-vrf"]
+	path = submodules/ark-vrf
+	url = https://github.com/davxy/ark-vrf.git
+[submodule "submodules/bandersnatch-vrf-spec"]
+	path = submodules/bandersnatch-vrf-spec
+	url = https://github.com/davxy/bandersnatch-vrf-spec.git

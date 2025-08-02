@@ -1,0 +1,188 @@
+\section{Statistics}\label{sec:bookkeeping}
+
+\subsection{Validator Activity}
+
+The \Jam chain does not explicitly issue rewards---we leave this as a job to be done by the staking subsystem (in Polkadot's case envisioned as a system parachain---hosted without fees---in the current imagining of a public \Jam network). However, much as with validator punishment information, it is important for the \Jam chain to facilitate the arrival of information on validator activity in to the staking subsystem so that it may be acted upon.
+
+Such performance information cannot directly cover all aspects of validator activity; whereas block production, guarantor reports and availability assurance can easily be tracked on-chain, \textsc{Grandpa}, \textsc{Beefy} and auditing activity cannot. In the latter case, this is instead tracked with validator voting activity: validators vote on their impression of each other's efforts and a median may be accepted as the truth for any given validator. With an assumption of 50\% honest validators, this gives an adequate means of oraclizing this information.
+
+The validator statistics are made on a per-epoch basis and we retain one record of completed statistics together with one record which serves as an accumulator for the present epoch. Both are tracked in $\activity$, which is thus a sequence of two elements, with the first being the accumulator and the second the previous epoch's statistics. For each epoch we track a performance record for each validator:
+\begin{align}\label{eq:activityspec}
+  \activity &\equiv \tup{\valstatsaccumulator, \valstatsprevious, \corestats, \servicestats}\\
+  \tuple{\valstatsaccumulator, \valstatsprevious} &\in \sequence[\Cvalcount]{\tuple{
+    \isa{\vs¬blocks}{\N}\,,
+    \isa{\vs¬tickets}{\N}\,,
+    \isa{\vs¬preimagecount}{\N}\,,
+    \isa{\vs¬preimagesize}{\N}\,,
+    \isa{\vs¬guarantees}{\N}\,,
+    \isa{\vs¬assurances}{\N}
+%    \isa{\mathbf{u}}{\sequence[\Cvalcount]{\N}}
+  }}^2
+  \!\!\!\!\!\!\!\!\!\!
+\end{align}
+
+The six validator statistics we track are:
+\begin{description}
+  \item[$\vs¬blocks$] The number of blocks produced by the validator.
+  \item[$\vs¬tickets$] The number of tickets introduced by the validator.
+  \item[$\vs¬preimagecount$] The number of preimages introduced by the validator.
+  \item[$\vs¬preimagesize$] The total number of octets across all preimages introduced by the validator.
+  \item[$\vs¬guarantees$] The number of reports guaranteed by the validator.
+  \item[$\vs¬assurances$] The number of availability assurances made by the validator.
+%  \item[$\mathbf{u}$] The number of audit announcements made by that validator as seen by other validators. This forms a subjective statistic
+\end{description}
+
+%The latter item is not a direct measure of the number of audits performed by the validator, but rather the number of times that other validators have seen the validator announce an audit. This is a measure of the validator's activity in the auditing process.
+
+The objective statistics are updated in line with their description, formally:
+\begin{align}
+  \using e =\; &\ffrac{\thetime}{\Cepochlen} \ ,\quad e' = \ffrac{\thetime'}{\Cepochlen}\\
+  \!\tup{\mathbf{a}, \valstatsprevious'} \equiv\;&\begin{cases}
+      \tup{\valstatsaccumulator, \valstatsprevious} &\when e' = e \\
+      \tup{\sq{\tup{0, \dots, \sq{0, \dots}}, \dots}, \valstatsaccumulator}\!\!\!\! &\otherwise
+  \end{cases}\!\!\!\!\\
+  \forall v \in \valindex :&\; \abracegroup{
+    \valstatsaccumulator'\subb{v}_\vs¬blocks &\equiv
+      \mathbf{a}\subb{v}_\vs¬blocks + (v = \H_\¬authorindex)\\
+    \valstatsaccumulator'\subb{v}_\vs¬tickets &\equiv
+      \mathbf{a}\subb{v}_\vs¬tickets + \begin{cases}
+        \len{\xttickets} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬preimagecount &\equiv
+      \mathbf{a}\subb{v}_\vs¬preimagecount + \begin{cases}
+        \len{\xtpreimages} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬preimagesize &\equiv
+      \mathbf{a}\subb{v}_\vs¬preimagesize + \begin{cases}
+        \sum_{d \in \xtpreimages}\len{d} &\when v = \H_\¬authorindex \\
+        0 &\otherwise
+      \end{cases}\\
+    \valstatsaccumulator'\subb{v}_\vs¬guarantees &\equiv
+      \mathbf{a}\subb{v}_\vs¬guarantees + (\activeset'\sub{v} \in \reporters)\\
+    \valstatsaccumulator'\subb{v}_\vs¬assurances &\equiv
+      \mathbf{a}\subb{v}_\vs¬assurances +
+        (\exists a \in \xtassurances : a_\xa¬assurer = v)
+  }\!\!\!\!\!
+\end{align}
+
+Note that $\reporters$ is the \emph{Reporters} set, as defined in equation \ref{eq:guarantorsig}.
+
+
+
+
+\subsection{Cores and Services}
+
+The other two components of statistics are the core and service activity statistics. These are tracked only on a per-block basis unlike the validator statistics which are tracked over the whole epoch.
+\begin{align}
+  \corestats &\in \sequence[\Ccorecount]{\tuple{
+    \begin{alignedat}{7}
+      \isa{\cs¬daload&}{\N}\,,\;
+      \isa{&\cs¬popularity&}{\N}\,,\;
+      \isa{&\cs¬importcount&}{\N}\,,\;
+      \isa{&\cs¬xtcount&}{\N}\,,\;\\
+      \isa{\cs¬xtsize&}{\N}\,,\;
+      \isa{&\cs¬exportcount&}{\N}\,,\;
+      \isa{&\cs¬bundlelen&}{\N}\,,\;
+      \isa{&\cs¬gasused&}{\gas}
+    \end{alignedat}
+  }}\\
+  \servicestats &\in \dictionary{\serviceid}{\tuple{
+    \begin{alignedat}{3}
+      \isa{\ss¬provision&}{\tup{\N, \N}}\,,\;
+      \isa{&\ss¬refinement&}{\tup{\N, \gas}}\,,\;\\
+      \isa{\ss¬importcount&}{\N}\,,\;
+      \isa{\ss¬xtcount}{\N}\,,\;
+      \isa{&\ss¬xtsize&}{\N}\,,\;
+      \isa{\ss¬exportcount}{\N}\,,\;\\
+      \isa{\ss¬accumulation&}{\tup{\N, \gas}}
+    \end{alignedat}
+  }}
+\end{align}
+
+The core statistics are updated using several intermediate values from across the overall state-transition function; $\incomingreports$, the incoming work-reports, as defined in \ref{eq:incomingworkreports} and $\justbecameavailable$, the newly available work-reports, as defined in \ref{eq:availableworkreports}. We define the statistics as follows:
+\begin{align}
+  \forall c \in \coreindex : \corestats'\subb{c} &\equiv \tup{
+    \begin{alignedat}{5}
+      \is{\cs¬importcount&}{R(c)_\¬importcount}\,,\;
+      \is{&\cs¬xtcount&}{R(c)_\¬xtcount}\,,\;
+      \is{&\cs¬xtsize&}{R(c)_\¬xtsize}\,,\\
+      \is{\cs¬exportcount&}{R(c)_\¬exportcount}\,,\;
+      \is{&\cs¬gasused&}{R(c)_\¬gasused}\,,\;
+      \is{&\cs¬bundlelen&}{L(c)}\,,\\
+      \is{\cs¬daload&}{D(c)}\,,\;
+      \is{&\cs¬popularity&}{\span\span \textstyle \sum_{a \in \xtassurances} a_\xa¬availabilities\subb{c}\qquad}
+    \end{alignedat}
+  }\!\!\!\!\\
+  \where R(c \in \coreindex) &\equiv
+    \!\!\!\!\!\!\!\!\!\!\!
+    \sum_{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports, \wrX_\wr¬core = c}
+    \!\!\!\!\!\!\!\!\!\!\!
+    \tup{
+      \wdX_\¬importcount,
+      \wdX_\¬xtcount,
+      \wdX_\¬xtsize,
+      \wdX_\¬exportcount,
+      \wdX_\¬gasused,
+    }\\
+  \also L(c \in \coreindex) &\equiv
+    \!\!\!\!\!\!\!
+    \sum_{\wrX \in \incomingreports, \wrX_\wr¬core = c}
+    \!\!\!\!\!\!\!
+    (\wrX_\wr¬avspec)_\as¬bundlelen\\
+  \also D(c \in \coreindex) &\equiv
+    \!\!\!\!\!\!
+    \sum_{\wrX \in \justbecameavailable, \wrX_\wr¬core = c}
+    \!\!\!\!\!\!
+    (\wrX_\wr¬avspec)_\as¬bundlelen +
+    \Csegmentsize\ceil{(\wrX_\wr¬avspec)_\as¬segcount\nicefrac{65}{64}}
+\end{align}
+
+\newcommand*{\local¬servicesactive}{\mathbf{s}}
+\newcommand*{\local¬servicesreported}{\mathbf{s}^R}
+\newcommand*{\local¬servicesprovided}{\mathbf{s}^P}
+\newcommand*{\local¬counter}{n}
+
+Finally, the service statistics are updated using the same intermediate values as the core statistics, but with a different set of calculations:
+\begin{align}
+  \forall s \in \local¬servicesactive : \servicestats'\subb{s} &\equiv \tup{
+    \begin{alignedat}{5}
+      \is{\ss¬importcount&}{R(s)_\¬importcount}\,,\;
+      \is{&\ss¬xtcount&}{R(s)_\¬xtcount}\,,\;
+      \is{&\ss¬xtsize&}{R(s)_\¬xtsize}\,,\\
+      \is{\ss¬exportcount&}{R(s)_\¬exportcount}\,,\;
+      \is{&\ss¬refinement&}{\span\span\tup{R(s)_\local¬counter, R(s)_\¬gasused}}\,,\;\\
+      \is{\ss¬provision&}{
+        \span\span\textstyle
+        \sum_{\tup{\xp¬serviceindex, \xp¬data}\,\in \xtpreimages}\tup{1, \len{\xp¬data}}
+      }\,,\;\\
+      \is{\ss¬accumulation&}{
+        \span\span
+        \subifnone{\accumulationstatistics\subb{s}, \tup{0, 0}}
+      }
+    \end{alignedat}
+  }\!\!\!\!\\
+  \where \local¬servicesactive &=
+    \local¬servicesreported \cup
+    \local¬servicesprovided \cup
+    \keys{\accumulationstatistics}\\
+  \also \local¬servicesreported &= \set{
+    \build{\wdX_\wd¬serviceindex}{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports}
+  }\\
+  \also \local¬servicesprovided &= \set{
+    \build{s}{\exists x: \tup{s, x} \in \xtpreimages}
+  }\\
+  \also R(s \in \serviceid) &\equiv
+    \!\!\!\!\!\!\!\!\!\!\!
+    \sum_{\wdX \in \wrX_\wr¬digests, \wrX \in \incomingreports, \wdX_\wd¬serviceindex = s}
+    \!\!\!\!\!\!\!\!\!\!\!
+    \tup{
+      \is{\local¬counter}{1},
+      \wdX_\wd¬gasused,
+      \wdX_\wd¬importcount,
+      \wdX_\wd¬xtcount,
+      \wdX_\wd¬xtsize,
+      \wdX_\wd¬exportcount
+    }
+\end{align}

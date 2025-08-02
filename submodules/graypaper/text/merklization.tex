@@ -1,0 +1,316 @@
+\section{State Merklization}\label{sec:statemerklization}
+
+The Merklization process defines a cryptographic commitment from which arbitrary information within state may be provided as being authentic in a concise and swift fashion. We describe this in two stages; the first defines a mapping from 31-octet sequences to (unlimited) octet sequences in a process called \emph{state serialization}. The second forms a 32-octet commitment from this mapping in a process called \emph{Merklization}.
+
+\subsection{Serialization}
+
+The serialization of state primarily involves placing all the various components of $\thestate$ into a single mapping from 31-octet sequence \emph{state-keys} to octet sequences of indefinite length. The state-key is constructed from a hash component and a chapter component, equivalent to either the index of a state component or, in the case of the inner dictionaries of $\accounts$, a service index.
+
+We define the state-key constructor functions $C$ as:
+\begin{equation}
+  C\colon\abracegroup{
+    \Nbits{8} \cup \tup{\Nbits{8}, \serviceid} \cup \tup{\serviceid, \blob} &\to \blob[31] \\
+    i \in \Nbits{8} &\mapsto \sq{i, 0, 0, \dots} \\
+    \tup{i, s \in \serviceid} &\mapsto \sq{i, n_0, 0, n_1, 0, n_2, 0, n_3, 0, 0, \dots}\ \where n = \encode[4]{s} \\
+    \tup{s, h} &\mapsto \sq{n_0, a_0, n_1, a_1, n_2, a_2, n_3, a_3, a_4, a_5, \dots, a_{26}}\ \where n = \encode[4]{s}, a = \blake{h}
+  }
+\end{equation}
+
+The state serialization is then defined as the dictionary built from the amalgamation of each of the components. Cryptographic hashing ensures that there will be no duplicate state-keys given that there are no duplicate inputs to $C$. Formally, we define $T$ which transforms some state $\thestate$ into its serialized form:
+\begin{equation}
+  T(\thestate) \equiv \abracegroup{
+    &&C(1) &\mapsto \encode{\sq{\build{\var{x}}{x \orderedin \authpool}}} \;, \\
+    &&C(2) &\mapsto \encode{\authqueue} \;, \\
+    &&C(3) &\mapsto \encode{
+      \var{\sq{\build{
+        \tup{\rh¬headerhash, \rh¬accoutlogsuperpeak, \rh¬stateroot, \var{\rh¬reportedpackagehashes}}
+      }{
+        \tup{\rh¬headerhash, \rh¬accoutlogsuperpeak, \rh¬stateroot, \rh¬reportedpackagehashes} \orderedin \recenthistory
+      }}},
+      \mmrencode{\accoutbelt}
+    } \;, \\
+    &&C(4) &\mapsto \encode{
+      \pendingset,
+      \epochroot,
+      \abracegroupboth{
+        0\ &\when \sealtickets \in \sequence[\Cepochlen]{\safroleticket}\\
+        1\ &\when \sealtickets \in \sequence[\Cepochlen]{\bskey}\\
+      },
+      \sealtickets,
+      \var{\ticketaccumulator}
+    } \;, \\
+    &&C(5) &\mapsto \encode{
+      \var{\sqorderby{x}{x \in \goodset}},
+      \var{\sqorderby{x}{x \in \badset}},
+      \var{\sqorderby{x}{x \in \wonkyset}},
+      \var{\sqorderby{x}{x \in \offenders}}
+    } \;, \\
+    &&C(6) &\mapsto \encode{\entropy} \;, \\
+    &&C(7) &\mapsto \encode{\stagingset} \;, \\
+    &&C(8) &\mapsto \encode{\activeset} \;, \\
+    &&C(9) &\mapsto \encode{\previousset} \;, \\
+    &&C(10) &\mapsto \encode{
+      \sq{\build{
+        \maybe{\tup{\rs¬workreport, \encode[4]{\rs¬timestamp}}}
+      }{
+        \tup{\rs¬workreport, \rs¬timestamp} \orderedin \reports
+      }}
+    } \;, \\
+    &&C(11) &\mapsto \encode[4]{\thetime} \;, \\
+    &&C(12) &\mapsto \encode{
+      \encode[4]{\manager, \assigners, \delegator, \registrar},
+      \alwaysaccers
+    } \;, \\
+    &&C(13) &\mapsto \encode{
+      \encode[4]{\valstatsaccumulator, \valstatsprevious},
+      \corestats,
+      \servicestats
+    } \;, \\
+    &&C(14) &\mapsto \encode{
+      \sq{\build{
+        \var{\sq{\build{
+          \tup{\mathbf{r}, \var{\mathbf{d}}}
+        }{
+          \tup{\mathbf{r}, \mathbf{d}} \orderedin \mathbf{i}
+        }}}
+      }{
+        \mathbf{i} \orderedin \ready
+      }}
+    } \;, \\
+    &&C(15) &\mapsto \encode{
+      \sq{\build{\var{\mathbf{i}}}{\mathbf{i} \orderedin \accumulated}}
+    } \;, \\
+    &&C(16) &\mapsto \encode{
+      \var{\sq{\build{\tup{\encode[4]{s}, \encode{h}}}{\tup{s, h} \orderedin \lastaccout}}}
+    } \;, \\
+    \forall \kv{s}{\saX} \in \accounts: &&C(255, s) &\mapsto \encode{
+      0,
+      \saX_\sa¬codehash,
+      \encode[8]{
+        \saX_\sa¬balance,
+        \saX_\sa¬minaccgas,
+        \saX_\sa¬minmemogas,
+        \saX_\sa¬octets,
+        \saX_\sa¬gratis
+      },
+      \encode[4]{
+        \saX_\sa¬items,
+        \saX_\sa¬created,
+        \saX_\sa¬lastacc,
+        \saX_\sa¬parent
+      }
+    } \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{\mathbf{k}}{\mathbf{v}} \in \saX_\sa¬storage:
+      &&C(s, \encode[4]{2^{32}-1} \concat \mathbf{k}) &\mapsto \mathbf{v} \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{h}{\mathbf{p}} \in \saX_\sa¬preimages:
+      &&C(s, \encode[4]{2^{32}-2} \concat h) &\mapsto \mathbf{p} \;, \\
+    \forall \kv{s}{\saX} \in \accounts, \kv{\tup{h, l}}{\mathbf{t}} \in \saX_\sa¬requests:
+      &&C(s, \encode[4]{l} \concat h) &\mapsto \encode{
+        \var{\sq{\build{\encode[4]{x}}{x \orderedin \mathbf{t}}}}
+      }
+  }
+\end{equation}
+
+Note that most rows describe a single mapping between a key derived from a natural and the serialization of a state component. However, the final four rows each define sets of mappings since these items act over all service accounts and in the case of the final three rows, the keys of a nested dictionary with the service.
+
+Also note that all non-discriminator numeric serialization in state is done in fixed-length according to the size of the term.
+
+Finally, be aware that \Jam does not allow service storage keys to be directly inspected or enumerated. Thus the key values themselves are not required to be known by implementations, and only the Merklisation-ready serialisation is important, which is a fixed-size hash (alongside the service index and item marker). Implementations are free to use this fact in order to avoid storing the keys themselves.
+
+\subsection{Merklization}
+
+With $T$ defined, we now define the rest of $\fnmerklizestate$ which primarily involves transforming the serialized mapping into a cryptographic commitment. We define this commitment as the root of the binary Patricia Merkle Trie with a format optimized for modern compute hardware, primarily by optimizing sizes to fit succinctly into typical memory layouts and reducing the need for unpredictable branching.
+
+\subsubsection{Node Encoding and Trie Identification}
+We identify (sub-)tries as the hash of their root node, with one exception: empty (sub-)tries are identified as the zero-hash, $\zerohash$.
+
+Nodes are fixed in size at 512 bit (64 bytes). Each node is either a branch or a leaf. The first bit discriminate between these two types.
+
+In the case of a branch, the remaining 511 bits are split between the two child node hashes, using the last 255 bits of the 0-bit (left) sub-trie identity and the full 256 bits of the 1-bit (right) sub-trie identity.
+
+Leaf nodes are further subdivided into embedded-value leaves and regular leaves. The second bit of the node discriminates between these.
+
+In the case of an embedded-value leaf, the remaining 6 bits of the first byte are used to store the embedded value size. The following 31 bytes are dedicated to the state key. The last 32 bytes are defined as the value, filling with zeroes if its length is less than 32 bytes.
+
+In the case of a regular leaf, the remaining 6 bits of the first byte are zeroed. The following 31 bytes store the state key. The last 32 bytes store the hash of the value.
+
+Formally, we define the encoding functions $B$ and $L$:
+\begin{align}
+  B&\colon\abracegroup{
+    \tuple{\hash, \hash} &\to \bitstring[512]\\
+    \tup{l, r} &\mapsto \sq{0} \concat \text{bits}(l)\interval{1}{} \concat \text{bits}(r)
+  }\\
+  L&\colon\abracegroup{
+    \tuple{\blob[31], \blob} &\to \bitstring[512]\\
+    \tup{k, v} &\mapsto \begin{cases}
+      \sq{1, 0} \concat \text{bits}(\encode[1]{\len{v}})\interval{2}{} \concat \text{bits}(k) \concat \text{bits}(v) \concat \sq{0, 0, \dots} &\when \len{v} \le 32\\
+      \sq{1, 1, 0, 0, 0, 0, 0, 0} \concat \text{bits}(k) \concat \text{bits}(\blake{v}) &\otherwise
+    \end{cases}
+  }
+\end{align}
+
+We may then define the basic Merklization function $\fnmerklizestate$ as:
+\begin{align}
+  \merklizestate{\thestate} &\equiv M(\set{\build{\kv{\text{bits}(k)}{\tup{k, v}}}{\kv{k}{v} \in T(\thestate) }})\\
+  M(d: \dictionary{\bitstring}{\tuple{\blob[31], \blob}}) &\equiv \begin{cases}
+    \zerohash &\when \len{d} = 0\\
+    \blake{\text{bits}^{-1}(L(k, v))} &\when \values{d} = \set{ \tup{k, v} }\\
+    \blake{\text{bits}^{-1}(B(M(l), M(r)))} &\otherwise\\
+    \multicolumn{2}{l}{\quad\where \forall b, p: \kv{b}{p} \in d \Leftrightarrow \kv{b\interval{1}{}}{p} \in \begin{cases}
+      l &\when b_0 = 0 \\
+      r &\when b_0 = 1
+    \end{cases}
+  }\end{cases}
+\end{align}
+
+\section{General Merklization}\label{sec:merklization}
+
+\subsection{Binary Merkle Trees}
+
+The Merkle tree is a cryptographic data structure yielding a hash commitment to a specific sequence of values. It provides $O(N)$ computation and $O(\log(N))$ proof size for inclusion. This \emph{well-balanced} formulation ensures that the maximum depth of any leaf is minimal and that the number of leaves at that depth is also minimal.
+
+The underlying function for our Merkle trees is the \emph{node} function $N$, which accepts some sequence of blobs of some length $n$ and provides either such a blob back or a hash:
+\begin{equation}
+  N\colon\abracegroup{
+    \tuple{\sequence{\blob[n]}, \blob \to \hash} &\to \blob[n] \cup \hash \\
+    \tup{\mathbf{v}, H} &\mapsto \begin{cases}
+      \zerohash &\when \len{\mathbf{v}} = 0 \\
+      \mathbf{v}_0 &\when \len{\mathbf{v}} = 1 \\
+      H(\token{\$node} \concat N(\mathbf{v}_{\dots\ceil{\nicefrac{\len{\mathbf{v}}}{2}}}, H) \concat N(\mathbf{v}_{\ceil{\nicefrac{\len{\mathbf{v}}}{2}}\dots}, H)) &\otherwise
+    \end{cases}
+  }\label{eq:merklenode}
+\end{equation}
+
+The astute reader will realize that if our $\blob[n]$ happens to be equivalent $\hash$ then this function will always evaluate into $\hash$. That said, for it to be secure care must be taken to ensure there is no possibility of preimage collision. For this purpose we include the hash prefix $\token{\$node}$ to minimize the chance of this; simply ensure any items are hashed with a different prefix and the system can be considered secure.
+
+We also define the \emph{trace} function $T$, which returns each opposite node from top to bottom as the tree is navigated to arrive at some leaf corresponding to the item of a given index into the sequence. It is useful in creating justifications of data inclusion.
+\begin{equation}
+  T\colon\abracegroup{
+    \tuple{\sequence{\blob[n]}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash}\ &\to \sequence{\blob[n] \cup \hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto \begin{cases}
+     \sq{N(P^\bot(\mathbf{v}, i), H)} \concat T(P^\top(\mathbf{v}, i), i - P_I(\mathbf{v}, i), H) &\when \len{\mathbf{v}} > 1\\
+      \sq{} &\otherwise\\
+      \multicolumn{2}{l}{
+        \begin{aligned}
+          \quad \where P^s(\mathbf{v}, i) &\equiv \begin{cases}
+            \mathbf{v}_{\dots\ceil{\nicefrac{\len{\mathbf{v}}}{2}}} &\when (i < \ceil{\nicefrac{\len{\mathbf{v}}}{2}}) = s\\
+            \mathbf{v}_{\ceil{\nicefrac{\len{\mathbf{v}}}{2}}\dots} &\otherwise
+          \end{cases}\\[4pt]
+          \quad \also P_I(\mathbf{v}, i) &\equiv \begin{cases}
+            0 &\when i < \ceil{\nicefrac{\len{\mathbf{v}}}{2}} \\
+            \ceil{\nicefrac{\len{\mathbf{v}}}{2}} &\otherwise
+          \end{cases}\\
+        \end{aligned}
+      }
+    \end{cases}\\
+  }
+\end{equation}
+
+From this we define our other Merklization functions.
+
+\subsubsection{Well-Balanced Tree}
+We define the well-balanced binary Merkle function as $\fnmerklizewb$:
+\begin{equation}
+    \fnmerklizewb\colon \abracegroup{
+      \label{eq:simplemerkleroot}
+      \tuple{\sequence{\blob}, \blob \to \hash} &\to \hash \\
+      \tup{\mathbf{v}, H} &\mapsto \begin{cases}
+        H(\mathbf{v}_0) &\when \len{\mathbf{v}} = 1 \\
+        N(\mathbf{v}, H) &\otherwise
+      \end{cases} \\
+    }
+\end{equation}
+
+This is suitable for creating proofs on data which is not much greater than 32 octets in length since it avoids hashing each item in the sequence. For sequences with larger data items, it is better to hash them beforehand to ensure proof-size is minimal since each proof will generally contain a data item.
+
+Note: In the case that no hash function argument $H$ is supplied, we may assume Blake 2b.
+
+\subsubsection{Constant-Depth Tree}
+We define the constant-depth binary Merkle function as $\fnmerklizecd$. We define two corresponding functions for working with subtree pages, $\fnmerklejustsubpath{x}$ and $\fnmerklesubtreepage{x}$. The latter provides a single page of leaves, themselves hashed, prefixed data. The former provides the Merkle path to a single page. Both assume size-aligned pages of size $2^x$ and accept page indices.
+\begin{align}
+  \label{eq:constantdepthmerkleroot}
+  \fnmerklizecd&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \blob \to \hash} &\to \hash\\
+    \tup{\mathbf{v}, H} &\mapsto N(C(\mathbf{v}, H), H)
+  }\\
+  \label{eq:constantdepthsubtreemerklejust}
+  \fnmerklejustsubpath{x}&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto T(C(\mathbf{v}, H), 2^xi, H)_{\dots\max(0, \ceil{\log_2(\max(1, \len{\mathbf{v}})) - x})}
+  }\\
+  \label{eq:constantdepthsubtreemerkleleafpage}
+  \fnmerklesubtreepage{x}&\colon \abracegroup{
+    \tuple{\sequence{\blob}, \Nmax{\len{\mathbf{v}}}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, i, H} &\mapsto \sq{\build{H(\token{\$leaf} \concat l)}{l \orderedin \mathbf{v}_{2^xi \dots \min(2^xi+2^x, \len{\mathbf{v}})}}}
+  }
+\end{align}
+
+For the latter justification $\fnmerklejustsubpath{x}$ to be acceptable, we must assume the target observer also knows not merely the value of the item at the given index, but also all other leaves within its $2^x$ size subtree, given by $\fnmerklesubtreepage{x}$.
+
+As above, we may assume a default value for $H$ of Blake 2b.
+
+For justifications and Merkle root calculations, a constancy preprocessor function $C$ is applied which hashes all data items with a fixed prefix ``leaf'' and then pads the overall size to the next power of two with the zero hash $\zerohash$:
+\begin{equation}
+  C\colon\abracegroup{
+    \tuple{\sequence{\blob}, \blob \to \hash} &\to \sequence{\hash}\\
+    \tup{\mathbf{v}, H} &\mapsto \mathbf{v}' \ \where \abracegroup[\;]{
+      \len{\mathbf{v}} &= 2^{\ceil{\log_2(\max(1, \len{\mathbf{v}}))}}\\
+      \mathbf{v}'\sub{i} &= \begin{cases}
+        H(\token{\$leaf} \concat \mathbf{v}\sub{i}) &\when i < \len{\mathbf{v}}\\
+        \zerohash &\otherwise \\
+      \end{cases}
+    }
+  }
+\end{equation}
+
+\subsection{Merkle Mountain Ranges and Belts}\label{sec:mmr}
+
+The Merkle Mountain Range (\textsc{mmr}) is an append-only cryptographic data structure which yields a commitment to a sequence of values. Appending to an \textsc{mmr} and proof of inclusion of some item within it are both $O(\log(N))$ in time and space for the size of the set.
+
+We define a Merkle Mountain Range as being within the set $\sequence{\optional{\hash}}$, a sequence of peaks, each peak the root of a Merkle tree containing $2^i$ items where $i$ is the index in the sequence. Since we support set sizes which are not always powers-of-two-minus-one, some peaks may be empty, $\none$ rather than a Merkle root.
+
+Since the sequence of hashes is somewhat unwieldy as a commitment, Merkle Mountain Ranges are themselves generally hashed before being published. Hashing them removes the possibility of further appending so the range itself is kept on the system which needs to generate future proofs.
+
+We define the \textsc{mmb} append function $\fnmmrappend$ as:
+\begin{equation}
+  \begin{aligned}
+    \label{eq:mmrappend}
+    \fnmmrappend&\colon\deffunc{
+      \tuple{\sequence{\optional{\hash}}, \hash, \blob\to\hash} &\to \sequence{\optional{\hash}}\\
+      \tup{\mathbf{r}, l, H} &\mapsto P(\mathbf{r}, l, 0, H)
+    }\\
+    \where P&\colon\deffunc{
+      \tuple{\sequence{\optional{\hash}}, \hash, \N, \blob\to\hash} &\to \sequence{\optional{\hash}}\\
+      \tup{\mathbf{r}, l, n, H} &\mapsto \begin{cases}
+        \mathbf{r} \append l &\when n \ge \len{\mathbf{r}}\\
+        R(\mathbf{r}, n, l) &\when n < \len{\mathbf{r}} \wedge \mathbf{r}\sub{n} = \none\\
+        P(R(\mathbf{r}, n, \none), H(\mathbf{r}\sub{n} \concat l), n + 1, H) &\otherwise
+      \end{cases}
+    }\\
+    \also R&\colon\deffunc{
+      \tuple{\sequence{T}, \N, T} &\to \sequence{T}\\
+      \tup{\mathbf{s}, i, v} &\mapsto \mathbf{s}'\ \where \mathbf{s}' = \mathbf{s} \exc \mathbf{s}'\sub{i} = v
+    }
+  \end{aligned}
+\end{equation}
+
+We define the \textsc{mmr} encoding function as $\fnmmrencode$:
+\begin{equation}
+  \fnmmrencode\colon\deffunc{
+    \sequence{\optional{\hash}} &\to \blob \\
+    \mathbf{b} &\mapsto \encode{\var{\sq{\build{\maybe{x}}{x \orderedin \mathbf{b}}}}}
+  }
+\end{equation}
+
+We define the \textsc{mmr} super-peak function as $\fnmmrsuperpeak$:
+\begin{equation}
+  \fnmmrsuperpeak\colon\deffunc{
+    \sequence{\optional{\hash}} &\to \hash \\
+    \mathbf{b} &\mapsto \begin{cases}
+      \zerohash &\when \len{\mathbf{h}} = 0\\
+      \mathbf{h}_0 &\when \len{\mathbf{h}} = 1\\
+      \keccak{\token{\$peak} \concat \mmrsuperpeak{\mathbf{h}_{\dots\len{\mathbf{h}}-1}} \concat \mathbf{h}_{\len{\mathbf{h}}-1}} &\otherwise \\
+      \multicolumn{2}{l}{\where \mathbf{h} = \sq{\build{h}{h \orderedin \mathbf{b}, h \ne \none}}}
+    \end{cases}
+  }
+\end{equation}
