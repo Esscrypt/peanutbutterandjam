@@ -1,0 +1,26 @@
+{
+  "name": "@pbnj/types",
+  "version": "0.1.0",
+  "description": "Centralized type definitions for the JAM protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "echo \"No tests specified\" && exit 0",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "jam",
+    "protocol",
+    "types",
+    "typescript"
+  ],
+  "author": "JAM Protocol Team",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist/**/*"
+  ]
+}

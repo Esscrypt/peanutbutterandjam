@@ -3,7 +3,7 @@ export { GenSpecCommand } from './gen-spec';
 export { ListKeysCommand } from './list-keys';
 export { PrintSpecCommand } from './print-spec';
 export { RunCommand } from './run';
-export { TestStfCommand } from './test-stf';
-export { TestSafroleCommand } from './test-safrole';
 export { TestAllCommand } from './test-all';
+export { TestSafroleCommand } from './test-safrole';
+export { TestStfCommand } from './test-stf';
 //# sourceMappingURL=index.js.map

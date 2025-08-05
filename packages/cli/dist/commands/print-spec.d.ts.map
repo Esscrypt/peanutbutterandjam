@@ -1,1 +1,1 @@
-{"version":3,"file":"print-spec.d.ts","sourceRoot":"","sources":["../../src/commands/print-spec.ts"],"names":[],"mappings":"AACA,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,UAAU,CAAA;AACxC,OAAO,KAAK,EAAE,gBAAgB,EAAE,MAAM,WAAW,CAAA;AAEjD,qBAAa,gBAAiB,YAAW,QAAQ,CAAC,gBAAgB,CAAC;IAC3D,OAAO,CAAC,OAAO,EAAE,gBAAgB,GAAG,OAAO,CAAC,IAAI,CAAC;CAIxD"}
+{"version":3,"file":"print-spec.d.ts","sourceRoot":"","sources":["../../src/commands/print-spec.ts"],"names":[],"mappings":"AAEA,OAAO,EAAE,OAAO,EAAE,MAAM,WAAW,CAAA;AAGnC,wBAAgB,sBAAsB,IAAI,OAAO,CA0BhD"}

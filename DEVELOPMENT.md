@@ -17,8 +17,8 @@
 
 3. **Verify Gray Paper Access**:
    ```bash
-   ls graypaper/text/safrole.tex  # Should exist
-   ls jamtestvectors/stf/safrole/ # Should exist
+   ls submodules/graypaper/text/safrole.tex  # Should exist
+   ls submodules/jamtestvectors/stf/safrole/ # Should exist
    ```
 
 ### Development Workflow

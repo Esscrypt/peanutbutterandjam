@@ -1,0 +1,207 @@
+# Erasure Coding Implementation Guide
+
+## Overview
+This guide outlines the implementation requirements for the `@pbnj/erasure-coding` package, which implements data availability through erasure coding for the JAM protocol as specified in the Gray Paper.
+
+## Package Structure
+```
+packages/erasure-coding/
+├── src/
+│   ├── types.ts               # Erasure coding types
+│   ├── core.ts                # Core erasure coding logic
+│   ├── algorithms/
+│   │   ├── types.ts           # Algorithm types
+│   │   ├── reed-solomon.ts    # Reed-Solomon implementation
+│   │   ├── polynomial.ts      # Polynomial operations
+│   │   └── index.ts           # Algorithm exports
+│   ├── validation/
+│   │   ├── types.ts           # Validation types
+│   │   ├── encoding.ts        # Encoding validation
+│   │   ├── decoding.ts        # Decoding validation
+│   │   └── index.ts           # Validation exports
+│   └── index.ts               # Main package exports
+```
+
+## Implementation Requirements
+
+### 1. Core Erasure Coding Interface
+```typescript
+interface ErasureCoder {
+  encode(data: Uint8Array, k: number, n: number): EncodedData
+  decode(encodedData: EncodedData, k: number): Uint8Array
+  validate(encodedData: EncodedData): ValidationResult
+}
+```
+
+### 2. Reed-Solomon Implementation
+- **Mathematical Correctness**: Implement Reed-Solomon algorithm correctly
+- **Polynomial Operations**: Efficient polynomial arithmetic over finite fields
+- **Error Correction**: Robust error correction capabilities
+- **Performance**: Optimize for large data blocks
+
+### 3. Data Recovery
+- **Partial Recovery**: Support recovery with partial data
+- **Error Detection**: Detect and correct errors in encoded data
+- **Performance**: Optimize recovery performance
+- **Reliability**: Ensure reliable data recovery
+
+## Gray Paper Compliance
+
+### 1. Erasure Coding Specifications
+- **Mathematical Correctness**: Implement exact mathematical specifications from Gray Paper
+- **Protocol Compliance**: Full compliance with protocol erasure coding requirements
+- **Security Properties**: Maintain all security properties during encoding/decoding
+- **Performance Requirements**: Meet performance requirements specified in Gray Paper
+
+### 2. Data Availability
+- **Availability Guarantees**: Ensure data availability guarantees
+- **Recovery Threshold**: Implement correct recovery threshold
+- **Network Efficiency**: Optimize for network efficiency
+- **Storage Efficiency**: Optimize for storage efficiency
+
+## Testing Requirements
+
+### 1. Unit Tests
+- **Algorithm Tests**: Test Reed-Solomon algorithm thoroughly
+- **Polynomial Tests**: Test polynomial operations
+- **Encoding Tests**: Test encoding functionality
+- **Decoding Tests**: Test decoding functionality
+
+### 2. Integration Tests
+- **End-to-End Tests**: Test complete encoding/decoding workflows
+- **Performance Tests**: Test performance characteristics
+- **Error Recovery Tests**: Test error recovery mechanisms
+- **Regression Tests**: Prevent regressions in erasure coding logic
+
+## Performance Requirements
+
+### 1. Encoding Performance
+- **Fast Encoding**: Optimize for fast data encoding
+- **Memory Efficiency**: Minimize memory usage during encoding
+- **Parallel Processing**: Use parallel processing where appropriate
+- **Scalability**: Scale efficiently with data size
+
+### 2. Decoding Performance
+- **Fast Decoding**: Optimize for fast data decoding
+- **Memory Efficiency**: Minimize memory usage during decoding
+- **Error Recovery**: Efficient error recovery during decoding
+- **Scalability**: Scale efficiently with data size
+
+## Security Requirements
+
+### 1. Data Integrity
+- **Tamper Detection**: Detect tampering during encoding/decoding
+- **Validation**: Validate all data during encoding/decoding
+- **Error Detection**: Detect and handle errors securely
+- **Audit Trail**: Maintain audit trail of encoding/decoding operations
+
+### 2. Algorithm Security
+- **Mathematical Security**: Ensure mathematical security of algorithms
+- **Implementation Security**: Secure implementation of algorithms
+- **Side-Channel Protection**: Protect against side-channel attacks
+- **Random Number Generation**: Use secure random number generation
+
+## Error Handling
+
+### 1. Error Types
+```typescript
+enum ErasureCodingError {
+  INVALID_PARAMETERS = 'INVALID_PARAMETERS',
+  ENCODING_ERROR = 'ENCODING_ERROR',
+  DECODING_ERROR = 'DECODING_ERROR',
+  INSUFFICIENT_DATA = 'INSUFFICIENT_DATA',
+  VALIDATION_ERROR = 'VALIDATION_ERROR'
+}
+```
+
+### 2. Error Recovery
+- **Graceful Degradation**: Handle errors gracefully
+- **Partial Recovery**: Support partial data recovery
+- **Error Reporting**: Provide detailed error reports
+- **Recovery Suggestions**: Suggest recovery actions when possible
+
+## Algorithm Implementation
+
+### 1. Reed-Solomon Algorithm
+- **Mathematical Implementation**: Correct mathematical implementation
+- **Finite Field Operations**: Efficient finite field arithmetic
+- **Polynomial Operations**: Efficient polynomial arithmetic
+- **Error Correction**: Robust error correction
+
+### 2. Polynomial Operations
+- **Addition**: Efficient polynomial addition
+- **Multiplication**: Efficient polynomial multiplication
+- **Division**: Efficient polynomial division
+- **Evaluation**: Efficient polynomial evaluation
+
+## Validation Requirements
+
+### 1. Input Validation
+- **Parameter Validation**: Validate all input parameters
+- **Data Validation**: Validate input data
+- **Boundary Checks**: Check parameter boundaries
+- **Type Safety**: Ensure type safety for all inputs
+
+### 2. Output Validation
+- **Result Validation**: Validate encoding/decoding results
+- **Consistency Checks**: Check result consistency
+- **Error Detection**: Detect errors in results
+- **Performance Validation**: Validate performance characteristics
+
+## Documentation Requirements
+
+### 1. API Documentation
+- **Function Documentation**: Document all public functions
+- **Type Documentation**: Document all types and interfaces
+- **Example Usage**: Provide usage examples for all major features
+- **Error Documentation**: Document all error conditions
+
+### 2. Algorithm Documentation
+- **Mathematical Background**: Document mathematical background
+- **Implementation Details**: Document implementation details
+- **Performance Characteristics**: Document performance characteristics
+- **Security Considerations**: Document security considerations
+
+## Integration Guidelines
+
+### 1. Package Integration
+- **Loose Coupling**: Maintain loose coupling with other packages
+- **Interface Contracts**: Define clear interface contracts
+- **Error Propagation**: Proper error propagation between packages
+- **Performance Coordination**: Coordinate performance optimizations
+
+### 2. External Dependencies
+- **Minimal Dependencies**: Keep external dependencies minimal
+- **Version Management**: Manage dependency versions carefully
+- **Security Audits**: Regularly audit external dependencies
+- **Compatibility**: Ensure compatibility with dependency versions
+
+## Implementation Progress
+
+### Done
+- Package structure created
+- Core types and interfaces defined
+- Finite field implementation (GF(2^16))
+- Polynomial operations implementation
+- Reed-Solomon algorithm implementation
+- Validation framework implemented
+- Core erasure coding logic implemented
+- Basic test suite created
+- Package builds successfully
+
+### In Progress
+- Reed-Solomon algorithm debugging and fixing
+- Test suite validation and correction
+
+### Next Steps
+- Fix Reed-Solomon encoding/decoding logic
+- Implement proper Cantor basis conversion
+- Add comprehensive test coverage
+- Performance optimization
+- Documentation completion
+
+This guide ensures that the erasure coding package is implemented securely, efficiently, and in full compliance with the Gray Paper specifications.
+description:
+globs:
+alwaysApply: false
+---

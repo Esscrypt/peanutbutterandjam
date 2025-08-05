@@ -1,4 +1,4 @@
-import { GenKeysCommand, GenSpecCommand, ListKeysCommand, PrintSpecCommand, RunCommand, TestStfCommand, TestSafroleCommand, TestAllCommand, } from './commands';
+import { GenKeysCommand, GenSpecCommand, ListKeysCommand, PrintSpecCommand, RunCommand, TestAllCommand, TestSafroleCommand, TestStfCommand, } from './commands/index';
 export class CommandHandler {
     commands = new Map();
     constructor() {

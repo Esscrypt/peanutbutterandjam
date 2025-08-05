@@ -1,0 +1,159 @@
+# State Transition Functions Implementation Guide
+
+## Overview
+This guide outlines the implementation requirements for the `@pbnj/state-transition` package, which implements the core state transition logic for the JAM protocol as specified in the Gray Paper.
+
+## Package Structure
+```
+packages/state-transition/
+├── src/
+│   ├── types.ts               # STF types and interfaces
+│   ├── core.ts                # Core STF implementation
+│   ├── validators/
+│   │   ├── types.ts           # STF validation types
+│   │   ├── input.ts           # Input validation
+│   │   ├── state.ts           # State validation
+│   │   └── index.ts           # Validator exports
+│   ├── components/
+│   │   ├── safrole.ts         # Safrole STF integration
+│   │   ├── disputes.ts        # Disputes STF integration
+│   │   ├── history.ts         # History STF integration
+│   │   └── index.ts           # Component exports
+│   └── index.ts               # Main package exports
+```
+
+## Implementation Requirements
+
+### 1. Core STF Interface
+```typescript
+interface StateTransitionFunction<TState, TInput, TOutput> {
+  execute(state: TState, input: TInput): Promise<TOutput>
+  validate(state: TState, input: TInput): Promise<ValidationResult>
+}
+```
+
+### 2. Component Integration
+- **Safrole Integration**: Integrate with `@pbnj/safrole` for block production consensus
+- **Disputes Integration**: Integrate with `@pbnj/disputes` for dispute resolution
+- **History Integration**: Integrate with `@pbnj/history` for historical data management
+
+### 3. Validation Requirements
+- **Input Validation**: Validate all input parameters before processing
+- **State Validation**: Validate state consistency and integrity
+- **Cross-Component Validation**: Validate interactions between components
+- **Error Handling**: Provide detailed error messages and codes
+
+### 4. Performance Requirements
+- **Efficient Execution**: Optimize for fast state transitions
+- **Memory Management**: Proper memory allocation and cleanup
+- **Async Operations**: Non-blocking async operations where appropriate
+- **Caching**: Intelligent caching of validation results
+
+## Gray Paper Compliance
+
+### 1. State Transition Specifications
+- **Mathematical Correctness**: Implement exact mathematical specifications from Gray Paper
+- **Protocol Compliance**: Full compliance with protocol state transition rules
+- **Security Properties**: Maintain all security properties during state transitions
+- **Consistency**: Ensure state consistency across all transitions
+
+### 2. Component Integration
+- **Safrole STF**: Implement Safrole state transitions as per Section 3
+- **Dispute Resolution**: Implement dispute resolution state transitions
+- **Historical Data**: Implement historical data management transitions
+- **Cross-Component Coordination**: Coordinate state transitions across components
+
+## Testing Requirements
+
+### 1. Unit Tests
+- **Individual STF Tests**: Test each state transition function in isolation
+- **Validation Tests**: Test all validation logic thoroughly
+- **Error Handling Tests**: Test error conditions and edge cases
+- **Performance Tests**: Test performance characteristics
+
+### 2. Integration Tests
+- **Cross-Component Tests**: Test integration between different components
+- **End-to-End Tests**: Test complete state transition workflows
+- **Test Vector Compliance**: Ensure compliance with JAM test vectors
+- **Regression Tests**: Prevent regressions in state transition logic
+
+## Security Requirements
+
+### 1. State Integrity
+- **Tamper Resistance**: Prevent unauthorized state modifications
+- **Consistency Checks**: Ensure state consistency after transitions
+- **Rollback Protection**: Prevent unauthorized state rollbacks
+- **Audit Trail**: Maintain comprehensive audit trail of state changes
+
+### 2. Input Validation
+- **Comprehensive Validation**: Validate all input parameters
+- **Type Safety**: Ensure type safety for all inputs
+- **Boundary Checks**: Check input boundaries and limits
+- **Sanitization**: Sanitize inputs to prevent injection attacks
+
+## Error Handling
+
+### 1. Error Types
+```typescript
+enum StateTransitionError {
+  INVALID_INPUT = 'INVALID_INPUT',
+  INVALID_STATE = 'INVALID_STATE',
+  COMPONENT_ERROR = 'COMPONENT_ERROR',
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
+  EXECUTION_ERROR = 'EXECUTION_ERROR'
+}
+```
+
+### 2. Error Reporting
+- **Detailed Messages**: Provide detailed error messages
+- **Error Codes**: Use standardized error codes
+- **Context Information**: Include relevant context in error messages
+- **Recovery Suggestions**: Suggest recovery actions when possible
+
+## Performance Optimization
+
+### 1. Execution Optimization
+- **Efficient Algorithms**: Use efficient algorithms for state transitions
+- **Memory Optimization**: Optimize memory usage during transitions
+- **Parallel Processing**: Use parallel processing where appropriate
+- **Caching**: Cache frequently accessed state information
+
+### 2. Validation Optimization
+- **Early Validation**: Validate inputs early in the process
+- **Incremental Validation**: Validate state incrementally
+- **Cached Validation**: Cache validation results when possible
+- **Async Validation**: Use async validation for non-critical checks
+
+## Documentation Requirements
+
+### 1. API Documentation
+- **Function Documentation**: Document all public functions
+- **Type Documentation**: Document all types and interfaces
+- **Example Usage**: Provide usage examples for all major features
+- **Error Documentation**: Document all error conditions
+
+### 2. Implementation Notes
+- **Gray Paper References**: Link implementations to Gray Paper sections
+- **Algorithm Descriptions**: Describe algorithms used in implementations
+- **Performance Notes**: Document performance characteristics
+- **Security Considerations**: Document security considerations
+
+## Integration Guidelines
+
+### 1. Component Integration
+- **Loose Coupling**: Maintain loose coupling between components
+- **Interface Contracts**: Define clear interface contracts
+- **Error Propagation**: Proper error propagation between components
+- **State Coordination**: Coordinate state changes across components
+
+### 2. External Dependencies
+- **Minimal Dependencies**: Keep external dependencies minimal
+- **Version Management**: Manage dependency versions carefully
+- **Security Audits**: Regularly audit external dependencies
+- **Compatibility**: Ensure compatibility with dependency versions
+
+This guide ensures that the state transition package is implemented securely, efficiently, and in full compliance with the Gray Paper specifications.
+description:
+globs:
+alwaysApply: false
+---

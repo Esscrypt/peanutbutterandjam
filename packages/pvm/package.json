@@ -5,6 +5,7 @@
   "main": "index.ts",
   "module": "index.ts",
   "scripts": {
+    "build": "tsc",
     "check": "tsc --pretty --noEmit",
     "test": "vitest run",
     "test:watch": "vitest run --watch",
@@ -13,7 +14,8 @@
   "dependencies": {
     "@pbnj/core": "workspace:*",
     "pino": "^9.6.0",
-    "pino-pretty": "^11.0.0"
+    "pino-pretty": "^11.0.0",
+    "@pbnj/types": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^2.1.9",

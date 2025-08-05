@@ -1,3 +1,7 @@
+---
+alwaysApply: true
+---
+
 # JAM Gray Paper Adherence Rules
 
 ## Overview
@@ -130,3 +134,4 @@ description:
 globs:
 alwaysApply: false
 ---
+

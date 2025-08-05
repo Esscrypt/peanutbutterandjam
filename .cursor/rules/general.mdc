@@ -1,0 +1,18 @@
+---
+alwaysApply: true
+---
+
+# General Typescript rules
+1. Avoid types such as any, unknown, never.
+2. Define types as narrow as possible, instead of "string"
+3. Use logger from `@pnbj/core`
+4. Before implementing some functionality, check if it already exists in a package or if there is a public one that makes sense to be used.
+5. Config stays in `config.ts`
+6. Interfaces and types and structs stay in `types.ts`
+7. Always constrain to one implementation class per file.
+8. Always write unit tests for each package.
+9. Build with `bun run build`
+10. Test with `bun run test`
+11. Always try to follow SOLID principles
+12. Write polymorphic interfaces and implementations
+

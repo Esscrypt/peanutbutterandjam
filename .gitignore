@@ -97,3 +97,9 @@ storybook-static
 
 
 *.bun-build
+
+
+polkajam
+
+dist
+

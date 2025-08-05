@@ -4,7 +4,7 @@
     "noEmit": false,
     "allowImportingTsExtensions": false,
     "module": "ESNext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "node",
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,

@@ -1,111 +1,146 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+// import { existsSync, readdirSync, readFileSync } from 'node:fs'
+// import { join } from 'node:path'
+// import { logger } from '@pbnj/core'
+// import type { SafroleInput, SafroleOutput, SafroleState } from '@pbnj/safrole'
+// import { executeSafroleSTF } from '@pbnj/safrole'
 
-export interface TestVector {
-  name: string
-  state: unknown
-  input: unknown
-  output: unknown
-  description?: string
-}
+// export interface TestVector {
+//   name: string
+//   state: unknown
+//   input: unknown
+//   output: unknown
+//   description?: string
+// }
 
-export class TestVectorProcessor {
-  private vectorsPath: string
+// export class TestVectorProcessor {
+//   private vectorsPath: string
 
-  constructor(vectorsPath = 'jamtestvectors') {
-    this.vectorsPath = vectorsPath
-  }
+//   constructor(vectorsPath = 'submodules/jamtestvectors') {
+//     this.vectorsPath = vectorsPath
+//   }
 
-  async loadTestVectors(directory: string): Promise<TestVector[]> {
-    const fullPath = join(this.vectorsPath, directory)
+//   async loadTestVectors(directory: string): Promise<TestVector[]> {
+//     const fullPath = join(this.vectorsPath, directory)
 
-    if (!existsSync(fullPath)) {
-      throw new Error(`Test vectors directory not found: ${fullPath}`)
-    }
+//     if (!existsSync(fullPath)) {
+//       throw new Error(`Test vectors directory not found: ${fullPath}`)
+//     }
 
-    const vectors: TestVector[] = []
-    const files = readdirSync(fullPath)
+//     const vectors: TestVector[] = []
+//     const files = readdirSync(fullPath)
 
-    for (const file of files) {
-      if (file.endsWith('.json')) {
-        const path = join(fullPath, file)
-        const content = readFileSync(path, 'utf-8')
-        const data = JSON.parse(content)
+//     for (const file of files) {
+//       if (file.endsWith('.json')) {
+//         const path = join(fullPath, file)
+//         const content = readFileSync(path, 'utf-8')
+//         const data = JSON.parse(content)
 
-        vectors.push({
-          name: file.replace('.json', ''),
-          state: data.state,
-          input: data.input,
-          output: data.output,
-          description: data.description,
-        })
-      }
-    }
+//         vectors.push({
+//           name: file.replace('.json', ''),
+//           state: data.pre_state,
+//           input: data.input,
+//           output: data.post_state,
+//           description: data.description,
+//         })
+//       }
+//     }
 
-    return vectors
-  }
+//     return vectors
+//   }
 
-  async runSafroleTest(vector: TestVector): Promise<unknown> {
-    // TODO: Implement your Safrole STF logic here
-    // This should process the input and produce an output
-    // that matches the expected output in the test vector
+//   async runSafroleTest(vector: TestVector): Promise<SafroleOutput> {
+//     logger.info('Running Safrole test', { vectorName: vector.name })
 
-    const { state, input } = vector
+//     // Convert test vector data to Safrole types
+//     const state = this.convertToSafroleState(vector.state)
+//     const input = this.convertToSafroleInput(vector.input)
 
-    // Your Safrole implementation
-    const result = await this.executeSafroleSTF(state, input)
+//     // Execute Safrole STF
+//     const result = await executeSafroleSTF(state, input)
 
-    return result
-  }
+//     return result
+//   }
 
-  private async executeSafroleSTF(
-    _state: unknown,
-    _input: unknown,
-  ): Promise<unknown> {
-    // For now, return a mock result that will fail validation
-    // This helps identify which test vectors need implementation
-    return {
-      ok: {
-        epoch_mark: null,
-        tickets_mark: null,
-      },
-    }
-  }
+//   private convertToSafroleState(stateData: unknown): SafroleState {
+//     const data = stateData as unknown
 
-  validateResult(vector: TestVector, result: unknown): boolean {
-    const expected = vector.output
+//     return {
+//       slot: data.tau || 0,
+//       entropy: data.eta || [],
+//       pendingSet: data.lambda || [],
+//       activeSet: data.kappa || [],
+//       previousSet: data.gamma_k || [],
+//       epochRoot: data.gamma_z || '',
+//       sealTickets: data.iota || [],
+//       ticketAccumulator: data.gamma_a || [],
+//     }
+//   }
 
-    // Compare result with expected output
-    const isValid = JSON.stringify(result) === JSON.stringify(expected)
+//   private convertToSafroleInput(inputData: unknown): SafroleInput {
+//     const data = inputData as unknown
 
-    if (!isValid) {
-    } else {
-    }
+//     return {
+//       slot: data.slot || 0,
+//       entropy: data.entropy || '',
+//       extrinsic: (data.extrinsic || []).map((ext: unknown) => ({
+//         entryIndex: ext.attempt || 0,
+//         signature: ext.signature || '',
+//       })),
+//     }
+//   }
 
-    return isValid
-  }
+//   validateResult(vector: TestVector, result: SafroleOutput): boolean {
+//     const expected = vector.output as unknown
 
-  async validateTestVectors(): Promise<void> {
-    try {
-      const { execSync } = await import('node:child_process')
-      execSync('./scripts/validate-all.sh', {
-        cwd: this.vectorsPath,
-        stdio: 'inherit',
-      })
-    } catch (error) {
-      throw error
-    }
-  }
+//     // Convert result back to test vector format for comparison
+//     const actualState = this.convertFromSafroleState(result.state)
 
-  async convertBinaryToJson(): Promise<void> {
-    try {
-      const { execSync } = await import('node:child_process')
-      execSync('./scripts/convert-all.sh', {
-        cwd: this.vectorsPath,
-        stdio: 'inherit',
-      })
-    } catch (error) {
-      throw error
-    }
-  }
-}
+//     // Compare states
+//     const stateMatch = JSON.stringify(actualState) === JSON.stringify(expected)
+
+//     if (!stateMatch) {
+//       logger.error('Test failed: state mismatch', {
+//         vectorName: vector.name,
+//         expected: JSON.stringify(expected, null, 2),
+//         actual: JSON.stringify(actualState, null, 2),
+//       })
+//     } else {
+//       logger.info('Test passed', { vectorName: vector.name })
+//     }
+
+//     return stateMatch
+//   }
+
+//   private convertFromSafroleState(state: SafroleState): unknown {
+//     return {
+//       tau: state.slot,
+//       eta: state.entropy,
+//       lambda: state.pendingSet,
+//       kappa: state.activeSet,
+//       gamma_k: state.previousSet,
+//       gamma_z: state.epochRoot,
+//       iota: state.sealTickets,
+//       gamma_a: state.ticketAccumulator,
+//       gamma_s: {
+//         keys: Array.isArray(state.sealTickets) ? state.sealTickets : [],
+//       },
+//       post_offenders: [],
+//     }
+//   }
+
+//   async validateTestVectors(): Promise<void> {
+//     const { execSync } = await import('node:child_process')
+//     execSync('./scripts/validate-all.sh', {
+//       cwd: this.vectorsPath,
+//       stdio: 'inherit',
+//     })
+//   }
+
+//   async convertBinaryToJson(): Promise<void> {
+//     const { execSync } = await import('node:child_process')
+//     execSync('./scripts/convert-all.sh', {
+//       cwd: this.vectorsPath,
+//       stdio: 'inherit',
+//     })
+//   }
+// }

@@ -1,6 +1,3 @@
-import type { ICommand } from '../types';
-import type { PrintSpecOptions } from '../parser';
-export declare class PrintSpecCommand implements ICommand<PrintSpecOptions> {
-    execute(options: PrintSpecOptions): Promise<void>;
-}
+import { Command } from 'commander';
+export declare function createPrintSpecCommand(): Command;
 //# sourceMappingURL=print-spec.d.ts.map

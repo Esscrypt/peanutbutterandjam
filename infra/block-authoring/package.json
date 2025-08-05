@@ -1,0 +1,48 @@
+{
+  "name": "@pbnj/block-authoring",
+  "version": "0.0.1",
+  "description": "Block authoring service for JAM Protocol",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --pretty --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest run --watch",
+    "test:coverage": "vitest run --coverage",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "cli": "tsx src/cli.ts",
+    "cli:build": "tsc && node dist/cli.js"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/safrole": "workspace:*",
+    "@pbnj/serialization": "workspace:*",
+    "@pbnj/pvm": "workspace:*",
+    "@pbnj/bandersnatch-vrf": "workspace:*",
+    "@pbnj/erasure-coding": "workspace:*",
+    "commander": "^12.0.0",
+    "@pbnj/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^2.1.9",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@pbnj/typescript-config": "workspace:*",
+    "tsx": "^4.19.2"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "keywords": [
+    "jam",
+    "protocol",
+    "block-authoring",
+    "consensus",
+    "blockchain"
+  ],
+  "author": "JAM Protocol Team",
+  "license": "MIT"
+}

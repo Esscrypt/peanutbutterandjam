@@ -65,7 +65,7 @@ Use these for comprehensive production validation.
 First, validate that the test vectors are properly formatted:
 
 ```bash
-cd jamtestvectors
+cd submodules/jamtestvectors
 ./scripts/validate-all.sh
 ```
 
@@ -76,7 +76,7 @@ This will run validation scripts for all STF components and verify the JSON file
 If you prefer to work with JSON format for easier debugging:
 
 ```bash
-cd jamtestvectors
+cd submodules/jamtestvectors
 ./scripts/convert-all.sh
 ```
 
@@ -89,7 +89,7 @@ This converts all binary test vector files to JSON format.
 Test your Safrole implementation:
 
 ```bash
-cd jamtestvectors/stf/safrole
+cd submodules/jamtestvectors/stf/safrole
 
 # Test tiny vectors
 python3 validate.py

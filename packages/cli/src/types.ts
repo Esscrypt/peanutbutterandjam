@@ -1,3 +1,5 @@
+import type { Result } from '@pbnj/core'
+
 export interface GlobalOptions {
   config?: string
   logLevel?: string
@@ -6,5 +8,5 @@ export interface GlobalOptions {
 }
 
 export interface ICommand<T extends GlobalOptions = GlobalOptions> {
-  execute(options: T): Promise<void>
+  execute(options: T): Promise<Result<void>>
 }

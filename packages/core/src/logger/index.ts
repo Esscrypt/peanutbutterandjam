@@ -38,30 +38,63 @@ export class LoggerProvider {
   }
 
   info(message: string, ...args: unknown[]) {
-    this._checkInit()
-    this.pino.info(args, message)
+    this._safeLog('info', message, args)
   }
 
   debug(message: string, ...args: unknown[]) {
-    this._checkInit()
-    this.pino.debug(args, message)
+    this._safeLog('debug', message, args)
+  }
+
+  warn(message: string, ...args: unknown[]) {
+    this._safeLog('warn', message, args)
   }
 
   warning(message: string, ...args: unknown[]) {
-    this._checkInit()
-    this.pino.warn(args, message)
+    this._safeLog('warn', message, args)
   }
 
   error(message: string, error?: unknown, ..._args: unknown[]) {
-    this._checkInit()
-    const args = typeof Bun !== 'undefined' ? Bun.inspect(_args) : _args
-    this.pino.error({ err: error, args }, message)
+    this._safeLog('error', message, [error, ..._args])
   }
 
-  private _checkInit() {
+  /**
+   * Safe logging method that handles uninitialized logger gracefully
+   */
+  private _safeLog(
+    level: 'info' | 'debug' | 'warn' | 'error',
+    message: string,
+    args: unknown[],
+  ) {
     if (!this.hasBeenInitialized) {
-      throw new Error('LoggerProvider has not been initialized')
+      // Log to console as fallback when logger is not initialized
+      const timestamp = new Date().toISOString()
+      const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`
+
+      if (level === 'error') {
+        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
+        console.error(logMessage, ...args)
+      } else if (level === 'warn') {
+        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
+        console.warn(logMessage, ...args)
+      } else if (level === 'debug') {
+        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
+        console.debug(logMessage, ...args)
+      } else {
+        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
+        console.log(logMessage, ...args)
+      }
+      return
     }
+
+    // Use the initialized logger
+    try {
+      if (level === 'error') {
+        const errorArgs = typeof Bun !== 'undefined' ? Bun.inspect(args) : args
+        this.pino.error({ err: args[0], args: errorArgs }, message)
+      } else {
+        this.pino[level](args, message)
+      }
+    } catch (_error) {}
   }
 }
 

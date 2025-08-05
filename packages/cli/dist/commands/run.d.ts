@@ -1,6 +1,3 @@
-import type { ICommand } from '../types';
-import type { RunOptions } from '../parser';
-export declare class RunCommand implements ICommand<RunOptions> {
-    execute(options: RunOptions): Promise<void>;
-}
+import { Command } from 'commander';
+export declare function createRunCommand(): Command;
 //# sourceMappingURL=run.d.ts.map

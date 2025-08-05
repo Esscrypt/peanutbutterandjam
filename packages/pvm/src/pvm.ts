@@ -1,8 +1,15 @@
 import { readFileSync, writeFileSync } from 'node:fs'
-import { logger } from './index'
+import { logger } from '@pbnj/core'
+import { PVMCallStack } from './call-stack'
 import {
-  type CallStack,
-  type CallStackFrame,
+  DEFAULTS,
+  GAS_CONFIG,
+  INSTRUCTION_LENGTHS,
+  RESULT_CODES,
+} from './config'
+import { InstructionRegistry } from './instructions/registry'
+import { PVMRAM } from './ram'
+import {
   type DeblobFunction,
   type DeblobResult,
   type ProgramBlob,
@@ -10,11 +17,9 @@ import {
   type PVMInstruction,
   type PVMRuntime,
   type PVMState,
-  type RAM,
   type RegisterValue,
   type RegisterValue32,
   type ResultCode,
-  RuntimeError,
   type SingleStepResult,
 } from './types'
 
@@ -45,68 +50,16 @@ const defaultDeblob: DeblobFunction = (blob: number[]): DeblobResult => {
   }
 }
 
-// RAM implementation
-class PVMRAM implements RAM {
-  public cells: Map<number, number> = new Map()
-
-  readOctet(address: number): number {
-    return this.cells.get(address) || 0
-  }
-
-  writeOctet(address: number, value: number): void {
-    // Ensure value is 8-bit
-    const octet = value & 0xff
-    this.cells.set(address, octet)
-  }
-
-  readOctets(address: number, count: number): number[] {
-    const result: number[] = []
-    for (let i = 0; i < count; i++) {
-      result.push(this.readOctet(address + i))
-    }
-    return result
-  }
-
-  writeOctets(address: number, values: number[]): void {
-    values.forEach((value, index) => {
-      this.writeOctet(address + index, value)
-    })
-  }
-}
-
-// Call stack implementation
-class PVMCallStack implements CallStack {
-  public frames: CallStackFrame[] = []
-
-  pushFrame(frame: CallStackFrame): void {
-    this.frames.push(frame)
-  }
-
-  popFrame(): CallStackFrame | undefined {
-    return this.frames.pop()
-  }
-
-  getCurrentFrame(): CallStackFrame | undefined {
-    return this.frames[this.frames.length - 1]
-  }
-
-  isEmpty(): boolean {
-    return this.frames.length === 0
-  }
-
-  getDepth(): number {
-    return this.frames.length
-  }
-}
-
 // PVM implementation
 export class PVM implements PVMRuntime {
   public state: PVMState
   private deblob: DeblobFunction
   private instructions: PVMInstruction[] = []
+  private gasLimit: bigint
 
   constructor(deblobFunction?: DeblobFunction) {
     this.deblob = deblobFunction || defaultDeblob
+    this.gasLimit = GAS_CONFIG.DEFAULT_GAS_LIMIT
 
     // Initialize default state
     this.state = {
@@ -123,17 +76,18 @@ export class PVM implements PVMRuntime {
         r6: 0n,
         r7: 0n,
         // 32-bit registers initialized to 0
-        r8: 0,
-        r9: 0,
-        r10: 0,
-        r11: 0,
-        r12: 0,
+        r8: 0n,
+        r9: 0n,
+        r10: 0n,
+        r11: 0n,
+        r12: 0n,
       },
       callStack: new PVMCallStack(),
       ram: new PVMRAM(),
+      gasCounter: this.gasLimit,
     }
 
-    logger.info('PVM initialized with PVM specification compliance')
+    logger.info('PVM initialized with Gray Paper specification compliance')
   }
 
   /**
@@ -152,11 +106,14 @@ export class PVM implements PVMRuntime {
       }
 
       // Parse instructions from the extracted data
-      this.instructions = this.parseInstructions(deblobResult)
+      this.instructions = this.parseInstructionsFromData(
+        deblobResult.instructionData,
+      )
 
       // Reset state
       this.state.instructionPointer = 0
       this.state.resultCode = null
+      this.state.gasCounter = this.gasLimit
 
       logger.info('Program loaded successfully', {
         instructionCount: this.instructions.length,
@@ -166,6 +123,33 @@ export class PVM implements PVMRuntime {
         throw error
       }
       throw new PVMError(`Failed to load program: ${error}`, 'LOAD_ERROR')
+    }
+  }
+
+  /**
+   * Load program from raw instruction data
+   */
+  public loadProgramFromData(instructionData: number[]): void {
+    try {
+      // Parse instructions from the raw data
+      this.instructions = this.parseInstructionsFromData(instructionData)
+
+      // Reset state
+      this.state.instructionPointer = 0
+      this.state.resultCode = null
+      this.state.gasCounter = this.gasLimit
+
+      logger.info('Program loaded from data successfully', {
+        instructionCount: this.instructions.length,
+      })
+    } catch (error) {
+      if (error instanceof PVMError) {
+        throw error
+      }
+      throw new PVMError(
+        `Failed to load program from data: ${error}`,
+        'LOAD_ERROR',
+      )
     }
   }
 
@@ -180,8 +164,8 @@ export class PVM implements PVMRuntime {
       if (!currentInstruction) {
         // No more instructions - halt
         return {
-          resultCode: '∎', // Halt
-          newState: { ...this.state, resultCode: '∎' },
+          resultCode: RESULT_CODES.HALT,
+          newState: { ...this.state, resultCode: RESULT_CODES.HALT },
         }
       }
 
@@ -207,8 +191,52 @@ export class PVM implements PVMRuntime {
       })
 
       return {
-        resultCode: 'F', // Failure
-        newState: { ...this.state, resultCode: 'F' },
+        resultCode: RESULT_CODES.FAULT,
+        newState: { ...this.state, resultCode: RESULT_CODES.FAULT },
+      }
+    }
+  }
+
+  /**
+   * Step with host call support
+   */
+  public stepWithHostCall(): SingleStepResult {
+    try {
+      const currentInstruction =
+        this.instructions[this.state.instructionPointer]
+
+      if (!currentInstruction) {
+        // No more instructions - halt
+        return {
+          resultCode: RESULT_CODES.HALT,
+          newState: { ...this.state, resultCode: RESULT_CODES.HALT },
+        }
+      }
+
+      // Execute the instruction
+      const resultCode = this.executeInstruction(currentInstruction)
+
+      // Update state
+      const newState: PVMState = {
+        ...this.state,
+        resultCode,
+        instructionPointer: this.state.instructionPointer + 1,
+      }
+
+      this.state = newState
+
+      return {
+        resultCode,
+        newState,
+      }
+    } catch (error) {
+      logger.error('Step with host call execution failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        newState: { ...this.state, resultCode: RESULT_CODES.FAULT },
       }
     }
   }
@@ -222,12 +250,12 @@ export class PVM implements PVMRuntime {
     while (this.state.resultCode === null) {
       const result = this.step()
 
-      if (result.resultCode === 'F') {
+      if (result.resultCode === RESULT_CODES.FAULT) {
         logger.error('PVM execution failed')
         break
       }
 
-      if (result.resultCode === '∎') {
+      if (result.resultCode === RESULT_CODES.HALT) {
         logger.info('PVM execution completed (halt)')
         break
       }
@@ -250,14 +278,15 @@ export class PVM implements PVMRuntime {
         r5: 0n,
         r6: 0n,
         r7: 0n,
-        r8: 0,
-        r9: 0,
-        r10: 0,
-        r11: 0,
-        r12: 0,
+        r8: 0n,
+        r9: 0n,
+        r10: 0n,
+        r11: 0n,
+        r12: 0n,
       },
       callStack: new PVMCallStack(),
       ram: new PVMRAM(),
+      gasCounter: this.gasLimit,
     }
     this.instructions = []
 
@@ -279,8 +308,20 @@ export class PVM implements PVMRuntime {
   }
 
   /**
-   * Get register value (64-bit registers)
+   * Set gas limit
    */
+  public setGasLimit(limit: bigint): void {
+    this.gasLimit = limit
+    this.state.gasCounter = limit
+  }
+
+  /**
+   * Get gas counter
+   */
+  public getGasCounter(): bigint {
+    return this.state.gasCounter
+  }
+
   /**
    * Get register value (64-bit registers)
    */
@@ -358,7 +399,7 @@ export class PVM implements PVMRuntime {
       case 12:
         return this.state.registerState.r12
       default:
-        return 0
+        return 0n
     }
   }
 
@@ -369,7 +410,7 @@ export class PVM implements PVMRuntime {
     index: 8 | 9 | 10 | 11 | 12,
     value: RegisterValue32,
   ): void {
-    const maskedValue = value & 0xffffffff // Ensure 32-bit
+    const maskedValue = value & 0xffffffffn // Ensure 32-bit
     switch (index) {
       case 8:
         this.state.registerState.r8 = maskedValue
@@ -414,6 +455,7 @@ export class PVM implements PVMRuntime {
         },
         callStackDepth: this.state.callStack.getDepth(),
         instructionCount: this.instructions.length,
+        gasCounter: this.state.gasCounter.toString(),
       }
 
       writeFileSync(filePath, JSON.stringify(stateData, null, 2))
@@ -453,6 +495,7 @@ export class PVM implements PVMRuntime {
 
       this.state.resultCode = stateData.resultCode
       this.state.instructionPointer = stateData.instructionPointer
+      this.state.gasCounter = BigInt(stateData.gasCounter || this.gasLimit)
 
       logger.info('State loaded from file', { filePath })
     } catch (error) {
@@ -466,17 +509,29 @@ export class PVM implements PVMRuntime {
   // Private methods
 
   /**
-   * Parse instructions from deblob result
+   * Parse instructions from instruction data
    */
-  private parseInstructions(deblobResult: DeblobResult): PVMInstruction[] {
+  private parseInstructionsFromData(
+    instructionData: number[],
+  ): PVMInstruction[] {
     const instructions: PVMInstruction[] = []
     let address = 0
 
-    // Simple parsing - in practice this would be more sophisticated
-    for (let i = 0; i < deblobResult.instructionData.length; i += 4) {
-      const opcode =
-        deblobResult.instructionData[i] & deblobResult.opcodeBitmask[i] || 0xff
-      const operands = deblobResult.instructionData.slice(i + 1, i + 4)
+    // Parse instructions using Gray Paper skip distance logic
+    while (address < instructionData.length) {
+      const opcode = instructionData[address]
+      const instructionLength =
+        INSTRUCTION_LENGTHS[opcode as keyof typeof INSTRUCTION_LENGTHS] ||
+        DEFAULTS.UNKNOWN_INSTRUCTION_LENGTH
+
+      if (address + instructionLength > instructionData.length) {
+        break // Not enough data for complete instruction
+      }
+
+      const operands = instructionData.slice(
+        address + 1,
+        address + instructionLength,
+      )
 
       instructions.push({
         opcode,
@@ -484,14 +539,14 @@ export class PVM implements PVMRuntime {
         address,
       })
 
-      address += 4
+      address += instructionLength
     }
 
     return instructions
   }
 
   /**
-   * Execute a single PVM instruction
+   * Execute a single PVM instruction using the instruction registry
    */
   private executeInstruction(instruction: PVMInstruction): ResultCode {
     logger.debug('Executing instruction', {
@@ -500,20 +555,57 @@ export class PVM implements PVMRuntime {
       operands: instruction.operands,
     })
 
-    // Basic instruction execution - this would be expanded based on PVM spec
-    switch (instruction.opcode) {
-      case 0x00: // NOP
-        return '☇' // Continue
-      case 0x01: // HALT
-        return '∎' // Halt
-      case 0x02: // ERROR
-        return 'F' // Failure
-      default:
-        // Unknown instruction
-        throw new RuntimeError(
-          `Unknown instruction opcode: ${instruction.opcode}`,
-          instruction,
-        )
+    const registry = InstructionRegistry.getInstance()
+    const handler = registry.getHandler(instruction.opcode)
+
+    if (!handler) {
+      // Unknown instruction - treat as TRAP (panic)
+      logger.warn('Unknown instruction opcode', { opcode: instruction.opcode })
+      return RESULT_CODES.PANIC
+    }
+
+    try {
+      // Create instruction context
+      const context = {
+        instruction,
+        registers: this.state.registerState,
+        ram: this.state.ram,
+        callStack: this.state.callStack,
+        instructionPointer: this.state.instructionPointer,
+        stackPointer: this.state.stackPointer || 0,
+        gasCounter: this.state.gasCounter,
+      }
+
+      // Execute instruction
+      const result = handler.execute(context)
+
+      // Update state based on result
+      if (result.newRegisters) {
+        this.state.registerState = {
+          ...this.state.registerState,
+          ...result.newRegisters,
+        }
+      }
+
+      if (result.newInstructionPointer !== undefined) {
+        this.state.instructionPointer = result.newInstructionPointer
+      }
+
+      if (result.newGasCounter !== undefined) {
+        this.state.gasCounter = result.newGasCounter
+      }
+
+      if (result.newCallStack) {
+        this.state.callStack.frames = result.newCallStack
+      }
+
+      return result.resultCode
+    } catch (error) {
+      logger.error('Instruction execution failed', {
+        opcode: instruction.opcode,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return RESULT_CODES.PANIC
     }
   }
 }

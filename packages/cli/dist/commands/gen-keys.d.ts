@@ -1,6 +1,3 @@
-import type { ICommand } from '../types';
-import type { GenKeysOptions } from '../parser';
-export declare class GenKeysCommand implements ICommand<GenKeysOptions> {
-    execute(options: GenKeysOptions): Promise<void>;
-}
+import { Command } from 'commander';
+export declare function createGenKeysCommand(): Command;
 //# sourceMappingURL=gen-keys.d.ts.map

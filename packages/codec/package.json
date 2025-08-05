@@ -1,0 +1,32 @@
+{
+  "name": "@pbnj/codec",
+  "version": "0.0.1",
+  "description": "Data encoding and decoding for the JAM protocol",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "lint": "biome check src/",
+    "format": "biome format --write src/"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2",
+    "vitest": "3.2.4",
+    "@biomejs/biome": "2.1.3"
+  },
+  "keywords": [
+    "jam",
+    "protocol",
+    "codec",
+    "encoding",
+    "decoding",
+    "serialization"
+  ],
+  "author": "JAM Protocol Team",
+  "license": "MIT"
+}

@@ -13,7 +13,7 @@ export class TestSafroleCommand {
             if (specificVector) {
                 // Test specific vector
                 const vectors = await processor.loadTestVectors(`stf/safrole/${vectorType}`);
-                const targetVector = vectors.find(v => v.name === specificVector);
+                const targetVector = vectors.find((v) => v.name === specificVector);
                 if (!targetVector) {
                     throw new Error(`Test vector not found: ${specificVector}`);
                 }

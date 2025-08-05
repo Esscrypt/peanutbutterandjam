@@ -1,6 +1,3 @@
-import type { ICommand } from '../types';
-import type { TestStfOptions } from '../parser';
-export declare class TestStfCommand implements ICommand<TestStfOptions> {
-    execute(options: TestStfOptions): Promise<void>;
-}
+import { Command } from 'commander';
+export declare function createTestStfCommand(): Command;
 //# sourceMappingURL=test-stf.d.ts.map

@@ -1,6 +1,3 @@
-import type { ICommand } from '../types';
-import type { ListKeysOptions } from '../parser';
-export declare class ListKeysCommand implements ICommand<ListKeysOptions> {
-    execute(options: ListKeysOptions): Promise<void>;
-}
+import { Command } from 'commander';
+export declare function createListKeysCommand(): Command;
 //# sourceMappingURL=list-keys.d.ts.map
