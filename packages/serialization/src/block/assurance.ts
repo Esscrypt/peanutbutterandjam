@@ -5,9 +5,9 @@
  * Reference: graypaper/text/assurance.tex
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, hexToUint8Array } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
-import type { Assurance, OctetSequence } from '../types'
+import type { Assurance, Uint8Array } from '../types'
 import { encodeAvailabilitySpecification } from '../work-package/availability-specification'
 
 /**
@@ -16,18 +16,18 @@ import { encodeAvailabilitySpecification } from '../work-package/availability-sp
  * @param assurance - Assurance to encode
  * @returns Encoded octet sequence
  */
-export function encodeAssurance(assurance: Assurance): OctetSequence {
+export function encodeAssurance(assurance: Assurance): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Anchor (32 bytes)
-  parts.push(hexToBytes(assurance.anchor))
+  // Anchor (32 Uint8Array)
+  parts.push(hexToUint8Array(assurance.anchor))
 
   // Availabilities (array of availability specifications)
   for (const availability of assurance.availabilities) {
     parts.push(encodeAvailabilitySpecification(availability))
   }
 
-  // Assurer (8 bytes)
+  // Assurer (8 Uint8Array)
   parts.push(encodeNatural(assurance.assurer))
 
   // Signature (variable length)
@@ -53,20 +53,20 @@ export function encodeAssurance(assurance: Assurance): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded assurance and remaining data
  */
-export function decodeAssurance(data: OctetSequence): {
+export function decodeAssurance(data: Uint8Array): {
   value: Assurance
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
-  // Anchor (32 bytes)
+  // Anchor (32 Uint8Array)
   const anchor = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
   // Availabilities (array of availability specifications)
   const availabilities = []
   while (currentData.length >= 112) {
-    // Each availability spec is 112 bytes
+    // Each availability spec is 112 Uint8Array
     const availability = decodeAvailabilitySpecification(
       currentData.slice(0, 112),
     )
@@ -74,7 +74,7 @@ export function decodeAssurance(data: OctetSequence): {
     currentData = currentData.slice(112)
   }
 
-  // Assurer (8 bytes)
+  // Assurer (8 Uint8Array)
   const assurer = BigInt(
     `0x${Array.from(currentData.slice(0, 8))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -104,7 +104,7 @@ export function decodeAssurance(data: OctetSequence): {
 }
 
 // Helper function for decoding availability specification
-function decodeAvailabilitySpecification(data: OctetSequence) {
+function decodeAvailabilitySpecification(data: Uint8Array) {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     packageHash: bytesToHex(data.slice(0, 32)),

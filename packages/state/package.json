@@ -1,0 +1,29 @@
+{
+  "name": "@pbnj/state",
+  "version": "0.0.1",
+  "description": "State management and database layer for JAM nodes",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "dev": "bun run --watch src/index.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@pbnj/types": "workspace:*",
+    "drizzle-orm": "^0.44.4",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "bun-types": "latest",
+    "drizzle-kit": "^0.31.4"
+  },
+  "peerDependencies": {
+    "bun": "latest"
+  }
+}

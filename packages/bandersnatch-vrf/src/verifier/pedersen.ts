@@ -1,10 +1,11 @@
 /**
  * Pedersen VRF Verifier Implementation
  *
- * Implements Pedersen VRF verification with key hiding
+ * Implements verification for Pedersen VRF scheme
  */
 
-import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '../types'
+import { logger } from '@pbnj/core'
+import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
 import type { VerificationResult, VerifierConfig } from './types'
 
 /**

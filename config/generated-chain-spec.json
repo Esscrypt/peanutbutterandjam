@@ -1,0 +1,59 @@
+{
+  "bootnodes": [
+    "12D3KooWQYV9dGMAoNdsHfUcDjyfB5rk68A9EJF6RkGsaYPb5Cy8@127.0.0.1:40000",
+    "12D3KooWQYV9dGMAoNdsHfUcDjyfB5rk68A9EJF6RkGsaYPb5Cy9@127.0.0.1:40001"
+  ],
+  "id": "test-chain",
+  "name": "Test Chain",
+  "genesis_header": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "genesis_state": {
+    "accounts": {
+      "0x1234567890123456789012345678901234567890": {
+        "balance": "500000000000000000",
+        "nonce": 0,
+        "isValidator": false
+      },
+      "0x2345678901234567890123456789012345678901": {
+        "balance": "300000000000000000",
+        "nonce": 0,
+        "isValidator": false
+      },
+      "0x000102030405060708090a0b0c0d0e0f10111213": {
+        "balance": "1000000000000000000",
+        "nonce": 0,
+        "isValidator": true,
+        "validatorKey": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "stake": "1000000000000000000"
+      },
+      "0x0102030405060708090a0b0c0d0e0f1011121314": {
+        "balance": "1000000000000000000",
+        "nonce": 0,
+        "isValidator": true,
+        "validatorKey": "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        "stake": "1000000000000000000"
+      }
+    },
+    "validators": [
+      {
+        "address": "0x000102030405060708090a0b0c0d0e0f10111213",
+        "publicKey": "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "stake": "1000000000000000000",
+        "isActive": true,
+        "altname": "validator-0"
+      },
+      {
+        "address": "0x0102030405060708090a0b0c0d0e0f1011121314",
+        "publicKey": "0x02030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021",
+        "stake": "1000000000000000000",
+        "isActive": true,
+        "altname": "validator-1"
+      }
+    ],
+    "safrole": {
+      "epoch": 0,
+      "timeslot": 0,
+      "entropy": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "tickets": []
+    }
+  }
+}

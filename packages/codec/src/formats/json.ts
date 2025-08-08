@@ -1,12 +1,11 @@
 /**
- * JSON Format Codec Implementation
+ * JSON Codec Implementation
  *
- * Human-readable JSON encoding for debugging and development
+ * Implements JSON encoding and decoding for the JAM protocol
  */
 
 import { logger } from '@pbnj/core'
-import type { CodecConfig } from '../types'
-import type { FormatCodec, JsonConfig, JsonData } from './types'
+import type { CodecConfig, FormatCodec, JsonConfig, JsonData } from '@pbnj/types'
 
 /**
  * JSON codec for human-readable data serialization

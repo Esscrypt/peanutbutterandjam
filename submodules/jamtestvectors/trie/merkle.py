@@ -16,15 +16,15 @@ def branch(l, r):
     assert len(l) == 32
     assert len(r) == 32
     head = l[0] & 0xfe
-    return bytes([head]) + l[1:] + r
+    return Uint8Array([head]) + l[1:] + r
 
 # GP (287)
 def leaf(k, v):
     if len(v) <= 32:
         head = 0b01 | (len(v) << 2)
-        return bytes([head]) + k[:-1] + v + ((32 - len(v)) * b'\0')
+        return Uint8Array([head]) + k[:-1] + v + ((32 - len(v)) * b'\0')
     head = 0b11
-    return bytes([head]) + k[:-1] + hash(v)
+    return Uint8Array([head]) + k[:-1] + hash(v)
 
 def bit(k, i):
     return (k[i >> 3] & (1 << (i & 7))) != 0
@@ -89,14 +89,14 @@ class Rng:
     def next_32(self):
         return self.next_64() >> 32
 
-    def bytes(self, num):
+    def Uint8Array(self, num):
         data = bytearray()
         while len(data) < num:
             if (num - len(data)) > 4:
-                data.extend(self.next_64().to_bytes(8, byteorder='little'))
+                data.extend(self.next_64().to_Uint8Array(8, byteorder='little'))
             else:
-                data.extend(self.next_32().to_bytes(4, byteorder='little'))
-        return bytes(data[:num])
+                data.extend(self.next_32().to_Uint8Array(4, byteorder='little'))
+        return Uint8Array(data[:num])
 
     def range_64(self, low, high):
         assert 0 <= low <= high < (1 << 64)
@@ -115,12 +115,12 @@ class Rng:
 ## Test vector generation
 
 def random_key(rng):
-    return rng.bytes(32)
+    return rng.Uint8Array(32)
 
 def random_value(rng, size=None):
     if size is None:
         size = rng.range_64(0, 64)
-    return rng.bytes(size)
+    return rng.Uint8Array(size)
 
 def inputs():
     rng = Rng(42)
@@ -133,11 +133,11 @@ def inputs():
     yield [(random_key(rng), random_value(rng, 60))]
 
     k1 = random_key(rng)
-    k2 = bytes([k1[0] ^ 1]) + k1[1:]
+    k2 = Uint8Array([k1[0] ^ 1]) + k1[1:]
     yield [(k1, random_value(rng)), (k2, random_value(rng))]
 
     k1 = random_key(rng)
-    k2 = k1[:1] + bytes([k1[1] ^ 1]) + k1[2:]
+    k2 = k1[:1] + Uint8Array([k1[1] ^ 1]) + k1[2:]
     yield [(k1, random_value(rng)), (k2, random_value(rng))]
 
     yield [(random_key(rng), random_value(rng)) for i in range(2)]

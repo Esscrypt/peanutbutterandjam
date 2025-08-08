@@ -38,13 +38,13 @@ def varied_seed(n):
     result = []
     next = n % large_prime
 
-    # next is always a 32-bit prime, so it fits in 4 bytes.
+    # next is always a 32-bit prime, so it fits in 4 Uint8Array.
     # this loop generates a cycle of modular exponents of a generator.
     # if this generator is unknown, this cycle is in practice unpredictable,
     # so this should generate a sequence that looks a bit like random
     # and should be enough for simple tests.
     for i in range(8):
-        result = result + list(to_le_bytes(next, 4))
+        result = result + list(to_le_Uint8Array(next, 4))
         next = next * n % large_prime
     
     return result
@@ -66,19 +66,19 @@ def inputs_Eq331():
     yield(number_vector(341), irregular_seed)
 
 
-def to_le_bytes(n, k):
-    return n.to_bytes(k, 'little')
+def to_le_Uint8Array(n, k):
+    return n.to_Uint8Array(k, 'little')
 
-def from_le_bytes(b):
-    return int.from_bytes(b, 'little')
+def from_le_Uint8Array(b):
+    return int.from_Uint8Array(b, 'little')
 
 def compute_q(h, l):
     result = []
     for i in range(l):  
-        preimage = bytes(h.copy()) + to_le_bytes(i // 8, 4)
+        preimage = Uint8Array(h.copy()) + to_le_Uint8Array(i // 8, 4)
         offset = 4*i % 32
         slice = hash(preimage)[offset:offset + 4] 
-        result.append(from_le_bytes(slice))
+        result.append(from_le_Uint8Array(slice))
 
     return result
 

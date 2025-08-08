@@ -1,0 +1,105 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "PBNJ Nodes Dashboard",
+    "tags": ["pbnj", "blockchain", "nodes"],
+    "style": "dark",
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Block Creation Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(block_creation_time_ms_bucket[5m]))",
+            "legendFormat": "95th percentile - {{node_id}}"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(block_creation_time_ms_bucket[5m]))",
+            "legendFormat": "50th percentile - {{node_id}}"
+          }
+        ],
+        "yAxis": {
+          "label": "Time (ms)"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Blocks Created",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "increase(blocks_created_total[5m])",
+            "legendFormat": "{{node_id}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "displayMode": "list"
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Memory Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "memory_usage_bytes",
+            "legendFormat": "{{node_id}}"
+          }
+        ],
+        "yAxis": {
+          "label": "Bytes"
+        }
+      },
+      {
+        "id": 4,
+        "title": "CPU Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "cpu_usage_percent",
+            "legendFormat": "{{node_id}}"
+          }
+        ],
+        "yAxis": {
+          "label": "Percentage"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Extrinsics Processed",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "increase(extrinsics_processed_total[5m])",
+            "legendFormat": "{{node_id}}"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Work Packages Processed",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "increase(work_packages_processed_total[5m])",
+            "legendFormat": "{{node_id}}"
+          }
+        ]
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s"
+  }
+} 

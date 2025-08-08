@@ -4,7 +4,7 @@
 
 import json
 import glob
-from jam_types import Struct, ScaleBytes, spec
+from jam_types import Struct, ScaleUint8Array, spec
 
 class StfTestVector(Struct):
     state_class = None
@@ -37,8 +37,8 @@ def convert_to_json(filename, subsystem_type, spec_name = None):
     print("* Converting:", filename)
     with open(filename, 'rb') as file:
         blob = file.read()
-        scale_bytes = ScaleBytes(blob)
-        dump = subsystem_type(data=scale_bytes)
+        scale_Uint8Array = ScaleUint8Array(blob)
+        dump = subsystem_type(data=scale_Uint8Array)
         decoded = dump.decode()
         json_filename = str(filename).replace('.bin', '.json')
         with open(json_filename, 'w') as json_file:

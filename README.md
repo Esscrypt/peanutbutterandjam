@@ -13,17 +13,34 @@ This project strictly adheres to the [JAM Gray Paper](https://graypaper.com/) sp
 - **Adherence Rules**: [Gray Paper Adherence Rules](.cursor/rules/graypaper-adherence.mdc)
 - **VRF Implementation**: [Bandersnatch VRF Implementation Guide](.cursor/rules/bandersnatch-vrf-implementation.mdc)
 
-## Releases
+## 📚 Documentation
 
-See [RELEASE.md](./RELEASE.md) for detailed release instructions and CLI binary downloads.
+- **[Documentation Index](docs/README.md)** - Complete documentation overview
+- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and guidelines
+- **[Testing Guide](docs/TESTING.md)** - Testing against JAM test vectors
+- **[Release Guide](docs/RELEASE.md)** - Release procedures and CLI downloads
 
-## Development
+## 🚀 Quick Start
 
-See [DEVELOPMENT.md](./DEVELOPMENT.md) for development setup and guidelines.
+### Testnet Setup
+```bash
+# Run hybrid testnet (Polkajam + PBNJ)
+./scripts/hybrid-testnet.sh
 
-## Testing
+# Or run simple testnet
+./scripts/simple-testnet.sh
+```
 
-See [TESTING.md](./TESTING.md) for testing against JAM test vectors.
+### Multi-Node Setup
+```bash
+# Start multiple nodes with observability
+./scripts/start-nodes.sh
+
+# Test single node
+./scripts/test-single-node.sh
+```
+
+See **[Testnet Documentation](docs/TESTNET_README.md)** for detailed setup instructions.
 
 ## Packages
 

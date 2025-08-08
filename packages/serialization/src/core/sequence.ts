@@ -9,7 +9,7 @@ import type {
   Decoder,
   Encoder,
   Natural,
-  OctetSequence,
+  Uint8Array,
   Sequence,
 } from '../types'
 import { decodeNatural, encodeNatural } from './natural-number'
@@ -23,7 +23,7 @@ import { decodeNatural, encodeNatural } from './natural-number'
  * @param sequence - Sequence of natural numbers to encode
  * @returns Encoded octet sequence
  */
-export function encodeSequence(sequence: Sequence<Natural>): OctetSequence {
+export function encodeSequence(sequence: Sequence<Natural>): Uint8Array {
   return encodeSequenceGeneric(sequence, encodeNatural)
 }
 
@@ -40,10 +40,10 @@ export function encodeSequence(sequence: Sequence<Natural>): OctetSequence {
 export function encodeSequenceGeneric<T>(
   sequence: T[],
   encoder: Encoder<T>,
-): OctetSequence {
+): Uint8Array {
   // Calculate total size needed
   let totalSize = 0
-  const encodedElements: OctetSequence[] = []
+  const encodedElements: Uint8Array[] = []
 
   for (const element of sequence) {
     const encoded = encoder(element)
@@ -71,9 +71,9 @@ export function encodeSequenceGeneric<T>(
  * @returns Decoded sequence and remaining data
  */
 export function decodeSequence(
-  data: OctetSequence,
+  data: Uint8Array,
   count?: number,
-): { value: Natural[]; remaining: OctetSequence } {
+): { value: Natural[]; remaining: Uint8Array } {
   return decodeSequenceGeneric(data, decodeNatural, count)
 }
 
@@ -86,10 +86,10 @@ export function decodeSequence(
  * @returns Decoded sequence and remaining data
  */
 export function decodeSequenceGeneric<T>(
-  data: OctetSequence,
+  data: Uint8Array,
   decoder: Decoder<T>,
   count?: number,
-): { value: T[]; remaining: OctetSequence } {
+): { value: T[]; remaining: Uint8Array } {
   const result: T[] = []
   let remaining = data
 
@@ -133,7 +133,7 @@ export function decodeSequenceGeneric<T>(
  */
 export function encodeSequenceWithLength(
   sequence: Sequence<Natural>,
-): OctetSequence {
+): Uint8Array {
   const encodedSequence = encodeSequence(sequence)
   const length = BigInt(sequence.length)
   const encodedLength = encodeNatural(length)
@@ -151,9 +151,9 @@ export function encodeSequenceWithLength(
  * @param data - Octet sequence to decode
  * @returns Decoded sequence and remaining data
  */
-export function decodeSequenceWithLength(data: OctetSequence): {
+export function decodeSequenceWithLength(data: Uint8Array): {
   value: Natural[]
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   // First decode the length
   const { value: length, remaining: lengthRemaining } = decodeNatural(data)
@@ -175,9 +175,9 @@ export function decodeSequenceWithLength(data: OctetSequence): {
  * @param sequence - Sequence of octet sequences
  * @returns Concatenated octet sequence
  */
-export function encodeOctetSequence(
-  sequence: Sequence<OctetSequence>,
-): OctetSequence {
+export function encodeUint8Array(
+  sequence: Sequence<Uint8Array>,
+): Uint8Array {
   // Calculate total size
   const totalSize = sequence.reduce((sum, element) => sum + element.length, 0)
   const result = new Uint8Array(totalSize)
@@ -199,11 +199,11 @@ export function encodeOctetSequence(
  * @param count - Number of elements to decode
  * @returns Decoded sequence and remaining data
  */
-export function decodeOctetSequence(
-  data: OctetSequence,
+export function decodeUint8Array(
+  data: Uint8Array,
   elementLength: number,
   count: number,
-): { value: OctetSequence[]; remaining: OctetSequence } {
+): { value: Uint8Array[]; remaining: Uint8Array } {
   const totalLength = elementLength * count
 
   if (data.length < totalLength) {
@@ -212,7 +212,7 @@ export function decodeOctetSequence(
     )
   }
 
-  const result: OctetSequence[] = []
+  const result: Uint8Array[] = []
 
   for (let i = 0; i < count; i++) {
     const start = i * elementLength

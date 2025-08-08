@@ -8,7 +8,7 @@
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
-import type { Credential, Guarantee, OctetSequence } from '../types'
+import type { Credential, Guarantee, Uint8Array } from '../types'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
 
 /**
@@ -20,8 +20,8 @@ import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
  * @param credential - Credential to encode
  * @returns Encoded octet sequence
  */
-function encodeCredential(credential: Credential): OctetSequence {
-  const parts: OctetSequence[] = []
+function encodeCredential(credential: Credential): Uint8Array {
+  const parts: Uint8Array[] = []
 
   // Value: encode[2](v)
   parts.push(encodeFixedLength(credential.value, 2))
@@ -49,9 +49,9 @@ function encodeCredential(credential: Credential): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded credential and remaining data
  */
-function decodeCredential(data: OctetSequence): {
+function decodeCredential(data: Uint8Array): {
   value: Credential
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -90,8 +90,8 @@ function decodeCredential(data: OctetSequence): {
  * @param guarantee - Guarantee to encode
  * @returns Encoded octet sequence
  */
-function encodeGuarantee(guarantee: Guarantee): OctetSequence {
-  const parts: OctetSequence[] = []
+function encodeGuarantee(guarantee: Guarantee): Uint8Array {
+  const parts: Uint8Array[] = []
 
   // Work report: xg_workreport
   parts.push(encodeWorkReport(guarantee.workReport))
@@ -121,9 +121,9 @@ function encodeGuarantee(guarantee: Guarantee): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantee and remaining data
  */
-function decodeGuarantee(data: OctetSequence): {
+function decodeGuarantee(data: Uint8Array): {
   value: Guarantee
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -165,7 +165,7 @@ function decodeGuarantee(data: OctetSequence): {
  * @param guarantees - Array of guarantees to encode (ordered by work report)
  * @returns Encoded octet sequence
  */
-export function encodeGuarantees(guarantees: Guarantee[]): OctetSequence {
+export function encodeGuarantees(guarantees: Guarantee[]): Uint8Array {
   // Sort guarantees by work report as required by Gray Paper
   // For simplicity, we'll sort by the authorizer hash which should be unique
   const sortedGuarantees = [...guarantees].sort((a, b) => {
@@ -181,9 +181,9 @@ export function encodeGuarantees(guarantees: Guarantee[]): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantees and remaining data
  */
-export function decodeGuarantees(data: OctetSequence): {
+export function decodeGuarantees(data: Uint8Array): {
   value: Guarantee[]
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeSequenceGeneric(data, decodeGuarantee)
 }

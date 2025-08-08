@@ -1,46 +1,38 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { logger, z } from '@pbnj/core'
-import { Command } from 'commander'
-import { generateChainSpec } from '../utils/chain-spec'
+import { logger } from '@pbnj/core'
+import { generateChainSpec } from '../utils/chain-spec.js'
 
-export function createGenSpecCommand(): Command {
-  const command = new Command('gen-spec')
-    .description('Generate new chain spec from the spec config')
-    .argument('<input.json>', 'Input chain spec file')
-    .argument('<output.json>', 'Output chain spec file')
-    .action(async (inputFile: string, outputFile: string) => {
-      try {
-        if (!existsSync(inputFile)) {
-          logger.error(`Input file not found: ${inputFile}`)
-          process.exit(1)
-        }
+export function createGenSpecCommand(args: string[]): void {
+  const [inputFile, outputFile] = args
 
-        const inputSpec = JSON.parse(readFileSync(inputFile, 'utf-8'))
-        const chainSpec = generateChainSpec(inputSpec)
+  if (!inputFile || !outputFile) {
+    console.error('Error: Both input file and output file are required')
+    console.log('Usage: pbnj gen-spec <input-file> <output-file>')
+    process.exit(1)
+  }
 
-        writeFileSync(outputFile, JSON.stringify(chainSpec, null, 2))
+  try {
+    if (!existsSync(inputFile)) {
+      logger.error(`Input file not found: ${inputFile}`)
+      process.exit(1)
+    }
 
-        logger.info(`Successfully generated chain spec: ${outputFile}`)
-      } catch (error) {
-        if (error instanceof z.ZodError) {
-          logger.error('Configuration validation failed:')
-          error.errors.forEach((err: z.ZodIssue) => {
-            logger.error(`  ${err.path.join('.')}: ${err.message}`)
-          })
-        } else if (error instanceof SyntaxError) {
-          logger.error('Invalid JSON in input file')
-        } else {
-          logger.error(
-            'Failed to generate spec:',
-            error instanceof Error ? error.message : String(error),
-          )
-          if (error instanceof Error && error.stack) {
-            logger.error('Stack trace:', error.stack)
-          }
-        }
-        process.exit(1)
-      }
-    })
+    const inputConfig = JSON.parse(readFileSync(inputFile, 'utf-8'))
+    const chainSpec = generateChainSpec(inputConfig)
+    
+    writeFileSync(outputFile, JSON.stringify(chainSpec, null, 2))
+    logger.info(`Chain spec generated successfully: ${outputFile}`)
+  } catch (error) {
+    logger.error(
+      'Failed to generate chain spec:',
+      error instanceof Error ? error.message : String(error),
+    )
+    process.exit(1)
+  }
+}
 
-  return command
+// Execute if this file is run directly
+if (require.main === module) {
+  console.log('Running gen-spec command directly')
+  createGenSpecCommand(process.argv.slice(2))
 }

@@ -229,7 +229,7 @@ export class DecodingValidation implements DecodingValidator {
 
       if (differences > 0) {
         errors.push(
-          `Data integrity check failed: ${differences} bytes differ between original and decoded data`,
+          `Data integrity check failed: ${differences} Uint8Array differ between original and decoded data`,
         )
       }
     }
@@ -237,7 +237,7 @@ export class DecodingValidation implements DecodingValidator {
     // Check for padding issues
     if (decodedData.length > 0 && decodedData.length % 684 !== 0) {
       warnings.push(
-        `Decoded data length (${decodedData.length}) is not a multiple of 684 bytes. May contain padding.`,
+        `Decoded data length (${decodedData.length}) is not a multiple of 684 Uint8Array. May contain padding.`,
       )
     }
 

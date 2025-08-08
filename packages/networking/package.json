@@ -1,0 +1,48 @@
+{
+  "name": "@pbnj/networking",
+  "version": "0.0.1",
+  "description": "JAM Simple Networking Protocol (JAMNP-S) implementation",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --pretty --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest run --watch",
+    "clean": "rm -rf .turbo && rm -rf node_modules"
+  },
+  "dependencies": {
+    "@infisical/quic": "^1.0.0",
+    "@pbnj/core": "workspace:*",
+    "@pbnj/serialization": "workspace:*",
+    "@pbnj/state": "workspace:*",
+    "@pbnj/types": "workspace:*",
+    "@stablelib/blake2b": "^2.0.1",
+    "@stablelib/ed25519": "^2.0.1",
+    "@stablelib/sha256": "^2.0.1",
+    "blakejs": "^1.2.1",
+    "node-forge": "^1.3.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9",
+    "typescript": "^5.8.2",
+    "biome": "^0.3.3",
+    "@pbnj/typescript-config": "workspace:*",
+    "@types/node": "^20.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "keywords": [
+    "jam",
+    "protocol",
+    "networking",
+    "quic",
+    "tls",
+    "p2p"
+  ],
+  "author": "JAM Protocol Team",
+  "license": "MIT"
+}

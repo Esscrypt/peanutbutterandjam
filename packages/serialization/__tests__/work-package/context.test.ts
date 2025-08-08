@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { WorkContext } from '../../src/types'
+import type { WorkContext } from '@pbnj/types'
 import {
   decodeWorkContext,
   encodeWorkContext,

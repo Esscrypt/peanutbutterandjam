@@ -7,7 +7,7 @@
 
 import { bytesToHex, hexToBytes } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
-import type { ImportReference, OctetSequence } from '../types'
+import type { ImportReference, Uint8Array } from '../types'
 
 /**
  * Encode import reference
@@ -17,7 +17,7 @@ import type { ImportReference, OctetSequence } from '../types'
  */
 export function encodeImportReference(
   importRef: ImportReference,
-): OctetSequence {
+): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Hash (32 bytes)
@@ -45,9 +45,9 @@ export function encodeImportReference(
  * @param data - Octet sequence to decode
  * @returns Decoded import reference and remaining data
  */
-export function decodeImportReference(data: OctetSequence): {
+export function decodeImportReference(data: Uint8Array): {
   value: ImportReference
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   // Hash (32 bytes)
   const hash = bytesToHex(data.slice(0, 32))

@@ -7,7 +7,7 @@
 
 import { bytesToHex, hexToBytes } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
-import type { OctetSequence, SafroleTicket } from '../types'
+import type { Uint8Array, SafroleTicket } from '../types'
 
 /**
  * Encode Safrole ticket
@@ -15,7 +15,7 @@ import type { OctetSequence, SafroleTicket } from '../types'
  * @param ticket - Safrole ticket to encode
  * @returns Encoded octet sequence
  */
-export function encodeSafroleTicket(ticket: SafroleTicket): OctetSequence {
+export function encodeSafroleTicket(ticket: SafroleTicket): Uint8Array {
   const parts: Uint8Array[] = []
 
   // ID (32 bytes)
@@ -43,9 +43,9 @@ export function encodeSafroleTicket(ticket: SafroleTicket): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded Safrole ticket and remaining data
  */
-export function decodeSafroleTicket(data: OctetSequence): {
+export function decodeSafroleTicket(data: Uint8Array): {
   value: SafroleTicket
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 

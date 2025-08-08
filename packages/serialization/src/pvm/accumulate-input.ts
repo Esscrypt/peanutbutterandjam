@@ -5,7 +5,7 @@
  * encode(aiX ∈ accinput) - PVM-specific accumulate input encoding
  */
 
-import type { AccumulateInput, OctetSequence } from '../types'
+import type { AccumulateInput, Uint8Array } from '../types'
 import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
@@ -26,7 +26,7 @@ import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
  */
 export function encodeAccumulateInput(
   accumulateInput: AccumulateInput,
-): OctetSequence {
+): Uint8Array {
   if (accumulateInput.type === 'operand') {
     // encode{0, encode[U]{o}} for operand tuple
     const operandEncoded = encodeOperandTuple(accumulateInput.value)
@@ -50,9 +50,9 @@ export function encodeAccumulateInput(
  * @param data - Octet sequence to decode
  * @returns Decoded accumulate input and remaining data
  */
-export function decodeAccumulateInput(data: OctetSequence): {
+export function decodeAccumulateInput(data: Uint8Array): {
   value: AccumulateInput
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   if (data.length === 0) {
     throw new Error('Insufficient data for accumulate input decoding')

@@ -5,7 +5,7 @@
  * Little-endian encoding for fixed-length integers
  */
 
-import type { FixedLengthSize, Natural, OctetSequence } from '../types'
+import type { FixedLengthSize, Natural, Uint8Array } from '@pbnj/types'
 
 /**
  * Encode natural number using fixed-length little-endian encoding
@@ -21,7 +21,7 @@ import type { FixedLengthSize, Natural, OctetSequence } from '../types'
 export function encodeFixedLength(
   value: Natural,
   length: FixedLengthSize,
-): OctetSequence {
+): Uint8Array {
   // Validate input
   if (value < 0n) {
     throw new Error(`Natural number cannot be negative: ${value}`)
@@ -52,9 +52,9 @@ export function encodeFixedLength(
  * @returns Decoded natural number and remaining data
  */
 export function decodeFixedLength(
-  data: OctetSequence,
+  data: Uint8Array,
   length: FixedLengthSize,
-): { value: Natural; remaining: OctetSequence } {
+): { value: Natural; remaining: Uint8Array } {
   if (data.length < length) {
     throw new Error(
       `Insufficient data for ${length}-byte decoding (got ${data.length} bytes)`,
@@ -88,7 +88,7 @@ export function decodeFixedLength(
 export function encodeFixedLengthTuple(
   tuple: readonly Natural[],
   length: FixedLengthSize,
-): OctetSequence {
+): Uint8Array {
   const totalLength = tuple.length * length
   const result = new Uint8Array(totalLength)
 
@@ -109,10 +109,10 @@ export function encodeFixedLengthTuple(
  * @returns Decoded tuple and remaining data
  */
 export function decodeFixedLengthTuple(
-  data: OctetSequence,
+  data: Uint8Array,
   length: FixedLengthSize,
   count: number,
-): { value: Natural[]; remaining: OctetSequence } {
+): { value: Natural[]; remaining: Uint8Array } {
   const totalLength = count * length
 
   if (data.length < totalLength) {
@@ -148,7 +148,7 @@ export function decodeFixedLengthTuple(
 export function encodeFixedLengthSequence(
   sequence: Natural[],
   length: FixedLengthSize,
-): OctetSequence {
+): Uint8Array {
   return encodeFixedLengthTuple(sequence, length)
 }
 
@@ -161,10 +161,10 @@ export function encodeFixedLengthSequence(
  * @returns Decoded sequence and remaining data
  */
 export function decodeFixedLengthSequence(
-  data: OctetSequence,
+  data: Uint8Array,
   length: FixedLengthSize,
   count: number,
-): { value: Natural[]; remaining: OctetSequence } {
+): { value: Natural[]; remaining: Uint8Array } {
   return decodeFixedLengthTuple(data, length, count)
 }
 
@@ -175,16 +175,16 @@ export function decodeFixedLengthSequence(
 /**
  * Encode 8-bit unsigned integer
  */
-export function encodeUint8(value: Natural): OctetSequence {
+export function encodeUint8(value: Natural): Uint8Array {
   return encodeFixedLength(value, 1)
 }
 
 /**
  * Decode 8-bit unsigned integer
  */
-export function decodeUint8(data: OctetSequence): {
+export function decodeUint8(data: Uint8Array): {
   value: Natural
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeFixedLength(data, 1)
 }
@@ -192,16 +192,16 @@ export function decodeUint8(data: OctetSequence): {
 /**
  * Encode 16-bit unsigned integer
  */
-export function encodeUint16(value: Natural): OctetSequence {
+export function encodeUint16(value: Natural): Uint8Array {
   return encodeFixedLength(value, 2)
 }
 
 /**
  * Decode 16-bit unsigned integer
  */
-export function decodeUint16(data: OctetSequence): {
+export function decodeUint16(data: Uint8Array): {
   value: Natural
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeFixedLength(data, 2)
 }
@@ -209,16 +209,16 @@ export function decodeUint16(data: OctetSequence): {
 /**
  * Encode 32-bit unsigned integer
  */
-export function encodeUint32(value: Natural): OctetSequence {
+export function encodeUint32(value: Natural): Uint8Array {
   return encodeFixedLength(value, 4)
 }
 
 /**
  * Decode 32-bit unsigned integer
  */
-export function decodeUint32(data: OctetSequence): {
+export function decodeUint32(data: Uint8Array): {
   value: Natural
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeFixedLength(data, 4)
 }
@@ -226,16 +226,50 @@ export function decodeUint32(data: OctetSequence): {
 /**
  * Encode 64-bit unsigned integer
  */
-export function encodeUint64(value: Natural): OctetSequence {
+export function encodeUint64(value: Natural): Uint8Array {
   return encodeFixedLength(value, 8)
 }
 
 /**
  * Decode 64-bit unsigned integer
  */
-export function decodeUint64(data: OctetSequence): {
+export function decodeUint64(data: Uint8Array): {
   value: Natural
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeFixedLength(data, 8)
+}
+
+/**
+ * Encode 128-bit unsigned integer
+ */
+export function encodeUint128(value: Natural): Uint8Array {
+  return encodeFixedLength(value, 16)
+}
+
+/**
+ * Decode 128-bit unsigned integer
+ */
+export function decodeUint128(data: Uint8Array): {
+  value: Natural
+  remaining: Uint8Array
+} {
+  return decodeFixedLength(data, 16)
+}
+
+/**
+ * Encode 256-bit unsigned integer
+ */
+export function encodeUint256(value: Natural): Uint8Array {
+  return encodeFixedLength(value, 32)
+}
+
+/**
+ * Decode 256-bit unsigned integer
+ */
+export function decodeUint256(data: Uint8Array): {
+  value: Natural
+  remaining: Uint8Array
+} {
+  return decodeFixedLength(data, 32)
 }

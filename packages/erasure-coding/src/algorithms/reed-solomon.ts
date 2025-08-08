@@ -1,17 +1,12 @@
 /**
  * Reed-Solomon Algorithm Implementation
  *
- * Implementation based on Gray Paper specifications for JAM protocol
+ * Implements Reed-Solomon encoding and decoding for erasure coding
  */
 
 import { logger } from '@pbnj/core'
-import type { FieldElement } from '../types'
-import type {
-  FiniteField,
-  PolynomialOperations,
-  ReedSolomonAlgorithm,
-} from './types'
-import { CANTOR_BASIS } from './types'
+import type { FieldElement, ReedSolomonAlgorithm, FiniteField, PolynomialOperations } from '@pbnj/types'
+import { CANTOR_BASIS } from '@pbnj/types'
 
 /**
  * Reed-Solomon algorithm implementation

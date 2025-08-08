@@ -9,11 +9,12 @@
 export type Bytes = Uint8Array
 export type Hash = string
 export type Natural = bigint
-export type OctetSequence = number[]
+export type OctetSequence = Uint8Array
 export type VariableOctetSequence = number[]
 export type FixedOctetSequence = number[]
 export type BitSequence = boolean[]
-export type HashValue = string
+export type HashValue = `0x${string}`
+export type HexString = `0x${string}`
 export type Optional<T> = T | null
 export type Tuple<T extends readonly unknown[]> = T
 export type Sequence<T> = T[]

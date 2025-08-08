@@ -11,99 +11,110 @@ import {
   bytesToBigInt,
   bytesToHex,
   type Hex,
-  hexToBigInt,
   hexToBytes,
 } from 'viem'
-import type { Bytes, Hash } from '../types'
+import type { Hash } from '@pbnj/types'
+import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
 
 /**
  * Blake2b hash function
  * @param data - Input data to hash
  * @returns 32-byte hash as hex string
  */
-export function blake2bHash(data: Bytes): Hash {
-  try {
+export function blake2bHash(data: Uint8Array): Hash {
     const hash = blakejs.blake2b(data, undefined, 32)
     return `0x${Buffer.from(hash).toString('hex')}` as Hash
-  } catch (_error) {
-    // Fallback to simple hash if blake2b fails
-    return simpleHash(data)
-  }
 }
 
 /**
  * Blake2b hash function (alias for blake2bHash)
  */
-export function blake2b(data: Bytes): Hash {
+export function blake2b(data: Uint8Array): Hash {
   return blake2bHash(data)
 }
 
 /**
- * Ed25519 key pair generation using blakejs
- * @returns Object with publicKey and secretKey
+ * Sign data with Ed25519 private key
  */
-export function generateEd25519KeyPair(): {
-  publicKey: Bytes
-  secretKey: Bytes
-} {
-  // Generate random secret key
-  const secretKey = new Uint8Array(32)
-  const nodeCrypto = require('node:crypto')
-  nodeCrypto.randomFillSync(secretKey)
-
-  // Derive public key using blake2b
-  const publicKey = blake2bHash(secretKey)
-  return {
-    publicKey: Buffer.from(publicKey.replace('0x', ''), 'hex'),
-    secretKey,
+export function signEd25519(data: Uint8Array, privateKey: Uint8Array): Uint8Array {
+  // The @stablelib/ed25519 library expects the secret key to be exactly 64 Uint8Array
+  // The secretKey from generateKeyPair() should already be in the correct format
+  if (privateKey.length !== 64) {
+    throw new Error(`Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`)
   }
+  return new Uint8Array(sign(privateKey, data))
 }
 
 /**
- * Ed25519 signature using blakejs
- * @param message - Message to sign
- * @param secretKey - Secret key for signing
- * @returns Signature as hex string
+ * Verify Ed25519 signature
  */
-export function ed25519Sign(message: Bytes, secretKey: Bytes): string {
+export function verifyEd25519(data: Uint8Array, signature: Uint8Array, publicKey: Uint8Array): boolean {
   try {
-    // Create signature using blake2b
-    const hash = blake2bHash(message)
-    const signature = blake2bHash(
-      Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
-    )
-    return signature
-  } catch (_error) {
-    // Fallback signature
-    return `0x${Buffer.from(message.slice(0, 64)).toString('hex').padEnd(128, '0')}`
-  }
-}
-
-/**
- * Ed25519 signature verification using blakejs
- * @param message - Original message
- * @param signature - Signature to verify
- * @param publicKey - Public key for verification
- * @returns True if signature is valid
- */
-export function ed25519Verify(
-  _message: Bytes,
-  signature: string,
-  _publicKey: Bytes,
-): boolean {
-  try {
-    // Simple verification for now
-    return signature.length === 130 && signature.startsWith('0x')
-  } catch (_error) {
+    if (signature.length !== 64) {
+      return false
+    }
+    return verify(publicKey, data, signature)
+  } catch (error) {
     return false
   }
 }
+
+
+/**
+ * Generate a new Ed25519 key pair using @stablelib/ed25519
+ */
+export function generateEd25519KeyPairStable(): {
+  publicKey: Uint8Array
+  privateKey: Uint8Array
+} {
+  const keyPair = generateKeyPair()
+  return {
+    publicKey: new Uint8Array(keyPair.publicKey),
+    privateKey: new Uint8Array(keyPair.secretKey), // This is 64 Uint8Array (32 Uint8Array seed + 32 Uint8Array public key)
+  }
+}
+
+
+/**
+ * Serialize Ed25519 public key to hex string
+ */
+export function serializePublicKey(publicKey: Uint8Array): string {
+  return Buffer.from(publicKey).toString('hex')
+}
+
+/**
+ * Deserialize Ed25519 public key from hex string
+ */
+export function deserializePublicKey(hexString: string): Uint8Array {
+  return new Uint8Array(Buffer.from(hexString, 'hex'))
+}
+
+/**
+ * Validate Ed25519 public key
+ */
+export function validatePublicKey(publicKey: Uint8Array): boolean {
+  return publicKey.length === 32
+}
+
+/**
+ * Validate Ed25519 private key
+ */
+export function validatePrivateKey(privateKey: Uint8Array): boolean {
+  return privateKey.length === 32
+}
+
+/**
+ * Validate Ed25519 signature
+ */
+export function validateSignature(signature: Uint8Array): boolean {
+  return signature.length === 64
+} 
 
 /**
  * BLS key pair generation using blakejs
  * @returns Object with publicKey and secretKey
  */
-export function generateBLSKeyPair(): { publicKey: Bytes; secretKey: Bytes } {
+export function generateBLSKeyPair(): { publicKey: Uint8Array; secretKey: Uint8Array } {
   // Generate random secret key
   const secretKey = new Uint8Array(32)
   const nodeCrypto = require('node:crypto')
@@ -123,7 +134,7 @@ export function generateBLSKeyPair(): { publicKey: Bytes; secretKey: Bytes } {
  * @param secretKey - Secret key for signing
  * @returns BLS signature as hex string
  */
-export function blsSign(message: Bytes, secretKey: Bytes): string {
+export function blsSign(message: Uint8Array, secretKey: Uint8Array): string {
   try {
     // BLS signature using blake2b
     const hash = blake2bHash(message)
@@ -145,9 +156,9 @@ export function blsSign(message: Bytes, secretKey: Bytes): string {
  * @returns True if signature is valid
  */
 export function blsVerify(
-  _message: Bytes,
+  _message: Uint8Array,
   signature: string,
-  _publicKey: Bytes,
+  _publicKey: Uint8Array,
 ): boolean {
   try {
     // Simple verification for now
@@ -162,8 +173,8 @@ export function blsVerify(
  * @returns Object with publicKey and secretKey
  */
 export function generateBandersnatchKeyPair(): {
-  publicKey: Bytes
-  secretKey: Bytes
+  publicKey: Uint8Array
+  secretKey: Uint8Array
 } {
   // Generate random secret key
   const secretKey = new Uint8Array(32)
@@ -184,7 +195,7 @@ export function generateBandersnatchKeyPair(): {
  * @param secretKey - Secret key for VRF
  * @returns VRF proof as hex string
  */
-export function bandersnatchVrfProof(message: Bytes, secretKey: Bytes): string {
+export function bandersnatchVrfProof(message: Uint8Array, secretKey: Uint8Array): string {
   try {
     // VRF proof using blake2b
     const hash = blake2bHash(message)
@@ -206,9 +217,9 @@ export function bandersnatchVrfProof(message: Bytes, secretKey: Bytes): string {
  * @returns True if proof is valid
  */
 export function bandersnatchVrfVerify(
-  _message: Bytes,
+  _message: Uint8Array,
   proof: string,
-  _publicKey: Bytes,
+  _publicKey: Uint8Array,
 ): boolean {
   try {
     // Simple verification for now
@@ -218,24 +229,13 @@ export function bandersnatchVrfVerify(
   }
 }
 
-/**
- * Simple hash function as fallback
- */
-function simpleHash(data: Uint8Array): Hash {
-  let hash = 0
-  for (let i = 0; i < data.length; i++) {
-    hash = (hash << 5) - hash + data[i]
-    hash = hash & hash // Convert to 32-bit integer
-  }
-  return `0x${Math.abs(hash).toString(16).padStart(64, '0')}` as Hash
-}
 
 /**
- * Generate random bytes
+ * Generate random Uint8Array
  */
-export function randomBytes(length: number): Bytes {
+export function randomUint8Array(length: number): Uint8Array {
   const crypto = require('node:crypto')
-  return crypto.randomBytes(length)
+  return crypto.randomUint8Array(length)
 }
 
 /**
@@ -243,12 +243,12 @@ export function randomBytes(length: number): Bytes {
  */
 export function randomHex(length: number): Hex {
   const crypto = require('node:crypto')
-  const bytes = crypto.randomBytes(length)
-  return bytesToHex(bytes)
+  const Uint8Array = crypto.randomUint8Array(length)
+  return bytesToHex(Uint8Array)
 }
 
 // Re-export viem's hex functions directly
-export { bytesToHex, hexToBytes, bytesToBigInt, hexToBigInt }
+export { bytesToHex, hexToBytes, bytesToBigInt }
 
 /**
  * Verify hex string format
@@ -265,118 +265,4 @@ export function isValidHexLength(hex: string, expectedLength: number): boolean {
     return false
   }
   return hex.length === expectedLength + 2 // +2 for '0x' prefix
-}
-
-/**
- * Generate deterministic hash from multiple inputs
- */
-export function hashConcat(...inputs: (Bytes | string)[]): Hash {
-  const concatenated = inputs.map((input) =>
-    typeof input === 'string' ? Buffer.from(input, 'utf8') : input,
-  )
-  const combined = Buffer.concat(concatenated)
-  return blake2bHash(combined)
-}
-
-/**
- * Merkle tree root calculation
- * @param hashes - Array of hashes to build merkle tree from
- * @returns Merkle root as hex string
- */
-export function merkleRoot(hashes: Hash[]): Hash {
-  if (hashes.length === 0) {
-    return '0x0000000000000000000000000000000000000000000000000000000000000000'
-  }
-
-  if (hashes.length === 1) {
-    return hashes[0]
-  }
-
-  const newHashes: Hash[] = []
-
-  for (let i = 0; i < hashes.length; i += 2) {
-    const left = hashes[i]
-    const right = i + 1 < hashes.length ? hashes[i + 1] : left
-
-    const combined = Buffer.concat([
-      Buffer.from(left.replace('0x', ''), 'hex'),
-      Buffer.from(right.replace('0x', ''), 'hex'),
-    ])
-
-    newHashes.push(blake2bHash(combined))
-  }
-
-  return merkleRoot(newHashes)
-}
-
-/**
- * Generate merkle proof for a leaf
- * @param hashes - Array of all hashes
- * @param leafIndex - Index of the leaf to prove
- * @returns Object with proof array and root
- */
-export function merkleProof(
-  hashes: Hash[],
-  leafIndex: number,
-): { proof: Hash[]; root: Hash } {
-  if (hashes.length === 0 || leafIndex >= hashes.length) {
-    return {
-      proof: [],
-      root: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    }
-  }
-
-  const proof: Hash[] = []
-  let currentIndex = leafIndex
-  let currentHashes = [...hashes]
-
-  while (currentHashes.length > 1) {
-    const isRight = currentIndex % 2 === 1
-    const siblingIndex = isRight ? currentIndex - 1 : currentIndex + 1
-
-    if (siblingIndex < currentHashes.length) {
-      proof.push(currentHashes[siblingIndex])
-    }
-
-    // Move to parent level
-    currentIndex = Math.floor(currentIndex / 2)
-    const newHashes: Hash[] = []
-    for (let i = 0; i < currentHashes.length; i += 2) {
-      const left = currentHashes[i]
-      const right = i + 1 < currentHashes.length ? currentHashes[i + 1] : left
-      const combined = Buffer.concat([
-        Buffer.from(left.replace('0x', ''), 'hex'),
-        Buffer.from(right.replace('0x', ''), 'hex'),
-      ])
-      newHashes.push(blake2bHash(combined))
-    }
-    currentHashes = newHashes
-  }
-
-  return { proof, root: currentHashes[0] }
-}
-
-/**
- * Verify merkle proof
- * @param leaf - Leaf hash to verify
- * @param proof - Merkle proof array
- * @param root - Expected merkle root
- * @returns True if proof is valid
- */
-export function verifyMerkleProof(
-  leaf: Hash,
-  proof: Hash[],
-  root: Hash,
-): boolean {
-  let currentHash = leaf
-
-  for (const proofHash of proof) {
-    const combined = Buffer.concat([
-      Buffer.from(currentHash.replace('0x', ''), 'hex'),
-      Buffer.from(proofHash.replace('0x', ''), 'hex'),
-    ])
-    currentHash = blake2bHash(combined)
-  }
-
-  return currentHash === root
 }

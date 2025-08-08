@@ -1,13 +1,12 @@
 /**
  * Finite Field Implementation for GF(2^16)
  *
- * Implementation based on Gray Paper specifications
+ * Implements finite field operations for erasure coding
  */
 
 import { logger } from '@pbnj/core'
-import type { FieldElement } from '../types'
-import type { FiniteField } from './types'
-import { FIELD_GENERATOR, IRREDUCIBLE_POLYNOMIAL } from './types'
+import type { FieldElement, FiniteField } from '@pbnj/types'
+import { FIELD_GENERATOR, IRREDUCIBLE_POLYNOMIAL } from '@pbnj/types'
 
 /**
  * Finite field implementation for GF(2^16)

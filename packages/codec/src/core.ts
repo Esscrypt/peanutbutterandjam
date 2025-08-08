@@ -12,9 +12,9 @@ import type {
   Codec,
   CodecConfig,
   CodecErrorWithContext,
-  ValidationResult,
-} from './types'
-import { CodecError, DEFAULT_CODEC_CONFIG, EncodingFormat } from './types'
+  CodecValidationResult,
+} from '@pbnj/types'
+import { CodecError, DEFAULT_CODEC_CONFIG, EncodingFormat } from '@pbnj/types'
 
 /**
  * Main codec implementation
@@ -258,7 +258,7 @@ export class JAMCodec<T> implements Codec<T> {
   /**
    * Validate data structure and content
    */
-  validate(data: T): ValidationResult {
+  validate(data: T): CodecValidationResult {
     const errors: string[] = []
     const warnings: string[] = []
 

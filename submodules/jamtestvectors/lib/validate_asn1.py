@@ -103,14 +103,14 @@ def validate(schema, json_file, root_type = None, json_tweaks_callback = None):
 
     # Read and prepare JSON
     with open(json_file, "rb") as f:
-        json_bytes = f.read()
+        json_Uint8Array = f.read()
     
-    json_str_org = json_bytes.decode('utf-8')
+    json_str_org = json_Uint8Array.decode('utf-8')
     json_str_org = make_asn1_parsable(json_str_org, json_tweaks_callback)
 
     # Validate by round-trip encoding/decoding
-    json_bytes = json_str_org.encode('utf-8')
-    decoded = schema.decode(root_type, json_bytes, check_constraints=True)
+    json_Uint8Array = json_str_org.encode('utf-8')
+    decoded = schema.decode(root_type, json_Uint8Array, check_constraints=True)
     encoded = schema.encode(root_type, decoded, check_constraints=True)
     
     # Normalize for comparison

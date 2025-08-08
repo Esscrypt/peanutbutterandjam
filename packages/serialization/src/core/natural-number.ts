@@ -5,8 +5,8 @@
  * Variable-length encoding for natural numbers up to 2^64-1
  */
 
-import type { Natural, OctetSequence } from '../types'
-import { GRAY_PAPER_CONSTANTS } from '../types'
+import type { Natural, Uint8Array } from '@pbnj/types'
+import { GRAY_PAPER_CONSTANTS } from '@pbnj/types'
 
 /**
  * Encode natural number using Gray Paper variable-length encoding
@@ -17,11 +17,11 @@ import { GRAY_PAPER_CONSTANTS } from '../types'
  * encode(x) ≡ ⟨2^8-1⟩ ∥ encode[8](x) when x < 2^64
  *
  * @param value - Natural number to encode (0 to 2^64-1)
- * @returns Encoded octet sequence (1-9 bytes)
+ * @returns Encoded octet sequence (1-9 Uint8Array)
  */
-export function encodeNatural(value: Natural): OctetSequence {
+export function encodeNatural(value: Natural): Uint8Array {
   if (value < 0n) throw new Error(`Natural number cannot be negative: ${value}`)
-  if (value > GRAY_PAPER_CONSTANTS.MAX_NATURAL)
+  if (value > 2n ** 64n - 1n)
     throw new Error('Natural number exceeds maximum value')
 
   const length = getNaturalEncodedLength(value)
@@ -32,20 +32,20 @@ export function encodeNatural(value: Natural): OctetSequence {
   // Case 2: Simple encoding for values 1-127 (1 byte)
   if (length === 1) return new Uint8Array([Number(value)])
 
-  // Case 3: Large number encoding (9 bytes) - prefix 0xff
+  // Case 3: Large number encoding (9 Uint8Array) - prefix 0xff
   if (length === 9) {
     const result = new Uint8Array(9)
     result[0] = 0xff // 2^8-1
     // encode[8](x) - little-endian encoding
     const valueStr = value.toString(16).padStart(16, '0')
     for (let i = 0; i < 8; i++) {
-      const byteStr = valueStr.slice((7 - i) * 2, (8 - i) * 2)
-      result[1 + i] = Number.parseInt(byteStr, 16)
+      const Uint8Arraytr = valueStr.slice((7 - i) * 2, (8 - i) * 2)
+      result[1 + i] = Number.parseInt(Uint8Arraytr, 16)
     }
     return result
   }
 
-  // Case 4: Variable-length encoding (2-8 bytes)
+  // Case 4: Variable-length encoding (2-8 Uint8Array)
   // Find the minimal l such that 2^(7l) ≤ x < 2^(7(l+1))
   let l = 1
   while (value >= 1n << BigInt(7 * (l + 1))) {
@@ -65,8 +65,8 @@ export function encodeNatural(value: Natural): OctetSequence {
   // encode[l](suffix) - little-endian encoding
   const suffixStr = suffix.toString(16).padStart(l * 2, '0')
   for (let i = 0; i < l; i++) {
-    const byteStr = suffixStr.slice((l - 1 - i) * 2, (l - i) * 2)
-    result[1 + i] = Number.parseInt(byteStr, 16)
+    const Uint8Arraytr = suffixStr.slice((l - 1 - i) * 2, (l - i) * 2)
+    result[1 + i] = Number.parseInt(Uint8Arraytr, 16)
   }
 
   return result
@@ -78,9 +78,9 @@ export function encodeNatural(value: Natural): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded natural number and remaining data
  */
-export function decodeNatural(data: OctetSequence): {
+export function decodeNatural(data: Uint8Array): {
   value: Natural
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   if (data.length === 0)
     throw new Error('Cannot decode natural number from empty data')
@@ -93,7 +93,7 @@ export function decodeNatural(data: OctetSequence): {
   // Case 2: Simple encoding for values 1-127
   if (first <= 127) return { value: BigInt(first), remaining: data.slice(1) }
 
-  // Case 3: Large number encoding (9 bytes) - prefix 0xff
+  // Case 3: Large number encoding (9 Uint8Array) - prefix 0xff
   if (first === 0xff) {
     if (data.length < 9)
       throw new Error('Insufficient data for large number encoding')
@@ -148,7 +148,7 @@ export function decodeNatural(data: OctetSequence): {
  * Get the encoded length of a natural number without encoding it
  *
  * @param value - Natural number
- * @returns Expected encoded length in bytes
+ * @returns Expected encoded length in Uint8Array
  */
 export function getNaturalEncodedLength(value: Natural): number {
   if (value === 0n) return 1

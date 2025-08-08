@@ -8,10 +8,10 @@
 import { describe, expect, it } from 'vitest'
 import { encodeNatural } from '../../src/core/natural-number'
 import {
-  decodeOctetSequence,
+  decodeUint8Array,
   decodeSequence,
   decodeSequenceWithLength,
-  encodeOctetSequence,
+  encodeUint8Array,
   encodeSequence,
   encodeSequenceWithLength,
 } from '../../src/core/sequence'
@@ -86,18 +86,18 @@ describe('Sequence Encoding', () => {
         new Uint8Array([4, 5, 6]),
         new Uint8Array([7, 8, 9]),
       ]
-      const encoded = encodeOctetSequence(sequences)
+      const encoded = encodeUint8Array(sequences)
 
-      const { value: decoded } = decodeOctetSequence(encoded, 3, 3)
+      const { value: decoded } = decodeUint8Array(encoded, 3, 3)
       expect(decoded).toEqual(sequences)
     })
 
     it('should handle empty octet sequences', () => {
       const sequences: Uint8Array[] = []
-      const encoded = encodeOctetSequence(sequences)
+      const encoded = encodeUint8Array(sequences)
       expect(encoded.length).toBe(0)
 
-      const { value: decoded } = decodeOctetSequence(encoded, 0, 0)
+      const { value: decoded } = decodeUint8Array(encoded, 0, 0)
       expect(decoded).toEqual(sequences)
     })
 
@@ -107,7 +107,7 @@ describe('Sequence Encoding', () => {
         new Uint8Array([2, 3]),
         new Uint8Array([4, 5, 6]),
       ]
-      const encoded = encodeOctetSequence(sequences)
+      const encoded = encodeUint8Array(sequences)
 
       // For variable length, we need to decode manually
       let offset = 0
@@ -168,7 +168,7 @@ describe('Sequence Encoding', () => {
       const hash2 = new Uint8Array(32).fill(2)
       const sequences = [hash1, hash2]
 
-      const encoded = encodeOctetSequence(sequences)
+      const encoded = encodeUint8Array(sequences)
       expect(encoded.length).toBe(hash1.length + hash2.length)
 
       // Should be direct concatenation

@@ -5,7 +5,7 @@
  * encode(b ∈ bitstring) ≡ ⟨∑(bᵢ·2ⁱ)⟩ ∥ encode(b[8:])
  */
 
-import type { OctetSequence } from '../types'
+import type { Uint8Array } from '../types'
 
 /**
  * Encode bit sequence using Gray Paper bitstring encoding
@@ -18,7 +18,7 @@ import type { OctetSequence } from '../types'
  * @param bits - Array of boolean values representing bits
  * @returns Encoded octet sequence
  */
-export function encodeBitSequence(bits: boolean[]): OctetSequence {
+export function encodeBitSequence(bits: boolean[]): Uint8Array {
   if (bits.length === 0) {
     return new Uint8Array(0)
   }
@@ -46,9 +46,9 @@ export function encodeBitSequence(bits: boolean[]): OctetSequence {
  * @returns Decoded bit array and remaining data
  */
 export function decodeBitSequence(
-  data: OctetSequence,
+  data: Uint8Array,
   bitCount?: number,
-): { value: boolean[]; remaining: OctetSequence } {
+): { value: boolean[]; remaining: Uint8Array } {
   if (data.length === 0) {
     return { value: [], remaining: data }
   }
@@ -94,7 +94,7 @@ export function decodeBitSequence(
  * @param bits - Array of boolean values representing bits
  * @returns Encoded octet sequence with length prefix
  */
-export function encodeBitSequenceWithLength(bits: boolean[]): OctetSequence {
+export function encodeBitSequenceWithLength(bits: boolean[]): Uint8Array {
   const encodedBits = encodeBitSequence(bits)
   const length = bits.length
 
@@ -114,9 +114,9 @@ export function encodeBitSequenceWithLength(bits: boolean[]): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded bit array and remaining data
  */
-export function decodeBitSequenceWithLength(data: OctetSequence): {
+export function decodeBitSequenceWithLength(data: Uint8Array): {
   value: boolean[]
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   // First decode the length
   const { value: length, remaining: lengthRemaining } = decodeNatural(data)

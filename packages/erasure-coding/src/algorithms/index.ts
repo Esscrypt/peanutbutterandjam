@@ -7,4 +7,3 @@
 export * from './finite-field'
 export * from './polynomial'
 export * from './reed-solomon'
-export * from './types'

@@ -5,15 +5,15 @@
  * encode(d ∈ dictionary{K,V}) ≡ encode(var{⟨⟨encode(k), encode(d[k])⟩⟩})
  */
 
-import type { OctetSequence } from '../types'
+import type { Uint8Array } from '../types'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 
 /**
  * Dictionary entry with key-value pair
  */
-export interface DictionaryEntry<K, V> {
-  key: K
-  value: V
+export interface DictionaryEntry {
+  key: Uint8Array
+  value: Uint8Array
 }
 
 /**
@@ -24,45 +24,28 @@ export interface DictionaryEntry<K, V> {
  *
  * This orders pairs by key and encodes as variable-length sequence
  *
- * @param dictionary - Dictionary object to encode
- * @param keyEncoder - Function to encode keys
- * @param valueEncoder - Function to encode values
+ * @param entries - Array of key-value pairs to encode
  * @returns Encoded octet sequence
  */
-export function encodeDictionary<K, V>(
-  dictionary: Record<string, V>,
-  keyEncoder: (key: K) => OctetSequence,
-  valueEncoder: (value: V) => OctetSequence,
-): OctetSequence {
-  // Convert dictionary to array of entries
-  const entries: DictionaryEntry<K, V>[] = Object.entries(dictionary).map(
-    ([key, value]) => ({
-      key: key as K,
-      value,
-    }),
-  )
-
-  // Sort entries by key (lexicographic order for strings)
-  entries.sort((a, b) => {
-    const keyA = String(a.key)
-    const keyB = String(b.key)
+export function encodeDictionary(entries: DictionaryEntry[]): Uint8Array {
+  // Sort entries by key (lexicographic order)
+  const sortedEntries = [...entries].sort((a, b) => {
+    const keyA = bytesToHex(a.key)
+    const keyB = bytesToHex(b.key)
     return keyA.localeCompare(keyB)
   })
 
   // Encode each entry as ⟨encode(k), encode(d[k])⟩
-  const encodedPairs: OctetSequence[] = entries.map((entry) => {
-    const encodedKey = keyEncoder(entry.key)
-    const encodedValue = valueEncoder(entry.value)
-
+  const encodedPairs: Uint8Array[] = sortedEntries.map(({ key, value }) => {
     // Concatenate key and value: ⟨encode(k), encode(d[k])⟩
-    const pairData = new Uint8Array(encodedKey.length + encodedValue.length)
-    pairData.set(encodedKey, 0)
-    pairData.set(encodedValue, encodedKey.length)
+    const pairData = new Uint8Array(key.length + value.length)
+    pairData.set(key, 0)
+    pairData.set(value, key.length)
 
     return pairData
   })
 
-  // Encode as variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
+  // Concatenate all pairs into a sequence
   const concatenatedPairs = new Uint8Array(
     encodedPairs.reduce((sum, pair) => sum + pair.length, 0),
   )
@@ -72,6 +55,7 @@ export function encodeDictionary<K, V>(
     offset += pair.length
   }
 
+  // Encode as variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
   return encodeVariableLength(concatenatedPairs)
 }
 
@@ -82,98 +66,61 @@ export function encodeDictionary<K, V>(
  * encode(d ∈ dictionary{K,V}) ≡ encode(var{⟨⟨encode(k), encode(d[k])⟩⟩})
  *
  * @param data - Octet sequence to decode
- * @param keyDecoder - Function to decode keys
- * @param valueDecoder - Function to decode values
+ * @param keyLength - Fixed length of keys
+ * @param valueLength - Fixed length of values (or -1 for variable length)
  * @returns Decoded dictionary and remaining data
  */
-export function decodeDictionary<K, V>(
-  data: OctetSequence,
-  keyDecoder: (data: OctetSequence) => { value: K; remaining: OctetSequence },
-  valueDecoder: (data: OctetSequence) => { value: V; remaining: OctetSequence },
-): { value: Record<string, V>; remaining: OctetSequence } {
+export function decodeDictionary(
+  data: Uint8Array,
+  keyLength: number,
+  valueLength: number = -1,
+): { value: DictionaryEntry[]; remaining: Uint8Array } {
   // Decode variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
   const { value: concatenatedPairs, remaining } = decodeVariableLength(data)
 
   // If no data, return empty dictionary
   if (concatenatedPairs.length === 0) {
-    return { value: {}, remaining }
+    return { value: [], remaining }
   }
 
-  // Decode each pair from the concatenated data
-  const dictionary: Record<string, V> = {}
+  const result: DictionaryEntry[] = []
   let currentData = concatenatedPairs
 
-  while (currentData.length > 0) {
-    // Decode key: ⟨encode(k)
-    const { value: key, remaining: keyRemaining } = keyDecoder(currentData)
+  // Decode pairs until no data remains
+  while (currentData.length >= keyLength) {
+    try {
+      // Extract key
+      const key = currentData.slice(0, keyLength)
+      currentData = currentData.slice(keyLength)
 
-    // Decode value: encode(d[k])⟩
-    const { value, remaining: valueRemaining } = valueDecoder(keyRemaining)
+      // Extract value
+      let value: Uint8Array
+      if (valueLength === -1) {
+        // Variable length value - take remaining data
+        value = currentData
+        currentData = new Uint8Array(0)
+      } else if (currentData.length >= valueLength) {
+        // Fixed length value
+        value = currentData.slice(0, valueLength)
+        currentData = currentData.slice(valueLength)
+      } else {
+        // Not enough data for value
+        break
+      }
 
-    // Add to dictionary
-    dictionary[String(key)] = value
-    currentData = valueRemaining
+      result.push({ key, value })
+    } catch (error) {
+      // If we can't decode more pairs, we're done
+      break
+    }
   }
 
-  return { value: dictionary, remaining }
+  return { value: result, remaining }
 }
 
 /**
- * Encode dictionary with length prefix
- *
- * @param dictionary - Dictionary object to encode
- * @param keyEncoder - Function to encode keys
- * @param valueEncoder - Function to encode values
- * @returns Encoded octet sequence with length prefix
+ * Helper function to convert Uint8Array to hex for comparison
  */
-export function encodeDictionaryWithLength<K, V>(
-  dictionary: Record<string, V>,
-  keyEncoder: (key: K) => OctetSequence,
-  valueEncoder: (value: V) => OctetSequence,
-): OctetSequence {
-  const encoded = encodeDictionary(dictionary, keyEncoder, valueEncoder)
-  const length = Object.keys(dictionary).length
-
-  // Encode length as natural number
-  const encodedLength = encodeNatural(BigInt(length))
-
-  const result = new Uint8Array(encodedLength.length + encoded.length)
-  result.set(encodedLength, 0)
-  result.set(encoded, encodedLength.length)
-
-  return result
+function bytesToHex(Uint8Array: Uint8Array): string {
+  return Array.from(Uint8Array, byte => byte.toString(16).padStart(2, '0')).join('')
 }
-
-/**
- * Decode dictionary with length prefix
- *
- * @param data - Octet sequence to decode
- * @param keyDecoder - Function to decode keys
- * @param valueDecoder - Function to decode values
- * @returns Decoded dictionary and remaining data
- */
-export function decodeDictionaryWithLength<K, V>(
-  data: OctetSequence,
-  keyDecoder: (data: OctetSequence) => { value: K; remaining: OctetSequence },
-  valueDecoder: (data: OctetSequence) => { value: V; remaining: OctetSequence },
-): { value: Record<string, V>; remaining: OctetSequence } {
-  // First decode the length
-  const { value: length, remaining: lengthRemaining } = decodeNatural(data)
-  const entryCount = Number(length)
-
-  if (entryCount < 0 || entryCount > Number.MAX_SAFE_INTEGER) {
-    throw new Error(`Invalid dictionary length: ${length}`)
-  }
-
-  // Then decode the dictionary
-  const { value, remaining } = decodeDictionary(
-    lengthRemaining,
-    keyDecoder,
-    valueDecoder,
-  )
-
-  return { value, remaining }
-}
-
-// Import required functions
-import { decodeNatural, encodeNatural } from './natural-number'

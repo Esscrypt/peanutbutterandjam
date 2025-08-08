@@ -12,7 +12,7 @@ import type {
   VRFSecretKey,
 } from '@pbnj/types'
 import { BandersnatchCurve } from '../curve'
-import type { ProverConfig } from '../types'
+import type { ProverConfig } from './types'
 import { DEFAULT_PROVER_CONFIG } from './config'
 
 /**

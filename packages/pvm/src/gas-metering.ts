@@ -1,11 +1,12 @@
 /**
- * Gas Metering for PVM
+ * Gas metering implementation for PVM
  *
- * Implements gas costs for PVM instructions as specified in the Gray Paper
+ * Implements gas metering as specified in Gray Paper
  */
 
-import type { Gas } from './types'
-import { PVM_CONSTANTS } from './types'
+import { logger } from '@pbnj/core'
+import type { Gas } from '@pbnj/types'
+import { PVM_CONSTANTS } from '@pbnj/types'
 
 /**
  * Gas costs for PVM instructions as specified in the Gray Paper

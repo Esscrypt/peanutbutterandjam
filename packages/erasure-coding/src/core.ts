@@ -1,20 +1,30 @@
 /**
  * Core Erasure Coding Implementation
  *
- * Main erasure coding implementation for JAM protocol
+ * Main erasure coding implementation for the JAM protocol
  */
 
-import { logger } from '@pbnj/core'
-import { GF2_16, PolynomialOps, ReedSolomon } from './algorithms'
+import { ReedSolomon } from './algorithms/reed-solomon'
 import type {
-  EncodedData,
   ErasureCoder,
-  ErasureCodingErrorWithContext,
   ErasureCodingParams,
-  ValidationResult,
+  EncodedData,
+  ErasureCodingErrorWithContext,
+} from '@pbnj/types'
+import { DEFAULT_ERASURE_CODING_PARAMS, ErasureCodingError } from '@pbnj/types'
+import type {
+  GF2_16,
+  PolynomialOps,
+  EncodingValidation,
+  DecodingValidation,
+  ValidationResult
 } from './types'
-import { DEFAULT_ERASURE_CODING_PARAMS, ErasureCodingError } from './types'
-import { DecodingValidation, EncodingValidation } from './validation'
+import {
+  GF2_16 as GF2_16Impl,
+  PolynomialOps as PolynomialOpsImpl,
+  EncodingValidation as EncodingValidationImpl,
+  DecodingValidation as DecodingValidationImpl
+} from './types'
 
 /**
  * Main erasure coding implementation
@@ -31,15 +41,15 @@ export class JAMErasureCoder implements ErasureCoder {
     this.params = { ...DEFAULT_ERASURE_CODING_PARAMS, ...params }
 
     // Initialize algorithms
-    this.field = new GF2_16()
-    this.polynomial = new PolynomialOps(this.field)
+    this.field = new GF2_16Impl()
+    this.polynomial = new PolynomialOpsImpl(this.field)
     this.reedSolomon = new ReedSolomon(this.field, this.polynomial)
 
     // Initialize validation
-    this.encodingValidation = new EncodingValidation()
-    this.decodingValidation = new DecodingValidation()
+    this.encodingValidation = new EncodingValidationImpl()
+    this.decodingValidation = new DecodingValidationImpl()
 
-    logger.debug('JAM Erasure Coder initialized', { params: this.params })
+    console.debug('JAM Erasure Coder initialized', { params: this.params })
   }
 
   /**
@@ -52,7 +62,7 @@ export class JAMErasureCoder implements ErasureCoder {
   ): EncodedData {
     const startTime = Date.now()
 
-    logger.debug('Starting erasure coding encoding', {
+    console.debug('Starting erasure coding encoding', {
       dataLength: data.length,
       k,
       n,
@@ -95,18 +105,18 @@ export class JAMErasureCoder implements ErasureCoder {
       // Encode each chunk and create shards
       const shards: Uint8Array[] = []
       for (let shardIndex = 0; shardIndex < n; shardIndex++) {
-        const shardBytes: number[] = []
+        const shardUint8Array: number[] = []
 
         for (const chunk of chunks) {
           const encodedChunk = this.reedSolomon.encode(chunk, k, n)
           // Take the shardIndex-th element from the encoded chunk
           const shardWord = encodedChunk[shardIndex]
-          // Convert word to bytes (little-endian)
-          shardBytes.push(shardWord & 0xff)
-          shardBytes.push((shardWord >> 8) & 0xff)
+          // Convert word to Uint8Array (little-endian)
+          shardUint8Array.push(shardWord & 0xff)
+          shardUint8Array.push((shardWord >> 8) & 0xff)
         }
 
-        shards.push(new Uint8Array(shardBytes))
+        shards.push(new Uint8Array(shardUint8Array))
       }
 
       // Create indices
@@ -135,7 +145,7 @@ export class JAMErasureCoder implements ErasureCoder {
       }
 
       const encodingTime = Date.now() - startTime
-      logger.debug('Erasure coding encoding completed', {
+      console.debug('Erasure coding encoding completed', {
         originalLength: data.length,
         encodedShards: shards.length,
         encodingTime,
@@ -144,7 +154,7 @@ export class JAMErasureCoder implements ErasureCoder {
       return encodedData
     } catch (error) {
       const encodingTime = Date.now() - startTime
-      logger.error('Erasure coding encoding failed', {
+      console.error('Erasure coding encoding failed', {
         error: error instanceof Error ? error.message : String(error),
         encodingTime,
       })
@@ -158,7 +168,7 @@ export class JAMErasureCoder implements ErasureCoder {
   decode(encodedData: EncodedData, k: number = this.params.k): Uint8Array {
     const startTime = Date.now()
 
-    logger.debug('Starting erasure coding decoding', {
+    console.debug('Starting erasure coding decoding', {
       shardCount: encodedData.shards.length,
       k,
       originalLength: encodedData.originalLength,
@@ -215,8 +225,8 @@ export class JAMErasureCoder implements ErasureCoder {
           k,
           this.params.n,
         )
-        const decodedBytes = this.wordsToData(decodedChunk)
-        decodedChunks.push(decodedBytes)
+        const decodedUint8Array = this.wordsToData(decodedChunk)
+        decodedChunks.push(decodedUint8Array)
       }
 
       // Join chunks
@@ -229,7 +239,7 @@ export class JAMErasureCoder implements ErasureCoder {
       )
 
       const decodingTime = Date.now() - startTime
-      logger.debug('Erasure coding decoding completed', {
+      console.debug('Erasure coding decoding completed', {
         decodedLength: unpaddedData.length,
         decodingTime,
       })
@@ -237,7 +247,7 @@ export class JAMErasureCoder implements ErasureCoder {
       return unpaddedData
     } catch (error) {
       const decodingTime = Date.now() - startTime
-      logger.error('Erasure coding decoding failed', {
+      console.error('Erasure coding decoding failed', {
         error: error instanceof Error ? error.message : String(error),
         decodingTime,
       })
@@ -253,10 +263,10 @@ export class JAMErasureCoder implements ErasureCoder {
   }
 
   /**
-   * Pad data to multiple of 684 bytes
+   * Pad data to multiple of 684 Uint8Array
    */
   private padData(data: Uint8Array): Uint8Array {
-    const blockSize = 684 // 342 words * 2 bytes per word
+    const blockSize = 684 // 342 words * 2 Uint8Array per word
     const padding = (blockSize - (data.length % blockSize)) % blockSize
 
     if (padding === 0) {
@@ -353,6 +363,6 @@ export class JAMErasureCoder implements ErasureCoder {
    */
   updateParams(newParams: Partial<ErasureCodingParams>): void {
     this.params = { ...this.params, ...newParams }
-    logger.debug('Erasure coding parameters updated', { params: this.params })
+    console.debug('Erasure coding parameters updated', { params: this.params })
   }
 }

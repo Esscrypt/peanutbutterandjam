@@ -1,12 +1,11 @@
 /**
- * Binary Format Codec Implementation
+ * Binary Codec Implementation
  *
- * Efficient binary encoding for network transmission
+ * Implements binary encoding and decoding for the JAM protocol
  */
 
 import { logger } from '@pbnj/core'
-import type { CodecConfig } from '../types'
-import type { BinaryConfig, BinaryData, FormatCodec } from './types'
+import type { CodecConfig, BinaryConfig, BinaryData, FormatCodec } from '@pbnj/types'
 
 /**
  * Binary codec for efficient data serialization

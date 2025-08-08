@@ -7,7 +7,7 @@
 
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
-import type { DeferredTransfer, OctetSequence } from '../types'
+import type { DeferredTransfer, Uint8Array } from '../types'
 
 /**
  * Encode deferred transfer using Gray Paper encoding
@@ -20,8 +20,8 @@ import type { DeferredTransfer, OctetSequence } from '../types'
  */
 export function encodeDeferredTransfer(
   deferredTransfer: DeferredTransfer,
-): OctetSequence {
-  const parts: OctetSequence[] = []
+): Uint8Array {
+  const parts: Uint8Array[] = []
 
   // Source: encode[4](dxX_source) (4-byte fixed-length)
   parts.push(encodeFixedLength(deferredTransfer.source, 4))
@@ -58,9 +58,9 @@ export function encodeDeferredTransfer(
  * @param data - Octet sequence to decode
  * @returns Decoded deferred transfer and remaining data
  */
-export function decodeDeferredTransfer(data: OctetSequence): {
+export function decodeDeferredTransfer(data: Uint8Array): {
   value: DeferredTransfer
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 

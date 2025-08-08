@@ -1,10 +1,22 @@
-import { z } from '@pbnj/core'
+import { z, logger, bytesToHex } from '@pbnj/core'
+import { createGenesisStateTrie, createStateKey } from '@pbnj/serialization'
+import type { GenesisState, ServiceAccount, SafroleState, Account, Validator } from '@pbnj/types'
+
+/**
+ * Helper function to convert Uint8Array to hex without 0x prefix
+ */
+function Uint8ArrayToHexNoPrefix(Uint8Array: Uint8Array): string {
+  return Array.from(Uint8Array)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
 
 /**
  * Input configuration schema for chain spec generation
  */
 const ChainSpecConfigSchema = z.object({
   id: z.string().min(1, 'Chain ID is required'),
+  name: z.string().optional(),
   genesis_validators: z
     .array(
       z.object({
@@ -16,52 +28,178 @@ const ChainSpecConfigSchema = z.object({
             'Bandersnatch key must be a 64-character hex string',
           ),
         net_addr: z.string().min(1, 'Network address is required'),
+        validator_index: z.number().int().min(0).optional().default(0),
+        stake: z.string().regex(/^\d+$/, 'Stake must be a numeric string').optional().default('1000000000000000000'),
       }),
     )
     .min(1, 'At least one genesis validator is required'),
+  accounts: z.array(z.object({
+    address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Address must be a valid hex address'),
+    balance: z.string().regex(/^\d+$/, 'Balance must be a numeric string'),
+    nonce: z.number().int().min(0).optional().default(0),
+    isValidator: z.boolean().optional().default(false),
+    validatorKey: z.string().optional(),
+    stake: z.string().regex(/^\d+$/, 'Stake must be a numeric string').optional(),
+  })).optional(),
 })
 
 export type ChainSpecConfig = z.infer<typeof ChainSpecConfigSchema>
 
 /**
- * Chain specification structure
- * Based on jamduna chain spec format
+ * Chain specification structure matching polkajam format
  */
 export interface ChainSpec {
-  /** Bootnodes - network addresses of initial nodes */
-  bootnodes: string[]
   /** Chain identifier */
   id: string
-  /** Genesis block header as hex string */
-  genesis_header: string
-  /** Genesis state as key-value pairs */
+  /** Genesis state structure - flat key-value mapping */
   genesis_state: Record<string, string>
 }
 
 export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
-  // Validate input configuration
+  logger.info('Generating chain spec', { id: inputConfig.id, validatorsCount: inputConfig.genesis_validators.length })
+
+  // Validate input config
   const validatedConfig = ChainSpecConfigSchema.parse(inputConfig)
 
-  // Generate bootnodes from validator network addresses
-  const bootnodes = validatedConfig.genesis_validators.map(
-    (validator) => `${validator.peer_id}@${validator.net_addr}`,
-  )
+  // Generate validators and accounts using proper JIP-5 functions
+  const validators: Validator[] = []
+  const accounts: Record<string, Account> = {}
 
-  // Generate genesis header (simplified - just a placeholder for now)
-  const genesisHeader = `0x${'0'.repeat(512)}` // 256 bytes for genesis header
-
-  // Generate genesis state with some basic entries
-  const genesisState: Record<string, string> = {
-    // Add some basic state entries
-    [`0x${'1'.repeat(64)}`]: `0x${'2'.repeat(64)}`,
-    [`0x${'3'.repeat(64)}`]: `0x${'4'.repeat(64)}`,
-    [`0x${'5'.repeat(64)}`]: `0x${'6'.repeat(64)}`,
+  for (const validator of validatedConfig.genesis_validators) {
+    try {
+      const validatorIndex = validator.validator_index || 0
+      
+      // Generate deterministic address from validator index
+      const addressUint8Array = new Uint8Array(20)
+      for (let i = 0; i < 20; i++) {
+        addressUint8Array[i] = (validatorIndex + i) % 256
+      }
+      const address = `0x${Uint8ArrayToHexNoPrefix(addressUint8Array)}`
+      
+      // Create validator entry
+      const validatorEntry = {
+        address,
+        publicKey: `0x${validator.bandersnatch}`,
+        stake: validator.stake,
+        isActive: true,
+        altname: `validator-${validatorIndex}`,
+      }
+      
+      validators.push(validatorEntry)
+      
+      // Add validator account to accounts
+      accounts[address] = {
+        address,
+        balance: BigInt(validator.stake),
+        nonce: 0,
+        isValidator: true,
+        validatorKey: `0x${validator.bandersnatch}`,
+        stake: BigInt(validator.stake),
+      }
+      
+      logger.debug('Generated validator', { 
+        index: validatorIndex, 
+        address: validatorEntry.address, 
+        altname: validatorEntry.altname 
+      })
+      
+    } catch (error) {
+      logger.error('Failed to generate validator', { 
+        validator, 
+        error: error instanceof Error ? error.message : String(error) 
+      })
+      throw error
+    }
   }
 
-  return {
-    bootnodes,
+  // Create genesis state with proper types according to Gray Paper specification
+  const genesisState: GenesisState = {
+    accounts: Object.fromEntries(
+      Object.entries(accounts).map(([address, account]) => [
+        address,
+        {
+          ...account,
+          storage: new Map(),
+          preimages: new Map(),
+          requests: new Map(),
+          gratis: 0n,
+          codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+          minaccgas: 1000n,
+          minmemogas: 100n,
+          octets: 0n,
+          items: 0,
+          created: 0,
+          lastacc: 0,
+          parent: 0
+        } as ServiceAccount
+      ])
+    ) as Record<`0x${string}`, ServiceAccount>,
+    validators,
+    safrole: {
+      epoch: 0,
+      timeslot: 0,
+      entropy: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      pendingset: [],
+      epochroot: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      sealtickets: [],
+      ticketaccumulator: '0x0000000000000000000000000000000000000000000000000000000000000000'
+    } as SafroleState
+  }
+
+  // Generate service accounts for each validator (Chapter 255) according to Gray Paper
+  for (let i = 0; i < validators.length; i++) {
+    const validator = validators[i]
+    const serviceAccount: ServiceAccount = {
+      balance: validator.stake,
+      nonce: 0,
+      isValidator: true,
+      validatorKey: validator.publicKey,
+      stake: validator.stake,
+      storage: new Map(),
+      preimages: new Map(),
+      requests: new Map(),
+      gratis: 0n,
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      minaccgas: 1000n,
+      minmemogas: 100n,
+      octets: 0n,
+      items: 0,
+      created: 0,
+      lastacc: 0,
+      parent: 0
+    }
+    
+    // Create service account key (Chapter 255 with service ID) according to Gray Paper
+    const serviceKey = createStateKey(255, i)
+    const serviceKeyHex = `0x${Uint8ArrayToHexNoPrefix(serviceKey)}`
+    ;(genesisState.accounts as Record<string, ServiceAccount>)[serviceKeyHex] = serviceAccount
+  }
+
+  // Generate genesis state trie according to Gray Paper specification
+  // This includes chapters 1-16 and 255 (service accounts)
+  const genesisStateTrie = createGenesisStateTrie(genesisState)
+  
+  // Convert keys to match Polkajam format (remove 0x prefix)
+  const convertedStateTrie: Record<string, string> = {}
+  for (const [key, value] of Object.entries(genesisStateTrie)) {
+    const keyWithoutPrefix = key.startsWith('0x') ? key.slice(2) : key
+    const valueWithoutPrefix = value.startsWith('0x') ? value.slice(2) : value
+    convertedStateTrie[keyWithoutPrefix] = valueWithoutPrefix
+  }
+
+  // Create chain spec matching polkajam format
+  const chainSpec: ChainSpec = {
     id: validatedConfig.id,
-    genesis_header: genesisHeader,
-    genesis_state: genesisState,
+    genesis_state: convertedStateTrie,
   }
+
+  logger.info('Chain spec generated successfully', {
+    accountsCount: Object.keys(accounts).length,
+    validatorsCount: validators.length,
+    stateTrieEntries: Object.keys(convertedStateTrie).length,
+  })
+
+  return chainSpec
 }
+
+

@@ -5,8 +5,6 @@
  * Reference: Gray Paper specifications
  */
 
-// Export environment utilities
-export * from './env'
 // Export logger
 export * from './logger'
 // Export all utilities
@@ -14,3 +12,9 @@ export * from './utils'
 
 // Export Zod schemas
 export * from './zod'
+
+// Export merklization implementation
+export * from './merklization'
+
+// Export crypto utilities
+export * from './crypto'

@@ -5,7 +5,7 @@
  * Reference: Gray Paper validation specifications
  */
 
-import type { Bytes, Hash, HexString, Optional } from '../types'
+import type { Hash, HexString } from '@pbnj/types'
 import { isValidHex, isValidHexLength } from './crypto'
 import { isValidBase58, isValidBase64 } from './encoding'
 
@@ -304,7 +304,7 @@ export function validateHexString(
       errors: [
         {
           field: fieldName,
-          message: `${fieldName} must be ${expectedLength} bytes long`,
+          message: `${fieldName} must be ${expectedLength} Uint8Array long`,
           code: 'LENGTH_ERROR',
         },
       ],
@@ -597,23 +597,6 @@ export function isHash(value: unknown): value is Hash {
  */
 export function isHexString(value: unknown): value is HexString {
   return typeof value === 'string' && isValidHex(value)
-}
-
-/**
- * Type guard for Bytes
- */
-export function isBytes(value: unknown): value is Bytes {
-  return value instanceof Uint8Array || Buffer.isBuffer(value)
-}
-
-/**
- * Type guard for Optional
- */
-export function isOptional<T>(
-  value: unknown,
-  validator: TypeGuard<T>,
-): value is Optional<T> {
-  return value === null || value === undefined || validator(value)
 }
 
 /**

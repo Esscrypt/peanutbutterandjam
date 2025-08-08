@@ -11,7 +11,7 @@
   "scripts": {
     "build": "turbo run build",
     "check": "turbo run check --cache=local:r,remote:r",
-    "clean": "turbo run clean && rm -rf node_modules",
+    "clean": "turbo run clean && find . -name 'node_modules' -type d -exec rm -rf {} + && rm -rf .turbo && rm -rf dist",
     "db:migrate:core": "turbo run db:migrate:core --filter @pbnj/database",
     "dev": "turbo run dev --cache=local:r,remote:r --parallel --continue",
     "disable-remote-caching": "turbo unlink && rm -rf ./node_modules/.cache/turbo",
@@ -24,7 +24,9 @@
     "prepare": "lefthook install",
     "drizzle-studio": "cd ./packages/db && bun drizzle-kit studio"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@stablelib/blake2b": "^2.0.1"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.1.2",
     "@types/bun": "latest",

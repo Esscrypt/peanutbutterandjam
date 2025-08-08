@@ -5,12 +5,12 @@
  * Reference: graypaper/text/dispute.tex
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, hexToUint8Array } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
 import type {
   Dispute,
   Judgment,
-  OctetSequence,
+  Uint8Array,
   ValidityDispute,
 } from '../types'
 
@@ -20,14 +20,14 @@ import type {
  * @param judgment - Judgment to encode
  * @returns Encoded octet sequence
  */
-export function encodeJudgment(judgment: Judgment): OctetSequence {
+export function encodeJudgment(judgment: Judgment): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Validity (variable length)
   parts.push(encodeNatural(BigInt(judgment.validity.length))) // Length prefix
   parts.push(judgment.validity)
 
-  // Judge index (8 bytes)
+  // Judge index (8 Uint8Array)
   parts.push(encodeNatural(judgment.judgeIndex))
 
   // Signature (variable length)
@@ -55,13 +55,13 @@ export function encodeJudgment(judgment: Judgment): OctetSequence {
  */
 export function encodeValidityDispute(
   validityDispute: ValidityDispute,
-): OctetSequence {
+): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Report hash (32 bytes)
-  parts.push(hexToBytes(validityDispute.reportHash))
+  // Report hash (32 Uint8Array)
+  parts.push(hexToUint8Array(validityDispute.reportHash))
 
-  // Epoch index (8 bytes)
+  // Epoch index (8 Uint8Array)
   parts.push(encodeNatural(validityDispute.epochIndex))
 
   // Judgments (array of judgments)
@@ -88,7 +88,7 @@ export function encodeValidityDispute(
  * @param dispute - Dispute to encode
  * @returns Encoded octet sequence
  */
-export function encodeDispute(dispute: Dispute): OctetSequence {
+export function encodeDispute(dispute: Dispute): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Validity disputes (array of validity disputes)
@@ -123,9 +123,9 @@ export function encodeDispute(dispute: Dispute): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded dispute and remaining data
  */
-export function decodeDispute(data: OctetSequence): {
+export function decodeDispute(data: Uint8Array): {
   value: Dispute
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -181,17 +181,17 @@ export function decodeDispute(data: OctetSequence): {
  * @param data - Octet sequence to decode
  * @returns Decoded validity dispute and remaining data
  */
-export function decodeValidityDispute(data: OctetSequence): {
+export function decodeValidityDispute(data: Uint8Array): {
   value: ValidityDispute
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
-  // Report hash (32 bytes)
+  // Report hash (32 Uint8Array)
   const reportHash = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
-  // Epoch index (8 bytes)
+  // Epoch index (8 Uint8Array)
   const epochIndex = BigInt(
     `0x${Array.from(currentData.slice(0, 8))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -227,9 +227,9 @@ export function decodeValidityDispute(data: OctetSequence): {
  * @param data - Octet sequence to decode
  * @returns Decoded judgment and remaining data
  */
-export function decodeJudgment(data: OctetSequence): {
+export function decodeJudgment(data: Uint8Array): {
   value: Judgment
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -243,7 +243,7 @@ export function decodeJudgment(data: OctetSequence): {
   const validity = currentData.slice(0, Number(validityLength))
   currentData = currentData.slice(Number(validityLength))
 
-  // Judge index (8 bytes)
+  // Judge index (8 Uint8Array)
   const judgeIndex = BigInt(
     `0x${Array.from(currentData.slice(0, 8))
       .map((b) => b.toString(16).padStart(2, '0'))

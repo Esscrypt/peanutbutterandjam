@@ -3,6 +3,9 @@
 export * as z from 'zod'
 // if needed, import viem for EVM types
 
+// Export genesis header schema
+export * from './schemas/genesis-header'
+
 /**
  * coerce.boolean doesnt work by default: https://github.com/colinhacks/zod/discussions/3329
  */

@@ -8,7 +8,7 @@ from jam_types import (
     TimeSlot,
     ServiceId,
     U32,
-    ByteSequence,
+    Uint8Arrayequence,
     Errno,
     ServicesStatistics
 )
@@ -17,7 +17,7 @@ from jam_types import class_name as n
 class PreimagesMapEntry(Struct):
     type_mapping = [
         ('hash', n(OpaqueHash)),
-        ('blob', n(ByteSequence)),
+        ('blob', n(Uint8Arrayequence)),
     ]
 
 class PreimagesLookupMetaMapKey(Struct):

@@ -1,19 +1,20 @@
 /**
  * Ring VRF Verifier Implementation
  *
- * Implements Ring VRF verification with anonymity
+ * Implements verification for Ring VRF scheme with anonymity
  */
 
 import { logger } from '@pbnj/core'
-import { BandersnatchCurve } from '../curve'
-import { IETFVRFProver } from '../prover/ietf'
 import type {
   RingVRFInput,
   RingVRFOutput,
   RingVRFProof,
+  RingVRFProofWithOutput,
+  RingVRFParams,
   RingVRFRing,
-  VRFPublicKey,
-} from '../types'
+} from '@pbnj/types'
+import { BandersnatchCurve } from '../curve'
+import { IETFVRFProver } from '../prover/ietf'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'
 
@@ -26,7 +27,7 @@ export class RingVRFVerifier {
    * Verify Ring VRF proof
    */
   static verify(
-    ring: VRFPublicKey[],
+    ring: RingVRFRing,
     input: RingVRFInput,
     output: RingVRFOutput,
     proof: RingVRFProof,
@@ -38,7 +39,7 @@ export class RingVRFVerifier {
 
     logger.debug('Verifying Ring VRF proof', {
       inputLength: input.message.length,
-      ringSize: ring.length,
+      ringSize: ring.publicKeys.length,
       hasAuxData: !!auxData,
       config: mergedConfig,
     })
@@ -114,7 +115,7 @@ export class RingVRFVerifier {
    * Verify Ring VRF proof with detailed result
    */
   static verifyWithResult(
-    ring: VRFPublicKey[],
+    ring: RingVRFRing,
     input: RingVRFInput,
     output: RingVRFOutput,
     proof: RingVRFProof,
@@ -164,7 +165,7 @@ export class RingVRFVerifier {
    */
   private static validateRingInput(
     input: RingVRFInput,
-    ring: VRFPublicKey[],
+    ring: RingVRFRing,
   ): void {
     if (input.ring.size < 2) {
       throw new Error(`Ring size too small: ${input.ring.size} < 2`)
@@ -174,9 +175,9 @@ export class RingVRFVerifier {
       throw new Error(`Ring size too large: ${input.ring.size} > 1024`)
     }
 
-    if (ring.length !== input.ring.size) {
+    if (ring.publicKeys.length !== input.ring.size) {
       throw new Error(
-        `Ring size mismatch: ${ring.length} != ${input.ring.size}`,
+        `Ring size mismatch: ${ring.publicKeys.length} != ${input.ring.size}`,
       )
     }
   }

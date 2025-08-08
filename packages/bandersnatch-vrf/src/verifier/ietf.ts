@@ -1,13 +1,12 @@
 /**
  * IETF VRF Verifier Implementation
  *
- * Implements RFC-9381 VRF proof verification
+ * Implements verification for IETF VRF scheme
  */
 
 import { logger } from '@pbnj/core'
-import { BandersnatchCurve, type CurvePoint } from '../curve'
-import { IETFVRFProver } from '../prover/ietf'
-import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '../types'
+import { BandersnatchCurve } from '../curve'
+import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'
 
@@ -38,7 +37,7 @@ export class IETFVRFVerifier {
 
     try {
       // 1. Hash input to curve point (H1)
-      const alpha = IETFVRFProver.hashToCurve(_input.message, mergedConfig)
+      const alpha = BandersnatchCurve.hashToCurve(_input.message, mergedConfig)
 
       // 2. Verify proof
       const isValid = this.verifyProof(
@@ -211,7 +210,7 @@ export class IETFVRFVerifier {
   /**
    * Check if two curve points are equal
    */
-  private static pointsEqual(p1: CurvePoint, p2: CurvePoint): boolean {
+  private static pointsEqual(p1: any, p2: any): boolean {
     if (p1.isInfinity && p2.isInfinity) return true
     if (p1.isInfinity || p2.isInfinity) return false
     return p1.x === p2.x && p1.y === p2.y

@@ -9,13 +9,13 @@ import {
   decodeVariableLength,
   encodeVariableLength,
 } from '../core/discriminator'
-import type { OctetSequence } from '../types'
+import type { Uint8Array } from '../types'
 
 /**
  * Block body structure
  */
 export interface BlockBody {
-  extrinsics: OctetSequence[]
+  extrinsics: Uint8Array[]
 }
 
 /**
@@ -27,7 +27,7 @@ export interface BlockBody {
  * @param body - Block body to encode
  * @returns Encoded octet sequence
  */
-export function encodeBlockBody(body: BlockBody): OctetSequence {
+export function encodeBlockBody(body: BlockBody): Uint8Array {
   // Encode extrinsics as a sequence
   const extrinsicsData = new Uint8Array(
     body.extrinsics.reduce((sum, ext) => sum + ext.length, 0),
@@ -49,16 +49,16 @@ export function encodeBlockBody(body: BlockBody): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded block body and remaining data
  */
-export function decodeBlockBody(data: OctetSequence): {
+export function decodeBlockBody(data: Uint8Array): {
   value: BlockBody
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   // Decode variable-length extrinsics data
   const { value: extrinsicsData, remaining } = decodeVariableLength(data)
 
   // For now, treat extrinsics as a single blob
   // In a real implementation, you would parse individual extrinsics
-  const extrinsics: OctetSequence[] = [extrinsicsData]
+  const extrinsics: Uint8Array[] = [extrinsicsData]
 
   return {
     value: { extrinsics },
@@ -74,9 +74,9 @@ export function decodeBlockBody(data: OctetSequence): {
  * @returns Encoded octet sequence
  */
 export function encodeBlock(
-  header: OctetSequence,
-  body: OctetSequence,
-): OctetSequence {
+  header: Uint8Array,
+  body: Uint8Array,
+): Uint8Array {
   const result = new Uint8Array(header.length + body.length)
   result.set(header, 0)
   result.set(body, header.length)
@@ -91,12 +91,12 @@ export function encodeBlock(
  * @returns Decoded header, body, and remaining data
  */
 export function decodeBlock(
-  data: OctetSequence,
+  data: Uint8Array,
   headerLength: number,
 ): {
-  header: OctetSequence
-  body: OctetSequence
-  remaining: OctetSequence
+  header: Uint8Array
+  body: Uint8Array
+  remaining: Uint8Array
 } {
   if (data.length < headerLength) {
     throw new Error(

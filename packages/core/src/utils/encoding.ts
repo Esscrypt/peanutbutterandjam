@@ -5,8 +5,7 @@
  * Reference: Gray Paper encoding specifications
  */
 
-import type { Hex } from 'viem'
-import type { Bytes } from '../types'
+import { bytesToHex, hexToBytes, type Hex } from 'viem'
 import { isValidHex } from './crypto'
 
 /**
@@ -20,43 +19,30 @@ export enum EncodingFormat {
   BINARY = 'binary',
 }
 
+
 /**
- * Encode bytes to hex string
+ * Encode Uint8Array to base64 string
  */
-export function encodeHex(bytes: Bytes): Hex {
-  return `0x${Buffer.from(bytes).toString('hex')}` as Hex
+export function encodeBase64(Uint8Array: Uint8Array): string {
+  return Buffer.from(Uint8Array).toString('base64')
 }
 
 /**
- * Decode hex string to bytes
+ * Decode base64 string to Uint8Array
  */
-export function decodeHex(hex: Hex): Bytes {
-  return Buffer.from(hex.replace('0x', ''), 'hex')
-}
-
-/**
- * Encode bytes to base64 string
- */
-export function encodeBase64(bytes: Bytes): string {
-  return Buffer.from(bytes).toString('base64')
-}
-
-/**
- * Decode base64 string to bytes
- */
-export function decodeBase64(base64: string): Bytes {
+export function decodeBase64(base64: string): Uint8Array {
   return Buffer.from(base64, 'base64')
 }
 
 /**
- * Encode bytes to base58 string
+ * Encode Uint8Array to base58 string
  */
-export function encodeBase58(bytes: Bytes): string {
+export function encodeBase58(Uint8Array: Uint8Array): string {
   // Simple base58 implementation - in production, use a proper base58 library
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   const base = alphabet.length
 
-  let num = BigInt(`0x${Buffer.from(bytes).toString('hex')}`)
+  let num = BigInt(`0x${Buffer.from(Uint8Array).toString('hex')}`)
   let str = ''
 
   while (num > 0) {
@@ -66,7 +52,7 @@ export function encodeBase58(bytes: Bytes): string {
   }
 
   // Handle leading zeros
-  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) {
+  for (let i = 0; i < Uint8Array.length && Uint8Array[i] === 0; i++) {
     str = `1${str}`
   }
 
@@ -74,9 +60,9 @@ export function encodeBase58(bytes: Bytes): string {
 }
 
 /**
- * Decode base58 string to bytes
+ * Decode base58 string to Uint8Array
  */
-export function decodeBase58(base58: string): Bytes {
+export function decodeBase58(base58: string): Uint8Array {
   // Simple base58 implementation - in production, use a proper base58 library
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   const base = alphabet.length
@@ -95,7 +81,7 @@ export function decodeBase58(base58: string): Bytes {
   }
 
   const hex = num.toString(16)
-  const bytes = Buffer.from(
+  const Uint8Array = Buffer.from(
     hex.padStart(hex.length + (hex.length % 2), '0'),
     'hex',
   )
@@ -106,48 +92,48 @@ export function decodeBase58(base58: string): Bytes {
     leadingZeros++
   }
 
-  const result = Buffer.alloc(leadingZeros + bytes.length)
+  const result = Buffer.alloc(leadingZeros + Uint8Array.length)
   result.fill(0, 0, leadingZeros)
-  bytes.copy(result, leadingZeros)
+  Uint8Array.copy(result, leadingZeros)
 
   return result
 }
 
 /**
- * Encode bytes to UTF8 string
+ * Encode Uint8Array to UTF8 string
  */
-export function encodeUtf8(bytes: Bytes): string {
-  return Buffer.from(bytes).toString('utf8')
+export function encodeUtf8(Uint8Array: Uint8Array): string {
+  return Buffer.from(Uint8Array).toString('utf8')
 }
 
 /**
- * Decode UTF8 string to bytes
+ * Decode UTF8 string to Uint8Array
  */
-export function decodeUtf8(str: string): Bytes {
+export function decodeUtf8(str: string): Uint8Array {
   return Buffer.from(str, 'utf8')
 }
 
 /**
- * Encode bytes to binary string
+ * Encode Uint8Array to binary string
  */
-export function encodeBinary(bytes: Bytes): string {
-  return Buffer.from(bytes).toString('binary')
+export function encodeBinary(Uint8Array: Uint8Array): string {
+  return Buffer.from(Uint8Array).toString('binary')
 }
 
 /**
- * Decode binary string to bytes
+ * Decode binary string to Uint8Array
  */
-export function decodeBinary(binary: string): Bytes {
+export function decodeBinary(binary: string): Uint8Array {
   return Buffer.from(binary, 'binary')
 }
 
 /**
  * Generic encode function
  */
-export function encode(bytes: Bytes, format: EncodingFormat): string {
+export function encode(bytes: Uint8Array, format: EncodingFormat): string {
   switch (format) {
     case EncodingFormat.HEX:
-      return encodeHex(bytes)
+      return bytesToHex(bytes)
     case EncodingFormat.BASE64:
       return encodeBase64(bytes)
     case EncodingFormat.BASE58:
@@ -164,10 +150,10 @@ export function encode(bytes: Bytes, format: EncodingFormat): string {
 /**
  * Generic decode function
  */
-export function decode(data: string, format: EncodingFormat): Bytes {
+export function decode(data: string, format: EncodingFormat): Uint8Array {
   switch (format) {
     case EncodingFormat.HEX:
-      return decodeHex(data as Hex)
+      return hexToBytes(data as Hex)
     case EncodingFormat.BASE64:
       return decodeBase64(data)
     case EncodingFormat.BASE58:
@@ -189,8 +175,8 @@ export function convertEncoding(
   fromFormat: EncodingFormat,
   toFormat: EncodingFormat,
 ): string {
-  const bytes = decode(data, fromFormat)
-  return encode(bytes, toFormat)
+  const Uint8Array = decode(data, fromFormat)
+  return encode(Uint8Array, toFormat)
 }
 
 /**

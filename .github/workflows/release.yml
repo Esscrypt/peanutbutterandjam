@@ -65,7 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./packages/cli/dist/bin/bundle-linux
+          asset_path: ./packages/cli/dist/bin/pbnj-linux
           asset_name: pbnj-linux-x64
           asset_content_type: application/octet-stream
 
@@ -75,7 +75,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./packages/cli/dist/bin/bundle-macos
+          asset_path: ./packages/cli/dist/bin/pbnj-macos
           asset_name: pbnj-macos-x64
           asset_content_type: application/octet-stream
 
@@ -85,16 +85,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./packages/cli/dist/bin/bundle-win.exe
-          asset_name: pbnj-win-x64.exe
+          asset_path: ./packages/cli/dist/bin/pbnj-win.bat
+          asset_name: pbnj-win-x64.bat
           asset_content_type: application/octet-stream
 
       - name: Create checksums
         run: |
           cd packages/cli/dist/bin
-          sha256sum bundle-linux > pbnj-linux-x64.sha256
-          sha256sum bundle-macos > pbnj-macos-x64.sha256
-          sha256sum bundle-win.exe > pbnj-win-x64.sha256
+          sha256sum pbnj-linux > pbnj-linux-x64.sha256
+          sha256sum pbnj-macos > pbnj-macos-x64.sha256
+          sha256sum pbnj-win.bat > pbnj-win-x64.sha256
 
       - name: Upload checksums
         uses: actions/upload-release-asset@v1

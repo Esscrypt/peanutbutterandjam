@@ -16,3 +16,6 @@
 [submodule "submodules/polkavm"]
 	path = submodules/polkavm
 	url = https://github.com/paritytech/polkavm.git
+[submodule "submodules/jam-docs"]
+	path = submodules/jam-docs
+	url = https://github.com/JamBrains/jam-docs.git

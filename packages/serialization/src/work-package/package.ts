@@ -12,50 +12,44 @@ import {
   encodeImportReference,
 } from '../pvm/import-reference'
 import type {
-  ExtrinsicReference,
-  OctetSequence,
-  WorkItem,
-  WorkPackage,
-} from '../types'
+  SerializationExtrinsicReference as ExtrinsicReference,
+  SerializationWorkItem as WorkItem,
+  SerializationWorkPackage as WorkPackage,
+} from '@pbnj/types'
 import { encodeWorkContext } from './context'
 
-/**
- * Encode work item
- *
- * @param workItem - Work item to encode
- * @returns Encoded octet sequence
- */
-export function encodeWorkItem(workItem: WorkItem): OctetSequence {
+export function encodeWorkItem(workItem: WorkItem): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Service index (8 bytes)
-  parts.push(encodeNatural(workItem.serviceIndex))
+  // Service (4 bytes)
+  parts.push(encodeNatural(BigInt(workItem.service || 0)))
 
-  // Code hash (32 bytes)
-  parts.push(hexToBytes(workItem.codeHash))
+  // Code hash (32 bytes) - convert hex to bytes
+  parts.push(hexToBytes(workItem.code_hash))
 
-  // Ref gas limit (8 bytes)
-  parts.push(encodeNatural(workItem.refGasLimit))
+  // Payload (variable length) - convert hex to bytes
+  const payloadBytes = hexToBytes(workItem.payload)
+  parts.push(encodeNatural(BigInt(payloadBytes.length))) // Length prefix
+  parts.push(payloadBytes)
 
-  // Acc gas limit (8 bytes)
-  parts.push(encodeNatural(workItem.accGasLimit))
+  // Refine gas limit (4 bytes)
+  parts.push(encodeNatural(BigInt(workItem.refine_gas_limit || 0)))
 
-  // Export count (8 bytes)
-  parts.push(encodeNatural(workItem.exportCount))
-
-  // Payload (variable length)
-  parts.push(encodeNatural(BigInt(workItem.payload.length))) // Length prefix
-  parts.push(workItem.payload)
+  // Accumulate gas limit (4 bytes)
+  parts.push(encodeNatural(BigInt(workItem.accumulate_gas_limit || 0)))
 
   // Import segments (array of import references)
-  for (const importRef of workItem.importSegments) {
+  for (const importRef of workItem.import_segments) {
     parts.push(encodeImportReference(importRef))
   }
 
-  // Extrinsics (array of extrinsic references)
-  for (const extrinsicRef of workItem.extrinsics) {
+  // Extrinsic (array of extrinsic references)
+  for (const extrinsicRef of workItem.extrinsic) {
     parts.push(encodeExtrinsicReference(extrinsicRef))
   }
+
+  // Export count (4 bytes)
+  parts.push(encodeNatural(BigInt(workItem.export_count || 0)))
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -78,14 +72,14 @@ export function encodeWorkItem(workItem: WorkItem): OctetSequence {
  */
 export function encodeExtrinsicReference(
   extrinsicRef: ExtrinsicReference,
-): OctetSequence {
+): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Hash (32 bytes)
+  // Hash (32 bytes) - convert hex to bytes
   parts.push(hexToBytes(extrinsicRef.hash))
 
-  // Index (8 bytes)
-  parts.push(encodeNatural(extrinsicRef.index))
+  // Len (8 bytes)
+  parts.push(encodeNatural(BigInt(extrinsicRef.len)))
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -106,28 +100,30 @@ export function encodeExtrinsicReference(
  * @param workPackage - Work package to encode
  * @returns Encoded octet sequence
  */
-export function encodeWorkPackage(workPackage: WorkPackage): OctetSequence {
+export function encodeWorkPackage(workPackage: WorkPackage): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Auth code host (8 bytes)
-  parts.push(encodeNatural(workPackage.authCodeHost))
+  parts.push(encodeNatural(BigInt(workPackage.auth_code_host)))
 
-  // Auth code hash (32 bytes)
-  parts.push(hexToBytes(workPackage.authCodeHash))
+  // Auth code hash (32 bytes) - convert hex to bytes
+  parts.push(hexToBytes(workPackage.authorizer.code_hash))
 
   // Context
   parts.push(encodeWorkContext(workPackage.context))
 
-  // Auth token (variable length)
-  parts.push(encodeNatural(BigInt(workPackage.authToken.length))) // Length prefix
-  parts.push(workPackage.authToken)
+  // Auth token (variable length) - convert hex to bytes
+  const authTokenBytes = hexToBytes(workPackage.authorization)
+  parts.push(encodeNatural(BigInt(authTokenBytes.length))) // Length prefix
+  parts.push(authTokenBytes)
 
-  // Auth config (variable length)
-  parts.push(encodeNatural(BigInt(workPackage.authConfig.length))) // Length prefix
-  parts.push(workPackage.authConfig)
+  // Auth config (variable length) - convert hex to bytes
+  const authConfigBytes = hexToBytes(workPackage.authorizer.params)
+  parts.push(encodeNatural(BigInt(authConfigBytes.length))) // Length prefix
+  parts.push(authConfigBytes)
 
   // Work items (array of work items)
-  for (const workItem of workPackage.workItems) {
+  for (const workItem of workPackage.items) {
     parts.push(encodeWorkItem(workItem))
   }
 
@@ -150,9 +146,9 @@ export function encodeWorkPackage(workPackage: WorkPackage): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded work package and remaining data
  */
-export function decodeWorkPackage(data: OctetSequence): {
+export function decodeWorkPackage(data: Uint8Array): {
   value: WorkPackage
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -219,9 +215,9 @@ export function decodeWorkPackage(data: OctetSequence): {
  * @param data - Octet sequence to decode
  * @returns Decoded work item and remaining data
  */
-export function decodeWorkItem(data: OctetSequence): {
+export function decodeWorkItem(data: Uint8Array): {
   value: WorkItem
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -295,12 +291,12 @@ export function decodeWorkItem(data: OctetSequence): {
       refGasLimit,
       accGasLimit,
       exportCount,
-      payload,
+      payload: bytesToHex(payload),
       importSegments,
       extrinsics,
     },
     remaining: currentData,
-  }
+  } 
 }
 
 /**
@@ -309,15 +305,15 @@ export function decodeWorkItem(data: OctetSequence): {
  * @param data - Octet sequence to decode
  * @returns Decoded extrinsic reference and remaining data
  */
-export function decodeExtrinsicReference(data: OctetSequence): {
+export function decodeExtrinsicReference(data: Uint8Array): {
   value: ExtrinsicReference
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
-  // Hash (32 bytes)
+  // Hash (32 Uint8Array)
   const hash = bytesToHex(data.slice(0, 32))
   const remaining = data.slice(32)
 
-  // Index (8 bytes)
+  // Index (8 Uint8Array)
   const index = BigInt(
     `0x${Array.from(remaining.slice(0, 8))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -334,7 +330,7 @@ export function decodeExtrinsicReference(data: OctetSequence): {
 }
 
 // Helper function for decoding work context
-function decodeWorkContext(data: OctetSequence) {
+function decodeWorkContext(data: Uint8Array) {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     anchorHash: bytesToHex(data.slice(0, 32)),

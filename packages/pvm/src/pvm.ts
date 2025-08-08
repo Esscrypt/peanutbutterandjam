@@ -1,27 +1,30 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+/**
+ * Polkadot Virtual Machine (PVM) Implementation
+ *
+ * Implements the PVM as specified in Gray Paper
+ */
+
 import { logger } from '@pbnj/core'
-import { PVMCallStack } from './call-stack'
-import {
-  DEFAULTS,
-  GAS_CONFIG,
-  INSTRUCTION_LENGTHS,
-  RESULT_CODES,
-} from './config'
-import { InstructionRegistry } from './instructions/registry'
-import { PVMRAM } from './ram'
-import {
-  type DeblobFunction,
-  type DeblobResult,
-  type ProgramBlob,
+import { BandersnatchCurve } from '@pbnj/bandersnatch-vrf'
+import { ArgumentInvocation } from './argument-invocation'
+import { BasicBlockValidation } from './basic-block-validation'
+import { CallStack } from './call-stack'
+import { GasMetering } from './gas-metering'
+import { HostCall } from './host-call'
+import { ProgramInit } from './program-init'
+import { RAM } from './ram'
+import type {
+  PVMState,
+  PVMRuntime,
+  ProgramBlob,
+  SingleStepResult,
+  Gas,
   PVMError,
-  type PVMInstruction,
-  type PVMRuntime,
-  type PVMState,
-  type RegisterValue,
-  type RegisterValue32,
-  type ResultCode,
-  type SingleStepResult,
-} from './types'
+  MemoryError,
+  GasError,
+  ParseError,
+  RuntimeError,
+} from '@pbnj/types'
 
 // Default deblob function implementation
 const defaultDeblob: DeblobFunction = (blob: number[]): DeblobResult => {

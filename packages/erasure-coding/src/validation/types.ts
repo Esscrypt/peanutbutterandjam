@@ -4,18 +4,18 @@
  * Types for erasure coding validation
  */
 
-import type { EncodedData, ValidationResult } from '../types'
+import type { EncodedData, ErasureCodingValidationResult } from '@pbnj/types'
 
 /**
  * Encoding validation interface
  */
 export interface EncodingValidator {
   /** Validate encoding parameters */
-  validateParameters(k: number, n: number): ValidationResult
+  validateParameters(k: number, n: number): ErasureCodingValidationResult
   /** Validate input data */
-  validateInputData(data: Uint8Array): ValidationResult
+  validateInputData(data: Uint8Array): ErasureCodingValidationResult
   /** Validate encoded data structure */
-  validateEncodedData(encodedData: EncodedData): ValidationResult
+  validateEncodedData(encodedData: EncodedData): ErasureCodingValidationResult
 }
 
 /**
@@ -23,17 +23,17 @@ export interface EncodingValidator {
  */
 export interface DecodingValidator {
   /** Validate decoding parameters */
-  validateParameters(k: number, receivedCount: number): ValidationResult
+  validateParameters(k: number, receivedCount: number): ErasureCodingValidationResult
   /** Validate received shards */
   validateReceivedShards(
     shards: Uint8Array[],
     indices: number[],
-  ): ValidationResult
+  ): ErasureCodingValidationResult
   /** Validate decoded data */
   validateDecodedData(
     originalData: Uint8Array,
     decodedData: Uint8Array,
-  ): ValidationResult
+  ): ErasureCodingValidationResult
 }
 
 /**

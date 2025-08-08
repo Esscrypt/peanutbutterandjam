@@ -1,15 +1,15 @@
 /**
  * Pedersen VRF Prover Implementation
  *
- * Implements Pedersen VRF with key hiding
+ * Implements Pedersen VRF proving with key hiding
  */
 
 import type {
-  ProverConfig,
   VRFInput,
   VRFProofWithOutput,
   VRFSecretKey,
-} from '../types'
+} from '@pbnj/types'
+import type { ProverConfig } from './types'
 
 /**
  * Pedersen VRF Prover

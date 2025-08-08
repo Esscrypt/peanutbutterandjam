@@ -23,12 +23,31 @@ export {
   DEFAULT_CODEC_CONFIG,
   EncodingFormat,
 } from '@pbnj/types'
-// Export core codec functionality
-export * from './core'
-// Export format-specific codecs
-export * from './formats'
+// Core codec functionality
+export { JAMCodec } from './core'
+
+// Format-specific codecs
+export { JsonCodec } from './formats/json'
+export { BinaryCodec } from './formats/binary'
+export { JamAsn1Codec, JamAsn1Decoder } from './formats/jam-asn1'
+export { JamCodec, JamDecoder } from './formats/jam-codec'
+
+// JAM-specific types
+export type {
+  JamValidatorKeys,
+  JamEpochMark,
+  JamHeader,
+  JamBlock,
+  JamCodecConfig
+} from './formats/jam-codec'
+
+// ASN.1 types
+export type {
+  Asn1TagClass,
+  Asn1UniversalTag,
+  Asn1LengthType,
+  Asn1TLV
+} from './formats/jam-asn1'
+
 // Export utilities
 export * from './utils'
-
-// Schema exports (to be implemented)
-// export * from './schemas'

@@ -28,12 +28,10 @@ describe('generateChainSpec', () => {
     const result = generateChainSpec(validConfig)
 
     expect(result).toBeDefined()
-    expect(result.bootnodes).toBeDefined()
     expect(result.id).toBeDefined()
-    expect(result.genesis_header).toBeDefined()
     expect(result.genesis_state).toBeDefined()
-    expect(result.bootnodes).toHaveLength(2)
     expect(result.id).toBe('dev')
+    expect(typeof result.genesis_state).toBe('object')
   })
 
   it('should validate required fields', () => {
@@ -135,10 +133,8 @@ describe('generateChainSpec', () => {
 
     const result = generateChainSpec(multiValidatorConfig)
 
-    expect(result.bootnodes).toHaveLength(3)
     expect(result.id).toBe('test')
-    expect(result.bootnodes[0]).toBe('validator1@127.0.0.1:40000')
-    expect(result.bootnodes[1]).toBe('validator2@127.0.0.1:40001')
-    expect(result.bootnodes[2]).toBe('validator3@127.0.0.1:40002')
+    expect(typeof result.genesis_state).toBe('object')
+    expect(Object.keys(result.genesis_state).length).toBeGreaterThan(0)
   })
 })

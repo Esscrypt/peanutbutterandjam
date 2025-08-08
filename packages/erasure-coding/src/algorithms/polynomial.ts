@@ -1,11 +1,10 @@
 /**
  * Polynomial Operations Implementation
  *
- * Implementation of polynomial arithmetic over finite fields
+ * Implements polynomial operations for erasure coding
  */
 
-import type { FieldElement, Polynomial } from '../types'
-import type { FiniteField, PolynomialOperations } from './types'
+import type { FieldElement, Polynomial, FiniteField, PolynomialOperations } from '@pbnj/types'
 
 /**
  * Polynomial operations implementation

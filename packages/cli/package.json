@@ -24,6 +24,8 @@
     "build": "tsc",
     "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --format=cjs",
     "build:binary": "bun run build:bundle && npx pkg dist/bundle.js --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path dist/bin --public",
+    "build:all": "bun run build:binary",
+    "install:binary": "../../scripts/cli-install.sh",
     "check": "tsc --pretty --noEmit",
     "test": "vitest run",
     "test:watch": "vitest run --watch",
@@ -31,19 +33,22 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "commander": "^12.0.0",
     "@pbnj/core": "workspace:*",
-    "@pbnj/safrole": "workspace:*",
-    "@pbnj/types": "workspace:*"
+    "@pbnj/node": "workspace:*",
+    "@pbnj/types": "workspace:*",
+    "cli": "^1.0.1",
+    "dotenv": "^17.2.1",
+    "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@pbnj/typescript-config": "workspace:*",
     "@types/node": "^22.0.0",
+    "@types/yargs": "^17.0.33",
     "esbuild": "^0.20.0",
     "pkg": "^5.8.1",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
-    "vitest": "^2.1.9",
-    "@pbnj/typescript-config": "workspace:*"
+    "vitest": "^2.1.9"
   },
   "exports": {
     ".": "./src/index.ts"

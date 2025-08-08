@@ -62,6 +62,15 @@ export type {
   State as CodecState,
   Transaction,
   ValidationResult as CodecValidationResult,
+  // Format-specific types
+  FormatCodec,
+  BaseConfig,
+  BinaryConfig,
+  JsonConfig,
+  Asn1Config,
+  BinaryData,
+  JsonData,
+  Asn1Data,
 } from './codec'
 export {
   CodecError,
@@ -72,11 +81,44 @@ export {
 export * from './consensus'
 // Core types
 export * from './core'
+// Erasure coding types
+export * from './erasure-coding'
 // Network types
 export * from './network'
+// JAMNP-S types
+export * from './jamnp'
 // PVM types
 export * from './pvm'
-// Serialization types
-export * from './serialization'
+// Serialization types - export specific types to avoid conflicts
+export type {
+  BlockHeader as SerializationBlockHeader,
+  BlockBody as SerializationBlockBody,
+  WorkItem as SerializationWorkItem,
+  WorkPackage as SerializationWorkPackage,
+  ExtrinsicReference as SerializationExtrinsicReference,
+  SafroleTicket,
+  SafroleState,
+  Dispute,
+  WorkReport as SerializationWorkReport,
+  Privileges,
+  ActivityStats,
+  ReadyItem,
+  AccumulatedItem,
+  LastAccountOut,
+  ServiceAccount,
+  GenesisState as SerializationGenesisState,
+  StateTrieEntry,
+  StateTrie,
+  ValidatorKeyTuple,
+  EpochMark,
+  SafroleTicketSingle,
+  SafroleTicketArray,
+} from './serialization'
+export {
+  isTicketsMarkArray,
+  isTicketsMarkSingle,
+} from './serialization'
+// State types
+export * from './state'
 // VRF types
 export * from './vrf'

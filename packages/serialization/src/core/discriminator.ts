@@ -5,7 +5,7 @@
  * var{x} ≡ ⟨len(x), x⟩ and maybe{x} ≡ 0 when x = none, ⟨1, x⟩ otherwise
  */
 
-import type { OctetSequence, Optional } from '../types'
+import type { Uint8Array, Optional } from '../types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -17,7 +17,7 @@ import { decodeNatural, encodeNatural } from './natural-number'
  * @param data - Variable-length data to encode
  * @returns Encoded octet sequence with length prefix
  */
-export function encodeVariableLength(data: OctetSequence): OctetSequence {
+export function encodeVariableLength(data: Uint8Array): Uint8Array {
   const length = data.length
   const encodedLength = encodeNatural(BigInt(length))
 
@@ -34,9 +34,9 @@ export function encodeVariableLength(data: OctetSequence): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded data and remaining octet sequence
  */
-export function decodeVariableLength(data: OctetSequence): {
-  value: OctetSequence
-  remaining: OctetSequence
+export function decodeVariableLength(data: Uint8Array): {
+  value: Uint8Array
+  remaining: Uint8Array
 } {
   const { value: length, remaining: lengthRemaining } = decodeNatural(data)
 
@@ -69,8 +69,8 @@ export function decodeVariableLength(data: OctetSequence): {
  */
 export function encodeOptional<T>(
   value: Optional<T>,
-  encoder: (value: T) => OctetSequence,
-): OctetSequence {
+  encoder: (value: T) => Uint8Array,
+): Uint8Array {
   if (value === null || value === undefined) {
     return new Uint8Array([0])
   }
@@ -91,11 +91,11 @@ export function encodeOptional<T>(
  * @returns Decoded optional value and remaining octet sequence
  */
 export function decodeOptional<T>(
-  data: OctetSequence,
-  decoder: (data: OctetSequence) => { value: T; remaining: OctetSequence },
+  data: Uint8Array,
+  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
 ): {
   value: Optional<T>
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   if (data.length === 0) {
     throw new Error('Cannot decode optional value from empty data')
@@ -127,8 +127,8 @@ export function decodeOptional<T>(
  */
 export function encodeDiscriminatedUnion(
   discriminator: number,
-  data: OctetSequence,
-): OctetSequence {
+  data: Uint8Array,
+): Uint8Array {
   if (discriminator < 0 || discriminator > 255) {
     throw new Error(`Discriminator must be 0-255, got ${discriminator}`)
   }
@@ -148,14 +148,14 @@ export function encodeDiscriminatedUnion(
  * @returns Decoded value and remaining octet sequence
  */
 export function decodeDiscriminatedUnion<T>(
-  data: OctetSequence,
+  data: Uint8Array,
   decoders: Map<
     number,
-    (data: OctetSequence) => { value: T; remaining: OctetSequence }
+    (data: Uint8Array) => { value: T; remaining: Uint8Array }
   >,
 ): {
   value: T
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   if (data.length === 0) {
     throw new Error('Cannot decode discriminated union from empty data')

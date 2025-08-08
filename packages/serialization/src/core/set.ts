@@ -5,7 +5,7 @@
  * encode({a,b,c,...}) ≡ encode(a) ∥ encode(b) ∥ encode(c) ∥ ...
  */
 
-import type { OctetSequence } from '../types'
+import type { Uint8Array } from '../types'
 
 /**
  * Encode set using Gray Paper set encoding
@@ -21,8 +21,8 @@ import type { OctetSequence } from '../types'
  */
 export function encodeSet<T>(
   set: Set<T>,
-  encoder: (value: T) => OctetSequence,
-): OctetSequence {
+  encoder: (value: T) => Uint8Array,
+): Uint8Array {
   // Convert set to array and sort elements
   const elements = Array.from(set).sort((a, b) => {
     // For simple types, use string comparison
@@ -59,10 +59,10 @@ export function encodeSet<T>(
  * @returns Decoded set and remaining data
  */
 export function decodeSet<T>(
-  data: OctetSequence,
-  decoder: (data: OctetSequence) => { value: T; remaining: OctetSequence },
+  data: Uint8Array,
+  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
   elementCount?: number,
-): { value: Set<T>; remaining: OctetSequence } {
+): { value: Set<T>; remaining: Uint8Array } {
   const set = new Set<T>()
   let currentData = data
 
@@ -100,8 +100,8 @@ export function decodeSet<T>(
  */
 export function encodeSetWithLength<T>(
   set: Set<T>,
-  encoder: (value: T) => OctetSequence,
-): OctetSequence {
+  encoder: (value: T) => Uint8Array,
+): Uint8Array {
   const encoded = encodeSet(set, encoder)
   const length = set.size
 
@@ -123,9 +123,9 @@ export function encodeSetWithLength<T>(
  * @returns Decoded set and remaining data
  */
 export function decodeSetWithLength<T>(
-  data: OctetSequence,
-  decoder: (data: OctetSequence) => { value: T; remaining: OctetSequence },
-): { value: Set<T>; remaining: OctetSequence } {
+  data: Uint8Array,
+  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
+): { value: Set<T>; remaining: Uint8Array } {
   // First decode the length
   const { value: length, remaining: lengthRemaining } = decodeNatural(data)
   const elementCount = Number(length)

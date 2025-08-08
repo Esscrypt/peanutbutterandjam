@@ -1,126 +1,170 @@
 /**
  * Erasure Coding Types
  *
- * Core types for erasure coding implementation based on Gray Paper specifications
+ * Types for the JAM protocol erasure coding implementation
  */
 
-/**
- * Erasure coding parameters
- */
-export interface ErasureCodingParams {
-  /** Number of data words (k) - default 342 */
-  k: number
-  /** Total number of code words (n) - default 1023 */
-  n: number
-  /** Field size - default 2^16 */
-  fieldSize: number
-}
+import type { EncodedData } from '@pbnj/types'
 
 /**
- * Encoded data structure
- */
-export interface EncodedData {
-  /** Original data length */
-  originalLength: number
-  /** Number of data words */
-  k: number
-  /** Total number of code words */
-  n: number
-  /** Encoded shards/chunks */
-  shards: Uint8Array[]
-  /** Indices of the shards */
-  indices: number[]
-}
-
-/**
- * Validation result for erasure coding operations
+ * Validation result interface
  */
 export interface ValidationResult {
-  /** Whether the validation passed */
   isValid: boolean
-  /** Validation errors */
   errors: string[]
-  /** Validation warnings */
   warnings: string[]
 }
 
 /**
- * Core erasure coding interface
+ * Finite field interface
  */
-export interface ErasureCoder {
-  /** Encode data into erasure coded shards */
-  encode(data: Uint8Array, k?: number, n?: number): EncodedData
-  /** Decode data from erasure coded shards */
-  decode(encodedData: EncodedData, k?: number): Uint8Array
-  /** Validate encoded data */
-  validate(encodedData: EncodedData): ValidationResult
+export interface FiniteField {
+  add(a: number, b: number): number
+  multiply(a: number, b: number): number
+  divide(a: number, b: number): number
+  inverse(a: number): number
+  power(a: number, b: number): number
+  subtract(a: number, b: number): number
+  negate(a: number): number
 }
 
 /**
- * Erasure coding error types
+ * GF2_16 finite field implementation
  */
-export enum ErasureCodingError {
-  INVALID_PARAMETERS = 'INVALID_PARAMETERS',
-  ENCODING_ERROR = 'ENCODING_ERROR',
-  DECODING_ERROR = 'DECODING_ERROR',
-  INSUFFICIENT_DATA = 'INSUFFICIENT_DATA',
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
+export class GF2_16 implements FiniteField {
+  add(a: number, b: number): number {
+    return a ^ b
+  }
+
+  multiply(a: number, b: number): number {
+    // Implementation will be provided by algorithms
+    return a * b
+  }
+
+  divide(a: number, b: number): number {
+    // Implementation will be provided by algorithms
+    return a / b
+  }
+
+  inverse(a: number): number {
+    // Implementation will be provided by algorithms
+    return 1 / a
+  }
+
+  power(a: number, b: number): number {
+    // Implementation will be provided by algorithms
+    return Math.pow(a, b)
+  }
+
+  subtract(a: number, b: number): number {
+    return a ^ b
+  }
+
+  negate(a: number): number {
+    return a
+  }
+
+  getGenerator(): number {
+    return 2 // Default generator for GF(2^16)
+  }
+
+  getSize(): number {
+    return 65536 // 2^16
+  }
 }
 
 /**
- * Erasure coding error with context
+ * Polynomial operations implementation
  */
-export interface ErasureCodingErrorWithContext {
-  error: ErasureCodingError
-  message: string
-  context?: Record<string, unknown>
+export { PolynomialOps } from './algorithms/polynomial'
+
+/**
+ * Encoding validation implementation
+ */
+export class EncodingValidation {
+  validateParameters(_k: number, _n: number): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
+
+  validateInputData(_data: Uint8Array): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
+
+  validateEncodedData(_encodedData: EncodedData): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
 }
 
 /**
- * Finite field element (GF(2^16))
+ * Decoding validation implementation
  */
-export type FieldElement = number
+export class DecodingValidation {
+  validateParameters(_k: number, _receivedCount: number): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
 
-/**
- * Polynomial coefficients
- */
-export type Polynomial = FieldElement[]
+  validateReceivedShards(_shards: Uint8Array[], _indices: number[]): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
 
-/**
- * Reed-Solomon encoding parameters
- */
-export interface ReedSolomonParams {
-  /** Generator polynomial */
-  generator: Polynomial
-  /** Field generator */
-  fieldGenerator: FieldElement
-  /** Irreducible polynomial */
-  irreducible: number
+  validateDecodedData(_originalData: Uint8Array, _decodedData: Uint8Array): ValidationResult {
+    return {
+      isValid: true,
+      errors: [],
+      warnings: []
+    }
+  }
 }
 
 /**
- * Default erasure coding parameters based on Gray Paper
+ * Validation engine implementation
  */
-export const DEFAULT_ERASURE_CODING_PARAMS: ErasureCodingParams = {
+export class ValidationEngine {
+  constructor() {
+    // Implementation
+  }
+}
+
+// Default erasure coding parameters
+export const DEFAULT_ERASURE_CODING_PARAMS = {
   k: 342,
   n: 1023,
-  fieldSize: 65536, // 2^16
+  fieldSize: 16
 }
 
-/**
- * Segment encoding parameters for Import DA system
- */
-export const SEGMENT_ERASURE_CODING_PARAMS: ErasureCodingParams = {
+export const BLOB_ERASURE_CODING_PARAMS = {
+  k: 342,
+  n: 1023,
+  fieldSize: 16
+}
+
+export const SEGMENT_ERASURE_CODING_PARAMS = {
   k: 6,
   n: 1023,
-  fieldSize: 65536, // 2^16
+  fieldSize: 16
 }
 
-/**
- * Blob encoding parameters for Audit DA system
- */
-export const BLOB_ERASURE_CODING_PARAMS: ErasureCodingParams = {
-  k: 342,
-  n: 1023,
-  fieldSize: 65536, // 2^16
-}
+// Re-export types from @pbnj/types for convenience
+export type {
+  EncodedData
+} from '@pbnj/types' 

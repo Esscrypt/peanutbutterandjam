@@ -4,7 +4,7 @@ import os
 import sys
 from pathlib import Path
 
-from jam_types import Struct, ByteArray, ByteSequence, Block, Header, OpaqueHash, Vec, String, spec
+from jam_types import Struct, ByteArray, Uint8Arrayequence, Block, Header, OpaqueHash, Vec, String, spec
 from jam_types import class_name as n
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,7 +19,7 @@ class TrieKey(ByteArray):
 class KeyValue(Struct):
     type_mapping = [
         ('key', n(TrieKey)),
-        ('value', n(ByteSequence))
+        ('value', n(Uint8Arrayequence))
     ]
 
 class KeyValues(Vec):

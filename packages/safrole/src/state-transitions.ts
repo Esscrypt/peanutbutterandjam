@@ -1,7 +1,7 @@
 /**
- * Safrole State Transition Functions
+ * Safrole State Transitions
  *
- * Implements state transitions as specified in Gray Paper Section 3
+ * Implements the Safrole consensus protocol state transitions
  * Reference: graypaper/text/safrole.tex
  */
 
@@ -12,9 +12,12 @@ import type {
   SafroleOutput,
   SafroleState,
   Ticket,
+  // TicketProof,
+  // SafroleError,
+  // SafroleErrorCode,
   ValidatorKey,
-} from './types'
-import { SAFROLE_CONSTANTS } from './types'
+} from '@pbnj/types'
+import { SAFROLE_CONSTANTS } from '@pbnj/types'
 
 /**
  * Execute Safrole State Transition Function
@@ -102,9 +105,9 @@ function handleEpochTransition(
   })
 
   // Rotate validator sets
-  const newActiveSet = state.pendingSet
-  const newPendingSet = state.activeSet
-  const newPreviousSet = state.activeSet
+  const newActiveSet = state.pendingset
+  const newPendingSet = state.activeset
+  const newPreviousSet = state.activeset
 
   // Update entropy
   const newEntropy = [...input.entropy]

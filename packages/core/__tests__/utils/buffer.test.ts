@@ -81,8 +81,8 @@ describe('BufferUtils', () => {
     it('should copy buffer contents', () => {
       const source = Buffer.from('hello')
       const target = Buffer.alloc(5)
-      const bytesCopied = BufferUtils.copy(source, target)
-      expect(bytesCopied).toBe(5)
+      const Uint8ArrayCopied = BufferUtils.copy(source, target)
+      expect(Uint8ArrayCopied).toBe(5)
       expect(target.toString('utf8')).toBe('hello')
     })
 
@@ -146,7 +146,7 @@ describe('BufferUtils', () => {
       const value = 0x01020304n
       const buffer = BufferUtils.fromBigInt(value)
       expect(buffer).toBeInstanceOf(Uint8Array)
-      expect(buffer.length).toBe(3) // 0x01020304 = 3 bytes when converted
+      expect(buffer.length).toBe(3) // 0x01020304 = 3 Uint8Array when converted
       // The actual values depend on the hex conversion, so we just check the length
       expect(buffer.length).toBeGreaterThan(0)
     })
@@ -275,39 +275,39 @@ describe('BufferUtils', () => {
       const buffer = Buffer.alloc(10)
 
       // Test small value
-      const bytesWritten1 = BufferUtils.writeVarInt(buffer, 127, 0)
+      const Uint8ArrayWritten1 = BufferUtils.writeVarInt(buffer, 127, 0)
       const result1 = BufferUtils.readVarInt(buffer, 0)
       expect(result1.value).toBe(127)
       expect(result1.bytesRead).toBe(1)
-      expect(bytesWritten1).toBe(1)
+      expect(Uint8ArrayWritten1).toBe(1)
 
       // Test larger value
-      const bytesWritten2 = BufferUtils.writeVarInt(buffer, 16384, 0)
+      const Uint8ArrayWritten2 = BufferUtils.writeVarInt(buffer, 16384, 0)
       const result2 = BufferUtils.readVarInt(buffer, 0)
       expect(result2.value).toBe(16384)
-      expect(bytesWritten2).toBe(3)
+      expect(Uint8ArrayWritten2).toBe(3)
     })
 
     it('should read/write string with length prefix', () => {
       const buffer = Buffer.alloc(100)
       const testString = 'hello world'
 
-      const bytesWritten = BufferUtils.writeString(buffer, testString, 0)
+      const Uint8ArrayWritten = BufferUtils.writeString(buffer, testString, 0)
       const result = BufferUtils.readString(buffer, 0)
 
       expect(result.value).toBe(testString)
-      expect(result.bytesRead).toBe(bytesWritten)
+      expect(result.bytesRead).toBe(Uint8ArrayWritten)
     })
 
-    it('should read/write bytes with length prefix', () => {
+    it('should read/write Uint8Array with length prefix', () => {
       const buffer = Buffer.alloc(100)
-      const testBytes = Buffer.from('hello world')
+      const testUint8Array = Buffer.from('hello world')
 
-      const bytesWritten = BufferUtils.writeBytes(buffer, testBytes, 0)
+      const Uint8ArrayWritten = BufferUtils.writeBytes(buffer, testUint8Array, 0)
       const result = BufferUtils.readBytes(buffer, 0)
 
-      expect(BufferUtils.equals(result.value, testBytes)).toBe(true)
-      expect(result.bytesRead).toBe(bytesWritten)
+      expect(BufferUtils.equals(result.value, testUint8Array)).toBe(true)
+      expect(result.bytesRead).toBe(Uint8ArrayWritten)
     })
   })
 

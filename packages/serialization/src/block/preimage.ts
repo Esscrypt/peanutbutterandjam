@@ -8,7 +8,7 @@
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
-import type { OctetSequence, Preimage } from '../types'
+import type { Uint8Array, Preimage } from '../types'
 
 /**
  * Encode single preimage using Gray Paper encoding
@@ -19,8 +19,8 @@ import type { OctetSequence, Preimage } from '../types'
  * @param preimage - Preimage to encode
  * @returns Encoded octet sequence
  */
-function encodePreimage(preimage: Preimage): OctetSequence {
-  const parts: OctetSequence[] = []
+function encodePreimage(preimage: Preimage): Uint8Array {
+  const parts: Uint8Array[] = []
 
   // Service index: encode[4](xp_serviceindex)
   parts.push(encodeFixedLength(preimage.serviceIndex, 4))
@@ -48,9 +48,9 @@ function encodePreimage(preimage: Preimage): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded preimage and remaining data
  */
-function decodePreimage(data: OctetSequence): {
+function decodePreimage(data: Uint8Array): {
   value: Preimage
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -89,7 +89,7 @@ function decodePreimage(data: OctetSequence): {
  * @param preimages - Array of preimages to encode (ordered by service index)
  * @returns Encoded octet sequence
  */
-export function encodePreimages(preimages: Preimage[]): OctetSequence {
+export function encodePreimages(preimages: Preimage[]): Uint8Array {
   // Sort preimages by service index as required by Gray Paper
   const sortedPreimages = [...preimages].sort((a, b) => {
     if (a.serviceIndex < b.serviceIndex) return -1
@@ -106,9 +106,9 @@ export function encodePreimages(preimages: Preimage[]): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded preimages and remaining data
  */
-export function decodePreimages(data: OctetSequence): {
+export function decodePreimages(data: Uint8Array): {
   value: Preimage[]
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   return decodeSequenceGeneric(data, decodePreimage)
 }

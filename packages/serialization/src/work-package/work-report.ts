@@ -5,9 +5,9 @@
  * Reference: graypaper/text/work_report.tex
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, hexToUint8Array } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
-import type { OctetSequence, WorkReport } from '../types'
+import type { Uint8Array, WorkReport } from '../types'
 import { encodeAvailabilitySpecification } from './availability-specification'
 import { encodeWorkContext } from './context'
 import { encodeWorkDigest } from './work-digest'
@@ -18,7 +18,7 @@ import { encodeWorkDigest } from './work-digest'
  * @param report - Work report to encode
  * @returns Encoded octet sequence
  */
-export function encodeWorkReport(report: WorkReport): OctetSequence {
+export function encodeWorkReport(report: WorkReport): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Availability specification
@@ -31,10 +31,10 @@ export function encodeWorkReport(report: WorkReport): OctetSequence {
   parts.push(encodeNatural(BigInt(report.core.length))) // Length prefix
   parts.push(report.core)
 
-  // Authorizer (32 bytes)
-  parts.push(hexToBytes(report.authorizer))
+  // Authorizer (32 Uint8Array)
+  parts.push(hexToUint8Array(report.authorizer))
 
-  // Auth gas used (8 bytes)
+  // Auth gas used (8 Uint8Array)
   parts.push(encodeNatural(report.authGasUsed))
 
   // Auth trace (variable length)
@@ -69,9 +69,9 @@ export function encodeWorkReport(report: WorkReport): OctetSequence {
  * @param data - Octet sequence to decode
  * @returns Decoded work report and remaining data
  */
-export function decodeWorkReport(data: OctetSequence): {
+export function decodeWorkReport(data: Uint8Array): {
   value: WorkReport
-  remaining: OctetSequence
+  remaining: Uint8Array
 } {
   let currentData = data
 
@@ -95,11 +95,11 @@ export function decodeWorkReport(data: OctetSequence): {
   const core = currentData.slice(0, Number(coreLength))
   currentData = currentData.slice(Number(coreLength))
 
-  // Authorizer (32 bytes)
+  // Authorizer (32 Uint8Array)
   const authorizer = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
-  // Auth gas used (8 bytes)
+  // Auth gas used (8 Uint8Array)
   const authGasUsed = BigInt(
     `0x${Array.from(currentData.slice(0, 8))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -151,7 +151,7 @@ export function decodeWorkReport(data: OctetSequence): {
 }
 
 // Helper functions for decoding (simplified versions)
-function decodeAvailabilitySpecification(data: OctetSequence) {
+function decodeAvailabilitySpecification(data: Uint8Array) {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     packageHash: bytesToHex(data.slice(0, 32)),
@@ -170,7 +170,7 @@ function decodeAvailabilitySpecification(data: OctetSequence) {
   }
 }
 
-function decodeWorkContext(data: OctetSequence) {
+function decodeWorkContext(data: Uint8Array) {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     anchorHash: bytesToHex(data.slice(0, 32)),
@@ -186,7 +186,7 @@ function decodeWorkContext(data: OctetSequence) {
   }
 }
 
-function decodeWorkDigest(data: OctetSequence) {
+function decodeWorkDigest(data: Uint8Array) {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     value: {

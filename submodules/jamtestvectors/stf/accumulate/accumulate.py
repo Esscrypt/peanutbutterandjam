@@ -10,7 +10,7 @@ from jam_types import (
     AccumulatedQueue,
     ServiceId,
     ServiceInfo,
-    ByteSequence,
+    Uint8Arrayequence,
     Privileges,
     ServicesStatistics
 )
@@ -18,14 +18,14 @@ from jam_types import class_name as n
 
 class AccumulateStorageMapEntry(Struct):
     type_mapping = [
-        ('key', n(ByteSequence)),
-        ('value', n(ByteSequence)),
+        ('key', n(Uint8Arrayequence)),
+        ('value', n(Uint8Arrayequence)),
     ]
 
 class AccumulatePreimagesMapEntry(Struct):
     type_mapping = [
         ('hash', n(OpaqueHash)),
-        ('blob', n(ByteSequence)),
+        ('blob', n(Uint8Arrayequence)),
     ]
 
 class AccumulateAccountMapData(Struct):

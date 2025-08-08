@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { AvailabilitySpecification } from '../../src/types'
+import type { AvailabilitySpecification } from '@pbnj/types'
 import {
   decodeAvailabilitySpecification,
   encodeAvailabilitySpecification,

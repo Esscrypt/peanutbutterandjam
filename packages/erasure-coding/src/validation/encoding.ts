@@ -4,7 +4,8 @@
  * Validation for erasure coding encoding operations
  */
 
-import type { EncodedData, ValidationResult } from '../types'
+import type { EncodedData } from '@pbnj/types'
+import type { ValidationResult } from '../types'
 import type { EncodingValidator, ValidationConfig } from './types'
 import { DEFAULT_VALIDATION_CONFIG } from './types'
 
@@ -116,10 +117,10 @@ export class EncodingValidation implements EncodingValidator {
       )
     }
 
-    // Check if data length is a multiple of 684 bytes (342 words * 2 bytes per word)
+    // Check if data length is a multiple of 684 Uint8Array (342 words * 2 Uint8Array per word)
     if (data.length % 684 !== 0) {
       warnings.push(
-        `Data length (${data.length}) is not a multiple of 684 bytes. Padding may be required.`,
+        `Data length (${data.length}) is not a multiple of 684 Uint8Array. Padding may be required.`,
       )
     }
 

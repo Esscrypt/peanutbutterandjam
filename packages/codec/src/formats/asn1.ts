@@ -1,12 +1,11 @@
 /**
- * ASN.1 Format Codec Implementation
+ * ASN.1 Codec Implementation
  *
- * Standard ASN.1 encoding for interoperability
+ * Implements ASN.1 encoding and decoding for the JAM protocol
  */
 
 import { logger } from '@pbnj/core'
-import type { CodecConfig } from '../types'
-import type { Asn1Config, Asn1Data, FormatCodec } from './types'
+import type { CodecConfig, Asn1Config, Asn1Data, FormatCodec } from '@pbnj/types'
 
 /**
  * ASN.1 codec for standard data serialization

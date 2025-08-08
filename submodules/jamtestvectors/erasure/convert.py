@@ -2,7 +2,7 @@
 
 import os
 import sys
-from jam_types import Struct, ByteSequence
+from jam_types import Struct, Uint8Arrayequence
 from jam_types import class_name as n
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -13,8 +13,8 @@ os.chdir(script_dir)
 
 class ErasureTestVector(Struct):
     type_mapping = [
-        ("data", n(ByteSequence)),
-        ("shards", "Vec<ByteSequence>"),
+        ("data", n(Uint8Arrayequence)),
+        ("shards", "Vec<Uint8Arrayequence>"),
     ]
 
 for spec_name in ["tiny", "full"]:

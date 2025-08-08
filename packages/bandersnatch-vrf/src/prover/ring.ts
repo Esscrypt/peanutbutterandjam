@@ -1,7 +1,7 @@
 /**
  * Ring VRF Prover Implementation
  *
- * Implements Ring VRF with anonymity
+ * Implements Ring VRF proving with anonymity
  */
 
 import { logger } from '@pbnj/core'
@@ -11,7 +11,7 @@ import type {
   RingVRFProofWithOutput,
   RingVRFRing,
   VRFSecretKey,
-} from '../types'
+} from '@pbnj/types'
 import { DEFAULT_PROVER_CONFIG, RING_VRF_CONFIG } from './config'
 import { IETFVRFProver } from './ietf'
 import type { ProverConfig } from './types'

@@ -5,9 +5,9 @@
  * Reference: graypaper/text/availability_specification.tex
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, hexToUint8Array } from '@pbnj/core'
 import { encodeNatural } from '../core/natural-number'
-import type { AvailabilitySpecification, OctetSequence } from '../types'
+import type { AvailabilitySpecification, Uint8Array } from '../types'
 
 /**
  * Encode availability specification
@@ -17,22 +17,22 @@ import type { AvailabilitySpecification, OctetSequence } from '../types'
  */
 export function encodeAvailabilitySpecification(
   spec: AvailabilitySpecification,
-): OctetSequence {
+): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Package hash (32 bytes)
-  parts.push(hexToBytes(spec.packageHash))
+  // Package hash (32 Uint8Array)
+  parts.push(hexToUint8Array(spec.packageHash))
 
-  // Bundle length (8 bytes)
+  // Bundle length (8 Uint8Array)
   parts.push(encodeNatural(spec.bundleLength))
 
-  // Erasure root (32 bytes)
-  parts.push(hexToBytes(spec.erasureRoot))
+  // Erasure root (32 Uint8Array)
+  parts.push(hexToUint8Array(spec.erasureRoot))
 
-  // Segment root (32 bytes)
-  parts.push(hexToBytes(spec.segmentRoot))
+  // Segment root (32 Uint8Array)
+  parts.push(hexToUint8Array(spec.segmentRoot))
 
-  // Segment count (8 bytes)
+  // Segment count (8 Uint8Array)
   parts.push(encodeNatural(spec.segmentCount))
 
   // Concatenate all parts
@@ -55,15 +55,15 @@ export function encodeAvailabilitySpecification(
  * @returns Decoded availability specification
  */
 export function decodeAvailabilitySpecification(
-  data: OctetSequence,
+  data: Uint8Array,
 ): AvailabilitySpecification {
   let offset = 0
 
-  // Package hash (32 bytes)
+  // Package hash (32 Uint8Array)
   const packageHash = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
-  // Bundle length (8 bytes)
+  // Bundle length (8 Uint8Array)
   const bundleLength = BigInt(
     `0x${Array.from(data.slice(offset, offset + 8))
       .map((b) => b.toString(16).padStart(2, '0'))
@@ -71,15 +71,15 @@ export function decodeAvailabilitySpecification(
   )
   offset += 8
 
-  // Erasure root (32 bytes)
+  // Erasure root (32 Uint8Array)
   const erasureRoot = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
-  // Segment root (32 bytes)
+  // Segment root (32 Uint8Array)
   const segmentRoot = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
-  // Segment count (8 bytes)
+  // Segment count (8 Uint8Array)
   const segmentCount = BigInt(
     `0x${Array.from(data.slice(offset, offset + 8))
       .map((b) => b.toString(16).padStart(2, '0'))
