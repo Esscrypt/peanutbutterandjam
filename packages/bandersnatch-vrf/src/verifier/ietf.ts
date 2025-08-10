@@ -5,8 +5,8 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BandersnatchCurve } from '../curve'
 import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
+import { BandersnatchCurve, type CurvePoint } from '../curve'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'
 
@@ -37,12 +37,13 @@ export class IETFVRFVerifier {
 
     try {
       // 1. Hash input to curve point (H1)
-      const alpha = BandersnatchCurve.hashToCurve(_input.message, mergedConfig)
+      const alphaPoint = BandersnatchCurve.hashToCurve(_input.message)
+      const alphaBytes = BandersnatchCurve.pointToBytes(alphaPoint)
 
       // 2. Verify proof
       const isValid = this.verifyProof(
         _publicKey,
-        alpha,
+        alphaBytes,
         _output.gamma,
         _proof,
         _auxData,
@@ -136,11 +137,11 @@ export class IETFVRFVerifier {
       return false
     }
 
-    const cBytes = proof.bytes.slice(0, 32)
-    const sBytes = proof.bytes.slice(32, 64)
+    const cUint8Array = proof.bytes.slice(0, 32)
+    const sUint8Array = proof.bytes.slice(32, 64)
 
-    const c = this.bytesToBigint(cBytes)
-    const s = this.bytesToBigint(sBytes)
+    const c = this.bytesToBigint(cUint8Array)
+    const s = this.bytesToBigint(sUint8Array)
 
     // Convert inputs to curve points
     const alphaPoint = BandersnatchCurve.bytesToPoint(alpha)
@@ -197,12 +198,12 @@ export class IETFVRFVerifier {
   }
 
   /**
-   * Convert bytes to bigint
+   * Convert Uint8Array to bigint
    */
-  private static bytesToBigint(bytes: Uint8Array): bigint {
+  private static bytesToBigint(Uint8Array: Uint8Array): bigint {
     let result = 0n
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(bytes[i])
+    for (let i = 0; i < Uint8Array.length; i++) {
+      result = (result << 8n) | BigInt(Uint8Array[i])
     }
     return result
   }
@@ -210,9 +211,9 @@ export class IETFVRFVerifier {
   /**
    * Check if two curve points are equal
    */
-  private static pointsEqual(p1: any, p2: any): boolean {
+  private static pointsEqual(p1: CurvePoint, p2: CurvePoint): boolean {
     if (p1.isInfinity && p2.isInfinity) return true
     if (p1.isInfinity || p2.isInfinity) return false
-    return p1.x === p2.x && p1.y === p2.y
+    return p1.x === p2.x && p2.y === p2.y
   }
 }

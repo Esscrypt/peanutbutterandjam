@@ -5,7 +5,7 @@
  * Reference: Gray Paper encoding specifications
  */
 
-import { bytesToHex, hexToBytes, type Hex } from 'viem'
+import { bytesToHex, type Hex, hexToBytes } from 'viem'
 import { isValidHex } from './crypto'
 
 /**
@@ -19,12 +19,11 @@ export enum EncodingFormat {
   BINARY = 'binary',
 }
 
-
 /**
  * Encode Uint8Array to base64 string
  */
-export function encodeBase64(Uint8Array: Uint8Array): string {
-  return Buffer.from(Uint8Array).toString('base64')
+export function encodeBase64(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('base64')
 }
 
 /**
@@ -37,12 +36,12 @@ export function decodeBase64(base64: string): Uint8Array {
 /**
  * Encode Uint8Array to base58 string
  */
-export function encodeBase58(Uint8Array: Uint8Array): string {
+export function encodeBase58(bytes: Uint8Array): string {
   // Simple base58 implementation - in production, use a proper base58 library
   const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
   const base = alphabet.length
 
-  let num = BigInt(`0x${Buffer.from(Uint8Array).toString('hex')}`)
+  let num = BigInt(`0x${Buffer.from(bytes).toString('hex')}`)
   let str = ''
 
   while (num > 0) {
@@ -52,7 +51,7 @@ export function encodeBase58(Uint8Array: Uint8Array): string {
   }
 
   // Handle leading zeros
-  for (let i = 0; i < Uint8Array.length && Uint8Array[i] === 0; i++) {
+  for (let i = 0; i < bytes.length && bytes[i] === 0; i++) {
     str = `1${str}`
   }
 
@@ -81,7 +80,7 @@ export function decodeBase58(base58: string): Uint8Array {
   }
 
   const hex = num.toString(16)
-  const Uint8Array = Buffer.from(
+  const bytes = Buffer.from(
     hex.padStart(hex.length + (hex.length % 2), '0'),
     'hex',
   )
@@ -92,9 +91,9 @@ export function decodeBase58(base58: string): Uint8Array {
     leadingZeros++
   }
 
-  const result = Buffer.alloc(leadingZeros + Uint8Array.length)
+  const result = Buffer.alloc(leadingZeros + bytes.length)
   result.fill(0, 0, leadingZeros)
-  Uint8Array.copy(result, leadingZeros)
+  bytes.copy(result, leadingZeros)
 
   return result
 }
@@ -116,8 +115,8 @@ export function decodeUtf8(str: string): Uint8Array {
 /**
  * Encode Uint8Array to binary string
  */
-export function encodeBinary(Uint8Array: Uint8Array): string {
-  return Buffer.from(Uint8Array).toString('binary')
+export function encodeBinary(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('binary')
 }
 
 /**
@@ -175,8 +174,8 @@ export function convertEncoding(
   fromFormat: EncodingFormat,
   toFormat: EncodingFormat,
 ): string {
-  const Uint8Array = decode(data, fromFormat)
-  return encode(Uint8Array, toFormat)
+  const bytes = decode(data, fromFormat)
+  return encode(bytes, toFormat)
 }
 
 /**

@@ -444,11 +444,14 @@ export class LOAD_U32Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_U32 instruction', { registerA, address })
 
-    const bytes = [0, 1, 2, 3].map((i) =>
+    const Uint8Array = [0, 1, 2, 3].map((i) =>
       context.ram.readOctet(Number(address) + i),
     )
     const value =
-      (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0]
+      (Uint8Array[3] << 24) |
+      (Uint8Array[2] << 16) |
+      (Uint8Array[1] << 8) |
+      Uint8Array[0]
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -490,10 +493,14 @@ export class LOAD_I32Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_I32 instruction', { registerA, address })
 
-    const bytes = [0, 1, 2, 3].map((i) =>
+    const Uint8Array = [0, 1, 2, 3].map((i) =>
       context.ram.readOctet(Number(address) + i),
     )
-    let value = (bytes[3] << 24) | (bytes[2] << 16) | (bytes[1] << 8) | bytes[0]
+    let value =
+      (Uint8Array[3] << 24) |
+      (Uint8Array[2] << 16) |
+      (Uint8Array[1] << 8) |
+      Uint8Array[0]
     if (value & 0x80000000) value = value - 0x100000000 // sign extend
     const newRegisters = { ...context.registers }
     this.setRegisterValue(

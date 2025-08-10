@@ -1,14 +1,46 @@
 /**
  * Guarantee Serialization
  *
- * Implements guarantee encoding from Gray Paper Appendix D.2
- * encode[G](xtguarantees) - Variable-length guarantee sequence
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 146-157):
+ *
+ * encodeGuarantees(XT_guarantees) = encode(
+ *   var{⟨⟨XG_workreport, encode[4](XG_timeslot),
+ *        var{⟨⟨encode[2](v), s⟩ | ⟨v, s⟩ ∈ XG_credential⟩}⟩ |
+ *       ⟨XG_workreport, XG_timeslot, XG_credential⟩ ∈ XT_guarantees⟩}
+ * )
+ *
+ * Guarantees encode work report validity with validator credentials.
+ * Inner tuples contain variable-length sequences requiring discriminators.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Guarantees are validator attestations that work reports are valid.
+ * They provide the security foundation for JAM's compute validation.
+ *
+ * Guarantee structure:
+ * 1. **Work report**: The full work report being guaranteed
+ * 2. **Time slot** (4 bytes): When this guarantee was created
+ * 3. **Credentials**: List of validator signatures attesting validity
+ *
+ * Credential structure (nested):
+ * - **Validator index** (2 bytes): Which validator signed
+ * - **Signature**: Cryptographic signature over work report
+ *
+ * Key concepts:
+ * - Threshold security: Multiple validators must sign
+ * - Time bounds: Guarantees expire after certain slots
+ * - Slashing risk: Invalid guarantees can result in validator punishment
+ * - Economic finality: Guaranteed work reports become economically final
+ *
+ * The nested variable-length structure allows flexible numbers of
+ * validators to participate while maintaining efficient encoding.
  */
 
+import type { Credential, Guarantee } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
-import type { Credential, Guarantee, Uint8Array } from '../types'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
 
 /**
@@ -24,7 +56,7 @@ function encodeCredential(credential: Credential): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Value: encode[2](v)
-  parts.push(encodeFixedLength(credential.value, 2))
+  parts.push(encodeFixedLength(BigInt(credential.value), 2))
 
   // Signature: s (variable-length octet sequence)
   parts.push(encodeNatural(BigInt(credential.signature.length))) // Length prefix
@@ -71,7 +103,7 @@ function decodeCredential(data: Uint8Array): {
   currentData = signatureLengthRemaining.slice(signatureLengthNum)
 
   const credential: Credential = {
-    value: credentialValue,
+    value: Number(credentialValue),
     signature,
   }
 
@@ -97,7 +129,7 @@ function encodeGuarantee(guarantee: Guarantee): Uint8Array {
   parts.push(encodeWorkReport(guarantee.workReport))
 
   // Timeslot: encode[4](xg_timeslot)
-  parts.push(encodeFixedLength(guarantee.timeslot, 4))
+  parts.push(encodeFixedLength(BigInt(guarantee.timeslot), 4))
 
   // Credentials: var{sq{build{tuple{encode[2](v), s}}{tuple{v, s} orderedin xg_credential}}}
   parts.push(encodeSequenceGeneric(guarantee.credential, encodeCredential))
@@ -146,7 +178,7 @@ function decodeGuarantee(data: Uint8Array): {
 
   const guarantee: Guarantee = {
     workReport,
-    timeslot,
+    timeslot: Number(timeslot),
     credential,
   }
 
@@ -167,7 +199,7 @@ function decodeGuarantee(data: Uint8Array): {
  */
 export function encodeGuarantees(guarantees: Guarantee[]): Uint8Array {
   // Sort guarantees by work report as required by Gray Paper
-  // For simplicity, we'll sort by the authorizer hash which should be unique
+  // Sort by the authorizer hash which should be unique
   const sortedGuarantees = [...guarantees].sort((a, b) => {
     return a.workReport.authorizer.localeCompare(b.workReport.authorizer)
   })

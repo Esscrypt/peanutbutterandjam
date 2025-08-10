@@ -145,10 +145,10 @@ describe('Debug Tests', () => {
   describe('Core Encoding/Decoding', () => {
     it('should handle simple data correctly', () => {
       const coder = new JAMErasureCoder({ k: 3, n: 5 })
-      const data = new Uint8Array([1, 2, 3, 4, 5, 6]) // 6 bytes
+      const data = new Uint8Array([1, 2, 3, 4, 5, 6]) // 6 Uint8Array
 
       // For testing, we'll use a simpler approach
-      // Create data that's exactly 684 bytes (342 words * 2 bytes per word)
+      // Create data that's exactly 684 Uint8Array (342 words * 2 Uint8Array per word)
       const paddedData = new Uint8Array(684)
       paddedData.set(data)
 
@@ -158,7 +158,7 @@ describe('Debug Tests', () => {
       expect(encoded.n).toBe(5)
 
       const decoded = coder.decode(encoded, 3)
-      // The decoded data should be the full 684 bytes, so we need to extract the original 6 bytes
+      // The decoded data should be the full 684 Uint8Array, so we need to extract the original 6 Uint8Array
       expect(decoded.slice(0, data.length)).toEqual(data)
     })
 

@@ -1,18 +1,58 @@
 /**
  * Operand tuple serialization
  *
- * Implements Gray Paper operand tuple serialization
- * Reference: graypaper/text/operand_tuple.tex
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 279-287):
+ *
+ * encode[U](OT ∈ operandtuple) ≡ encode(
+ *   OT_packagehash,
+ *   OT_segroot,
+ *   OT_authorizer,
+ *   OT_payloadhash,
+ *   OT_gaslimit,
+ *   encodeResult(OT_result),
+ *   var{OT_authtrace}
+ * )
+ *
+ * Operand tuples represent work item execution results that are passed
+ * between services during PVM accumulation. The [U] parameter indicates
+ * the accumulation context for the encoding.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Operand tuples are the primary outputs of successful work item execution.
+ * They contain both the result data and metadata about execution.
+ *
+ * Operand Tuple structure:
+ * 1. **Package hash**: Hash of work package that produced this result
+ * 2. **Segment root**: Merkle root of data segments produced
+ * 3. **Authorizer**: Public key that authorized the original work package
+ * 4. **Payload hash**: Hash of input data that was processed
+ * 5. **Gas limit**: Maximum gas the work item was allowed to use
+ * 6. **Result**: The actual output data or error code (encodeResult)
+ * 7. **Auth trace** (variable): Execution trace of authorization logic
+ *
+ * Key concepts:
+ * - **Work item outputs**: Results from successful PVM execution
+ * - **Import/Export**: Other work items can import these as inputs
+ * - **Traceability**: Full audit trail from input to output
+ * - **Gas accounting**: Precise resource usage tracking
+ *
+ * Result encoding:
+ * - Success: var{output_data} with type 0
+ * - Errors: specific error codes (1=∞, 2=panic, 3=badexports, etc.)
+ *
+ * This structure enables work items to produce verifiable outputs
+ * that other work items can safely consume with full provenance.
  */
 
-import { bytesToHex, hexToUint8Array } from '@pbnj/core'
-import { encodeNatural } from '../core/natural-number'
+import { bytesToHex, hexToBytes } from '@pbnj/core'
 import type {
-  Uint8Array,
   OperandTuple,
-  WorkError,
+  SerializationWorkError as WorkError,
   WorkResult,
-} from '../types'
+} from '@pbnj/types'
+import { encodeNatural } from '../core/natural-number'
 
 /**
  * Encode operand tuple
@@ -24,19 +64,19 @@ export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Package hash (32 Uint8Array)
-  parts.push(hexToUint8Array(operandTuple.packageHash))
+  parts.push(hexToBytes(operandTuple.packageHash))
 
   // Segment root (32 Uint8Array)
-  parts.push(hexToUint8Array(operandTuple.segmentRoot))
+  parts.push(hexToBytes(operandTuple.segmentRoot))
 
   // Authorizer (32 Uint8Array)
-  parts.push(hexToUint8Array(operandTuple.authorizer))
+  parts.push(hexToBytes(operandTuple.authorizer))
 
   // Payload hash (32 Uint8Array)
-  parts.push(hexToUint8Array(operandTuple.payloadHash))
+  parts.push(hexToBytes(operandTuple.payloadHash))
 
   // Gas limit (8 Uint8Array)
-  parts.push(encodeNatural(operandTuple.gasLimit))
+  parts.push(encodeNatural(BigInt(operandTuple.gasLimit)))
 
   // Result (variable length)
   if (typeof operandTuple.result === 'string') {
@@ -46,10 +86,11 @@ export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
     parts.push(lengthEncoded)
     parts.push(errorUint8Array)
   } else {
-    // Success result (octet sequence)
-    const lengthEncoded = encodeNatural(BigInt(operandTuple.result.length))
+    // Success result (hex string, convert to bytes)
+    const resultBytes = operandTuple.result as Uint8Array
+    const lengthEncoded = encodeNatural(BigInt(resultBytes.length))
     parts.push(lengthEncoded)
-    parts.push(operandTuple.result)
+    parts.push(resultBytes)
   }
 
   // Auth trace (variable length)
@@ -121,9 +162,12 @@ export function decodeOperandTuple(data: Uint8Array): {
   try {
     const resultString = new TextDecoder().decode(resultData)
     if (
-      ['infinity', 'panic', 'bad_exports', 'oversize', 'bad', 'big'].includes(
-        resultString,
-      )
+      [
+        'oversize',
+        'bad_exports',
+        'invalid_result',
+        'gas_limit_exceeded',
+      ].includes(resultString)
     ) {
       result = resultString as WorkError
     } else {
@@ -149,7 +193,7 @@ export function decodeOperandTuple(data: Uint8Array): {
       segmentRoot: segRoot,
       authorizer,
       payloadHash,
-      gasLimit,
+      gasLimit: Number(gasLimit),
       result,
       authTrace,
     },

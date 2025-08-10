@@ -8,10 +8,14 @@
 import { z } from 'zod'
 
 // Hex string validation for 32-byte hashes
-const hex32Schema = z.string().regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a 32-byte hex string')
+const hex32Schema = z
+  .string()
+  .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a 32-byte hex string')
 
 // Hex string validation for 96-byte signatures
-const hex96Schema = z.string().regex(/^0x[a-fA-F0-9]{192}$/, 'Must be a 96-byte hex string')
+const hex96Schema = z
+  .string()
+  .regex(/^0x[a-fA-F0-9]{192}$/, 'Must be a 96-byte hex string')
 
 // Validator schema
 const validatorSchema = z.object({
@@ -43,10 +47,12 @@ export const genesisHeaderSchema = z.object({
 // Genesis state schema
 export const genesisStateSchema = z.object({
   state_root: hex32Schema,
-  keyvals: z.array(z.object({
-    key: z.string().regex(/^0x[a-fA-F0-9]*$/),
-    value: z.string().regex(/^0x[a-fA-F0-9]*$/),
-  })),
+  keyvals: z.array(
+    z.object({
+      key: z.string().regex(/^0x[a-fA-F0-9]*$/),
+      value: z.string().regex(/^0x[a-fA-F0-9]*$/),
+    }),
+  ),
 })
 
 // Complete genesis.json schema
@@ -63,30 +69,34 @@ export type GenesisJson = z.infer<typeof genesisJsonSchema>
 /**
  * Validate genesis header data
  */
-export function validateGenesisHeader(data: unknown): { success: true; data: GenesisHeader } | { success: false; error: string } {
+export function validateGenesisHeader(
+  data: unknown,
+): { success: true; data: GenesisHeader } | { success: false; error: string } {
   const result = genesisHeaderSchema.safeParse(data)
-  
+
   if (result.success) {
     return { success: true, data: result.data }
   }
-  
-  return { 
-    success: false, 
-    error: `Genesis header validation failed: ${result.error.message}` 
+
+  return {
+    success: false,
+    error: `Genesis header validation failed: ${result.error.message}`,
   }
 }
 
 /**
  * Parse and validate genesis header from JSON string
  */
-export function parseGenesisHeader(jsonString: string): { success: true; data: GenesisHeader } | { success: false; error: string } {
+export function parseGenesisHeader(
+  jsonString: string,
+): { success: true; data: GenesisHeader } | { success: false; error: string } {
   try {
     const parsed = JSON.parse(jsonString)
     return validateGenesisHeader(parsed)
   } catch (error) {
-    return { 
-      success: false, 
-      error: `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    return {
+      success: false,
+      error: `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}`,
     }
   }
 }
@@ -94,30 +104,34 @@ export function parseGenesisHeader(jsonString: string): { success: true; data: G
 /**
  * Validate complete genesis.json data
  */
-export function validateGenesisJson(data: unknown): { success: true; data: GenesisJson } | { success: false; error: string } {
+export function validateGenesisJson(
+  data: unknown,
+): { success: true; data: GenesisJson } | { success: false; error: string } {
   const result = genesisJsonSchema.safeParse(data)
-  
+
   if (result.success) {
     return { success: true, data: result.data }
   }
-  
-  return { 
-    success: false, 
-    error: `Genesis JSON validation failed: ${result.error.message}` 
+
+  return {
+    success: false,
+    error: `Genesis JSON validation failed: ${result.error.message}`,
   }
 }
 
 /**
  * Parse and validate complete genesis.json from JSON string
  */
-export function parseGenesisJson(jsonString: string): { success: true; data: GenesisJson } | { success: false; error: string } {
+export function parseGenesisJson(
+  jsonString: string,
+): { success: true; data: GenesisJson } | { success: false; error: string } {
   try {
     const parsed = JSON.parse(jsonString)
     return validateGenesisJson(parsed)
   } catch (error) {
-    return { 
-      success: false, 
-      error: `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}` 
+    return {
+      success: false,
+      error: `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}`,
     }
   }
-} 
+}

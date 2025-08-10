@@ -4,8 +4,8 @@
  * Provides bidirectional QUIC stream creation and message framing
  */
 
-import type { Bytes, StreamKind } from '@pbnj/types'
 import type { QUICStream } from '@infisical/quic'
+import type { Bytes, StreamKind } from '@pbnj/types'
 
 /**
  * Stream state
@@ -60,16 +60,17 @@ export interface MessageFrame {
  */
 export class QuicStreamManager {
   private streams: Map<string, StreamInfo> = new Map()
-  private streamHandlers: Map<StreamKind, (stream: StreamInfo, data: Bytes) => void> = new Map()
-
-  constructor() {}
+  private streamHandlers: Map<
+    StreamKind,
+    (stream: StreamInfo, data: Bytes) => void
+  > = new Map()
 
   /**
    * Register stream handler for a specific stream kind
    */
   registerStreamHandler(
     kind: StreamKind,
-    handler: (stream: StreamInfo, data: Bytes) => void
+    handler: (stream: StreamInfo, data: Bytes) => void,
   ): void {
     this.streamHandlers.set(kind, handler)
   }
@@ -81,10 +82,10 @@ export class QuicStreamManager {
     connectionId: string,
     kind: StreamKind,
     quicStream: QUICStream,
-    isInitiator: boolean = true
+    isInitiator = true,
   ): Promise<string> {
     const streamId = this.generateStreamId()
-    
+
     const streamInfo: StreamInfo = {
       id: streamId,
       kind,
@@ -115,7 +116,7 @@ export class QuicStreamManager {
    */
   async handleIncomingStream(
     connectionId: string,
-    quicStream: QUICStream
+    quicStream: QUICStream,
   ): Promise<void> {
     try {
       // Read stream kind byte
@@ -158,7 +159,9 @@ export class QuicStreamManager {
     }
 
     if (streamInfo.state !== StreamState.OPEN) {
-      throw new Error(`Stream ${streamId} is not open (state: ${streamInfo.state})`)
+      throw new Error(
+        `Stream ${streamId} is not open (state: ${streamInfo.state})`,
+      )
     }
 
     if (!streamInfo.quicStream) {
@@ -196,12 +199,13 @@ export class QuicStreamManager {
       if (streamInfo.quicStream) {
         await streamInfo.quicStream.destroy()
       }
-      
+
       streamInfo.state = StreamState.CLOSED
       console.log(`Stream ${streamId} closed`)
     } catch (error) {
       streamInfo.state = StreamState.ERROR
-      streamInfo.error = error instanceof Error ? error.message : 'Unknown error'
+      streamInfo.error =
+        error instanceof Error ? error.message : 'Unknown error'
       console.error(`Failed to close stream ${streamId}:`, error)
       throw error
     } finally {
@@ -221,7 +225,7 @@ export class QuicStreamManager {
    */
   getActiveStreams(): StreamInfo[] {
     return Array.from(this.streams.values()).filter(
-      stream => stream.state === StreamState.OPEN
+      (stream) => stream.state === StreamState.OPEN,
     )
   }
 
@@ -230,7 +234,7 @@ export class QuicStreamManager {
    */
   getStreamsByKind(kind: StreamKind): StreamInfo[] {
     return Array.from(this.streams.values()).filter(
-      stream => stream.kind === kind && stream.state === StreamState.OPEN
+      (stream) => stream.kind === kind && stream.state === StreamState.OPEN,
     )
   }
 
@@ -247,10 +251,15 @@ export class QuicStreamManager {
   /**
    * Send frame on stream
    */
-  private async sendFrame(streamId: string, frame: MessageFrame): Promise<void> {
+  private async sendFrame(
+    streamId: string,
+    frame: MessageFrame,
+  ): Promise<void> {
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo || !streamInfo.quicStream) {
-      throw new Error(`Stream ${streamId} not found or no QUIC stream available`)
+      throw new Error(
+        `Stream ${streamId} not found or no QUIC stream available`,
+      )
     }
 
     // Create buffer with length prefix and content
@@ -266,7 +275,9 @@ export class QuicStreamManager {
     const writer = streamInfo.quicStream.writable.getWriter()
     try {
       await writer.write(totalBuffer)
-      console.log(`Sent frame on stream ${streamId}: ${totalBuffer.length} bytes`)
+      console.log(
+        `Sent frame on stream ${streamId}: ${totalBuffer.length} bytes`,
+      )
     } finally {
       writer.releaseLock()
     }
@@ -280,13 +291,13 @@ export class QuicStreamManager {
     // UP stream kinds are numbered starting from 0
     // CE stream kinds are numbered starting from 128
     const reader = quicStream.readable.getReader()
-    
+
     try {
       const { value, done } = await reader.read()
       if (done || !value || value.length === 0) {
         throw new Error('Failed to read stream kind byte')
       }
-      
+
       // Return the first byte as the stream kind
       return value[0]
     } finally {
@@ -297,16 +308,21 @@ export class QuicStreamManager {
   /**
    * Send stream kind byte
    */
-  private async sendStreamKind(streamId: string, kind: StreamKind): Promise<void> {
+  private async sendStreamKind(
+    streamId: string,
+    kind: StreamKind,
+  ): Promise<void> {
     // Send single byte representing stream kind
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo || !streamInfo.quicStream) {
-      throw new Error(`Stream ${streamId} not found or no QUIC stream available`)
+      throw new Error(
+        `Stream ${streamId} not found or no QUIC stream available`,
+      )
     }
-    
+
     // Create a single byte buffer with the stream kind
     const kindBuffer = new Uint8Array([kind])
-    
+
     // Get the writable stream and send the byte
     const writer = streamInfo.quicStream.writable.getWriter()
     try {
@@ -320,10 +336,13 @@ export class QuicStreamManager {
   /**
    * Set up stream event handlers
    */
-  private setupStreamEventHandlers(streamId: string, quicStream: QUICStream): void {
+  private setupStreamEventHandlers(
+    streamId: string,
+    quicStream: QUICStream,
+  ): void {
     // Set up readable stream handler
     const reader = quicStream.readable.getReader()
-    
+
     const readChunk = async () => {
       try {
         const { value, done } = await reader.read()
@@ -340,16 +359,18 @@ export class QuicStreamManager {
         this.handleStreamError(streamId, error as Error)
       }
     }
-    
+
     // Start reading
     readChunk()
-    
+
     // Handle stream close when the stream is destroyed
-    quicStream.closedP.then(() => {
-      this.handleStreamClose(streamId)
-    }).catch((error) => {
-      this.handleStreamError(streamId, error as Error)
-    })
+    quicStream.closedP
+      .then(() => {
+        this.handleStreamClose(streamId)
+      })
+      .catch((error) => {
+        this.handleStreamError(streamId, error as Error)
+      })
   }
 
   /**
@@ -367,14 +388,17 @@ export class QuicStreamManager {
     // Parse message frame
     try {
       const frame = this.parseMessageFrame(data)
-      
+
       // Handle message based on stream kind
       const handler = this.streamHandlers.get(streamInfo.kind)
       if (handler) {
         handler(streamInfo, frame.content)
       }
     } catch (error) {
-      console.error(`Failed to parse message frame on stream ${streamId}:`, error)
+      console.error(
+        `Failed to parse message frame on stream ${streamId}:`,
+        error,
+      )
     }
   }
 
@@ -388,7 +412,7 @@ export class QuicStreamManager {
 
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const length = view.getUint32(0, true) // 32-bit little-endian
-    
+
     if (data.length < 4 + length) {
       throw new Error('Message frame incomplete')
     }
@@ -430,4 +454,4 @@ export class QuicStreamManager {
   private generateStreamId(): string {
     return `stream_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   }
-} 
+}

@@ -55,8 +55,8 @@ describe('Merklization', () => {
     it('should handle values of different lengths', () => {
       const input: TrieInput = {
         '645eece27fdce6fd3852790131a50dc5b2dd655a855421b88700e6eb43279ad9': '72', // 1 byte
-        '3dbc5f775f6156957139100c343bb5ae6589af7398db694ab6c60630a9ed0fcd': '4227b4a465084852cd87d8f23bec0db6fa7766b9685ab5e095ef9cda9e15e49d', // 32 bytes
-        'd44438ec54b3f4d9771a43ed435f21b53a4f1f42be4c34b5d998bb9d53adc517': '2bdea5ab5a70d42dbd29c5944a90aa6f1774815854a21d9af07a9ca98d936150c0' // > 32 bytes
+        '3dbc5f775f6156957139100c343bb5ae6589af7398db694ab6c60630a9ed0fcd': '4227b4a465084852cd87d8f23bec0db6fa7766b9685ab5e095ef9cda9e15e49d', // 32 Uint8Array
+        'd44438ec54b3f4d9771a43ed435f21b53a4f1f42be4c34b5d998bb9d53adc517': '2bdea5ab5a70d42dbd29c5944a90aa6f1774815854a21d9af07a9ca98d936150c0' // > 32 Uint8Array
       }
       const result = merklizeHex(input)
       // This should work without throwing errors
@@ -86,14 +86,14 @@ describe('Merklization', () => {
     })
 
     it('should implement leaf node encoding correctly (GP 287)', () => {
-      // Test embedded-value leaf (value <= 32 bytes)
+      // Test embedded-value leaf (value <= 32 Uint8Array)
       const embeddedInput: TrieInput = {
         '645eece27fdce6fd3852790131a50dc5b2dd655a855421b88700e6eb43279ad9': '72'
       }
       const embeddedResult = merklizeHex(embeddedInput)
       expect(embeddedResult).toBe('75978696ab7bd70492c2abbecf26fd03eb2c41e0d83daf968f45c20f566b9a9b')
 
-      // Test regular leaf (value > 32 bytes)
+      // Test regular leaf (value > 32 Uint8Array)
       const regularInput: TrieInput = {
         'd44438ec54b3f4d9771a43ed435f21b53a4f1f42be4c34b5d998bb9d53adc517': '2bdea5ab5a70d42dbd29c5944a90aa6f1774815854a21d9af07a9ca98d936150c0'
       }

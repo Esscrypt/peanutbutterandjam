@@ -176,18 +176,18 @@ export class BlockSubmitter {
     }
 
     // 1. Serialize header
-    const headerBytes = encodeBlockHeader(serializationHeader)
+    const headerUint8Array = encodeBlockHeader(serializationHeader)
 
     // 2. Serialize body (extrinsics)
     const extrinsicsData = block.body.map((ext) => ext.data)
-    const bodyBytes = encodeBlockBody({ extrinsics: extrinsicsData })
+    const bodyUint8Array = encodeBlockBody({ extrinsics: extrinsicsData })
 
     // 3. Concatenate header and body
     const serializedBlock = new Uint8Array(
-      headerBytes.length + bodyBytes.length,
+      headerUint8Array.length + bodyUint8Array.length,
     )
-    serializedBlock.set(headerBytes, 0)
-    serializedBlock.set(bodyBytes, headerBytes.length)
+    serializedBlock.set(headerUint8Array, 0)
+    serializedBlock.set(bodyUint8Array, headerUint8Array.length)
 
     return serializedBlock
   }
@@ -320,8 +320,8 @@ export class BlockSubmitter {
       sealSignature: block.header.signature as `0x${string}`,
     }
 
-    const headerBytes = encodeBlockHeader(serializationHeader)
-    return blake2bHash(headerBytes)
+    const headerUint8Array = encodeBlockHeader(serializationHeader)
+    return blake2bHash(headerUint8Array)
   }
 
   /**

@@ -1,13 +1,19 @@
-import { z, logger, bytesToHex } from '@pbnj/core'
+import { logger, z } from '@pbnj/core'
 import { createGenesisStateTrie, createStateKey } from '@pbnj/serialization'
-import type { GenesisState, ServiceAccount, SafroleState, Account, Validator } from '@pbnj/types'
+import type {
+  Account,
+  GenesisState,
+  SafroleState,
+  ServiceAccount,
+  Validator,
+} from '@pbnj/types'
 
 /**
  * Helper function to convert Uint8Array to hex without 0x prefix
  */
 function Uint8ArrayToHexNoPrefix(Uint8Array: Uint8Array): string {
   return Array.from(Uint8Array)
-    .map(b => b.toString(16).padStart(2, '0'))
+    .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
@@ -29,18 +35,31 @@ const ChainSpecConfigSchema = z.object({
           ),
         net_addr: z.string().min(1, 'Network address is required'),
         validator_index: z.number().int().min(0).optional().default(0),
-        stake: z.string().regex(/^\d+$/, 'Stake must be a numeric string').optional().default('1000000000000000000'),
+        stake: z
+          .string()
+          .regex(/^\d+$/, 'Stake must be a numeric string')
+          .optional()
+          .default('1000000000000000000'),
       }),
     )
     .min(1, 'At least one genesis validator is required'),
-  accounts: z.array(z.object({
-    address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Address must be a valid hex address'),
-    balance: z.string().regex(/^\d+$/, 'Balance must be a numeric string'),
-    nonce: z.number().int().min(0).optional().default(0),
-    isValidator: z.boolean().optional().default(false),
-    validatorKey: z.string().optional(),
-    stake: z.string().regex(/^\d+$/, 'Stake must be a numeric string').optional(),
-  })).optional(),
+  accounts: z
+    .array(
+      z.object({
+        address: z
+          .string()
+          .regex(/^0x[a-fA-F0-9]{40}$/, 'Address must be a valid hex address'),
+        balance: z.string().regex(/^\d+$/, 'Balance must be a numeric string'),
+        nonce: z.number().int().min(0).optional().default(0),
+        isValidator: z.boolean().optional().default(false),
+        validatorKey: z.string().optional(),
+        stake: z
+          .string()
+          .regex(/^\d+$/, 'Stake must be a numeric string')
+          .optional(),
+      }),
+    )
+    .optional(),
 })
 
 export type ChainSpecConfig = z.infer<typeof ChainSpecConfigSchema>
@@ -56,7 +75,10 @@ export interface ChainSpec {
 }
 
 export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
-  logger.info('Generating chain spec', { id: inputConfig.id, validatorsCount: inputConfig.genesis_validators.length })
+  logger.info('Generating chain spec', {
+    id: inputConfig.id,
+    validatorsCount: inputConfig.genesis_validators.length,
+  })
 
   // Validate input config
   const validatedConfig = ChainSpecConfigSchema.parse(inputConfig)
@@ -68,14 +90,14 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
   for (const validator of validatedConfig.genesis_validators) {
     try {
       const validatorIndex = validator.validator_index || 0
-      
+
       // Generate deterministic address from validator index
       const addressUint8Array = new Uint8Array(20)
       for (let i = 0; i < 20; i++) {
         addressUint8Array[i] = (validatorIndex + i) % 256
       }
       const address = `0x${Uint8ArrayToHexNoPrefix(addressUint8Array)}`
-      
+
       // Create validator entry
       const validatorEntry = {
         address,
@@ -84,9 +106,9 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
         isActive: true,
         altname: `validator-${validatorIndex}`,
       }
-      
+
       validators.push(validatorEntry)
-      
+
       // Add validator account to accounts
       accounts[address] = {
         address,
@@ -96,17 +118,16 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
         validatorKey: `0x${validator.bandersnatch}`,
         stake: BigInt(validator.stake),
       }
-      
-      logger.debug('Generated validator', { 
-        index: validatorIndex, 
-        address: validatorEntry.address, 
-        altname: validatorEntry.altname 
+
+      logger.debug('Generated validator', {
+        index: validatorIndex,
+        address: validatorEntry.address,
+        altname: validatorEntry.altname,
       })
-      
     } catch (error) {
-      logger.error('Failed to generate validator', { 
-        validator, 
-        error: error instanceof Error ? error.message : String(error) 
+      logger.error('Failed to generate validator', {
+        validator,
+        error: error instanceof Error ? error.message : String(error),
       })
       throw error
     }
@@ -123,27 +144,31 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
           preimages: new Map(),
           requests: new Map(),
           gratis: 0n,
-          codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+          codehash:
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
           minaccgas: 1000n,
           minmemogas: 100n,
           octets: 0n,
           items: 0,
           created: 0,
           lastacc: 0,
-          parent: 0
-        } as ServiceAccount
-      ])
+          parent: 0,
+        } as ServiceAccount,
+      ]),
     ) as Record<`0x${string}`, ServiceAccount>,
     validators,
     safrole: {
       epoch: 0,
       timeslot: 0,
-      entropy: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      entropy:
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
       pendingset: [],
-      epochroot: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      epochroot:
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
       sealtickets: [],
-      ticketaccumulator: '0x0000000000000000000000000000000000000000000000000000000000000000'
-    } as SafroleState
+      ticketaccumulator:
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+    } as SafroleState,
   }
 
   // Generate service accounts for each validator (Chapter 255) according to Gray Paper
@@ -159,26 +184,28 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
       preimages: new Map(),
       requests: new Map(),
       gratis: 0n,
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash:
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
       minaccgas: 1000n,
       minmemogas: 100n,
       octets: 0n,
       items: 0,
       created: 0,
       lastacc: 0,
-      parent: 0
+      parent: 0,
     }
-    
+
     // Create service account key (Chapter 255 with service ID) according to Gray Paper
     const serviceKey = createStateKey(255, i)
     const serviceKeyHex = `0x${Uint8ArrayToHexNoPrefix(serviceKey)}`
-    ;(genesisState.accounts as Record<string, ServiceAccount>)[serviceKeyHex] = serviceAccount
+    ;(genesisState.accounts as Record<string, ServiceAccount>)[serviceKeyHex] =
+      serviceAccount
   }
 
   // Generate genesis state trie according to Gray Paper specification
   // This includes chapters 1-16 and 255 (service accounts)
   const genesisStateTrie = createGenesisStateTrie(genesisState)
-  
+
   // Convert keys to match Polkajam format (remove 0x prefix)
   const convertedStateTrie: Record<string, string> = {}
   for (const [key, value] of Object.entries(genesisStateTrie)) {
@@ -201,5 +228,3 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
 
   return chainSpec
 }
-
-

@@ -1,32 +1,85 @@
 /**
  * State Serialization
  *
- * Implements Gray Paper state serialization for genesis state
- * Reference: graypaper/text/merklization.tex
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix C - State Merklization
+ * Formula (Equation 21-112):
+ *
+ * State-key constructor functions C:
+ * C: N₈ ∪ ⟨N₈, serviceid⟩ ∪ ⟨serviceid, blob⟩ → blob[31]
+ *
+ * State serialization T(σ):
+ * T(σ) ≡ {
+ *   C(2) ↦ encode(authqueue),
+ *   C(3) ↦ encode(var{⟨⟨RH_headerhash, RH_accoutlogsuperpeak, RH_stateroot, var{RH_reportedpackagehashes}⟩⟩}, mmrencode(accoutbelt)),
+ *   C(4) ↦ encode(pendingset, epochroot, discriminator(sealtickets), sealtickets, var{ticketaccumulator}),
+ *   C(5) ↦ encode(var{ordered(goodset)}, var{ordered(badset)}, var{ordered(wonkyset)}, var{ordered(offenders)}),
+ *   C(6) ↦ encode(entropy),
+ *   C(7) ↦ encode(stagingset),
+ *   C(8) ↦ encode(activeset),
+ *   C(9) ↦ encode(previousset),
+ *   C(10) ↦ encode(⟨maybe{⟨RS_workreport, encode[4](RS_timestamp)⟩}⟩),
+ *   C(11) ↦ encode[4](thetime),
+ *   C(12) ↦ encode(encode[4](manager, assigners, delegator, registrar), alwaysaccers),
+ *   C(13) ↦ encode(encode[4](valstatsaccumulator, valstatsprevious), corestats, servicestats),
+ *   ...
+ * }
+ *
+ * The serialization places all components of σ into a single mapping from
+ * 31-octet state-keys to indefinite-length octet sequences for Merklization.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * State serialization transforms JAM's complex state structure into a
+ * flat key-value mapping suitable for Merkle trie storage and commitment.
+ *
+ * State-key construction C():
+ * - **C(i)**: Simple index → 31-byte key starting with i
+ * - **C(i, s)**: Index + service → key encoding both values
+ * - **C(s, h)**: Service + hash → key for service-specific data
+ *
+ * Key state components:
+ * - **C(2)**: Authorization queue for pending authorizations
+ * - **C(3)**: Recent history of blocks and account logs
+ * - **C(4)**: Safrole consensus state (tickets, epoch data)
+ * - **C(5)**: Validator behavior tracking (good/bad/wonky sets)
+ * - **C(6)**: Entropy accumulator for randomness
+ * - **C(7-9)**: Validator sets (staging/active/previous)
+ * - **C(10)**: Pending work reports
+ * - **C(11)**: Current time slot
+ * - **C(12)**: Privileges and governance settings
+ * - **C(13)**: Statistics and metrics
+ * - **C(14-16)**: Work package state (ready/accumulated/last account)
+ * - **C(255, s)**: Service account data for service s
+ * - **C(s, ...)**: Service-specific storage, preimages, requests
+ *
+ * This flattening enables:
+ * - Efficient Merkle proof generation for any state component
+ * - Deterministic state root computation
+ * - Partial state synchronization
+ * - Compact state commitments (32-byte hash)
  */
 
-import { bytesToHex, hexToUint8Array } from '@pbnj/core'
+import { bytesToHex, hexToBytes } from '@pbnj/core'
+import type {
+  AccumulatedItem,
+  ActivityStats,
+  Address,
+  Dispute,
+  SerializationGenesisState as GenesisState,
+  Hash,
+  LastAccountOut,
+  Privileges,
+  ReadyItem,
+  SerializationSafroleState as SafroleState,
+  SafroleTicket,
+  ServiceAccount,
+  ServiceId,
+  StateTrie,
+  Timeslot,
+  WorkReport,
+} from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 import { encodeUint8Array } from '../core/sequence'
-import type { Uint8Array } from '../types'
-import type {
-  Hash,
-  Address,
-  Timeslot,
-  ServiceId,
-  SafroleTicket,
-  SafroleState,
-  Dispute,
-  WorkReport,
-  Privileges,
-  ActivityStats,
-  ReadyItem,
-  AccumulatedItem,
-  LastAccountOut,
-  ServiceAccount,
-  GenesisState,
-  StateTrie
-} from './types'
 
 /**
  * State key constructor function C from Gray Paper
@@ -46,7 +99,7 @@ export function createStateKey(
     const view = new DataView(serviceUint8Array.buffer)
     view.setUint32(0, serviceId, true) // little-endian
 
-    const hashUint8Array = hexToUint8Array(hash)
+    const hashUint8Array = hexToBytes(hash as `0x${string}`)
     const blakeHash = hashUint8Array.slice(0, 27) // Take first 27 Uint8Array
 
     key.set(serviceUint8Array, 0) // n₀, n₁, n₂, n₃
@@ -77,21 +130,21 @@ export function createStateKey(
  * Serialize authpool (Chapter 1)
  */
 export function serializeAuthpool(authpool: Address[]): Uint8Array {
-  return encodeUint8Array(authpool.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(authpool.map((hex) => hexToBytes(hex)))
 }
 
 /**
  * Serialize authqueue (Chapter 2)
  */
 export function serializeAuthqueue(authqueue: Address[]): Uint8Array {
-  return encodeUint8Array(authqueue.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(authqueue.map((hex) => hexToBytes(hex)))
 }
 
 /**
  * Serialize recent history (Chapter 3)
  */
 export function serializeRecent(recent: Hash[]): Uint8Array {
-  return encodeUint8Array(recent.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(recent.map((hex) => hexToBytes(hex as `0x${string}`)))
 }
 
 /**
@@ -102,22 +155,26 @@ export function serializeSafrole(safrole: SafroleState): Uint8Array {
   const parts: Uint8Array[] = []
 
   // pendingset
-  const pendingTickets = safrole.pendingset.map(ticket => serializeSafroleTicket(ticket))
+  const pendingTickets = safrole.pendingset.map((ticket) =>
+    serializeSafroleTicket(ticket),
+  )
   parts.push(encodeUint8Array(pendingTickets))
 
   // epochroot (32 Uint8Array)
-  parts.push(hexToUint8Array(safrole.epochroot))
+  parts.push(hexToBytes(safrole.epochroot))
 
   // sealtickets type (0 for tickets, 1 for keys)
   const sealticketsType = safrole.sealtickets.length > 0 ? 0n : 1n
   parts.push(encodeNatural(sealticketsType))
 
   // sealtickets
-  const sealTickets = safrole.sealtickets.map(ticket => serializeSafroleTicket(ticket))
+  const sealTickets = safrole.sealtickets.map((ticket) =>
+    serializeSafroleTicket(ticket),
+  )
   parts.push(encodeUint8Array(sealTickets))
 
   // ticketaccumulator
-  parts.push(hexToUint8Array(safrole.ticketaccumulator))
+  parts.push(hexToBytes(safrole.ticketaccumulator))
 
   return concatenateArrays(parts)
 }
@@ -127,22 +184,34 @@ export function serializeSafrole(safrole: SafroleState): Uint8Array {
  */
 function serializeSafroleTicket(ticket: SafroleTicket): Uint8Array {
   const parts: Uint8Array[] = []
-  
-  // hash
-  parts.push(hexToUint8Array(ticket.hash))
-  
+
+  // hash (use id if hash is not available)
+  if (ticket.hash) {
+    parts.push(hexToBytes(ticket.hash))
+  } else {
+    parts.push(hexToBytes(ticket.id))
+  }
+
   // owner
-  parts.push(hexToUint8Array(ticket.owner))
-  
+  if (ticket.owner) {
+    parts.push(hexToBytes(ticket.owner))
+  } else {
+    parts.push(new Uint8Array(20)) // Default empty address
+  }
+
   // stake
-  parts.push(encodeNatural(BigInt(ticket.stake)))
-  
+  if (ticket.stake) {
+    parts.push(encodeNatural(BigInt(ticket.stake)))
+  } else {
+    parts.push(encodeNatural(0n))
+  }
+
   // timestamp
   const timestampUint8Array = new Uint8Array(4)
   const view = new DataView(timestampUint8Array.buffer)
-  view.setUint32(0, ticket.timestamp, true)
+  view.setUint32(0, ticket.timestamp || 0, true)
   parts.push(timestampUint8Array)
-  
+
   return concatenateArrays(parts)
 }
 
@@ -150,11 +219,17 @@ function serializeSafroleTicket(ticket: SafroleTicket): Uint8Array {
  * Serialize disputes (Chapter 5)
  */
 export function serializeDisputes(disputes: Dispute[]): Uint8Array {
-  const disputeData = disputes.map(dispute => {
+  const disputeData = disputes.map((dispute) => {
     const parts: Uint8Array[] = []
-    parts.push(hexToUint8Array(dispute.hash))
-    parts.push(encodeNatural(BigInt(dispute.type)))
-    parts.push(dispute.data)
+    // Serialize validity disputes
+    parts.push(encodeNatural(BigInt(dispute.validityDisputes.length)))
+    dispute.validityDisputes.forEach((vd) => {
+      parts.push(hexToBytes(vd.reportHash))
+      parts.push(encodeNatural(BigInt(vd.epochIndex)))
+    })
+    // Serialize challenge and finality disputes as bytes
+    parts.push(dispute.challengeDisputes)
+    parts.push(dispute.finalityDisputes)
     return concatenateArrays(parts)
   })
   return encodeUint8Array(disputeData)
@@ -164,44 +239,46 @@ export function serializeDisputes(disputes: Dispute[]): Uint8Array {
  * Serialize entropy (Chapter 6)
  */
 export function serializeEntropy(entropy: Hash): Uint8Array {
-  return hexToUint8Array(entropy)
+  return hexToBytes(entropy as `0x${string}`)
 }
 
 /**
  * Serialize staging set (Chapter 7)
  */
 export function serializeStagingSet(stagingSet: Address[]): Uint8Array {
-  return encodeUint8Array(stagingSet.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(stagingSet.map((hex) => hexToBytes(hex)))
 }
 
 /**
  * Serialize active set (Chapter 8)
  */
 export function serializeActiveSet(activeSet: Address[]): Uint8Array {
-  return encodeUint8Array(activeSet.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(activeSet.map((hex) => hexToBytes(hex)))
 }
 
 /**
  * Serialize previous set (Chapter 9)
  */
 export function serializePreviousSet(previousSet: Address[]): Uint8Array {
-  return encodeUint8Array(previousSet.map(hex => hexToUint8Array(hex)))
+  return encodeUint8Array(previousSet.map((hex) => hexToBytes(hex)))
 }
 
 /**
  * Serialize reports (Chapter 10)
  */
 export function serializeReports(reports: WorkReport[]): Uint8Array {
-  const reportData = reports.map(report => {
+  const reportData = reports.map((report) => {
     const parts: Uint8Array[] = []
-    parts.push(hexToUint8Array(report.hash))
-    
+    // Use workPackageId as the hash identifier
+    parts.push(hexToBytes(report.workPackageId as `0x${string}`))
+
     const timestampUint8Array = new Uint8Array(4)
     const view = new DataView(timestampUint8Array.buffer)
     view.setUint32(0, report.timestamp, true)
     parts.push(timestampUint8Array)
-    
-    parts.push(report.data)
+
+    // Serialize the authTrace as the data
+    parts.push(report.authTrace)
     return concatenateArrays(parts)
   })
   return encodeUint8Array(reportData)
@@ -235,7 +312,9 @@ export function serializePrivileges(privileges: Privileges): Uint8Array {
   parts.push(privilegeUint8Array)
 
   // alwaysaccers
-  parts.push(encodeUint8Array(privileges.alwaysaccers.map(hex => hexToUint8Array(hex))))
+  parts.push(
+    encodeUint8Array(privileges.alwaysaccers.map((hex) => hexToBytes(hex))),
+  )
 
   return concatenateArrays(parts)
 }
@@ -267,9 +346,9 @@ export function serializeActivity(activity: ActivityStats): Uint8Array {
  * Serialize ready (Chapter 14)
  */
 export function serializeReady(ready: ReadyItem[]): Uint8Array {
-  const readyData = ready.map(item => {
+  const readyData = ready.map((item) => {
     const parts: Uint8Array[] = []
-    parts.push(hexToUint8Array(item.request))
+    parts.push(hexToBytes(item.request))
     parts.push(item.data)
     return concatenateArrays(parts)
   })
@@ -279,23 +358,27 @@ export function serializeReady(ready: ReadyItem[]): Uint8Array {
 /**
  * Serialize accumulated (Chapter 15)
  */
-export function serializeAccumulated(accumulated: AccumulatedItem[]): Uint8Array {
-  return encodeUint8Array(accumulated.map(item => item.data))
+export function serializeAccumulated(
+  accumulated: AccumulatedItem[],
+): Uint8Array {
+  return encodeUint8Array(accumulated.map((item) => item.data))
 }
 
 /**
  * Serialize last account out (Chapter 16)
  */
-export function serializeLastAccountOut(lastAccountOut: LastAccountOut[]): Uint8Array {
-  const lastAccountData = lastAccountOut.map(item => {
+export function serializeLastAccountOut(
+  lastAccountOut: LastAccountOut[],
+): Uint8Array {
+  const lastAccountData = lastAccountOut.map((item) => {
     const parts: Uint8Array[] = []
-    
+
     const serviceIdUint8Array = new Uint8Array(4)
     const view = new DataView(serviceIdUint8Array.buffer)
     view.setUint32(0, item.serviceId, true)
     parts.push(serviceIdUint8Array)
-    
-    parts.push(hexToUint8Array(item.hash))
+
+    parts.push(hexToBytes(item.hash))
     return concatenateArrays(parts)
   })
   return encodeUint8Array(lastAccountData)
@@ -312,7 +395,7 @@ export function serializeServiceAccount(account: ServiceAccount): Uint8Array {
   parts.push(encodeNatural(0n))
 
   // codehash (32 Uint8Array)
-  parts.push(hexToUint8Array(account.codehash))
+  parts.push(hexToBytes(account.codehash))
 
   // encode[8](balance, minaccgas, minmemogas, octets, gratis)
   const accountUint8Array = new Uint8Array(40) // 5 * 8 Uint8Array
@@ -404,7 +487,7 @@ export function createGenesisStateTrie(genesisState: GenesisState): StateTrie {
     assigners: 0,
     delegator: 0,
     registrar: 0,
-    alwaysaccers: []
+    alwaysaccers: [],
   })
   stateTrie[bytesToHex(privilegesKey)] = bytesToHex(privilegesData)
 
@@ -414,7 +497,7 @@ export function createGenesisStateTrie(genesisState: GenesisState): StateTrie {
     valstatsaccumulator: 0,
     valstatsprevious: 0,
     corestats: new Uint8Array(0),
-    servicestats: new Uint8Array(0)
+    servicestats: new Uint8Array(0),
   })
   stateTrie[bytesToHex(activityKey)] = bytesToHex(activityData)
 
@@ -435,9 +518,9 @@ export function createGenesisStateTrie(genesisState: GenesisState): StateTrie {
 
   // Chapter 255: accounts
   for (const [address, account] of Object.entries(genesisState.accounts)) {
-    const serviceId = parseInt(address.slice(2, 10), 16)
+    const serviceId = Number.parseInt(address.slice(2, 10), 16)
     const accountKey = createStateKey(255, serviceId)
-    const accountData = serializeServiceAccount(account)
+    const accountData = serializeServiceAccount(account as ServiceAccount)
     stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
   }
 
@@ -458,4 +541,4 @@ function concatenateArrays(arrays: Uint8Array[]): Uint8Array {
   }
 
   return result
-} 
+}

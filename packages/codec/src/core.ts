@@ -5,9 +5,6 @@
  */
 
 import { logger } from '@pbnj/core'
-import { Asn1Codec } from './formats/asn1'
-import { BinaryCodec } from './formats/binary'
-import { JsonCodec } from './formats/json'
 import type {
   Codec,
   CodecConfig,
@@ -15,6 +12,9 @@ import type {
   CodecValidationResult,
 } from '@pbnj/types'
 import { CodecError, DEFAULT_CODEC_CONFIG, EncodingFormat } from '@pbnj/types'
+import { Asn1Codec } from './formats/asn1'
+import { BinaryCodec } from './formats/binary'
+import { JsonCodec } from './formats/json'
 
 /**
  * Main codec implementation
@@ -307,7 +307,7 @@ export class JAMCodec<T> implements Codec<T> {
   }
 
   /**
-   * Get the size of data in bytes
+   * Get the size of data in Uint8Array
    */
   private getDataSize(data: T): number {
     if (data === null || data === undefined) {

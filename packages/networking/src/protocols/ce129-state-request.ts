@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting ranges of state trie data.
  */
 
-import type { 
-  Bytes, 
-  StateRequest, 
+import type {
+  Bytes,
+  StateRequest,
   StateResponse,
-  StreamInfo
+  StreamInfo,
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -72,23 +72,27 @@ export class StateRequestProtocol {
   async addStateNode(hash: Bytes, node: StateTrieNode): Promise<void> {
     const hashString = hash.toString()
     this.stateStore.set(hashString, node)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         const nodeData = {
           hash: Buffer.from(node.hash).toString('hex'),
           type: node.type,
-          children: node.children?.map(child => Buffer.from(child).toString('hex')),
+          children: node.children?.map((child) =>
+            Buffer.from(child).toString('hex'),
+          ),
           key: node.key ? Buffer.from(node.key).toString('hex') : undefined,
-          value: node.value ? Buffer.from(node.value).toString('hex') : undefined,
-          next: node.next ? Buffer.from(node.next).toString('hex') : undefined
+          value: node.value
+            ? Buffer.from(node.value).toString('hex')
+            : undefined,
+          next: node.next ? Buffer.from(node.next).toString('hex') : undefined,
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           3, // Service ID 3 for state trie
           Buffer.from(`state_node_${hashString}`),
-          Buffer.from(JSON.stringify(nodeData), 'utf8')
+          Buffer.from(JSON.stringify(nodeData), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist state node to database:', error)
@@ -102,14 +106,14 @@ export class StateRequestProtocol {
   async addKeyValue(key: Bytes, value: Bytes): Promise<void> {
     const keyString = key.toString()
     this.keyValueStore.set(keyString, value)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           3, // Service ID 3 for state trie
           Buffer.from(`kv_${keyString}`),
-          value
+          value,
         )
       } catch (error) {
         console.error('Failed to persist key-value pair to database:', error)
@@ -145,25 +149,31 @@ export class StateRequestProtocol {
       const hashString = hash.toString()
       const nodeData = await this.dbIntegration.getServiceStorage(
         3,
-        Buffer.from(`state_node_${hashString}`)
+        Buffer.from(`state_node_${hashString}`),
       )
-      
+
       if (nodeData) {
         const parsedData = JSON.parse(nodeData.toString())
         const node: StateTrieNode = {
           hash: Buffer.from(parsedData.hash, 'hex'),
           type: parsedData.type,
-          children: parsedData.children?.map((child: string) => Buffer.from(child, 'hex')),
+          children: parsedData.children?.map((child: string) =>
+            Buffer.from(child, 'hex'),
+          ),
           key: parsedData.key ? Buffer.from(parsedData.key, 'hex') : undefined,
-          value: parsedData.value ? Buffer.from(parsedData.value, 'hex') : undefined,
-          next: parsedData.next ? Buffer.from(parsedData.next, 'hex') : undefined
+          value: parsedData.value
+            ? Buffer.from(parsedData.value, 'hex')
+            : undefined,
+          next: parsedData.next
+            ? Buffer.from(parsedData.next, 'hex')
+            : undefined,
         }
-        
+
         // Cache in local store
         this.stateStore.set(hashString, node)
         return node
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get state node from database:', error)
@@ -185,15 +195,15 @@ export class StateRequestProtocol {
       const keyString = key.toString()
       const value = await this.dbIntegration.getServiceStorage(
         3,
-        Buffer.from(`kv_${keyString}`)
+        Buffer.from(`kv_${keyString}`),
       )
-      
+
       if (value) {
         // Cache in local store
         this.keyValueStore.set(keyString, value)
         return value
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get key-value pair from database:', error)
@@ -208,30 +218,39 @@ export class StateRequestProtocol {
     headerHash: Bytes,
     startKey: Bytes,
     endKey: Bytes,
-    maximumSize: number
+    maximumSize: number,
   ): StateRequest {
     return {
       headerHash,
       startKey,
       endKey,
-      maximumSize
+      maximumSize,
     }
   }
 
   /**
    * Process state request and generate response
    */
-  async processStateRequest(request: StateRequest): Promise<StateResponse | null> {
+  async processStateRequest(
+    request: StateRequest,
+  ): Promise<StateResponse | null> {
     try {
       // Get boundary nodes for the requested range
-      const boundaryNodes = await this.getBoundaryNodes(request.startKey, request.endKey)
-      
+      const boundaryNodes = await this.getBoundaryNodes(
+        request.startKey,
+        request.endKey,
+      )
+
       // Get key-value pairs in the requested range
-      const keyValuePairs = await this.getKeyValuePairs(request.startKey, request.endKey, request.maximumSize)
+      const keyValuePairs = await this.getKeyValuePairs(
+        request.startKey,
+        request.endKey,
+        request.maximumSize,
+      )
 
       return {
         boundaryNodes,
-        keyValuePairs
+        keyValuePairs,
       }
     } catch (error) {
       console.error('Failed to process state request:', error)
@@ -242,21 +261,24 @@ export class StateRequestProtocol {
   /**
    * Get boundary nodes for the requested range
    */
-  private async getBoundaryNodes(startKey: Bytes, endKey: Bytes): Promise<Bytes[]> {
+  private async getBoundaryNodes(
+    startKey: Bytes,
+    endKey: Bytes,
+  ): Promise<Bytes[]> {
     const boundaryNodes: Bytes[] = []
-    
+
     // Get path to start key
     const startPath = await this.getPathToKey(startKey)
     boundaryNodes.push(...startPath)
-    
+
     // Get path to end key
     const endPath = await this.getPathToKey(endKey)
     boundaryNodes.push(...endPath)
-    
+
     // Remove duplicates
     const uniqueNodes = new Set<string>()
     const result: Bytes[] = []
-    
+
     for (const node of boundaryNodes) {
       const hash = node.toString()
       if (!uniqueNodes.has(hash)) {
@@ -264,7 +286,7 @@ export class StateRequestProtocol {
         result.push(node)
       }
     }
-    
+
     return result
   }
 
@@ -272,41 +294,43 @@ export class StateRequestProtocol {
    * Get key-value pairs in the requested range
    */
   private async getKeyValuePairs(
-    startKey: Bytes, 
-    endKey: Bytes, 
-    maximumSize: number
+    startKey: Bytes,
+    endKey: Bytes,
+    maximumSize: number,
   ): Promise<Array<{ key: Bytes; value: Bytes }>> {
     const pairs: Array<{ key: Bytes; value: Bytes }> = []
-    
+
     // Iterate through all key-value pairs in local store
     for (const [keyStr, value] of this.keyValueStore.entries()) {
       const key = Buffer.from(keyStr, 'hex')
-      
+
       if (this.isKeyInRange(key, startKey, endKey)) {
         pairs.push({ key, value })
-        
+
         if (pairs.length >= maximumSize) {
           break
         }
       }
     }
-    
+
     // If we need more data, check database
     if (pairs.length < maximumSize && this.dbIntegration) {
       try {
-        const storage = await this.dbIntegration.getServiceAccountStore().getServiceStorage(3)
-        
+        const storage = await this.dbIntegration
+          .getServiceAccountStore()
+          .getServiceStorage(3)
+
         for (const item of storage) {
           if (item.storageKey.startsWith('kv_')) {
             const keyStr = item.storageKey.replace('kv_', '')
             const key = Buffer.from(keyStr, 'hex')
             const value = Buffer.from(item.storageValue, 'hex')
-            
+
             // Check if we already have this pair
-            const exists = pairs.some(pair => pair.key.toString() === keyStr)
+            const exists = pairs.some((pair) => pair.key.toString() === keyStr)
             if (!exists && this.isKeyInRange(key, startKey, endKey)) {
               pairs.push({ key, value })
-              
+
               if (pairs.length >= maximumSize) {
                 break
               }
@@ -317,7 +341,7 @@ export class StateRequestProtocol {
         console.error('Failed to get key-value pairs from database:', error)
       }
     }
-    
+
     // Sort by key
     return pairs.sort((a, b) => this.compareKeys(a.key, b.key))
   }
@@ -327,8 +351,8 @@ export class StateRequestProtocol {
    */
   private async getPathToKey(key: Bytes): Promise<Bytes[]> {
     const path: Bytes[] = []
-    let currentKey = key
-    
+    const _currentKey = key
+
     // This is a simplified implementation
     // In practice, you would traverse the state trie to find the path
     // For now, we'll return an empty path
@@ -342,7 +366,7 @@ export class StateRequestProtocol {
     const keyStr = key.toString()
     const startStr = startKey.toString()
     const endStr = endKey.toString()
-    
+
     return keyStr >= startStr && keyStr <= endStr
   }
 
@@ -352,19 +376,10 @@ export class StateRequestProtocol {
   private compareKeys(keyA: Bytes, keyB: Bytes): number {
     const strA = keyA.toString()
     const strB = keyB.toString()
-    
+
     if (strA < strB) return -1
     if (strA > strB) return 1
     return 0
-  }
-
-  /**
-   * Get root hash of state trie
-   */
-  private getRootHash(): Bytes {
-    // This would return the current state trie root hash
-    // For now, return a placeholder
-    return Buffer.from('0000000000000000000000000000000000000000000000000000000000000000', 'hex')
   }
 
   /**
@@ -420,7 +435,7 @@ export class StateRequestProtocol {
       headerHash,
       startKey,
       endKey,
-      maximumSize
+      maximumSize,
     }
   }
 
@@ -430,10 +445,10 @@ export class StateRequestProtocol {
   serializeStateResponse(response: StateResponse): Bytes {
     // Calculate total size
     let totalSize = 4 + 4 // number of boundary nodes + number of key-value pairs
-    
+
     // Size for boundary nodes
     totalSize += response.boundaryNodes.length * 32
-    
+
     // Size for key-value pairs
     for (const pair of response.keyValuePairs) {
       totalSize += 4 + pair.key.length + 4 + pair.value.length // key length + key + value length + value
@@ -526,14 +541,17 @@ export class StateRequestProtocol {
 
     return {
       boundaryNodes,
-      keyValuePairs
+      keyValuePairs,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<StateResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<StateResponse | null> {
     try {
       const request = this.deserializeStateRequest(data)
       return await this.processStateRequest(request)
@@ -542,4 +560,4 @@ export class StateRequestProtocol {
       return null
     }
   }
-} 
+}

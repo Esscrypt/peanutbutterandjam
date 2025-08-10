@@ -51,17 +51,21 @@ export interface DeserializationContext {
   options?: Record<string, unknown>
 }
 
-export interface FixedLengthSize {
-  size: number
-  isFixed: true
-}
+export type FixedLengthSize = 1 | 2 | 4 | 8 | 16 | 32
 
-export interface Encoder<T> {
-  encode(data: T): SerializationResult
-}
+// Additional basic types
+export type Balance = bigint
+export type Gas = bigint
+export type PublicKey = Bytes
+export type Signature = Bytes
+export type Address = `0x${string}` // 20-byte Ethereum-style address
+export type ServiceId = number // Service identifier
 
-export interface Decoder<_T> {
-  decode(data: Uint8Array): DeserializationResult
+export type Encoder<T> = (data: T) => Uint8Array
+
+export type Decoder<T> = (data: Uint8Array) => {
+  value: T
+  remaining: Uint8Array
 }
 
 export interface OptionalEncoder<T> {

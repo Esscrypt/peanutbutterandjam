@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting sequences of blocks.
  */
 
-import type { 
-  Bytes, 
-  BlockRequest, 
+import type {
+  BlockRequest,
   BlockResponse,
-  StreamInfo
+  Bytes,
+  StreamInfo,
 } from '@pbnj/types'
 import { BlockRequestDirection } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
@@ -41,8 +41,10 @@ export class BlockRequestProtocol {
     try {
       // Load blocks from database
       // We'll store blocks in service account storage (service ID 2 for blocks)
-      const storage = await this.dbIntegration.getServiceAccountStore().getServiceStorage(2)
-      
+      const storage = await this.dbIntegration
+        .getServiceAccountStore()
+        .getServiceStorage(2)
+
       for (const item of storage) {
         if (item.storageKey.startsWith('block_')) {
           const blockHash = item.storageKey.replace('block_', '')
@@ -63,14 +65,14 @@ export class BlockRequestProtocol {
   async addBlock(blockHash: Bytes, blockData: Bytes): Promise<void> {
     const hashString = blockHash.toString()
     this.blockStore.set(hashString, blockData)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           2, // Service ID 2 for blocks
           Buffer.from(`block_${hashString}`),
-          blockData
+          blockData,
         )
       } catch (error) {
         console.error('Failed to persist block to database:', error)
@@ -84,7 +86,7 @@ export class BlockRequestProtocol {
   async removeBlock(blockHash: Bytes): Promise<void> {
     const hashString = blockHash.toString()
     this.blockStore.delete(hashString)
-    
+
     // Note: We don't have a delete method in the current interface
     // For now, we'll mark it as removed by setting a special value
     if (this.dbIntegration) {
@@ -92,7 +94,7 @@ export class BlockRequestProtocol {
         await this.dbIntegration.setServiceStorage(
           2,
           Buffer.from(`block_${hashString}`),
-          Buffer.from('removed')
+          Buffer.from('removed'),
         )
       } catch (error) {
         console.error('Failed to remove block from database:', error)
@@ -128,15 +130,15 @@ export class BlockRequestProtocol {
       const hashString = blockHash.toString()
       const blockData = await this.dbIntegration.getServiceStorage(
         2,
-        Buffer.from(`block_${hashString}`)
+        Buffer.from(`block_${hashString}`),
       )
-      
+
       if (blockData && blockData.toString() !== 'removed') {
         // Cache in local store
         this.blockStore.set(hashString, blockData)
         return blockData
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get block from database:', error)
@@ -150,19 +152,21 @@ export class BlockRequestProtocol {
   createBlockRequest(
     headerHash: Bytes,
     direction: BlockRequestDirection,
-    maximumBlocks: number
+    maximumBlocks: number,
   ): BlockRequest {
     return {
       headerHash,
       direction,
-      maximumBlocks
+      maximumBlocks,
     }
   }
 
   /**
    * Process block request and generate response
    */
-  async processBlockRequest(request: BlockRequest): Promise<BlockResponse | null> {
+  async processBlockRequest(
+    request: BlockRequest,
+  ): Promise<BlockResponse | null> {
     const blocks: Bytes[] = []
     let currentHash = request.headerHash
     let blocksFound = 0
@@ -177,16 +181,18 @@ export class BlockRequestProtocol {
         if (!blockData) break
 
         // Check if block can be finalized
-        if (!await this.canBeFinalized(childHash)) break
+        if (!(await this.canBeFinalized(childHash))) break
 
         blocks.push(blockData)
         blocksFound++
         currentHash = childHash
       }
-    } else if (request.direction === BlockRequestDirection.DESCENDING_INCLUSIVE) {
+    } else if (
+      request.direction === BlockRequestDirection.DESCENDING_INCLUSIVE
+    ) {
       // Start with the given block and go up the chain
       let blockData = await this.getBlockFromDatabase(currentHash)
-      if (blockData && await this.canBeFinalized(currentHash)) {
+      if (blockData && (await this.canBeFinalized(currentHash))) {
         blocks.push(blockData)
         blocksFound++
       }
@@ -198,7 +204,7 @@ export class BlockRequestProtocol {
         blockData = await this.getBlockFromDatabase(parentHash)
         if (!blockData) break
 
-        if (!await this.canBeFinalized(parentHash)) break
+        if (!(await this.canBeFinalized(parentHash))) break
 
         blocks.push(blockData)
         blocksFound++
@@ -211,7 +217,7 @@ export class BlockRequestProtocol {
     }
 
     return {
-      blocks
+      blocks,
     }
   }
 
@@ -219,7 +225,7 @@ export class BlockRequestProtocol {
    * Find child block by examining block data
    * This is a simplified implementation - in practice, you'd parse the block header
    */
-  private async findChildBlock(parentHash: Bytes): Promise<Bytes | null> {
+  private async findChildBlock(_parentHash: Bytes): Promise<Bytes | null> {
     // This would require parsing block headers to find child relationships
     // For now, we'll return null as this is a placeholder implementation
     return null
@@ -229,7 +235,7 @@ export class BlockRequestProtocol {
    * Find parent block by examining block data
    * This is a simplified implementation - in practice, you'd parse the block header
    */
-  private async findParentBlock(childHash: Bytes): Promise<Bytes | null> {
+  private async findParentBlock(_childHash: Bytes): Promise<Bytes | null> {
     // This would require parsing block headers to find parent relationships
     // For now, we'll return null as this is a placeholder implementation
     return null
@@ -239,7 +245,7 @@ export class BlockRequestProtocol {
    * Check if block can be finalized
    * This is a simplified implementation - in practice, you'd check finality criteria
    */
-  private async canBeFinalized(blockHash: Bytes): Promise<boolean> {
+  private async canBeFinalized(_blockHash: Bytes): Promise<boolean> {
     // This would require checking finality criteria
     // For now, we'll assume all blocks can be finalized
     return true
@@ -289,7 +295,7 @@ export class BlockRequestProtocol {
     return {
       headerHash,
       direction,
-      maximumBlocks
+      maximumBlocks,
     }
   }
 
@@ -298,7 +304,8 @@ export class BlockRequestProtocol {
    */
   serializeBlockResponse(response: BlockResponse): Bytes {
     // Serialize according to JAMNP-S specification
-    const totalSize = 4 + response.blocks.reduce((size, block) => size + 4 + block.length, 0)
+    const totalSize =
+      4 + response.blocks.reduce((size, block) => size + 4 + block.length, 0)
     const buffer = new ArrayBuffer(totalSize)
     const view = new DataView(buffer)
     let offset = 0
@@ -347,14 +354,17 @@ export class BlockRequestProtocol {
     }
 
     return {
-      blocks
+      blocks,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<BlockResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<BlockResponse | null> {
     try {
       const request = this.deserializeBlockRequest(data)
       return await this.processBlockRequest(request)
@@ -363,4 +373,4 @@ export class BlockRequestProtocol {
       return null
     }
   }
-} 
+}

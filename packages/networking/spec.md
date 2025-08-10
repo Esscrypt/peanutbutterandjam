@@ -73,7 +73,7 @@ All validators in the previous, current, and next epochs should ensure they are 
 other such validators.
 
 The validators' IP-layer endpoints are given as IPv6/port combinations, to be found in the first 18
-bytes of validator metadata, with the first 16 bytes being the IPv6 address and the latter 2 being
+Uint8Array of validator metadata, with the first 16 Uint8Array being the IPv6 address and the latter 2 being
 a little endian representation of the port.
 
 **Strategy**: For all such pairwise connections, we assign a Preferred Initiator for the connection
@@ -135,7 +135,7 @@ identified protocol becomes active immediately after this byte is sent.
 ### Messages
 
 All stream protocols are specified in terms of _messages_. A message is transmitted in two parts.
-First, the size (in bytes) of the message content is transmitted, encoded as a little-endian 32-bit
+First, the size (in Uint8Array) of the message content is transmitted, encoded as a little-endian 32-bit
 unsigned integer. Second, the message content itself is transmitted.
 
 ### Notation
@@ -157,10 +157,10 @@ In the protocol descriptions below:
 - `len++` preceding a sequence indicates that the sequence should be explicitly prefixed by its
   length. If a sequence is not preceded by `len++`, the length is either fixed or implied by
   context. In the case of a message consisting of a single sequence, the length of the sequence is
-  implied by the message size in bytes. If the encoded size of an element of the sequence is fixed,
+  implied by the message size in Uint8Array. If the encoded size of an element of the sequence is fixed,
   the length of the sequence can be trivially calculated by dividing the message size by this size.
   Otherwise, the sequence length can be determined by reading and decoding elements one at a time
-  from the stream until the number of bytes read matches the size of the message.
+  from the stream until the number of Uint8Array read matches the size of the message.
 
 ### Common types
 
@@ -283,15 +283,15 @@ the given start key is not present in the state trie, the "path to the start key
 either at a fork node with an all-zeroes hash in the branch that would be taken for the start key,
 or at a leaf node with a different key.
 
-The total encoded size of the response should not exceed the given maximum size in bytes, unless
+The total encoded size of the response should not exceed the given maximum size in Uint8Array, unless
 the response contains only a single key/value pair. As such, the response may not cover the full
 requested range.
 
-Note that the keys in the response are only 31 bytes, as the final key byte is ignored by the
+Note that the keys in the response are only 31 Uint8Array, as the final key byte is ignored by the
 Merklization function.
 
 ```
-Key = [u8; 31] (First 31 bytes of key only)
+Key = [u8; 31] (First 31 Uint8Array of key only)
 Maximum Size = u32
 Boundary Node = As returned by B/L, defined in the State Merklization appendix of the GP
 Value = len++[u8]
@@ -321,7 +321,7 @@ on the wire; the difference is only in which step they are used for.
 The first step should be performed $\text{max}(\left\lfloor E / 60 \right\rfloor, 1)$ slots after
 the connectivity changes for a new epoch are applied (where $E$ is the number of slots in an
 epoch). The index of the proxy validator for a ticket is determined by interpreting the last 4
-bytes of the ticket's VRF output as a big-endian unsigned integer, modulo the number of validators.
+Uint8Array of the ticket's VRF output as a big-endian unsigned integer, modulo the number of validators.
 The proxy validator is selected from the next epoch's validator list. If the generating validator
 is chosen as the proxy validator, then the first step should effectively be skipped and the
 generating validator should distribute the ticket to the current validators itself, as per the

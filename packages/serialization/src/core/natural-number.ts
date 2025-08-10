@@ -1,12 +1,37 @@
 /**
  * Natural Number Serialization
  *
- * Implements fnencode: Nbits(64) → blob[1:9] from Gray Paper Appendix D.1
- * Variable-length encoding for natural numbers up to 2^64-1
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 30-38):
+ *
+ * fnencode: Nbits(64) → blob[1:9]
+ * x ↦ {
+ *   ⟨0⟩                                                    when x = 0
+ *   ⟨2^8-2^(8-l) + ⌊x/2^(8l)⌋⟩ ∥ encode[l](x mod 2^(8l)) when ∃l ∈ N₈: 2^(7l) ≤ x < 2^(7(l+1))
+ *   ⟨2^8-1⟩ ∥ encode[8](x)                                when x < 2^64
+ * }
+ *
+ * Implements variable-length encoding for natural numbers up to 2^64-1
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * This is JAM's space-efficient variable-length encoding for natural numbers.
+ * It uses a clever prefix scheme to minimize bytes while supporting large numbers:
+ *
+ * - Small numbers (0): Use just 1 byte [0x00]
+ * - Medium numbers (1-2^7): Use 2+ bytes with length-coded prefix
+ * - Large numbers (≥2^56): Use maximum 9 bytes with 0xFF prefix
+ *
+ * The encoding works by:
+ * 1. Determining how many bytes are needed (l)
+ * 2. Creating a prefix byte that encodes both the length and high bits
+ * 3. Following with l bytes of little-endian data
+ *
+ * This is more efficient than fixed 8-byte encoding for small numbers,
+ * which are common in blockchain operations (balances, indices, etc.).
  */
 
-import type { Natural, Uint8Array } from '@pbnj/types'
-import { GRAY_PAPER_CONSTANTS } from '@pbnj/types'
+import type { Natural } from '@pbnj/types'
 
 /**
  * Encode natural number using Gray Paper variable-length encoding

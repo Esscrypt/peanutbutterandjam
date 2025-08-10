@@ -5,7 +5,8 @@
  * Reference: Gray Paper network specifications
  */
 
-import type { Uint8Array } from './core'
+// Remove the problematic import - Uint8Array is a built-in type
+// import type { Uint8Array } from './core'
 
 /**
  * Network message types
@@ -195,7 +196,7 @@ export type AnyNetworkMessage =
   | PongMessage
 
 /**
- * Network peer information
+ * Network peer interface
  */
 export interface NetworkPeer {
   /** Peer ID */
@@ -225,7 +226,7 @@ export enum ConnectionStatus {
 }
 
 /**
- * Network statistics
+ * Network statistics interface
  */
 export interface NetworkStats {
   /** Total peers */
@@ -236,16 +237,16 @@ export interface NetworkStats {
   messagesSent: number
   /** Messages received */
   messagesReceived: number
-  /** Uint8Array sent */
-  Uint8ArraySent: number
-  /** Uint8Array received */
-  Uint8ArrayReceived: number
+  /** Bytes sent */
+  bytesSent: number
+  /** Bytes received */
+  bytesReceived: number
   /** Average latency */
   averageLatency: number
 }
 
 /**
- * Network configuration
+ * Network configuration interface
  */
 export interface NetworkConfig {
   /** Listen address */
@@ -264,328 +265,32 @@ export interface NetworkConfig {
   enableRelay: boolean
 }
 
-// ============================================================================
-// Safrole-specific network types
-// ============================================================================
-
 /**
- * Safrole network message types
+ * Peer interface
  */
-export enum SafroleMessageType {
-  // Block propagation
-  BLOCK_ANNOUNCE = 0x01,
-  BLOCK_REQUEST = 0x02,
-  BLOCK_RESPONSE = 0x03,
-
-  // State synchronization
-  STATE_REQUEST = 0x04,
-  STATE_RESPONSE = 0x05,
-
-  // Consensus messages
-  GRANDPA_VOTE = 0x06,
-  GRANDPA_COMMIT = 0x07,
-  BEEFY_COMMITMENT = 0x08,
-
-  // Work package distribution
-  WORK_PACKAGE_ANNOUNCE = 0x09,
-  WORK_PACKAGE_REQUEST = 0x0a,
-  WORK_PACKAGE_RESPONSE = 0x0b,
-
-  // Availability assurances
-  AVAILABILITY_ANNOUNCE = 0x0c,
-  AVAILABILITY_REQUEST = 0x0d,
-  AVAILABILITY_RESPONSE = 0x0e,
-
-  // Peer management
-  PEER_HANDSHAKE = 0x0f,
-  PEER_DISCONNECT = 0x10,
-
-  // Heartbeat
-  PING = 0x11,
-  PONG = 0x12,
-}
-
-/**
- * Safrole network message interface
- */
-export interface SafroleNetworkMessage {
-  id: string // Unique message ID
-  type: SafroleMessageType // Message type enum
-  payload: Uint8Array // Serialized payload
-  timestamp: number // Unix timestamp
-  signature?: string // Optional signature for authenticated messages
-}
-
-/**
- * Safrole block propagation messages
- */
-export interface SafroleBlockAnnounce {
-  header: any // Block header (simplified)
-  hash: string // Block hash
-  parentHash: string // Parent block hash
-  slot: number // Slot number
-  author: string // Author validator ID
-  isTicketed: boolean // Whether block uses ticket seal
-}
-
-export interface SafroleBlockRequest {
-  hash: string // Requested block hash
-  includeExtrinsics: boolean // Whether to include extrinsics
-  includeState: boolean // Whether to include state
-}
-
-export interface SafroleBlockResponse {
-  block: any // Full block data (simplified)
-  state?: any // Optional state data (simplified)
-}
-
-/**
- * Safrole state synchronization messages
- */
-export enum SafroleStateComponent {
-  SAFROLE = 0x01, // Safrole consensus state
-  VALIDATORS = 0x02, // Validator sets
-  ENTROPY = 0x03, // Entropy accumulator
-  TICKETS = 0x04, // Ticket accumulator
-  ACCOUNTS = 0x05, // Account state
-  REPORTS = 0x06, // Work reports
-}
-
-export interface SafroleStateRequest {
-  blockHash: string // Block hash to sync from
-  components: SafroleStateComponent[] // Which state components to request
-}
-
-export interface SafroleStateResponse {
-  blockHash: string // Block hash
-  state: any // Requested state components (simplified)
-  proof?: string // Optional Merkle proof
-}
-
-/**
- * Safrole consensus protocol messages
- */
-export interface SafroleGrandpaVote {
-  targetHash: string // Target block hash
-  targetNumber: number // Target block number
-  stateRoot: string // Posterior state root
-  signature: string // Validator signature
-  validatorIndex: number // Validator index
-}
-
-export interface SafroleGrandpaCommit {
-  targetHash: string // Committed block hash
-  targetNumber: number // Committed block number
-  stateRoot: string // Posterior state root
-  signatures: SafroleGrandpaVote[] // Aggregated signatures
-}
-
-export interface SafroleBeefyCommitment {
-  blockNumber: number // Block number
-  mmrRoot: string // MMR root
-  validatorSetId: number // Validator set ID
-  signatures: string[] // BLS aggregated signatures
-}
-
-/**
- * Safrole work package distribution messages
- */
-export interface SafroleWorkPackageAnnounce {
-  packageHash: string // Work package hash
-  size: number // Package size in Uint8Array
-  coreId: number // Assigned core ID
-  deadline: number // Processing deadline
-}
-
-export interface SafroleWorkPackageRequest {
-  packageHash: string // Work package hash
-  validatorId: string // Requesting validator ID
-}
-
-export interface SafroleWorkPackageResponse {
-  packageHash: string // Work package hash
-  data: Uint8Array // Package data
-  proof?: string // Optional availability proof
-}
-
-/**
- * Safrole availability protocol messages
- */
-export interface SafroleAvailabilityAnnounce {
-  packageHash: string // Work package hash
-  validatorId: string // Validator ID
-  available: boolean // Whether package is available
-  proof?: string // Optional availability proof
-}
-
-export interface SafroleAvailabilityRequest {
-  packageHash: string // Work package hash
-  validatorId: string // Requesting validator ID
-}
-
-export interface SafroleAvailabilityResponse {
-  packageHash: string // Work package hash
-  available: boolean // Whether package is available
-  proof?: string // Optional availability proof
-}
-
-/**
- * Safrole peer management messages
- */
-export interface SafrolePeerHandshake {
-  nodeId: string // Node identifier
-  validatorKey?: string // Validator key (if validator)
-  supportedProtocols: string[] // Supported protocol versions
-  capabilities: string[] // Node capabilities
-}
-
-export interface SafroleHandshakeResponse {
-  accepted: boolean // Whether handshake accepted
-  reason?: string // Rejection reason if applicable
-  supportedProtocols: string[] // Supported protocol versions
-}
-
-export interface SafrolePeerDisconnect {
-  reason: string // Disconnect reason
-  code: number // Disconnect code
-}
-
-/**
- * Safrole heartbeat messages
- */
-export interface SafrolePing {
-  nonce: number // Random nonce for response matching
-  timestamp: number // Current timestamp
-}
-
-export interface SafrolePong {
-  nonce: number // Echo of ping nonce
-  timestamp: number // Response timestamp
-}
-
-/**
- * Safrole connection configuration
- */
-export interface SafroleConnectionConfig {
-  maxPeers: number // Maximum peer connections
-  maxValidatorPeers: number // Maximum validator connections
-  handshakeTimeout: number // Handshake timeout (ms)
-  pingInterval: number // Ping interval (ms)
-  pingTimeout: number // Ping timeout (ms)
-}
-
-/**
- * Safrole peer information
- */
-export interface SafrolePeerInfo {
-  nodeId: string // Node identifier
-  validatorKey?: string // Validator key (if validator)
-  address: string // Network address
-  port: number // Network port
-  capabilities: string[] // Node capabilities
-  lastSeen: number // Last seen timestamp
-  isConnected: boolean // Whether currently connected
-}
-
-/**
- * Safrole network statistics
- */
-export interface SafroleNetworkStats {
-  totalPeers: number // Total known peers
-  connectedPeers: number // Currently connected peers
-  validatorPeers: number // Connected validator peers
-  messagesSent: number // Total messages sent
-  messagesReceived: number // Total messages received
-  Uint8ArraySent: number // Total Uint8Array sent
-  Uint8ArrayReceived: number // Total Uint8Array received
-}
-
-/**
- * Safrole message validation result
- */
-export interface SafroleMessageValidationResult {
-  isValid: boolean // Whether message is valid
-  errors: string[] // Validation errors
-  warnings: string[] // Validation warnings
-}
-
-/**
- * Network Types for JAM Protocol
- *
- * Network-related types and interfaces
- * Reference: Gray Paper network specifications
- */
-
-import type { Block, Hash, Peer } from '@pbnj/types'
-
-/**
- * Network message types
- */
-export enum NetworkMessageType {
-  /** Block announcement */
-  BLOCK_ANNOUNCEMENT = 'block_announcement',
-  /** Block request */
-  BLOCK_REQUEST = 'block_request',
-  /** Block response */
-  BLOCK_RESPONSE = 'block_response',
-  /** Transaction announcement */
-  TRANSACTION_ANNOUNCEMENT = 'transaction_announcement',
-  /** Transaction request */
-  TRANSACTION_REQUEST = 'transaction_request',
-  /** Transaction response */
-  TRANSACTION_RESPONSE = 'transaction_response',
-  /** Peer discovery */
-  PEER_DISCOVERY = 'peer_discovery',
-  /** Peer handshake */
-  PEER_HANDSHAKE = 'peer_handshake',
-  /** Peer disconnect */
-  PEER_DISCONNECT = 'peer_disconnect',
-  /** Heartbeat */
-  HEARTBEAT = 'heartbeat',
-}
-
-/**
- * Base network message
- */
-export interface NetworkMessage {
-  /** Message type */
-  type: NetworkMessageType
-  /** Message ID */
+export interface Peer {
+  /** Peer ID */
   id: string
-  /** Timestamp */
-  timestamp: number
-  /** Source peer ID */
-  sourcePeerId: string
-  /** Target peer ID (optional for broadcast) */
-  targetPeerId?: string
+  /** Peer address */
+  address: string
+  /** Peer port */
+  port: number
+  /** Peer public key */
+  publicKey: Uint8Array
+  /** Connection status */
+  connected: boolean
+  /** Last seen timestamp */
+  lastSeen: number
+  /** Peer capabilities */
+  capabilities: string[]
 }
 
 /**
- * Union type for all network messages
+ * Connection state interface
  */
-export type NetworkMessageUnion =
-  | BlockAnnouncementMessage
-  | BlockRequestMessage
-  | BlockResponseMessage
-  | TransactionAnnouncementMessage
-  | TransactionRequestMessage
-  | TransactionResponseMessage
-  | PeerDiscoveryMessage
-  | PeerHandshakeMessage
-  | PeerDisconnectMessage
-  | HeartbeatMessage
-
-
-/**
- * Network connection
- */
-export interface NetworkConnection {
-  /** Connection ID */
-  id: string
-  /** Peer information */
-  peer: Peer
-  /** Connection state */
-  state: ConnectionState
+export interface ConnectionState {
+  /** Connection status */
+  status: ConnectionStatus
   /** Connection established timestamp */
   establishedAt: number
   /** Last activity timestamp */

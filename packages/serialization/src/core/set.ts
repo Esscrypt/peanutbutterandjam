@@ -1,11 +1,38 @@
 /**
  * Set Serialization
  *
- * Implements set encoding from Gray Paper Appendix D.1
- * encode({a,b,c,...}) ≡ encode(a) ∥ encode(b) ∥ encode(c) ∥ ...
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 95-97):
+ *
+ * encode({a, b, c, ...}) ≡ encode(a) ∥ encode(b) ∥ encode(c) ∥ ...
+ * where a < b < c < ...
+ *
+ * For any values which are sets and don't already have a defined encoding,
+ * we define the serialization of a set as the serialization of the set's
+ * elements in proper order.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Set encoding is similar to sequence encoding but with automatic ordering.
+ * This ensures sets have deterministic serialization regardless of insertion order.
+ *
+ * Key differences from sequences:
+ * - Automatic sorting: elements are ordered before encoding
+ * - No duplicates: sets inherently contain unique elements
+ * - Order-independent: {A, B} == {B, A} after serialization
+ *
+ * Process:
+ * 1. Extract all elements from set
+ * 2. Sort elements using their encoded representations
+ * 3. Concatenate sorted encoded elements
+ *
+ * Example: {hash2, hash1} where hash1 < hash2 lexicographically
+ * - Ordered: [hash1, hash2]
+ * - Encoded: encode(hash1) ∥ encode(hash2)
+ *
+ * This is used for validator sets, peer sets, and other collections
+ * where order doesn't matter but deterministic encoding is required.
  */
-
-import type { Uint8Array } from '../types'
 
 /**
  * Encode set using Gray Paper set encoding

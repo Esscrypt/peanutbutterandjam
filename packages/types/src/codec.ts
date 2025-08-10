@@ -4,8 +4,6 @@
  * Core types for data encoding and decoding in the JAM protocol
  */
 
-import type { Bytes } from './core'
-
 /**
  * Supported encoding formats
  */
@@ -192,7 +190,7 @@ export interface FormatCodec<T> {
  * Base configuration interface
  */
 export interface BaseConfig {
-  /** Maximum data size in bytes */
+  /** Maximum data size in Uint8Array */
   maxDataSize: number
   /** Enable validation */
   enableValidation: boolean
@@ -251,7 +249,7 @@ export interface BinaryData {
   /** Data version */
   version: number
   /** Actual data */
-  data: Bytes
+  data: Uint8Array
   /** Checksum for data integrity */
   checksum: string
 }
@@ -279,7 +277,7 @@ export interface Asn1Data {
   /** ASN.1 length */
   length: number
   /** ASN.1 value */
-  value: Bytes
+  value: Uint8Array
   /** ASN.1 constructed flag */
   constructed: boolean
 }

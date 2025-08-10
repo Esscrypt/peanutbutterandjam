@@ -26,19 +26,16 @@ import {
   serializeAccumulated,
   serializeLastAccountOut
 } from '../state-serialization'
-import { bytesToHex } from '@pbnj/core'
+
 import type {
-  SafroleState,
+  SerializationSafroleState as SafroleState,
   SafroleTicket,
   Privileges,
   ActivityStats,
   ServiceAccount,
-  GenesisState,
+  SerializationGenesisState as GenesisState,
   Address,
   Hash,
-  PublicKey,
-  Balance,
-  Gas,
   Timeslot,
   ServiceId,
   Dispute,
@@ -46,7 +43,7 @@ import type {
   ReadyItem,
   AccumulatedItem,
   LastAccountOut
-} from '../types'
+} from '@pbnj/types'
 
 describe('State Serialization', () => {
   describe('createStateKey', () => {
@@ -65,14 +62,14 @@ describe('State Serialization', () => {
       expect(serviceKey[0]).toBe(255)
       
       // Verify service ID encoding
-      const serviceBytes = new Uint8Array(4)
-      const view = new DataView(serviceBytes.buffer)
+      const serviceUint8Array = new Uint8Array(4)
+      const view = new DataView(serviceUint8Array.buffer)
       view.setUint32(0, 12345, true)
       
-      expect(serviceKey[1]).toBe(serviceBytes[0])
-      expect(serviceKey[3]).toBe(serviceBytes[1])
-      expect(serviceKey[5]).toBe(serviceBytes[2])
-      expect(serviceKey[7]).toBe(serviceBytes[3])
+      expect(serviceKey[1]).toBe(serviceUint8Array[0])
+      expect(serviceKey[3]).toBe(serviceUint8Array[1])
+      expect(serviceKey[5]).toBe(serviceUint8Array[2])
+      expect(serviceKey[7]).toBe(serviceUint8Array[3])
     })
 
     it('should create hash key C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩', () => {
@@ -83,11 +80,11 @@ describe('State Serialization', () => {
       expect(hashKey.length).toBe(31)
       
       // Verify service ID encoding
-      const serviceBytes = new Uint8Array(4)
-      const view = new DataView(serviceBytes.buffer)
+      const serviceUint8Array = new Uint8Array(4)
+      const view = new DataView(serviceUint8Array.buffer)
       view.setUint32(0, serviceId, true)
       
-      expect(hashKey.slice(0, 4)).toEqual(serviceBytes)
+      expect(hashKey.slice(0, 4)).toEqual(serviceUint8Array)
     })
   })
 
@@ -111,6 +108,8 @@ describe('State Serialization', () => {
 
     it('should serialize runtime safrole state with tickets', () => {
       const ticket: SafroleTicket = {
+        id: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+        entryIndex: 0,
         hash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
         owner: '0x1234567890abcdef1234567890abcdef12345678',
         stake: '1000000000000000000',
@@ -251,7 +250,7 @@ describe('State Serialization', () => {
       const serialized = serializeServiceAccount(genesisAccount)
       
       // Should have: 0 + codehash(32) + encode[8](balance, minaccgas, minmemogas, octets, gratis) + encode[4](items, created, lastacc, parent)
-      // = 1 + 32 + 40 + 16 = 89 bytes
+      // = 1 + 32 + 40 + 16 = 89 Uint8Array
       expect(serialized.length).toBe(89)
     })
 
@@ -286,8 +285,8 @@ describe('State Serialization', () => {
       expect(serialized.length).toBe(89)
       
       // Verify balance encoding
-      const balanceBytes = serialized.slice(33, 41) // After 0 + codehash
-      const balanceView = new DataView(balanceBytes.buffer)
+      const balanceUint8Array = serialized.slice(33, 41) // After 0 + codehash
+      const balanceView = new DataView(balanceUint8Array.buffer)
       const decodedBalance = balanceView.getBigUint64(0, true)
       
       expect(decodedBalance).toBe(BigInt(runtimeAccount.balance))
@@ -355,9 +354,21 @@ describe('State Serialization', () => {
     it('should serialize disputes', () => {
       const disputes: Dispute[] = [
         {
-          hash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          type: 1,
-          data: new Uint8Array([1, 2, 3, 4])
+          validityDisputes: [
+            {
+              reportHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+              epochIndex: 1,
+              judgments: [
+                {
+                  validity: true,
+                  judgeIndex: 0,
+                  signature: new Uint8Array([1, 2, 3, 4])
+                }
+              ]
+            }
+          ],
+          challengeDisputes: new Uint8Array([1, 2, 3, 4]),
+          finalityDisputes: new Uint8Array([5, 6, 7, 8])
         }
       ]
       const serialized = serializeDisputes(disputes)
@@ -434,9 +445,31 @@ describe('State Serialization', () => {
     it('should serialize reports', () => {
       const reports: WorkReport[] = [
         {
-          hash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-          timestamp: 1234567890,
-          data: new Uint8Array([1, 2, 3, 4])
+          id: 'test-report',
+          workPackageId: 'test-package',
+          availabilitySpec: {
+            packageHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+            bundleLength: 1024,
+            erasureRoot: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+            segmentRoot: '0x9876543210abcdef9876543210abcdef9876543210abcdef9876543210abcdef',
+            segmentCount: 4
+          },
+          context: {
+            anchorhash: '0x1111111111111111111111111111111111111111111111111111111111111111',
+            anchorpoststate: '0x2222222222222222222222222222222222222222222222222222222222222222',
+            anchoraccoutlog: '0x3333333333333333333333333333333333333333333333333333333333333333',
+            lookupanchorhash: '0x4444444444444444444444444444444444444444444444444444444444444444',
+            lookupanchortime: 1234567890,
+            prerequisites: []
+          },
+          coreIndex: 0,
+          authorizer: '0x5555555555555555555555555555555555555555555555555555555555555555',
+          authTrace: new Uint8Array([1, 2, 3, 4]),
+          srLookup: new Map(),
+          digests: [],
+          authGasUsed: 1000,
+          author: '0x5555555555555555555555555555555555555555555555555555555555555555',
+          timestamp: 1234567890
         }
       ]
       const serialized = serializeReports(reports)
@@ -541,7 +574,7 @@ describe('State Serialization', () => {
       // Should have 16 chapters + 1 account = 17 entries
       expect(Object.keys(stateTrie).length).toBe(17)
 
-      // Verify all keys are 64 characters (31 bytes as hex + 0x prefix)
+      // Verify all keys are 64 characters (31 Uint8Array as hex + 0x prefix)
       for (const key of Object.keys(stateTrie)) {
         expect(key.length).toBe(64)
       }

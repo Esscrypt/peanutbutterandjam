@@ -19,7 +19,7 @@ export function createGenSpecCommand(args: string[]): void {
 
     const inputConfig = JSON.parse(readFileSync(inputFile, 'utf-8'))
     const chainSpec = generateChainSpec(inputConfig)
-    
+
     writeFileSync(outputFile, JSON.stringify(chainSpec, null, 2))
     logger.info(`Chain spec generated successfully: ${outputFile}`)
   } catch (error) {

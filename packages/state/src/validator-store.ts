@@ -1,15 +1,20 @@
-import { eq, and, desc } from 'drizzle-orm'
-import type { DatabaseConfig, ValidatorInfo } from '@pbnj/types'
-import type { ValidatorIndex, ValidatorMetadata, Bytes } from '@pbnj/types'
-import { validators, type Validator, type NewValidator } from './schema'
+import type { Bytes } from '@pbnj/types'
+import { and, eq } from 'drizzle-orm'
+import { type NewValidator, type Validator, validators } from './schema'
 
 /**
  * Validator store implementation
  */
 export class ValidatorStore {
-  private db: ReturnType<typeof import('./database').DatabaseManager.prototype.getDatabase>
+  private db: ReturnType<
+    typeof import('./database').DatabaseManager.prototype.getDatabase
+  >
 
-  constructor(db: ReturnType<typeof import('./database').DatabaseManager.prototype.getDatabase>) {
+  constructor(
+    db: ReturnType<
+      typeof import('./database').DatabaseManager.prototype.getDatabase
+    >,
+  ) {
     this.db = db
   }
 
@@ -17,9 +22,9 @@ export class ValidatorStore {
    * Store or update validator information
    */
   async upsertValidator(info: {
-    index: ValidatorIndex
+    index: number
     publicKey: Bytes
-    metadata: ValidatorMetadata
+    metadata: { endpoint: { host: string; port: number } }
     epoch: number
     isActive: boolean
   }): Promise<void> {
@@ -29,7 +34,7 @@ export class ValidatorStore {
       metadataHost: info.metadata.endpoint.host,
       metadataPort: info.metadata.endpoint.port,
       epoch: info.epoch,
-      isActive: info.isActive
+      isActive: info.isActive,
     }
 
     await this.db
@@ -43,15 +48,15 @@ export class ValidatorStore {
           metadataPort: validatorData.metadataPort,
           epoch: validatorData.epoch,
           isActive: validatorData.isActive,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       })
   }
 
   /**
    * Get validator information by index
    */
-  async getValidator(index: ValidatorIndex): Promise<Validator | null> {
+  async getValidator(index: number): Promise<Validator | null> {
     const result = await this.db
       .select()
       .from(validators)
@@ -86,10 +91,10 @@ export class ValidatorStore {
   /**
    * Deactivate a validator
    */
-  async deactivateValidator(index: ValidatorIndex): Promise<void> {
+  async deactivateValidator(index: number): Promise<void> {
     await this.db
       .update(validators)
       .set({ isActive: false, updatedAt: new Date() })
       .where(eq(validators.index, index))
   }
-} 
+}

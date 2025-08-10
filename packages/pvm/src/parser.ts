@@ -13,7 +13,7 @@ export class PVMParser implements Parser {
       if (data.length < 4) {
         return {
           success: false,
-          error: 'Instruction data too short (minimum 4 bytes required)',
+          error: 'Instruction data too short (minimum 4 Uint8Array required)',
         }
       }
 

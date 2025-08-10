@@ -5,7 +5,12 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { CodecConfig, Asn1Config, Asn1Data, FormatCodec } from '@pbnj/types'
+import type {
+  Asn1Config,
+  Asn1Data,
+  CodecConfig,
+  FormatCodec,
+} from '@pbnj/types'
 
 /**
  * ASN.1 codec for standard data serialization

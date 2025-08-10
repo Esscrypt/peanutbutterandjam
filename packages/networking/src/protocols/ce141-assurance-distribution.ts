@@ -5,18 +5,17 @@
  * This is a Common Ephemeral (CE) stream for distributing availability assurances.
  */
 
-import type { 
-  Bytes, 
-  AssuranceDistribution,
-  StreamInfo
-} from '@pbnj/types'
+import type { AssuranceDistribution, Bytes, StreamInfo } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Assurance distribution protocol handler
  */
 export class AssuranceDistributionProtocol {
-  private assurances: Map<string, { anchorHash: Bytes; bitfield: Bytes; signature: Bytes; timestamp: number }> = new Map()
+  private assurances: Map<
+    string,
+    { anchorHash: Bytes; bitfield: Bytes; signature: Bytes; timestamp: number }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -38,19 +37,33 @@ export class AssuranceDistributionProtocol {
 
     try {
       // Load assurances from database (service ID 10 for assurances)
-      console.log('Assurance distribution state loading - protocol not yet fully implemented')
+      console.log(
+        'Assurance distribution state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load assurance distribution state from database:', error)
+      console.error(
+        'Failed to load assurance distribution state from database:',
+        error,
+      )
     }
   }
 
   /**
    * Store assurance in local store and persist to database
    */
-  async storeAssurance(anchorHash: Bytes, bitfield: Bytes, signature: Bytes): Promise<void> {
+  async storeAssurance(
+    anchorHash: Bytes,
+    bitfield: Bytes,
+    signature: Bytes,
+  ): Promise<void> {
     const hashString = anchorHash.toString()
-    this.assurances.set(hashString, { anchorHash, bitfield, signature, timestamp: Date.now() })
-    
+    this.assurances.set(hashString, {
+      anchorHash,
+      bitfield,
+      signature,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
@@ -59,13 +72,13 @@ export class AssuranceDistributionProtocol {
           anchorHash: Buffer.from(anchorHash).toString('hex'),
           bitfield: Buffer.from(bitfield).toString('hex'),
           signature: Buffer.from(signature).toString('hex'),
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           10, // Service ID 10 for assurances
           Buffer.from(`assurance_${hashString}`),
-          Buffer.from(JSON.stringify(assuranceData), 'utf8')
+          Buffer.from(JSON.stringify(assuranceData), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist assurance to database:', error)
@@ -76,14 +89,26 @@ export class AssuranceDistributionProtocol {
   /**
    * Get assurance from local store
    */
-  getAssurance(anchorHash: Bytes): { anchorHash: Bytes; bitfield: Bytes; signature: Bytes; timestamp: number } | undefined {
+  getAssurance(anchorHash: Bytes):
+    | {
+        anchorHash: Bytes
+        bitfield: Bytes
+        signature: Bytes
+        timestamp: number
+      }
+    | undefined {
     return this.assurances.get(anchorHash.toString())
   }
 
   /**
    * Get assurance from database if not in local store
    */
-  async getAssuranceFromDatabase(anchorHash: Bytes): Promise<{ anchorHash: Bytes; bitfield: Bytes; signature: Bytes; timestamp: number } | null> {
+  async getAssuranceFromDatabase(anchorHash: Bytes): Promise<{
+    anchorHash: Bytes
+    bitfield: Bytes
+    signature: Bytes
+    timestamp: number
+  } | null> {
     if (this.getAssurance(anchorHash)) {
       return this.getAssurance(anchorHash) || null
     }
@@ -94,23 +119,23 @@ export class AssuranceDistributionProtocol {
       const hashString = anchorHash.toString()
       const assuranceData = await this.dbIntegration.getServiceStorage(
         10,
-        Buffer.from(`assurance_${hashString}`)
+        Buffer.from(`assurance_${hashString}`),
       )
-      
+
       if (assuranceData) {
         const parsedData = JSON.parse(assuranceData.toString())
         const assurance = {
           anchorHash: Buffer.from(parsedData.anchorHash, 'hex'),
           bitfield: Buffer.from(parsedData.bitfield, 'hex'),
           signature: Buffer.from(parsedData.signature, 'hex'),
-          timestamp: parsedData.timestamp
+          timestamp: parsedData.timestamp,
         }
-        
+
         // Cache in local store
         this.assurances.set(hashString, assurance)
         return assurance
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get assurance from database:', error)
@@ -121,12 +146,20 @@ export class AssuranceDistributionProtocol {
   /**
    * Process assurance distribution
    */
-  async processAssuranceDistribution(assurance: AssuranceDistribution): Promise<void> {
+  async processAssuranceDistribution(
+    assurance: AssuranceDistribution,
+  ): Promise<void> {
     try {
       // Store the assurance
-      await this.storeAssurance(assurance.anchorHash, assurance.bitfield, assurance.signature)
-      
-      console.log(`Processed assurance distribution for anchor hash: ${assurance.anchorHash.toString().substring(0, 16)}...`)
+      await this.storeAssurance(
+        assurance.anchorHash,
+        assurance.bitfield,
+        assurance.signature,
+      )
+
+      console.log(
+        `Processed assurance distribution for anchor hash: ${assurance.anchorHash.toString().substring(0, 16)}...`,
+      )
     } catch (error) {
       console.error('Failed to process assurance distribution:', error)
     }
@@ -135,11 +168,15 @@ export class AssuranceDistributionProtocol {
   /**
    * Create assurance distribution message
    */
-  createAssuranceDistribution(anchorHash: Bytes, bitfield: Bytes, signature: Bytes): AssuranceDistribution {
+  createAssuranceDistribution(
+    anchorHash: Bytes,
+    bitfield: Bytes,
+    signature: Bytes,
+  ): AssuranceDistribution {
     return {
       anchorHash,
       bitfield,
-      signature
+      signature,
     }
   }
 
@@ -197,19 +234,22 @@ export class AssuranceDistributionProtocol {
     return {
       anchorHash,
       bitfield,
-      signature
+      signature,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const assurance = this.deserializeAssuranceDistribution(data)
       await this.processAssuranceDistribution(assurance)
     } catch (error) {
-      console.error('Failed to handle assurance distribution stream data:', error)
+      console.error(
+        'Failed to handle assurance distribution stream data:',
+        error,
+      )
     }
   }
-} 
+}

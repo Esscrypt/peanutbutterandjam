@@ -6,11 +6,7 @@
  * CE 132: Proxy validator to all current validators
  */
 
-import type { 
-  Bytes, 
-  TicketDistribution,
-  StreamInfo
-} from '@pbnj/types'
+import type { Bytes, StreamInfo, TicketDistribution } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
@@ -40,7 +36,9 @@ export class TicketDistributionProtocol {
     try {
       // Load tickets from database (service ID 4 for tickets)
       // We'll implement this when the protocol is fully implemented
-      console.log('Ticket distribution state loading - protocol not yet fully implemented')
+      console.log(
+        'Ticket distribution state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
       console.error('Failed to load ticket state from database:', error)
     }
@@ -49,31 +47,37 @@ export class TicketDistributionProtocol {
   /**
    * Store ticket in local store and persist to database
    */
-  async storeTicket(epochIndex: number, ticket: { attempt: number; proof: Bytes }): Promise<void> {
+  async storeTicket(
+    epochIndex: number,
+    ticket: { attempt: number; proof: Bytes },
+  ): Promise<void> {
     const ticketHash = Buffer.from(`${epochIndex}_${ticket.attempt}`)
     const hashString = ticketHash.toString()
-    this.tickets.set(hashString, { ticket: ticket.proof, timestamp: Date.now() })
-    
+    this.tickets.set(hashString, {
+      ticket: ticket.proof,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           4, // Service ID 4 for tickets
           Buffer.from(`ticket_${hashString}`),
-          ticket.proof
+          ticket.proof,
         )
-        
+
         // Store metadata
         const metadata = {
           epochIndex,
           attempt: ticket.attempt,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           4,
           Buffer.from(`ticket_meta_${hashString}`),
-          Buffer.from(JSON.stringify(metadata), 'utf8')
+          Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist ticket to database:', error)
@@ -92,7 +96,10 @@ export class TicketDistributionProtocol {
   /**
    * Get ticket from database if not in local store
    */
-  async getTicketFromDatabase(epochIndex: number, attempt: number): Promise<Bytes | null> {
+  async getTicketFromDatabase(
+    epochIndex: number,
+    attempt: number,
+  ): Promise<Bytes | null> {
     if (this.getTicket(epochIndex, attempt)) {
       return this.getTicket(epochIndex, attempt) || null
     }
@@ -103,15 +110,18 @@ export class TicketDistributionProtocol {
       const hashString = `${epochIndex}_${attempt}`
       const ticketData = await this.dbIntegration.getServiceStorage(
         4,
-        Buffer.from(`ticket_${hashString}`)
+        Buffer.from(`ticket_${hashString}`),
       )
-      
+
       if (ticketData) {
         // Cache in local store
-        this.tickets.set(hashString, { ticket: ticketData, timestamp: Date.now() })
+        this.tickets.set(hashString, {
+          ticket: ticketData,
+          timestamp: Date.now(),
+        })
         return ticketData
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get ticket from database:', error)
@@ -122,12 +132,16 @@ export class TicketDistributionProtocol {
   /**
    * Process ticket distribution
    */
-  async processTicketDistribution(distribution: TicketDistribution): Promise<void> {
+  async processTicketDistribution(
+    distribution: TicketDistribution,
+  ): Promise<void> {
     try {
       // Store the ticket
       await this.storeTicket(distribution.epochIndex, distribution.ticket)
-      
-      console.log(`Processed ticket distribution for epoch ${distribution.epochIndex}, attempt ${distribution.ticket.attempt}`)
+
+      console.log(
+        `Processed ticket distribution for epoch ${distribution.epochIndex}, attempt ${distribution.ticket.attempt}`,
+      )
     } catch (error) {
       console.error('Failed to process ticket distribution:', error)
     }
@@ -136,10 +150,13 @@ export class TicketDistributionProtocol {
   /**
    * Create ticket distribution message
    */
-  createTicketDistribution(epochIndex: number, ticket: { attempt: number; proof: Bytes }): TicketDistribution {
+  createTicketDistribution(
+    epochIndex: number,
+    ticket: { attempt: number; proof: Bytes },
+  ): TicketDistribution {
     return {
       epochIndex,
-      ticket
+      ticket,
     }
   }
 
@@ -196,15 +213,15 @@ export class TicketDistributionProtocol {
       epochIndex,
       ticket: {
         attempt,
-        proof
-      }
+        proof,
+      },
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const distribution = this.deserializeTicketDistribution(data)
       await this.processTicketDistribution(distribution)
@@ -212,4 +229,4 @@ export class TicketDistributionProtocol {
       console.error('Failed to handle ticket distribution stream data:', error)
     }
   }
-} 
+}

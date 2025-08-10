@@ -10,7 +10,7 @@ export interface WebSocket {
 }
 
 // Basic types as defined in the specification
-export type Hash = Uint8Array // 32 bytes
+export type Hash = Uint8Array // 32 Uint8Array
 export type Slot = bigint // 0 to 2^32-1
 export type Blob = Uint8Array // arbitrary length
 export type ServiceId = number // 0 to 2^32-1

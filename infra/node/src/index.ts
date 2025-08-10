@@ -6,8 +6,8 @@
  */
 
 import { logger } from '@pbnj/core'
-import { MainServiceImpl } from './main-service'
 import type { MainServiceConfig } from './main-service'
+import { MainServiceImpl } from './main-service'
 
 /**
  * Default configuration for the JAM node
@@ -15,7 +15,9 @@ import type { MainServiceConfig } from './main-service'
 const defaultConfig: MainServiceConfig = {
   blockAuthoring: {
     networkId: 'jam-network',
-    validatorKey: process.env['VALIDATOR_KEY'] || '0x0000000000000000000000000000000000000000000000000000000000000000',
+    validatorKey:
+      process.env['VALIDATOR_KEY'] ||
+      '0x0000000000000000000000000000000000000000000000000000000000000000',
     slotDuration: 6000, // 6 seconds
     epochLength: 600, // 600 slots
     maxExtrinsicsPerBlock: 1000,
@@ -41,11 +43,13 @@ const defaultConfig: MainServiceConfig = {
     },
   },
   networking: {
-    validatorIndex: parseInt(process.env['VALIDATOR_INDEX'] || '0'),
+    validatorIndex: Number.parseInt(process.env['VALIDATOR_INDEX'] || '0'),
     nodeType: process.env['NODE_TYPE'] || 'validator',
     listenAddress: process.env['LISTEN_ADDRESS'] || '0.0.0.0',
-    listenPort: parseInt(process.env['LISTEN_PORT'] || '30333'),
-    chainHash: process.env['CHAIN_HASH'] || '0x0000000000000000000000000000000000000000000000000000000000000000',
+    listenPort: Number.parseInt(process.env['LISTEN_PORT'] || '30333'),
+    chainHash:
+      process.env['CHAIN_HASH'] ||
+      '0x0000000000000000000000000000000000000000000000000000000000000000',
     isBuilder: process.env['IS_BUILDER'] === 'true',
   },
   nodeId: process.env['NODE_ID'] || 'jam-node-1',
@@ -67,7 +71,6 @@ async function main(): Promise<void> {
     // Create and run the main service
     const mainService = new MainServiceImpl(defaultConfig)
     await mainService.run()
-
   } catch (error) {
     logger.error('Failed to start JAM node', { error })
     process.exit(1)

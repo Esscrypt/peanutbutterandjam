@@ -366,7 +366,7 @@ export interface BlockAuthoringService {
   // Utility methods
   getMetrics(): BlockAuthoringMetrics
   resetMetrics(): void
-  
+
   // Service lifecycle
   start(): Promise<boolean>
   stop(): Promise<void>

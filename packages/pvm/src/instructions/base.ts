@@ -108,21 +108,21 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   }
 
   /**
-   * Get 64-bit immediate value (8 bytes)
+   * Get 64-bit immediate value (8 Uint8Array)
    */
   protected getImmediate64(operands: number[], startIndex = 1): bigint {
     return this.getImmediateValue(operands, startIndex, 8)
   }
 
   /**
-   * Get 32-bit immediate value (4 bytes)
+   * Get 32-bit immediate value (4 Uint8Array)
    */
   protected getImmediate32(operands: number[], startIndex = 1): number {
     return Number(this.getImmediateValue(operands, startIndex, 4))
   }
 
   /**
-   * Get 16-bit immediate value (2 bytes)
+   * Get 16-bit immediate value (2 Uint8Array)
    */
   protected getImmediate16(operands: number[], startIndex = 1): number {
     return Number(this.getImmediateValue(operands, startIndex, 2))

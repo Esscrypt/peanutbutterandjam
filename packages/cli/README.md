@@ -173,7 +173,7 @@ bun run test:watch
 
 2. **"Invalid hex string"**
    - Use valid hexadecimal characters (0-9, a-f, A-F)
-   - Ensure even length (complete bytes)
+   - Ensure even length (complete Uint8Array)
 
 3. **"Port already in use"**
    - Change port: `--port 40001`

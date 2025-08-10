@@ -4,7 +4,6 @@
  * Implements gas metering as specified in Gray Paper
  */
 
-import { logger } from '@pbnj/core'
 import type { Gas } from '@pbnj/types'
 import { PVM_CONSTANTS } from '@pbnj/types'
 

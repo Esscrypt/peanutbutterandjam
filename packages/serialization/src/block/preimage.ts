@@ -1,14 +1,45 @@
 /**
  * Preimage Serialization
  *
- * Implements preimage encoding from Gray Paper Appendix D.2
- * encode[P](xtpreimages) - Variable-length preimage sequence
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 139-144):
+ *
+ * encodePreimages(XT_preimages) = encode(
+ *   var{⟨⟨encode[4](XP_serviceindex), var{XP_data}⟩ |
+ *       ⟨XP_serviceindex, XP_data⟩ ∈ XT_preimages⟩}
+ * )
+ *
+ * Inner tuples contain variable-length sequence terms which need
+ * length discriminators (var{}).
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Preimages are data blobs that work packages reference by hash.
+ * This allows work packages to be small while still accessing large data.
+ *
+ * Preimage structure:
+ * 1. **Service index** (4 bytes): Which service this preimage belongs to
+ * 2. **Data** (variable): The actual preimage data blob
+ *
+ * Key concepts:
+ * - Hash-based addressing: Work packages store hashes, blocks store data
+ * - Service isolation: Each service has its own preimage namespace
+ * - Variable size: Preimages can be small configs or large datasets
+ * - Length prefixing: var{XP_data} allows parser to know data size
+ *
+ * Example flow:
+ * 1. Work package references hash(data) for service 5
+ * 2. Block includes preimage entry: service=5, data=original_data
+ * 3. PVM can resolve hash to actual data during execution
+ *
+ * This design enables efficient data availability while keeping
+ * work package sizes manageable.
  */
 
+import type { Preimage } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
-import type { Uint8Array, Preimage } from '../types'
 
 /**
  * Encode single preimage using Gray Paper encoding
@@ -23,7 +54,7 @@ function encodePreimage(preimage: Preimage): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Service index: encode[4](xp_serviceindex)
-  parts.push(encodeFixedLength(preimage.serviceIndex, 4))
+  parts.push(encodeFixedLength(BigInt(preimage.serviceIndex), 4))
 
   // Data: var{xp_data} (variable-length octet sequence)
   parts.push(encodeNatural(BigInt(preimage.data.length))) // Length prefix
@@ -70,7 +101,7 @@ function decodePreimage(data: Uint8Array): {
   currentData = dataLengthRemaining.slice(dataLengthNum)
 
   const preimage: Preimage = {
-    serviceIndex,
+    serviceIndex: Number(serviceIndex),
     data: preimageData,
   }
 

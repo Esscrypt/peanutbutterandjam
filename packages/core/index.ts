@@ -3,11 +3,10 @@ export {
   bytesToBigInt,
   bytesToHex,
   type Hex,
-  hexToBigInt
+  hexToBigInt,
 } from 'viem'
 export * from './src/logger'
-export * from './src/utils'
-// Re-export buffer utilities
-export { BufferUtils } from './src/utils/buffer'
-export * from './src/zod'
 export * from './src/merklization'
+export * from './src/utils'
+// Buffer utilities moved to individual exports
+export * from './src/zod'

@@ -12,7 +12,7 @@ export function parseArgs(args: string[]): ParsedArgs {
 
   while (i < args.length) {
     const arg = args[i]
-    
+
     if (arg.startsWith('--')) {
       // Long option
       const key = arg.slice(2)
@@ -43,6 +43,10 @@ export function parseArgs(args: string[]): ParsedArgs {
   return result
 }
 
-export function getOption(args: ParsedArgs, key: string, defaultValue?: any): any {
+export function getOption(
+  args: ParsedArgs,
+  key: string,
+  defaultValue?: any,
+): any {
   return args[key] !== undefined ? args[key] : defaultValue
-} 
+}

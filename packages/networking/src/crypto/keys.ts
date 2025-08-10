@@ -5,7 +5,11 @@
  */
 
 import type { Bytes } from '@pbnj/types'
-import { generateKeyPair as generateEd25519KeyPair, sign, verify } from '@stablelib/ed25519'
+import {
+  generateKeyPair as generateEd25519KeyPair,
+  sign,
+  verify,
+} from '@stablelib/ed25519'
 
 /**
  * Key pair structure
@@ -22,7 +26,7 @@ export function generateKeyPair(): KeyPair {
   const keyPair = generateEd25519KeyPair()
   return {
     publicKey: keyPair.publicKey,
-    privateKey: keyPair.secretKey
+    privateKey: keyPair.secretKey,
   }
 }
 
@@ -36,6 +40,10 @@ export function signMessage(privateKey: Bytes, message: Bytes): Bytes {
 /**
  * Verify Ed25519 signature
  */
-export function verifySignature(publicKey: Bytes, message: Bytes, signature: Bytes): boolean {
+export function verifySignature(
+  publicKey: Bytes,
+  message: Bytes,
+  signature: Bytes,
+): boolean {
   return verify(publicKey, message, signature)
-} 
+}

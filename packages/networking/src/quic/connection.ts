@@ -4,10 +4,14 @@
  * Provides QUIC connection establishment and lifecycle management
  */
 
-import type { ConnectionEndpoint } from '@pbnj/types'
-import { QUICServer, QUICClient, QUICConnection } from '@infisical/quic'
+import { QUICClient, type QUICConnection, QUICServer } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
-import type { QUICServerCrypto, QUICClientCrypto, QUICConfig } from '@infisical/quic/dist/types'
+import type {
+  QUICClientCrypto,
+  QUICConfig,
+  QUICServerCrypto,
+} from '@infisical/quic/dist/types'
+import type { ConnectionEndpoint } from '@pbnj/types'
 
 /**
  * QUIC connection state
@@ -72,14 +76,17 @@ export class QuicConnectionManager {
   /**
    * Create QUIC server with proper configuration
    */
-  private async createServer(crypto: QUICServerCrypto, config: QUICConfig): Promise<QUICServer> {
+  private async createServer(
+    crypto: QUICServerCrypto,
+    config: QUICConfig,
+  ): Promise<QUICServer> {
     const server = new QUICServer({
       crypto,
       config: {
         ...config,
         key: new Uint8Array(32), // Required for server
-        cert: new Uint8Array(32) // Required for server
-      }
+        cert: new Uint8Array(32), // Required for server
+      },
     })
     return server
   }
@@ -89,7 +96,7 @@ export class QuicConnectionManager {
    */
   async connectToPeer(
     endpoint: ConnectionEndpoint,
-    tlsConfig: QUICConfig
+    tlsConfig: QUICConfig,
   ): Promise<string> {
     try {
       // Create client crypto
@@ -100,8 +107,8 @@ export class QuicConnectionManager {
             const randomData = new Uint8Array(data.byteLength)
             crypto.getRandomValues(randomData)
             new Uint8Array(data).set(randomData)
-          }
-        }
+          },
+        },
       }
 
       // Create client with target endpoint
@@ -109,9 +116,9 @@ export class QuicConnectionManager {
         host: endpoint.host,
         port: endpoint.port,
         crypto: clientCrypto,
-        config: tlsConfig
+        config: tlsConfig,
       })
-      
+
       // Get the QUIC connection
       const quicConnection = client.connection
 
@@ -142,30 +149,37 @@ export class QuicConnectionManager {
   async startListening(
     address: string,
     port: number,
-    tlsConfig: QUICConfig
+    tlsConfig: QUICConfig,
   ): Promise<void> {
     try {
       // Create server crypto
       const serverCrypto: QUICServerCrypto = {
         key: new ArrayBuffer(32), // Placeholder key
         ops: {
-          sign: async (_key: ArrayBuffer, _data: ArrayBuffer): Promise<ArrayBuffer> => {
+          sign: async (
+            _key: ArrayBuffer,
+            _data: ArrayBuffer,
+          ): Promise<ArrayBuffer> => {
             // Placeholder signing
             return new ArrayBuffer(64)
           },
-          verify: async (_key: ArrayBuffer, _data: ArrayBuffer, _sig: ArrayBuffer): Promise<boolean> => {
+          verify: async (
+            _key: ArrayBuffer,
+            _data: ArrayBuffer,
+            _sig: ArrayBuffer,
+          ): Promise<boolean> => {
             // Placeholder verification
             return true
-          }
-        }
+          },
+        },
       }
 
       // Create server
       this.server = await this.createServer(serverCrypto, tlsConfig)
-      
+
       // Start server
       await this.server.start()
-      
+
       console.log(`QUIC server listening on ${address}:${port}`)
     } catch (error) {
       console.error('Failed to start QUIC server:', error)
@@ -180,7 +194,9 @@ export class QuicConnectionManager {
   async createStream(connectionId: string): Promise<QUICStream> {
     const connectionInfo = this.connections.get(connectionId)
     if (!connectionInfo || !connectionInfo.quicConnection) {
-      throw new Error(`Connection ${connectionId} not found or no QUIC connection available`)
+      throw new Error(
+        `Connection ${connectionId} not found or no QUIC connection available`,
+      )
     }
 
     // JAMNP-S specification requires bidirectional streams
@@ -197,7 +213,10 @@ export class QuicConnectionManager {
       return
     }
 
-    if (connection.state === ConnectionState.DISCONNECTED || connection.state === ConnectionState.ERROR) {
+    if (
+      connection.state === ConnectionState.DISCONNECTED ||
+      connection.state === ConnectionState.ERROR
+    ) {
       return
     }
 
@@ -208,7 +227,7 @@ export class QuicConnectionManager {
       if (connection.quicConnection) {
         await connection.quicConnection.stop({ isApp: true })
       }
-      
+
       this.handleConnectionClosed(connectionId)
     } catch (error) {
       this.handleConnectionError(connectionId, error as Error)
@@ -227,7 +246,7 @@ export class QuicConnectionManager {
    */
   getActiveConnections(): QUICConnectionInfo[] {
     return Array.from(this.connections.values()).filter(
-      conn => conn.state === ConnectionState.CONNECTED
+      (conn) => conn.state === ConnectionState.CONNECTED,
     )
   }
 
@@ -264,7 +283,7 @@ export class QuicConnectionManager {
       connection.state = ConnectionState.ERROR
       connection.error = error.message
       console.error(`Connection error: ${connectionId}`, error)
-      
+
       // Clean up the connection after a short delay to allow for potential recovery
       setTimeout(() => {
         if (connection.state === ConnectionState.ERROR) {
@@ -280,4 +299,4 @@ export class QuicConnectionManager {
   private generateConnectionId(): string {
     return `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   }
-} 
+}

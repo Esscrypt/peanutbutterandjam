@@ -6,15 +6,15 @@
  * in the validator grid structure.
  */
 
-import type { 
-  Bytes, 
-  BlockAnnouncementHandshake, 
+import { blake2bHash } from '@pbnj/core'
+import type {
   BlockAnnouncement,
+  BlockAnnouncementHandshake,
+  Bytes,
+  StreamInfo,
   ValidatorGrid,
   ValidatorMetadata,
-  StreamInfo
 } from '@pbnj/types'
-import { blake2bHash } from '@pbnj/core'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
@@ -24,7 +24,6 @@ export class BlockAnnouncementProtocol {
   private knownLeaves: Map<string, { hash: Bytes; slot: number }> = new Map()
   private finalizedBlock: { hash: Bytes; slot: number } | null = null
   private grid: ValidatorGrid | null = null
-  private validators: ValidatorMetadata[] = []
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -58,7 +57,9 @@ export class BlockAnnouncementProtocol {
         this.knownLeaves.set(leaf.hash.toString(), leaf)
       }
 
-      console.log(`Loaded state: finalized block at slot ${this.finalizedBlock?.slot}, ${this.knownLeaves.size} known leaves`)
+      console.log(
+        `Loaded state: finalized block at slot ${this.finalizedBlock?.slot}, ${this.knownLeaves.size} known leaves`,
+      )
     } catch (error) {
       console.error('Failed to load state from database:', error)
     }
@@ -77,7 +78,7 @@ export class BlockAnnouncementProtocol {
    */
   async updateFinalizedBlock(hash: Bytes, slot: number): Promise<void> {
     this.finalizedBlock = { hash, slot }
-    
+
     // Persist to database
     if (this.dbIntegration) {
       try {
@@ -93,7 +94,7 @@ export class BlockAnnouncementProtocol {
    */
   async addKnownLeaf(hash: Bytes, slot: number): Promise<void> {
     this.knownLeaves.set(hash.toString(), { hash, slot })
-    
+
     // Persist to database
     if (this.dbIntegration) {
       try {
@@ -109,7 +110,7 @@ export class BlockAnnouncementProtocol {
    */
   async removeKnownLeaf(hash: Bytes): Promise<void> {
     this.knownLeaves.delete(hash.toString())
-    
+
     // Remove from database
     if (this.dbIntegration) {
       try {
@@ -146,7 +147,7 @@ export class BlockAnnouncementProtocol {
     return {
       finalBlockHash: this.finalizedBlock.hash,
       finalBlockSlot: this.finalizedBlock.slot,
-      leaves: Array.from(this.knownLeaves.values())
+      leaves: Array.from(this.knownLeaves.values()),
     }
   }
 
@@ -155,8 +156,14 @@ export class BlockAnnouncementProtocol {
    */
   async processHandshake(handshake: BlockAnnouncementHandshake): Promise<void> {
     // Update our finalized block if peer has a newer one
-    if (!this.finalizedBlock || handshake.finalBlockSlot > this.finalizedBlock.slot) {
-      await this.updateFinalizedBlock(handshake.finalBlockHash, handshake.finalBlockSlot)
+    if (
+      !this.finalizedBlock ||
+      handshake.finalBlockSlot > this.finalizedBlock.slot
+    ) {
+      await this.updateFinalizedBlock(
+        handshake.finalBlockHash,
+        handshake.finalBlockSlot,
+      )
     }
 
     // Add any new leaves from peer
@@ -178,17 +185,25 @@ export class BlockAnnouncementProtocol {
     return {
       header: blockHeader,
       finalBlockHash: this.finalizedBlock.hash,
-      finalBlockSlot: this.finalizedBlock.slot
+      finalBlockSlot: this.finalizedBlock.slot,
     }
   }
 
   /**
    * Process block announcement from peer
    */
-  async processBlockAnnouncement(announcement: BlockAnnouncement): Promise<void> {
+  async processBlockAnnouncement(
+    announcement: BlockAnnouncement,
+  ): Promise<void> {
     // Update finalized block if peer has a newer one
-    if (!this.finalizedBlock || announcement.finalBlockSlot > this.finalizedBlock.slot) {
-      await this.updateFinalizedBlock(announcement.finalBlockHash, announcement.finalBlockSlot)
+    if (
+      !this.finalizedBlock ||
+      announcement.finalBlockSlot > this.finalizedBlock.slot
+    ) {
+      await this.updateFinalizedBlock(
+        announcement.finalBlockHash,
+        announcement.finalBlockSlot,
+      )
     }
 
     // Process the block header
@@ -208,7 +223,9 @@ export class BlockAnnouncementProtocol {
       // Add as known leaf
       await this.addKnownLeaf(blockHash, slot)
 
-      console.log(`Processed block header: hash=${blockHashHex.substring(0, 18)}..., slot=${slot}`)
+      console.log(
+        `Processed block header: hash=${blockHashHex.substring(0, 18)}..., slot=${slot}`,
+      )
     } catch (error) {
       console.error('Failed to process block header:', error)
     }
@@ -223,10 +240,10 @@ export class BlockAnnouncementProtocol {
     if (header.length < 8) {
       throw new Error('Block header too short')
     }
-    
+
     // Assume slot is stored in the first 8 bytes
     const slotBytes = header.slice(0, 8)
-    return Number(BigInt('0x' + slotBytes.toString()))
+    return Number(BigInt(`0x${slotBytes.toString()}`))
   }
 
   /**
@@ -247,7 +264,9 @@ export class BlockAnnouncementProtocol {
    */
   serializeHandshake(handshake: BlockAnnouncementHandshake): Bytes {
     // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(4 + 32 + 4 + handshake.leaves.length * (32 + 4))
+    const buffer = new ArrayBuffer(
+      4 + 32 + 4 + handshake.leaves.length * (32 + 4),
+    )
     const view = new DataView(buffer)
     let offset = 0
 
@@ -313,7 +332,7 @@ export class BlockAnnouncementProtocol {
     return {
       finalBlockHash,
       finalBlockSlot,
-      leaves
+      leaves,
     }
   }
 
@@ -343,7 +362,10 @@ export class BlockAnnouncementProtocol {
   /**
    * Deserialize block announcement message
    */
-  deserializeBlockAnnouncement(data: Bytes, headerLength: number): BlockAnnouncement {
+  deserializeBlockAnnouncement(
+    data: Bytes,
+    headerLength: number,
+  ): BlockAnnouncement {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -361,17 +383,17 @@ export class BlockAnnouncementProtocol {
     return {
       header,
       finalBlockHash,
-      finalBlockSlot
+      finalBlockSlot,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     if (data.length === 0) {
       // Initial handshake
-      const handshake = this.createHandshake()
+      const _handshake = this.createHandshake()
       // Send handshake response would be handled by the stream manager
       return
     }
@@ -381,7 +403,7 @@ export class BlockAnnouncementProtocol {
       const handshake = this.deserializeHandshake(data)
       await this.processHandshake(handshake)
       return
-    } catch (error) {
+    } catch (_error) {
       // Not a handshake, try as block announcement
     }
 
@@ -395,4 +417,4 @@ export class BlockAnnouncementProtocol {
       console.error('Failed to parse block announcement data:', error)
     }
   }
-} 
+}

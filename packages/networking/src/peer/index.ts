@@ -4,8 +4,8 @@
  * Handles validator set management, peer discovery, and connection management
  */
 
-export * from './validator-set'
-export * from './peer-discovery'
-export * from './grid-structure'
+export * from './builder-slots'
 export * from './connection-manager'
-export * from './builder-slots' 
+export * from './grid-structure'
+export * from './peer-discovery'
+export * from './validator-set'

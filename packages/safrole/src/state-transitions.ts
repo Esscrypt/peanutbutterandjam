@@ -223,7 +223,7 @@ function extractTicketId(
 ): string {
   // Use IETF VRF to generate deterministic ticket ID
   const secretKey = {
-    bytes: new Uint8Array(Buffer.from(signature, 'hex')),
+    Uint8Array: new Uint8Array(Buffer.from(signature, 'hex')),
   }
 
   const input = {
@@ -290,7 +290,7 @@ function computeEpochRoot(validators: ValidatorKey[]): string {
     // Create a ring of validator public keys
     const ring = {
       publicKeys: validators.map((v) => ({
-        bytes: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
+        Uint8Array: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
       })),
       size: validators.length,
       commitment: new Uint8Array(32).fill(0),
@@ -311,7 +311,9 @@ function computeEpochRoot(validators: ValidatorKey[]): string {
 
     // Generate Ring VRF proof
     const secretKey = {
-      bytes: new Uint8Array(Buffer.from(validators[0].bandersnatch, 'hex')),
+      Uint8Array: new Uint8Array(
+        Buffer.from(validators[0].bandersnatch, 'hex'),
+      ),
     }
 
     const ringVrfResult = RingVRFProver.prove(secretKey, input)
@@ -350,7 +352,7 @@ function generateFallbackSealTickets(
     // Create a ring of validator public keys
     const ring = {
       publicKeys: validators.map((v) => ({
-        bytes: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
+        Uint8Array: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
       })),
       size: validators.length,
       commitment: new Uint8Array(32).fill(0),
@@ -379,7 +381,9 @@ function generateFallbackSealTickets(
       }
 
       const secretKey = {
-        bytes: new Uint8Array(Buffer.from(validators[i].bandersnatch, 'hex')),
+        Uint8Array: new Uint8Array(
+          Buffer.from(validators[i].bandersnatch, 'hex'),
+        ),
       }
 
       const ringVrfResult = RingVRFProver.prove(secretKey, input)

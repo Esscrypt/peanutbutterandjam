@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
-import { config } from 'dotenv'
 import { logger } from '@pbnj/core'
-import { createRunCommand } from './commands/run'
-import { createGenSpecCommand } from './commands/gen-spec'
+import { config } from 'dotenv'
 import { createGenKeysCommand } from './commands/gen-keys'
+import { createGenSpecCommand } from './commands/gen-spec'
 import { createListKeysCommand } from './commands/list-keys'
+import { createRunCommand } from './commands/run'
 
 // Load environment variables
 config()
@@ -18,7 +18,13 @@ const args = process.argv.slice(2)
 const command = args[0]
 
 // Check for global help/version flags only if no subcommand or if it's a global flag
-if (!command || command === '--help' || command === '-h' || command === '--version' || command === '-v') {
+if (
+  !command ||
+  command === '--help' ||
+  command === '-h' ||
+  command === '--version' ||
+  command === '-v'
+) {
   // Show help if requested
   if (command === '--help' || command === '-h') {
     console.log(`
@@ -45,7 +51,8 @@ Use "pbnj <command> --help" for more information about a command.
   }
 }
 
-const isSubcommandHelp = args.length > 1 && (args[1] === '--help' || args[1] === '-h')
+const isSubcommandHelp =
+  args.length > 1 && (args[1] === '--help' || args[1] === '-h')
 
 // Main execution
 ;(async () => {

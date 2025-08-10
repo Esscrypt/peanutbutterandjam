@@ -40,7 +40,7 @@ describe('Chain Spec Generator', () => {
       const stateKeys = Object.keys(chainSpec.genesis_state)
       expect(stateKeys.length).toBeGreaterThan(0)
       
-      // All keys should be 62-character hex strings (31 bytes without 0x prefix)
+      // All keys should be 62-character hex strings (31 Uint8Array without 0x prefix)
       for (const key of stateKeys) {
         expect(key).toMatch(/^[a-fA-F0-9]{62}$/)
       }
@@ -225,7 +225,7 @@ describe('Chain Spec Generator', () => {
     it('should generate valid hex strings for state keys', () => {
       const chainSpec = generateChainSpec(validConfig)
 
-      // All state keys should be valid 62-character hex strings (31 bytes without 0x prefix)
+      // All state keys should be valid 62-character hex strings (31 Uint8Array without 0x prefix)
       for (const key of Object.keys(chainSpec.genesis_state)) {
         expect(key).toMatch(/^[a-fA-F0-9]{62}$/)
       }

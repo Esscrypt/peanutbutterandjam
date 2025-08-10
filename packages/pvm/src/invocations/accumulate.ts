@@ -222,9 +222,9 @@ export class AccumulateInvocationSystem {
     // Generate Blake2 hash
     const hash = blake2bHash(encodedData)
 
-    // Decode first 4 bytes and convert to number
-    const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex')
-    const decodedValue = hashBytes.readUInt32BE(0)
+    // Decode first 4 Uint8Array and convert to number
+    const hashUint8Array = Buffer.from(hash.replace('0x', ''), 'hex')
+    const decodedValue = hashUint8Array.readUInt32BE(0)
 
     // Apply the formula: (decoded mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex
     const modulus =
@@ -246,13 +246,13 @@ export class AccumulateInvocationSystem {
     // Create a buffer to hold the encoded data
     const buffer = Buffer.alloc(4 + entropyAccumulator.length + 4) // serviceId (4) + entropy (var) + timeslot (4)
 
-    // Write serviceId as 4 bytes (big-endian)
+    // Write serviceId as 4 Uint8Array (big-endian)
     buffer.writeUInt32BE(serviceId, 0)
 
     // Write entropy accumulator as string
     buffer.write(entropyAccumulator, 4, 'utf8')
 
-    // Write timeslot as 4 bytes (big-endian)
+    // Write timeslot as 4 Uint8Array (big-endian)
     buffer.writeUInt32BE(timeslot, 4 + entropyAccumulator.length)
 
     return buffer
@@ -327,19 +327,19 @@ export class AccumulateInvocationSystem {
   ): number[] {
     const result: number[] = []
 
-    // Encode timeslot as 4 bytes
+    // Encode timeslot as 4 Uint8Array
     result.push((timeslot >> 24) & 0xff)
     result.push((timeslot >> 16) & 0xff)
     result.push((timeslot >> 8) & 0xff)
     result.push(timeslot & 0xff)
 
-    // Encode service ID as 4 bytes
+    // Encode service ID as 4 Uint8Array
     result.push((serviceId >> 24) & 0xff)
     result.push((serviceId >> 16) & 0xff)
     result.push((serviceId >> 8) & 0xff)
     result.push(serviceId & 0xff)
 
-    // Encode input length as 4 bytes
+    // Encode input length as 4 Uint8Array
     result.push((inputLength >> 24) & 0xff)
     result.push((inputLength >> 16) & 0xff)
     result.push((inputLength >> 8) & 0xff)

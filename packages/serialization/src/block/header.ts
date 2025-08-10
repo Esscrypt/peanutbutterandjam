@@ -1,194 +1,313 @@
 /**
- * Block header serialization
+ * JAM Block header serialization according to Gray Paper
  *
- * Implements Gray Paper block header serialization
- * Reference: graypaper/text/block_header.tex
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 182-197):
+ *
+ * encode(H) = encode(encodeUnsignedHeader(H), H_sealsig)
+ *
+ * encodeUnsignedHeader(H) = encode(
+ *   H_parent,
+ *   H_priorstateroot,
+ *   H_extrinsichash,
+ *   encode[4](H_timeslot),
+ *   maybe{H_epochmark},
+ *   maybe{H_winnersmark},
+ *   encode[2](H_authorindex),
+ *   H_vrfsig,
+ *   var{H_offendersmark}
+ * )
+ *
+ * Implements JAM block header serialization as specified in the Gray Paper
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * JAM block headers contain all the metadata needed to verify and process blocks.
+ * The header has both signed and unsigned portions for cryptographic integrity.
+ *
+ * Structure breakdown:
+ * 1. **Parent hash** (32 bytes): Links to previous block
+ * 2. **Prior state root** (32 bytes): State commitment before this block
+ * 3. **Extrinsic hash** (32 bytes): Merkle root of all extrinsics in block
+ * 4. **Time slot** (4 bytes): When this block was produced
+ * 5. **Epoch mark** (optional): New validator set and entropy (only on epoch boundaries)
+ * 6. **Winners mark** (optional): Winning Safrole tickets for this slot
+ * 7. **Author index** (2 bytes): Which validator authored this block
+ * 8. **VRF signature** (96 bytes): Proves authorship and randomness
+ * 9. **Offenders mark** (variable): Ed25519 keys of misbehaving validators
+ * 10. **Seal signature** (64 bytes): Final signature over unsigned header
+ *
+ * The two-part structure (unsigned + seal) allows validators to sign the
+ * complete header contents while including the signature in the commitment.
  */
 
 import { bytesToHex, hexToBytes } from '@pbnj/core'
+import type {
+  EpochMark,
+  HashValue,
+  JamHeader,
+  SafroleTicketHeader,
+  ValidatorKeyPair,
+} from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
-import type { 
-  BlockHeader, 
-  Uint8Array, 
-  EpochMark, 
-  SafroleTicketSingle, 
-  SafroleTicketArray,
-  ValidatorKeyTuple
-} from '@pbnj/types'
-import { isTicketsMarkArray, isTicketsMarkSingle } from '@pbnj/types'
 
-/**
- * Encode validator key tuple
- */
-function encodeValidatorKeyTuple(validator: ValidatorKeyTuple): Uint8Array {
+// Helper functions for hash values
+function encodeHashValue(hash: HashValue): Uint8Array {
+  return hexToBytes(hash)
+}
+
+function decodeHashValue(data: Uint8Array): HashValue {
+  return bytesToHex(data)
+}
+
+// Validator key pair encoding/decoding
+function encodeValidatorKeyPair(validator: ValidatorKeyPair): Uint8Array {
   const parts: Uint8Array[] = []
-  
-  // Bandersnatch key (32 Uint8Array)
-  parts.push(hexToBytes(validator.bandersnatch))
-  
-  // Ed25519 key (32 Uint8Array)
-  parts.push(hexToBytes(validator.ed25519))
-  
-  // Concatenate parts
+  parts.push(encodeHashValue(validator.bandersnatch))
+  parts.push(encodeHashValue(validator.ed25519))
+
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
   let offset = 0
-  
   for (const part of parts) {
     result.set(part, offset)
     offset += part.length
   }
-  
   return result
 }
 
-/**
- * Encode epoch mark
- */
-function encodeEpochMark(epochMark: EpochMark): Uint8Array {
+function decodeValidatorKeyPair(
+  data: Uint8Array,
+  offset: number,
+): { result: ValidatorKeyPair; newOffset: number } {
+  const bandersnatch = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
+  const ed25519 = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
+
+  return {
+    result: { bandersnatch, ed25519 },
+    newOffset: offset,
+  }
+}
+
+// Epoch mark encoding/decoding (optional)
+function encodeEpochMark(epochMark: EpochMark | null): Uint8Array {
+  if (epochMark === null) {
+    // Encode as None (1 byte with value 0)
+    return new Uint8Array([0])
+  }
+
   const parts: Uint8Array[] = []
-  
-  // entropy (32 Uint8Array)
-  parts.push(hexToBytes(epochMark.entropy))
-  
-  // tickets_entropy (32 Uint8Array)
-  parts.push(hexToBytes(epochMark.tickets_entropy))
-  
-  // validators sequence
+  // Encode as Some (1 byte with value 1)
+  parts.push(new Uint8Array([1]))
+
+  // Encode entropy (32 bytes)
+  parts.push(encodeHashValue(epochMark.entropy))
+
+  // Encode tickets_entropy (32 bytes)
+  parts.push(encodeHashValue(epochMark.tickets_entropy))
+
+  // Encode validators count and validators
+  parts.push(encodeNatural(BigInt(epochMark.validators.length)))
   for (const validator of epochMark.validators) {
-    parts.push(encodeValidatorKeyTuple(validator))
+    parts.push(encodeValidatorKeyPair(validator))
   }
-  
-  // Concatenate parts
+
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
   let offset = 0
-  
   for (const part of parts) {
     result.set(part, offset)
     offset += part.length
   }
-  
   return result
 }
 
-/**
- * Encode Safrole ticket (single object format)
- */
-function encodeSafroleTicketSingle(ticket: SafroleTicketSingle): Uint8Array {
+function decodeEpochMark(
+  data: Uint8Array,
+  offset: number,
+): { result: EpochMark | null; newOffset: number } {
+  const optionTag = data[offset]
+  offset += 1
+
+  if (optionTag === 0) {
+    return { result: null, newOffset: offset }
+  }
+
+  // Decode entropy
+  const entropy = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
+
+  // Decode tickets_entropy
+  const ticketsEntropy = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
+
+  // Decode validators count
+  const validatorsCountResult = decodeNatural(data.slice(offset))
+  const validatorsCount = Number(validatorsCountResult.value)
+  offset += data.slice(offset).length - validatorsCountResult.remaining.length
+
+  // Decode validators
+  const validators: ValidatorKeyPair[] = []
+  for (let i = 0; i < validatorsCount; i++) {
+    const validatorResult = decodeValidatorKeyPair(data, offset)
+    validators.push(validatorResult.result)
+    offset = validatorResult.newOffset
+  }
+
+  return {
+    result: {
+      entropy,
+      tickets_entropy: ticketsEntropy,
+      validators,
+    },
+    newOffset: offset,
+  }
+}
+
+// Winners mark encoding/decoding (optional array of tickets)
+function encodeWinnersMark(
+  winnersMark: SafroleTicketHeader[] | null,
+): Uint8Array {
+  if (winnersMark === null) {
+    // Encode as None (1 byte with value 0)
+    return new Uint8Array([0])
+  }
+
   const parts: Uint8Array[] = []
-  
-  // id (32 Uint8Array)
-  parts.push(hexToBytes(ticket.id))
-  
-  // entry_index (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(ticket.entry_index)))
-  
-  // Concatenate parts
+  // Encode as Some (1 byte with value 1)
+  parts.push(new Uint8Array([1]))
+
+  // Encode tickets count and tickets
+  parts.push(encodeNatural(BigInt(winnersMark.length)))
+  for (const ticket of winnersMark) {
+    parts.push(encodeFixedLength(BigInt(ticket.attempt), 4 as const))
+    parts.push(encodeHashValue(ticket.signature))
+  }
+
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
   let offset = 0
-  
   for (const part of parts) {
     result.set(part, offset)
     offset += part.length
   }
-  
   return result
 }
 
-/**
- * Encode Safrole ticket (array format)
- */
-function encodeSafroleTicketArray(ticket: SafroleTicketArray): Uint8Array {
+function decodeWinnersMark(
+  data: Uint8Array,
+  offset: number,
+): { result: SafroleTicketHeader[] | null; newOffset: number } {
+  const optionTag = data[offset]
+  offset += 1
+
+  if (optionTag === 0) {
+    return { result: null, newOffset: offset }
+  }
+
+  // Decode tickets count
+  const ticketsCountResult = decodeNatural(data.slice(offset))
+  const ticketsCount = Number(ticketsCountResult.value)
+  offset += data.slice(offset).length - ticketsCountResult.remaining.length
+
+  // Decode tickets
+  const tickets: SafroleTicketHeader[] = []
+  for (let i = 0; i < ticketsCount; i++) {
+    const attemptResult = decodeFixedLength(data.slice(offset), 4 as const)
+    const attempt = Number(attemptResult.value)
+    offset += 4
+
+    const signature = decodeHashValue(data.slice(offset, offset + 32))
+    offset += 32
+
+    tickets.push({ attempt, signature })
+  }
+
+  return { result: tickets, newOffset: offset }
+}
+
+// Offenders mark encoding/decoding (array of Ed25519 keys)
+function encodeOffendersMark(offendersMark: HashValue[]): Uint8Array {
   const parts: Uint8Array[] = []
-  
-  // id (32 Uint8Array)
-  parts.push(hexToBytes(ticket.id))
-  
-  // attempt (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(ticket.attempt)))
-  
-  // Concatenate parts
+
+  // Encode count
+  parts.push(encodeNatural(BigInt(offendersMark.length)))
+
+  // Encode keys
+  for (const key of offendersMark) {
+    parts.push(encodeHashValue(key))
+  }
+
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
   let offset = 0
-  
   for (const part of parts) {
     result.set(part, offset)
     offset += part.length
   }
-  
   return result
 }
 
-/**
- * Encode block header according to test vector format
- *
- * @param header - Block header to encode
- * @returns Encoded octet sequence
- */
-export function encodeBlockHeader(header: BlockHeader): Uint8Array {
+function decodeOffendersMark(
+  data: Uint8Array,
+  offset: number,
+): { result: HashValue[]; newOffset: number } {
+  // Decode count
+  const countResult = decodeNatural(data.slice(offset))
+  const count = Number(countResult.value)
+  offset += data.slice(offset).length - countResult.remaining.length
+
+  // Decode keys
+  const keys: HashValue[] = []
+  for (let i = 0; i < count; i++) {
+    const key = decodeHashValue(data.slice(offset, offset + 32))
+    keys.push(key)
+    offset += 32
+  }
+
+  return { result: keys, newOffset: offset }
+}
+
+export function encodeJamHeader(header: JamHeader): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // 1. parent (32 Uint8Array)
-  parts.push(hexToBytes(header.parent))
+  // parent (32 bytes)
+  parts.push(encodeHashValue(header.parent))
 
-  // 2. parent_state_root (32 Uint8Array)
-  parts.push(hexToBytes(header.parent_state_root))
+  // parent_state_root (32 bytes)
+  parts.push(encodeHashValue(header.parent_state_root))
 
-  // 3. extrinsic_hash (32 Uint8Array)
-  parts.push(hexToBytes(header.extrinsic_hash))
+  // extrinsic_hash (32 bytes)
+  parts.push(encodeHashValue(header.extrinsic_hash))
 
-  // 4. slot (4 Uint8Array)
-  parts.push(encodeFixedLength(BigInt(header.slot), 4))
+  // slot (4 bytes)
+  parts.push(encodeFixedLength(BigInt(header.slot), 4 as const))
 
-  // 5. epoch_mark (maybe{} encoding: 1 byte discriminator + encoded epoch mark if present)
-  if (header.epoch_mark) {
-    parts.push(new Uint8Array([1])) // Discriminator: 1 for present
-    parts.push(encodeEpochMark(header.epoch_mark))
-  } else {
-    parts.push(new Uint8Array([0])) // Discriminator: 0 for none
-  }
+  // epoch_mark (optional)
+  parts.push(encodeEpochMark(header.epoch_mark))
 
-  // 6. tickets_mark (maybe{} encoding: 1 byte discriminator + encoded tickets mark if present)
-  if (header.tickets_mark) {
-    parts.push(new Uint8Array([1])) // Discriminator: 1 for present
-    
-    if (isTicketsMarkArray(header.tickets_mark)) {
-      // Array format: [{id, attempt}, {id, attempt}, ...]
-      for (const ticket of header.tickets_mark) {
-        parts.push(encodeSafroleTicketArray(ticket))
-      }
-    } else if (isTicketsMarkSingle(header.tickets_mark)) {
-      // Single object format: {id, entry_index}
-      parts.push(encodeSafroleTicketSingle(header.tickets_mark))
-    }
-  } else {
-    parts.push(new Uint8Array([0])) // Discriminator: 0 for none
-  }
+  // winners_mark (optional)
+  parts.push(encodeWinnersMark(header.winners_mark))
 
-  // 7. offenders_mark (variable length with length prefix)
-  parts.push(encodeNatural(BigInt(header.offenders_mark.length))) // Length prefix
-  for (const offender of header.offenders_mark) {
-    parts.push(hexToBytes(offender))
-  }
+  // author_index (2 bytes)
+  parts.push(encodeFixedLength(BigInt(header.author_index), 2 as const))
 
-  // 8. author_index (2 Uint8Array)
-  parts.push(encodeFixedLength(BigInt(header.author_index), 2))
+  // vrf_sig (96 bytes)
+  parts.push(encodeHashValue(header.vrf_sig))
 
-  // 9. entropy_source (32 Uint8Array)
-  parts.push(hexToBytes(header.entropy_source))
+  // offenders_mark (variable)
+  parts.push(encodeOffendersMark(header.offenders_mark))
 
-  // 10. seal (32 Uint8Array)
-  parts.push(hexToBytes(header.seal))
+  // seal_sig (96 bytes) - this is part of the signed header, not unsigned
+  parts.push(encodeHashValue(header.seal_sig))
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
   let offset = 0
-
   for (const part of parts) {
     result.set(part, offset)
     offset += part.length
@@ -197,120 +316,67 @@ export function encodeBlockHeader(header: BlockHeader): Uint8Array {
   return result
 }
 
-/**
- * Decode block header
- *
- * @param data - Octet sequence to decode
- * @returns Decoded block header and remaining data
- */
-export function decodeBlockHeader(data: Uint8Array): {
-  value: BlockHeader
-  remaining: Uint8Array
-} {
-  let remaining = data
+export function decodeJamHeader(data: Uint8Array): JamHeader {
+  let offset = 0
 
-  // Parent hash (32 Uint8Array)
-  const parent = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
+  // parent (32 bytes)
+  const parent = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
 
-  // Prior state root (32 Uint8Array)
-  const parent_state_root = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
+  // parent_state_root (32 bytes)
+  const parentStateRoot = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
 
-  // Extrinsic hash (32 Uint8Array)
-  const extrinsic_hash = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
+  // extrinsic_hash (32 bytes)
+  const extrinsicHash = decodeHashValue(data.slice(offset, offset + 32))
+  offset += 32
 
-  // Slot (4 Uint8Array)
-  const { value: slot, remaining: slotRemaining } = decodeFixedLength(
-    remaining,
-    4,
-  )
-  remaining = slotRemaining
+  // slot (4 bytes)
+  const slotResult = decodeFixedLength(data.slice(offset), 4 as const)
+  const slot = Number(slotResult.value)
+  offset += 4
 
-  // Epoch mark (maybe{} encoding: 1 byte discriminator + encoded epoch mark if present)
-  let epoch_mark: EpochMark | null = null
-  const epochDiscriminator = remaining[0]
-  remaining = remaining.slice(1)
-  if (epochDiscriminator === 1) {
-    // TODO: Implement epoch mark decoding
-    // For now, skip the epoch mark data
-    remaining = remaining.slice(32 + 32 + 6 * 64) // entropy + tickets_entropy + 6 validators
-  }
+  // epoch_mark (optional)
+  const epochMarkResult = decodeEpochMark(data, offset)
+  const epochMark = epochMarkResult.result
+  offset = epochMarkResult.newOffset
 
-  // Tickets mark (maybe{} encoding: 1 byte discriminator + encoded tickets mark if present)
-  let tickets_mark: SafroleTicketSingle | SafroleTicketArray[] | null = null
-  const ticketsDiscriminator = remaining[0]
-  remaining = remaining.slice(1)
-  if (ticketsDiscriminator === 1) {
-    // TODO: Implement tickets mark decoding
-    // For now, skip the tickets mark data
-    tickets_mark = null
-  }
+  // winners_mark (optional)
+  const winnersMarkResult = decodeWinnersMark(data, offset)
+  const winnersMark = winnersMarkResult.result
+  offset = winnersMarkResult.newOffset
 
-  // Offenders mark (variable length - decode length first)
-  const { value: offendersMarkLength, remaining: offendersLengthRemaining } =
-    decodeNatural(remaining)
-  remaining = offendersLengthRemaining
-  const offenders_mark: string[] = []
-  let offendersRemaining = remaining.slice(0, Number(offendersMarkLength))
-  while (offendersRemaining.length > 0) {
-    const offender = bytesToHex(offendersRemaining.slice(0, 32))
-    offenders_mark.push(offender)
-    offendersRemaining = offendersRemaining.slice(32)
-  }
-  remaining = remaining.slice(Number(offendersMarkLength))
+  // author_index (2 bytes)
+  const authorIndexResult = decodeFixedLength(data.slice(offset), 2 as const)
+  const authorIndex = Number(authorIndexResult.value)
+  offset += 2
 
-  // Author index (2 Uint8Array)
-  const { value: author_index, remaining: authorRemaining } = decodeFixedLength(
-    remaining,
-    2,
-  )
-  remaining = authorRemaining
+  // vrf_sig (96 bytes)
+  const vrfSig = decodeHashValue(data.slice(offset, offset + 96))
+  offset += 96
 
-  // Entropy source (32 Uint8Array)
-  const entropy_source = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
+  // offenders_mark (variable)
+  const offendersMarkResult = decodeOffendersMark(data, offset)
+  const offendersMark = offendersMarkResult.result
+  offset = offendersMarkResult.newOffset
 
-  // Seal (32 Uint8Array)
-  const seal = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
+  // seal_sig (96 bytes)
+  const sealSig = decodeHashValue(data.slice(offset, offset + 96))
 
   return {
-    value: {
-      parent,
-      parent_state_root,
-      extrinsic_hash,
-      slot: Number(slot),
-      epoch_mark,
-      tickets_mark,
-      offenders_mark,
-      author_index: Number(author_index),
-      entropy_source,
-      seal,
-    },
-    remaining,
+    parent,
+    parent_state_root: parentStateRoot,
+    extrinsic_hash: extrinsicHash,
+    slot,
+    epoch_mark: epochMark,
+    winners_mark: winnersMark,
+    offenders_mark: offendersMark,
+    author_index: authorIndex,
+    vrf_sig: vrfSig,
+    seal_sig: sealSig,
   }
 }
 
-/**
- * Encode unsigned block header (without seal signature)
- *
- * @param header - Block header to encode (without seal signature)
- * @returns Encoded octet sequence
- */
-export function encodeUnsignedBlockHeader(
-  header: Omit<BlockHeader, 'seal'>,
-): Uint8Array {
-  // Create a temporary header with a dummy seal signature for encoding
-  const tempHeader: BlockHeader = {
-    ...header,
-    seal: '0x0000000000000000000000000000000000000000000000000000000000000000',
-  }
-
-  // Encode the full header
-  const fullEncoded = encodeBlockHeader(tempHeader)
-
-  // Remove the last 32 Uint8Array (seal signature)
-  return fullEncoded.slice(0, -32)
-}
+// Legacy function aliases for compatibility
+export const encodeHeader = encodeJamHeader
+export const decodeHeader = decodeJamHeader

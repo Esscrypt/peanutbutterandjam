@@ -506,7 +506,7 @@ describe('Register Operations Instructions', () => {
     })
   })
 
-  describe('REVERSE_BYTES Instruction', () => {
+  describe('REVERSE_Uint8Array Instruction', () => {
     it('should reverse byte order of register value', () => {
       const handler = registry.getHandler(0x111)!
       const context = {
@@ -571,7 +571,7 @@ describe('Register Operations Instructions', () => {
       expect(registry.getHandler(0x108)?.name).toBe('SIGN_EXTEND_8')
       expect(registry.getHandler(0x109)?.name).toBe('SIGN_EXTEND_16')
       expect(registry.getHandler(0x10a)?.name).toBe('ZERO_EXTEND_16')
-      expect(registry.getHandler(0x111)?.name).toBe('REVERSE_BYTES')
+      expect(registry.getHandler(0x111)?.name).toBe('REVERSE_Uint8Array')
     })
   })
 })

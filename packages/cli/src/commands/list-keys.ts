@@ -4,7 +4,7 @@ import { logger } from '@pbnj/core'
 
 import { generateValidatorKeys } from '../utils/key-generation'
 
-export function createListKeysCommand(args: string[]): void {
+export function createListKeysCommand(_args: string[]): void {
   try {
     const keysDir = join(process.env['HOME'] || '', '.pbnj', 'keys')
 

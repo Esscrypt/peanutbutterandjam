@@ -1,11 +1,45 @@
 /**
  * Discriminator Encoding
  *
- * Implements discriminator encoding from Gray Paper Appendix D.1
- * var{x} ≡ ⟨len(x), x⟩ and maybe{x} ≡ 0 when x = none, ⟨1, x⟩ otherwise
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 52-62):
+ *
+ * Length discriminator for variable-length terms:
+ * var{x} ≡ ⟨len(x), x⟩ thus encode(var{x}) ≡ encode(len(x)) ∥ encode(x)
+ *
+ * Optional discriminator for terms in union with none:
+ * maybe{x} ≡ {
+ *   0       when x = none
+ *   ⟨1, x⟩  otherwise
+ * }
+ *
+ * Discriminators are encoded as a natural and are encoded immediately
+ * prior to the item to determine the nature of the encoded item.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Discriminators solve the problem of encoding variable-sized or optional data.
+ * They're essential for safe deserialization when you don't know sizes in advance.
+ *
+ * Two main types:
+ *
+ * 1. LENGTH DISCRIMINATOR (var{x}):
+ *    - Prefixes variable-length data with its length
+ *    - Example: var{"hello"} → encode(5) ∥ "hello"
+ *    - Allows parser to know how many bytes to read
+ *    - Used for blobs, strings, arrays of unknown size
+ *
+ * 2. OPTIONAL DISCRIMINATOR (maybe{x}):
+ *    - Handles nullable/optional values
+ *    - 0 byte = null/none, 1 byte + data = some value
+ *    - Example: maybe{42} → [0x01] ∥ encode(42)
+ *    - Example: maybe{null} → [0x00]
+ *
+ * These are crucial for complex data structures where components
+ * may be missing or have variable sizes (like epoch marks in headers).
  */
 
-import type { Uint8Array, Optional } from '../types'
+import type { Optional } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -47,7 +81,7 @@ export function decodeVariableLength(data: Uint8Array): {
   const lengthNum = Number(length)
   if (lengthRemaining.length < lengthNum) {
     throw new Error(
-      `Insufficient data for variable-length decoding (expected ${lengthNum} bytes, got ${lengthRemaining.length})`,
+      `Insufficient data for variable-length decoding (expected ${lengthNum} Uint8Array, got ${lengthRemaining.length})`,
     )
   }
 

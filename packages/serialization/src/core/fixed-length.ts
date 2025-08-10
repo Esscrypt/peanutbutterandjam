@@ -1,11 +1,36 @@
 /**
  * Fixed-Length Integer Serialization
  *
- * Implements fnencode[l]: Nbits(8l) → blob[l] from Gray Paper Appendix D.1
- * Little-endian encoding for fixed-length integers
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 102-109):
+ *
+ * fnencode[l ∈ N]: Nbits(8l) → blob[l]
+ * x ↦ {
+ *   ⟨⟩                                      when l = 0
+ *   ⟨x mod 256⟩ ∥ encode[l-1](⌊x/256⌋)     otherwise
+ * }
+ *
+ * Values are encoded in regular little-endian fashion. This is utilized
+ * for almost all integer encoding across the protocol.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * This is the standard fixed-width integer encoding used throughout JAM.
+ * Unlike variable-length encoding, this always uses exactly l bytes.
+ *
+ * Key characteristics:
+ * - Little-endian byte order (least significant byte first)
+ * - Recursive definition: encode least significant byte, then recurse
+ * - Used for timestamps, indices, gas limits, etc. where size is known
+ * - More efficient than variable-length for numbers that consistently use full width
+ *
+ * Example: encode[4](0x12345678) = [0x78, 0x56, 0x34, 0x12]
+ *
+ * The l parameter is constrained to {1, 2, 4, 8, 16, 32} bytes to match
+ * common integer sizes and memory alignment requirements.
  */
 
-import type { FixedLengthSize, Natural, Uint8Array } from '@pbnj/types'
+import type { FixedLengthSize, Natural } from '@pbnj/types'
 
 /**
  * Encode natural number using fixed-length little-endian encoding
@@ -15,7 +40,7 @@ import type { FixedLengthSize, Natural, Uint8Array } from '@pbnj/types'
  * encode[l](x) ≡ ⟨x mod 256⟩ ∥ encode[l-1](⌊x/256⌋) otherwise
  *
  * @param value - Natural number to encode
- * @param length - Fixed length in bytes (1, 2, 4, or 8)
+ * @param length - Fixed length in Uint8Array (1, 2, 4, or 8)
  * @returns Encoded octet sequence of specified length
  */
 export function encodeFixedLength(
@@ -27,17 +52,18 @@ export function encodeFixedLength(
     throw new Error(`Natural number cannot be negative: ${value}`)
   }
 
-  const maxValue = 2n ** (8n * BigInt(length)) - 1n
+  const lengthNum = Number(length)
+  const maxValue = 2n ** (8n * BigInt(lengthNum)) - 1n
   if (value > maxValue) {
     throw new Error(
-      `Value ${value} exceeds maximum for ${length}-byte encoding: ${maxValue}`,
+      `Value ${value} exceeds maximum for ${lengthNum}-byte encoding: ${maxValue}`,
     )
   }
 
-  const result = new Uint8Array(length)
+  const result = new Uint8Array(lengthNum)
 
   // Little-endian encoding
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < lengthNum; i++) {
     result[i] = Number((value >> BigInt(8 * i)) & 0xffn)
   }
 
@@ -48,29 +74,30 @@ export function encodeFixedLength(
  * Decode natural number from fixed-length little-endian encoding
  *
  * @param data - Octet sequence to decode
- * @param length - Expected length in bytes
+ * @param length - Expected length in Uint8Array
  * @returns Decoded natural number and remaining data
  */
 export function decodeFixedLength(
   data: Uint8Array,
   length: FixedLengthSize,
 ): { value: Natural; remaining: Uint8Array } {
-  if (data.length < length) {
+  const lengthNum = Number(length)
+  if (data.length < lengthNum) {
     throw new Error(
-      `Insufficient data for ${length}-byte decoding (got ${data.length} bytes)`,
+      `Insufficient data for ${lengthNum}-byte decoding (got ${data.length} Uint8Array)`,
     )
   }
 
   let value = 0n
 
   // Little-endian decoding
-  for (let i = 0; i < length; i++) {
+  for (let i = 0; i < lengthNum; i++) {
     value |= BigInt(data[i]) << BigInt(8 * i)
   }
 
   return {
     value,
-    remaining: data.slice(length),
+    remaining: data.slice(lengthNum),
   }
 }
 
@@ -89,12 +116,13 @@ export function encodeFixedLengthTuple(
   tuple: readonly Natural[],
   length: FixedLengthSize,
 ): Uint8Array {
-  const totalLength = tuple.length * length
+  const lengthNum = Number(length)
+  const totalLength = tuple.length * lengthNum
   const result = new Uint8Array(totalLength)
 
   for (let i = 0; i < tuple.length; i++) {
     const element = encodeFixedLength(tuple[i], length)
-    result.set(element, i * length)
+    result.set(element, i * lengthNum)
   }
 
   return result
@@ -113,18 +141,19 @@ export function decodeFixedLengthTuple(
   length: FixedLengthSize,
   count: number,
 ): { value: Natural[]; remaining: Uint8Array } {
-  const totalLength = count * length
+  const lengthNum = Number(length)
+  const totalLength = count * lengthNum
 
   if (data.length < totalLength) {
     throw new Error(
-      `Insufficient data for tuple decoding (expected ${totalLength} bytes, got ${data.length})`,
+      `Insufficient data for tuple decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
     )
   }
 
   const result: Natural[] = []
 
   for (let i = 0; i < count; i++) {
-    const elementData = data.slice(i * length, (i + 1) * length)
+    const elementData = data.slice(i * lengthNum, (i + 1) * lengthNum)
     const { value } = decodeFixedLength(elementData, length)
     result.push(value)
   }

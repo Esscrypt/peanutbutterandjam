@@ -77,10 +77,10 @@ describe('JIP-5 Secret Key Derivation', () => {
 
     it('should reject invalid seed lengths', () => {
       const shortSeed = new Uint8Array(16)
-      expect(() => deriveSecretSeeds(shortSeed)).toThrow('Seed must be exactly 32 bytes')
+      expect(() => deriveSecretSeeds(shortSeed)).toThrow('Seed must be exactly 32 Uint8Array')
 
       const longSeed = new Uint8Array(64)
-      expect(() => deriveSecretSeeds(longSeed)).toThrow('Seed must be exactly 32 bytes')
+      expect(() => deriveSecretSeeds(longSeed)).toThrow('Seed must be exactly 32 Uint8Array')
     })
   })
 

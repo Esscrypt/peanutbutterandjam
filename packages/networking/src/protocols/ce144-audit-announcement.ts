@@ -5,18 +5,26 @@
  * This is a Common Ephemeral (CE) stream for announcing audit requirements.
  */
 
-import type { 
-  Bytes, 
-  AuditAnnouncement,
-  StreamInfo
-} from '@pbnj/types'
+import type { AuditAnnouncement, Bytes, StreamInfo } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Audit announcement protocol handler
  */
 export class AuditAnnouncementProtocol {
-  private auditAnnouncements: Map<string, { headerHash: Bytes; tranche: number; announcement: { workReports: Array<{ coreIndex: number; workReportHash: Bytes }>; signature: Bytes }; evidence: Bytes; timestamp: number }> = new Map()
+  private auditAnnouncements: Map<
+    string,
+    {
+      headerHash: Bytes
+      tranche: number
+      announcement: {
+        workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
+        signature: Bytes
+      }
+      evidence: Bytes
+      timestamp: number
+    }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -38,9 +46,14 @@ export class AuditAnnouncementProtocol {
 
     try {
       // Load audit announcements from database (service ID 13 for audit announcements)
-      console.log('Audit announcement state loading - protocol not yet fully implemented')
+      console.log(
+        'Audit announcement state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load audit announcement state from database:', error)
+      console.error(
+        'Failed to load audit announcement state from database:',
+        error,
+      )
     }
   }
 
@@ -50,12 +63,21 @@ export class AuditAnnouncementProtocol {
   async storeAuditAnnouncement(
     headerHash: Bytes,
     tranche: number,
-    announcement: { workReports: Array<{ coreIndex: number; workReportHash: Bytes }>; signature: Bytes },
-    evidence: Bytes
+    announcement: {
+      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
+      signature: Bytes
+    },
+    evidence: Bytes,
   ): Promise<void> {
     const hashString = headerHash.toString()
-    this.auditAnnouncements.set(hashString, { headerHash, tranche, announcement, evidence, timestamp: Date.now() })
-    
+    this.auditAnnouncements.set(hashString, {
+      headerHash,
+      tranche,
+      announcement,
+      evidence,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
@@ -64,23 +86,26 @@ export class AuditAnnouncementProtocol {
           headerHash: Buffer.from(headerHash).toString('hex'),
           tranche,
           announcement: {
-            workReports: announcement.workReports.map(wr => ({
+            workReports: announcement.workReports.map((wr) => ({
               coreIndex: wr.coreIndex,
-              workReportHash: Buffer.from(wr.workReportHash).toString('hex')
+              workReportHash: Buffer.from(wr.workReportHash).toString('hex'),
             })),
-            signature: Buffer.from(announcement.signature).toString('hex')
+            signature: Buffer.from(announcement.signature).toString('hex'),
           },
           evidence: Buffer.from(evidence).toString('hex'),
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           13, // Service ID 13 for audit announcements
           Buffer.from(`audit_announcement_${hashString}`),
-          Buffer.from(JSON.stringify(announcementData), 'utf8')
+          Buffer.from(JSON.stringify(announcementData), 'utf8'),
         )
       } catch (error) {
-        console.error('Failed to persist audit announcement to database:', error)
+        console.error(
+          'Failed to persist audit announcement to database:',
+          error,
+        )
       }
     }
   }
@@ -88,14 +113,34 @@ export class AuditAnnouncementProtocol {
   /**
    * Get audit announcement from local store
    */
-  getAuditAnnouncement(headerHash: Bytes): { headerHash: Bytes; tranche: number; announcement: { workReports: Array<{ coreIndex: number; workReportHash: Bytes }>; signature: Bytes }; evidence: Bytes; timestamp: number } | undefined {
+  getAuditAnnouncement(headerHash: Bytes):
+    | {
+        headerHash: Bytes
+        tranche: number
+        announcement: {
+          workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
+          signature: Bytes
+        }
+        evidence: Bytes
+        timestamp: number
+      }
+    | undefined {
     return this.auditAnnouncements.get(headerHash.toString())
   }
 
   /**
    * Get audit announcement from database if not in local store
    */
-  async getAuditAnnouncementFromDatabase(headerHash: Bytes): Promise<{ headerHash: Bytes; tranche: number; announcement: { workReports: Array<{ coreIndex: number; workReportHash: Bytes }>; signature: Bytes }; evidence: Bytes; timestamp: number } | null> {
+  async getAuditAnnouncementFromDatabase(headerHash: Bytes): Promise<{
+    headerHash: Bytes
+    tranche: number
+    announcement: {
+      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
+      signature: Bytes
+    }
+    evidence: Bytes
+    timestamp: number
+  } | null> {
     if (this.getAuditAnnouncement(headerHash)) {
       return this.getAuditAnnouncement(headerHash) || null
     }
@@ -106,9 +151,9 @@ export class AuditAnnouncementProtocol {
       const hashString = headerHash.toString()
       const announcementData = await this.dbIntegration.getServiceStorage(
         13,
-        Buffer.from(`audit_announcement_${hashString}`)
+        Buffer.from(`audit_announcement_${hashString}`),
       )
-      
+
       if (announcementData) {
         const parsedData = JSON.parse(announcementData.toString())
         const announcement = {
@@ -117,19 +162,19 @@ export class AuditAnnouncementProtocol {
           announcement: {
             workReports: parsedData.announcement.workReports.map((wr: any) => ({
               coreIndex: wr.coreIndex,
-              workReportHash: Buffer.from(wr.workReportHash, 'hex')
+              workReportHash: Buffer.from(wr.workReportHash, 'hex'),
             })),
-            signature: Buffer.from(parsedData.announcement.signature, 'hex')
+            signature: Buffer.from(parsedData.announcement.signature, 'hex'),
           },
           evidence: Buffer.from(parsedData.evidence, 'hex'),
-          timestamp: parsedData.timestamp
+          timestamp: parsedData.timestamp,
         }
-        
+
         // Cache in local store
         this.auditAnnouncements.set(hashString, announcement)
         return announcement
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get audit announcement from database:', error)
@@ -140,12 +185,21 @@ export class AuditAnnouncementProtocol {
   /**
    * Process audit announcement
    */
-  async processAuditAnnouncement(announcement: AuditAnnouncement): Promise<void> {
+  async processAuditAnnouncement(
+    announcement: AuditAnnouncement,
+  ): Promise<void> {
     try {
       // Store the audit announcement
-      await this.storeAuditAnnouncement(announcement.headerHash, announcement.tranche, announcement.announcement, announcement.evidence)
-      
-      console.log(`Processed audit announcement for header hash: ${announcement.headerHash.toString().substring(0, 16)}..., tranche: ${announcement.tranche}`)
+      await this.storeAuditAnnouncement(
+        announcement.headerHash,
+        announcement.tranche,
+        announcement.announcement,
+        announcement.evidence,
+      )
+
+      console.log(
+        `Processed audit announcement for header hash: ${announcement.headerHash.toString().substring(0, 16)}..., tranche: ${announcement.tranche}`,
+      )
     } catch (error) {
       console.error('Failed to process audit announcement:', error)
     }
@@ -157,14 +211,17 @@ export class AuditAnnouncementProtocol {
   createAuditAnnouncement(
     headerHash: Bytes,
     tranche: number,
-    announcement: { workReports: Array<{ coreIndex: number; workReportHash: Bytes }>; signature: Bytes },
-    evidence: Bytes
+    announcement: {
+      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
+      signature: Bytes
+    },
+    evidence: Bytes,
   ): AuditAnnouncement {
     return {
       headerHash,
       tranche,
       announcement,
-      evidence
+      evidence,
     }
   }
 
@@ -174,12 +231,12 @@ export class AuditAnnouncementProtocol {
   serializeAuditAnnouncement(announcement: AuditAnnouncement): Bytes {
     // Calculate total size
     let totalSize = 32 + 4 + 4 // headerHash + tranche + number of work reports
-    
+
     // Size for work reports
-    for (const workReport of announcement.announcement.workReports) {
+    for (const _workReport of announcement.announcement.workReports) {
       totalSize += 4 + 32 // coreIndex + workReportHash
     }
-    
+
     // Size for signature and evidence
     totalSize += 64 + 4 + announcement.evidence.length // signature + evidence length + evidence
 
@@ -273,16 +330,16 @@ export class AuditAnnouncementProtocol {
       tranche,
       announcement: {
         workReports,
-        signature
+        signature,
       },
-      evidence
+      evidence,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const announcement = this.deserializeAuditAnnouncement(data)
       await this.processAuditAnnouncement(announcement)
@@ -290,4 +347,4 @@ export class AuditAnnouncementProtocol {
       console.error('Failed to handle audit announcement stream data:', error)
     }
   }
-} 
+}

@@ -21,5 +21,11 @@
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true,
     "types": ["bun-types"]
-  }
+  },
+  "exclude": [
+    "**/__tests__/**",
+    "**/scripts/**",
+    "**/*.test.ts",
+    "**/*.spec.ts"
+  ]
 }

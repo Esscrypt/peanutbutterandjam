@@ -1,17 +1,36 @@
 /**
  * Sequence Serialization
  *
- * Implements sequence encoding from Gray Paper Appendix D.1
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 42-44):
+ *
+ * Sequence serialization for any T which is a subset of the domain of fnencode:
  * encode([i₀, i₁, ...]) ≡ encode(i₀) ∥ encode(i₁) ∥ ...
+ *
+ * We simply concatenate the serializations of each element in the sequence in turn.
+ * Fixed length octet sequences (e.g. hashes) have an identity serialization.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Sequence encoding is JAM's simple but powerful approach to encoding arrays.
+ * It's the foundation for encoding complex structures.
+ *
+ * Key principles:
+ * - Order matters: [A, B] ≠ [B, A]
+ * - No separators: elements are directly concatenated
+ * - No length prefix (unless using var{} discriminator)
+ * - Identity for byte arrays: [0x01, 0x02] → 0x0102
+ *
+ * Examples:
+ * - Hash sequence: [hash1, hash2] → hash1 ∥ hash2 (64 bytes)
+ * - Number sequence: [1, 2, 3] → encode(1) ∥ encode(2) ∥ encode(3)
+ * - Empty sequence: [] → ⟨⟩ (0 bytes)
+ *
+ * This works because individual element encoding is deterministic,
+ * so deserialization can parse elements sequentially.
  */
 
-import type {
-  Decoder,
-  Encoder,
-  Natural,
-  Uint8Array,
-  Sequence,
-} from '../types'
+import type { Decoder, Encoder, Natural, Sequence } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -175,9 +194,7 @@ export function decodeSequenceWithLength(data: Uint8Array): {
  * @param sequence - Sequence of octet sequences
  * @returns Concatenated octet sequence
  */
-export function encodeUint8Array(
-  sequence: Sequence<Uint8Array>,
-): Uint8Array {
+export function encodeUint8Array(sequence: Sequence<Uint8Array>): Uint8Array {
   // Calculate total size
   const totalSize = sequence.reduce((sum, element) => sum + element.length, 0)
   const result = new Uint8Array(totalSize)
@@ -208,7 +225,7 @@ export function decodeUint8Array(
 
   if (data.length < totalLength) {
     throw new Error(
-      `Insufficient data for octet sequence decoding (expected ${totalLength} bytes, got ${data.length})`,
+      `Insufficient data for octet sequence decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
     )
   }
 

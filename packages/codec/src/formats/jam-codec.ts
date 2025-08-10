@@ -1,9 +1,9 @@
-import type { Codec } from '@pbnj/types'
 import { logger } from '@pbnj/core'
+import type { Codec } from '@pbnj/types'
 
 /**
  * JAM Custom Codec
- * 
+ *
  * The JAM protocol uses a custom variable-length encoding format similar to SCALE
  * but with compact integer encoding. This is NOT standard ASN.1.
  */
@@ -61,7 +61,11 @@ export class JamCodec<T> implements Codec<T> {
     throw new Error('Decoding not yet implemented')
   }
 
-  validate(_data: T): { isValid: boolean; errors: string[]; warnings: string[] } {
+  validate(_data: T): {
+    isValid: boolean
+    errors: string[]
+    warnings: string[]
+  } {
     // TODO: Implement validation
     return { isValid: true, errors: [], warnings: [] }
   }
@@ -69,7 +73,7 @@ export class JamCodec<T> implements Codec<T> {
 
 export class JamDecoder {
   private data: Uint8Array
-  private offset: number = 0
+  private offset = 0
 
   constructor(data: Uint8Array, _config: JamCodecConfig = {}) {
     this.data = data
@@ -89,17 +93,17 @@ export class JamDecoder {
     }
 
     // Mode 1: two-byte (64-16383)
-    if ((firstByte & 0xC0) === 0x80) {
+    if ((firstByte & 0xc0) === 0x80) {
       const secondByte = this.data[this.offset]
       this.offset++
-      return ((firstByte & 0x3F) << 8) | secondByte
+      return ((firstByte & 0x3f) << 8) | secondByte
     }
 
     // Mode 2: four-byte (16384-1073741823)
-    if ((firstByte & 0xE0) === 0xC0) {
+    if ((firstByte & 0xe0) === 0xc0) {
       const bytes = this.data.slice(this.offset, this.offset + 3)
       this.offset += 3
-      let value = (firstByte & 0x1F) << 24
+      let value = (firstByte & 0x1f) << 24
       value |= bytes[0] << 16
       value |= bytes[1] << 8
       value |= bytes[2]
@@ -110,7 +114,7 @@ export class JamDecoder {
     const length = firstByte & 0x03
     const bytes = this.data.slice(this.offset, this.offset + length)
     this.offset += length
-    
+
     let value = 0
     for (let i = 0; i < bytes.length; i++) {
       value |= bytes[i] << (i * 8)
@@ -180,34 +184,34 @@ export class JamDecoder {
   decodeHeader(): JamHeader {
     // Read parent hash (32 bytes)
     const parent = this.readHash()
-    
+
     // Read parent state root (32 bytes)
     const parentStateRoot = this.readHash()
-    
+
     // Read extrinsic hash (32 bytes)
     const extrinsicHash = this.readHash()
-    
+
     // Read slot number
     const slot = this.readCompactInt()
-    
+
     // Read optional epoch mark
     const epochMark = this.readOptional(() => this.decodeEpochMark())
-    
+
     // Read optional tickets mark
     const ticketsMark = this.readOptional(() => this.readHash())
-    
+
     // Read offenders mark (vector of hashes)
     const offendersMark = this.readVector(() => this.readHash())
-    
+
     // Read author index
     const authorIndex = this.readCompactInt()
-    
+
     // Read entropy source (variable length)
     const entropySource = this.readVariableBytes()
-    
+
     // Read seal (variable length)
     const seal = this.readVariableBytes()
-    
+
     return {
       parent,
       parentStateRoot,
@@ -218,7 +222,7 @@ export class JamDecoder {
       offendersMark,
       authorIndex,
       entropySource,
-      seal
+      seal,
     }
   }
 
@@ -228,17 +232,17 @@ export class JamDecoder {
   decodeEpochMark(): JamEpochMark {
     // Read entropy (32 bytes)
     const entropy = this.readHash()
-    
+
     // Read tickets entropy (32 bytes)
     const ticketsEntropy = this.readHash()
-    
+
     // Read validators vector
     const validators = this.readVector(() => this.decodeValidatorKeys())
-    
+
     return {
       entropy,
       ticketsEntropy,
-      validators
+      validators,
     }
   }
 
@@ -248,13 +252,13 @@ export class JamDecoder {
   decodeValidatorKeys(): JamValidatorKeys {
     // Read bandersnatch public key (32 bytes)
     const bandersnatch = this.readHash()
-    
+
     // Read Ed25519 public key (32 bytes)
     const ed25519 = this.readHash()
-    
+
     return {
       bandersnatch,
-      ed25519
+      ed25519,
     }
   }
 
@@ -264,13 +268,13 @@ export class JamDecoder {
   decodeBlock(): JamBlock {
     // Read header
     const header = this.decodeHeader()
-    
+
     // Read extrinsics vector
     const extrinsics = this.readVector(() => this.readVariableBytes())
-    
+
     return {
       header,
-      extrinsics
+      extrinsics,
     }
   }
 
@@ -294,4 +298,4 @@ export class JamDecoder {
   skipRemaining(): void {
     this.offset = this.data.length
   }
-} 
+}

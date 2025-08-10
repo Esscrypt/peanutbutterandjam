@@ -26,7 +26,7 @@ export const PROVER_PERFORMANCE = {
   BATCH_SIZE: 100,
   /** Parallel processing threshold */
   PARALLEL_THRESHOLD: 10,
-  /** Memory limit for caching in bytes */
+  /** Memory limit for caching in Uint8Array */
   CACHE_MEMORY_LIMIT: 1024 * 1024, // 1MB
 } as const
 

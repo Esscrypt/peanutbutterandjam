@@ -4,7 +4,7 @@
  * Implements RFC-9381 VRF proof generation
  */
 
-import { logger } from '@pbnj/core'
+import { bytesToBigInt, logger } from '@pbnj/core'
 import type {
   VRFInput,
   VRFProof,
@@ -12,8 +12,8 @@ import type {
   VRFSecretKey,
 } from '@pbnj/types'
 import { BandersnatchCurve } from '../curve'
-import type { ProverConfig } from './types'
 import { DEFAULT_PROVER_CONFIG } from './config'
+import type { ProverConfig } from './types'
 
 /**
  * IETF VRF Prover
@@ -89,11 +89,11 @@ export class IETFVRFProver {
    * Scalar multiplication on Bandersnatch curve
    */
   private static scalarMultiply(
-    pointBytes: Uint8Array,
-    scalarBytes: Uint8Array,
+    pointUint8Array: Uint8Array,
+    scalarUint8Array: Uint8Array,
   ): Uint8Array {
-    const point = BandersnatchCurve.bytesToPoint(pointBytes)
-    const scalar = this.bytesToBigint(scalarBytes)
+    const point = BandersnatchCurve.bytesToPoint(pointUint8Array)
+    const scalar = bytesToBigInt(scalarUint8Array)
     const result = BandersnatchCurve.scalarMultiply(point, scalar)
     return BandersnatchCurve.pointToBytes(result)
   }
@@ -142,16 +142,16 @@ export class IETFVRFProver {
     const c = this.hashToScalar(challengeInput)
 
     // Calculate s = k + c * x (mod q)
-    const x = this.bytesToBigint(secretKey.bytes)
+    const x = bytesToBigInt(secretKey.bytes)
     const s = (k + c * x) % BandersnatchCurve.CURVE_ORDER
 
     // Serialize proof as (c, s)
-    const proofBytes = new Uint8Array([
-      ...this.bigintToBytes(c, 32),
-      ...this.bigintToBytes(s, 32),
+    const proofUint8Array = new Uint8Array([
+      ...this.bigintToUint8Array(c, 32),
+      ...this.bigintToUint8Array(s, 32),
     ])
 
-    return { bytes: proofBytes }
+    return { bytes: proofUint8Array }
   }
 
   /**
@@ -160,12 +160,12 @@ export class IETFVRFProver {
   private static generateRandomScalar(): bigint {
     // In production, use cryptographically secure random number generation
     // For now, use a simple deterministic method for testing
-    const randomBytes = new Uint8Array(32)
+    const randomUint8Array = new Uint8Array(32)
     for (let i = 0; i < 32; i++) {
-      randomBytes[i] = Math.floor(Math.random() * 256)
+      randomUint8Array[i] = Math.floor(Math.random() * 256)
     }
 
-    const randomValue = this.bytesToBigint(randomBytes)
+    const randomValue = bytesToBigInt(randomUint8Array)
     return randomValue % BandersnatchCurve.CURVE_ORDER
   }
 
@@ -174,7 +174,7 @@ export class IETFVRFProver {
    */
   private static hashToScalar(_data: Uint8Array): bigint {
     const hash = BandersnatchCurve.hashPoint({ x: 0n, y: 0n, isInfinity: true })
-    const hashValue = this.bytesToBigint(hash)
+    const hashValue = bytesToBigInt(hash)
     return hashValue % BandersnatchCurve.CURVE_ORDER
   }
 
@@ -194,20 +194,9 @@ export class IETFVRFProver {
   }
 
   /**
-   * Convert bytes to bigint
+   * Convert bigint to Uint8Array with specified length
    */
-  private static bytesToBigint(bytes: Uint8Array): bigint {
-    let result = 0n
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(bytes[i])
-    }
-    return result
-  }
-
-  /**
-   * Convert bigint to bytes with specified length
-   */
-  private static bigintToBytes(value: bigint, length: number): Uint8Array {
+  private static bigintToUint8Array(value: bigint, length: number): Uint8Array {
     const bytes = new Uint8Array(length)
     let temp = value
 

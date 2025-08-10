@@ -6,11 +6,11 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BaseService, ServiceRegistry } from './service-interface'
-import type { MainService, Service } from './service-interface'
 import { BlockAuthoringServiceImpl } from './block-authoring-service'
-import { NetworkingService } from './networking-service'
 import { MetricsCollector } from './metrics-collector'
+import { NetworkingService } from './networking-service'
+import type { MainService, Service } from './service-interface'
+import { BaseService, ServiceRegistry } from './service-interface'
 import {
   BlockSubmitterService,
   ExtrinsicValidatorService,
@@ -62,7 +62,7 @@ export class MainServiceImpl extends BaseService implements MainService {
     super('main-service')
     this.config = config
     this.registry = new ServiceRegistry()
-    
+
     // Initialize all services
     this.initializeServices()
   }
@@ -80,7 +80,7 @@ export class MainServiceImpl extends BaseService implements MainService {
     this.headerConstructorService = new HeaderConstructorService()
     this.stateManagerService = new StateManagerService()
     this.workPackageProcessorService = new WorkPackageProcessorService()
-    
+
     // Create networking service with dependencies
     this.networkingService = new NetworkingService({
       validatorIndex: this.config.networking.validatorIndex,
@@ -102,7 +102,7 @@ export class MainServiceImpl extends BaseService implements MainService {
     this.registry.register(this.blockSubmitterService)
     this.registry.register(this.blockAuthoringService)
     this.registry.register(this.networkingService)
-    
+
     // Register this service as the main service
     this.registry.registerMain(this)
   }
@@ -113,13 +113,13 @@ export class MainServiceImpl extends BaseService implements MainService {
   async init(): Promise<void> {
     try {
       logger.info('Initializing main service...')
-      
+
       // Configure block authoring service
       this.blockAuthoringService.configure(this.config.blockAuthoring)
-      
+
       // Initialize all services
       await this.registry.initAll()
-      
+
       this.setInitialized(true)
       logger.info('Main service initialized successfully')
     } catch (error) {
@@ -134,17 +134,17 @@ export class MainServiceImpl extends BaseService implements MainService {
   async start(): Promise<boolean> {
     try {
       logger.info('Starting main service...')
-      
+
       // Start all services
       const success = await this.registry.startAll()
-      
+
       if (success) {
         this.setRunning(true)
         logger.info('Main service started successfully')
       } else {
         logger.error('Main service failed to start - some services failed')
       }
-      
+
       return success
     } catch (error) {
       logger.error('Error starting main service', { error })
@@ -158,10 +158,10 @@ export class MainServiceImpl extends BaseService implements MainService {
   async stop(): Promise<void> {
     try {
       logger.info('Stopping main service...')
-      
+
       // Stop all services
       await this.registry.stopAll()
-      
+
       this.setRunning(false)
       logger.info('Main service stopped successfully')
     } catch (error) {
@@ -175,21 +175,20 @@ export class MainServiceImpl extends BaseService implements MainService {
   async run(): Promise<void> {
     try {
       logger.info('Starting JAM node...')
-      
+
       // Initialize and start the service
       await this.init()
       const started = await this.start()
-      
+
       if (!started) {
         throw new Error('Failed to start main service')
       }
-      
+
       logger.info('JAM node is running')
-      
+
       // Keep the process alive
       // In a real implementation, this might involve event loops, timers, etc.
       await this.keepAlive()
-      
     } catch (error) {
       logger.error('Error in main service run', { error })
       await this.shutdown()
@@ -203,9 +202,9 @@ export class MainServiceImpl extends BaseService implements MainService {
   async shutdown(): Promise<void> {
     try {
       logger.info('Shutting down JAM node...')
-      
+
       await this.stop()
-      
+
       logger.info('JAM node shutdown complete')
     } catch (error) {
       logger.error('Error during shutdown', { error })
@@ -226,7 +225,7 @@ export class MainServiceImpl extends BaseService implements MainService {
 
       process.on('SIGINT', () => shutdown('SIGINT'))
       process.on('SIGTERM', () => shutdown('SIGTERM'))
-      
+
       // Keep the process alive
       // In a real implementation, this might be replaced with actual work loops
       setInterval(() => {
@@ -267,4 +266,4 @@ export class MainServiceImpl extends BaseService implements MainService {
   getService<T extends Service>(name: string): T | undefined {
     return this.registry.get(name) as T | undefined
   }
-} 
+}

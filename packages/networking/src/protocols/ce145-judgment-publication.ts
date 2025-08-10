@@ -5,18 +5,24 @@
  * This is a Common Ephemeral (CE) stream for publishing audit judgments.
  */
 
-import type { 
-  Bytes, 
-  JudgmentPublication,
-  StreamInfo
-} from '@pbnj/types'
+import type { Bytes, JudgmentPublication, StreamInfo } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Judgment publication protocol handler
  */
 export class JudgmentPublicationProtocol {
-  private judgments: Map<string, { epochIndex: number; validatorIndex: number; validity: 0 | 1; workReportHash: Bytes; signature: Bytes; timestamp: number }> = new Map()
+  private judgments: Map<
+    string,
+    {
+      epochIndex: number
+      validatorIndex: number
+      validity: 0 | 1
+      workReportHash: Bytes
+      signature: Bytes
+      timestamp: number
+    }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -38,9 +44,14 @@ export class JudgmentPublicationProtocol {
 
     try {
       // Load judgments from database (service ID 14 for judgments)
-      console.log('Judgment publication state loading - protocol not yet fully implemented')
+      console.log(
+        'Judgment publication state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load judgment publication state from database:', error)
+      console.error(
+        'Failed to load judgment publication state from database:',
+        error,
+      )
     }
   }
 
@@ -52,11 +63,18 @@ export class JudgmentPublicationProtocol {
     validatorIndex: number,
     validity: 0 | 1,
     workReportHash: Bytes,
-    signature: Bytes
+    signature: Bytes,
   ): Promise<void> {
     const key = `${epochIndex}_${validatorIndex}_${workReportHash.toString()}`
-    this.judgments.set(key, { epochIndex, validatorIndex, validity, workReportHash, signature, timestamp: Date.now() })
-    
+    this.judgments.set(key, {
+      epochIndex,
+      validatorIndex,
+      validity,
+      workReportHash,
+      signature,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
@@ -67,13 +85,13 @@ export class JudgmentPublicationProtocol {
           validity,
           workReportHash: Buffer.from(workReportHash).toString('hex'),
           signature: Buffer.from(signature).toString('hex'),
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           14, // Service ID 14 for judgments
           Buffer.from(`judgment_${key}`),
-          Buffer.from(JSON.stringify(judgmentData), 'utf8')
+          Buffer.from(JSON.stringify(judgmentData), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist judgment to database:', error)
@@ -84,7 +102,20 @@ export class JudgmentPublicationProtocol {
   /**
    * Get judgment from local store
    */
-  getJudgment(epochIndex: number, validatorIndex: number, workReportHash: Bytes): { epochIndex: number; validatorIndex: number; validity: 0 | 1; workReportHash: Bytes; signature: Bytes; timestamp: number } | undefined {
+  getJudgment(
+    epochIndex: number,
+    validatorIndex: number,
+    workReportHash: Bytes,
+  ):
+    | {
+        epochIndex: number
+        validatorIndex: number
+        validity: 0 | 1
+        workReportHash: Bytes
+        signature: Bytes
+        timestamp: number
+      }
+    | undefined {
     const key = `${epochIndex}_${validatorIndex}_${workReportHash.toString()}`
     return this.judgments.get(key)
   }
@@ -92,9 +123,22 @@ export class JudgmentPublicationProtocol {
   /**
    * Get judgment from database if not in local store
    */
-  async getJudgmentFromDatabase(epochIndex: number, validatorIndex: number, workReportHash: Bytes): Promise<{ epochIndex: number; validatorIndex: number; validity: 0 | 1; workReportHash: Bytes; signature: Bytes; timestamp: number } | null> {
+  async getJudgmentFromDatabase(
+    epochIndex: number,
+    validatorIndex: number,
+    workReportHash: Bytes,
+  ): Promise<{
+    epochIndex: number
+    validatorIndex: number
+    validity: 0 | 1
+    workReportHash: Bytes
+    signature: Bytes
+    timestamp: number
+  } | null> {
     if (this.getJudgment(epochIndex, validatorIndex, workReportHash)) {
-      return this.getJudgment(epochIndex, validatorIndex, workReportHash) || null
+      return (
+        this.getJudgment(epochIndex, validatorIndex, workReportHash) || null
+      )
     }
 
     if (!this.dbIntegration) return null
@@ -103,9 +147,9 @@ export class JudgmentPublicationProtocol {
       const key = `${epochIndex}_${validatorIndex}_${workReportHash.toString()}`
       const judgmentData = await this.dbIntegration.getServiceStorage(
         14,
-        Buffer.from(`judgment_${key}`)
+        Buffer.from(`judgment_${key}`),
       )
-      
+
       if (judgmentData) {
         const parsedData = JSON.parse(judgmentData.toString())
         const judgment = {
@@ -114,14 +158,14 @@ export class JudgmentPublicationProtocol {
           validity: parsedData.validity as 0 | 1,
           workReportHash: Buffer.from(parsedData.workReportHash, 'hex'),
           signature: Buffer.from(parsedData.signature, 'hex'),
-          timestamp: parsedData.timestamp
+          timestamp: parsedData.timestamp,
         }
-        
+
         // Cache in local store
         this.judgments.set(key, judgment)
         return judgment
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get judgment from database:', error)
@@ -132,12 +176,22 @@ export class JudgmentPublicationProtocol {
   /**
    * Process judgment publication
    */
-  async processJudgmentPublication(judgment: JudgmentPublication): Promise<void> {
+  async processJudgmentPublication(
+    judgment: JudgmentPublication,
+  ): Promise<void> {
     try {
       // Store the judgment
-      await this.storeJudgment(judgment.epochIndex, judgment.validatorIndex, judgment.validity, judgment.workReportHash, judgment.signature)
-      
-      console.log(`Processed judgment publication for epoch ${judgment.epochIndex}, validator ${judgment.validatorIndex}, validity: ${judgment.validity}`)
+      await this.storeJudgment(
+        judgment.epochIndex,
+        judgment.validatorIndex,
+        judgment.validity,
+        judgment.workReportHash,
+        judgment.signature,
+      )
+
+      console.log(
+        `Processed judgment publication for epoch ${judgment.epochIndex}, validator ${judgment.validatorIndex}, validity: ${judgment.validity}`,
+      )
     } catch (error) {
       console.error('Failed to process judgment publication:', error)
     }
@@ -151,14 +205,14 @@ export class JudgmentPublicationProtocol {
     validatorIndex: number,
     validity: 0 | 1,
     workReportHash: Bytes,
-    signature: Bytes
+    signature: Bytes,
   ): JudgmentPublication {
     return {
       epochIndex,
       validatorIndex,
       validity,
       workReportHash,
-      signature
+      signature,
     }
   }
 
@@ -224,14 +278,14 @@ export class JudgmentPublicationProtocol {
       validatorIndex,
       validity,
       workReportHash,
-      signature
+      signature,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const judgment = this.deserializeJudgmentPublication(data)
       await this.processJudgmentPublication(judgment)
@@ -239,4 +293,4 @@ export class JudgmentPublicationProtocol {
       console.error('Failed to handle judgment publication stream data:', error)
     }
   }
-} 
+}

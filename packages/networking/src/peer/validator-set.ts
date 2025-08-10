@@ -5,11 +5,11 @@
  * Handles epoch transitions and validator metadata
  */
 
-import type { 
-  ValidatorMetadata, 
+import type {
+  ConnectionEndpoint,
   EpochIndex,
   ValidatorIndex,
-  ConnectionEndpoint
+  ValidatorMetadata,
 } from '@pbnj/types'
 
 /**
@@ -20,9 +20,7 @@ export class ValidatorSetManager {
   private currentValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
   private previousValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
   private nextValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
-  private epochTransitionPending: boolean = false
-
-  constructor() {}
+  private epochTransitionPending = false
 
   /**
    * Get current epoch index
@@ -57,26 +55,26 @@ export class ValidatorSetManager {
    */
   getAllConnectedValidators(): Map<ValidatorIndex, ValidatorMetadata> {
     const allValidators = new Map<ValidatorIndex, ValidatorMetadata>()
-    
+
     // Add current validators
     for (const [index, metadata] of this.currentValidators) {
       allValidators.set(index, metadata)
     }
-    
+
     // Add previous validators
     for (const [index, metadata] of this.previousValidators) {
       if (!allValidators.has(index)) {
         allValidators.set(index, metadata)
       }
     }
-    
+
     // Add next validators
     for (const [index, metadata] of this.nextValidators) {
       if (!allValidators.has(index)) {
         allValidators.set(index, metadata)
       }
     }
-    
+
     return allValidators
   }
 
@@ -105,55 +103,72 @@ export class ValidatorSetManager {
    * Check if a validator should be connected (in any of the three sets)
    */
   shouldConnectToValidator(validatorIndex: ValidatorIndex): boolean {
-    return this.isCurrentValidator(validatorIndex) ||
-           this.isPreviousValidator(validatorIndex) ||
-           this.isNextValidator(validatorIndex)
+    return (
+      this.isCurrentValidator(validatorIndex) ||
+      this.isPreviousValidator(validatorIndex) ||
+      this.isNextValidator(validatorIndex)
+    )
   }
 
   /**
    * Get validator metadata
    */
-  getValidatorMetadata(validatorIndex: ValidatorIndex): ValidatorMetadata | undefined {
-    return this.currentValidators.get(validatorIndex) ||
-           this.previousValidators.get(validatorIndex) ||
-           this.nextValidators.get(validatorIndex)
+  getValidatorMetadata(
+    validatorIndex: ValidatorIndex,
+  ): ValidatorMetadata | undefined {
+    return (
+      this.currentValidators.get(validatorIndex) ||
+      this.previousValidators.get(validatorIndex) ||
+      this.nextValidators.get(validatorIndex)
+    )
   }
 
   /**
    * Update current validator set
    */
-  updateCurrentValidators(validators: Map<ValidatorIndex, ValidatorMetadata>): void {
+  updateCurrentValidators(
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): void {
     this.currentValidators = new Map(validators)
   }
 
   /**
    * Update previous validator set
    */
-  updatePreviousValidators(validators: Map<ValidatorIndex, ValidatorMetadata>): void {
+  updatePreviousValidators(
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): void {
     this.previousValidators = new Map(validators)
   }
 
   /**
    * Update next validator set
    */
-  updateNextValidators(validators: Map<ValidatorIndex, ValidatorMetadata>): void {
+  updateNextValidators(
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): void {
     this.nextValidators = new Map(validators)
   }
 
   /**
    * Prepare for epoch transition
    */
-  prepareEpochTransition(newEpoch: EpochIndex, newValidators: Map<ValidatorIndex, ValidatorMetadata>): void {
+  prepareEpochTransition(
+    newEpoch: EpochIndex,
+    newValidators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): void {
     if (newEpoch <= this.currentEpoch) {
-      throw new Error(`New epoch ${newEpoch} must be greater than current epoch ${this.currentEpoch}`)
+      throw new Error(
+        `New epoch ${newEpoch} must be greater than current epoch ${this.currentEpoch}`,
+      )
     }
 
     // Store current validators as previous
     this.previousValidators = new Map(this.currentValidators)
-    
+
     // Store new validators as next
     this.nextValidators = new Map(newValidators)
-    
+
     this.epochTransitionPending = true
   }
 
@@ -167,13 +182,13 @@ export class ValidatorSetManager {
 
     // Move next validators to current
     this.currentValidators = new Map(this.nextValidators)
-    
+
     // Clear next validators
     this.nextValidators.clear()
-    
+
     // Increment epoch
     this.currentEpoch++
-    
+
     this.epochTransitionPending = false
   }
 
@@ -182,13 +197,13 @@ export class ValidatorSetManager {
    */
   getLeavingValidators(): ValidatorIndex[] {
     const leaving: ValidatorIndex[] = []
-    
+
     for (const [index] of this.previousValidators) {
       if (!this.currentValidators.has(index)) {
         leaving.push(index)
       }
     }
-    
+
     return leaving
   }
 
@@ -197,13 +212,13 @@ export class ValidatorSetManager {
    */
   getJoiningValidators(): ValidatorIndex[] {
     const joining: ValidatorIndex[] = []
-    
+
     for (const [index] of this.currentValidators) {
       if (!this.previousValidators.has(index)) {
         joining.push(index)
       }
     }
-    
+
     return joining
   }
 
@@ -212,13 +227,13 @@ export class ValidatorSetManager {
    */
   getStayingValidators(): ValidatorIndex[] {
     const staying: ValidatorIndex[] = []
-    
+
     for (const [index] of this.currentValidators) {
       if (this.previousValidators.has(index)) {
         staying.push(index)
       }
     }
-    
+
     return staying
   }
 
@@ -253,22 +268,27 @@ export class ValidatorSetManager {
   /**
    * Find validator by endpoint
    */
-  findValidatorByEndpoint(endpoint: ConnectionEndpoint): ValidatorIndex | undefined {
+  findValidatorByEndpoint(
+    endpoint: ConnectionEndpoint,
+  ): ValidatorIndex | undefined {
     const allValidators = this.getAllConnectedValidators()
-    
+
     for (const [index, metadata] of allValidators) {
       if (this.endpointsMatch(metadata.endpoint, endpoint)) {
         return index
       }
     }
-    
+
     return undefined
   }
 
   /**
    * Check if two endpoints match
    */
-  private endpointsMatch(a: ConnectionEndpoint, b: ConnectionEndpoint): boolean {
+  private endpointsMatch(
+    a: ConnectionEndpoint,
+    b: ConnectionEndpoint,
+  ): boolean {
     return a.host === b.host && a.port === b.port
   }
 
@@ -289,7 +309,7 @@ export class ValidatorSetManager {
       previousCount: this.getPreviousValidatorCount(),
       nextCount: this.getNextValidatorCount(),
       totalConnected: this.getTotalConnectedValidatorCount(),
-      epochTransitionPending: this.epochTransitionPending
+      epochTransitionPending: this.epochTransitionPending,
     }
   }
-} 
+}

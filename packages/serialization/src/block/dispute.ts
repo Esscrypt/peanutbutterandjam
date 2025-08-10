@@ -1,18 +1,48 @@
 /**
  * Dispute serialization
  *
- * Implements Gray Paper dispute serialization
- * Reference: graypaper/text/dispute.tex
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 166-180):
+ *
+ * encodeDisputes(⟨V, C, F⟩) = encode(
+ *   var{⟨⟨XV_reporthash, encode[4](XV_epochindex),
+ *        ⟨⟨XVJ_validity, encode[2](XVJ_judgeindex), XVJ_signature⟩ |
+ *         ⟨XVJ_validity, XVJ_judgeindex, XVJ_signature⟩ ∈ XV_judgments⟩⟩ |
+ *       ⟨XV_reporthash, XV_epochindex, XV_judgments⟩ ∈ V⟩},
+ *   var{C},
+ *   var{F}
+ * )
+ *
+ * Disputes handle validity challenges and other protocol violations.
+ * Reference: graypaper/text/disputes.tex
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Disputes are formal challenges to protocol violations or invalid work.
+ * They enable slashing of misbehaving validators and maintain security.
+ *
+ * Dispute structure (3-tuple: V, C, F):
+ * 1. **Validity disputes (V)**: Challenges to work report correctness
+ * 2. **Culprits (C)**: Direct evidence of validator misbehavior
+ * 3. **Faults (F)**: Protocol violations and slashing conditions
+ *
+ * Validity dispute structure:
+ * - **Report hash**: Which work report is being disputed
+ * - **Epoch index** (4 bytes): When the disputed work occurred
+ * - **Judgments**: List of validator opinions (valid/invalid + signatures)
+ *
+ * Judgment structure (nested):
+ * - **Validity**: Boolean indicating if validator thinks work is valid
+ * - **Judge index** (2 bytes): Which validator is making judgment
+ * - **Signature**: Cryptographic commitment to the judgment
+ *
+ * This multi-layered structure enables comprehensive dispute resolution
+ * while maintaining efficient encoding for the common case of no disputes.
  */
 
-import { bytesToHex, hexToUint8Array } from '@pbnj/core'
+import { bytesToHex, hexToBytes } from '@pbnj/core'
+import type { Dispute, Judgment, ValidityDispute } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
-import type {
-  Dispute,
-  Judgment,
-  Uint8Array,
-  ValidityDispute,
-} from '../types'
 
 /**
  * Encode judgment
@@ -23,12 +53,11 @@ import type {
 export function encodeJudgment(judgment: Judgment): Uint8Array {
   const parts: Uint8Array[] = []
 
-  // Validity (variable length)
-  parts.push(encodeNatural(BigInt(judgment.validity.length))) // Length prefix
-  parts.push(judgment.validity)
+  // Validity (1 byte: 0 for false, 1 for true)
+  parts.push(new Uint8Array([judgment.validity ? 1 : 0]))
 
   // Judge index (8 Uint8Array)
-  parts.push(encodeNatural(judgment.judgeIndex))
+  parts.push(encodeNatural(BigInt(judgment.judgeIndex)))
 
   // Signature (variable length)
   parts.push(encodeNatural(BigInt(judgment.signature.length))) // Length prefix
@@ -59,10 +88,10 @@ export function encodeValidityDispute(
   const parts: Uint8Array[] = []
 
   // Report hash (32 Uint8Array)
-  parts.push(hexToUint8Array(validityDispute.reportHash))
+  parts.push(hexToBytes(validityDispute.reportHash))
 
   // Epoch index (8 Uint8Array)
-  parts.push(encodeNatural(validityDispute.epochIndex))
+  parts.push(encodeNatural(BigInt(validityDispute.epochIndex)))
 
   // Judgments (array of judgments)
   for (const judgment of validityDispute.judgments) {
@@ -192,10 +221,12 @@ export function decodeValidityDispute(data: Uint8Array): {
   currentData = currentData.slice(32)
 
   // Epoch index (8 Uint8Array)
-  const epochIndex = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
+  const epochIndex = Number(
+    BigInt(
+      `0x${Array.from(currentData.slice(0, 8))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')}`,
+    ),
   )
   currentData = currentData.slice(8)
 
@@ -233,21 +264,17 @@ export function decodeJudgment(data: Uint8Array): {
 } {
   let currentData = data
 
-  // Validity (variable length)
-  const validityLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
-  currentData = currentData.slice(8)
-  const validity = currentData.slice(0, Number(validityLength))
-  currentData = currentData.slice(Number(validityLength))
+  // Validity (1 byte: 0 for false, 1 for true)
+  const validity = currentData[0] === 1
+  currentData = currentData.slice(1)
 
   // Judge index (8 Uint8Array)
-  const judgeIndex = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
+  const judgeIndex = Number(
+    BigInt(
+      `0x${Array.from(currentData.slice(0, 8))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')}`,
+    ),
   )
   currentData = currentData.slice(8)
 

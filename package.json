@@ -1,6 +1,6 @@
 {
-  "name": "@pbnj/monorepo",
-  "version": "0.0.1",
+  "name": "peanutbutterandjam",
+  "version": "0.0.0",
   "private": true,
   "workspaces": [
     "config/*",
@@ -9,30 +9,25 @@
     "infra/*"
   ],
   "scripts": {
-    "build": "turbo run build",
-    "check": "turbo run check --cache=local:r,remote:r",
-    "clean": "turbo run clean && find . -name 'node_modules' -type d -exec rm -rf {} + && rm -rf .turbo && rm -rf dist",
-    "db:migrate:core": "turbo run db:migrate:core --filter @pbnj/database",
-    "dev": "turbo run dev --cache=local:r,remote:r --parallel --continue",
-    "disable-remote-caching": "turbo unlink && rm -rf ./node_modules/.cache/turbo",
-    "enable-remote-caching": "turbo link",
+    "build": "turbo run build --output-logs=full --log-order=stream",
+    "check": "turbo run check --cache=local:r,remote:r --output-logs=full",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:migrate:core": "turbo run db:migrate:core --filter @oogabooga/database",
     "format": "biome format . --write",
     "generate": "turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",
-    "lint:fix": "biome check . --write --unsafe --max-diagnostics=1000",
+    "lint:fix": "biome check . --write",
     "test": "turbo run test --parallel",
     "prepare": "lefthook install",
-    "drizzle-studio": "cd ./packages/db && bun drizzle-kit studio"
+    "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
-  "dependencies": {
-    "@stablelib/blake2b": "^2.0.1"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@biomejs/biome": "2.1.2",
+    "@biomejs/biome": "2.1.3",
     "@types/bun": "latest",
     "lefthook": "1.12.2",
     "turbo": "2.5.5",
-    "typescript": "5.8.3"
+    "typescript": "5.9.2"
   },
   "packageManager": "bun@1.2.19",
   "trustedDependencies": [

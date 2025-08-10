@@ -59,7 +59,7 @@ RPC_RATE_LIMIT_WINDOW=900000     # Rate limit window in ms (default: 15 minutes)
 RPC_RATE_LIMIT_MAX_REQUESTS=1000 # Max requests per window (default: 1000)
 
 # Payload limits
-RPC_MAX_PAYLOAD_SIZE=10485760    # Max payload size in bytes (default: 10MB)
+RPC_MAX_PAYLOAD_SIZE=10485760    # Max payload size in Uint8Array (default: 10MB)
 
 # Base environment variables (from @pbnj/core)
 NODE_ENV=development             # Environment (development/production)

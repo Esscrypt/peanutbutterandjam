@@ -129,7 +129,7 @@ export const OPCODES = {
   SIGN_EXTEND_8: 0x108, // Sign extend 8-bit value
   SIGN_EXTEND_16: 0x109, // Sign extend 16-bit value
   ZERO_EXTEND_16: 0x10a, // Zero extend 16-bit value
-  REVERSE_BYTES: 0x10b, // Reverse byte order
+  REVERSE_Uint8Array: 0x10b, // Reverse byte order
 
   // Instructions with Arguments of Two Registers & One Immediate
   STORE_IND_U8: 0x120, // Store to indexed memory (8-bit)
@@ -261,40 +261,40 @@ export const INSTRUCTION_LENGTHS = {
   [OPCODES.ECALLI]: 2, // 1 byte opcode + 1 byte immediate
 
   // Instructions with Arguments of One Register and One Extended Width Immediate
-  [OPCODES.LOAD_IMM_64]: 10, // 1 byte opcode + 1 byte register + 8 bytes immediate
+  [OPCODES.LOAD_IMM_64]: 10, // 1 byte opcode + 1 byte register + 8 Uint8Array immediate
 
   // Instructions with Arguments of Two Immediates (variable length)
   [OPCODES.STORE_IMM_U8]: 3, // 1 byte opcode + 1 byte address + 1 byte value
-  [OPCODES.STORE_IMM_U16]: 4, // 1 byte opcode + 1 byte address + 2 bytes value
-  [OPCODES.STORE_IMM_U32]: 6, // 1 byte opcode + 1 byte address + 4 bytes value
-  [OPCODES.STORE_IMM_U64]: 10, // 1 byte opcode + 1 byte address + 8 bytes value
+  [OPCODES.STORE_IMM_U16]: 4, // 1 byte opcode + 1 byte address + 2 Uint8Array value
+  [OPCODES.STORE_IMM_U32]: 6, // 1 byte opcode + 1 byte address + 4 Uint8Array value
+  [OPCODES.STORE_IMM_U64]: 10, // 1 byte opcode + 1 byte address + 8 Uint8Array value
 
   // Instructions with Arguments of One Offset (variable length)
-  [OPCODES.JUMP]: 3, // 1 byte opcode + 2 bytes offset
+  [OPCODES.JUMP]: 3, // 1 byte opcode + 2 Uint8Array offset
 
   // Instructions with Arguments of One Register & One Immediate (variable length)
   [OPCODES.JUMP_IND]: 3, // 1 byte opcode + 1 byte register + 1 byte immediate
   [OPCODES.LOAD_IMM]: 3, // 1 byte opcode + 1 byte register + 1 byte immediate
   [OPCODES.LOAD_U8]: 3, // 1 byte opcode + 1 byte register + 1 byte address
   [OPCODES.LOAD_I8]: 3, // 1 byte opcode + 1 byte register + 1 byte address
-  [OPCODES.LOAD_U16]: 4, // 1 byte opcode + 1 byte register + 2 bytes address
-  [OPCODES.LOAD_I16]: 4, // 1 byte opcode + 1 byte register + 2 bytes address
-  [OPCODES.LOAD_U32]: 6, // 1 byte opcode + 1 byte register + 4 bytes address
-  [OPCODES.LOAD_I32]: 6, // 1 byte opcode + 1 byte register + 4 bytes address
-  [OPCODES.LOAD_U64]: 10, // 1 byte opcode + 1 byte register + 8 bytes address
+  [OPCODES.LOAD_U16]: 4, // 1 byte opcode + 1 byte register + 2 Uint8Array address
+  [OPCODES.LOAD_I16]: 4, // 1 byte opcode + 1 byte register + 2 Uint8Array address
+  [OPCODES.LOAD_U32]: 6, // 1 byte opcode + 1 byte register + 4 Uint8Array address
+  [OPCODES.LOAD_I32]: 6, // 1 byte opcode + 1 byte register + 4 Uint8Array address
+  [OPCODES.LOAD_U64]: 10, // 1 byte opcode + 1 byte register + 8 Uint8Array address
   [OPCODES.STORE_U8]: 3, // 1 byte opcode + 1 byte register + 1 byte address
-  [OPCODES.STORE_U16]: 4, // 1 byte opcode + 1 byte register + 2 bytes address
-  [OPCODES.STORE_U32]: 6, // 1 byte opcode + 1 byte register + 4 bytes address
-  [OPCODES.STORE_U64]: 10, // 1 byte opcode + 1 byte register + 8 bytes address
+  [OPCODES.STORE_U16]: 4, // 1 byte opcode + 1 byte register + 2 Uint8Array address
+  [OPCODES.STORE_U32]: 6, // 1 byte opcode + 1 byte register + 4 Uint8Array address
+  [OPCODES.STORE_U64]: 10, // 1 byte opcode + 1 byte register + 8 Uint8Array address
 
   // Instructions with Arguments of One Register & Two Immediates
   [OPCODES.STORE_IMM_IND_U8]: 4, // 1 byte opcode + 1 byte register + 1 byte offset + 1 byte value
-  [OPCODES.STORE_IMM_IND_U16]: 5, // 1 byte opcode + 1 byte register + 1 byte offset + 2 bytes value
-  [OPCODES.STORE_IMM_IND_U32]: 7, // 1 byte opcode + 1 byte register + 1 byte offset + 4 bytes value
-  [OPCODES.STORE_IMM_IND_U64]: 11, // 1 byte opcode + 1 byte register + 1 byte offset + 8 bytes value
+  [OPCODES.STORE_IMM_IND_U16]: 5, // 1 byte opcode + 1 byte register + 1 byte offset + 2 Uint8Array value
+  [OPCODES.STORE_IMM_IND_U32]: 7, // 1 byte opcode + 1 byte register + 1 byte offset + 4 Uint8Array value
+  [OPCODES.STORE_IMM_IND_U64]: 11, // 1 byte opcode + 1 byte register + 1 byte offset + 8 Uint8Array value
 
   // Instructions with Arguments of One Register, One Immediate and One Offset
-  [OPCODES.LOAD_IMM_JUMP]: 5, // 1 byte opcode + 1 byte register + 1 byte immediate + 2 bytes offset
+  [OPCODES.LOAD_IMM_JUMP]: 5, // 1 byte opcode + 1 byte register + 1 byte immediate + 2 Uint8Array offset
   [OPCODES.BRANCH_EQ_IMM]: 4, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
   [OPCODES.BRANCH_NE_IMM]: 4, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
   [OPCODES.BRANCH_LT_U_IMM]: 4, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
@@ -318,62 +318,62 @@ export const INSTRUCTION_LENGTHS = {
   [OPCODES.SIGN_EXTEND_8]: 2,
   [OPCODES.SIGN_EXTEND_16]: 2,
   [OPCODES.ZERO_EXTEND_16]: 2,
-  [OPCODES.REVERSE_BYTES]: 2,
+  [OPCODES.REVERSE_Uint8Array]: 2,
 
   // Instructions with Arguments of Two Registers & One Immediate (variable length)
-  [OPCODES.STORE_IND_U8]: 3, // 1 byte opcode + 2 bytes registers + 1 byte immediate
-  [OPCODES.STORE_IND_U16]: 4, // 1 byte opcode + 2 bytes registers + 2 bytes immediate
-  [OPCODES.STORE_IND_U32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.STORE_IND_U64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.LOAD_IND_U8]: 3, // 1 byte opcode + 2 bytes registers + 1 byte immediate
-  [OPCODES.LOAD_IND_I8]: 3, // 1 byte opcode + 2 bytes registers + 1 byte immediate
-  [OPCODES.LOAD_IND_U16]: 4, // 1 byte opcode + 2 bytes registers + 2 bytes immediate
-  [OPCODES.LOAD_IND_I16]: 4, // 1 byte opcode + 2 bytes registers + 2 bytes immediate
-  [OPCODES.LOAD_IND_U32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.LOAD_IND_I32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.LOAD_IND_U64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.ADD_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.AND_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.XOR_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.OR_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.MUL_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SET_LT_U_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SET_LT_S_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_L_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SHLO_R_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SHAR_R_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.NEG_ADD_IMM_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SET_GT_U_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SET_GT_S_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_L_IMM_ALT_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SHLO_R_IMM_ALT_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.SHAR_R_IMM_ALT_32]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.CMOV_IZ_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.CMOV_NZ_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.ADD_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.MUL_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_L_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_R_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHAR_R_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.NEG_ADD_IMM_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_L_IMM_ALT_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHLO_R_IMM_ALT_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.SHAR_R_IMM_ALT_64]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.ROT_R_64_IMM]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.ROT_R_64_IMM_ALT]: 10, // 1 byte opcode + 2 bytes registers + 8 bytes immediate
-  [OPCODES.ROT_R_32_IMM]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
-  [OPCODES.ROT_R_32_IMM_ALT]: 6, // 1 byte opcode + 2 bytes registers + 4 bytes immediate
+  [OPCODES.STORE_IND_U8]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
+  [OPCODES.STORE_IND_U16]: 4, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
+  [OPCODES.STORE_IND_U32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.STORE_IND_U64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.LOAD_IND_U8]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
+  [OPCODES.LOAD_IND_I8]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
+  [OPCODES.LOAD_IND_U16]: 4, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
+  [OPCODES.LOAD_IND_I16]: 4, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
+  [OPCODES.LOAD_IND_U32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.LOAD_IND_I32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.LOAD_IND_U64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.ADD_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.AND_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.XOR_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.OR_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.MUL_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SET_LT_U_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SET_LT_S_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_L_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SHLO_R_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SHAR_R_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.NEG_ADD_IMM_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SET_GT_U_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SET_GT_S_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_L_IMM_ALT_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SHLO_R_IMM_ALT_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.SHAR_R_IMM_ALT_32]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.CMOV_IZ_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.CMOV_NZ_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.ADD_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.MUL_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_L_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_R_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHAR_R_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.NEG_ADD_IMM_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_L_IMM_ALT_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHLO_R_IMM_ALT_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.SHAR_R_IMM_ALT_64]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.ROT_R_64_IMM]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.ROT_R_64_IMM_ALT]: 10, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
+  [OPCODES.ROT_R_32_IMM]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
+  [OPCODES.ROT_R_32_IMM_ALT]: 6, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
 
   // Instructions with Arguments of Two Registers & One Offset (variable length)
-  [OPCODES.BRANCH_EQ]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
-  [OPCODES.BRANCH_NE]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
-  [OPCODES.BRANCH_LT_U]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
-  [OPCODES.BRANCH_LT_S]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
-  [OPCODES.BRANCH_GE_U]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
-  [OPCODES.BRANCH_GE_S]: 3, // 1 byte opcode + 2 bytes registers + 1 byte offset
+  [OPCODES.BRANCH_EQ]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
+  [OPCODES.BRANCH_NE]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
+  [OPCODES.BRANCH_LT_U]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
+  [OPCODES.BRANCH_LT_S]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
+  [OPCODES.BRANCH_GE_U]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
+  [OPCODES.BRANCH_GE_S]: 3, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
 
   // Instructions with Arguments of Two Registers and Two Immediates
-  [OPCODES.LOAD_IMM_JUMP_IND]: 6, // 1 byte opcode + 2 bytes registers + 1 byte immediate + 2 bytes immediate
+  [OPCODES.LOAD_IMM_JUMP_IND]: 6, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate + 2 Uint8Array immediate
 
   // Instructions with Arguments of Three Registers (length 3)
   [OPCODES.ADD_32]: 3,

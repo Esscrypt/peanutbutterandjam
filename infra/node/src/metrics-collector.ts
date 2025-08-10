@@ -5,17 +5,16 @@
  * Provides integration with Prometheus, Grafana, and other observability tools
  */
 
-import type { BlockAuthoringMetrics } from './types'
+// OpenTelemetry imports
+import { metrics, SpanStatusCode, trace } from '@opentelemetry/api'
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+import { Resource } from '@opentelemetry/resources'
+import { NodeSDK } from '@opentelemetry/sdk-node'
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
 import { logger } from '@pbnj/core'
 import { BaseService } from './service-interface'
-
-// OpenTelemetry imports
-import { metrics, trace, SpanStatusCode } from '@opentelemetry/api'
-import { Resource } from '@opentelemetry/resources'
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
-import { NodeSDK } from '@opentelemetry/sdk-node'
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
-import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
+import type { BlockAuthoringMetrics } from './types'
 
 /**
  * Metrics Collector with OpenTelemetry
@@ -48,7 +47,10 @@ export class MetricsCollector extends BaseService {
   private blocksSubmittedCounter: any
   private blocksFailedCounter: any
 
-  constructor(private nodeId: string, private serviceName: string = 'pbnj-node') {
+  constructor(
+    private nodeId: string,
+    private serviceName = 'pbnj-node',
+  ) {
     super('metrics-collector')
     this.initializeOpenTelemetry()
     this.initializeMetrics()
@@ -101,7 +103,9 @@ export class MetricsCollector extends BaseService {
           'service.instance.id': this.nodeId,
         }),
         traceExporter: new OTLPTraceExporter({
-          url: process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] || 'http://localhost:4318/v1/traces',
+          url:
+            process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ||
+            'http://localhost:4318/v1/traces',
         }),
         instrumentations: [getNodeAutoInstrumentations()],
       })
@@ -109,10 +113,13 @@ export class MetricsCollector extends BaseService {
       sdk.start()
       logger.info('OpenTelemetry SDK initialized', { nodeId: this.nodeId })
     } catch (error) {
-      logger.warn('Failed to initialize OpenTelemetry SDK, continuing without observability', { 
-        nodeId: this.nodeId, 
-        error: error instanceof Error ? error.message : String(error) 
-      })
+      logger.warn(
+        'Failed to initialize OpenTelemetry SDK, continuing without observability',
+        {
+          nodeId: this.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      )
     }
   }
 
@@ -122,20 +129,29 @@ export class MetricsCollector extends BaseService {
   private initializeMetrics(): void {
     try {
       // Histograms for timing metrics
-      this.blockCreationTimeHistogram = this.meter.createHistogram('block_creation_time_ms', {
-        description: 'Time taken to create a block in milliseconds',
-        unit: 'ms',
-      })
+      this.blockCreationTimeHistogram = this.meter.createHistogram(
+        'block_creation_time_ms',
+        {
+          description: 'Time taken to create a block in milliseconds',
+          unit: 'ms',
+        },
+      )
 
-      this.blockValidationTimeHistogram = this.meter.createHistogram('block_validation_time_ms', {
-        description: 'Time taken to validate a block in milliseconds',
-        unit: 'ms',
-      })
+      this.blockValidationTimeHistogram = this.meter.createHistogram(
+        'block_validation_time_ms',
+        {
+          description: 'Time taken to validate a block in milliseconds',
+          unit: 'ms',
+        },
+      )
 
-      this.blockSubmissionTimeHistogram = this.meter.createHistogram('block_submission_time_ms', {
-        description: 'Time taken to submit a block in milliseconds',
-        unit: 'ms',
-      })
+      this.blockSubmissionTimeHistogram = this.meter.createHistogram(
+        'block_submission_time_ms',
+        {
+          description: 'Time taken to submit a block in milliseconds',
+          unit: 'ms',
+        },
+      )
 
       this.blockSizeHistogram = this.meter.createHistogram('block_size_bytes', {
         description: 'Size of created blocks in bytes',
@@ -143,10 +159,13 @@ export class MetricsCollector extends BaseService {
       })
 
       // Gauges for current values
-      this.memoryUsageGauge = this.meter.createUpDownCounter('memory_usage_bytes', {
-        description: 'Current memory usage in bytes',
-        unit: 'bytes',
-      })
+      this.memoryUsageGauge = this.meter.createUpDownCounter(
+        'memory_usage_bytes',
+        {
+          description: 'Current memory usage in bytes',
+          unit: 'bytes',
+        },
+      )
 
       this.cpuUsageGauge = this.meter.createUpDownCounter('cpu_usage_percent', {
         description: 'Current CPU usage percentage',
@@ -154,32 +173,50 @@ export class MetricsCollector extends BaseService {
       })
 
       // Counters for cumulative values
-      this.extrinsicCountCounter = this.meter.createCounter('extrinsics_processed_total', {
-        description: 'Total number of extrinsics processed',
-      })
+      this.extrinsicCountCounter = this.meter.createCounter(
+        'extrinsics_processed_total',
+        {
+          description: 'Total number of extrinsics processed',
+        },
+      )
 
-      this.workPackageCountCounter = this.meter.createCounter('work_packages_processed_total', {
-        description: 'Total number of work packages processed',
-      })
+      this.workPackageCountCounter = this.meter.createCounter(
+        'work_packages_processed_total',
+        {
+          description: 'Total number of work packages processed',
+        },
+      )
 
-      this.blocksCreatedCounter = this.meter.createCounter('blocks_created_total', {
-        description: 'Total number of blocks created',
-      })
+      this.blocksCreatedCounter = this.meter.createCounter(
+        'blocks_created_total',
+        {
+          description: 'Total number of blocks created',
+        },
+      )
 
-      this.blocksSubmittedCounter = this.meter.createCounter('blocks_submitted_total', {
-        description: 'Total number of blocks submitted',
-      })
+      this.blocksSubmittedCounter = this.meter.createCounter(
+        'blocks_submitted_total',
+        {
+          description: 'Total number of blocks submitted',
+        },
+      )
 
-      this.blocksFailedCounter = this.meter.createCounter('blocks_failed_total', {
-        description: 'Total number of blocks that failed',
-      })
+      this.blocksFailedCounter = this.meter.createCounter(
+        'blocks_failed_total',
+        {
+          description: 'Total number of blocks that failed',
+        },
+      )
 
       logger.info('OpenTelemetry metrics initialized', { nodeId: this.nodeId })
     } catch (error) {
-      logger.warn('Failed to initialize OpenTelemetry metrics, continuing without metrics', { 
-        nodeId: this.nodeId, 
-        error: error instanceof Error ? error.message : String(error) 
-      })
+      logger.warn(
+        'Failed to initialize OpenTelemetry metrics, continuing without metrics',
+        {
+          nodeId: this.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      )
     }
   }
 
@@ -194,21 +231,30 @@ export class MetricsCollector extends BaseService {
 
     // Record metrics in OpenTelemetry
     try {
-      if (newMetrics.creationTime !== undefined && this.blockCreationTimeHistogram) {
+      if (
+        newMetrics.creationTime !== undefined &&
+        this.blockCreationTimeHistogram
+      ) {
         this.blockCreationTimeHistogram.record(newMetrics.creationTime, {
           node_id: this.nodeId,
           metric_type: 'creation_time',
         })
       }
 
-      if (newMetrics.validationTime !== undefined && this.blockValidationTimeHistogram) {
+      if (
+        newMetrics.validationTime !== undefined &&
+        this.blockValidationTimeHistogram
+      ) {
         this.blockValidationTimeHistogram.record(newMetrics.validationTime, {
           node_id: this.nodeId,
           metric_type: 'validation_time',
         })
       }
 
-      if (newMetrics.submissionTime !== undefined && this.blockSubmissionTimeHistogram) {
+      if (
+        newMetrics.submissionTime !== undefined &&
+        this.blockSubmissionTimeHistogram
+      ) {
         this.blockSubmissionTimeHistogram.record(newMetrics.submissionTime, {
           node_id: this.nodeId,
           metric_type: 'submission_time',
@@ -229,14 +275,20 @@ export class MetricsCollector extends BaseService {
         })
       }
 
-      if (newMetrics.extrinsicCount !== undefined && this.extrinsicCountCounter) {
+      if (
+        newMetrics.extrinsicCount !== undefined &&
+        this.extrinsicCountCounter
+      ) {
         this.extrinsicCountCounter.add(newMetrics.extrinsicCount, {
           node_id: this.nodeId,
           metric_type: 'extrinsic_count',
         })
       }
 
-      if (newMetrics.workPackageCount !== undefined && this.workPackageCountCounter) {
+      if (
+        newMetrics.workPackageCount !== undefined &&
+        this.workPackageCountCounter
+      ) {
         this.workPackageCountCounter.add(newMetrics.workPackageCount, {
           node_id: this.nodeId,
           metric_type: 'work_package_count',
@@ -250,9 +302,9 @@ export class MetricsCollector extends BaseService {
         })
       }
     } catch (error) {
-      logger.warn('Failed to record metrics', { 
-        nodeId: this.nodeId, 
-        error: error instanceof Error ? error.message : String(error) 
+      logger.warn('Failed to record metrics', {
+        nodeId: this.nodeId,
+        error: error instanceof Error ? error.message : String(error),
       })
     }
   }
@@ -260,7 +312,10 @@ export class MetricsCollector extends BaseService {
   /**
    * Record block creation with tracing
    */
-  recordBlockCreation(blockNumber: number, metrics: Partial<BlockAuthoringMetrics>): void {
+  recordBlockCreation(
+    blockNumber: number,
+    metrics: Partial<BlockAuthoringMetrics>,
+  ): void {
     try {
       const span = this.tracer.startSpan('block_creation', {
         attributes: {
@@ -298,10 +353,10 @@ export class MetricsCollector extends BaseService {
         span.end()
       }
     } catch (error) {
-      logger.warn('Failed to record block creation trace', { 
-        nodeId: this.nodeId, 
+      logger.warn('Failed to record block creation trace', {
+        nodeId: this.nodeId,
         blockNumber,
-        error: error instanceof Error ? error.message : String(error) 
+        error: error instanceof Error ? error.message : String(error),
       })
       // Fallback to just updating metrics without tracing
       this.updateMetrics(metrics)
@@ -311,7 +366,11 @@ export class MetricsCollector extends BaseService {
   /**
    * Record block submission with tracing
    */
-  recordBlockSubmission(blockNumber: number, success: boolean, metrics: Partial<BlockAuthoringMetrics>): void {
+  recordBlockSubmission(
+    blockNumber: number,
+    success: boolean,
+    metrics: Partial<BlockAuthoringMetrics>,
+  ): void {
     try {
       const span = this.tracer.startSpan('block_submission', {
         attributes: {
@@ -336,7 +395,9 @@ export class MetricsCollector extends BaseService {
           })
         }
 
-        span.setStatus({ code: success ? SpanStatusCode.OK : SpanStatusCode.ERROR })
+        span.setStatus({
+          code: success ? SpanStatusCode.OK : SpanStatusCode.ERROR,
+        })
         span.setAttributes({
           'block.submission_time_ms': metrics.submissionTime || 0,
         })
@@ -355,11 +416,11 @@ export class MetricsCollector extends BaseService {
         span.end()
       }
     } catch (error) {
-      logger.warn('Failed to record block submission trace', { 
-        nodeId: this.nodeId, 
+      logger.warn('Failed to record block submission trace', {
+        nodeId: this.nodeId,
         blockNumber,
         success,
-        error: error instanceof Error ? error.message : String(error) 
+        error: error instanceof Error ? error.message : String(error),
       })
       // Fallback to just updating metrics without tracing
       this.updateMetrics(metrics)

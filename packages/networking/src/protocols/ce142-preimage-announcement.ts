@@ -5,18 +5,22 @@
  * This is a Common Ephemeral (CE) stream for announcing possession of preimages.
  */
 
-import type { 
-  Bytes, 
-  PreimageAnnouncement,
-  StreamInfo
-} from '@pbnj/types'
+import type { Bytes, PreimageAnnouncement, StreamInfo } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Preimage announcement protocol handler
  */
 export class PreimageAnnouncementProtocol {
-  private preimageAnnouncements: Map<string, { serviceId: number; hash: Bytes; preimageLength: number; timestamp: number }> = new Map()
+  private preimageAnnouncements: Map<
+    string,
+    {
+      serviceId: number
+      hash: Bytes
+      preimageLength: number
+      timestamp: number
+    }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -38,19 +42,33 @@ export class PreimageAnnouncementProtocol {
 
     try {
       // Load preimage announcements from database (service ID 11 for preimage announcements)
-      console.log('Preimage announcement state loading - protocol not yet fully implemented')
+      console.log(
+        'Preimage announcement state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load preimage announcement state from database:', error)
+      console.error(
+        'Failed to load preimage announcement state from database:',
+        error,
+      )
     }
   }
 
   /**
    * Store preimage announcement in local store and persist to database
    */
-  async storePreimageAnnouncement(serviceId: number, hash: Bytes, preimageLength: number): Promise<void> {
+  async storePreimageAnnouncement(
+    serviceId: number,
+    hash: Bytes,
+    preimageLength: number,
+  ): Promise<void> {
     const hashString = hash.toString()
-    this.preimageAnnouncements.set(hashString, { serviceId, hash, preimageLength, timestamp: Date.now() })
-    
+    this.preimageAnnouncements.set(hashString, {
+      serviceId,
+      hash,
+      preimageLength,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
@@ -59,16 +77,19 @@ export class PreimageAnnouncementProtocol {
           serviceId,
           hash: Buffer.from(hash).toString('hex'),
           preimageLength,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           11, // Service ID 11 for preimage announcements
           Buffer.from(`preimage_announcement_${hashString}`),
-          Buffer.from(JSON.stringify(announcementData), 'utf8')
+          Buffer.from(JSON.stringify(announcementData), 'utf8'),
         )
       } catch (error) {
-        console.error('Failed to persist preimage announcement to database:', error)
+        console.error(
+          'Failed to persist preimage announcement to database:',
+          error,
+        )
       }
     }
   }
@@ -76,14 +97,26 @@ export class PreimageAnnouncementProtocol {
   /**
    * Get preimage announcement from local store
    */
-  getPreimageAnnouncement(hash: Bytes): { serviceId: number; hash: Bytes; preimageLength: number; timestamp: number } | undefined {
+  getPreimageAnnouncement(hash: Bytes):
+    | {
+        serviceId: number
+        hash: Bytes
+        preimageLength: number
+        timestamp: number
+      }
+    | undefined {
     return this.preimageAnnouncements.get(hash.toString())
   }
 
   /**
    * Get preimage announcement from database if not in local store
    */
-  async getPreimageAnnouncementFromDatabase(hash: Bytes): Promise<{ serviceId: number; hash: Bytes; preimageLength: number; timestamp: number } | null> {
+  async getPreimageAnnouncementFromDatabase(hash: Bytes): Promise<{
+    serviceId: number
+    hash: Bytes
+    preimageLength: number
+    timestamp: number
+  } | null> {
     if (this.getPreimageAnnouncement(hash)) {
       return this.getPreimageAnnouncement(hash) || null
     }
@@ -94,23 +127,23 @@ export class PreimageAnnouncementProtocol {
       const hashString = hash.toString()
       const announcementData = await this.dbIntegration.getServiceStorage(
         11,
-        Buffer.from(`preimage_announcement_${hashString}`)
+        Buffer.from(`preimage_announcement_${hashString}`),
       )
-      
+
       if (announcementData) {
         const parsedData = JSON.parse(announcementData.toString())
         const announcement = {
           serviceId: parsedData.serviceId,
           hash: Buffer.from(parsedData.hash, 'hex'),
           preimageLength: parsedData.preimageLength,
-          timestamp: parsedData.timestamp
+          timestamp: parsedData.timestamp,
         }
-        
+
         // Cache in local store
         this.preimageAnnouncements.set(hashString, announcement)
         return announcement
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get preimage announcement from database:', error)
@@ -121,12 +154,20 @@ export class PreimageAnnouncementProtocol {
   /**
    * Process preimage announcement
    */
-  async processPreimageAnnouncement(announcement: PreimageAnnouncement): Promise<void> {
+  async processPreimageAnnouncement(
+    announcement: PreimageAnnouncement,
+  ): Promise<void> {
     try {
       // Store the preimage announcement
-      await this.storePreimageAnnouncement(announcement.serviceId, announcement.hash, announcement.preimageLength)
-      
-      console.log(`Processed preimage announcement for service ${announcement.serviceId}, hash: ${announcement.hash.toString().substring(0, 16)}...`)
+      await this.storePreimageAnnouncement(
+        announcement.serviceId,
+        announcement.hash,
+        announcement.preimageLength,
+      )
+
+      console.log(
+        `Processed preimage announcement for service ${announcement.serviceId}, hash: ${announcement.hash.toString().substring(0, 16)}...`,
+      )
     } catch (error) {
       console.error('Failed to process preimage announcement:', error)
     }
@@ -135,11 +176,15 @@ export class PreimageAnnouncementProtocol {
   /**
    * Create preimage announcement message
    */
-  createPreimageAnnouncement(serviceId: number, hash: Bytes, preimageLength: number): PreimageAnnouncement {
+  createPreimageAnnouncement(
+    serviceId: number,
+    hash: Bytes,
+    preimageLength: number,
+  ): PreimageAnnouncement {
     return {
       serviceId,
       hash,
-      preimageLength
+      preimageLength,
     }
   }
 
@@ -187,19 +232,22 @@ export class PreimageAnnouncementProtocol {
     return {
       serviceId,
       hash,
-      preimageLength
+      preimageLength,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const announcement = this.deserializePreimageAnnouncement(data)
       await this.processPreimageAnnouncement(announcement)
     } catch (error) {
-      console.error('Failed to handle preimage announcement stream data:', error)
+      console.error(
+        'Failed to handle preimage announcement stream data:',
+        error,
+      )
     }
   }
-} 
+}

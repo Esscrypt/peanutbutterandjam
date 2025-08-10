@@ -81,8 +81,7 @@
       },
       "suspicious": {
         "noArrayIndexKey": "off",
-        "noImplicitAnyLet": "off",
-        "noConsole": "error"
+        "noImplicitAnyLet": "off"
       },
       "complexity": {
         "useLiteralKeys": "off",

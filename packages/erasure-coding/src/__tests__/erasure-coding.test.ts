@@ -22,7 +22,7 @@ describe('JAM Erasure Coder', () => {
       const coder = new JAMErasureCoder()
       const originalData = new TextEncoder().encode('Hello, JAM Protocol!')
 
-      // Pad to multiple of 684 bytes
+      // Pad to multiple of 684 Uint8Array
       const paddedLength = Math.ceil(originalData.length / 684) * 684
       const paddedData = new Uint8Array(paddedLength)
       paddedData.set(originalData)
@@ -89,7 +89,7 @@ describe('JAM Erasure Coder', () => {
 
     it('should encode blob data correctly', () => {
       const coder = new JAMErasureCoder(BLOB_ERASURE_CODING_PARAMS)
-      const originalData = new Uint8Array(1368) // 2 * 684 bytes
+      const originalData = new Uint8Array(1368) // 2 * 684 Uint8Array
       for (let i = 0; i < originalData.length; i++) {
         originalData[i] = i % 256
       }
@@ -116,7 +116,7 @@ describe('JAM Erasure Coder', () => {
 
     it('should encode segment data correctly', () => {
       const coder = new JAMErasureCoder(SEGMENT_ERASURE_CODING_PARAMS)
-      const originalData = new Uint8Array(4104) // 6 * 684 bytes
+      const originalData = new Uint8Array(4104) // 6 * 684 Uint8Array
       for (let i = 0; i < originalData.length; i++) {
         originalData[i] = i % 256
       }
@@ -150,7 +150,7 @@ describe('JAM Erasure Coder', () => {
     it('should handle edge case data sizes', () => {
       const coder = new JAMErasureCoder()
 
-      // Test with exactly 684 bytes
+      // Test with exactly 684 Uint8Array
       const data684 = new Uint8Array(684)
       for (let i = 0; i < data684.length; i++) {
         data684[i] = i % 256

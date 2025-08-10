@@ -5,7 +5,12 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { FieldElement, ReedSolomonAlgorithm, FiniteField, PolynomialOperations } from '@pbnj/types'
+import type {
+  FieldElement,
+  FiniteField,
+  PolynomialOperations,
+  ReedSolomonAlgorithm,
+} from '@pbnj/types'
 import { CANTOR_BASIS } from '@pbnj/types'
 
 /**

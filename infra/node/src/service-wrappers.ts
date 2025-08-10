@@ -6,14 +6,14 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BaseService } from './service-interface'
 import { BlockSubmitter } from './block-submitter'
 import { ExtrinsicValidator } from './extrinsic-validator'
 import { GenesisManager } from './genesis-manager'
 import { HeaderConstructor } from './header-constructor'
+import { BaseService } from './service-interface'
 import { StateManager } from './state-manager'
-import { WorkPackageProcessor } from './work-package-processor'
 import type { GenesisConfig } from './types'
+import { WorkPackageProcessor } from './work-package-processor'
 
 /**
  * Block Submitter Service Wrapper
@@ -81,7 +81,9 @@ export class ExtrinsicValidatorService extends BaseService {
       this.setInitialized(true)
       logger.info('Extrinsic validator service initialized successfully')
     } catch (error) {
-      logger.error('Failed to initialize extrinsic validator service', { error })
+      logger.error('Failed to initialize extrinsic validator service', {
+        error,
+      })
       throw error
     }
   }
@@ -277,7 +279,9 @@ export class WorkPackageProcessorService extends BaseService {
       this.setInitialized(true)
       logger.info('Work package processor service initialized successfully')
     } catch (error) {
-      logger.error('Failed to initialize work package processor service', { error })
+      logger.error('Failed to initialize work package processor service', {
+        error,
+      })
       throw error
     }
   }
@@ -307,4 +311,4 @@ export class WorkPackageProcessorService extends BaseService {
   getWorkPackageProcessor(): WorkPackageProcessor {
     return this.workPackageProcessor
   }
-} 
+}

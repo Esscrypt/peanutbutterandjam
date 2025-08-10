@@ -5,16 +5,11 @@
  * Reference: Gray Paper specifications
  */
 
-// Import blakejs for cryptographic operations
-import * as blakejs from 'blakejs'
-import {
-  bytesToBigInt,
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-} from 'viem'
 import type { Hash } from '@pbnj/types'
 import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
+// Import blakejs for cryptographic operations
+import * as blakejs from 'blakejs'
+import { bytesToBigInt, bytesToHex, type Hex, hexToBytes } from 'viem'
 
 /**
  * Blake2b hash function
@@ -22,8 +17,8 @@ import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
  * @returns 32-byte hash as hex string
  */
 export function blake2bHash(data: Uint8Array): Hash {
-    const hash = blakejs.blake2b(data, undefined, 32)
-    return `0x${Buffer.from(hash).toString('hex')}` as Hash
+  const hash = blakejs.blake2b(data, undefined, 32)
+  return `0x${Buffer.from(hash).toString('hex')}` as Hash
 }
 
 /**
@@ -36,11 +31,16 @@ export function blake2b(data: Uint8Array): Hash {
 /**
  * Sign data with Ed25519 private key
  */
-export function signEd25519(data: Uint8Array, privateKey: Uint8Array): Uint8Array {
+export function signEd25519(
+  data: Uint8Array,
+  privateKey: Uint8Array,
+): Uint8Array {
   // The @stablelib/ed25519 library expects the secret key to be exactly 64 Uint8Array
   // The secretKey from generateKeyPair() should already be in the correct format
   if (privateKey.length !== 64) {
-    throw new Error(`Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`)
+    throw new Error(
+      `Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`,
+    )
   }
   return new Uint8Array(sign(privateKey, data))
 }
@@ -48,17 +48,20 @@ export function signEd25519(data: Uint8Array, privateKey: Uint8Array): Uint8Arra
 /**
  * Verify Ed25519 signature
  */
-export function verifyEd25519(data: Uint8Array, signature: Uint8Array, publicKey: Uint8Array): boolean {
+export function verifyEd25519(
+  data: Uint8Array,
+  signature: Uint8Array,
+  publicKey: Uint8Array,
+): boolean {
   try {
     if (signature.length !== 64) {
       return false
     }
     return verify(publicKey, data, signature)
-  } catch (error) {
+  } catch (_error) {
     return false
   }
 }
-
 
 /**
  * Generate a new Ed25519 key pair using @stablelib/ed25519
@@ -73,7 +76,6 @@ export function generateEd25519KeyPairStable(): {
     privateKey: new Uint8Array(keyPair.secretKey), // This is 64 Uint8Array (32 Uint8Array seed + 32 Uint8Array public key)
   }
 }
-
 
 /**
  * Serialize Ed25519 public key to hex string
@@ -108,13 +110,16 @@ export function validatePrivateKey(privateKey: Uint8Array): boolean {
  */
 export function validateSignature(signature: Uint8Array): boolean {
   return signature.length === 64
-} 
+}
 
 /**
  * BLS key pair generation using blakejs
  * @returns Object with publicKey and secretKey
  */
-export function generateBLSKeyPair(): { publicKey: Uint8Array; secretKey: Uint8Array } {
+export function generateBLSKeyPair(): {
+  publicKey: Uint8Array
+  secretKey: Uint8Array
+} {
   // Generate random secret key
   const secretKey = new Uint8Array(32)
   const nodeCrypto = require('node:crypto')
@@ -195,7 +200,10 @@ export function generateBandersnatchKeyPair(): {
  * @param secretKey - Secret key for VRF
  * @returns VRF proof as hex string
  */
-export function bandersnatchVrfProof(message: Uint8Array, secretKey: Uint8Array): string {
+export function bandersnatchVrfProof(
+  message: Uint8Array,
+  secretKey: Uint8Array,
+): string {
   try {
     // VRF proof using blake2b
     const hash = blake2bHash(message)
@@ -228,7 +236,6 @@ export function bandersnatchVrfVerify(
     return false
   }
 }
-
 
 /**
  * Generate random Uint8Array

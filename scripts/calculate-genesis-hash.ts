@@ -5,27 +5,35 @@
  * Reference: https://docs.jamcha.in/basics/genesis-config
  */
 
-import { blake2bHash } from '@pbnj/core'
-import { encodeBlockHeader } from '@pbnj/serialization'
 import { readFileSync } from 'node:fs'
-import { parseGenesisHeader, type GenesisHeader } from '@pbnj/core'
-import type { BlockHeader, EpochMark, ValidatorKeyTuple } from '@pbnj/serialization'
+import { blake2bHash, type GenesisHeader, parseGenesisHeader } from '@pbnj/core'
+import type {
+  BlockHeader,
+  EpochMark,
+  ValidatorKeyTuple,
+} from '@pbnj/serialization'
+import { encodeBlockHeader } from '@pbnj/serialization'
 
 // Expected hash from JAM documentation
-const EXPECTED_HASH = '0xe864d485113737c28c2fef3b2aed39cb2f289a369b15c54e9c44720bcfdc0ca0'
+const EXPECTED_HASH =
+  '0xe864d485113737c28c2fef3b2aed39cb2f289a369b15c54e9c44720bcfdc0ca0'
 
 /**
  * Convert genesis header JSON format to serialization format
  */
-function convertGenesisHeaderToSerializationFormat(genesisHeader: GenesisHeader): BlockHeader {
+function convertGenesisHeaderToSerializationFormat(
+  genesisHeader: GenesisHeader,
+): BlockHeader {
   // Convert epoch mark structure
   const epochMark: EpochMark = {
     entropyAccumulator: genesisHeader.epoch_mark.entropy as `0x${string}`,
     entropy1: genesisHeader.epoch_mark.tickets_entropy as `0x${string}`,
-    validators: genesisHeader.epoch_mark.validators.map((validator): ValidatorKeyTuple => ({
-      bandersnatchKey: validator.bandersnatch as `0x${string}`,
-      ed25519Key: validator.ed25519 as `0x${string}`,
-    })),
+    validators: genesisHeader.epoch_mark.validators.map(
+      (validator): ValidatorKeyTuple => ({
+        bandersnatchKey: validator.bandersnatch as `0x${string}`,
+        ed25519Key: validator.ed25519 as `0x${string}`,
+      }),
+    ),
   }
 
   return {
@@ -49,13 +57,16 @@ function main() {
 
     // Load and validate genesis header from JSON file
     console.log('📁 Loading genesis header from config/genesis-header.json...')
-    const genesisHeaderJson = readFileSync('./config/genesis-header.json', 'utf8')
+    const genesisHeaderJson = readFileSync(
+      './config/genesis-header.json',
+      'utf8',
+    )
     const parseResult = parseGenesisHeader(genesisHeaderJson)
-    
+
     if (!parseResult.success) {
       throw new Error(`Failed to parse genesis header: ${parseResult.error}`)
     }
-    
+
     const genesisHeader = parseResult.data
     console.log('✅ Genesis header loaded and validated successfully\n')
 
@@ -84,23 +95,36 @@ function main() {
 
     if (headerHash === EXPECTED_HASH) {
       console.log('🎉 SUCCESS: Genesis header hash matches expected value!')
-      console.log('The encodeBlockHeader function is correctly implementing the Gray Paper specification.')
+      console.log(
+        'The encodeBlockHeader function is correctly implementing the Gray Paper specification.',
+      )
     } else {
-      console.log('❌ FAILURE: Genesis header hash does not match expected value.')
-      console.log('The encodeBlockHeader function may not be correctly implementing the Gray Paper specification.')
-      
+      console.log(
+        '❌ FAILURE: Genesis header hash does not match expected value.',
+      )
+      console.log(
+        'The encodeBlockHeader function may not be correctly implementing the Gray Paper specification.',
+      )
+
       // Debug information
       console.log('\n🔍 Debug Information:')
-      console.log('Encoded header (first 100 bytes):', Array.from(encodedHeader.slice(0, 100)).map(b => b.toString(16).padStart(2, '0')).join(''))
+      console.log(
+        'Encoded header (first 100 bytes):',
+        Array.from(encodedHeader.slice(0, 100))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join(''),
+      )
       console.log('Encoded header length:', encodedHeader.length)
     }
-
   } catch (error) {
-    console.error('❌ Error:', error instanceof Error ? error.message : String(error))
+    console.error(
+      '❌ Error:',
+      error instanceof Error ? error.message : String(error),
+    )
     process.exit(1)
   }
 }
 
 if (require.main === module) {
   main()
-} 
+}

@@ -4,9 +4,9 @@
  * Provides high-level transport abstraction over QUIC
  */
 
-import type { Bytes, ConnectionEndpoint } from '@pbnj/types'
+import { EventEmitter } from 'node:events'
 import type { QUICConfig } from '@infisical/quic/dist/types'
-import { EventEmitter } from 'events'
+import type { Bytes, ConnectionEndpoint } from '@pbnj/types'
 import { QuicConnectionManager } from './connection'
 import { QuicStreamManager } from './stream'
 
@@ -33,11 +33,18 @@ export interface TransportConfig {
  */
 export interface TransportEvents {
   /** Connection established */
-  onConnectionEstablished?: (connectionId: string, endpoint: ConnectionEndpoint) => void
+  onConnectionEstablished?: (
+    connectionId: string,
+    endpoint: ConnectionEndpoint,
+  ) => void
   /** Connection closed */
   onConnectionClosed?: (connectionId: string) => void
   /** Stream created */
-  onStreamCreated?: (streamId: string, kind: number, connectionId: string) => void
+  onStreamCreated?: (
+    streamId: string,
+    kind: number,
+    connectionId: string,
+  ) => void
   /** Stream closed */
   onStreamClosed?: (streamId: string) => void
   /** Message received */
@@ -54,7 +61,7 @@ export class QuicTransport extends EventEmitter {
   private streamManager: QuicStreamManager
   private config: TransportConfig
   private events: TransportEvents
-  private isListening: boolean = false
+  private isListening = false
 
   constructor(config: TransportConfig, events: TransportEvents = {}) {
     super()
@@ -62,7 +69,7 @@ export class QuicTransport extends EventEmitter {
     this.events = events
     this.connectionManager = new QuicConnectionManager()
     this.streamManager = new QuicStreamManager()
-    
+
     this.setupEventHandlers()
   }
 
@@ -85,11 +92,13 @@ export class QuicTransport extends EventEmitter {
       await this.connectionManager.startListening(
         this.config.listenAddress,
         this.config.listenPort,
-        this.config.tlsConfig
+        this.config.tlsConfig,
       )
-      
+
       this.isListening = true
-      console.log(`Transport layer started on ${this.config.listenAddress}:${this.config.listenPort}`)
+      console.log(
+        `Transport layer started on ${this.config.listenAddress}:${this.config.listenPort}`,
+      )
     } catch (error) {
       console.error('Failed to start transport layer:', error)
       throw error
@@ -106,7 +115,7 @@ export class QuicTransport extends EventEmitter {
       for (const connection of activeConnections) {
         await this.connectionManager.closeConnection(connection.id)
       }
-      
+
       this.isListening = false
       console.log('Transport layer stopped')
     } catch (error) {
@@ -122,12 +131,12 @@ export class QuicTransport extends EventEmitter {
     try {
       const connectionId = await this.connectionManager.connectToPeer(
         endpoint,
-        this.config.tlsConfig
+        this.config.tlsConfig,
       )
-      
+
       // Set up connection event handlers
       this.setupConnectionEventHandlers(connectionId)
-      
+
       return connectionId
     } catch (error) {
       console.error('Failed to connect to peer:', error)
@@ -154,7 +163,8 @@ export class QuicTransport extends EventEmitter {
   async createStream(connectionId: string, kind: number): Promise<string> {
     try {
       // Get connection info
-      const connectionInfo = this.connectionManager.getConnectionInfo(connectionId)
+      const connectionInfo =
+        this.connectionManager.getConnectionInfo(connectionId)
       if (!connectionInfo) {
         throw new Error(`Connection ${connectionId} not found`)
       }
@@ -162,15 +172,20 @@ export class QuicTransport extends EventEmitter {
       // Create actual QUIC stream through the connection
       // JAMNP-S specification requires bidirectional streams
       const quicStream = await this.connectionManager.createStream(connectionId)
-      
+
       // Create stream in the stream manager
-      const streamId = await this.streamManager.createStream(connectionId, kind, quicStream, true)
-      
+      const streamId = await this.streamManager.createStream(
+        connectionId,
+        kind,
+        quicStream,
+        true,
+      )
+
       // Trigger stream created event
       if (this.events.onStreamCreated) {
         this.events.onStreamCreated(streamId, kind, connectionId)
       }
-      
+
       return streamId
     } catch (error) {
       console.error('Failed to create stream:', error)
@@ -196,7 +211,7 @@ export class QuicTransport extends EventEmitter {
   async closeStream(streamId: string): Promise<void> {
     try {
       await this.streamManager.closeStream(streamId)
-      
+
       // Trigger stream closed event
       if (this.events.onStreamClosed) {
         this.events.onStreamClosed(streamId)
@@ -255,14 +270,21 @@ export class QuicTransport extends EventEmitter {
   private setupConnectionEventHandlers(connectionId: string): void {
     // Monitor connection state changes
     const checkConnectionState = () => {
-      const connectionInfo = this.connectionManager.getConnectionInfo(connectionId)
+      const connectionInfo =
+        this.connectionManager.getConnectionInfo(connectionId)
       if (connectionInfo) {
         if (connectionInfo.state === 'connected') {
           // Trigger connection established event
           if (this.events.onConnectionEstablished) {
-            this.events.onConnectionEstablished(connectionId, connectionInfo.remoteEndpoint)
+            this.events.onConnectionEstablished(
+              connectionId,
+              connectionInfo.remoteEndpoint,
+            )
           }
-        } else if (connectionInfo.state === 'disconnected' || connectionInfo.state === 'error') {
+        } else if (
+          connectionInfo.state === 'disconnected' ||
+          connectionInfo.state === 'error'
+        ) {
           // Trigger connection closed event
           if (this.events.onConnectionClosed) {
             this.events.onConnectionClosed(connectionId)
@@ -273,16 +295,21 @@ export class QuicTransport extends EventEmitter {
 
     // Check connection state periodically
     const interval = setInterval(checkConnectionState, 100)
-    
+
     // Clean up interval when connection is closed
     const cleanup = () => {
       clearInterval(interval)
     }
-    
+
     // Set up cleanup on connection close
     setTimeout(() => {
-      const connectionInfo = this.connectionManager.getConnectionInfo(connectionId)
-      if (!connectionInfo || connectionInfo.state === 'disconnected' || connectionInfo.state === 'error') {
+      const connectionInfo =
+        this.connectionManager.getConnectionInfo(connectionId)
+      if (
+        !connectionInfo ||
+        connectionInfo.state === 'disconnected' ||
+        connectionInfo.state === 'error'
+      ) {
         cleanup()
       }
     }, 1000)
@@ -297,19 +324,4 @@ export class QuicTransport extends EventEmitter {
       this.events.onMessageReceived(stream.id, data)
     }
   }
-
-  /**
-   * Handle transport errors
-   */
-  private handleError(error: Error): void {
-    console.error('Transport error:', error)
-    
-    // Trigger error event if handler is registered
-    if (this.events.onError) {
-      this.events.onError(error)
-    }
-    
-    // Emit error event for EventEmitter compatibility
-    this.emit('error', error)
-  }
-} 
+}

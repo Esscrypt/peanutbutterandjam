@@ -1,27 +1,25 @@
-import { eq, and, desc, sql } from 'drizzle-orm'
 import type { Bytes } from '@pbnj/types'
+import { and, eq } from 'drizzle-orm'
 import {
+  type NewServiceAccount,
+  type NewServicePreimage,
+  type NewServicePreimageRequest,
+  type NewServicePrivilege,
+  type NewServiceStorage,
+  type NewStateTrieNode,
+  type NewStateTrieRoot,
+  type ServiceAccount,
+  type ServicePrivilege,
+  type ServiceStorage,
+  type StateTrieNode,
+  type StateTrieRoot,
   serviceAccounts,
-  serviceStorage,
-  servicePreimages,
   servicePreimageRequests,
+  servicePreimages,
   servicePrivileges,
+  serviceStorage,
   stateTrieNodes,
   stateTrieRoot,
-  type ServiceAccount,
-  type NewServiceAccount,
-  type ServiceStorage,
-  type NewServiceStorage,
-  type ServicePreimage,
-  type NewServicePreimage,
-  type ServicePreimageRequest,
-  type NewServicePreimageRequest,
-  type ServicePrivilege,
-  type NewServicePrivilege,
-  type StateTrieNode,
-  type NewStateTrieNode,
-  type StateTrieRoot,
-  type NewStateTrieRoot
 } from './schema'
 
 /**
@@ -29,9 +27,15 @@ import {
  * Based on Gray Paper accounts.tex and merklization.tex
  */
 export class ServiceAccountStore {
-  private db: ReturnType<typeof import('./database').DatabaseManager.prototype.getDatabase>
+  private db: ReturnType<
+    typeof import('./database').DatabaseManager.prototype.getDatabase
+  >
 
-  constructor(db: ReturnType<typeof import('./database').DatabaseManager.prototype.getDatabase>) {
+  constructor(
+    db: ReturnType<
+      typeof import('./database').DatabaseManager.prototype.getDatabase
+    >,
+  ) {
     this.db = db
   }
 
@@ -68,7 +72,7 @@ export class ServiceAccountStore {
       parent: account.parent,
       items: 0,
       octets: 0n,
-      minBalance: 0n
+      minBalance: 0n,
     }
 
     await this.db
@@ -84,8 +88,8 @@ export class ServiceAccountStore {
           minMemoGas: accountData.minMemoGas,
           lastAcc: accountData.lastAcc,
           parent: accountData.parent,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       })
   }
 
@@ -125,7 +129,10 @@ export class ServiceAccountStore {
   /**
    * Update service account last accumulation time
    */
-  async updateLastAccumulation(serviceId: number, timeSlot: number): Promise<void> {
+  async updateLastAccumulation(
+    serviceId: number,
+    timeSlot: number,
+  ): Promise<void> {
     await this.db
       .update(serviceAccounts)
       .set({ lastAcc: timeSlot, updatedAt: new Date() })
@@ -139,17 +146,20 @@ export class ServiceAccountStore {
   /**
    * Store a key-value pair in service storage
    */
-  async setStorageItem(serviceId: number, key: Bytes, value: Bytes): Promise<void> {
-    const keyHex = Buffer.from(key).toString('hex')
+  async setStorageItem(
+    serviceId: number,
+    key: Bytes,
+    value: Bytes,
+  ): Promise<void> {
     const valueHex = Buffer.from(value).toString('hex')
     const keyHash = Buffer.from(key).toString('hex') // In practice, this would be Blake2b hash
-    
+
     const storageData: NewServiceStorage = {
       id: `${serviceId}:${keyHash}`,
       serviceId,
-      storageKey: keyHex,
+      storageKey: Buffer.from(key).toString('hex'),
       storageValue: valueHex,
-      keyHash
+      keyHash,
     }
 
     await this.db
@@ -159,28 +169,33 @@ export class ServiceAccountStore {
         target: serviceStorage.id,
         set: {
           storageValue: valueHex,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       })
 
     // Update the JSON storage in service account
-    await this.updateServiceAccountStorage(serviceId, keyHex, valueHex)
+    await this.updateServiceAccountStorage(
+      serviceId,
+      Buffer.from(key).toString('hex'),
+      valueHex,
+    )
   }
 
   /**
    * Get a storage item by key
    */
   async getStorageItem(serviceId: number, key: Bytes): Promise<Bytes | null> {
-    const keyHex = Buffer.from(key).toString('hex')
     const keyHash = Buffer.from(key).toString('hex') // In practice, this would be Blake2b hash
-    
+
     const result = await this.db
       .select()
       .from(serviceStorage)
-      .where(and(
-        eq(serviceStorage.serviceId, serviceId),
-        eq(serviceStorage.keyHash, keyHash)
-      ))
+      .where(
+        and(
+          eq(serviceStorage.serviceId, serviceId),
+          eq(serviceStorage.keyHash, keyHash),
+        ),
+      )
       .limit(1)
 
     if (result.length === 0) {
@@ -203,7 +218,11 @@ export class ServiceAccountStore {
   /**
    * Update the JSON storage field in service account
    */
-  private async updateServiceAccountStorage(serviceId: number, key: string, value: string): Promise<void> {
+  private async updateServiceAccountStorage(
+    serviceId: number,
+    key: string,
+    value: string,
+  ): Promise<void> {
     const account = await this.getServiceAccount(serviceId)
     if (!account) {
       throw new Error(`Service account ${serviceId} not found`)
@@ -225,14 +244,18 @@ export class ServiceAccountStore {
   /**
    * Store a preimage for a service
    */
-  async setPreimage(serviceId: number, hash: string, preimage: Bytes): Promise<void> {
+  async setPreimage(
+    serviceId: number,
+    hash: string,
+    preimage: Bytes,
+  ): Promise<void> {
     const preimageHex = Buffer.from(preimage).toString('hex')
-    
+
     const preimageData: NewServicePreimage = {
       id: `${serviceId}:${hash}`,
       serviceId,
       hash,
-      preimage: preimageHex
+      preimage: preimageHex,
     }
 
     await this.db
@@ -241,8 +264,8 @@ export class ServiceAccountStore {
       .onConflictDoUpdate({
         target: servicePreimages.id,
         set: {
-          preimage: preimageHex
-        }
+          preimage: preimageHex,
+        },
       })
 
     // Update the JSON preimages in service account
@@ -256,10 +279,12 @@ export class ServiceAccountStore {
     const result = await this.db
       .select()
       .from(servicePreimages)
-      .where(and(
-        eq(servicePreimages.serviceId, serviceId),
-        eq(servicePreimages.hash, hash)
-      ))
+      .where(
+        and(
+          eq(servicePreimages.serviceId, serviceId),
+          eq(servicePreimages.hash, hash),
+        ),
+      )
       .limit(1)
 
     if (result.length === 0) {
@@ -270,16 +295,20 @@ export class ServiceAccountStore {
   }
 
   /**
-   * Request a preimage (mark as requested)
+   * Request a preimage for a service
    */
-  async requestPreimage(serviceId: number, hash: string, length: number): Promise<void> {
+  async requestPreimage(
+    serviceId: number,
+    hash: string,
+    length: number,
+  ): Promise<void> {
     const requestData: NewServicePreimageRequest = {
       id: `${serviceId}:${hash}:${length}`,
       serviceId,
       hash,
       length,
       timeSlots: [],
-      status: 'requested'
+      status: 'requested',
     }
 
     await this.db
@@ -289,27 +318,48 @@ export class ServiceAccountStore {
         target: servicePreimageRequests.id,
         set: {
           status: 'requested',
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       })
+
+    // Update the JSON requests in service account
+    const account = await this.getServiceAccount(serviceId)
+    if (account) {
+      const requests = account.requests as Record<string, number>
+      requests[`${hash}:${length}`] = Date.now()
+
+      await this.db
+        .update(serviceAccounts)
+        .set({ requests, updatedAt: new Date() })
+        .where(eq(serviceAccounts.serviceId, serviceId))
+    }
   }
 
   /**
    * Mark preimage as available
    */
-  async markPreimageAvailable(serviceId: number, hash: string, length: number, timeSlot: number): Promise<void> {
+  async markPreimageAvailable(
+    serviceId: number,
+    hash: string,
+    length: number,
+    timeSlot: number,
+  ): Promise<void> {
     const request = await this.db
       .select()
       .from(servicePreimageRequests)
-      .where(and(
-        eq(servicePreimageRequests.serviceId, serviceId),
-        eq(servicePreimageRequests.hash, hash),
-        eq(servicePreimageRequests.length, length)
-      ))
+      .where(
+        and(
+          eq(servicePreimageRequests.serviceId, serviceId),
+          eq(servicePreimageRequests.hash, hash),
+          eq(servicePreimageRequests.length, length),
+        ),
+      )
       .limit(1)
 
     if (request.length === 0) {
-      throw new Error(`Preimage request not found: ${serviceId}:${hash}:${length}`)
+      throw new Error(
+        `Preimage request not found: ${serviceId}:${hash}:${length}`,
+      )
     }
 
     const timeSlots = request[0].timeSlots as number[]
@@ -321,7 +371,7 @@ export class ServiceAccountStore {
       .set({
         timeSlots: newTimeSlots,
         status,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(servicePreimageRequests.id, request[0].id))
   }
@@ -329,7 +379,11 @@ export class ServiceAccountStore {
   /**
    * Update the JSON preimages field in service account
    */
-  private async updateServiceAccountPreimages(serviceId: number, hash: string, preimage: string): Promise<void> {
+  private async updateServiceAccountPreimages(
+    serviceId: number,
+    hash: string,
+    preimage: string,
+  ): Promise<void> {
     const account = await this.getServiceAccount(serviceId)
     if (!account) {
       throw new Error(`Service account ${serviceId} not found`)
@@ -352,7 +406,12 @@ export class ServiceAccountStore {
    * Grant a privilege to a service
    */
   async grantPrivilege(privilege: {
-    privilegeType: 'manager' | 'delegator' | 'registrar' | 'assigner' | 'always_accers'
+    privilegeType:
+      | 'manager'
+      | 'delegator'
+      | 'registrar'
+      | 'assigner'
+      | 'always_accers'
     serviceId: number
     coreIndex?: number
     gasLimit?: bigint
@@ -362,7 +421,7 @@ export class ServiceAccountStore {
       privilegeType: privilege.privilegeType,
       serviceId: privilege.serviceId,
       coreIndex: privilege.coreIndex,
-      gasLimit: privilege.gasLimit
+      gasLimit: privilege.gasLimit,
     }
 
     await this.db
@@ -372,8 +431,8 @@ export class ServiceAccountStore {
         target: servicePrivileges.id,
         set: {
           coreIndex: privilege.coreIndex,
-          gasLimit: privilege.gasLimit
-        }
+          gasLimit: privilege.gasLimit,
+        },
       })
   }
 
@@ -390,7 +449,14 @@ export class ServiceAccountStore {
   /**
    * Get all services with a specific privilege
    */
-  async getServicesWithPrivilege(privilegeType: 'manager' | 'delegator' | 'registrar' | 'assigner' | 'always_accers'): Promise<ServicePrivilege[]> {
+  async getServicesWithPrivilege(
+    privilegeType:
+      | 'manager'
+      | 'delegator'
+      | 'registrar'
+      | 'assigner'
+      | 'always_accers',
+  ): Promise<ServicePrivilege[]> {
     return await this.db
       .select()
       .from(servicePrivileges)
@@ -422,7 +488,7 @@ export class ServiceAccountStore {
       rightChild: node.rightChild,
       stateKey: node.stateKey,
       valueHash: node.valueHash,
-      embeddedValue: node.embeddedValue
+      embeddedValue: node.embeddedValue,
     }
 
     await this.db
@@ -436,8 +502,8 @@ export class ServiceAccountStore {
           rightChild: node.rightChild,
           stateKey: node.stateKey,
           valueHash: node.valueHash,
-          embeddedValue: node.embeddedValue
-        }
+          embeddedValue: node.embeddedValue,
+        },
       })
   }
 
@@ -466,7 +532,7 @@ export class ServiceAccountStore {
       id: 1,
       rootHash: root.rootHash,
       blockNumber: root.blockNumber,
-      timeSlot: root.timeSlot
+      timeSlot: root.timeSlot,
     }
 
     await this.db
@@ -478,8 +544,8 @@ export class ServiceAccountStore {
           rootHash: root.rootHash,
           blockNumber: root.blockNumber,
           timeSlot: root.timeSlot,
-          updatedAt: new Date()
-        }
+          updatedAt: new Date(),
+        },
       })
   }
 
@@ -520,28 +586,29 @@ export class ServiceAccountStore {
     // Calculate octets: sum of storage sizes + request overhead
     let octets = 0n
     for (const req of requests) {
-      octets += 81n + BigInt(req.length) // 81 bytes overhead per request
+      octets += 81n + BigInt(req.length) // 81 Uint8Array overhead per request
     }
     for (const item of storage) {
       const keyLength = Buffer.from(item.storageKey, 'hex').length
       const valueLength = Buffer.from(item.storageValue, 'hex').length
-      octets += 34n + BigInt(keyLength) + BigInt(valueLength) // 34 bytes overhead per storage item
+      octets += 34n + BigInt(keyLength) + BigInt(valueLength) // 34 Uint8Array overhead per storage item
     }
 
     // Calculate minimum balance (simplified - would need actual constants from Gray Paper)
     const baseDeposit = 1000n // Example constant
     const itemDeposit = 100n // Example constant
     const byteDeposit = 1n // Example constant
-    
+
     const account = await this.getServiceAccount(serviceId)
     const gratis = account?.gratis || 0n
-    
-    const minBalance = baseDeposit + (itemDeposit * BigInt(items)) + (byteDeposit * octets) - gratis
+
+    const minBalance =
+      baseDeposit + itemDeposit * BigInt(items) + byteDeposit * octets - gratis
 
     return {
       items,
       octets,
-      minBalance: minBalance > 0n ? minBalance : 0n
+      minBalance: minBalance > 0n ? minBalance : 0n,
     }
   }
 
@@ -550,15 +617,15 @@ export class ServiceAccountStore {
    */
   async updateAccountFootprint(serviceId: number): Promise<void> {
     const footprint = await this.calculateAccountFootprint(serviceId)
-    
+
     await this.db
       .update(serviceAccounts)
       .set({
         items: footprint.items,
         octets: footprint.octets,
         minBalance: footprint.minBalance,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       })
       .where(eq(serviceAccounts.serviceId, serviceId))
   }
-} 
+}

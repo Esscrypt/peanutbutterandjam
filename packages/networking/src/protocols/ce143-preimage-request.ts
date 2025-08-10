@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type { 
-  Bytes, 
+import type {
+  Bytes,
   PreimageRequest,
   PreimageResponse,
-  StreamInfo
+  StreamInfo,
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -39,9 +39,14 @@ export class PreimageRequestProtocol {
 
     try {
       // Load preimages from database (service ID 12 for preimages)
-      console.log('Preimage request state loading - protocol not yet fully implemented')
+      console.log(
+        'Preimage request state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load preimage request state from database:', error)
+      console.error(
+        'Failed to load preimage request state from database:',
+        error,
+      )
     }
   }
 
@@ -51,14 +56,14 @@ export class PreimageRequestProtocol {
   async storePreimage(hash: Bytes, preimage: Bytes): Promise<void> {
     const hashString = hash.toString()
     this.preimages.set(hashString, preimage)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           12, // Service ID 12 for preimages
           Buffer.from(`preimage_${hashString}`),
-          preimage
+          preimage,
         )
       } catch (error) {
         console.error('Failed to persist preimage to database:', error)
@@ -87,15 +92,15 @@ export class PreimageRequestProtocol {
       const hashString = hash.toString()
       const preimage = await this.dbIntegration.getServiceStorage(
         12,
-        Buffer.from(`preimage_${hashString}`)
+        Buffer.from(`preimage_${hashString}`),
       )
-      
+
       if (preimage) {
         // Cache in local store
         this.preimages.set(hashString, preimage)
         return preimage
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get preimage from database:', error)
@@ -106,20 +111,26 @@ export class PreimageRequestProtocol {
   /**
    * Process preimage request and generate response
    */
-  async processPreimageRequest(request: PreimageRequest): Promise<PreimageResponse | null> {
+  async processPreimageRequest(
+    request: PreimageRequest,
+  ): Promise<PreimageResponse | null> {
     try {
       // Get preimage from local store or database
       const preimage = await this.getPreimageFromDatabase(request.hash)
-      
+
       if (!preimage) {
-        console.log(`Preimage not found for hash: ${request.hash.toString().substring(0, 16)}...`)
+        console.log(
+          `Preimage not found for hash: ${request.hash.toString().substring(0, 16)}...`,
+        )
         return null
       }
 
-      console.log(`Found preimage for hash: ${request.hash.toString().substring(0, 16)}...`)
+      console.log(
+        `Found preimage for hash: ${request.hash.toString().substring(0, 16)}...`,
+      )
 
       return {
-        preimage
+        preimage,
       }
     } catch (error) {
       console.error('Failed to process preimage request:', error)
@@ -132,7 +143,7 @@ export class PreimageRequestProtocol {
    */
   createPreimageRequest(hash: Bytes): PreimageRequest {
     return {
-      hash
+      hash,
     }
   }
 
@@ -142,7 +153,7 @@ export class PreimageRequestProtocol {
   serializePreimageRequest(request: PreimageRequest): Bytes {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // hash (32 bytes)
-    const view = new DataView(buffer)
+    const _view = new DataView(buffer)
 
     // Write hash (32 bytes)
     new Uint8Array(buffer).set(request.hash, 0)
@@ -158,7 +169,7 @@ export class PreimageRequestProtocol {
     const hash = data.slice(0, 32)
 
     return {
-      hash
+      hash,
     }
   }
 
@@ -196,14 +207,17 @@ export class PreimageRequestProtocol {
     const preimage = data.slice(offset, offset + preimageLength)
 
     return {
-      preimage
+      preimage,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<PreimageResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<PreimageResponse | null> {
     try {
       const request = this.deserializePreimageRequest(data)
       return await this.processPreimageRequest(request)
@@ -212,4 +226,4 @@ export class PreimageRequestProtocol {
       return null
     }
   }
-} 
+}

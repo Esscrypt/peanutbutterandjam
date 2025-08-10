@@ -1,11 +1,39 @@
 /**
  * Bit Sequence Serialization
  *
- * Implements bitstring encoding from Gray Paper Appendix D.1
- * encode(b ∈ bitstring) ≡ ⟨∑(bᵢ·2ⁱ)⟩ ∥ encode(b[8:])
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 65-74):
+ *
+ * encode(b ∈ bitstring) ≡ {
+ *   ⟨⟩                                                    when b = ⟨⟩
+ *   ⟨∑ᵢ₌₀^min(8,len(b)) bᵢ · 2ⁱ⟩ ∥ encode(b[8:])         otherwise
+ * }
+ *
+ * A sequence of bits is packed into octets in order of least significant
+ * to most, and arranged into an octet stream. This avoids wasteful
+ * encoding of each individual bit as an octet.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Bit sequence encoding efficiently packs boolean arrays into bytes.
+ * This is 8x more space-efficient than encoding each bit as a full byte.
+ *
+ * Key aspects:
+ * - Packing order: LEAST significant bit first (LSB)
+ * - Byte filling: Fill bytes from right-to-left (bit 0 to bit 7)
+ * - Recursive processing: Handle 8 bits at a time
+ * - Partial bytes: Last byte may be partially filled
+ *
+ * Example: [true, false, true, false, false, true, false, false]
+ * - Bit positions: [0, 1, 2, 3, 4, 5, 6, 7]
+ * - Binary value: 00100101 (reading right-to-left)
+ * - Result byte: 0x25 (37 decimal)
+ *
+ * This is used for validator participation sets, availability bitfields,
+ * and other boolean arrays common in consensus protocols.
  */
 
-import type { Uint8Array } from '../types'
+// Uint8Array is a built-in type, no need to import
 
 /**
  * Encode bit sequence using Gray Paper bitstring encoding

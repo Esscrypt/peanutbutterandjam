@@ -1,13 +1,51 @@
 /**
  * Availability specification serialization
  *
- * Implements Gray Paper availability specification serialization
- * Reference: graypaper/text/availability_specification.tex
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 208-214):
+ *
+ * encode(AS ∈ avspec) ≡ encode(
+ *   AS_packagehash,
+ *   encode[4](AS_bundlelen),
+ *   AS_erasureroot,
+ *   AS_segroot,
+ *   encode[2](AS_segcount)
+ * )
+ *
+ * Availability specifications define data availability parameters
+ * for work package erasure coding and reconstruction.
+ * Reference: graypaper/text/erasure_coding.tex
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Availability specifications describe how work package data is
+ * encoded for distributed storage and retrieval across validators.
+ *
+ * Availability Spec structure:
+ * 1. **Package hash**: Hash identifying the work package data
+ * 2. **Bundle length** (4 bytes): Size of original data before encoding
+ * 3. **Erasure root**: Merkle root of erasure-coded segments
+ * 4. **Segment root**: Merkle root of individual data segments
+ * 5. **Segment count** (2 bytes): Number of erasure code segments
+ *
+ * Key concepts:
+ * - Erasure coding: Data split into N segments, any M can reconstruct
+ * - Merkle commitments: Cryptographic proofs for data integrity
+ * - Distributed storage: Validators store different segments
+ * - Efficient reconstruction: Only need subset of segments to rebuild
+ *
+ * Example: 1MB work package → 100 segments, need any 67 to reconstruct
+ * - Validators store 1-2 segments each (1-2% of original data)
+ * - Network can lose 33% of validators and still recover data
+ * - Reconstruction only happens when data is actually needed
+ *
+ * This enables JAM's scalable data availability without requiring
+ * every validator to store every piece of data.
  */
 
-import { bytesToHex, hexToUint8Array } from '@pbnj/core'
+import { bytesToHex, hexToBytes } from '@pbnj/core'
+import type { AvailabilitySpecification } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
-import type { AvailabilitySpecification, Uint8Array } from '../types'
 
 /**
  * Encode availability specification
@@ -21,19 +59,19 @@ export function encodeAvailabilitySpecification(
   const parts: Uint8Array[] = []
 
   // Package hash (32 Uint8Array)
-  parts.push(hexToUint8Array(spec.packageHash))
+  parts.push(hexToBytes(spec.packageHash))
 
   // Bundle length (8 Uint8Array)
-  parts.push(encodeNatural(spec.bundleLength))
+  parts.push(encodeNatural(BigInt(spec.bundleLength)))
 
   // Erasure root (32 Uint8Array)
-  parts.push(hexToUint8Array(spec.erasureRoot))
+  parts.push(hexToBytes(spec.erasureRoot))
 
   // Segment root (32 Uint8Array)
-  parts.push(hexToUint8Array(spec.segmentRoot))
+  parts.push(hexToBytes(spec.segmentRoot))
 
   // Segment count (8 Uint8Array)
-  parts.push(encodeNatural(spec.segmentCount))
+  parts.push(encodeNatural(BigInt(spec.segmentCount)))
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -88,9 +126,9 @@ export function decodeAvailabilitySpecification(
 
   return {
     packageHash,
-    bundleLength,
+    bundleLength: Number(bundleLength),
     erasureRoot,
     segmentRoot,
-    segmentCount,
+    segmentCount: Number(segmentCount),
   }
 }

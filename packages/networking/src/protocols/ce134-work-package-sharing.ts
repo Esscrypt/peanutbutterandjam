@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for guarantors to share work packages.
  */
 
-import type { 
-  Bytes, 
+import type {
+  Bytes,
+  StreamInfo,
   WorkPackageSharing,
   WorkPackageSharingResponse,
-  StreamInfo
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -17,7 +17,10 @@ import type { NetworkingDatabaseIntegration } from '../db-integration'
  * Work package sharing protocol handler
  */
 export class WorkPackageSharingProtocol {
-  private workPackageBundles: Map<string, { bundle: Bytes; coreIndex: number; timestamp: number }> = new Map()
+  private workPackageBundles: Map<
+    string,
+    { bundle: Bytes; coreIndex: number; timestamp: number }
+  > = new Map()
   private segmentsRootMappings: Map<string, Bytes> = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
@@ -40,9 +43,14 @@ export class WorkPackageSharingProtocol {
 
     try {
       // Load work package bundles from database (service ID 5 for work package sharing)
-      console.log('Work package sharing state loading - protocol not yet fully implemented')
+      console.log(
+        'Work package sharing state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load work package sharing state from database:', error)
+      console.error(
+        'Failed to load work package sharing state from database:',
+        error,
+      )
     }
   }
 
@@ -52,34 +60,41 @@ export class WorkPackageSharingProtocol {
   async storeWorkPackageBundle(
     bundleHash: Bytes,
     bundle: Bytes,
-    coreIndex: number
+    coreIndex: number,
   ): Promise<void> {
     const hashString = bundleHash.toString()
-    this.workPackageBundles.set(hashString, { bundle, coreIndex, timestamp: Date.now() })
-    
+    this.workPackageBundles.set(hashString, {
+      bundle,
+      coreIndex,
+      timestamp: Date.now(),
+    })
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           5, // Service ID 5 for work package sharing
           Buffer.from(`bundle_${hashString}`),
-          bundle
+          bundle,
         )
-        
+
         // Store metadata
         const metadata = {
           coreIndex,
           timestamp: Date.now(),
-          hash: Buffer.from(bundleHash).toString('hex')
+          hash: Buffer.from(bundleHash).toString('hex'),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           5,
           Buffer.from(`bundle_meta_${hashString}`),
-          Buffer.from(JSON.stringify(metadata), 'utf8')
+          Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
-        console.error('Failed to persist work package bundle to database:', error)
+        console.error(
+          'Failed to persist work package bundle to database:',
+          error,
+        )
       }
     }
   }
@@ -89,21 +104,24 @@ export class WorkPackageSharingProtocol {
    */
   async storeSegmentsRootMapping(
     workPackageHash: Bytes,
-    segmentsRoot: Bytes
+    segmentsRoot: Bytes,
   ): Promise<void> {
     const hashString = workPackageHash.toString()
     this.segmentsRootMappings.set(hashString, segmentsRoot)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           5, // Service ID 5 for work package sharing
           Buffer.from(`segments_root_${hashString}`),
-          segmentsRoot
+          segmentsRoot,
         )
       } catch (error) {
-        console.error('Failed to persist segments root mapping to database:', error)
+        console.error(
+          'Failed to persist segments root mapping to database:',
+          error,
+        )
       }
     }
   }
@@ -111,7 +129,9 @@ export class WorkPackageSharingProtocol {
   /**
    * Get work package bundle from local store
    */
-  getWorkPackageBundle(bundleHash: Bytes): { bundle: Bytes; coreIndex: number; timestamp: number } | undefined {
+  getWorkPackageBundle(
+    bundleHash: Bytes,
+  ): { bundle: Bytes; coreIndex: number; timestamp: number } | undefined {
     return this.workPackageBundles.get(bundleHash.toString())
   }
 
@@ -125,7 +145,9 @@ export class WorkPackageSharingProtocol {
   /**
    * Get work package bundle from database if not in local store
    */
-  async getWorkPackageBundleFromDatabase(bundleHash: Bytes): Promise<{ bundle: Bytes; coreIndex: number; timestamp: number } | null> {
+  async getWorkPackageBundleFromDatabase(
+    bundleHash: Bytes,
+  ): Promise<{ bundle: Bytes; coreIndex: number; timestamp: number } | null> {
     if (this.getWorkPackageBundle(bundleHash)) {
       return this.getWorkPackageBundle(bundleHash) || null
     }
@@ -136,19 +158,19 @@ export class WorkPackageSharingProtocol {
       const hashString = bundleHash.toString()
       const bundleData = await this.dbIntegration.getServiceStorage(
         5,
-        Buffer.from(`bundle_${hashString}`)
+        Buffer.from(`bundle_${hashString}`),
       )
-      
+
       if (bundleData) {
         // Get metadata
         const metadataData = await this.dbIntegration.getServiceStorage(
           5,
-          Buffer.from(`bundle_meta_${hashString}`)
+          Buffer.from(`bundle_meta_${hashString}`),
         )
-        
+
         let coreIndex = 0
         let timestamp = Date.now()
-        
+
         if (metadataData) {
           try {
             const metadata = JSON.parse(metadataData.toString())
@@ -158,12 +180,16 @@ export class WorkPackageSharingProtocol {
             console.error('Failed to parse bundle metadata:', error)
           }
         }
-        
+
         // Cache in local store
-        this.workPackageBundles.set(hashString, { bundle: bundleData, coreIndex, timestamp })
+        this.workPackageBundles.set(hashString, {
+          bundle: bundleData,
+          coreIndex,
+          timestamp,
+        })
         return { bundle: bundleData, coreIndex, timestamp }
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get work package bundle from database:', error)
@@ -174,7 +200,9 @@ export class WorkPackageSharingProtocol {
   /**
    * Get segments root mapping from database if not in local store
    */
-  async getSegmentsRootMappingFromDatabase(workPackageHash: Bytes): Promise<Bytes | null> {
+  async getSegmentsRootMappingFromDatabase(
+    workPackageHash: Bytes,
+  ): Promise<Bytes | null> {
     if (this.getSegmentsRootMapping(workPackageHash)) {
       return this.getSegmentsRootMapping(workPackageHash) || null
     }
@@ -185,15 +213,15 @@ export class WorkPackageSharingProtocol {
       const hashString = workPackageHash.toString()
       const segmentsRoot = await this.dbIntegration.getServiceStorage(
         5,
-        Buffer.from(`segments_root_${hashString}`)
+        Buffer.from(`segments_root_${hashString}`),
       )
-      
+
       if (segmentsRoot) {
         // Cache in local store
         this.segmentsRootMappings.set(hashString, segmentsRoot)
         return segmentsRoot
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get segments root mapping from database:', error)
@@ -204,23 +232,34 @@ export class WorkPackageSharingProtocol {
   /**
    * Process work package sharing
    */
-  async processWorkPackageSharing(sharing: WorkPackageSharing): Promise<WorkPackageSharingResponse | null> {
+  async processWorkPackageSharing(
+    sharing: WorkPackageSharing,
+  ): Promise<WorkPackageSharingResponse | null> {
     try {
       // Store segments root mappings
       for (const mapping of sharing.segmentsRootMappings) {
-        await this.storeSegmentsRootMapping(mapping.workPackageHash, mapping.segmentsRoot)
+        await this.storeSegmentsRootMapping(
+          mapping.workPackageHash,
+          mapping.segmentsRoot,
+        )
       }
-      
+
       // Store work package bundle
       const bundleHash = Buffer.from('placeholder_hash') // In practice, this would be calculated
-      await this.storeWorkPackageBundle(bundleHash, sharing.workPackageBundle, sharing.coreIndex)
-      
-      console.log(`Processed work package sharing for core ${sharing.coreIndex}`)
-      
+      await this.storeWorkPackageBundle(
+        bundleHash,
+        sharing.workPackageBundle,
+        sharing.coreIndex,
+      )
+
+      console.log(
+        `Processed work package sharing for core ${sharing.coreIndex}`,
+      )
+
       // Create response (placeholder)
       return {
         workReportHash: Buffer.from('placeholder_work_report_hash'),
-        signature: Buffer.from('placeholder_signature')
+        signature: Buffer.from('placeholder_signature'),
       }
     } catch (error) {
       console.error('Failed to process work package sharing:', error)
@@ -233,13 +272,16 @@ export class WorkPackageSharingProtocol {
    */
   createWorkPackageSharing(
     coreIndex: number,
-    segmentsRootMappings: Array<{ workPackageHash: Bytes; segmentsRoot: Bytes }>,
-    workPackageBundle: Bytes
+    segmentsRootMappings: Array<{
+      workPackageHash: Bytes
+      segmentsRoot: Bytes
+    }>,
+    workPackageBundle: Bytes,
   ): WorkPackageSharing {
     return {
       coreIndex,
       segmentsRootMappings,
-      workPackageBundle
+      workPackageBundle,
     }
   }
 
@@ -249,12 +291,12 @@ export class WorkPackageSharingProtocol {
   serializeWorkPackageSharing(sharing: WorkPackageSharing): Bytes {
     // Calculate total size
     let totalSize = 4 + 4 // coreIndex + number of mappings
-    
+
     // Size for segments root mappings
-    for (const mapping of sharing.segmentsRootMappings) {
+    for (const _mapping of sharing.segmentsRootMappings) {
       totalSize += 32 + 32 // workPackageHash + segmentsRoot
     }
-    
+
     // Size for work package bundle
     totalSize += 4 + sharing.workPackageBundle.length // bundle length + bundle data
 
@@ -307,7 +349,10 @@ export class WorkPackageSharingProtocol {
     offset += 4
 
     // Read segments root mappings
-    const segmentsRootMappings: Array<{ workPackageHash: Bytes; segmentsRoot: Bytes }> = []
+    const segmentsRootMappings: Array<{
+      workPackageHash: Bytes
+      segmentsRoot: Bytes
+    }> = []
     for (let i = 0; i < numMappings; i++) {
       // Read work package hash (32 bytes)
       const workPackageHash = data.slice(offset, offset + 32)
@@ -330,14 +375,17 @@ export class WorkPackageSharingProtocol {
     return {
       coreIndex,
       segmentsRootMappings,
-      workPackageBundle
+      workPackageBundle,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<WorkPackageSharingResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<WorkPackageSharingResponse | null> {
     try {
       const sharing = this.deserializeWorkPackageSharing(data)
       return await this.processWorkPackageSharing(sharing)
@@ -346,4 +394,4 @@ export class WorkPackageSharingProtocol {
       return null
     }
   }
-} 
+}

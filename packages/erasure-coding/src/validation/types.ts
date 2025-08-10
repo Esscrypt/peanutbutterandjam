@@ -23,7 +23,10 @@ export interface EncodingValidator {
  */
 export interface DecodingValidator {
   /** Validate decoding parameters */
-  validateParameters(k: number, receivedCount: number): ErasureCodingValidationResult
+  validateParameters(
+    k: number,
+    receivedCount: number,
+  ): ErasureCodingValidationResult
   /** Validate received shards */
   validateReceivedShards(
     shards: Uint8Array[],

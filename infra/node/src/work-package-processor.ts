@@ -289,15 +289,18 @@ export class WorkPackageProcessor {
     const authCodeHash = workPackage.authCodeHash
     const authConfig = workPackage.authConfig
 
-    // Convert authCodeHash string to bytes
-    const authCodeHashBytes = Buffer.from(authCodeHash.replace('0x', ''), 'hex')
+    // Convert authCodeHash string to Uint8Array
+    const authCodeHashUint8Array = Buffer.from(
+      authCodeHash.replace('0x', ''),
+      'hex',
+    )
 
     // Concatenate auth code hash and config
     const combined = new Uint8Array(
-      authCodeHashBytes.length + authConfig.length,
+      authCodeHashUint8Array.length + authConfig.length,
     )
-    combined.set(authCodeHashBytes)
-    combined.set(authConfig, authCodeHashBytes.length)
+    combined.set(authCodeHashUint8Array)
+    combined.set(authConfig, authCodeHashUint8Array.length)
 
     // Calculate Blake2b hash
     return blake2bHash(combined)

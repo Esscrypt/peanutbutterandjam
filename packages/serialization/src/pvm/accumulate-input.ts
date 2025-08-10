@@ -1,11 +1,47 @@
 /**
  * Accumulate Input Serialization
  *
- * Implements accumulate input encoding from Gray Paper Appendix D.2
- * encode(aiX ∈ accinput) - PVM-specific accumulate input encoding
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 289-292):
+ *
+ * encode(AI ∈ accinput) ≡ {
+ *   encode(0, encode[U](o))  when AI ∈ operandtuple
+ *   encode(1, encode[X](o))  when AI ∈ defxfer
+ * }
+ *
+ * Accumulate inputs represent either operand tuples from work item execution
+ * or deferred transfers, distinguished by discriminator encoding.
+ * Used in PVM accumulation operations.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Accumulate inputs are the data flowing between work items during
+ * the PVM accumulation phase. They can be one of two types.
+ *
+ * Discriminator encoding (0 or 1 prefix):
+ * - **Type 0**: Operand tuple from successful work item execution
+ * - **Type 1**: Deferred transfer for cross-service value movement
+ *
+ * Key concepts:
+ * - **Operand tuples**: Results from work items that other items can import
+ * - **Deferred transfers**: Value transfers between services scheduled for later
+ * - **Type safety**: Discriminator ensures correct deserialization
+ * - **Flow control**: Accumulation phase processes these in dependency order
+ *
+ * Example flow:
+ * 1. Work item A produces operand tuple (type 0)
+ * 2. Work item B imports A's output and creates deferred transfer (type 1)
+ * 3. PVM accumulation processes both in correct order
+ *
+ * This unified input type allows the PVM to handle heterogeneous
+ * data flows while maintaining type safety and execution ordering.
  */
 
-import type { AccumulateInput, Uint8Array } from '../types'
+import type {
+  AccumulateInput,
+  DeferredTransfer,
+  OperandTuple,
+} from '@pbnj/types'
 import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
@@ -27,16 +63,20 @@ import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
 export function encodeAccumulateInput(
   accumulateInput: AccumulateInput,
 ): Uint8Array {
-  if (accumulateInput.type === 'operand') {
+  if (accumulateInput.type === 0) {
     // encode{0, encode[U]{o}} for operand tuple
-    const operandEncoded = encodeOperandTuple(accumulateInput.value)
+    const operandEncoded = encodeOperandTuple(
+      accumulateInput.value as OperandTuple,
+    )
     const result = new Uint8Array(1 + operandEncoded.length)
     result[0] = 0 // Discriminator for operand tuple
     result.set(operandEncoded, 1)
     return result
   } else {
     // encode{1, encode[X]{o}} for deferred transfer
-    const transferEncoded = encodeDeferredTransfer(accumulateInput.value)
+    const transferEncoded = encodeDeferredTransfer(
+      accumulateInput.value as DeferredTransfer,
+    )
     const result = new Uint8Array(1 + transferEncoded.length)
     result[0] = 1 // Discriminator for deferred transfer
     result.set(transferEncoded, 1)
@@ -65,7 +105,7 @@ export function decodeAccumulateInput(data: Uint8Array): {
     // Operand tuple: encode{0, encode[U]{o}}
     const { value: operandTuple, remaining } = decodeOperandTuple(remainingData)
     return {
-      value: { type: 'operand', value: operandTuple },
+      value: { type: 0, value: operandTuple },
       remaining,
     }
   } else if (discriminator === 1) {
@@ -73,7 +113,7 @@ export function decodeAccumulateInput(data: Uint8Array): {
     const { value: deferredTransfer, remaining } =
       decodeDeferredTransfer(remainingData)
     return {
-      value: { type: 'deferred', value: deferredTransfer },
+      value: { type: 1, value: deferredTransfer },
       remaining,
     }
   } else {

@@ -5,7 +5,12 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { CodecConfig, BinaryConfig, BinaryData, FormatCodec } from '@pbnj/types'
+import type {
+  BinaryConfig,
+  BinaryData,
+  CodecConfig,
+  FormatCodec,
+} from '@pbnj/types'
 
 /**
  * Binary codec for efficient data serialization

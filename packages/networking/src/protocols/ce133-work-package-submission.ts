@@ -5,20 +5,20 @@
  * This is a Common Ephemeral (CE) stream for builders to submit work packages to guarantors.
  */
 
-import type { 
-  Bytes, 
-  WorkPackageSubmission,
-  StreamInfo
-} from '@pbnj/types'
 import { blake2bHash } from '@pbnj/core'
+import type { Bytes, StreamInfo, WorkPackageSubmission } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Work package submission protocol handler
  */
 export class WorkPackageSubmissionProtocol {
-  private workPackages: Map<string, { workPackage: Bytes; extrinsic: Bytes }> = new Map()
-  private pendingSubmissions: Map<string, { coreIndex: number; timestamp: number }> = new Map()
+  private workPackages: Map<string, { workPackage: Bytes; extrinsic: Bytes }> =
+    new Map()
+  private pendingSubmissions: Map<
+    string,
+    { coreIndex: number; timestamp: number }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -40,24 +40,29 @@ export class WorkPackageSubmissionProtocol {
 
     try {
       // Load pending work packages from database
-      const pendingWorkPackages = await this.dbIntegration.getPendingWorkPackages()
-      
+      const pendingWorkPackages =
+        await this.dbIntegration.getPendingWorkPackages()
+
       for (const pending of pendingWorkPackages) {
-        const workPackageData = await this.dbIntegration.getWorkPackage(pending.workPackageHash)
+        const workPackageData = await this.dbIntegration.getWorkPackage(
+          pending.workPackageHash,
+        )
         if (workPackageData) {
           this.workPackages.set(pending.workPackageHash.toString(), {
             workPackage: workPackageData.workPackage,
-            extrinsic: workPackageData.extrinsic
+            extrinsic: workPackageData.extrinsic,
           })
-          
+
           this.pendingSubmissions.set(pending.workPackageHash.toString(), {
             coreIndex: workPackageData.coreIndex,
-            timestamp: workPackageData.timestamp
+            timestamp: workPackageData.timestamp,
           })
         }
       }
 
-      console.log(`Loaded state: ${this.workPackages.size} work packages, ${this.pendingSubmissions.size} pending submissions`)
+      console.log(
+        `Loaded state: ${this.workPackages.size} work packages, ${this.pendingSubmissions.size} pending submissions`,
+      )
     } catch (error) {
       console.error('Failed to load state from database:', error)
     }
@@ -69,15 +74,20 @@ export class WorkPackageSubmissionProtocol {
   addWorkPackage(
     workPackageHash: Bytes,
     workPackage: Bytes,
-    extrinsic: Bytes
+    extrinsic: Bytes,
   ): void {
-    this.workPackages.set(workPackageHash.toString(), { workPackage, extrinsic })
+    this.workPackages.set(workPackageHash.toString(), {
+      workPackage,
+      extrinsic,
+    })
   }
 
   /**
    * Get work package from local store
    */
-  getWorkPackage(workPackageHash: Bytes): { workPackage: Bytes; extrinsic: Bytes } | undefined {
+  getWorkPackage(
+    workPackageHash: Bytes,
+  ): { workPackage: Bytes; extrinsic: Bytes } | undefined {
     return this.workPackages.get(workPackageHash.toString())
   }
 
@@ -87,19 +97,21 @@ export class WorkPackageSubmissionProtocol {
   createWorkPackageSubmission(
     coreIndex: number,
     workPackage: Bytes,
-    extrinsic: Bytes
+    extrinsic: Bytes,
   ): WorkPackageSubmission {
     return {
       coreIndex,
       workPackage,
-      extrinsic
+      extrinsic,
     }
   }
 
   /**
    * Process work package submission
    */
-  async processWorkPackageSubmission(submission: WorkPackageSubmission): Promise<boolean> {
+  async processWorkPackageSubmission(
+    submission: WorkPackageSubmission,
+  ): Promise<boolean> {
     try {
       // Validate work package
       if (!this.validateWorkPackage(submission.workPackage)) {
@@ -115,15 +127,22 @@ export class WorkPackageSubmissionProtocol {
 
       // Calculate work package hash
       const workPackageHash = blake2bHash(submission.workPackage)
-      const workPackageHashBytes = Buffer.from(workPackageHash.replace('0x', ''), 'hex')
+      const workPackageHashBytes = Buffer.from(
+        workPackageHash.replace('0x', ''),
+        'hex',
+      )
 
       // Store the work package locally
-      this.addWorkPackage(workPackageHashBytes, submission.workPackage, submission.extrinsic)
+      this.addWorkPackage(
+        workPackageHashBytes,
+        submission.workPackage,
+        submission.extrinsic,
+      )
 
       // Record pending submission locally
       this.pendingSubmissions.set(workPackageHash, {
         coreIndex: submission.coreIndex,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       })
 
       // Persist to database if available
@@ -133,7 +152,7 @@ export class WorkPackageSubmissionProtocol {
             workPackageHashBytes,
             submission.workPackage,
             submission.extrinsic,
-            submission.coreIndex
+            submission.coreIndex,
           )
         } catch (error) {
           console.error('Failed to persist work package to database:', error)
@@ -179,18 +198,20 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Get pending submissions for a specific core
    */
-  getPendingSubmissions(coreIndex: number): Array<{ workPackageHash: Bytes; timestamp: number }> {
+  getPendingSubmissions(
+    coreIndex: number,
+  ): Array<{ workPackageHash: Bytes; timestamp: number }> {
     const pending: Array<{ workPackageHash: Bytes; timestamp: number }> = []
-    
+
     for (const [hash, submission] of this.pendingSubmissions.entries()) {
       if (submission.coreIndex === coreIndex) {
         pending.push({
           workPackageHash: Buffer.from(hash.replace('0x', ''), 'hex'),
-          timestamp: submission.timestamp
+          timestamp: submission.timestamp,
         })
       }
     }
-    
+
     return pending
   }
 
@@ -200,13 +221,16 @@ export class WorkPackageSubmissionProtocol {
   async removePendingSubmission(workPackageHash: Bytes): Promise<void> {
     const hashString = workPackageHash.toString()
     this.pendingSubmissions.delete(hashString)
-    
+
     // Mark as processed in database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.markWorkPackageProcessed(workPackageHash)
       } catch (error) {
-        console.error('Failed to mark work package as processed in database:', error)
+        console.error(
+          'Failed to mark work package as processed in database:',
+          error,
+        )
       }
     }
   }
@@ -216,7 +240,9 @@ export class WorkPackageSubmissionProtocol {
    */
   serializeWorkPackageSubmission(submission: WorkPackageSubmission): Bytes {
     // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(4 + submission.workPackage.length + submission.extrinsic.length)
+    const buffer = new ArrayBuffer(
+      4 + submission.workPackage.length + submission.extrinsic.length,
+    )
     const view = new DataView(buffer)
     let offset = 0
 
@@ -271,14 +297,14 @@ export class WorkPackageSubmissionProtocol {
     return {
       coreIndex,
       workPackage,
-      extrinsic
+      extrinsic,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<boolean> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<boolean> {
     try {
       const submission = this.deserializeWorkPackageSubmission(data)
       return await this.processWorkPackageSubmission(submission)
@@ -287,4 +313,4 @@ export class WorkPackageSubmissionProtocol {
       return false
     }
   }
-} 
+}

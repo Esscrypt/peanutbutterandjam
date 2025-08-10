@@ -4,7 +4,12 @@
  * Implements polynomial operations for erasure coding
  */
 
-import type { FieldElement, Polynomial, FiniteField, PolynomialOperations } from '@pbnj/types'
+import type {
+  FieldElement,
+  FiniteField,
+  Polynomial,
+  PolynomialOperations,
+} from '@pbnj/types'
 
 /**
  * Polynomial operations implementation

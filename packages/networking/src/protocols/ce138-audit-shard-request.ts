@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting bundle shards from assurers.
  */
 
-import type { 
-  Bytes, 
+import type {
   AuditShardRequest,
   AuditShardResponse,
-  StreamInfo
+  Bytes,
+  StreamInfo,
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -39,26 +39,35 @@ export class AuditShardRequestProtocol {
 
     try {
       // Load audit shards from database (service ID 8 for audit shards)
-      console.log('Audit shard request state loading - protocol not yet fully implemented')
+      console.log(
+        'Audit shard request state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load audit shard request state from database:', error)
+      console.error(
+        'Failed to load audit shard request state from database:',
+        error,
+      )
     }
   }
 
   /**
    * Store audit shard in local store and persist to database
    */
-  async storeAuditShard(erasureRoot: Bytes, shardIndex: number, auditShard: Bytes): Promise<void> {
+  async storeAuditShard(
+    erasureRoot: Bytes,
+    shardIndex: number,
+    auditShard: Bytes,
+  ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_audit`
     this.auditShards.set(key, auditShard)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           8, // Service ID 8 for audit shards
           Buffer.from(key),
-          auditShard
+          auditShard,
         )
       } catch (error) {
         console.error('Failed to persist audit shard to database:', error)
@@ -77,7 +86,10 @@ export class AuditShardRequestProtocol {
   /**
    * Get audit shard from database if not in local store
    */
-  async getAuditShardFromDatabase(erasureRoot: Bytes, shardIndex: number): Promise<Bytes | null> {
+  async getAuditShardFromDatabase(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): Promise<Bytes | null> {
     if (this.getAuditShard(erasureRoot, shardIndex)) {
       return this.getAuditShard(erasureRoot, shardIndex) || null
     }
@@ -88,15 +100,15 @@ export class AuditShardRequestProtocol {
       const key = `${erasureRoot.toString()}_${shardIndex}_audit`
       const auditShard = await this.dbIntegration.getServiceStorage(
         8,
-        Buffer.from(key)
+        Buffer.from(key),
       )
-      
+
       if (auditShard) {
         // Cache in local store
         this.auditShards.set(key, auditShard)
         return auditShard
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get audit shard from database:', error)
@@ -107,21 +119,30 @@ export class AuditShardRequestProtocol {
   /**
    * Process audit shard request and generate response
    */
-  async processAuditShardRequest(request: AuditShardRequest): Promise<AuditShardResponse | null> {
+  async processAuditShardRequest(
+    request: AuditShardRequest,
+  ): Promise<AuditShardResponse | null> {
     try {
       // Get audit shard from local store or database
-      const auditShard = await this.getAuditShardFromDatabase(request.erasureRoot, request.shardIndex)
-      
+      const auditShard = await this.getAuditShardFromDatabase(
+        request.erasureRoot,
+        request.shardIndex,
+      )
+
       if (!auditShard) {
-        console.log(`Audit shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`)
+        console.log(
+          `Audit shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+        )
         return null
       }
 
-      console.log(`Found audit shard for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`)
+      console.log(
+        `Found audit shard for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+      )
 
       return {
         bundleShard: auditShard,
-        justification: Buffer.alloc(0) // Empty buffer if no justification
+        justification: Buffer.alloc(0), // Empty buffer if no justification
       }
     } catch (error) {
       console.error('Failed to process audit shard request:', error)
@@ -132,10 +153,13 @@ export class AuditShardRequestProtocol {
   /**
    * Create audit shard request message
    */
-  createAuditShardRequest(erasureRoot: Bytes, shardIndex: number): AuditShardRequest {
+  createAuditShardRequest(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): AuditShardRequest {
     return {
       erasureRoot,
-      shardIndex
+      shardIndex,
     }
   }
 
@@ -174,7 +198,7 @@ export class AuditShardRequestProtocol {
 
     return {
       erasureRoot,
-      shardIndex
+      shardIndex,
     }
   }
 
@@ -183,7 +207,9 @@ export class AuditShardRequestProtocol {
    */
   serializeAuditShardResponse(response: AuditShardResponse): Bytes {
     // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(4 + 4 + response.bundleShard.length + response.justification.length)
+    const buffer = new ArrayBuffer(
+      4 + 4 + response.bundleShard.length + response.justification.length,
+    )
     const view = new DataView(buffer)
     let offset = 0
 
@@ -229,14 +255,17 @@ export class AuditShardRequestProtocol {
 
     return {
       bundleShard,
-      justification
+      justification,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<AuditShardResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<AuditShardResponse | null> {
     try {
       const request = this.deserializeAuditShardRequest(data)
       return await this.processAuditShardRequest(request)
@@ -245,4 +274,4 @@ export class AuditShardRequestProtocol {
       return null
     }
   }
-} 
+}

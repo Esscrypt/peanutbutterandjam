@@ -42,7 +42,7 @@ export function createTLSConfig(
   certificate: JAMNPCertificate,
   privateKey: Bytes,
   alpnProtocols: string[],
-  verifyPeer: boolean = true
+  verifyPeer = true
 ): TLSConfig {
   return {
     certificate,
@@ -79,7 +79,7 @@ export function validatePeerCertificate(
     }
     
     return true
-  } catch (error) {
+  } catch (_error) {
     return false
   }
 }
@@ -89,7 +89,7 @@ export function validatePeerCertificate(
  */
 export function generateALPNProtocol(
   chainHash: string,
-  isBuilder: boolean = false
+  isBuilder = false
 ): string {
   const base = `jamnp-s/${packageJson.version}/${chainHash}`
   return isBuilder ? `${base}/builder` : base
@@ -128,7 +128,7 @@ export function parseALPNProtocol(protocol: string): {
       chainHash,
       isBuilder,
     }
-  } catch (error) {
+  } catch (_error) {
     return null
   }
 }
@@ -198,7 +198,7 @@ export function performTLSHandshake(
 }
 
 // Import helper functions
-import { validateCertificate, generateAlternativeName } from './certificates'
+import { generateAlternativeName, validateCertificate } from './certificates'
 
 // Helper function to compare arrays
 function arraysEqual(a: Bytes, b: Bytes): boolean {

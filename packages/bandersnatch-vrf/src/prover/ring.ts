@@ -4,14 +4,14 @@
  * Implements Ring VRF proving with anonymity
  */
 
-import { logger } from '@pbnj/core'
-import { BandersnatchCurve, type CurvePoint } from '../curve'
+import { bytesToBigInt, logger } from '@pbnj/core'
 import type {
   RingVRFInput,
   RingVRFProofWithOutput,
   RingVRFRing,
   VRFSecretKey,
 } from '@pbnj/types'
+import { BandersnatchCurve, type CurvePoint } from '../curve'
 import { DEFAULT_PROVER_CONFIG, RING_VRF_CONFIG } from './config'
 import { IETFVRFProver } from './ietf'
 import type { ProverConfig } from './types'
@@ -161,7 +161,7 @@ export class RingVRFProver {
 
     const gToSecret = BandersnatchCurve.scalarMultiply(
       g,
-      this.bytesToBigint(secretKey.bytes),
+      bytesToBigInt(secretKey.bytes),
     )
     const hToIndex = BandersnatchCurve.scalarMultiply(h, BigInt(proverIndex))
 
@@ -209,7 +209,7 @@ export class RingVRFProver {
       (-sum + BandersnatchCurve.CURVE_ORDER) % BandersnatchCurve.CURVE_ORDER
 
     // Compute the prover's random value
-    const secretScalar = this.bytesToBigint(secretKey.bytes)
+    const secretScalar = bytesToBigInt(secretKey.bytes)
 
     let randomSum = 0n
     for (let i = 0; i < ringSize; i++) {
@@ -225,13 +225,15 @@ export class RingVRFProver {
 
     // Serialize the proof
     const proofData: number[] = []
-    proofData.push(...Array.from(this.bigintToBytes(BigInt(ringSize), 4)))
-    proofData.push(...Array.from(this.bigintToBytes(BigInt(proverIndex), 4)))
+    proofData.push(...Array.from(this.bigintToUint8Array(BigInt(ringSize), 4)))
+    proofData.push(
+      ...Array.from(this.bigintToUint8Array(BigInt(proverIndex), 4)),
+    )
     randomValues.forEach((v) =>
-      proofData.push(...Array.from(this.bigintToBytes(v, 32))),
+      proofData.push(...Array.from(this.bigintToUint8Array(v, 32))),
     )
     challenges.forEach((c) =>
-      proofData.push(...Array.from(this.bigintToBytes(c, 32))),
+      proofData.push(...Array.from(this.bigintToUint8Array(c, 32))),
     )
 
     return this.hashToBytes(new Uint8Array(proofData))
@@ -263,14 +265,14 @@ export class RingVRFProver {
       } else {
         randomValues.push(this.generateRandomScalar())
         const commitment = this.hashToBytes(
-          this.bigintToBytes(randomValues[i], 32),
+          this.bigintToUint8Array(randomValues[i], 32),
         )
         commitments.push(commitment)
       }
     }
 
     // Compute the prover's commitment to make the ring signature valid
-    const secretScalar = this.bytesToBigint(secretKey.bytes)
+    const secretScalar = bytesToBigInt(secretKey.bytes)
 
     // Calculate the prover's random value
     let randomSum = 0n
@@ -287,18 +289,20 @@ export class RingVRFProver {
 
     // Compute the prover's commitment
     const proverCommitment = this.hashToBytes(
-      this.bigintToBytes(randomValues[proverIndex], 32),
+      this.bigintToUint8Array(randomValues[proverIndex], 32),
     )
     commitments[proverIndex] = proverCommitment
 
     // Create the signature
     const signatureData: number[] = []
-    signatureData.push(...Array.from(this.bigintToBytes(BigInt(ringSize), 4)))
     signatureData.push(
-      ...Array.from(this.bigintToBytes(BigInt(proverIndex), 4)),
+      ...Array.from(this.bigintToUint8Array(BigInt(ringSize), 4)),
+    )
+    signatureData.push(
+      ...Array.from(this.bigintToUint8Array(BigInt(proverIndex), 4)),
     )
     randomValues.forEach((v) =>
-      signatureData.push(...Array.from(this.bigintToBytes(v, 32))),
+      signatureData.push(...Array.from(this.bigintToUint8Array(v, 32))),
     )
     commitments.forEach((c) => signatureData.push(...Array.from(c)))
 
@@ -313,7 +317,7 @@ export class RingVRFProver {
     scalarBytes: Uint8Array,
   ): Uint8Array {
     const point = BandersnatchCurve.bytesToPoint(pointBytes)
-    const scalar = this.bytesToBigint(scalarBytes)
+    const scalar = bytesToBigInt(scalarBytes)
     const result = BandersnatchCurve.scalarMultiply(point, scalar)
     return BandersnatchCurve.pointToBytes(result)
   }
@@ -334,17 +338,6 @@ export class RingVRFProver {
   }
 
   /**
-   * Convert bytes to bigint
-   */
-  private static bytesToBigint(bytes: Uint8Array): bigint {
-    let result = 0n
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(bytes[i])
-    }
-    return result
-  }
-
-  /**
    * Simple hash function for internal use
    */
   private static hashToBytes(data: Uint8Array): Uint8Array {
@@ -362,12 +355,12 @@ export class RingVRFProver {
    */
   private static generateRandomScalar(): bigint {
     // In production, use cryptographically secure random number generation
-    const randomBytes = new Uint8Array(32)
+    const randomUint8Array = new Uint8Array(32)
     for (let i = 0; i < 32; i++) {
-      randomBytes[i] = Math.floor(Math.random() * 256)
+      randomUint8Array[i] = Math.floor(Math.random() * 256)
     }
 
-    const randomValue = this.bytesToBigint(randomBytes)
+    const randomValue = bytesToBigInt(randomUint8Array)
     return randomValue % BandersnatchCurve.CURVE_ORDER
   }
 
@@ -415,9 +408,12 @@ export class RingVRFProver {
   }
 
   /**
-   * Convert bigint to bytes
+   * Convert bigint to Uint8Array
    */
-  private static bigintToBytes(value: bigint, byteLength: number): Uint8Array {
+  private static bigintToUint8Array(
+    value: bigint,
+    byteLength: number,
+  ): Uint8Array {
     const bytes = new Uint8Array(byteLength)
     for (let i = 0; i < byteLength; i++) {
       bytes[i] = Number(value >> BigInt(8 * (byteLength - 1 - i)))

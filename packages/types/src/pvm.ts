@@ -5,6 +5,9 @@
  * Reference: graypaper/text/pvm.tex
  */
 
+import type { Bytes, HashValue, HexString } from './core'
+import type { OperandTuple } from './serialization'
+
 // Gas types as specified in Gray Paper
 export type Gas = bigint // 64-bit unsigned integer (0 to 2^64-1)
 export type SignedGas = bigint // 64-bit signed integer (-2^63 to 2^63-1)
@@ -351,32 +354,9 @@ export interface JumpTableEntry {
 
 // ===== IS-AUTHORIZED INVOCATION TYPES =====
 
-// Work package interface for Is-Authorized
-export interface WorkPackage {
-  context: WorkContext
-  workitems: WorkItem[]
-}
+// Work-related types are handled in the serialization package
 
-export interface WorkContext {
-  lookupanchortime: number
-}
-
-export interface WorkItem {
-  serviceindex: number
-  codehash: number[]
-  payload: number[]
-  refgaslimit: Gas
-  accgaslimit: Gas
-  importsegments: number[][]
-  exportsegments: number[][]
-  extrinsics: number[][]
-}
-
-// Work error types
-export type WorkError = 'BAD' | 'BIG'
-
-// Is-Authorized result type
-export type IsAuthorizedResult = number[] | WorkError
+// (Moved to end of file to avoid duplicates)
 
 // Is-Authorized context mutator function
 export type IsAuthorizedContextMutator = (
@@ -400,10 +380,22 @@ export type IsAuthorizedContextMutator = (
 
 // ===== REFINE INVOCATION TYPES =====
 
-// Service account interface
+// PVM-specific service account interface (for PVM runtime)
 export interface ServiceAccount {
   codehash: number[]
-  // Other service account fields would be defined here
+  storage: Map<string, number[]>
+  requests: Map<string, number[][]>
+  balance: bigint
+  minaccgas: bigint
+  minmemogas: bigint
+  preimages: Map<string, number[]>
+  created: number
+  gratis: boolean
+  lastacc: number
+  parent: number
+  items: number
+  minbalance: bigint
+  octets: number
 }
 
 // Accounts state interface
@@ -448,22 +440,6 @@ export type RefineContextMutator = (
     }
 
 // ===== ACCUMULATE INVOCATION TYPES =====
-export interface ServiceAccount {
-  codehash: number[]
-  storage: Map<string, number[]>
-  requests: Map<string, number[][]>
-  balance: bigint
-  minaccgas: bigint
-  minmemogas: bigint
-  preimages: Map<string, number[]>
-  created: number
-  gratis: boolean
-  lastacc: number
-  parent: number
-  items: number
-  minbalance: bigint
-  octets: number
-}
 
 export interface PartialState {
   accounts: Map<number, ServiceAccount>
@@ -481,8 +457,11 @@ export interface PartialState {
 }
 
 export interface DeferredTransfer {
-  amount: bigint
-  destination: number
+  source: number // DX_source (4 bytes)
+  dest: number // DX_dest (4 bytes)
+  amount: bigint // DX_amount (8 bytes)
+  memo: Bytes // DX_memo (variable)
+  gas: bigint // DX_gas (8 bytes)
 }
 
 export interface Implications {
@@ -497,8 +476,8 @@ export interface Implications {
 export type ImplicationsPair = [Implications, Implications]
 
 export interface AccumulateInput {
-  // Sequence of accumulate inputs
-  inputs: number[][]
+  type: number // 0 for operand tuple, 1 for deferred transfer
+  value: OperandTuple | DeferredTransfer
 }
 
 export interface AccumulateOutput {
@@ -526,6 +505,41 @@ export type AccumulateContextMutator = (
       context: ImplicationsPair
     }
   | { resultCode: 'fault'; address: number }
+
+// Work types for PVM compatibility
+export interface WorkContext {
+  lookupanchortime: number
+}
+
+export interface WorkItem {
+  serviceindex: number
+  codehash: HashValue
+  payload: HexString
+  refgaslimit: Gas
+  accgaslimit: Gas
+  importsegments: ImportSegment[]
+  exportsegments: ExportSegment[]
+  extrinsics: ExtrinsicReference[]
+}
+
+export interface ImportSegment {
+  hash: HashValue // Root hash of the import tree
+  index: number
+}
+
+export interface ExportSegment {
+  data: HexString
+  size: number
+}
+
+export interface ExtrinsicReference {
+  hash: HashValue
+  length: number
+}
+
+export type WorkError = 'BAD' | 'BIG'
+
+export type IsAuthorizedResult = number[] | WorkError
 
 // PVM Constants
 export const PVM_CONSTANTS = {

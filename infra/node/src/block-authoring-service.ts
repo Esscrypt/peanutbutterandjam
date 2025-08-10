@@ -6,12 +6,12 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BaseService } from './service-interface'
 import { BlockSubmitter } from './block-submitter'
 import { ExtrinsicValidator } from './extrinsic-validator'
 import { GenesisManager } from './genesis-manager'
 import { HeaderConstructor } from './header-constructor'
 import { MetricsCollector } from './metrics-collector'
+import { BaseService } from './service-interface'
 import { StateManager } from './state-manager'
 import type {
   Block,
@@ -37,7 +37,10 @@ import { WorkPackageProcessor } from './work-package-processor'
 /**
  * Block Authoring Service Implementation
  */
-export class BlockAuthoringServiceImpl extends BaseService implements BlockAuthoringService {
+export class BlockAuthoringServiceImpl
+  extends BaseService
+  implements BlockAuthoringService
+{
   private config!: BlockAuthoringConfig
   private genesisManager?: GenesisManager
   private genesisState?: GenesisState
@@ -55,7 +58,9 @@ export class BlockAuthoringServiceImpl extends BaseService implements BlockAutho
     this.extrinsicValidator = new ExtrinsicValidator()
     this.stateManager = new StateManager()
     this.blockSubmitter = new BlockSubmitter()
-    this.metricsCollector = new MetricsCollector(process.env['NODE_ID'] || 'default-node')
+    this.metricsCollector = new MetricsCollector(
+      process.env['NODE_ID'] || 'default-node',
+    )
   }
 
   async init(): Promise<void> {
@@ -260,22 +265,22 @@ export class BlockAuthoringServiceImpl extends BaseService implements BlockAutho
   async start(): Promise<boolean> {
     try {
       logger.info('Starting block authoring service...')
-      
+
       // Start networking service (if implemented)
       logger.info('Starting networking service...')
       // TODO: Initialize and start networking service
       // await this.networkingService.start()
-      
+
       // Start block submission service
       logger.info('Starting block submission service...')
       // TODO: Initialize and start block submission service
       // await this.blockSubmitter.start()
-      
+
       // Start metrics collection
       logger.info('Starting metrics collection...')
       // TODO: Start metrics collection if needed
       // this.metricsCollector.start()
-      
+
       logger.info('Block authoring service started successfully')
       return true
     } catch (error) {
@@ -290,22 +295,22 @@ export class BlockAuthoringServiceImpl extends BaseService implements BlockAutho
   async stop(): Promise<void> {
     try {
       logger.info('Stopping block authoring service...')
-      
+
       // Stop networking service
       logger.info('Stopping networking service...')
       // TODO: Stop networking service
       // await this.networkingService.stop()
-      
+
       // Stop block submission service
       logger.info('Stopping block submission service...')
       // TODO: Stop block submission service
       // await this.blockSubmitter.stop()
-      
+
       // Stop metrics collection
       logger.info('Stopping metrics collection...')
       // TODO: Stop metrics collection if needed
       // this.metricsCollector.stop()
-      
+
       logger.info('Block authoring service stopped successfully')
     } catch (error) {
       logger.error('Error stopping block authoring service', { error })

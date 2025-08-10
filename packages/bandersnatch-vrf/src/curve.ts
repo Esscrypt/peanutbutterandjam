@@ -5,6 +5,7 @@
  * Reference: submodules/ark-vrf/src/suites/bandersnatch/
  */
 
+import { bytesToBigInt } from '@pbnj/core'
 import { BANDERSNATCH_PARAMS } from './config'
 
 /**
@@ -183,40 +184,40 @@ export class BandersnatchCurve {
   }
 
   /**
-   * Convert point to bytes
+   * Convert point to Uint8Array
    */
   static pointToBytes(point: CurvePoint): Uint8Array {
     if (point.isInfinity) {
       return new Uint8Array(64).fill(0)
     }
 
-    // Serialize as (x, y) coordinates, each 32 bytes
-    const xBytes = this.bigintToBytes(point.x, 32)
-    const yBytes = this.bigintToBytes(point.y, 32)
+    // Serialize as (x, y) coordinates, each 32 Uint8Array
+    const xUint8Array = this.bigintToUint8Array(point.x, 32)
+    const yUint8Array = this.bigintToUint8Array(point.y, 32)
 
-    return new Uint8Array([...xBytes, ...yBytes])
+    return new Uint8Array([...xUint8Array, ...yUint8Array])
   }
 
   /**
-   * Convert bytes to point
+   * Convert Uint8Array to point
    */
   static bytesToPoint(bytes: Uint8Array): CurvePoint {
     if (bytes.length !== 64) {
-      // Try to handle shorter bytes by padding
+      // Try to handle shorter Uint8Array by padding
       if (bytes.length < 64) {
-        const paddedBytes = new Uint8Array(64)
-        paddedBytes.set(bytes, 0)
-        bytes = paddedBytes
+        const paddedUint8Array = new Uint8Array(64)
+        paddedUint8Array.set(bytes, 0)
+        bytes = paddedUint8Array
       } else {
         throw new Error('Invalid point bytes length')
       }
     }
 
-    const xBytes = bytes.slice(0, 32)
-    const yBytes = bytes.slice(32, 64)
+    const xUint8Array = bytes.slice(0, 32)
+    const yUint8Array = bytes.slice(32, 64)
 
-    const x = this.bytesToBigint(xBytes)
-    const y = this.bytesToBigint(yBytes)
+    const x = bytesToBigInt(xUint8Array)
+    const y = bytesToBigInt(yUint8Array)
 
     // Check if this is the infinity point
     if (x === 0n && y === 0n) {
@@ -227,9 +228,9 @@ export class BandersnatchCurve {
   }
 
   /**
-   * Convert bigint to bytes
+   * Convert bigint to Uint8Array
    */
-  private static bigintToBytes(value: bigint, length: number): Uint8Array {
+  private static bigintToUint8Array(value: bigint, length: number): Uint8Array {
     const bytes = new Uint8Array(length)
     let temp = value
 
@@ -239,19 +240,6 @@ export class BandersnatchCurve {
     }
 
     return bytes
-  }
-
-  /**
-   * Convert bytes to bigint
-   */
-  private static bytesToBigint(bytes: Uint8Array): bigint {
-    let result = 0n
-
-    for (let i = 0; i < bytes.length; i++) {
-      result = (result << 8n) | BigInt(bytes[i])
-    }
-
-    return result
   }
 
   /**
@@ -280,8 +268,8 @@ export class BandersnatchCurve {
       // Hash the input
       const hash = this.sha256(hashInput)
 
-      // Use first 32 bytes as x-coordinate
-      const x = this.bytesToBigint(hash.slice(0, 32)) % this.FIELD_MODULUS
+      // Use first 32 Uint8Array as x-coordinate
+      const x = bytesToBigInt(hash.slice(0, 32)) % this.FIELD_MODULUS
 
       // Try to solve for y: y² = x³ + 5
       const rightSide =
@@ -422,7 +410,7 @@ export class BandersnatchCurve {
       h = (h * 31n + BigInt(data[i])) % (1n << 256n)
     }
 
-    // Convert to bytes
+    // Convert to Uint8Array
     for (let i = 0; i < 32; i++) {
       hash[i] = Number((h >> (BigInt(i) * 8n)) & 0xffn)
     }

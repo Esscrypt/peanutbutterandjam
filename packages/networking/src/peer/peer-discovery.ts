@@ -5,11 +5,11 @@
  * Handles peer discovery, connection establishment, and peer tracking
  */
 
-import type { 
-  ValidatorIndex, 
-  ValidatorMetadata, 
+import type {
   ConnectionEndpoint,
-  NodeType
+  NodeType,
+  ValidatorIndex,
+  ValidatorMetadata,
 } from '@pbnj/types'
 import { PreferredInitiator } from '@pbnj/types'
 
@@ -36,10 +36,8 @@ export class PeerDiscoveryManager {
   private localNodeType: NodeType | null = null
   private discoveryInterval: NodeJS.Timeout | null = null
   // private connectionTimeout: number = 30000 // 30 seconds
-  private maxConnectionAttempts: number = 3
-  private retryDelay: number = 60000 // 1 minute
-
-  constructor() {}
+  private maxConnectionAttempts = 3
+  private retryDelay = 60000 // 1 minute
 
   /**
    * Set local validator information
@@ -55,7 +53,7 @@ export class PeerDiscoveryManager {
   addPeer(
     validatorIndex: ValidatorIndex,
     metadata: ValidatorMetadata,
-    preferredInitiator: PreferredInitiator = PreferredInitiator.NEITHER
+    preferredInitiator: PreferredInitiator = PreferredInitiator.NEITHER,
   ): void {
     const peerInfo: PeerInfo = {
       validatorIndex,
@@ -65,7 +63,7 @@ export class PeerDiscoveryManager {
       lastSeen: Date.now(),
       connectionAttempts: 0,
       lastConnectionAttempt: 0,
-      preferredInitiator
+      preferredInitiator,
     }
 
     this.peers.set(validatorIndex, peerInfo)
@@ -97,13 +95,13 @@ export class PeerDiscoveryManager {
    */
   getConnectedPeers(): Map<ValidatorIndex, PeerInfo> {
     const connected = new Map<ValidatorIndex, PeerInfo>()
-    
+
     for (const [index, peer] of this.peers) {
       if (peer.isConnected) {
         connected.set(index, peer)
       }
     }
-    
+
     return connected
   }
 
@@ -113,13 +111,13 @@ export class PeerDiscoveryManager {
   getDisconnectedPeers(): Map<ValidatorIndex, PeerInfo> {
     const disconnected = new Map<ValidatorIndex, PeerInfo>()
     const now = Date.now()
-    
+
     for (const [index, peer] of this.peers) {
       if (!peer.isConnected && this.shouldConnectToPeer(peer, now)) {
         disconnected.set(index, peer)
       }
     }
-    
+
     return disconnected
   }
 
@@ -191,66 +189,80 @@ export class PeerDiscoveryManager {
   /**
    * Get peers that need connection attempts
    */
-  getPeersNeedingConnection(): Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> {
+  getPeersNeedingConnection(): Array<{
+    validatorIndex: ValidatorIndex
+    peer: PeerInfo
+  }> {
     const now = Date.now()
     const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
-    
+
     for (const [index, peer] of this.peers) {
       if (this.shouldConnectToPeer(peer, now)) {
         peers.push({ validatorIndex: index, peer })
       }
     }
-    
+
     // Sort by preferred initiator and last attempt time
     peers.sort((a, b) => {
       // Prefer peers where we should be the initiator
-      const aShouldInitiate = a.peer.preferredInitiator === PreferredInitiator.LOCAL
-      const bShouldInitiate = b.peer.preferredInitiator === PreferredInitiator.LOCAL
-      
+      const aShouldInitiate =
+        a.peer.preferredInitiator === PreferredInitiator.LOCAL
+      const bShouldInitiate =
+        b.peer.preferredInitiator === PreferredInitiator.LOCAL
+
       if (aShouldInitiate && !bShouldInitiate) return -1
       if (!aShouldInitiate && bShouldInitiate) return 1
-      
+
       // Then sort by last attempt time (oldest first)
       return a.peer.lastConnectionAttempt - b.peer.lastConnectionAttempt
     })
-    
+
     return peers
   }
 
   /**
    * Get peers where we should be the initiator
    */
-  getPeersToInitiate(): Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> {
+  getPeersToInitiate(): Array<{
+    validatorIndex: ValidatorIndex
+    peer: PeerInfo
+  }> {
     const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
-    
+
     for (const [index, peer] of this.peers) {
       if (peer.preferredInitiator === PreferredInitiator.LOCAL) {
         peers.push({ validatorIndex: index, peer })
       }
     }
-    
+
     return peers
   }
 
   /**
    * Get peers where remote should be the initiator
    */
-  getPeersToAccept(): Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> {
+  getPeersToAccept(): Array<{
+    validatorIndex: ValidatorIndex
+    peer: PeerInfo
+  }> {
     const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
-    
+
     for (const [index, peer] of this.peers) {
       if (peer.preferredInitiator === PreferredInitiator.REMOTE) {
         peers.push({ validatorIndex: index, peer })
       }
     }
-    
+
     return peers
   }
 
   /**
    * Update preferred initiator for a peer
    */
-  updatePreferredInitiator(validatorIndex: ValidatorIndex, preferredInitiator: PreferredInitiator): void {
+  updatePreferredInitiator(
+    validatorIndex: ValidatorIndex,
+    preferredInitiator: PreferredInitiator,
+  ): void {
     const peer = this.peers.get(validatorIndex)
     if (peer) {
       peer.preferredInitiator = preferredInitiator
@@ -260,7 +272,10 @@ export class PeerDiscoveryManager {
   /**
    * Compute preferred initiator based on validator indices
    */
-  computePreferredInitiator(validatorA: ValidatorIndex, validatorB: ValidatorIndex): PreferredInitiator {
+  computePreferredInitiator(
+    validatorA: ValidatorIndex,
+    validatorB: ValidatorIndex,
+  ): PreferredInitiator {
     // Simple rule: lower validator index initiates
     if (validatorA < validatorB) {
       return PreferredInitiator.LOCAL
@@ -293,14 +308,14 @@ export class PeerDiscoveryManager {
       disconnectedPeers,
       peersNeedingConnection,
       localValidatorIndex: this.localValidatorIndex,
-      localNodeType: this.localNodeType
+      localNodeType: this.localNodeType,
     }
   }
 
   /**
    * Start peer discovery
    */
-  startDiscovery(intervalMs: number = 30000): void {
+  startDiscovery(intervalMs = 30000): void {
     if (this.discoveryInterval) {
       clearInterval(this.discoveryInterval)
     }
@@ -329,9 +344,9 @@ export class PeerDiscoveryManager {
     // 2. Attempting connections to disconnected peers
     // 3. Updating peer status
     // 4. Computing preferred initiators
-    
+
     const peersNeedingConnection = this.getPeersNeedingConnection()
-    
+
     for (const { validatorIndex, peer } of peersNeedingConnection) {
       // Emit event or call callback for connection attempt
       this.onPeerNeedsConnection(validatorIndex, peer)
@@ -341,24 +356,30 @@ export class PeerDiscoveryManager {
   /**
    * Callback for when a peer needs connection
    */
-  private onPeerNeedsConnection(validatorIndex: ValidatorIndex, peer: PeerInfo): void {
+  private onPeerNeedsConnection(
+    validatorIndex: ValidatorIndex,
+    peer: PeerInfo,
+  ): void {
     // This would be overridden by the connection manager
-    console.log(`Peer ${validatorIndex} needs connection to ${peer.endpoint.host}:${peer.endpoint.port}`)
+    console.log(
+      `Peer ${validatorIndex} needs connection to ${peer.endpoint.host}:${peer.endpoint.port}`,
+    )
   }
 
   /**
    * Clean up old peers
    */
-  cleanupOldPeers(maxAgeMs: number = 300000): void { // 5 minutes
+  cleanupOldPeers(maxAgeMs = 300000): void {
+    // 5 minutes
     const now = Date.now()
     const toRemove: ValidatorIndex[] = []
-    
+
     for (const [index, peer] of this.peers) {
       if (now - peer.lastSeen > maxAgeMs && !peer.isConnected) {
         toRemove.push(index)
       }
     }
-    
+
     for (const index of toRemove) {
       this.removePeer(index)
     }
@@ -373,4 +394,4 @@ export class PeerDiscoveryManager {
       peer.lastConnectionAttempt = 0
     }
   }
-} 
+}

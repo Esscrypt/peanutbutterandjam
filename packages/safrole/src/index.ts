@@ -7,24 +7,22 @@
 
 // Re-export specific types from centralized types package to avoid conflicts
 export type {
-  Ticket,
-  TicketProof,
-  SafroleState,
-  SafroleInput,
-  SafroleOutput,
+  SAFROLE_CONSTANTS,
   SafroleError,
   SafroleErrorCode,
-  SAFROLE_CONSTANTS,
+  SafroleInput,
+  SafroleOutput,
+  SafroleState,
+  Ticket,
+  TicketProof,
 } from '@pbnj/types'
 
 // Re-export values (enums and constants) from centralized types package
 export {
-  SafroleErrorCode,
   SAFROLE_CONSTANTS,
+  SafroleErrorCode,
 } from '@pbnj/types'
-
-// Safrole implementation
-export * from './state-transitions'
-
 // Network protocol implementation
 export * from './network/serialization'
+// Safrole implementation
+export * from './state-transitions'

@@ -274,9 +274,13 @@ export class ProgramInitializer {
   /**
    * Decode length from blob data
    */
-  private decodeLength(data: number[], offset: number, bytes: number): number {
+  private decodeLength(
+    data: number[],
+    offset: number,
+    Uint8Array: number,
+  ): number {
     let length = 0
-    for (let i = 0; i < bytes; i++) {
+    for (let i = 0; i < Uint8Array; i++) {
       length |= data[offset + i] << (i * 8)
     }
     return length

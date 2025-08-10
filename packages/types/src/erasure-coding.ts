@@ -227,4 +227,4 @@ export const IRREDUCIBLE_POLYNOMIAL = 0x1002d
 /**
  * Field generator α (root of irreducible polynomial)
  */
-export const FIELD_GENERATOR = 0x0002 
+export const FIELD_GENERATOR = 0x0002

@@ -53,7 +53,7 @@ export class GF2_16 implements FiniteField {
 
   power(a: number, b: number): number {
     // Implementation will be provided by algorithms
-    return Math.pow(a, b)
+    return a ** b
   }
 
   subtract(a: number, b: number): number {
@@ -86,7 +86,7 @@ export class EncodingValidation {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 
@@ -94,7 +94,7 @@ export class EncodingValidation {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 
@@ -102,7 +102,7 @@ export class EncodingValidation {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 }
@@ -115,23 +115,29 @@ export class DecodingValidation {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 
-  validateReceivedShards(_shards: Uint8Array[], _indices: number[]): ValidationResult {
+  validateReceivedShards(
+    _shards: Uint8Array[],
+    _indices: number[],
+  ): ValidationResult {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 
-  validateDecodedData(_originalData: Uint8Array, _decodedData: Uint8Array): ValidationResult {
+  validateDecodedData(
+    _originalData: Uint8Array,
+    _decodedData: Uint8Array,
+  ): ValidationResult {
     return {
       isValid: true,
       errors: [],
-      warnings: []
+      warnings: [],
     }
   }
 }
@@ -139,32 +145,26 @@ export class DecodingValidation {
 /**
  * Validation engine implementation
  */
-export class ValidationEngine {
-  constructor() {
-    // Implementation
-  }
-}
+export class ValidationEngine {}
 
 // Default erasure coding parameters
 export const DEFAULT_ERASURE_CODING_PARAMS = {
   k: 342,
   n: 1023,
-  fieldSize: 16
+  fieldSize: 16,
 }
 
 export const BLOB_ERASURE_CODING_PARAMS = {
   k: 342,
   n: 1023,
-  fieldSize: 16
+  fieldSize: 16,
 }
 
 export const SEGMENT_ERASURE_CODING_PARAMS = {
   k: 6,
   n: 1023,
-  fieldSize: 16
+  fieldSize: 16,
 }
 
 // Re-export types from @pbnj/types for convenience
-export type {
-  EncodedData
-} from '@pbnj/types' 
+export type { EncodedData } from '@pbnj/types'

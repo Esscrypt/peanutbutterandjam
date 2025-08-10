@@ -4,11 +4,7 @@
  * Implements Pedersen VRF proving with key hiding
  */
 
-import type {
-  VRFInput,
-  VRFProofWithOutput,
-  VRFSecretKey,
-} from '@pbnj/types'
+import type { VRFInput, VRFProofWithOutput, VRFSecretKey } from '@pbnj/types'
 import type { ProverConfig } from './types'
 
 /**

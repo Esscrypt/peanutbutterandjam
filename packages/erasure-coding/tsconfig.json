@@ -1,21 +1,3 @@
 {
-  "extends": "../../config/typescript/base.json",
-  "compilerOptions": {
-    "noEmit": false,
-    "allowImportingTsExtensions": false,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true
-  },
-  "include": [
-    "src/**/*"
-  ],
-  "exclude": [
-    "dist",
-    "node_modules",
-    "**/*.test.ts",
-    "**/*.spec.ts"
-  ]
-} 
+  "extends": "@pbnj/typescript-config/base.json",
+}

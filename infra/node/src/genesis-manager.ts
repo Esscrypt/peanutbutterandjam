@@ -6,8 +6,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { logger } from '@pbnj/core'
-import { parseGenesisJson, type GenesisJson } from '@pbnj/core'
+import { type GenesisJson, logger, parseGenesisJson } from '@pbnj/core'
 import type { Account, GenesisConfig, GenesisState, Validator } from './types'
 
 /**
@@ -64,7 +63,7 @@ export class GenesisManager {
     logger.debug('Loading genesis from file', { filePath })
 
     const fileContent = readFileSync(filePath, 'utf-8')
-    
+
     // Parse and validate genesis JSON using the core package
     const parseResult = parseGenesisJson(fileContent)
     if (!parseResult.success) {

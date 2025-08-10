@@ -201,12 +201,8 @@
           "name": "validator_connections_validator_index_validators_index_fk",
           "tableFrom": "validator_connections",
           "tableTo": "validators",
-          "columnsFrom": [
-            "validator_index"
-          ],
-          "columnsTo": [
-            "index"
-          ],
+          "columnsFrom": ["validator_index"],
+          "columnsTo": ["index"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }

@@ -26,8 +26,8 @@ export function encodeMessage(message: NetworkMessage): Uint8Array {
 
     // Message body
     const encoder = new TextEncoder()
-    const idBytes = encoder.encode(message.id)
-    const signatureBytes = message.signature
+    const idUint8Array = encoder.encode(message.id)
+    const signatureUint8Array = message.signature
       ? encoder.encode(message.signature)
       : new Uint8Array(0)
 
@@ -37,9 +37,9 @@ export function encodeMessage(message: NetworkMessage): Uint8Array {
       messageType.length +
       payloadLength.length +
       hasSignature.length +
-      idBytes.length +
+      idUint8Array.length +
       message.payload.length +
-      signatureBytes.length
+      signatureUint8Array.length
 
     const body = new Uint8Array(totalLength)
     let offset = 0
@@ -57,13 +57,13 @@ export function encodeMessage(message: NetworkMessage): Uint8Array {
     body.set(hasSignature, offset)
     offset += hasSignature.length
 
-    body.set(idBytes, offset)
-    offset += idBytes.length
+    body.set(idUint8Array, offset)
+    offset += idUint8Array.length
 
     body.set(message.payload, offset)
     offset += message.payload.length
 
-    body.set(signatureBytes, offset)
+    body.set(signatureUint8Array, offset)
 
     logger.debug('Encoded network message', {
       messageId: message.id,
@@ -98,19 +98,19 @@ export function decodeMessage(data: Uint8Array): NetworkMessage {
     const { value: hasSignature, remaining: data4 } = decodeNatural(data3)
 
     // Extract components
-    const idBytes = data4.slice(0, Number(idLength))
+    const idUint8Array = data4.slice(0, Number(idLength))
     const payload = data4.slice(
       Number(idLength),
       Number(idLength) + Number(payloadLength),
     )
-    const signatureBytes =
+    const signatureUint8Array =
       hasSignature === 1n
         ? data4.slice(Number(idLength) + Number(payloadLength))
         : new Uint8Array(0)
 
-    const id = decoder.decode(idBytes)
+    const id = decoder.decode(idUint8Array)
     const signature =
-      hasSignature === 1n ? decoder.decode(signatureBytes) : undefined
+      hasSignature === 1n ? decoder.decode(signatureUint8Array) : undefined
 
     const message: NetworkMessage = {
       id,

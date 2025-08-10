@@ -12,7 +12,7 @@ export enum Asn1TagClass {
   UNIVERSAL = 0x00,
   APPLICATION = 0x40,
   CONTEXT_SPECIFIC = 0x80,
-  PRIVATE = 0xC0
+  PRIVATE = 0xc0,
 }
 
 // ASN.1 Universal Tags
@@ -28,13 +28,13 @@ export enum Asn1UniversalTag {
   PRINTABLE_STRING = 0x13,
   IA5_STRING = 0x16,
   UTC_TIME = 0x17,
-  GENERALIZED_TIME = 0x18
+  GENERALIZED_TIME = 0x18,
 }
 
 // ASN.1 Length Types
 export enum Asn1LengthType {
-  SHORT = 0x7F,
-  LONG = 0x80
+  SHORT = 0x7f,
+  LONG = 0x80,
 }
 
 // ASN.1 TLV (Tag-Length-Value) structure
@@ -49,27 +49,27 @@ export interface Asn1TLV {
 
 // JAM Protocol Types
 export interface JamValidatorKeys {
-  bandersnatch: Uint8Array  // 32 bytes
-  ed25519: Uint8Array       // 32 bytes
+  bandersnatch: Uint8Array // 32 bytes
+  ed25519: Uint8Array // 32 bytes
 }
 
 export interface JamEpochMark {
-  entropy: Uint8Array        // 32 bytes
+  entropy: Uint8Array // 32 bytes
   ticketsEntropy: Uint8Array // 32 bytes
   validators: JamValidatorKeys[]
 }
 
 export interface JamHeader {
-  parent: Uint8Array         // 32 bytes
+  parent: Uint8Array // 32 bytes
   parentStateRoot: Uint8Array // 32 bytes
-  extrinsicHash: Uint8Array  // 32 bytes
-  slot: number               // U32
+  extrinsicHash: Uint8Array // 32 bytes
+  slot: number // U32
   epochMark?: JamEpochMark
   ticketsMark?: Uint8Array[] // Optional
   offendersMark: Uint8Array[] // Ed25519Public[]
-  authorIndex: number         // U16
-  entropySource: Uint8Array  // BandersnatchVrfSignature (96 bytes)
-  seal: Uint8Array           // BandersnatchVrfSignature (96 bytes)
+  authorIndex: number // U16
+  entropySource: Uint8Array // BandersnatchVrfSignature (96 bytes)
+  seal: Uint8Array // BandersnatchVrfSignature (96 bytes)
 }
 
 export interface JamBlock {
@@ -95,7 +95,7 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
     const startTime = Date.now()
 
     logger.debug('Encoding data to JAM ASN.1 format', {
-      config: this.config
+      config: this.config,
     })
 
     try {
@@ -177,13 +177,13 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
     // This will be expanded based on the specific JAM types
     const jsonString = JSON.stringify(data, this.bigIntReplacer)
     const bytes = new TextEncoder().encode(jsonString)
-    
+
     return {
       tag: Asn1UniversalTag.OCTET_STRING,
       tagClass: Asn1TagClass.UNIVERSAL,
       isConstructed: false,
       length: bytes.length,
-      value: bytes
+      value: bytes,
     }
   }
 
@@ -202,11 +202,12 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
    */
   private encodeAsn1(asn1Data: Asn1TLV): Uint8Array {
     const result: number[] = []
-    
+
     // Encode tag
-    const tagByte = asn1Data.tagClass | (asn1Data.isConstructed ? 0x20 : 0x00) | asn1Data.tag
+    const tagByte =
+      asn1Data.tagClass | (asn1Data.isConstructed ? 0x20 : 0x00) | asn1Data.tag
     result.push(tagByte)
-    
+
     // Encode length
     if (asn1Data.length <= 127) {
       result.push(asn1Data.length)
@@ -215,10 +216,10 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
       result.push(0x80 | lengthBytes.length)
       result.push(...lengthBytes)
     }
-    
+
     // Encode value
     result.push(...asn1Data.value)
-    
+
     return new Uint8Array(result)
   }
 
@@ -236,7 +237,7 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
   private intToBytes(value: number): number[] {
     const bytes: number[] = []
     while (value > 0) {
-      bytes.unshift(value & 0xFF)
+      bytes.unshift(value & 0xff)
       value = value >> 8
     }
     return bytes.length > 0 ? bytes : [0]
@@ -282,7 +283,7 @@ export class JamAsn1Codec<T> implements FormatCodec<T> {
  */
 export class JamAsn1Decoder {
   private data: Uint8Array
-  private offset: number = 0
+  private offset = 0
 
   constructor(data: Uint8Array) {
     this.data = data
@@ -293,20 +294,20 @@ export class JamAsn1Decoder {
    */
   decodeBlock(): JamBlock {
     const tlv = this.readTLV()
-    
+
     if (tlv.tag !== Asn1UniversalTag.SEQUENCE) {
       throw new Error('Expected SEQUENCE for Block')
     }
 
     const children = this.decodeSequence(tlv.value)
-    
+
     if (children.length < 2) {
       throw new Error('Block must have at least header and extrinsic')
     }
 
     return {
       header: this.decodeHeader(children[0]),
-      extrinsic: children[1] // TODO: Implement extrinsic decoding
+      extrinsic: children[1], // TODO: Implement extrinsic decoding
     }
   }
 
@@ -319,7 +320,7 @@ export class JamAsn1Decoder {
     }
 
     const children = this.decodeSequence(tlv.value)
-    
+
     if (children.length < 8) {
       throw new Error('Header must have at least 8 fields')
     }
@@ -345,8 +346,8 @@ export class JamAsn1Decoder {
 
     // Parse tickets mark if present
     if (children[5] && children[5].tag === Asn1UniversalTag.SEQUENCE) {
-      ticketsMark = this.decodeSequence(children[5].value).map(child => 
-        this.decodeOctetString(child)
+      ticketsMark = this.decodeSequence(children[5].value).map((child) =>
+        this.decodeOctetString(child),
       )
     }
 
@@ -368,7 +369,7 @@ export class JamAsn1Decoder {
       offendersMark,
       authorIndex,
       entropySource,
-      seal
+      seal,
     }
   }
 
@@ -381,14 +382,14 @@ export class JamAsn1Decoder {
     }
 
     const children = this.decodeSequence(tlv.value)
-    
+
     if (children.length < 3) {
       throw new Error('EpochMark must have at least 3 fields')
     }
 
     const entropy = this.decodeOctetString(children[0])
     const ticketsEntropy = this.decodeOctetString(children[1])
-    
+
     // Parse validators
     const validators: JamValidatorKeys[] = []
     if (children[2] && children[2].tag === Asn1UniversalTag.SEQUENCE) {
@@ -401,7 +402,7 @@ export class JamAsn1Decoder {
     return {
       entropy,
       ticketsEntropy,
-      validators
+      validators,
     }
   }
 
@@ -414,14 +415,14 @@ export class JamAsn1Decoder {
     }
 
     const children = this.decodeSequence(tlv.value)
-    
+
     if (children.length < 2) {
       throw new Error('ValidatorKeys must have at least 2 fields')
     }
 
     return {
       bandersnatch: this.decodeOctetString(children[0]),
-      ed25519: this.decodeOctetString(children[1])
+      ed25519: this.decodeOctetString(children[1]),
     }
   }
 
@@ -435,9 +436,9 @@ export class JamAsn1Decoder {
 
     // Read tag
     const tagByte = this.data[this.offset++]
-    const tagClass = tagByte & 0xC0
+    const tagClass = tagByte & 0xc0
     const isConstructed = (tagByte & 0x20) !== 0
-    const tag = tagByte & 0x1F
+    const tag = tagByte & 0x1f
 
     // Read length
     const lengthByte = this.data[this.offset++]
@@ -446,7 +447,7 @@ export class JamAsn1Decoder {
     if (lengthByte <= Asn1LengthType.SHORT) {
       length = lengthByte
     } else {
-      const numLengthBytes = lengthByte & 0x7F
+      const numLengthBytes = lengthByte & 0x7f
       length = 0
       for (let i = 0; i < numLengthBytes; i++) {
         if (this.offset >= this.data.length) {
@@ -469,7 +470,7 @@ export class JamAsn1Decoder {
       tagClass,
       isConstructed,
       length,
-      value
+      value,
     }
   }
 
@@ -479,7 +480,7 @@ export class JamAsn1Decoder {
   private decodeSequence(data: Uint8Array): Asn1TLV[] {
     const decoder = new JamAsn1Decoder(data)
     const children: Asn1TLV[] = []
-    
+
     while (decoder.offset < data.length) {
       children.push(decoder.readTLV())
     }
@@ -531,4 +532,4 @@ export class JamAsn1Decoder {
   isEOF(): boolean {
     return this.offset >= this.data.length
   }
-} 
+}

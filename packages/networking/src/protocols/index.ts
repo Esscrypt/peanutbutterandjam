@@ -4,7 +4,6 @@
  * Implements all 15 stream protocols for the JAM Simple Networking Protocol
  */
 
-export * from './up0-block-announcement'
 export * from './ce128-block-request'
 export * from './ce129-state-request'
 export * from './ce131-132-ticket-distribution'
@@ -19,4 +18,5 @@ export * from './ce141-assurance-distribution'
 export * from './ce142-preimage-announcement'
 export * from './ce143-preimage-request'
 export * from './ce144-audit-announcement'
-export * from './ce145-judgment-publication' 
+export * from './ce145-judgment-publication'
+export * from './up0-block-announcement'

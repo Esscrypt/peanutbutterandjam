@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting missing work reports.
  */
 
-import type { 
-  Bytes, 
+import type {
+  Bytes,
+  StreamInfo,
   WorkReportRequest,
   WorkReportResponse,
-  StreamInfo
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -39,26 +39,34 @@ export class WorkReportRequestProtocol {
 
     try {
       // Load work reports from database (service ID 6 for work reports)
-      console.log('Work report request state loading - protocol not yet fully implemented')
+      console.log(
+        'Work report request state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load work report request state from database:', error)
+      console.error(
+        'Failed to load work report request state from database:',
+        error,
+      )
     }
   }
 
   /**
    * Store work report in local store and persist to database
    */
-  async storeWorkReport(workReportHash: Bytes, workReport: Bytes): Promise<void> {
+  async storeWorkReport(
+    workReportHash: Bytes,
+    workReport: Bytes,
+  ): Promise<void> {
     const hashString = workReportHash.toString()
     this.workReports.set(hashString, workReport)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           6, // Service ID 6 for work reports
           Buffer.from(`work_report_${hashString}`),
-          workReport
+          workReport,
         )
       } catch (error) {
         console.error('Failed to persist work report to database:', error)
@@ -76,7 +84,9 @@ export class WorkReportRequestProtocol {
   /**
    * Get work report from database if not in local store
    */
-  async getWorkReportFromDatabase(workReportHash: Bytes): Promise<Bytes | null> {
+  async getWorkReportFromDatabase(
+    workReportHash: Bytes,
+  ): Promise<Bytes | null> {
     if (this.getWorkReport(workReportHash)) {
       return this.getWorkReport(workReportHash) || null
     }
@@ -87,15 +97,15 @@ export class WorkReportRequestProtocol {
       const hashString = workReportHash.toString()
       const workReportData = await this.dbIntegration.getServiceStorage(
         6,
-        Buffer.from(`work_report_${hashString}`)
+        Buffer.from(`work_report_${hashString}`),
       )
-      
+
       if (workReportData) {
         // Cache in local store
         this.workReports.set(hashString, workReportData)
         return workReportData
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get work report from database:', error)
@@ -106,20 +116,28 @@ export class WorkReportRequestProtocol {
   /**
    * Process work report request and generate response
    */
-  async processWorkReportRequest(request: WorkReportRequest): Promise<WorkReportResponse | null> {
+  async processWorkReportRequest(
+    request: WorkReportRequest,
+  ): Promise<WorkReportResponse | null> {
     try {
       // Get work report from local store or database
-      const workReport = await this.getWorkReportFromDatabase(request.workReportHash)
-      
+      const workReport = await this.getWorkReportFromDatabase(
+        request.workReportHash,
+      )
+
       if (!workReport) {
-        console.log(`Work report not found for hash: ${request.workReportHash.toString().substring(0, 16)}...`)
+        console.log(
+          `Work report not found for hash: ${request.workReportHash.toString().substring(0, 16)}...`,
+        )
         return null
       }
 
-      console.log(`Found work report for hash: ${request.workReportHash.toString().substring(0, 16)}...`)
+      console.log(
+        `Found work report for hash: ${request.workReportHash.toString().substring(0, 16)}...`,
+      )
 
       return {
-        workReport
+        workReport,
       }
     } catch (error) {
       console.error('Failed to process work report request:', error)
@@ -132,7 +150,7 @@ export class WorkReportRequestProtocol {
    */
   createWorkReportRequest(workReportHash: Bytes): WorkReportRequest {
     return {
-      workReportHash
+      workReportHash,
     }
   }
 
@@ -142,7 +160,7 @@ export class WorkReportRequestProtocol {
   serializeWorkReportRequest(request: WorkReportRequest): Bytes {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // workReportHash (32 bytes)
-    const view = new DataView(buffer)
+    const _view = new DataView(buffer)
 
     // Write work report hash (32 bytes)
     new Uint8Array(buffer).set(request.workReportHash, 0)
@@ -158,7 +176,7 @@ export class WorkReportRequestProtocol {
     const workReportHash = data.slice(0, 32)
 
     return {
-      workReportHash
+      workReportHash,
     }
   }
 
@@ -196,14 +214,17 @@ export class WorkReportRequestProtocol {
     const workReport = data.slice(offset, offset + workReportLength)
 
     return {
-      workReport
+      workReport,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<WorkReportResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<WorkReportResponse | null> {
     try {
       const request = this.deserializeWorkReportRequest(data)
       return await this.processWorkReportRequest(request)
@@ -212,4 +233,4 @@ export class WorkReportRequestProtocol {
       return null
     }
   }
-} 
+}

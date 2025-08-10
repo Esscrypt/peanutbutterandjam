@@ -13,16 +13,16 @@ import { logger } from '@pbnj/core'
 export interface Service {
   /** Service name for identification */
   readonly name: string
-  
+
   /** Initialize the service (setup, configuration, etc.) */
   init(): Promise<void>
-  
+
   /** Start the service (begin operation) */
   start(): Promise<boolean>
-  
+
   /** Stop the service (clean shutdown) */
   stop(): Promise<void>
-  
+
   /** Get service status */
   getStatus(): ServiceStatus
 }
@@ -53,9 +53,11 @@ export class ServiceRegistry {
    */
   register(service: Service): void {
     if (this.services.has(service.name)) {
-      throw new Error(`Service with name '${service.name}' is already registered`)
+      throw new Error(
+        `Service with name '${service.name}' is already registered`,
+      )
     }
-    
+
     this.services.set(service.name, service)
     logger.info('Service registered', { name: service.name })
   }
@@ -94,21 +96,21 @@ export class ServiceRegistry {
    */
   async initAll(): Promise<void> {
     logger.info('Initializing all services...')
-    
+
     for (const service of this.services.values()) {
       try {
         logger.info('Initializing service', { name: service.name })
         await service.init()
         logger.info('Service initialized successfully', { name: service.name })
       } catch (error) {
-        logger.error('Failed to initialize service', { 
-          name: service.name, 
-          error: error instanceof Error ? error.message : String(error) 
+        logger.error('Failed to initialize service', {
+          name: service.name,
+          error: error instanceof Error ? error.message : String(error),
         })
         throw error
       }
     }
-    
+
     logger.info('All services initialized successfully')
   }
 
@@ -117,38 +119,44 @@ export class ServiceRegistry {
    */
   async startAll(): Promise<boolean> {
     logger.info('Starting all services...')
-    
-    const results: Array<{ name: string; success: boolean; error?: string }> = []
-    
+
+    const results: Array<{ name: string; success: boolean; error?: string }> =
+      []
+
     for (const service of this.services.values()) {
       try {
         logger.info('Starting service', { name: service.name })
         const success = await service.start()
         results.push({ name: service.name, success })
-        
+
         if (success) {
           logger.info('Service started successfully', { name: service.name })
         } else {
           logger.error('Service failed to start', { name: service.name })
         }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
-        logger.error('Error starting service', { 
-          name: service.name, 
-          error: errorMessage 
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        logger.error('Error starting service', {
+          name: service.name,
+          error: errorMessage,
         })
-        results.push({ name: service.name, success: false, error: errorMessage })
+        results.push({
+          name: service.name,
+          success: false,
+          error: errorMessage,
+        })
       }
     }
-    
-    const allSuccessful = results.every(r => r.success)
-    
+
+    const allSuccessful = results.every((r) => r.success)
+
     if (allSuccessful) {
       logger.info('All services started successfully')
     } else {
       logger.error('Some services failed to start', { results })
     }
-    
+
     return allSuccessful
   }
 
@@ -157,23 +165,23 @@ export class ServiceRegistry {
    */
   async stopAll(): Promise<void> {
     logger.info('Stopping all services...')
-    
+
     // Stop services in reverse order (dependencies first)
     const services = Array.from(this.services.values()).reverse()
-    
+
     for (const service of services) {
       try {
         logger.info('Stopping service', { name: service.name })
         await service.stop()
         logger.info('Service stopped successfully', { name: service.name })
       } catch (error) {
-        logger.error('Error stopping service', { 
-          name: service.name, 
-          error: error instanceof Error ? error.message : String(error) 
+        logger.error('Error stopping service', {
+          name: service.name,
+          error: error instanceof Error ? error.message : String(error),
         })
       }
     }
-    
+
     logger.info('All services stopped')
   }
 
@@ -181,14 +189,16 @@ export class ServiceRegistry {
    * Get status of all services
    */
   getAllStatus(): ServiceStatus[] {
-    return Array.from(this.services.values()).map(service => service.getStatus())
+    return Array.from(this.services.values()).map((service) =>
+      service.getStatus(),
+    )
   }
 
   /**
    * Check if all services are running
    */
   areAllRunning(): boolean {
-    return Array.from(this.services.values()).every(service => {
+    return Array.from(this.services.values()).every((service) => {
       const status = service.getStatus()
       return status.running
     })
@@ -201,7 +211,7 @@ export class ServiceRegistry {
 export interface MainService extends Service {
   /** Entry point for the application */
   run(): Promise<void>
-  
+
   /** Graceful shutdown */
   shutdown(): Promise<void>
 }
@@ -210,8 +220,8 @@ export interface MainService extends Service {
  * Base service class that provides common functionality
  */
 export abstract class BaseService implements Service {
-  protected initialized: boolean = false
-  protected running: boolean = false
+  protected initialized = false
+  protected running = false
 
   constructor(public readonly name: string) {}
 
@@ -234,4 +244,4 @@ export abstract class BaseService implements Service {
   protected setRunning(value: boolean): void {
     this.running = value
   }
-} 
+}

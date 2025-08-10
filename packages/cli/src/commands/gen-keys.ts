@@ -3,8 +3,7 @@ import { join } from 'node:path'
 import { logger } from '@pbnj/core'
 import { generateValidatorKeys } from '../utils/key-generation'
 
-export function createGenKeysCommand(args: string[]): void {
-
+export function createGenKeysCommand(_args: string[]): void {
   try {
     const keysDir = join(process.env['HOME'] || '', '.pbnj', 'keys')
     mkdirSync(keysDir, { recursive: true })

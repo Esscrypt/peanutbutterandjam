@@ -1,112 +1,44 @@
 /**
  * Block Authoring Types for JAM Protocol
  *
- * Types for block creation, validation, and submission
+ * Type definitions for block authoring, validation, and submission
  * Reference: Gray Paper block authoring specifications
  */
 
-import type { Ticket as SafroleTicket } from './consensus'
+import type { Extrinsic, Hash, HashValue, ValidatorKey } from './core'
 import type {
-  Bytes,
-  BlockHeader as CoreBlockHeader,
-  Extrinsic as CoreExtrinsic,
-  Hash,
-  ValidatorKey,
-} from './core'
+  BlockHeader,
+  SafroleTicket,
+  WorkDigest,
+  WorkItem,
+  WorkPackage,
+  WorkPackageContext,
+  WorkReport,
+} from './serialization'
 
-// Define missing types that will be implemented
-export interface WorkItem {
-  serviceIndex: number
-  codeHash: string
-  payload: Bytes
-  refGasLimit: number
-  accGasLimit: number
-  exportCount: number
-  importSegments: [string, number][] // [hash, index] pairs
-  extrinsics: [string, number][] // [hash, length] pairs
-}
+// ============================================================================
+// Work Package Types (re-exported from serialization to avoid duplication)
+// ============================================================================
 
-/**
- * Work package context
- */
-export interface WorkPackageContext {
-  lookupAnchorTime: number
-  coreIndex: number
-  validatorSet: ValidatorSet
-  networkState: NetworkState
-  timestamp: number
+// Re-export unified types from serialization
+export type {
+  WorkReport,
+  WorkPackageContext,
+  WorkDigest,
+  WorkPackage,
+  WorkItem,
 }
-
-/**
- * Work package
- */
-export interface WorkPackage {
-  id: string
-  data: Bytes
-  author: string
-  timestamp: number
-  authToken: Bytes
-  authCodeHost: number
-  authCodeHash: string
-  authConfig: Bytes
-  context: WorkPackageContext
-  workItems: WorkItem[]
-}
-
-/**
- * Work digest
- */
-export interface WorkDigest {
-  serviceIndex: number
-  codeHash: string
-  payloadHash: string
-  gasLimit: number
-  result: Uint8Array | WorkError
-  gasUsed: number
-  importCount: number
-  exportCount: number
-  extrinsicCount: number
-  extrinsicSize: number
-}
-
-/**
- * Work error types
- */
-export enum WorkError {
-  OVERSIZE = 'oversize',
-  BAD_EXPORTS = 'bad_exports',
-  INVALID_RESULT = 'invalid_result',
-  GAS_LIMIT_EXCEEDED = 'gas_limit_exceeded',
-  AUTHORIZATION_FAILED = 'authorization_failed',
-}
+export { WorkError } from './serialization'
 
 /**
  * Availability specification
  */
 export interface AvailabilitySpec {
-  packageHash: string
+  packageHash: HashValue
   bundleLength: number
-  erasureRoot: string
-  segmentRoot: string
+  erasureRoot: HashValue
+  segmentRoot: HashValue
   segmentCount: number
-}
-
-/**
- * Work report
- */
-export interface WorkReport {
-  id: string
-  workPackageId: string
-  availabilitySpec: AvailabilitySpec
-  context: WorkPackageContext
-  coreIndex: number
-  authorizer: string
-  authTrace: Bytes
-  srLookup: Map<string, string> // segment root lookup
-  digests: WorkDigest[]
-  authGasUsed: number
-  author: string
-  timestamp: number
 }
 
 export interface State {
@@ -124,10 +56,6 @@ export interface ValidatorSet {
 }
 
 export type Timeslot = number
-
-// Re-export core types with our own names
-export type BlockHeader = CoreBlockHeader
-export type Extrinsic = CoreExtrinsic
 
 export interface Block {
   header: BlockHeader
@@ -245,13 +173,13 @@ export interface BlockAuthoringMetrics {
   submissionTime: number // milliseconds
 
   // Resource usage
-  memoryUsage: number // bytes
+  memoryUsage: number // Uint8Array
   cpuUsage: number // percentage
 
   // Block statistics
   extrinsicCount: number
   workPackageCount: number
-  blockSize: number // bytes
+  blockSize: number // Uint8Array
 }
 
 /**
@@ -434,8 +362,8 @@ export interface TicketValidationResult {
  */
 export interface SignatureValidationResult {
   valid: boolean
-  signature?: Bytes
-  publicKey?: Bytes
+  signature?: Uint8Array
+  publicKey?: Uint8Array
   error?: string
 }
 
@@ -455,7 +383,7 @@ export interface TimeslotValidationResult {
 export interface AuthorValidationResult {
   valid: boolean
   authorIndex: number
-  validatorKey: Bytes
+  validatorKey: Uint8Array
   error?: string
 }
 
@@ -470,7 +398,7 @@ export interface Account {
   address: string
   balance: bigint
   nonce: number
-  code?: Bytes
+  code?: Uint8Array
   storage?: Map<string, string>
   isValidator?: boolean
   validatorKey?: string

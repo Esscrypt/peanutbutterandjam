@@ -1,11 +1,17 @@
 /**
  * Compact Number Serialization
  *
- * Implements SCALE-like compact encoding for natural numbers
- * This matches the format used in the JAM test vectors
+ * *** DO NOT REMOVE - IMPLEMENTATION NOTE ***
+ * This implements SCALE-like compact encoding for natural numbers.
+ * While not explicitly in the Gray Paper serialization section, this
+ * encoding format is used in JAM test vectors and follows the general
+ * principle of efficient variable-length encoding from the Gray Paper.
+ *
+ * Based on Gray Paper's general serialization principles (Appendix D.1)
+ * but with SCALE codec compatibility for test vector compliance.
  */
 
-import type { Natural, Uint8Array } from '../types'
+import type { Natural } from '@pbnj/types'
 
 /**
  * Encode natural number using SCALE-like compact encoding
@@ -78,15 +84,15 @@ export function decodeCompactNatural(data: Uint8Array): {
   }
 
   // Mode 1: two-byte (64-16383)
-  if ((first & 0xC0) === 0x40) {
+  if ((first & 0xc0) === 0x40) {
     if (data.length < 2)
       throw new Error('Insufficient data for two-byte compact natural')
-    const value = BigInt(first & 0x3F) << 6n | BigInt(data[1])
+    const value = (BigInt(first & 0x3f) << 6n) | BigInt(data[1])
     return { value, remaining: data.slice(2) }
   }
 
   // Mode 2: four-byte (16384-1073741823)
-  if ((first & 0xE0) === 0x80) {
+  if ((first & 0xe0) === 0x80) {
     if (data.length < 4)
       throw new Error('Insufficient data for four-byte compact natural')
     let value = BigInt(first & 0x03) << 30n
@@ -128,4 +134,4 @@ export function getCompactNaturalEncodedLength(value: Natural): number {
   if (value <= 16383n) return 2
   if (value <= 1073741823n) return 4
   return 1 + getCompactLength(value)
-} 
+}

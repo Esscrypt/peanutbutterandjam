@@ -5,18 +5,21 @@
  * This is a Common Ephemeral (CE) stream for distributing guaranteed work reports.
  */
 
-import type { 
-  Bytes, 
-  GuaranteedWorkReport,
-  StreamInfo
-} from '@pbnj/types'
+import type { Bytes, GuaranteedWorkReport, StreamInfo } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Work report distribution protocol handler
  */
 export class WorkReportDistributionProtocol {
-  private workReports: Map<string, { workReport: Bytes; slot: number; signatures: Array<{ validatorIndex: number; signature: Bytes }> }> = new Map()
+  private workReports: Map<
+    string,
+    {
+      workReport: Bytes
+      slot: number
+      signatures: Array<{ validatorIndex: number; signature: Bytes }>
+    }
+  > = new Map()
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -38,7 +41,9 @@ export class WorkReportDistributionProtocol {
 
     try {
       // Load work reports from database (service ID 6 for work reports)
-      console.log('Work report distribution state loading - protocol not yet fully implemented')
+      console.log(
+        'Work report distribution state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
       console.error('Failed to load work report state from database:', error)
     }
@@ -51,35 +56,35 @@ export class WorkReportDistributionProtocol {
     workReportHash: Bytes,
     workReport: Bytes,
     slot: number,
-    signatures: Array<{ validatorIndex: number; signature: Bytes }>
+    signatures: Array<{ validatorIndex: number; signature: Bytes }>,
   ): Promise<void> {
     const hashString = workReportHash.toString()
     this.workReports.set(hashString, { workReport, slot, signatures })
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           6, // Service ID 6 for work reports
           Buffer.from(`work_report_${hashString}`),
-          workReport
+          workReport,
         )
-        
+
         // Store metadata
         const metadata = {
           slot,
-          signatures: signatures.map(sig => ({
+          signatures: signatures.map((sig) => ({
             validatorIndex: sig.validatorIndex,
-            signature: Buffer.from(sig.signature).toString('hex')
+            signature: Buffer.from(sig.signature).toString('hex'),
           })),
           timestamp: Date.now(),
-          hash: Buffer.from(workReportHash).toString('hex')
+          hash: Buffer.from(workReportHash).toString('hex'),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           6,
           Buffer.from(`work_report_meta_${hashString}`),
-          Buffer.from(JSON.stringify(metadata), 'utf8')
+          Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist work report to database:', error)
@@ -90,14 +95,24 @@ export class WorkReportDistributionProtocol {
   /**
    * Get work report from local store
    */
-  getWorkReport(workReportHash: Bytes): { workReport: Bytes; slot: number; signatures: Array<{ validatorIndex: number; signature: Bytes }> } | undefined {
+  getWorkReport(workReportHash: Bytes):
+    | {
+        workReport: Bytes
+        slot: number
+        signatures: Array<{ validatorIndex: number; signature: Bytes }>
+      }
+    | undefined {
     return this.workReports.get(workReportHash.toString())
   }
 
   /**
    * Get work report from database if not in local store
    */
-  async getWorkReportFromDatabase(workReportHash: Bytes): Promise<{ workReport: Bytes; slot: number; signatures: Array<{ validatorIndex: number; signature: Bytes }> } | null> {
+  async getWorkReportFromDatabase(workReportHash: Bytes): Promise<{
+    workReport: Bytes
+    slot: number
+    signatures: Array<{ validatorIndex: number; signature: Bytes }>
+  } | null> {
     if (this.getWorkReport(workReportHash)) {
       return this.getWorkReport(workReportHash) || null
     }
@@ -108,37 +123,41 @@ export class WorkReportDistributionProtocol {
       const hashString = workReportHash.toString()
       const workReportData = await this.dbIntegration.getServiceStorage(
         6,
-        Buffer.from(`work_report_${hashString}`)
+        Buffer.from(`work_report_${hashString}`),
       )
-      
+
       if (workReportData) {
         // Get metadata
         const metadataData = await this.dbIntegration.getServiceStorage(
           6,
-          Buffer.from(`work_report_meta_${hashString}`)
+          Buffer.from(`work_report_meta_${hashString}`),
         )
-        
+
         let slot = 0
         let signatures: Array<{ validatorIndex: number; signature: Bytes }> = []
-        
+
         if (metadataData) {
           try {
             const metadata = JSON.parse(metadataData.toString())
             slot = metadata.slot
             signatures = metadata.signatures.map((sig: any) => ({
               validatorIndex: sig.validatorIndex,
-              signature: Buffer.from(sig.signature, 'hex')
+              signature: Buffer.from(sig.signature, 'hex'),
             }))
           } catch (error) {
             console.error('Failed to parse work report metadata:', error)
           }
         }
-        
+
         // Cache in local store
-        this.workReports.set(hashString, { workReport: workReportData, slot, signatures })
+        this.workReports.set(hashString, {
+          workReport: workReportData,
+          slot,
+          signatures,
+        })
         return { workReport: workReportData, slot, signatures }
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get work report from database:', error)
@@ -149,15 +168,24 @@ export class WorkReportDistributionProtocol {
   /**
    * Process work report distribution
    */
-  async processWorkReportDistribution(report: GuaranteedWorkReport): Promise<void> {
+  async processWorkReportDistribution(
+    report: GuaranteedWorkReport,
+  ): Promise<void> {
     try {
       // Calculate work report hash (placeholder - in practice this would be calculated)
       const workReportHash = Buffer.from('placeholder_work_report_hash')
-      
+
       // Store the work report
-      await this.storeWorkReport(workReportHash, report.workReport, report.slot, report.signatures)
-      
-      console.log(`Processed work report distribution for slot ${report.slot} with ${report.signatures.length} signatures`)
+      await this.storeWorkReport(
+        workReportHash,
+        report.workReport,
+        report.slot,
+        report.signatures,
+      )
+
+      console.log(
+        `Processed work report distribution for slot ${report.slot} with ${report.signatures.length} signatures`,
+      )
     } catch (error) {
       console.error('Failed to process work report distribution:', error)
     }
@@ -169,12 +197,12 @@ export class WorkReportDistributionProtocol {
   createWorkReportDistribution(
     workReport: Bytes,
     slot: number,
-    signatures: Array<{ validatorIndex: number; signature: Bytes }>
+    signatures: Array<{ validatorIndex: number; signature: Bytes }>,
   ): GuaranteedWorkReport {
     return {
       workReport,
       slot,
-      signatures
+      signatures,
     }
   }
 
@@ -184,12 +212,12 @@ export class WorkReportDistributionProtocol {
   serializeWorkReportDistribution(report: GuaranteedWorkReport): Bytes {
     // Calculate total size
     let totalSize = 4 + 4 // slot + number of signatures
-    
+
     // Size for signatures
-    for (const signature of report.signatures) {
+    for (const _signature of report.signatures) {
       totalSize += 4 + 64 // validatorIndex + signature (64 bytes for Ed25519)
     }
-    
+
     // Size for work report
     totalSize += 4 + report.workReport.length // work report length + work report data
 
@@ -265,19 +293,22 @@ export class WorkReportDistributionProtocol {
     return {
       workReport,
       slot,
-      signatures
+      signatures,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     try {
       const report = this.deserializeWorkReportDistribution(data)
       await this.processWorkReportDistribution(report)
     } catch (error) {
-      console.error('Failed to handle work report distribution stream data:', error)
+      console.error(
+        'Failed to handle work report distribution stream data:',
+        error,
+      )
     }
   }
-} 
+}

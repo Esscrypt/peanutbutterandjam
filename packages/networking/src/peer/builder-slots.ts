@@ -6,10 +6,10 @@
  */
 
 import type {
-  ValidatorIndex,
   CoreIndex,
   NodeType,
-  ValidatorMetadata
+  ValidatorIndex,
+  ValidatorMetadata,
 } from '@pbnj/types'
 
 /**
@@ -30,14 +30,15 @@ interface BuilderInfo {
 export class BuilderSlotsManager {
   private builders: Map<ValidatorIndex, BuilderInfo> = new Map()
   private slotAssignments: Map<CoreIndex, ValidatorIndex> = new Map()
-  private maxSlotsPerBuilder: number = 10
-
-  constructor() {}
+  private maxSlotsPerBuilder = 10
 
   /**
    * Set local validator information
    */
-  setLocalValidator(_validatorIndex: ValidatorIndex, _nodeType: NodeType): void {
+  setLocalValidator(
+    _validatorIndex: ValidatorIndex,
+    _nodeType: NodeType,
+  ): void {
     // Store local validator info for future use
     // TODO: Implement local validator tracking
   }
@@ -45,14 +46,17 @@ export class BuilderSlotsManager {
   /**
    * Register a new builder
    */
-  registerBuilder(validatorIndex: ValidatorIndex, metadata: ValidatorMetadata): void {
+  registerBuilder(
+    validatorIndex: ValidatorIndex,
+    metadata: ValidatorMetadata,
+  ): void {
     const builderInfo: BuilderInfo = {
       validatorIndex,
       metadata,
       isConnected: false,
       connectionId: null,
       lastActivity: Date.now(),
-      assignedSlots: []
+      assignedSlots: [],
     }
 
     this.builders.set(validatorIndex, builderInfo)
@@ -93,20 +97,23 @@ export class BuilderSlotsManager {
    */
   getConnectedBuilders(): Map<ValidatorIndex, BuilderInfo> {
     const connected = new Map<ValidatorIndex, BuilderInfo>()
-    
+
     for (const builder of this.builders.values()) {
       if (builder.isConnected) {
         connected.set(builder.validatorIndex, builder)
       }
     }
-    
+
     return connected
   }
 
   /**
    * Mark builder as connected
    */
-  markBuilderConnected(validatorIndex: ValidatorIndex, connectionId: string): void {
+  markBuilderConnected(
+    validatorIndex: ValidatorIndex,
+    connectionId: string,
+  ): void {
     const builder = this.builders.get(validatorIndex)
     if (builder) {
       builder.isConnected = true
@@ -140,7 +147,10 @@ export class BuilderSlotsManager {
   /**
    * Assign a slot to a builder
    */
-  assignSlotToBuilder(coreIndex: CoreIndex, validatorIndex: ValidatorIndex): boolean {
+  assignSlotToBuilder(
+    coreIndex: CoreIndex,
+    validatorIndex: ValidatorIndex,
+  ): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -165,7 +175,10 @@ export class BuilderSlotsManager {
   /**
    * Unassign a slot from a builder
    */
-  unassignSlotFromBuilder(coreIndex: CoreIndex, validatorIndex: ValidatorIndex): boolean {
+  unassignSlotFromBuilder(
+    coreIndex: CoreIndex,
+    validatorIndex: ValidatorIndex,
+  ): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -194,13 +207,13 @@ export class BuilderSlotsManager {
    */
   getBuildersForSlot(coreIndex: CoreIndex): ValidatorIndex[] {
     const builders: ValidatorIndex[] = []
-    
+
     for (const [slot, validatorIndex] of this.slotAssignments.entries()) {
       if (slot === coreIndex) {
         builders.push(validatorIndex)
       }
     }
-    
+
     return builders
   }
 
@@ -232,7 +245,10 @@ export class BuilderSlotsManager {
   /**
    * Check if a builder is assigned to a slot
    */
-  isBuilderAssignedToSlot(validatorIndex: ValidatorIndex, coreIndex: CoreIndex): boolean {
+  isBuilderAssignedToSlot(
+    validatorIndex: ValidatorIndex,
+    coreIndex: CoreIndex,
+  ): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -245,43 +261,61 @@ export class BuilderSlotsManager {
    */
   getAvailableSlots(totalSlots: number): CoreIndex[] {
     const available: CoreIndex[] = []
-    
+
     for (let i = 0; i < totalSlots; i++) {
       if (!this.slotAssignments.has(i as CoreIndex)) {
         available.push(i as CoreIndex)
       }
     }
-    
+
     return available
   }
 
   /**
    * Get overloaded builders (with more than max slots)
    */
-  getOverloadedBuilders(): Array<{ validatorIndex: ValidatorIndex; slotCount: number }> {
-    const overloaded: Array<{ validatorIndex: ValidatorIndex; slotCount: number }> = []
-    
+  getOverloadedBuilders(): Array<{
+    validatorIndex: ValidatorIndex
+    slotCount: number
+  }> {
+    const overloaded: Array<{
+      validatorIndex: ValidatorIndex
+      slotCount: number
+    }> = []
+
     for (const builder of this.builders.values()) {
       if (builder.assignedSlots.length > this.maxSlotsPerBuilder) {
-        overloaded.push({ validatorIndex: builder.validatorIndex, slotCount: builder.assignedSlots.length })
+        overloaded.push({
+          validatorIndex: builder.validatorIndex,
+          slotCount: builder.assignedSlots.length,
+        })
       }
     }
-    
+
     return overloaded
   }
 
   /**
    * Get underutilized builders (with fewer than max slots)
    */
-  getUnderutilizedBuilders(): Array<{ validatorIndex: ValidatorIndex; slotCount: number }> {
-    const underutilized: Array<{ validatorIndex: ValidatorIndex; slotCount: number }> = []
-    
+  getUnderutilizedBuilders(): Array<{
+    validatorIndex: ValidatorIndex
+    slotCount: number
+  }> {
+    const underutilized: Array<{
+      validatorIndex: ValidatorIndex
+      slotCount: number
+    }> = []
+
     for (const builder of this.builders.values()) {
       if (builder.assignedSlots.length < this.maxSlotsPerBuilder) {
-        underutilized.push({ validatorIndex: builder.validatorIndex, slotCount: builder.assignedSlots.length })
+        underutilized.push({
+          validatorIndex: builder.validatorIndex,
+          slotCount: builder.assignedSlots.length,
+        })
       }
     }
-    
+
     return underutilized
   }
 
@@ -291,33 +325,33 @@ export class BuilderSlotsManager {
   rebalanceSlotAssignments(): void {
     const overloaded = this.getOverloadedBuilders()
     const underutilized = this.getUnderutilizedBuilders()
-    
+
     // Sort overloaded by slot count (highest first)
     overloaded.sort((a, b) => b.slotCount - a.slotCount)
-    
+
     // Sort underutilized by slot count (lowest first)
     underutilized.sort((a, b) => a.slotCount - b.slotCount)
-    
+
     // Move slots from overloaded to underutilized builders
     for (const overloadedBuilder of overloaded) {
       const builder = this.builders.get(overloadedBuilder.validatorIndex)
       if (!builder) continue
-      
+
       // Get excess slots
       const excessSlots = builder.assignedSlots.slice(this.maxSlotsPerBuilder)
-      
+
       for (const slot of excessSlots) {
         // Find an underutilized builder
-        const underutilizedBuilder = underutilized.find(u => {
+        const underutilizedBuilder = underutilized.find((u) => {
           const b = this.builders.get(u.validatorIndex)
           return b && b.assignedSlots.length < this.maxSlotsPerBuilder
         })
-        
+
         if (underutilizedBuilder) {
           // Move slot
           this.unassignSlotFromBuilder(slot, overloadedBuilder.validatorIndex)
           this.assignSlotToBuilder(slot, underutilizedBuilder.validatorIndex)
-          
+
           // Update counts
           overloadedBuilder.slotCount--
           underutilizedBuilder.slotCount++
@@ -345,16 +379,17 @@ export class BuilderSlotsManager {
     const connectedBuilders = this.getConnectedBuilders().size
     const disconnectedBuilders = totalBuilders - connectedBuilders
     const totalSlotAssignments = this.slotAssignments.size
-    
+
     let totalSlots = 0
     for (const builder of this.builders.values()) {
       totalSlots += builder.assignedSlots.length
     }
-    
-    const averageSlotsPerBuilder = totalBuilders > 0 ? totalSlots / totalBuilders : 0
+
+    const averageSlotsPerBuilder =
+      totalBuilders > 0 ? totalSlots / totalBuilders : 0
     const overloaded = this.getOverloadedBuilders().length
     const underutilized = this.getUnderutilizedBuilders().length
-    
+
     return {
       totalBuilders,
       connectedBuilders,
@@ -363,7 +398,7 @@ export class BuilderSlotsManager {
       averageSlotsPerBuilder,
       maxSlotsPerBuilder: this.maxSlotsPerBuilder,
       overloadedBuilders: overloaded,
-      underutilizedBuilders: underutilized
+      underutilizedBuilders: underutilized,
     }
   }
 
@@ -377,7 +412,7 @@ export class BuilderSlotsManager {
   /**
    * Set maximum builders per slot
    */
-  setMaxBuildersPerSlot(maxBuilders: number): void {
+  setMaxBuildersPerSlot(_maxBuilders: number): void {
     // This method is no longer used as maxBuildersPerSlot is removed.
     // Keeping it for now to avoid breaking existing calls, but it will have no effect.
   }
@@ -385,16 +420,20 @@ export class BuilderSlotsManager {
   /**
    * Clean up inactive builders
    */
-  cleanupInactiveBuilders(maxInactiveTime: number = 300000): void { // 5 minutes
+  cleanupInactiveBuilders(maxInactiveTime = 300000): void {
+    // 5 minutes
     const now = Date.now()
     const toRemove: ValidatorIndex[] = []
-    
+
     for (const [validatorIndex, builder] of this.builders) {
-      if (now - builder.lastActivity > maxInactiveTime && !builder.isConnected) {
+      if (
+        now - builder.lastActivity > maxInactiveTime &&
+        !builder.isConnected
+      ) {
         toRemove.push(validatorIndex)
       }
     }
-    
+
     for (const validatorIndex of toRemove) {
       this.unregisterBuilder(validatorIndex)
     }
@@ -405,9 +444,9 @@ export class BuilderSlotsManager {
    */
   resetSlotAssignments(): void {
     this.slotAssignments.clear()
-    
+
     for (const builder of this.builders.values()) {
       builder.assignedSlots = []
     }
   }
-} 
+}

@@ -1,29 +1,28 @@
 /**
  * Networking Service for JAM Node
- * 
+ *
  * Integrates JAMNP-S networking with block authoring functionality
  */
 
-import type { 
-  ValidatorIndex, 
-  NodeType, 
-  ValidatorMetadata,
-  EpochIndex
-} from '@pbnj/types'
 import { logger } from '@pbnj/core'
-import { BaseService } from './service-interface'
-import { 
-  QuicTransport,
-  ConnectionManager,
-  ValidatorSetManager,
-  PeerDiscoveryManager,
+import {
   GridStructureManager,
-  BuilderSlotsManager,
+  PeerDiscoveryManager,
+  QuicTransport,
   type TransportConfig,
-  type TransportEvents
+  type TransportEvents,
+  ValidatorSetManager,
 } from '@pbnj/networking'
+import type {
+  EpochIndex,
+  NodeType,
+  ValidatorIndex,
+  ValidatorMetadata,
+} from '@pbnj/types'
+import { BaseService } from './service-interface'
+
 // import {
-//   encodeBlockHeader, 
+//   encodeBlockHeader,
 //   decodeBlockHeader,
 //   encodeWorkPackage,
 //   decodeWorkPackage,
@@ -43,21 +42,22 @@ interface WorkPackage {
   value: any
 }
 
-function encodeBlockHeader(header: BlockHeader): Uint8Array {
+function encodeBlockHeader(_header: BlockHeader): Uint8Array {
   return new Uint8Array(0)
 }
 
-function decodeBlockHeader(data: Uint8Array): BlockHeader {
+function decodeBlockHeader(_data: Uint8Array): BlockHeader {
   return {} as BlockHeader
 }
 
-function encodeWorkPackage(workPackage: WorkPackage): Uint8Array {
+function encodeWorkPackage(_workPackage: WorkPackage): Uint8Array {
   return new Uint8Array(0)
 }
 
-function decodeWorkPackage(data: Uint8Array): WorkPackage {
+function decodeWorkPackage(_data: Uint8Array): WorkPackage {
   return {} as WorkPackage
 }
+
 import type { BlockAuthoringServiceImpl } from './block-authoring-service'
 
 /**
@@ -86,17 +86,13 @@ export interface NetworkingServiceConfig {
 export class NetworkingService extends BaseService {
   private config: NetworkingServiceConfig
   private transport: QuicTransport
-  // private connectionManager: ConnectionManager
-  private validatorSetManager: ValidatorSetManager
-  private peerDiscoveryManager: PeerDiscoveryManager
-  private gridStructureManager: GridStructureManager
   // private builderSlotsManager: BuilderSlotsManager
-  private isRunning: boolean = false
+  private isRunning = false
 
   constructor(config: NetworkingServiceConfig) {
     super('networking-service')
     this.config = config
-    
+
     // Create transport configuration
     const transportConfig: TransportConfig = {
       listenAddress: config.listenAddress,
@@ -122,29 +118,35 @@ export class NetworkingService extends BaseService {
         maxStreamWindow: 16777216, // 16 MiB
         enableDgram: [false, 0, 0],
         enableEarlyData: false,
-        readableChunkSize: 16384
+        readableChunkSize: 16384,
       },
       maxConnections: 100,
       connectionTimeout: 30000,
-      messageTimeout: 10000
+      messageTimeout: 10000,
     }
 
     // Create transport events
     const transportEvents: TransportEvents = {
       onConnectionEstablished: (connectionId: string, endpoint: any) => {
-        logger.info('Transport connection established', { connectionId, endpoint })
+        logger.info('Transport connection established', {
+          connectionId,
+          endpoint,
+        })
       },
       onConnectionClosed: (connectionId: string) => {
         logger.info('Transport connection closed', { connectionId })
       },
       onMessageReceived: (streamId: string, data: Uint8Array) => {
-        logger.debug('Transport message received', { streamId, dataLength: data.length })
+        logger.debug('Transport message received', {
+          streamId,
+          dataLength: data.length,
+        })
         // Route message to appropriate protocol handler
         // TODO: Extract validatorIndex and streamKind from streamId
         const validatorIndex = 0 // Placeholder
         const streamKind = 0 // Placeholder
         this.handleIncomingMessage(validatorIndex, streamKind, data)
-      }
+      },
     }
 
     // Initialize components
@@ -211,10 +213,13 @@ export class NetworkingService extends BaseService {
    */
   updateValidatorSet(
     epoch: EpochIndex,
-    validators: Map<ValidatorIndex, ValidatorMetadata>
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
   ): void {
     // TODO: Implement validator set update
-    logger.debug('Validator set update received', { epoch, validatorCount: validators.size })
+    logger.debug('Validator set update received', {
+      epoch,
+      validatorCount: validators.size,
+    })
   }
 
   /**
@@ -228,11 +233,11 @@ export class NetworkingService extends BaseService {
       }
 
       // Serialize block header
-      const data = this.serializeBlockHeader(blockHeader)
-      
+      const _data = this.serializeBlockHeader(blockHeader)
+
       logger.info('Announcing block to network', {
         timeslot: blockHeader.timeslot,
-        parentHash: blockHeader.parentHash
+        parentHash: blockHeader.parentHash,
       })
 
       // TODO: Implement block announcement to connected validators
@@ -248,15 +253,17 @@ export class NetworkingService extends BaseService {
   async submitWorkPackage(workPackage: WorkPackage): Promise<void> {
     try {
       if (!this.isRunning) {
-        logger.warn('Networking service not running, cannot submit work package')
+        logger.warn(
+          'Networking service not running, cannot submit work package',
+        )
         return
       }
 
       // Serialize work package
-      const data = this.serializeWorkPackage(workPackage)
-      
+      const _data = this.serializeWorkPackage(workPackage)
+
       logger.info('Submitting work package to network', {
-        authCodeHost: workPackage.authCodeHost
+        authCodeHost: workPackage.authCodeHost,
       })
 
       // TODO: Implement work package submission to connected validators
@@ -287,9 +294,17 @@ export class NetworkingService extends BaseService {
   /**
    * Handle incoming message from network
    */
-  private handleIncomingMessage(validatorIndex: ValidatorIndex, streamKind: number, data: Uint8Array): void {
+  private handleIncomingMessage(
+    validatorIndex: ValidatorIndex,
+    streamKind: number,
+    data: Uint8Array,
+  ): void {
     try {
-      logger.debug('Handling incoming message', { validatorIndex, streamKind, dataLength: data.length })
+      logger.debug('Handling incoming message', {
+        validatorIndex,
+        streamKind,
+        dataLength: data.length,
+      })
 
       // UP protocols (0-127)
       if (streamKind >= 0 && streamKind <= 127) {
@@ -325,18 +340,23 @@ export class NetworkingService extends BaseService {
   /**
    * Handle block announcement (UP 0)
    */
-  private handleBlockAnnouncement(validatorIndex: ValidatorIndex, data: Uint8Array): void {
+  private handleBlockAnnouncement(
+    validatorIndex: ValidatorIndex,
+    data: Uint8Array,
+  ): void {
     try {
       const blockHeader = this.deserializeBlockHeader(data)
       logger.info('Received block announcement', {
         fromValidator: validatorIndex,
         timeslot: blockHeader.timeslot,
-        parentHash: blockHeader.parentHash
+        parentHash: blockHeader.parentHash,
       })
 
       // Notify block authoring service about new block
       // TODO: Implement block announcement handling in block authoring service
-      logger.debug('Block announcement received, would notify block authoring service')
+      logger.debug(
+        'Block announcement received, would notify block authoring service',
+      )
     } catch (error) {
       logger.error('Failed to handle block announcement:', error)
     }
@@ -345,18 +365,25 @@ export class NetworkingService extends BaseService {
   /**
    * Handle block request (CE 128)
    */
-  private handleBlockRequest(validatorIndex: ValidatorIndex, data: Uint8Array): void {
+  private handleBlockRequest(
+    validatorIndex: ValidatorIndex,
+    data: Uint8Array,
+  ): void {
     try {
       const request = this.deserializeBlockRequest(data)
       logger.info('Received block request', {
         fromValidator: validatorIndex,
-        blockNumber: request.blockNumber
+        blockNumber: request.blockNumber,
       })
 
       // Get block from block authoring service
       // TODO: Implement block retrieval in block authoring service
-      logger.debug('Block request received, would retrieve block from block authoring service')
-      logger.warn('Block retrieval not implemented yet', { blockNumber: request.blockNumber })
+      logger.debug(
+        'Block request received, would retrieve block from block authoring service',
+      )
+      logger.warn('Block retrieval not implemented yet', {
+        blockNumber: request.blockNumber,
+      })
     } catch (error) {
       logger.error('Failed to handle block request:', error)
     }
@@ -365,19 +392,27 @@ export class NetworkingService extends BaseService {
   /**
    * Handle state request (CE 129)
    */
-  private handleStateRequest(validatorIndex: ValidatorIndex, data: Uint8Array): void {
+  private handleStateRequest(
+    validatorIndex: ValidatorIndex,
+    data: Uint8Array,
+  ): void {
     try {
       const request = this.deserializeStateRequest(data)
       logger.info('Received state request', {
         fromValidator: validatorIndex,
         startKey: request.startKey,
-        endKey: request.endKey
+        endKey: request.endKey,
       })
 
       // Get state from block authoring service
       // TODO: Implement state retrieval in block authoring service
-      logger.debug('State request received, would retrieve state from block authoring service')
-      logger.warn('State retrieval not implemented yet', { startKey: request.startKey, endKey: request.endKey })
+      logger.debug(
+        'State request received, would retrieve state from block authoring service',
+      )
+      logger.warn('State retrieval not implemented yet', {
+        startKey: request.startKey,
+        endKey: request.endKey,
+      })
     } catch (error) {
       logger.error('Failed to handle state request:', error)
     }
@@ -386,29 +421,25 @@ export class NetworkingService extends BaseService {
   /**
    * Handle work package submission (CE 133)
    */
-  private handleWorkPackageSubmission(validatorIndex: ValidatorIndex, data: Uint8Array): void {
+  private handleWorkPackageSubmission(
+    validatorIndex: ValidatorIndex,
+    data: Uint8Array,
+  ): void {
     try {
       const workPackage = this.deserializeWorkPackage(data)
       logger.info('Received work package submission', {
         fromValidator: validatorIndex,
-        authCodeHost: workPackage.authCodeHost
+        authCodeHost: workPackage.authCodeHost,
       })
 
       // Process work package in block authoring service
       // TODO: Implement work package processing in block authoring service
-      logger.debug('Work package submission received, would process in block authoring service')
+      logger.debug(
+        'Work package submission received, would process in block authoring service',
+      )
     } catch (error) {
       logger.error('Failed to handle work package submission:', error)
     }
-  }
-
-  /**
-   * Get guarantor validators for a work package
-   */
-  private getGuarantorValidators(workPackage: WorkPackage): ValidatorIndex[] {
-    // This would implement the guarantor selection logic
-    // For now, return a placeholder
-    return []
   }
 
   /**
@@ -442,13 +473,6 @@ export class NetworkingService extends BaseService {
   }
 
   /**
-   * Serialize block request
-   */
-  private serializeBlockRequest(request: { blockNumber: number }): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(request))
-  }
-
-  /**
    * Deserialize block request
    */
   private deserializeBlockRequest(data: Uint8Array): { blockNumber: number } {
@@ -456,30 +480,12 @@ export class NetworkingService extends BaseService {
   }
 
   /**
-   * Serialize state request
-   */
-  private serializeStateRequest(request: { startKey: string; endKey: string }): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(request))
-  }
-
-  /**
    * Deserialize state request
    */
-  private deserializeStateRequest(data: Uint8Array): { startKey: string; endKey: string } {
+  private deserializeStateRequest(data: Uint8Array): {
+    startKey: string
+    endKey: string
+  } {
     return JSON.parse(new TextDecoder().decode(data))
   }
-
-  /**
-   * Serialize block
-   */
-  private serializeBlock(block: any): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(block))
-  }
-
-  /**
-   * Serialize state
-   */
-  private serializeState(state: any): Uint8Array {
-    return new TextEncoder().encode(JSON.stringify(state))
-  }
-} 
+}

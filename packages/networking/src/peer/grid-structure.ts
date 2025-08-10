@@ -5,11 +5,11 @@
  * Handles neighbor detection and grid positioning
  */
 
-import type { 
-  ValidatorGrid, 
-  ValidatorIndex, 
+import type {
+  GridPosition,
+  ValidatorGrid,
+  ValidatorIndex,
   ValidatorMetadata,
-  GridPosition
 } from '@pbnj/types'
 
 /**
@@ -19,14 +19,14 @@ export class GridStructureManager {
   private grid: ValidatorGrid | null = null
   private validators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
 
-  constructor() {}
-
   /**
    * Compute grid structure for current validators
    */
-  computeGridStructure(validators: Map<ValidatorIndex, ValidatorMetadata>): ValidatorGrid {
+  computeGridStructure(
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): ValidatorGrid {
     this.validators = new Map(validators)
-    
+
     const validatorCount = validators.size
     if (validatorCount === 0) {
       throw new Error('Cannot compute grid structure with zero validators')
@@ -34,23 +34,23 @@ export class GridStructureManager {
 
     // Compute grid dimensions
     const { rows, columns } = this.computeGridDimensions(validatorCount)
-    
+
     // Create grid positions
     const positions = new Map<ValidatorIndex, GridPosition>()
     const validatorIndices = Array.from(validators.keys()).sort((a, b) => a - b)
-    
+
     for (let i = 0; i < validatorIndices.length; i++) {
       const validatorIndex = validatorIndices[i]
       const row = Math.floor(i / columns)
       const column = i % columns
-      
+
       positions.set(validatorIndex, { row, column })
     }
 
     this.grid = {
       rows,
       columns,
-      positions
+      positions,
     }
 
     return this.grid
@@ -59,12 +59,15 @@ export class GridStructureManager {
   /**
    * Compute optimal grid dimensions
    */
-  private computeGridDimensions(validatorCount: number): { rows: number; columns: number } {
+  private computeGridDimensions(validatorCount: number): {
+    rows: number
+    columns: number
+  } {
     // Try to make the grid as square as possible
     const sqrt = Math.sqrt(validatorCount)
     const rows = Math.ceil(sqrt)
     const columns = Math.ceil(validatorCount / rows)
-    
+
     return { rows, columns }
   }
 
@@ -78,7 +81,10 @@ export class GridStructureManager {
   /**
    * Check if two validators are neighbors in the grid
    */
-  areNeighbors(validatorA: ValidatorIndex, validatorB: ValidatorIndex): boolean {
+  areNeighbors(
+    validatorA: ValidatorIndex,
+    validatorB: ValidatorIndex,
+  ): boolean {
     if (!this.grid) {
       return false
     }
@@ -135,7 +141,7 @@ export class GridStructureManager {
     }
 
     const validators: ValidatorIndex[] = []
-    
+
     for (const [index, position] of this.grid.positions) {
       if (position.row === row) {
         validators.push(index)
@@ -154,7 +160,7 @@ export class GridStructureManager {
     }
 
     const validators: ValidatorIndex[] = []
-    
+
     for (const [index, position] of this.grid.positions) {
       if (position.column === column) {
         validators.push(index)
@@ -167,14 +173,19 @@ export class GridStructureManager {
   /**
    * Get grid position for a validator
    */
-  getValidatorPosition(validatorIndex: ValidatorIndex): GridPosition | undefined {
+  getValidatorPosition(
+    validatorIndex: ValidatorIndex,
+  ): GridPosition | undefined {
     return this.grid?.positions.get(validatorIndex)
   }
 
   /**
    * Get validator at a specific grid position
    */
-  getValidatorAtPosition(row: number, column: number): ValidatorIndex | undefined {
+  getValidatorAtPosition(
+    row: number,
+    column: number,
+  ): ValidatorIndex | undefined {
     if (!this.grid) {
       return undefined
     }
@@ -198,7 +209,7 @@ export class GridStructureManager {
 
     return {
       rows: this.grid.rows,
-      columns: this.grid.columns
+      columns: this.grid.columns,
     }
   }
 
@@ -221,8 +232,12 @@ export class GridStructureManager {
       return false
     }
 
-    return row >= 0 && row < this.grid.rows && 
-           column >= 0 && column < this.grid.columns
+    return (
+      row >= 0 &&
+      row < this.grid.rows &&
+      column >= 0 &&
+      column < this.grid.columns
+    )
   }
 
   /**
@@ -248,7 +263,9 @@ export class GridStructureManager {
       neighborCounts.push(neighbors.length)
     }
 
-    const averageNeighbors = neighborCounts.reduce((sum, count) => sum + count, 0) / neighborCounts.length
+    const averageNeighbors =
+      neighborCounts.reduce((sum, count) => sum + count, 0) /
+      neighborCounts.length
     const maxNeighbors = Math.max(...neighborCounts)
     const minNeighbors = Math.min(...neighborCounts)
 
@@ -258,7 +275,7 @@ export class GridStructureManager {
       columns: this.grid.columns,
       averageNeighborsPerValidator: averageNeighbors,
       maxNeighborsPerValidator: maxNeighbors,
-      minNeighborsPerValidator: minNeighbors
+      minNeighborsPerValidator: minNeighbors,
     }
   }
 
@@ -273,7 +290,9 @@ export class GridStructureManager {
   /**
    * Update grid structure when validators change
    */
-  updateGridStructure(validators: Map<ValidatorIndex, ValidatorMetadata>): ValidatorGrid {
+  updateGridStructure(
+    validators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): ValidatorGrid {
     return this.computeGridStructure(validators)
   }
-} 
+}

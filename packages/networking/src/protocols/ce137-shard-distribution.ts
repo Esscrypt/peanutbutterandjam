@@ -5,11 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting EC shards from guarantors.
  */
 
-import type { 
-  Bytes, 
+import type {
+  Bytes,
   ShardDistributionRequest,
   ShardDistributionResponse,
-  StreamInfo
+  StreamInfo,
 } from '@pbnj/types'
 import type { NetworkingDatabaseIntegration } from '../db-integration'
 
@@ -41,26 +41,35 @@ export class ShardDistributionProtocol {
 
     try {
       // Load shards from database (service ID 7 for shards)
-      console.log('Shard distribution state loading - protocol not yet fully implemented')
+      console.log(
+        'Shard distribution state loading - protocol not yet fully implemented',
+      )
     } catch (error) {
-      console.error('Failed to load shard distribution state from database:', error)
+      console.error(
+        'Failed to load shard distribution state from database:',
+        error,
+      )
     }
   }
 
   /**
    * Store bundle shard in local store and persist to database
    */
-  async storeBundleShard(erasureRoot: Bytes, shardIndex: number, bundleShard: Bytes): Promise<void> {
+  async storeBundleShard(
+    erasureRoot: Bytes,
+    shardIndex: number,
+    bundleShard: Bytes,
+  ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_bundle`
     this.bundleShards.set(key, bundleShard)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           7, // Service ID 7 for shards
           Buffer.from(key),
-          bundleShard
+          bundleShard,
         )
       } catch (error) {
         console.error('Failed to persist bundle shard to database:', error)
@@ -71,10 +80,14 @@ export class ShardDistributionProtocol {
   /**
    * Store segment shards in local store and persist to database
    */
-  async storeSegmentShards(erasureRoot: Bytes, shardIndex: number, segmentShards: Bytes[]): Promise<void> {
+  async storeSegmentShards(
+    erasureRoot: Bytes,
+    shardIndex: number,
+    segmentShards: Bytes[],
+  ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     this.segmentShards.set(key, segmentShards)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
@@ -84,20 +97,20 @@ export class ShardDistributionProtocol {
           await this.dbIntegration.setServiceStorage(
             7,
             Buffer.from(segmentKey),
-            segmentShards[i]
+            segmentShards[i],
           )
         }
-        
+
         // Store metadata with segment count
         const metadata = {
           count: segmentShards.length,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         }
-        
+
         await this.dbIntegration.setServiceStorage(
           7,
           Buffer.from(`${key}_meta`),
-          Buffer.from(JSON.stringify(metadata), 'utf8')
+          Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
         console.error('Failed to persist segment shards to database:', error)
@@ -108,17 +121,21 @@ export class ShardDistributionProtocol {
   /**
    * Store justification in local store and persist to database
    */
-  async storeJustification(erasureRoot: Bytes, shardIndex: number, justification: Bytes): Promise<void> {
+  async storeJustification(
+    erasureRoot: Bytes,
+    shardIndex: number,
+    justification: Bytes,
+  ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_justification`
     this.justifications.set(key, justification)
-    
+
     // Persist to database if available
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
           7, // Service ID 7 for shards
           Buffer.from(key),
-          justification
+          justification,
         )
       } catch (error) {
         console.error('Failed to persist justification to database:', error)
@@ -137,7 +154,10 @@ export class ShardDistributionProtocol {
   /**
    * Get segment shards from local store
    */
-  getSegmentShards(erasureRoot: Bytes, shardIndex: number): Bytes[] | undefined {
+  getSegmentShards(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): Bytes[] | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     return this.segmentShards.get(key)
   }
@@ -153,7 +173,10 @@ export class ShardDistributionProtocol {
   /**
    * Get bundle shard from database if not in local store
    */
-  async getBundleShardFromDatabase(erasureRoot: Bytes, shardIndex: number): Promise<Bytes | null> {
+  async getBundleShardFromDatabase(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): Promise<Bytes | null> {
     if (this.getBundleShard(erasureRoot, shardIndex)) {
       return this.getBundleShard(erasureRoot, shardIndex) || null
     }
@@ -164,15 +187,15 @@ export class ShardDistributionProtocol {
       const key = `${erasureRoot.toString()}_${shardIndex}_bundle`
       const bundleShard = await this.dbIntegration.getServiceStorage(
         7,
-        Buffer.from(key)
+        Buffer.from(key),
       )
-      
+
       if (bundleShard) {
         // Cache in local store
         this.bundleShards.set(key, bundleShard)
         return bundleShard
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get bundle shard from database:', error)
@@ -183,7 +206,10 @@ export class ShardDistributionProtocol {
   /**
    * Get segment shards from database if not in local store
    */
-  async getSegmentShardsFromDatabase(erasureRoot: Bytes, shardIndex: number): Promise<Bytes[] | null> {
+  async getSegmentShardsFromDatabase(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): Promise<Bytes[] | null> {
     if (this.getSegmentShards(erasureRoot, shardIndex)) {
       return this.getSegmentShards(erasureRoot, shardIndex) || null
     }
@@ -192,37 +218,37 @@ export class ShardDistributionProtocol {
 
     try {
       const key = `${erasureRoot.toString()}_${shardIndex}_segments`
-      
+
       // Get metadata to know how many segments
       const metadataData = await this.dbIntegration.getServiceStorage(
         7,
-        Buffer.from(`${key}_meta`)
+        Buffer.from(`${key}_meta`),
       )
-      
+
       if (!metadataData) return null
-      
+
       const metadata = JSON.parse(metadataData.toString())
       const segmentShards: Bytes[] = []
-      
+
       // Get each segment shard
       for (let i = 0; i < metadata.count; i++) {
         const segmentKey = `${key}_${i}`
         const segmentShard = await this.dbIntegration.getServiceStorage(
           7,
-          Buffer.from(segmentKey)
+          Buffer.from(segmentKey),
         )
-        
+
         if (segmentShard) {
           segmentShards.push(segmentShard)
         }
       }
-      
+
       if (segmentShards.length > 0) {
         // Cache in local store
         this.segmentShards.set(key, segmentShards)
         return segmentShards
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get segment shards from database:', error)
@@ -233,7 +259,10 @@ export class ShardDistributionProtocol {
   /**
    * Get justification from database if not in local store
    */
-  async getJustificationFromDatabase(erasureRoot: Bytes, shardIndex: number): Promise<Bytes | null> {
+  async getJustificationFromDatabase(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): Promise<Bytes | null> {
     if (this.getJustification(erasureRoot, shardIndex)) {
       return this.getJustification(erasureRoot, shardIndex) || null
     }
@@ -244,15 +273,15 @@ export class ShardDistributionProtocol {
       const key = `${erasureRoot.toString()}_${shardIndex}_justification`
       const justification = await this.dbIntegration.getServiceStorage(
         7,
-        Buffer.from(key)
+        Buffer.from(key),
       )
-      
+
       if (justification) {
         // Cache in local store
         this.justifications.set(key, justification)
         return justification
       }
-      
+
       return null
     } catch (error) {
       console.error('Failed to get justification from database:', error)
@@ -263,31 +292,48 @@ export class ShardDistributionProtocol {
   /**
    * Process shard distribution request and generate response
    */
-  async processShardDistributionRequest(request: ShardDistributionRequest): Promise<ShardDistributionResponse | null> {
+  async processShardDistributionRequest(
+    request: ShardDistributionRequest,
+  ): Promise<ShardDistributionResponse | null> {
     try {
       // Get bundle shard
-      const bundleShard = await this.getBundleShardFromDatabase(request.erasureRoot, request.shardIndex)
+      const bundleShard = await this.getBundleShardFromDatabase(
+        request.erasureRoot,
+        request.shardIndex,
+      )
       if (!bundleShard) {
-        console.log(`Bundle shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`)
+        console.log(
+          `Bundle shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+        )
         return null
       }
 
       // Get segment shards
-      const segmentShards = await this.getSegmentShardsFromDatabase(request.erasureRoot, request.shardIndex)
+      const segmentShards = await this.getSegmentShardsFromDatabase(
+        request.erasureRoot,
+        request.shardIndex,
+      )
       if (!segmentShards) {
-        console.log(`Segment shards not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`)
+        console.log(
+          `Segment shards not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+        )
         return null
       }
 
       // Get justification
-      const justification = await this.getJustificationFromDatabase(request.erasureRoot, request.shardIndex)
+      const justification = await this.getJustificationFromDatabase(
+        request.erasureRoot,
+        request.shardIndex,
+      )
 
-      console.log(`Found shards for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`)
+      console.log(
+        `Found shards for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+      )
 
       return {
         bundleShard,
         segmentShards,
-        justification: justification || Buffer.alloc(0) // Empty buffer if no justification
+        justification: justification || Buffer.alloc(0), // Empty buffer if no justification
       }
     } catch (error) {
       console.error('Failed to process shard distribution request:', error)
@@ -298,10 +344,13 @@ export class ShardDistributionProtocol {
   /**
    * Create shard distribution request message
    */
-  createShardDistributionRequest(erasureRoot: Bytes, shardIndex: number): ShardDistributionRequest {
+  createShardDistributionRequest(
+    erasureRoot: Bytes,
+    shardIndex: number,
+  ): ShardDistributionRequest {
     return {
       erasureRoot,
-      shardIndex
+      shardIndex,
     }
   }
 
@@ -340,25 +389,27 @@ export class ShardDistributionProtocol {
 
     return {
       erasureRoot,
-      shardIndex
+      shardIndex,
     }
   }
 
   /**
    * Serialize shard distribution response message
    */
-  serializeShardDistributionResponse(response: ShardDistributionResponse): Bytes {
+  serializeShardDistributionResponse(
+    response: ShardDistributionResponse,
+  ): Bytes {
     // Calculate total size
     let totalSize = 4 + 4 + 4 // bundle shard length + number of segment shards + justification length
-    
+
     // Size for bundle shard
     totalSize += response.bundleShard.length
-    
+
     // Size for segment shards
     for (const segmentShard of response.segmentShards) {
       totalSize += 4 + segmentShard.length // segment shard length + segment shard data
     }
-    
+
     // Size for justification
     totalSize += response.justification.length
 
@@ -442,14 +493,17 @@ export class ShardDistributionProtocol {
     return {
       bundleShard,
       segmentShards,
-      justification
+      justification,
     }
   }
 
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(stream: StreamInfo, data: Bytes): Promise<ShardDistributionResponse | null> {
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Bytes,
+  ): Promise<ShardDistributionResponse | null> {
     try {
       const request = this.deserializeShardDistributionRequest(data)
       return await this.processShardDistributionRequest(request)
@@ -458,4 +512,4 @@ export class ShardDistributionProtocol {
       return null
     }
   }
-} 
+}

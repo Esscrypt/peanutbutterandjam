@@ -1,15 +1,47 @@
 /**
  * Block Body Serialization
  *
- * Implements block body encoding from Gray Paper Appendix D.2
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Block Serialization
+ * Formula (Equation 128-136):
+ *
+ * encode(B) = encode(
+ *   H,
+ *   encodeTickets(XT_tickets),
+ *   encodePreimages(XT_preimages),
+ *   encodeGuarantees(XT_guarantees),
+ *   encodeAssurances(XT_assurances),
+ *   encodeDisputes(XT_disputes)
+ * )
+ *
+ * A block B is serialized as a tuple of its elements in regular order.
  * Reference: Gray Paper block body specifications
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * The block body contains all the extrinsics (transactions) and metadata
+ * that validators need to process and validate the block contents.
+ *
+ * Block body components:
+ * 1. **Header**: Block metadata (already explained above)
+ * 2. **Tickets**: Safrole consensus tickets for randomness
+ * 3. **Preimages**: Data blobs referenced by hash in work packages
+ * 4. **Guarantees**: Validator attestations for work report validity
+ * 5. **Assurances**: Validator attestations for data availability
+ * 6. **Disputes**: Challenge proofs for invalid work or misbehavior
+ *
+ * Each component uses variable-length encoding (var{}) because:
+ * - Number of tickets/preimages/etc. varies per block
+ * - Size of individual items varies
+ * - Allows efficient empty block encoding
+ *
+ * The tuple structure ensures deterministic ordering and makes it
+ * possible to compute Merkle proofs for individual components.
  */
 
 import {
   decodeVariableLength,
   encodeVariableLength,
 } from '../core/discriminator'
-import type { Uint8Array } from '../types'
 
 /**
  * Block body structure
@@ -73,10 +105,7 @@ export function decodeBlockBody(data: Uint8Array): {
  * @param body - Block body
  * @returns Encoded octet sequence
  */
-export function encodeBlock(
-  header: Uint8Array,
-  body: Uint8Array,
-): Uint8Array {
+export function encodeBlock(header: Uint8Array, body: Uint8Array): Uint8Array {
   const result = new Uint8Array(header.length + body.length)
   result.set(header, 0)
   result.set(body, header.length)
@@ -100,7 +129,7 @@ export function decodeBlock(
 } {
   if (data.length < headerLength) {
     throw new Error(
-      `Insufficient data for block decoding (expected at least ${headerLength} bytes)`,
+      `Insufficient data for block decoding (expected at least ${headerLength} Uint8Array)`,
     )
   }
 

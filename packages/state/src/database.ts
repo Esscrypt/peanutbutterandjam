@@ -2,8 +2,9 @@
  * Database connection and management
  */
 
-import { logger } from '@pbnj/core'
 import type { DatabaseConfig } from '@pbnj/types'
+import { drizzle } from 'drizzle-orm/postgres-js'
+import postgres from 'postgres'
 import * as schema from './schema'
 
 /**
@@ -12,22 +13,14 @@ import * as schema from './schema'
 export class DatabaseManager {
   private client: postgres.Sql
   private db: ReturnType<typeof drizzle>
-  private config: DatabaseConfig
 
   constructor(config: DatabaseConfig) {
-    this.config = config
-    this.client = postgres({
-      host: config.host,
-      port: config.port,
-      database: config.database,
-      username: config.username,
-      password: config.password,
-      ssl: config.ssl,
-      max: config.maxConnections || 10,
+    this.client = postgres(config.url, {
+      max: config.poolSize || 10,
       idle_timeout: 20,
-      connect_timeout: 10
+      connect_timeout: config.timeout || 10,
     })
-    
+
     this.db = drizzle(this.client, { schema })
   }
 
@@ -60,4 +53,4 @@ export class DatabaseManager {
   getClient(): postgres.Sql {
     return this.client
   }
-} 
+}

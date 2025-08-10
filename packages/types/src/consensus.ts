@@ -5,7 +5,19 @@
  * Reference: graypaper/text/safrole.tex
  */
 
-import type { ValidatorKey } from './core'
+import type { Hash } from './core'
+
+// Define ConsensusState interface
+export interface ConsensusState {
+  slot: number
+  entropy: string[]
+  pendingSet: ValidatorKey[]
+  activeSet: ValidatorKey[]
+  previousSet: ValidatorKey[]
+  epochRoot: Hash
+  sealTickets: string[]
+  ticketAccumulator: Ticket[]
+}
 
 export interface Ticket {
   /** Ticket identifier (hash) */

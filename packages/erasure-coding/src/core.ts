@@ -4,26 +4,26 @@
  * Main erasure coding implementation for the JAM protocol
  */
 
-import { ReedSolomon } from './algorithms/reed-solomon'
 import type {
-  ErasureCoder,
-  ErasureCodingParams,
   EncodedData,
+  ErasureCoder,
   ErasureCodingErrorWithContext,
+  ErasureCodingParams,
 } from '@pbnj/types'
 import { DEFAULT_ERASURE_CODING_PARAMS, ErasureCodingError } from '@pbnj/types'
+import { ReedSolomon } from './algorithms/reed-solomon'
 import type {
+  DecodingValidation,
+  EncodingValidation,
   GF2_16,
   PolynomialOps,
-  EncodingValidation,
-  DecodingValidation,
-  ValidationResult
+  ValidationResult,
 } from './types'
 import {
+  DecodingValidation as DecodingValidationImpl,
+  EncodingValidation as EncodingValidationImpl,
   GF2_16 as GF2_16Impl,
   PolynomialOps as PolynomialOpsImpl,
-  EncodingValidation as EncodingValidationImpl,
-  DecodingValidation as DecodingValidationImpl
 } from './types'
 
 /**

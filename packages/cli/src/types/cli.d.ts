@@ -31,7 +31,10 @@ declare module 'cli' {
     args: string[]
   }
 
-  function parse(options: Record<string, [string, string, string, any]>, args?: string[]): CliOptions & CliArgs
+  function parse(
+    options: Record<string, [string, string, string, any]>,
+    args?: string[],
+  ): CliOptions & CliArgs
 
   const cli: {
     parse: typeof parse
@@ -39,4 +42,4 @@ declare module 'cli' {
   }
 
   export = cli
-} 
+}

@@ -1,11 +1,37 @@
 /**
  * Dictionary Serialization
  *
- * Implements dictionary encoding from Gray Paper Appendix D.1
- * encode(d ∈ dictionary{K,V}) ≡ encode(var{⟨⟨encode(k), encode(d[k])⟩⟩})
+ * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
+ * Gray Paper Section: Appendix D.1 - Serialization Codec
+ * Formula (Equation 78-91):
+ *
+ * ∀ K, V: encode(d ∈ dictionary{K,V}) ≡
+ *   encode(var{⟨orderby{k}{⟨encode(k), encode(d[k])⟩ | k ∈ keys(d)}⟩})
+ *
+ * Small dictionaries are encoded as a sequence of pairs ordered by the key.
+ * In general, dictionaries are placed in the Merkle trie directly, but
+ * small dictionaries may reasonably be encoded as shown above.
+ *
+ * *** IMPLEMENTER EXPLANATION ***
+ * Dictionary encoding provides a deterministic way to serialize key-value maps.
+ * The key insight is ordering: deterministic encoding requires consistent order.
+ *
+ * Process:
+ * 1. Extract all key-value pairs from dictionary
+ * 2. Sort pairs by key in lexicographic order
+ * 3. Encode each key and value separately
+ * 4. Concatenate all encoded pairs
+ * 5. Wrap with variable-length discriminator
+ *
+ * Example: {B: "world", A: "hello"}
+ * - Ordered: [(A, "hello"), (B, "world")]
+ * - Encoded: var{encode(A) ∥ encode("hello") ∥ encode(B) ∥ encode("world")}
+ *
+ * This is used for small dictionaries that need to be embedded in other
+ * structures. Large dictionaries use the Merkle trie for efficiency.
  */
 
-import type { Uint8Array } from '../types'
+import { bytesToHex } from '@pbnj/core'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 
 /**
@@ -73,7 +99,7 @@ export function encodeDictionary(entries: DictionaryEntry[]): Uint8Array {
 export function decodeDictionary(
   data: Uint8Array,
   keyLength: number,
-  valueLength: number = -1,
+  valueLength = -1,
 ): { value: DictionaryEntry[]; remaining: Uint8Array } {
   // Decode variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
   const { value: concatenatedPairs, remaining } = decodeVariableLength(data)
@@ -109,18 +135,11 @@ export function decodeDictionary(
       }
 
       result.push({ key, value })
-    } catch (error) {
+    } catch (_error) {
       // If we can't decode more pairs, we're done
       break
     }
   }
 
   return { value: result, remaining }
-}
-
-/**
- * Helper function to convert Uint8Array to hex for comparison
- */
-function bytesToHex(Uint8Array: Uint8Array): string {
-  return Array.from(Uint8Array, byte => byte.toString(16).padStart(2, '0')).join('')
 }

@@ -9,8 +9,6 @@ import type {
   RingVRFInput,
   RingVRFOutput,
   RingVRFProof,
-  RingVRFProofWithOutput,
-  RingVRFParams,
   RingVRFRing,
 } from '@pbnj/types'
 import { BandersnatchCurve } from '../curve'

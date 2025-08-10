@@ -5,19 +5,19 @@
  * Handles connection establishment, maintenance, and preferred initiator logic
  */
 
-import type { 
-  ValidatorIndex, 
-  ValidatorMetadata, 
+import type {
   ConnectionEndpoint,
   NodeType,
+  StreamInfo,
   StreamKind,
-  StreamInfo
+  ValidatorIndex,
+  ValidatorMetadata,
 } from '@pbnj/types'
 import { PreferredInitiator } from '@pbnj/types'
-import { QuicTransport } from '../quic/transport'
-import { ValidatorSetManager } from './validator-set'
-import { PeerDiscoveryManager } from './peer-discovery'
-import { GridStructureManager } from './grid-structure'
+import type { QuicTransport } from '../quic/transport'
+import type { GridStructureManager } from './grid-structure'
+import type { PeerDiscoveryManager } from './peer-discovery'
+import type { ValidatorSetManager } from './validator-set'
 
 /**
  * Connection information
@@ -50,7 +50,7 @@ export class ConnectionManager {
     transport: QuicTransport,
     validatorSetManager: ValidatorSetManager,
     peerDiscoveryManager: PeerDiscoveryManager,
-    gridStructureManager: GridStructureManager
+    gridStructureManager: GridStructureManager,
   ) {
     this.transport = transport
     this.validatorSetManager = validatorSetManager
@@ -73,13 +73,13 @@ export class ConnectionManager {
   async start(): Promise<void> {
     // Start the transport layer
     await this.transport.start()
-    
+
     // Start peer discovery
     this.peerDiscoveryManager.startDiscovery()
-    
+
     // Set up connection event handlers
     this.setupEventHandlers()
-    
+
     // Initial connection setup
     await this.setupInitialConnections()
   }
@@ -90,10 +90,10 @@ export class ConnectionManager {
   async stop(): Promise<void> {
     // Stop peer discovery
     this.peerDiscoveryManager.stopDiscovery()
-    
+
     // Close all connections
     await this.closeAllConnections()
-    
+
     // Stop the transport layer
     await this.transport.stop()
   }
@@ -103,20 +103,25 @@ export class ConnectionManager {
    */
   private async setupInitialConnections(): Promise<void> {
     const allValidators = this.validatorSetManager.getAllConnectedValidators()
-    
+
     for (const [validatorIndex, metadata] of allValidators) {
       if (validatorIndex === this.localValidatorIndex) {
         continue // Don't connect to ourselves
       }
 
       // Add to peer discovery
-      const preferredInitiator = this.peerDiscoveryManager.computePreferredInitiator(
-        this.localValidatorIndex!,
-        validatorIndex
+      const preferredInitiator =
+        this.peerDiscoveryManager.computePreferredInitiator(
+          this.localValidatorIndex!,
+          validatorIndex,
+        )
+
+      this.peerDiscoveryManager.addPeer(
+        validatorIndex,
+        metadata,
+        preferredInitiator,
       )
-      
-      this.peerDiscoveryManager.addPeer(validatorIndex, metadata, preferredInitiator)
-      
+
       // Attempt connection if we should be the initiator
       if (preferredInitiator === PreferredInitiator.LOCAL) {
         await this.attemptConnection(validatorIndex, metadata)
@@ -148,7 +153,7 @@ export class ConnectionManager {
   private handleIncomingConnection(connectionInfo: any): void {
     // Extract validator index from connection info
     const validatorIndex = this.extractValidatorIndex(connectionInfo)
-    
+
     if (validatorIndex !== null) {
       this.markConnectionEstablished(validatorIndex, connectionInfo)
     }
@@ -159,7 +164,7 @@ export class ConnectionManager {
    */
   private handleConnectionClosed(connectionInfo: any): void {
     const validatorIndex = this.extractValidatorIndex(connectionInfo)
-    
+
     if (validatorIndex !== null) {
       this.markConnectionClosed(validatorIndex)
     }
@@ -176,19 +181,24 @@ export class ConnectionManager {
   /**
    * Attempt connection to a validator
    */
-  async attemptConnection(validatorIndex: ValidatorIndex, metadata: ValidatorMetadata): Promise<boolean> {
+  async attemptConnection(
+    validatorIndex: ValidatorIndex,
+    metadata: ValidatorMetadata,
+  ): Promise<boolean> {
     try {
       // Record connection attempt
       this.peerDiscoveryManager.recordConnectionAttempt(validatorIndex)
-      
+
       // Attempt connection via transport
-      const connectionInfo = await this.transport.connectToPeer(metadata.endpoint)
-      
+      const connectionInfo = await this.transport.connectToPeer(
+        metadata.endpoint,
+      )
+
       if (connectionInfo) {
         this.markConnectionEstablished(validatorIndex, connectionInfo)
         return true
       }
-      
+
       return false
     } catch (error) {
       console.error(`Failed to connect to validator ${validatorIndex}:`, error)
@@ -199,7 +209,10 @@ export class ConnectionManager {
   /**
    * Mark connection as established
    */
-  private markConnectionEstablished(validatorIndex: ValidatorIndex, connectionInfo: any): void {
+  private markConnectionEstablished(
+    validatorIndex: ValidatorIndex,
+    connectionInfo: any,
+  ): void {
     const peer = this.peerDiscoveryManager.getPeer(validatorIndex)
     if (!peer) {
       return
@@ -207,7 +220,7 @@ export class ConnectionManager {
 
     // Update peer discovery
     this.peerDiscoveryManager.markPeerConnected(validatorIndex)
-    
+
     // Create connection info
     const connection: ConnectionInfo = {
       validatorIndex,
@@ -216,11 +229,11 @@ export class ConnectionManager {
       connectionId: connectionInfo.connectionId || null,
       streams: new Map(),
       lastActivity: Date.now(),
-      preferredInitiator: peer.preferredInitiator
+      preferredInitiator: peer.preferredInitiator,
     }
-    
+
     this.connections.set(validatorIndex, connection)
-    
+
     console.log(`Connection established to validator ${validatorIndex}`)
   }
 
@@ -230,17 +243,19 @@ export class ConnectionManager {
   private markConnectionClosed(validatorIndex: ValidatorIndex): void {
     // Update peer discovery
     this.peerDiscoveryManager.markPeerDisconnected(validatorIndex)
-    
+
     // Remove connection info
     this.connections.delete(validatorIndex)
-    
+
     console.log(`Connection closed to validator ${validatorIndex}`)
   }
 
   /**
    * Extract validator index from connection info
    */
-  private extractValidatorIndex(_connectionInfo: unknown): ValidatorIndex | null {
+  private extractValidatorIndex(
+    _connectionInfo: unknown,
+  ): ValidatorIndex | null {
     // TODO: Implement validator index extraction from connection info
     return null
   }
@@ -258,8 +273,8 @@ export class ConnectionManager {
    * Create stream to a validator
    */
   async createStream(
-    validatorIndex: ValidatorIndex, 
-    streamKind: StreamKind
+    validatorIndex: ValidatorIndex,
+    streamKind: StreamKind,
   ): Promise<StreamInfo | null> {
     const connection = this.connections.get(validatorIndex)
     if (!connection || !connection.isConnected) {
@@ -268,19 +283,22 @@ export class ConnectionManager {
 
     try {
       // Create stream through transport
-      const streamId = await this.transport.createStream(connection.connectionId!, streamKind)
-      
+      const streamId = await this.transport.createStream(
+        connection.connectionId!,
+        streamKind,
+      )
+
       // Create stream info
       const streamInfo: StreamInfo = {
         streamId,
         streamKind,
         isOpen: true,
-        isBidirectional: true
+        isBidirectional: true,
       }
 
       // Store stream info
       connection.streams.set(streamKind, streamInfo)
-      
+
       return streamInfo
     } catch (error) {
       console.error('Failed to create stream:', error)
@@ -294,7 +312,7 @@ export class ConnectionManager {
   async sendMessage(
     validatorIndex: ValidatorIndex,
     streamKind: StreamKind,
-    message: Uint8Array
+    message: Uint8Array,
   ): Promise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection || !connection.isConnected) {
@@ -311,7 +329,10 @@ export class ConnectionManager {
       connection.lastActivity = Date.now()
       return true
     } catch (error) {
-      console.error(`Failed to send message to validator ${validatorIndex}:`, error)
+      console.error(
+        `Failed to send message to validator ${validatorIndex}:`,
+        error,
+      )
       return false
     }
   }
@@ -319,7 +340,10 @@ export class ConnectionManager {
   /**
    * Close stream to a validator
    */
-  async closeStream(validatorIndex: ValidatorIndex, streamKind: StreamKind): Promise<boolean> {
+  async closeStream(
+    validatorIndex: ValidatorIndex,
+    streamKind: StreamKind,
+  ): Promise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection) {
       return false
@@ -335,7 +359,10 @@ export class ConnectionManager {
       connection.streams.delete(streamKind)
       return true
     } catch (error) {
-      console.error(`Failed to close stream ${streamKind} to validator ${validatorIndex}:`, error)
+      console.error(
+        `Failed to close stream ${streamKind} to validator ${validatorIndex}:`,
+        error,
+      )
       return false
     }
   }
@@ -354,16 +381,19 @@ export class ConnectionManager {
       for (const [streamKind] of connection.streams) {
         await this.closeStream(validatorIndex, streamKind)
       }
-      
+
       // Close connection
       if (connection.connectionId) {
         await this.transport.disconnectFromPeer(connection.connectionId)
       }
-      
+
       this.markConnectionClosed(validatorIndex)
       return true
     } catch (error) {
-      console.error(`Failed to close connection to validator ${validatorIndex}:`, error)
+      console.error(
+        `Failed to close connection to validator ${validatorIndex}:`,
+        error,
+      )
       return false
     }
   }
@@ -373,7 +403,7 @@ export class ConnectionManager {
    */
   async closeAllConnections(): Promise<void> {
     const validators = Array.from(this.connections.keys())
-    
+
     for (const validatorIndex of validators) {
       await this.closeConnection(validatorIndex)
     }
@@ -398,7 +428,7 @@ export class ConnectionManager {
    */
   getConnectedValidators(): ValidatorIndex[] {
     return Array.from(this.connections.keys()).filter(
-      index => this.connections.get(index)?.isConnected
+      (index) => this.connections.get(index)?.isConnected,
     )
   }
 
@@ -429,7 +459,7 @@ export class ConnectionManager {
       connectedCount,
       disconnectedCount,
       localValidatorIndex: this.localValidatorIndex,
-      localNodeType: this.localNodeType
+      localNodeType: this.localNodeType,
     }
   }
 
@@ -439,7 +469,7 @@ export class ConnectionManager {
   async updateValidatorSet(): Promise<void> {
     // Get current validators that should be connected
     const allValidators = this.validatorSetManager.getAllConnectedValidators()
-    
+
     // Add new validators to peer discovery
     for (const [validatorIndex, metadata] of allValidators) {
       if (validatorIndex === this.localValidatorIndex) {
@@ -449,24 +479,32 @@ export class ConnectionManager {
       const peer = this.peerDiscoveryManager.getPeer(validatorIndex)
       if (!peer) {
         // New validator - add to peer discovery
-        const preferredInitiator = this.peerDiscoveryManager.computePreferredInitiator(
-          this.localValidatorIndex!,
-          validatorIndex
+        const preferredInitiator =
+          this.peerDiscoveryManager.computePreferredInitiator(
+            this.localValidatorIndex!,
+            validatorIndex,
+          )
+
+        this.peerDiscoveryManager.addPeer(
+          validatorIndex,
+          metadata,
+          preferredInitiator,
         )
-        
-        this.peerDiscoveryManager.addPeer(validatorIndex, metadata, preferredInitiator)
-        
+
         // Attempt connection if we should be the initiator
         if (preferredInitiator === PreferredInitiator.LOCAL) {
           await this.attemptConnection(validatorIndex, metadata)
         }
       }
     }
-    
+
     // Remove validators that are no longer in the set
     const currentPeers = this.peerDiscoveryManager.getAllPeers()
     for (const [validatorIndex] of currentPeers) {
-      if (!allValidators.has(validatorIndex) && validatorIndex !== this.localValidatorIndex) {
+      if (
+        !allValidators.has(validatorIndex) &&
+        validatorIndex !== this.localValidatorIndex
+      ) {
         await this.closeConnection(validatorIndex)
         this.peerDiscoveryManager.removePeer(validatorIndex)
       }
@@ -479,12 +517,12 @@ export class ConnectionManager {
   async applyEpochTransition(): Promise<void> {
     // Apply epoch transition in validator set manager
     this.validatorSetManager.applyEpochTransition()
-    
+
     // Update connections based on new validator set
     await this.updateValidatorSet()
-    
+
     // Update grid structure
     const currentValidators = this.validatorSetManager.getCurrentValidators()
     this.gridStructureManager.updateGridStructure(currentValidators)
   }
-} 
+}
