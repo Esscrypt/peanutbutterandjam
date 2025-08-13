@@ -66,18 +66,18 @@ describe('JAM CLI Arguments', () => {
     it('should parse JAM arguments correctly', () => {
       const command = createRunCommand()
       
-      // Simulate parsing arguments
-      const testArgs = [
-        'run',
-        '--bandersnatch', '0x1234567890abcdef',
-        '--bls', '0xfedcba0987654321',
-        '--ed25519', '0xabcdef1234567890',
-        '--genesis', '/path/to/genesis.json',
-        '--metadata', 'Bob',
-        '--ts', '1234567890',
-        '--datadir', '/custom/data/path',
-        '--validatorindex', '5'
-      ]
+      // Simulate parsing arguments (commented out since not used)
+      // const testArgs = [
+      //   'run',
+      //   '--bandersnatch', '0x1234567890abcdef',
+      //   '--bls', '0xfedcba0987654321',
+      //   '--ed25519', '0xabcdef1234567890',
+      //   '--genesis', '/path/to/genesis.json',
+      //   '--metadata', 'Bob',
+      //   '--ts', '1234567890',
+      //   '--datadir', '/custom/data/path',
+      //   '--validatorindex', '5'
+      // ]
       
       // This test verifies that the command can be created and has the expected options
       // The actual parsing would require mocking the process.argv

@@ -66,11 +66,7 @@ export class ShardDistributionProtocol {
     // Persist to database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.setServiceStorage(
-          7, // Service ID 7 for shards
-          Buffer.from(key),
-          bundleShard,
-        )
+        await this.dbIntegration.setServiceStorage(key, bundleShard)
       } catch (error) {
         console.error('Failed to persist bundle shard to database:', error)
       }
@@ -95,8 +91,7 @@ export class ShardDistributionProtocol {
         for (let i = 0; i < segmentShards.length; i++) {
           const segmentKey = `${key}_${i}`
           await this.dbIntegration.setServiceStorage(
-            7,
-            Buffer.from(segmentKey),
+            segmentKey,
             segmentShards[i],
           )
         }
@@ -108,8 +103,7 @@ export class ShardDistributionProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          7,
-          Buffer.from(`${key}_meta`),
+          `${key}_meta`,
           Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
@@ -132,11 +126,7 @@ export class ShardDistributionProtocol {
     // Persist to database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.setServiceStorage(
-          7, // Service ID 7 for shards
-          Buffer.from(key),
-          justification,
-        )
+        await this.dbIntegration.setServiceStorage(key, justification)
       } catch (error) {
         console.error('Failed to persist justification to database:', error)
       }
@@ -185,10 +175,7 @@ export class ShardDistributionProtocol {
 
     try {
       const key = `${erasureRoot.toString()}_${shardIndex}_bundle`
-      const bundleShard = await this.dbIntegration.getServiceStorage(
-        7,
-        Buffer.from(key),
-      )
+      const bundleShard = await this.dbIntegration.getServiceStorage(key)
 
       if (bundleShard) {
         // Cache in local store
@@ -221,8 +208,7 @@ export class ShardDistributionProtocol {
 
       // Get metadata to know how many segments
       const metadataData = await this.dbIntegration.getServiceStorage(
-        7,
-        Buffer.from(`${key}_meta`),
+        `${key}_meta`,
       )
 
       if (!metadataData) return null
@@ -233,10 +219,8 @@ export class ShardDistributionProtocol {
       // Get each segment shard
       for (let i = 0; i < metadata.count; i++) {
         const segmentKey = `${key}_${i}`
-        const segmentShard = await this.dbIntegration.getServiceStorage(
-          7,
-          Buffer.from(segmentKey),
-        )
+        const segmentShard =
+          await this.dbIntegration.getServiceStorage(segmentKey)
 
         if (segmentShard) {
           segmentShards.push(segmentShard)
@@ -271,10 +255,7 @@ export class ShardDistributionProtocol {
 
     try {
       const key = `${erasureRoot.toString()}_${shardIndex}_justification`
-      const justification = await this.dbIntegration.getServiceStorage(
-        7,
-        Buffer.from(key),
-      )
+      const justification = await this.dbIntegration.getServiceStorage(key)
 
       if (justification) {
         // Cache in local store

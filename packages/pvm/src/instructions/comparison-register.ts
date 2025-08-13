@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 export class SET_LT_UInstruction extends BaseInstruction {
@@ -36,11 +36,11 @@ export class SET_LT_UInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need three registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -86,11 +86,11 @@ export class SET_LT_SInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need three registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)

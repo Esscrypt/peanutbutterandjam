@@ -1,0 +1,15 @@
+window.SIDEBAR_ITEMS = {
+  struct: ['Impossible'],
+  trait: [
+    'Error',
+    'Serialize',
+    'SerializeMap',
+    'SerializeSeq',
+    'SerializeStruct',
+    'SerializeStructVariant',
+    'SerializeTuple',
+    'SerializeTupleStruct',
+    'SerializeTupleVariant',
+    'Serializer',
+  ],
+}

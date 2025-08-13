@@ -229,6 +229,7 @@ describe('State Serialization', () => {
     it('should serialize genesis service account', () => {
       const genesisAccount: ServiceAccount = {
         balance: '1000000000000000000',
+        minbalance: '1000000000000000000',
         nonce: 0,
         isValidator: true,
         validatorKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
@@ -257,6 +258,7 @@ describe('State Serialization', () => {
     it('should serialize runtime service account', () => {
       const runtimeAccount: ServiceAccount = {
         balance: '5000000000000000000',
+        minbalance: '1000000000000000000',
         nonce: 5,
         isValidator: false,
         storage: new Map([
@@ -539,6 +541,7 @@ describe('State Serialization', () => {
         accounts: {
           '0x000102030405060708090a0b0c0d0e0f10111213': {
             balance: '1000000000000000000',
+            minbalance: '1000000000000000000',
             nonce: 0,
             isValidator: true,
             validatorKey: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',

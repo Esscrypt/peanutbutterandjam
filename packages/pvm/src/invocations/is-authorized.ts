@@ -9,8 +9,6 @@
  */
 
 import { logger } from '@pbnj/core'
-import { ArgumentInvocationSystem } from '../argument-invocation'
-import { IS_AUTHORIZED_CONFIG } from '../config'
 import type {
   Gas,
   IsAuthorizedContextMutator,
@@ -18,7 +16,9 @@ import type {
   RAM,
   RegisterState,
   WorkPackage,
-} from '../types'
+} from '@pbnj/types'
+import { ArgumentInvocationSystem } from '../argument-invocation'
+import { IS_AUTHORIZED_CONFIG } from '../config'
 
 /**
  * Is-Authorized Invocation System
@@ -30,7 +30,7 @@ import type {
  * @returns Tuple of [result, gas_used]
  */
 export class IsAuthorizedInvocationSystem {
-  private argumentInvocationSystem: ArgumentInvocationSystem<null>
+  private readonly argumentInvocationSystem: ArgumentInvocationSystem<null>
 
   constructor() {
     // Create argument invocation system with Is-Authorized context mutator
@@ -78,10 +78,10 @@ export class IsAuthorizedInvocationSystem {
 
     // Execute the argument invocation with authcode and encoded core index
     const result = this.argumentInvocationSystem.execute(
-      [0x01], // Simplified authcode - in real implementation this would be the actual authcode
+      new Uint8Array([0x01]), // Simplified authcode - in real implementation this would be the actual authcode
       0, // instruction pointer starts at 0
       IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS, // gas limit from config
-      { data: encodedCoreIndex, size: encodedCoreIndex.length }, // argument data
+      { data: new Uint8Array(encodedCoreIndex), size: encodedCoreIndex.length }, // argument data
       null, // context is null for Is-Authorized
     )
 
@@ -104,7 +104,7 @@ export class IsAuthorizedInvocationSystem {
       resultSize: result.result.length,
       gasUsed: gasUsed,
     })
-    return [result.result, gasUsed]
+    return [Array.from(result.result), gasUsed]
   }
 
   /**
@@ -214,10 +214,10 @@ export class IsAuthorizedInvocationSystem {
    * @param coreIndex - The core index to encode
    * @returns 2-octet array representation
    */
-  private encodeCoreIndex(coreIndex: number): number[] {
+  private encodeCoreIndex(coreIndex: number): Uint8Array {
     const buffer = new ArrayBuffer(2)
     const view = new DataView(buffer)
     view.setUint16(0, coreIndex, false) // big-endian
-    return Array.from(new Uint8Array(buffer))
+    return new Uint8Array(buffer)
   }
 }

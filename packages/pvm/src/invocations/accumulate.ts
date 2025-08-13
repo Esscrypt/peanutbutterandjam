@@ -6,13 +6,6 @@
  */
 
 import { blake2bHash, logger } from '@pbnj/core'
-import { ArgumentInvocationSystem } from '../argument-invocation'
-import {
-  ACCUMULATE_ERROR_CODES,
-  ACCUMULATE_FUNCTIONS,
-  ACCUMULATE_INVOCATION_CONFIG,
-  GENERAL_FUNCTIONS,
-} from '../config'
 import type {
   AccumulateContextMutator,
   AccumulateInput,
@@ -24,7 +17,14 @@ import type {
   PartialState,
   RAM,
   RegisterState,
-} from '../types'
+} from '@pbnj/types'
+import { ArgumentInvocationSystem } from '../argument-invocation'
+import {
+  ACCUMULATE_ERROR_CODES,
+  ACCUMULATE_FUNCTIONS,
+  ACCUMULATE_INVOCATION_CONFIG,
+  GENERAL_FUNCTIONS,
+} from '../config'
 
 /**
  * Accumulate Invocation System implementing Ψ_A from Gray Paper
@@ -111,7 +111,7 @@ export class AccumulateInvocationSystem {
         return 'BAD'
       }
 
-      const serviceCode = serviceAccount.codehash
+      const serviceCode = Buffer.from(serviceAccount.codehash, 'hex')
 
       // Check for null code or oversized code (Gray Paper eq:accinvocation)
       if (
@@ -146,7 +146,7 @@ export class AccumulateInvocationSystem {
       const encodedArgs = this.encodeArguments(
         timeslot,
         serviceId,
-        inputs.inputs.length,
+        0, // TODO: Fix input length calculation based on actual AccumulateInput structure
       )
 
       // Execute the service code using Argument Invocation System
@@ -324,26 +324,26 @@ export class AccumulateInvocationSystem {
     timeslot: number,
     serviceId: number,
     inputLength: number,
-  ): number[] {
-    const result: number[] = []
+  ): Uint8Array {
+    const result = new Uint8Array(12)
 
     // Encode timeslot as 4 Uint8Array
-    result.push((timeslot >> 24) & 0xff)
-    result.push((timeslot >> 16) & 0xff)
-    result.push((timeslot >> 8) & 0xff)
-    result.push(timeslot & 0xff)
+    result[0] = (timeslot >> 24) & 0xff
+    result[1] = (timeslot >> 16) & 0xff
+    result[2] = (timeslot >> 8) & 0xff
+    result[3] = timeslot & 0xff
 
     // Encode service ID as 4 Uint8Array
-    result.push((serviceId >> 24) & 0xff)
-    result.push((serviceId >> 16) & 0xff)
-    result.push((serviceId >> 8) & 0xff)
-    result.push(serviceId & 0xff)
+    result[4] = (serviceId >> 24) & 0xff
+    result[5] = (serviceId >> 16) & 0xff
+    result[6] = (serviceId >> 8) & 0xff
+    result[7] = serviceId & 0xff
 
     // Encode input length as 4 Uint8Array
-    result.push((inputLength >> 24) & 0xff)
-    result.push((inputLength >> 16) & 0xff)
-    result.push((inputLength >> 8) & 0xff)
-    result.push(inputLength & 0xff)
+    result[8] = (inputLength >> 24) & 0xff
+    result[9] = (inputLength >> 16) & 0xff
+    result[10] = (inputLength >> 8) & 0xff
+    result[11] = inputLength & 0xff
 
     return result
   }
@@ -460,11 +460,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r7 = gasCounter
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -477,11 +483,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE // Stateless fetch returns NONE
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -494,14 +506,20 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const [imX] = context
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
       const newRegisters = { ...registers }
       newRegisters.r7 = ACCUMULATE_ERROR_CODES.WHO
       return {
-        resultCode: 'continue' as const,
+        resultCode: 'continue',
         gasCounter: gasCounter - 10n,
         registers: newRegisters,
         ram,
@@ -513,7 +531,7 @@ export class AccumulateInvocationSystem {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -526,14 +544,20 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const [imX] = context
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
       const newRegisters = { ...registers }
       newRegisters.r7 = ACCUMULATE_ERROR_CODES.WHO
       return {
-        resultCode: 'continue' as const,
+        resultCode: 'continue',
         gasCounter: gasCounter - 10n,
         registers: newRegisters,
         ram,
@@ -545,7 +569,7 @@ export class AccumulateInvocationSystem {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -558,11 +582,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -575,11 +605,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -593,11 +629,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -610,11 +652,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -627,11 +675,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -644,7 +698,13 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     // Checkpoint affects the exceptional dimension (imY)
     const [imX, imY] = context
     const newImY = { ...imY }
@@ -654,7 +714,7 @@ export class AccumulateInvocationSystem {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -667,11 +727,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -684,11 +750,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -701,11 +773,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -718,11 +796,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -735,11 +819,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -752,11 +842,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -769,11 +865,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -786,11 +888,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -803,11 +911,17 @@ export class AccumulateInvocationSystem {
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
-  ) {
+  ): {
+    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
+    gasCounter: Gas
+    registers: RegisterState
+    ram: RAM
+    context: ImplicationsPair
+  } {
     const newRegisters = { ...registers }
     newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
     return {
-      resultCode: 'continue' as const,
+      resultCode: 'continue',
       gasCounter: gasCounter - 10n,
       registers: newRegisters,
       ram,
@@ -820,7 +934,7 @@ export class AccumulateInvocationSystem {
    * Selects between regular and exceptional dimensions based on termination type
    */
   private collapseResult(
-    executionResult: { gasUsed: Gas; result: number[] | 'oog' | 'panic' },
+    executionResult: { gasUsed: Gas; result: Uint8Array | 'oog' | 'panic' },
     context: ImplicationsPair,
   ): AccumulateInvocationResult {
     const [imX, imY] = context
@@ -835,7 +949,7 @@ export class AccumulateInvocationSystem {
         gasused: gasUsed,
         provisions: imY.provisions,
       }
-    } else if (Array.isArray(result) && result.length > 0) {
+    } else if (result.length > 0) {
       // Regular termination with yield - use regular dimension with yield
       return {
         poststate: imX.state,

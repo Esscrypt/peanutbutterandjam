@@ -1,79 +1,66 @@
 /**
  * Safrole Network Message Serialization
  *
- * Implements basic message passing according to Gray Paper
+ * Implements Gray Paper-compliant message passing according to serialization.tex
  * Reference: graypaper/text/serialization.tex
  */
 
 import { logger } from '@pbnj/core'
-import { decodeNatural, encodeNatural } from '@pbnj/serialization'
-import type { NetworkMessage } from './types'
-import { MessageType } from './types'
+import {
+  decodeNatural,
+  encodeNatural,
+  encodeUint8Array,
+} from '@pbnj/serialization'
+import { MessageType, type NetworkMessage } from '@pbnj/types'
 
 /**
- * Encode network message for transmission
- * Follows Gray Paper serialization principles
+ * Encode network message for transmission using Gray Paper serialization
+ *
+ * Gray Paper compliant encoding:
+ * - Natural number encoding for lengths and type discriminators
+ * - Sequence encoding for concatenating message components
+ * - Variable-length encoding with discriminators
  */
 export function encodeMessage(message: NetworkMessage): Uint8Array {
   try {
-    // Message header using Gray Paper natural number encoding
-    const idLength = encodeNatural(BigInt(message.id.length))
+    const encoder = new TextEncoder()
+
+    // Encode components using Gray Paper natural number encoding
+    const idBytes = encoder.encode(message.id)
+    const idLength = encodeNatural(BigInt(idBytes.length))
     const messageType = encodeNatural(BigInt(message.type))
     const payloadLength = encodeNatural(BigInt(message.payload.length))
+    const timestamp = encodeNatural(BigInt(message.timestamp))
+
+    // Handle optional signature with discriminator (Gray Paper §D.1)
     const hasSignature = message.signature
       ? encodeNatural(1n)
       : encodeNatural(0n)
+    const signatureBytes = message.signature || new Uint8Array(0)
 
-    // Message body
-    const encoder = new TextEncoder()
-    const idUint8Array = encoder.encode(message.id)
-    const signatureUint8Array = message.signature
-      ? encoder.encode(message.signature)
-      : new Uint8Array(0)
+    // Use Gray Paper sequence encoding to concatenate components
+    const components = [
+      idLength,
+      idBytes,
+      messageType,
+      payloadLength,
+      message.payload,
+      timestamp,
+      hasSignature,
+      signatureBytes,
+    ]
 
-    // Concatenate all parts manually (following Gray Paper sequence principles)
-    const totalLength =
-      idLength.length +
-      messageType.length +
-      payloadLength.length +
-      hasSignature.length +
-      idUint8Array.length +
-      message.payload.length +
-      signatureUint8Array.length
-
-    const body = new Uint8Array(totalLength)
-    let offset = 0
-
-    // Add each part sequentially
-    body.set(idLength, offset)
-    offset += idLength.length
-
-    body.set(messageType, offset)
-    offset += messageType.length
-
-    body.set(payloadLength, offset)
-    offset += payloadLength.length
-
-    body.set(hasSignature, offset)
-    offset += hasSignature.length
-
-    body.set(idUint8Array, offset)
-    offset += idUint8Array.length
-
-    body.set(message.payload, offset)
-    offset += message.payload.length
-
-    body.set(signatureUint8Array, offset)
+    const encoded = encodeUint8Array(components)
 
     logger.debug('Encoded network message', {
       messageId: message.id,
       messageType: MessageType[message.type],
       payloadSize: message.payload.length,
-      totalSize: body.length,
+      totalSize: encoded.length,
       hasSignature: !!message.signature,
     })
 
-    return body
+    return encoded
   } catch (error) {
     logger.error('Failed to encode network message', {
       error: error instanceof Error ? error.message : String(error),
@@ -85,38 +72,55 @@ export function encodeMessage(message: NetworkMessage): Uint8Array {
 }
 
 /**
- * Decode network message from transmission
+ * Decode network message from transmission using Gray Paper serialization
  */
 export function decodeMessage(data: Uint8Array): NetworkMessage {
   try {
     const decoder = new TextDecoder()
+    let remaining = data
 
-    // Decode header using Gray Paper natural number decoding
-    const { value: idLength, remaining: data1 } = decodeNatural(data)
-    const { value: messageType, remaining: data2 } = decodeNatural(data1)
-    const { value: payloadLength, remaining: data3 } = decodeNatural(data2)
-    const { value: hasSignature, remaining: data4 } = decodeNatural(data3)
+    // Decode components in the same order as encoding using Gray Paper natural number decoding
+    const { value: idLength, remaining: afterIdLength } =
+      decodeNatural(remaining)
+    remaining = afterIdLength
 
-    // Extract components
-    const idUint8Array = data4.slice(0, Number(idLength))
-    const payload = data4.slice(
-      Number(idLength),
-      Number(idLength) + Number(payloadLength),
-    )
-    const signatureUint8Array =
-      hasSignature === 1n
-        ? data4.slice(Number(idLength) + Number(payloadLength))
-        : new Uint8Array(0)
+    // Extract ID bytes
+    const idBytes = remaining.slice(0, Number(idLength))
+    remaining = remaining.slice(Number(idLength))
+    const id = decoder.decode(idBytes)
 
-    const id = decoder.decode(idUint8Array)
-    const signature =
-      hasSignature === 1n ? decoder.decode(signatureUint8Array) : undefined
+    // Decode message type
+    const { value: messageType, remaining: afterMessageType } =
+      decodeNatural(remaining)
+    remaining = afterMessageType
+
+    // Decode payload length
+    const { value: payloadLength, remaining: afterPayloadLength } =
+      decodeNatural(remaining)
+    remaining = afterPayloadLength
+
+    // Extract payload
+    const payload = remaining.slice(0, Number(payloadLength))
+    remaining = remaining.slice(Number(payloadLength))
+
+    // Decode timestamp
+    const { value: timestamp, remaining: afterTimestamp } =
+      decodeNatural(remaining)
+    remaining = afterTimestamp
+
+    // Decode signature discriminator
+    const { value: hasSignature, remaining: afterSignature } =
+      decodeNatural(remaining)
+    remaining = afterSignature
+
+    // Extract signature if present
+    const signature = hasSignature === 1n ? remaining : undefined
 
     const message: NetworkMessage = {
       id,
       type: Number(messageType) as MessageType,
       payload,
-      timestamp: Date.now(),
+      timestamp: Number(timestamp),
       signature,
     }
 
@@ -200,12 +204,12 @@ export function deserializePayload(payload: Uint8Array): unknown {
  */
 export function validateMessageFormat(message: NetworkMessage): boolean {
   try {
-    // Check required fields
+    // Check required fields exist
     if (
-      !message.id ||
-      !message.type ||
-      !message.payload ||
-      !message.timestamp
+      typeof message.id !== 'string' ||
+      typeof message.type !== 'number' ||
+      !(message.payload instanceof Uint8Array) ||
+      typeof message.timestamp !== 'number'
     ) {
       return false
     }
@@ -228,8 +232,13 @@ export function validateMessageFormat(message: NetworkMessage): boolean {
       return false
     }
 
-    // Check message ID format
+    // Check message ID format (according to Gray Paper natural number length constraints)
     if (message.id.length === 0 || message.id.length > 256) {
+      return false
+    }
+
+    // Check signature type if present
+    if (message.signature && !(message.signature instanceof Uint8Array)) {
       return false
     }
 
@@ -243,16 +252,19 @@ export function validateMessageFormat(message: NetworkMessage): boolean {
 }
 
 /**
- * Create a simple message for testing
+ * Create a test message for unit testing
  */
 export function createTestMessage(
+  id: string,
   type: MessageType,
-  payload: unknown,
+  payload: Uint8Array,
+  signature?: Uint8Array,
 ): NetworkMessage {
   return {
-    id: `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    id,
     type,
-    payload: serializePayload(payload),
+    payload,
     timestamp: Date.now(),
+    signature,
   }
 }

@@ -1,0 +1,13 @@
+{
+  "rustc": 8838817330114404042,
+  "features": "[\"alloc\", \"std\"]",
+  "declared_features": "[\"alloc\", \"core\", \"default\", \"libc\", \"logging\", \"rustc-dep-of-std\", \"std\", \"use_std\"]",
+  "target": 11745930252914242013,
+  "profile": 11723298867167628662,
+  "path": 354976991025260186,
+  "deps": [],
+  "local": [{ "Precalculated": "2.7.5" }],
+  "rustflags": [],
+  "config": 2069994364910194474,
+  "compile_kind": 0
+}

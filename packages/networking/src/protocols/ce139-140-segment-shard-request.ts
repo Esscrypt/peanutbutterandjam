@@ -70,8 +70,7 @@ export class SegmentShardRequestProtocol {
         for (let i = 0; i < segmentShards.length; i++) {
           const segmentKey = `${key}_${i}`
           await this.dbIntegration.setServiceStorage(
-            9, // Service ID 9 for segment shards
-            Buffer.from(segmentKey),
+            segmentKey,
             segmentShards[i],
           )
         }
@@ -83,8 +82,7 @@ export class SegmentShardRequestProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          9,
-          Buffer.from(`${key}_meta`),
+          `${key}_meta`,
           Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
@@ -107,11 +105,7 @@ export class SegmentShardRequestProtocol {
     // Persist to database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.setServiceStorage(
-          9, // Service ID 9 for segment shards
-          Buffer.from(key),
-          justification,
-        )
+        await this.dbIntegration.setServiceStorage(key, justification)
       } catch (error) {
         console.error('Failed to persist justification to database:', error)
       }
@@ -155,8 +149,7 @@ export class SegmentShardRequestProtocol {
 
       // Get metadata to know how many segments
       const metadataData = await this.dbIntegration.getServiceStorage(
-        9,
-        Buffer.from(`${key}_meta`),
+        `${key}_meta`,
       )
 
       if (!metadataData) return null
@@ -167,10 +160,8 @@ export class SegmentShardRequestProtocol {
       // Get each segment shard
       for (let i = 0; i < metadata.count; i++) {
         const segmentKey = `${key}_${i}`
-        const segmentShard = await this.dbIntegration.getServiceStorage(
-          9,
-          Buffer.from(segmentKey),
-        )
+        const segmentShard =
+          await this.dbIntegration.getServiceStorage(segmentKey)
 
         if (segmentShard) {
           segmentShards.push(segmentShard)
@@ -205,10 +196,7 @@ export class SegmentShardRequestProtocol {
 
     try {
       const key = `${erasureRoot.toString()}_${shardIndex}_justification`
-      const justification = await this.dbIntegration.getServiceStorage(
-        9,
-        Buffer.from(key),
-      )
+      const justification = await this.dbIntegration.getServiceStorage(key)
 
       if (justification) {
         // Cache in local store

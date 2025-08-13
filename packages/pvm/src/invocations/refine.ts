@@ -10,11 +10,11 @@
  */
 
 import { logger } from '@pbnj/core'
-import { ArgumentInvocationSystem } from '../argument-invocation'
-import { REFINE_CONFIG } from '../config'
 import type {
   Accounts,
   Gas,
+  HashValue,
+  HexString,
   RAM,
   RefineContext,
   RefineContextMutator,
@@ -23,7 +23,10 @@ import type {
   Segment,
   ServiceAccount,
   WorkPackage,
-} from '../types'
+} from '@pbnj/types'
+import { HOST_CALL_RESULTS } from '@pbnj/types'
+import { ArgumentInvocationSystem } from '../argument-invocation'
+import { REFINE_CONFIG } from '../config'
 
 /**
  * Refine Invocation System
@@ -40,7 +43,7 @@ import type {
  * @returns Tuple of [result, export_sequence, gas_used]
  */
 export class RefineInvocationSystem {
-  private argumentInvocationSystem: ArgumentInvocationSystem<RefineContext>
+  private readonly argumentInvocationSystem: ArgumentInvocationSystem<RefineContext>
 
   constructor() {
     // Create argument invocation system with Refine context mutator
@@ -65,8 +68,8 @@ export class RefineInvocationSystem {
     coreIndex: number,
     workItemIndex: number,
     workPackage: WorkPackage,
-    authorizerTrace: number[],
-    importSegments: number[][],
+    authorizerTrace: HashValue,
+    importSegments: Segment[],
     exportSegmentOffset: number,
     accounts: Accounts,
   ): [RefineResult, Segment[], Gas] {
@@ -80,7 +83,7 @@ export class RefineInvocationSystem {
       accountsCount: Object.keys(accounts).length,
     })
 
-    const workItem = workPackage.workitems[workItemIndex]
+    const workItem = workPackage.items[workItemIndex]
     if (!workItem) {
       logger.debug('Refine: work item not found, returning BAD')
       return ['BAD', [], 0n]
@@ -126,10 +129,10 @@ export class RefineInvocationSystem {
 
     // Execute the argument invocation with service code
     const result = this.argumentInvocationSystem.execute(
-      historicalCode,
+      new Uint8Array(Buffer.from(historicalCode, 'hex')), // service code
       0, // instruction pointer starts at 0
       workItem.refgaslimit, // gas limit from work item
-      { data: encodedArgs, size: encodedArgs.length }, // argument data
+      { data: new Uint8Array(encodedArgs), size: encodedArgs.length }, // argument data
       [new Map(), []], // initial context: empty PVM guests map and empty segments
     )
 
@@ -153,7 +156,7 @@ export class RefineInvocationSystem {
       resultSize: result.result.length,
       gasUsed: gasUsed,
     })
-    return [result.result, [], gasUsed]
+    return [new Uint8Array(result.result), [], gasUsed]
   }
 
   /**
@@ -216,7 +219,7 @@ export class RefineInvocationSystem {
             gasCounter: gasCounter - 10n,
             registers: {
               ...registers,
-              r7: 2n, // WHAT error code
+              r7: HOST_CALL_RESULTS.WHAT,
             },
             ram,
             context,
@@ -397,7 +400,7 @@ export class RefineInvocationSystem {
       gasCounter: gasCounter - 10n,
       registers: {
         ...registers,
-        r7: 2n ** 64n - 4n, // WHO error code
+        r7: HOST_CALL_RESULTS.WHO, // WHO error code
       },
       ram,
       context,
@@ -427,7 +430,7 @@ export class RefineInvocationSystem {
       gasCounter: gasCounter - 10n,
       registers: {
         ...registers,
-        r7: 2n ** 64n - 4n, // WHO error code
+        r7: HOST_CALL_RESULTS.WHO, // WHO error code
       },
       ram,
       context,
@@ -457,7 +460,7 @@ export class RefineInvocationSystem {
       gasCounter: gasCounter - 10n,
       registers: {
         ...registers,
-        r7: 2n ** 64n - 4n, // WHO error code
+        r7: HOST_CALL_RESULTS.WHO, // WHO error code
       },
       ram,
       context,
@@ -487,7 +490,7 @@ export class RefineInvocationSystem {
       gasCounter: gasCounter - 10n,
       registers: {
         ...registers,
-        r7: 2n ** 64n - 4n, // WHO error code
+        r7: HOST_CALL_RESULTS.WHO, // WHO error code
       },
       ram,
       context,
@@ -517,7 +520,7 @@ export class RefineInvocationSystem {
       gasCounter: gasCounter - 10n,
       registers: {
         ...registers,
-        r7: 2n ** 64n - 4n, // WHO error code
+        r7: HOST_CALL_RESULTS.WHO, // WHO error code
       },
       ram,
       context,
@@ -535,10 +538,10 @@ export class RefineInvocationSystem {
   private historicalLookup(
     serviceAccount: ServiceAccount,
     _lookupAnchorTime: number,
-    codehash: number[],
-  ): number[] | null {
+    codehash: HashValue,
+  ): HashValue | null {
     // Simplified implementation - return the service account code if codehash matches
-    if (this.arraysEqual(serviceAccount.codehash, codehash)) {
+    if (serviceAccount.codehash === codehash) {
       return serviceAccount.codehash
     }
     return null
@@ -558,42 +561,31 @@ export class RefineInvocationSystem {
     coreIndex: number,
     workItemIndex: number,
     serviceIndex: number,
-    payload: number[],
+    payload: HexString,
     _workPackage: WorkPackage,
-  ): number[] {
+  ): Uint8Array {
     // Simplified encoding - concatenate all values
     const coreBytes = this.encodeUint32(coreIndex)
     const workItemBytes = this.encodeUint32(workItemIndex)
     const serviceBytes = this.encodeUint32(serviceIndex)
     const payloadLengthBytes = this.encodeUint32(payload.length)
 
-    return [
+    return new Uint8Array([
       ...coreBytes,
       ...workItemBytes,
       ...serviceBytes,
       ...payloadLengthBytes,
-      ...payload,
-    ]
+      ...Buffer.from(payload, 'hex'),
+    ])
   }
 
   /**
    * Encode 32-bit unsigned integer
    */
-  private encodeUint32(value: number): number[] {
+  private encodeUint32(value: number): Uint8Array {
     const buffer = new ArrayBuffer(4)
     const view = new DataView(buffer)
     view.setUint32(0, value, false) // big-endian
-    return Array.from(new Uint8Array(buffer))
-  }
-
-  /**
-   * Compare two arrays for equality
-   */
-  private arraysEqual(a: number[], b: number[]): boolean {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
+    return new Uint8Array(buffer)
   }
 }

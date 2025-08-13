@@ -64,11 +64,7 @@ export class AuditShardRequestProtocol {
     // Persist to database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.setServiceStorage(
-          8, // Service ID 8 for audit shards
-          Buffer.from(key),
-          auditShard,
-        )
+        await this.dbIntegration.setServiceStorage(key, auditShard)
       } catch (error) {
         console.error('Failed to persist audit shard to database:', error)
       }
@@ -98,10 +94,7 @@ export class AuditShardRequestProtocol {
 
     try {
       const key = `${erasureRoot.toString()}_${shardIndex}_audit`
-      const auditShard = await this.dbIntegration.getServiceStorage(
-        8,
-        Buffer.from(key),
-      )
+      const auditShard = await this.dbIntegration.getServiceStorage(key)
 
       if (auditShard) {
         // Cache in local store

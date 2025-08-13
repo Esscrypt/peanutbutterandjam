@@ -7,7 +7,11 @@
 
 import type { Hex } from '@pbnj/core'
 import { blake2bHash, logger } from '@pbnj/core'
-import type { BlockAuthoringConfig, BlockHeader, Extrinsic } from './types'
+import type {
+  BlockAuthoringConfig,
+  SerializationBlockHeader as BlockHeader,
+  Extrinsic,
+} from '@pbnj/types'
 
 /**
  * Header Constructor
@@ -25,7 +29,7 @@ export class HeaderConstructor {
     const effectiveParent = parent || this.createGenesisHeader(config)
 
     logger.debug('Constructing block header', {
-      parentNumber: effectiveParent.number,
+      parentSlot: effectiveParent.slot,
       extrinsicsCount: extrinsics.length,
       isGenesis: !parent,
     })
@@ -39,30 +43,36 @@ export class HeaderConstructor {
     // Calculate extrinsics root
     const extrinsicsRoot = await this.calculateExtrinsicsRoot(extrinsics)
 
-    // Calculate timestamp
+    // Calculate next slot
     const timestamp = this.calculateTimestamp(
-      effectiveParent.timestamp,
+      effectiveParent.slot,
       config.slotDuration,
     )
 
     // Create new header
     const header: BlockHeader = {
-      number: effectiveParent.number + 1,
-      parentHash: parentHash as `0x${string}`,
-      stateRoot: stateRoot as `0x${string}`,
-      extrinsicsRoot: extrinsicsRoot as `0x${string}`,
-      timestamp,
-      author: config.validatorKey,
-      signature: '', // Will be set after header creation
+      parent: parentHash as `0x${string}`,
+      parent_state_root: stateRoot as `0x${string}`,
+      extrinsic_hash: extrinsicsRoot as `0x${string}`,
+      slot: timestamp, // JAM uses time slot instead of sequential block numbers
+      epoch_mark: null,
+      tickets_mark: null,
+      offenders_mark: [],
+      author_index: 0, // TODO: Map validatorKey to author_index
+      entropy_source: `0x${'00'.repeat(32)}` as `0x${string}`,
+      seal: `0x${'00'.repeat(32)}` as `0x${string}`,
     }
 
     // Generate signature for the header
-    header.signature = await this.generateSignature(header, config)
+    header.seal = (await this.generateSignature(
+      header,
+      config,
+    )) as `0x${string}`
 
     logger.debug('Header constructed', {
-      blockNumber: header.number,
-      parentHash: header.parentHash,
-      extrinsicsRoot: header.extrinsicsRoot,
+      blockSlot: header.slot,
+      parentHash: header.parent,
+      extrinsicsRoot: header.extrinsic_hash,
     })
 
     return header
@@ -73,7 +83,7 @@ export class HeaderConstructor {
    */
   private async calculateParentHash(parent: BlockHeader): Promise<Hex> {
     // TODO: Implement proper hash calculation using serialization
-    return `0x${parent.number.toString(16).padStart(64, '0')}`
+    return `0x${parent.slot.toString(16).padStart(64, '0')}`
   }
 
   /**
@@ -81,7 +91,7 @@ export class HeaderConstructor {
    */
   private async calculateStateRoot(parent: BlockHeader): Promise<Hex> {
     // TODO: Implement proper state root calculation
-    return `0x${parent.stateRoot}`
+    return parent.parent_state_root
   }
 
   /**
@@ -127,24 +137,27 @@ export class HeaderConstructor {
   /**
    * Create genesis header
    */
-  private createGenesisHeader(config: BlockAuthoringConfig): BlockHeader {
+  private createGenesisHeader(_config: BlockAuthoringConfig): BlockHeader {
     const genesisHeader: BlockHeader = {
-      number: 0,
-      parentHash:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
-      stateRoot:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
-      extrinsicsRoot:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
-      timestamp: Date.now(),
-      author: config.validatorKey,
-      signature:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      parent:
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      parent_state_root:
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      extrinsic_hash:
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      slot: 0, // Genesis block starts at slot 0
+      epoch_mark: null,
+      tickets_mark: null,
+      offenders_mark: [],
+      author_index: 0, // TODO: Map validatorKey to author_index
+      entropy_source:
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      seal: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
     }
 
     logger.debug('Created genesis header', {
-      number: genesisHeader.number,
-      timestamp: genesisHeader.timestamp,
+      slot: genesisHeader.slot,
+      timestamp: genesisHeader.slot,
     })
 
     return genesisHeader
@@ -163,12 +176,11 @@ export class HeaderConstructor {
 
     // Create a hash of the header for signing
     const headerData = {
-      number: header.number,
-      parentHash: header.parentHash,
-      stateRoot: header.stateRoot,
-      extrinsicsRoot: header.extrinsicsRoot,
-      timestamp: header.timestamp,
-      author: header.author,
+      slot: header.slot,
+      parentHash: header.parent,
+      stateRoot: header.parent_state_root,
+      extrinsicsRoot: header.extrinsic_hash,
+      authorIndex: header.author_index,
     }
 
     const headerBytes = new TextEncoder().encode(JSON.stringify(headerData))

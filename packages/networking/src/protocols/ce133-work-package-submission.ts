@@ -43,19 +43,21 @@ export class WorkPackageSubmissionProtocol {
       const pendingWorkPackages =
         await this.dbIntegration.getPendingWorkPackages()
 
-      for (const pending of pendingWorkPackages) {
-        const workPackageData = await this.dbIntegration.getWorkPackage(
-          pending.workPackageHash,
-        )
+      for (const pendingHash of pendingWorkPackages) {
+        const hashString = Buffer.from(pendingHash).toString('hex')
+        const workPackageData =
+          await this.dbIntegration.getWorkPackage(hashString)
+
         if (workPackageData) {
-          this.workPackages.set(pending.workPackageHash.toString(), {
-            workPackage: workPackageData.workPackage,
-            extrinsic: workPackageData.extrinsic,
+          // Store the work package data
+          this.workPackages.set(hashString, {
+            workPackage: workPackageData,
+            extrinsic: new Uint8Array(), // placeholder
           })
 
-          this.pendingSubmissions.set(pending.workPackageHash.toString(), {
-            coreIndex: workPackageData.coreIndex,
-            timestamp: workPackageData.timestamp,
+          this.pendingSubmissions.set(hashString, {
+            coreIndex: 0, // placeholder
+            timestamp: Date.now(),
           })
         }
       }
@@ -149,10 +151,8 @@ export class WorkPackageSubmissionProtocol {
       if (this.dbIntegration) {
         try {
           await this.dbIntegration.storeWorkPackage(
-            workPackageHashBytes,
+            workPackageHashBytes.toString(),
             submission.workPackage,
-            submission.extrinsic,
-            submission.coreIndex,
           )
         } catch (error) {
           console.error('Failed to persist work package to database:', error)
@@ -225,7 +225,9 @@ export class WorkPackageSubmissionProtocol {
     // Mark as processed in database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.markWorkPackageProcessed(workPackageHash)
+        await this.dbIntegration.markWorkPackageProcessed(
+          new Uint8Array(Buffer.from(workPackageHash)),
+        )
       } catch (error) {
         console.error(
           'Failed to mark work package as processed in database:',

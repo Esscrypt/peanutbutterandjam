@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { generateAlternativeName } from '../src/crypto/certificates'
+import { generateAlternativeName } from '@pbnj/core'
 
 describe('generateAlternativeName', () => {
   it('should generate alternative names according to Gray Paper specification', () => {

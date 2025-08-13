@@ -1,3 +1,3 @@
 {
-  "extends": "@pbnj/typescript-config/base.json",
+  "extends": "@pbnj/typescript-config/base.json"
 }

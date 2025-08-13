@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { deriveSecretSeeds, generateTrivialSeed } from '../src/crypto/certificates'
+import { deriveSecretSeeds, generateTrivialSeed } from '@pbnj/core'
 import { generateKeyPairFromSeed } from '@stablelib/ed25519'
 
 describe('JIP-5 Secret Key Derivation', () => {

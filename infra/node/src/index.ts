@@ -98,5 +98,5 @@ if (require.main === module) {
 }
 
 // Export for programmatic use
-export { MainServiceImpl as default }
+export { MainServiceImpl as default, MainServiceImpl }
 export type { MainServiceConfig }

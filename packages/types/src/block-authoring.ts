@@ -5,7 +5,13 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import type { Extrinsic, Hash, HashValue, ValidatorKey } from './core'
+import type {
+  Extrinsic,
+  Hash,
+  HashValue,
+  HexString,
+  ValidatorKey,
+} from './core'
 import type {
   BlockHeader,
   SafroleTicket,
@@ -395,19 +401,19 @@ export interface AuthorValidationResult {
  * Account structure
  */
 export interface Account {
-  address: string
+  address: HexString
   balance: bigint
   nonce: number
   code?: Uint8Array
-  storage?: Map<string, string>
+  storage?: Map<HexString, HexString>
   isValidator?: boolean
-  validatorKey?: string
+  validatorKey?: HexString
   stake?: bigint
 }
 
 export interface Validator {
-  address: string
-  publicKey: string
+  address: HexString
+  publicKey: HexString
   stake: bigint
   isActive: boolean
 }
@@ -423,14 +429,14 @@ export interface GenesisState {
   // Block information
   genesisBlock: {
     number: number
-    hash: string
-    parentHash: string
+    hash: HexString
+    parentHash: HexString
     timestamp: number
   }
 
   // Initial state
   state: {
-    accounts: Map<string, Account>
+    accounts: Map<HexString, Account>
     validators: Validator[]
     safrole: {
       epoch: number
@@ -438,18 +444,18 @@ export interface GenesisState {
       entropy: string
       tickets: SafroleTicket[]
     }
-    authpool: string[]
-    recent: string[]
+    authpool: HexString[]
+    recent: HexString[]
     lastAccount: number
-    stagingset: string[]
-    activeset: string[]
-    previousset: string[]
+    stagingset: HexString[]
+    activeset: HexString[]
+    previousset: HexString[]
     reports: WorkReport[]
     thetime: number
-    authqueue: string[]
-    privileges: Map<string, number>
+    authqueue: HexString[]
+    privileges: Map<HexString, number>
     disputes: unknown[]
-    activity: Map<string, number>
+    activity: Map<HexString, number>
     ready: boolean
     accumulated: unknown[]
   }

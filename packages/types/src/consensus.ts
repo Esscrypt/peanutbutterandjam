@@ -5,7 +5,7 @@
  * Reference: graypaper/text/safrole.tex
  */
 
-import type { Hash } from './core'
+import type { Hash, HashValue, HexString } from './core'
 
 // Define ConsensusState interface
 export interface ConsensusState {
@@ -38,29 +38,24 @@ export interface TicketProof {
 }
 
 export interface SafroleState {
-  /** Current slot index */
-  slot: number
-  /** Entropy accumulator and historical values */
-  entropy: string[]
-  /** Pending validator set (next epoch) */
+  /** Pending validator set (next epoch) - Gray Paper: pendingSet */
   pendingSet: ValidatorKey[]
-  /** Active validator set (current epoch) */
-  activeSet: ValidatorKey[]
-  /** Previous validator set */
-  previousSet: ValidatorKey[]
-  /** Epoch root (Bandersnatch ring root) */
-  epochRoot: string
-  /** Current epoch's seal tickets */
-  sealTickets: string[]
-  /** Ticket accumulator for next epoch */
+  /** Epoch root (Bandersnatch ring root) - Gray Paper: epochRoot */
+  epochRoot: HashValue
+  /** Current epoch's seal tickets - Gray Paper: sealTickets */
+  sealTickets: Ticket[] | ValidatorKey[]
+  /** Ticket accumulator for next epoch - Gray Paper: ticketAccumulator */
   ticketAccumulator: Ticket[]
+
+  // Note: activeSet, previousSet, and stagingSet are part of global state,
+  // not internal Safrole state according to Gray Paper equation (50)
 }
 
 export interface SafroleInput {
   /** Block slot */
   slot: number
   /** Current entropy */
-  entropy: string[]
+  entropy: HashValue
   /** Ticket proofs in extrinsic */
   extrinsic: TicketProof[]
 }
@@ -207,13 +202,13 @@ export interface ConsensusError {
  */
 export interface ValidatorKey {
   /** Bandersnatch key (first 32 Uint8Array) */
-  bandersnatch: string
+  bandersnatch: HexString
   /** Ed25519 key (next 32 Uint8Array) */
-  ed25519: string
+  ed25519: HexString
   /** BLS key (next 144 Uint8Array) */
-  bls: string
+  bls: HexString
   /** Metadata (last 128 Uint8Array) */
-  metadata: string
+  metadata: HexString
 }
 
 /**
@@ -223,7 +218,7 @@ export interface EpochMarker {
   /** Epoch number */
   epoch: number
   /** Entropy accumulator */
-  entropyAccumulator: string
+  entropyAccumulator: HexString
   /** Validator keys */
   validatorKeys: ValidatorKey[]
   /** Epoch root */

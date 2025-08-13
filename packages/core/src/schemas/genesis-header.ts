@@ -5,18 +5,20 @@
  * Reference: JAM Protocol genesis specifications
  */
 
+import type { Hex } from 'viem'
 import { z } from 'zod'
 
 // Hex string validation for 32-byte hashes
 const hex32Schema = z
   .string()
   .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a 32-byte hex string')
+  .transform((t) => t as Hex)
 
 // Hex string validation for 96-byte signatures
 const hex96Schema = z
   .string()
   .regex(/^0x[a-fA-F0-9]{192}$/, 'Must be a 96-byte hex string')
-
+  .transform((t) => t as Hex)
 // Validator schema
 const validatorSchema = z.object({
   bandersnatch: hex32Schema,

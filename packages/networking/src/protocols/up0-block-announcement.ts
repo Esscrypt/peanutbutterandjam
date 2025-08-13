@@ -24,6 +24,7 @@ export class BlockAnnouncementProtocol {
   private knownLeaves: Map<string, { hash: Bytes; slot: number }> = new Map()
   private finalizedBlock: { hash: Bytes; slot: number } | null = null
   private grid: ValidatorGrid | null = null
+  // private _validators: ValidatorMetadata[] = [] // TODO: Implement validator management
   private dbIntegration: NetworkingDatabaseIntegration | null = null
 
   constructor(dbIntegration?: NetworkingDatabaseIntegration) {
@@ -53,8 +54,8 @@ export class BlockAnnouncementProtocol {
       // Load known leaves
       const knownLeaves = await this.dbIntegration.getKnownLeaves()
       this.knownLeaves.clear()
-      for (const leaf of knownLeaves) {
-        this.knownLeaves.set(leaf.hash.toString(), leaf)
+      for (const [key, leaf] of knownLeaves) {
+        this.knownLeaves.set(key, leaf)
       }
 
       console.log(
@@ -68,9 +69,13 @@ export class BlockAnnouncementProtocol {
   /**
    * Set validator grid for neighbor detection
    */
-  setValidatorGrid(grid: ValidatorGrid, validators: ValidatorMetadata[]): void {
+  setValidatorGrid(
+    grid: ValidatorGrid,
+    _validators: ValidatorMetadata[],
+  ): void {
     this.grid = grid
-    this.validators = validators
+    // TODO: Implement validator management
+    // this._validators = validators
   }
 
   /**
@@ -393,7 +398,7 @@ export class BlockAnnouncementProtocol {
   async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
     if (data.length === 0) {
       // Initial handshake
-      const _handshake = this.createHandshake()
+      // const _handshake = this.createHandshake()
       // Send handshake response would be handled by the stream manager
       return
     }

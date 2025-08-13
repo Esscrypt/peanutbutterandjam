@@ -43,10 +43,10 @@ export function parseArgs(args: string[]): ParsedArgs {
   return result
 }
 
-export function getOption(
+export function getOption<T = unknown>(
   args: ParsedArgs,
   key: string,
-  defaultValue?: any,
-): any {
-  return args[key] !== undefined ? args[key] : defaultValue
+  defaultValue?: T,
+): T | undefined {
+  return args[key] !== undefined ? (args[key] as T) : defaultValue
 }

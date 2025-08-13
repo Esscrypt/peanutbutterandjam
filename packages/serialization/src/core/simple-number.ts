@@ -25,7 +25,7 @@ export function encodeSimpleNatural(value: Natural): Uint8Array {
 
   // Convert to hex string and pad to even length
   const hexStr = value.toString(16)
-  const paddedHex = hexStr.length % 2 === 0 ? hexStr : '0' + hexStr
+  const paddedHex = hexStr.length % 2 === 0 ? hexStr : `0${hexStr}`
 
   // Convert hex string to Uint8Array
   const result = new Uint8Array(paddedHex.length / 2)
@@ -56,7 +56,7 @@ export function decodeSimpleNatural(data: Uint8Array): {
   }
 
   // Parse hex string to BigInt
-  const value = BigInt('0x' + hexStr)
+  const value = BigInt(`0x${hexStr}`)
 
   return { value, remaining: data.slice(data.length) }
 }

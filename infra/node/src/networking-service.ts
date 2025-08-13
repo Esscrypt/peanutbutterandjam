@@ -6,13 +6,19 @@
 
 import { logger } from '@pbnj/core'
 import {
-  GridStructureManager,
-  PeerDiscoveryManager,
   QuicTransport,
   type TransportConfig,
   type TransportEvents,
-  ValidatorSetManager,
 } from '@pbnj/networking'
+import {
+  // encodeHeader,
+  decodeHeader,
+  // encodeWorkPackage,
+  decodeWorkPackage,
+  // encodeWorkPackage,
+  // type Header,
+  // type WorkPackage
+} from '@pbnj/serialization'
 import type {
   EpochIndex,
   NodeType,
@@ -21,42 +27,14 @@ import type {
 } from '@pbnj/types'
 import { BaseService } from './service-interface'
 
-// import {
-//   encodeBlockHeader,
-//   decodeBlockHeader,
-//   encodeWorkPackage,
-//   decodeWorkPackage,
-//   type BlockHeader,
-//   type WorkPackage
-// } from '@pbnj/serialization'
-
 // Temporary type definitions
 interface BlockHeader {
   timeslot: number
   parentHash: string
-  value: any
+  value: unknown
 }
 
-interface WorkPackage {
-  authCodeHost: string
-  value: any
-}
-
-function encodeBlockHeader(_header: BlockHeader): Uint8Array {
-  return new Uint8Array(0)
-}
-
-function decodeBlockHeader(_data: Uint8Array): BlockHeader {
-  return {} as BlockHeader
-}
-
-function encodeWorkPackage(_workPackage: WorkPackage): Uint8Array {
-  return new Uint8Array(0)
-}
-
-function decodeWorkPackage(_data: Uint8Array): WorkPackage {
-  return {} as WorkPackage
-}
+import type { WorkPackage } from '@pbnj/types'
 
 import type { BlockAuthoringServiceImpl } from './block-authoring-service'
 
@@ -86,6 +64,9 @@ export interface NetworkingServiceConfig {
 export class NetworkingService extends BaseService {
   private config: NetworkingServiceConfig
   private transport: QuicTransport
+  // private _validatorSetManager: ValidatorSetManager
+  // private _gridStructureManager: GridStructureManager
+  // private _peerDiscoveryManager: PeerDiscoveryManager
   // private builderSlotsManager: BuilderSlotsManager
   private isRunning = false
 
@@ -127,7 +108,7 @@ export class NetworkingService extends BaseService {
 
     // Create transport events
     const transportEvents: TransportEvents = {
-      onConnectionEstablished: (connectionId: string, endpoint: any) => {
+      onConnectionEstablished: (connectionId: string, endpoint: unknown) => {
         logger.info('Transport connection established', {
           connectionId,
           endpoint,
@@ -151,9 +132,11 @@ export class NetworkingService extends BaseService {
 
     // Initialize components
     this.transport = new QuicTransport(transportConfig, transportEvents)
-    this.validatorSetManager = new ValidatorSetManager()
-    this.gridStructureManager = new GridStructureManager()
-    this.peerDiscoveryManager = new PeerDiscoveryManager()
+
+    // TODO: Initialize managers when they're needed
+    // this._validatorSetManager = new ValidatorSetManager()
+    // this._gridStructureManager = new GridStructureManager()
+    // this._peerDiscoveryManager = new PeerDiscoveryManager()
     // this.builderSlotsManager = new BuilderSlotsManager()
     // this.connectionManager = new ConnectionManager(
     //   this.transport,
@@ -233,7 +216,7 @@ export class NetworkingService extends BaseService {
       }
 
       // Serialize block header
-      const _data = this.serializeBlockHeader(blockHeader)
+      // const _data = this.serializeBlockHeader(blockHeader)
 
       logger.info('Announcing block to network', {
         timeslot: blockHeader.timeslot,
@@ -260,10 +243,10 @@ export class NetworkingService extends BaseService {
       }
 
       // Serialize work package
-      const _data = this.serializeWorkPackage(workPackage)
+      // const _data = encodeWorkPackage(workPackage) // Commented out to avoid unused variable
 
       logger.info('Submitting work package to network', {
-        authCodeHost: workPackage.authCodeHost,
+        authCodeHost: workPackage.auth_code_host,
       })
 
       // TODO: Implement work package submission to connected validators
@@ -345,11 +328,11 @@ export class NetworkingService extends BaseService {
     data: Uint8Array,
   ): void {
     try {
-      const blockHeader = this.deserializeBlockHeader(data)
+      const blockHeader = decodeHeader(data)
       logger.info('Received block announcement', {
         fromValidator: validatorIndex,
-        timeslot: blockHeader.timeslot,
-        parentHash: blockHeader.parentHash,
+        timeslot: blockHeader.slot,
+        parentHash: blockHeader.parent,
       })
 
       // Notify block authoring service about new block
@@ -370,10 +353,10 @@ export class NetworkingService extends BaseService {
     data: Uint8Array,
   ): void {
     try {
-      const request = this.deserializeBlockRequest(data)
+      const header = decodeHeader(data)
       logger.info('Received block request', {
         fromValidator: validatorIndex,
-        blockNumber: request.blockNumber,
+        blockNumber: header.slot,
       })
 
       // Get block from block authoring service
@@ -382,7 +365,7 @@ export class NetworkingService extends BaseService {
         'Block request received, would retrieve block from block authoring service',
       )
       logger.warn('Block retrieval not implemented yet', {
-        blockNumber: request.blockNumber,
+        blockNumber: header.slot,
       })
     } catch (error) {
       logger.error('Failed to handle block request:', error)
@@ -426,10 +409,10 @@ export class NetworkingService extends BaseService {
     data: Uint8Array,
   ): void {
     try {
-      const workPackage = this.deserializeWorkPackage(data)
+      const { value: workPackage } = decodeWorkPackage(data)
       logger.info('Received work package submission', {
         fromValidator: validatorIndex,
-        authCodeHost: workPackage.authCodeHost,
+        authCodeHost: workPackage.auth_code_host,
       })
 
       // Process work package in block authoring service
@@ -440,43 +423,6 @@ export class NetworkingService extends BaseService {
     } catch (error) {
       logger.error('Failed to handle work package submission:', error)
     }
-  }
-
-  /**
-   * Serialize block header for network transmission
-   */
-  private serializeBlockHeader(blockHeader: BlockHeader): Uint8Array {
-    return encodeBlockHeader(blockHeader)
-  }
-
-  /**
-   * Deserialize block header from network data
-   */
-  private deserializeBlockHeader(data: Uint8Array): BlockHeader {
-    const { value } = decodeBlockHeader(data)
-    return value
-  }
-
-  /**
-   * Serialize work package for network transmission
-   */
-  private serializeWorkPackage(workPackage: WorkPackage): Uint8Array {
-    return encodeWorkPackage(workPackage)
-  }
-
-  /**
-   * Deserialize work package from network data
-   */
-  private deserializeWorkPackage(data: Uint8Array): WorkPackage {
-    const { value } = decodeWorkPackage(data)
-    return value
-  }
-
-  /**
-   * Deserialize block request
-   */
-  private deserializeBlockRequest(data: Uint8Array): { blockNumber: number } {
-    return JSON.parse(new TextDecoder().decode(data))
   }
 
   /**

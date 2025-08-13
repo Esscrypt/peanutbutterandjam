@@ -6,6 +6,7 @@ import { createGenKeysCommand } from './commands/gen-keys'
 import { createGenSpecCommand } from './commands/gen-spec'
 import { createListKeysCommand } from './commands/list-keys'
 import { createRunCommand } from './commands/run'
+import { createTestVectorsCommand } from './commands/test-vectors'
 
 // Load environment variables
 config()
@@ -34,10 +35,11 @@ Usage:
   pbnj <command> [options]
 
 Available Commands:
-  run         Run the PeanutButterAndJam node
-  gen-spec    Generate chain specification
-  gen-keys    Generate validator keys
-  list-keys   List generated keys
+  run           Run the PeanutButterAndJam node
+  gen-spec      Generate chain specification
+  gen-keys      Generate validator keys
+  list-keys     List generated keys
+  test-vectors  Execute JAM test vectors with ASN.1 validation
 
 Use "pbnj <command> --help" for more information about a command.
 `)
@@ -57,7 +59,7 @@ const isSubcommandHelp =
 // Main execution
 ;(async () => {
   switch (command) {
-    case 'run':
+    case 'run': {
       if (isSubcommandHelp) {
         console.log(`
 Run the PeanutButterAndJam node
@@ -92,8 +94,10 @@ Options:
 `)
         return
       }
-      await createRunCommand(args.slice(1))
+      const runCommand = createRunCommand()
+      await runCommand.parseAsync(args, { from: 'user' })
       break
+    }
     case 'gen-spec':
       if (isSubcommandHelp) {
         console.log(`
@@ -147,9 +151,44 @@ This command lists generated validator keys.
       }
       createListKeysCommand(args.slice(1))
       break
+    case 'test-vectors':
+      if (isSubcommandHelp) {
+        console.log(`
+Execute JAM test vectors with ASN.1 validation
+
+Usage:
+  pbnj test-vectors [options]
+
+Options:
+  -c, --component <name>     Test specific component (safrole, statistics, accumulate, etc.)
+  -p, --params <set>         Parameter set: "tiny" or "full" (default: "tiny")
+  -s, --spec <set>           Alias for --params
+  -f, --format <type>        Input format: "binary", "json", or "both" (default: "json")
+      --validate-schema      Run ASN.1 schema validation before tests
+  -o, --output <format>      Output format: "summary", "detailed", or "json" (default: "summary")
+      --filter <regex>       Filter test cases by name (regex pattern)
+      --fail-fast            Stop execution on first failure
+  -S, --seed <number>        Random seed for deterministic execution
+  -b, --blocks <number>      Number of test blocks to process
+      --parallel             Enable parallel test execution
+  -v, --verbose              Enable verbose output (can be repeated up to 5 times)
+  -h, --help                 Show this help message
+
+Examples:
+  pbnj test-vectors --params tiny --component safrole
+  pbnj test-vectors --format binary --validate-schema -vv
+  pbnj test-vectors --component statistics --spec full --output detailed
+  pbnj test-vectors --filter "epoch.*" --fail-fast --seed 12345
+`)
+        return
+      }
+      createTestVectorsCommand(args.slice(1))
+      break
     default:
       console.error(`Unknown command: ${command}`)
-      console.log('Available commands: run, gen-spec, gen-keys, list-keys')
+      console.log(
+        'Available commands: run, gen-spec, gen-keys, list-keys, test-vectors',
+      )
       console.log('Use "pbnj --help" for more information')
       process.exit(1)
   }

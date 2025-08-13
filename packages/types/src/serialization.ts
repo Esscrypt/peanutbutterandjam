@@ -216,7 +216,7 @@ export interface JamHeader {
  * Type guard to check if tickets_mark is an array
  */
 export function isTicketsMarkArray(
-  ticketsMark: any,
+  ticketsMark: unknown,
 ): ticketsMark is SafroleTicketArray[] {
   return Array.isArray(ticketsMark)
 }
@@ -225,13 +225,14 @@ export function isTicketsMarkArray(
  * Type guard to check if tickets_mark is a single object
  */
 export function isTicketsMarkSingle(
-  ticketsMark: any,
+  ticketsMark: unknown,
 ): ticketsMark is SafroleTicketSingle {
   return (
-    ticketsMark &&
+    ticketsMark !== null &&
     typeof ticketsMark === 'object' &&
     !Array.isArray(ticketsMark) &&
-    'entry_index' in ticketsMark
+    ticketsMark !== undefined &&
+    'entry_index' in (ticketsMark as Record<string, unknown>)
   )
 }
 
@@ -371,22 +372,7 @@ export interface RuntimeWorkPackage {
   authCodeHash: HexString
   authConfig: HexString
   context: WorkContext
-  workItems: Array<{
-    serviceIndex: number
-    codeHash: HexString
-    payload: HexString
-    refGasLimit: number
-    accGasLimit: number
-    exportCount: number
-    importSegments: Array<{
-      hash: HexString
-      index: number
-    }>
-    extrinsics: Array<{
-      hash: HexString
-      index: number
-    }>
-  }>
+  workItems: WorkItem[]
 }
 
 // ============================================================================
@@ -591,7 +577,7 @@ export interface ServiceAccount {
   /** Account preimages */
   preimages: Map<HashValue, Uint8Array>
   /** Account requests */
-  requests: Map<HashValue, Uint8Array>
+  requests: Map<string, Uint8Array>
   /** Account gratis */
   gratis: bigint
   /** Account code hash */
@@ -610,6 +596,8 @@ export interface ServiceAccount {
   lastacc: number
   /** Parent service ID */
   parent: number
+  /** Minimum balance requirement */
+  minbalance: string
 }
 
 /**

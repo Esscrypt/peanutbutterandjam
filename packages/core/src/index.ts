@@ -11,6 +11,8 @@ export * from './crypto'
 export * from './logger'
 // Export merklization implementation
 export * from './merklization'
+// Export shuffle functions
+export * from './shuffle'
 // Export all utilities
 export * from './utils'
 // Export Zod schemas

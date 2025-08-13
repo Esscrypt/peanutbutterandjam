@@ -64,8 +64,7 @@ export class WorkReportRequestProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          6, // Service ID 6 for work reports
-          Buffer.from(`work_report_${hashString}`),
+          `work_report_${hashString}`,
           workReport,
         )
       } catch (error) {
@@ -96,8 +95,7 @@ export class WorkReportRequestProtocol {
     try {
       const hashString = workReportHash.toString()
       const workReportData = await this.dbIntegration.getServiceStorage(
-        6,
-        Buffer.from(`work_report_${hashString}`),
+        `work_report_${hashString}`,
       )
 
       if (workReportData) {
@@ -160,7 +158,7 @@ export class WorkReportRequestProtocol {
   serializeWorkReportRequest(request: WorkReportRequest): Bytes {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // workReportHash (32 bytes)
-    const _view = new DataView(buffer)
+    // const _view = new DataView(buffer)
 
     // Write work report hash (32 bytes)
     new Uint8Array(buffer).set(request.workReportHash, 0)

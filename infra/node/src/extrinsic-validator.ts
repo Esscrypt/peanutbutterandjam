@@ -8,11 +8,17 @@
 import { logger } from '@pbnj/core'
 import type {
   BlockAuthoringConfig,
-  Extrinsic,
+  BlockAuthoringValidationResult,
+  Extrinsic as CoreExtrinsic,
   ValidationError,
-  ValidationResult,
   ValidationWarning,
-} from './types'
+} from '@pbnj/types'
+
+// Extend core Extrinsic with node-specific properties
+interface Extrinsic extends CoreExtrinsic {
+  id: string
+  author: string
+}
 
 /**
  * Extrinsic Validator
@@ -24,7 +30,7 @@ export class ExtrinsicValidator {
   async validate(
     extrinsics: Extrinsic[],
     config: BlockAuthoringConfig,
-  ): Promise<ValidationResult> {
+  ): Promise<BlockAuthoringValidationResult> {
     logger.debug('Validating extrinsics', {
       extrinsicCount: extrinsics.length,
     })

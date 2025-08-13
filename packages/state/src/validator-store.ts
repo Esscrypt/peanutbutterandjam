@@ -1,3 +1,4 @@
+import { bytesToHex } from '@pbnj/core'
 import type { Bytes } from '@pbnj/types'
 import { and, eq } from 'drizzle-orm'
 import { type NewValidator, type Validator, validators } from './schema'
@@ -30,7 +31,7 @@ export class ValidatorStore {
   }): Promise<void> {
     const validatorData: NewValidator = {
       index: info.index,
-      publicKey: Buffer.from(info.publicKey).toString('hex'),
+      publicKey: bytesToHex(info.publicKey),
       metadataHost: info.metadata.endpoint.host,
       metadataPort: info.metadata.endpoint.port,
       epoch: info.epoch,

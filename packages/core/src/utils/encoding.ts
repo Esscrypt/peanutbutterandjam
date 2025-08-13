@@ -101,8 +101,8 @@ export function decodeBase58(base58: string): Uint8Array {
 /**
  * Encode Uint8Array to UTF8 string
  */
-export function encodeUtf8(Uint8Array: Uint8Array): string {
-  return Buffer.from(Uint8Array).toString('utf8')
+export function encodeUtf8(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('utf8')
 }
 
 /**

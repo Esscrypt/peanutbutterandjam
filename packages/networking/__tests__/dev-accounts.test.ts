@@ -6,8 +6,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { generateCertificateFromSeed, generateAlternativeName, generateTrivialSeed } from '../src/crypto/certificates'
-import { generateKeyPairFromSeed } from '@stablelib/ed25519'
+import { generateCertificateFromSeed } from '../src/crypto/certificates'
+import { generateAlternativeName, generateTrivialSeed } from '@pbnj/core'
+import { decodeFixedLength } from '@pbnj/serialization'
+// import { generateKeyPairFromSeed } from '@stablelib/ed25519'
 
 describe('Dev Accounts Certificate Generation', () => {
   // Expected values from JIP-5 specification
@@ -64,7 +66,7 @@ describe('Dev Accounts Certificate Generation', () => {
 
   describe('generateCertificateFromSeed', () => {
     it('should generate correct public keys for all dev accounts using JIP-5', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         // Generate certificate using the seed (which will use JIP-5 derivation internally)
         const cert = generateCertificateFromSeed(account.seed)
         
@@ -115,7 +117,7 @@ describe('Dev Accounts Certificate Generation', () => {
 
   describe('Alternative Name Generation for Dev Accounts', () => {
     it('should generate correct alternative names for all dev accounts', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         const cert = generateCertificateFromSeed(account.seed)
         const alternativeName = cert.certificate.alternativeName
         
@@ -125,7 +127,12 @@ describe('Dev Accounts Certificate Generation', () => {
         
         // Verify it's consistent with direct generation from Ed25519 public key
         const publicKey = new Uint8Array(Buffer.from(account.ed25519_public.replace('0x', ''), 'hex'))
-        const directAlternativeName = generateAlternativeName(publicKey)
+        // Create adapter function for decodeFixedLength
+        const decoderAdapter = (data: Uint8Array, length: number) => {
+          const result = decodeFixedLength(data, length as any)
+          return { value: result.value, remaining: result.remaining }
+        }
+        const directAlternativeName = generateAlternativeName(publicKey, decoderAdapter)
         expect(alternativeName).toBe(directAlternativeName)
       }
     })
@@ -216,7 +223,7 @@ describe('Dev Accounts Certificate Generation', () => {
     it('should use correct base32 alphabet for all accounts', () => {
       const base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
       
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         const cert = generateCertificateFromSeed(account.seed)
         const alternativeName = cert.certificate.alternativeName
         
@@ -231,7 +238,7 @@ describe('Dev Accounts Certificate Generation', () => {
     })
 
     it('should generate alternative names with correct length', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         const cert = generateCertificateFromSeed(account.seed)
         const alternativeName = cert.certificate.alternativeName
 
@@ -279,7 +286,7 @@ describe('Dev Accounts Certificate Generation', () => {
     })
 
     it('should generate consistent alternative names for the same public key', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         const cert1 = generateCertificateFromSeed(account.seed)
         const cert2 = generateCertificateFromSeed(account.seed)
         
@@ -296,7 +303,7 @@ describe('Dev Accounts Certificate Generation', () => {
 
   describe('PEM Format Validation', () => {
     it('should generate valid PEM formats for all accounts', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         const cert = generateCertificateFromSeed(account.seed)
         
         expect(cert.privateKeyPEM).toContain('-----BEGIN PRIVATE KEY-----')
@@ -309,7 +316,7 @@ describe('Dev Accounts Certificate Generation', () => {
 
   describe('JIP-5 Integration', () => {
     it('should correctly derive secret seeds using JIP-5', () => {
-      for (const [name, account] of Object.entries(devAccounts)) {
+      for (const [_name, account] of Object.entries(devAccounts)) {
         // Generate trivial seed from index
         const trivialSeed = generateTrivialSeed(account.index)
         const expectedSeed = new Uint8Array(Buffer.from(account.seed.replace('0x', ''), 'hex'))

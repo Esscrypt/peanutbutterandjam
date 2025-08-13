@@ -4,8 +4,10 @@
  * Provides TLS 1.3 handshake with certificate authentication
  */
 
+import { generateAlternativeName } from '@pbnj/core'
+import { decodeFixedLength } from '@pbnj/serialization'
 import type { Bytes, JAMNPCertificate } from '@pbnj/types'
-import packageJson from '../../package.json' assert { type: 'json' }
+import packageJson from '../../package.json'
 
 /**
  * TLS 1.3 configuration for JAMNP-S
@@ -42,7 +44,7 @@ export function createTLSConfig(
   certificate: JAMNPCertificate,
   privateKey: Bytes,
   alpnProtocols: string[],
-  verifyPeer = true
+  verifyPeer = true,
 ): TLSConfig {
   return {
     certificate,
@@ -57,27 +59,34 @@ export function createTLSConfig(
  */
 export function validatePeerCertificate(
   peerCertificate: JAMNPCertificate,
-  expectedPublicKey?: Bytes
+  expectedPublicKey?: Bytes,
 ): boolean {
   try {
     // Basic certificate validation
     if (!validateCertificate(peerCertificate)) {
       return false
     }
-    
+
     // Check if public key matches expected value (if provided)
     if (expectedPublicKey) {
       if (!arraysEqual(peerCertificate.publicKey, expectedPublicKey)) {
         return false
       }
     }
-    
+
     // Verify alternative name consistency
-    const expectedName = generateAlternativeName(peerCertificate.publicKey)
+    const decoderAdapter = (data: Uint8Array, length: number) => {
+      const result = decodeFixedLength(data, length as any)
+      return { value: result.value, remaining: result.remaining }
+    }
+    const expectedName = generateAlternativeName(
+      peerCertificate.publicKey,
+      decoderAdapter,
+    )
     if (peerCertificate.alternativeName !== expectedName) {
       return false
     }
-    
+
     return true
   } catch (_error) {
     return false
@@ -89,7 +98,7 @@ export function validatePeerCertificate(
  */
 export function generateALPNProtocol(
   chainHash: string,
-  isBuilder = false
+  isBuilder = false,
 ): string {
   const base = `jamnp-s/${packageJson.version}/${chainHash}`
   return isBuilder ? `${base}/builder` : base
@@ -109,19 +118,19 @@ export function parseALPNProtocol(protocol: string): {
     if (parts.length < 3 || parts.length > 4) {
       return null
     }
-    
+
     const [name, version, chainHash, builder] = parts
-    
+
     if (name !== 'jamnp-s' || version !== packageJson.version) {
       return null
     }
-    
+
     if (chainHash.length !== 8) {
       return null
     }
-    
+
     const isBuilder = builder === 'builder'
-    
+
     return {
       name,
       version,
@@ -152,7 +161,7 @@ export function createTLSContext(config: TLSConfig): any {
  */
 export function performTLSHandshake(
   config: TLSConfig,
-  peerCertificate?: JAMNPCertificate
+  peerCertificate?: JAMNPCertificate,
 ): TLSHandshakeResult {
   try {
     // If we're not verifying peers, accept any valid certificate
@@ -168,7 +177,7 @@ export function performTLSHandshake(
         success: true,
       }
     }
-    
+
     // Verify peer certificate
     if (!peerCertificate) {
       return {
@@ -176,14 +185,14 @@ export function performTLSHandshake(
         error: 'No peer certificate provided',
       }
     }
-    
+
     if (!validatePeerCertificate(peerCertificate)) {
       return {
         success: false,
         error: 'Invalid peer certificate',
       }
     }
-    
+
     return {
       success: true,
       peerPublicKey: peerCertificate.publicKey,
@@ -198,7 +207,7 @@ export function performTLSHandshake(
 }
 
 // Import helper functions
-import { generateAlternativeName, validateCertificate } from './certificates'
+import { validateCertificate } from './certificates'
 
 // Helper function to compare arrays
 function arraysEqual(a: Bytes, b: Bytes): boolean {
@@ -211,4 +220,4 @@ function arraysEqual(a: Bytes, b: Bytes): boolean {
     }
   }
   return true
-} 
+}

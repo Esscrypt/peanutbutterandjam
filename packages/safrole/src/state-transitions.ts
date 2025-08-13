@@ -3,21 +3,99 @@
  *
  * Implements the Safrole consensus protocol state transitions
  * Reference: graypaper/text/safrole.tex
+ *
+ * Gray Paper Equation (50): σ ≡ ⟨pendingSet, epochRoot, sealTickets, ticketAccumulator⟩
+ * Key rotation (115-118): epoch transition with validator set rotation
+ * Validator shuffling (213-217): fyshuffle for core assignments
  */
 
 import { IETFVRFProver, RingVRFProver } from '@pbnj/bandersnatch-vrf'
-import { logger } from '@pbnj/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
 import type {
+  HashValue,
+  HexString,
   SafroleInput,
   SafroleOutput,
-  SafroleState,
+  ConsensusSafroleState as SafroleState,
   Ticket,
-  // TicketProof,
-  // SafroleError,
-  // SafroleErrorCode,
   ValidatorKey,
 } from '@pbnj/types'
 import { SAFROLE_CONSTANTS } from '@pbnj/types'
+import { hash as blake2b } from '@stablelib/blake2b'
+
+/**
+ * Convert little-endian byte array to 32-bit unsigned integer
+ */
+function fromLittleEndianBytes(bytes: Uint8Array): number {
+  let result = 0
+  for (let i = 0; i < bytes.length; i++) {
+    result += bytes[i] * 256 ** i
+  }
+  return result >>> 0 // Convert to unsigned 32-bit
+}
+
+/**
+ * Core shuffle function from Gray Paper Equation 329
+ */
+function jamShuffle<T>(validators: T[], entropy: string): T[] {
+  if (validators.length === 0) return []
+  if (validators.length === 1) return [...validators]
+
+  const cleanEntropy = entropy.startsWith('0x') ? entropy.slice(2) : entropy
+  const entropyBytes = new Uint8Array(32)
+  for (let i = 0; i < 32; i++) {
+    entropyBytes[i] = Number.parseInt(cleanEntropy.slice(i * 2, i * 2 + 2), 16)
+  }
+
+  const shuffled = [...validators]
+
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    // Compute Q_i following Gray Paper equation 329
+    const hashInput = new Uint8Array(entropyBytes.length + 4)
+    hashInput.set(entropyBytes, 0)
+
+    // Add i as little-endian 32-bit integer
+    const iBytes = new Uint8Array(4)
+    for (let j = 0; j < 4; j++) {
+      iBytes[j] = (i >>> (j * 8)) & 0xff
+    }
+    hashInput.set(iBytes, entropyBytes.length)
+
+    const hashResult = blake2b(hashInput, 4) // 4 bytes output
+    const q = fromLittleEndianBytes(hashResult)
+
+    // j = Q_i mod (i + 1)
+    const j = q % (i + 1)
+
+    // Swap elements
+    const temp = shuffled[i]
+    shuffled[i] = shuffled[j]
+    shuffled[j] = temp
+  }
+
+  return shuffled
+}
+
+/**
+ * Shuffle and rotate validators using entropy and rotation offset
+ */
+function shuffleAndRotateValidators<T>(
+  validators: T[],
+  entropy: string,
+  rotationOffset: number,
+): T[] {
+  // First shuffle using entropy
+  const shuffled = jamShuffle(validators, entropy)
+
+  // Then rotate based on offset
+  const rotated = [...shuffled]
+  if (rotationOffset > 0 && rotated.length > 0) {
+    const offset = rotationOffset % rotated.length
+    rotated.unshift(...rotated.splice(-offset))
+  }
+
+  return rotated
+}
 
 /**
  * Execute Safrole State Transition Function
@@ -26,20 +104,31 @@ import { SAFROLE_CONSTANTS } from '@pbnj/types'
 export async function executeSafroleSTF(
   state: SafroleState,
   input: SafroleInput,
+  currentSlot: number,
+  stagingSet: ValidatorKey[],
+  activeSet: ValidatorKey[],
+  offenders: Set<string> = new Set(),
 ): Promise<SafroleOutput> {
   logger.debug('Executing Safrole STF', {
-    slot: input.slot,
+    currentSlot,
+    newSlot: input.slot,
     entropyLength: input.entropy.length,
     extrinsicCount: input.extrinsic.length,
   })
 
   try {
     // Validate input
-    validateInput(state, input)
+    validateInput(input, currentSlot)
 
     // Handle epoch transition if needed
-    if (isEpochTransition(state.slot, input.slot)) {
-      return handleEpochTransition(state, input)
+    if (isEpochTransition(currentSlot, input.slot)) {
+      return handleEpochTransition(
+        state,
+        input,
+        stagingSet,
+        activeSet,
+        offenders,
+      )
     }
 
     // Handle regular slot
@@ -55,9 +144,9 @@ export async function executeSafroleSTF(
 /**
  * Validate input parameters
  */
-function validateInput(state: SafroleState, input: SafroleInput): void {
-  if (input.slot <= state.slot) {
-    throw new Error(`Invalid slot: ${input.slot} <= ${state.slot}`)
+function validateInput(input: SafroleInput, currentSlot: number): void {
+  if (input.slot < currentSlot) {
+    throw new Error(`Invalid slot: ${input.slot} < ${currentSlot}`)
   }
 
   if (input.extrinsic.length > SAFROLE_CONSTANTS.MAX_EXTRINSICS_PER_SLOT) {
@@ -66,10 +155,9 @@ function validateInput(state: SafroleState, input: SafroleInput): void {
     )
   }
 
-  if (input.entropy.length !== SAFROLE_CONSTANTS.ENTROPY_SIZE) {
-    throw new Error(
-      `Invalid entropy size: ${input.entropy.length} != ${SAFROLE_CONSTANTS.ENTROPY_SIZE}`,
-    )
+  if (input.entropy.length !== 66) {
+    // 0x + 64 hex chars for 32 bytes
+    throw new Error(`Invalid entropy size: ${input.entropy.length} != 66`)
   }
 
   // Validate entry indices
@@ -93,43 +181,49 @@ function isEpochTransition(currentSlot: number, newSlot: number): boolean {
 }
 
 /**
- * Handle epoch transition
+ * Handle epoch transition - Gray Paper equations (115-118)
+ *
+ * Key rotation formula from Gray Paper:
+ * ⟨pendingSet', activeSet', previousSet', epochRoot'⟩ ≡
+ *   (Φ(stagingSet), pendingSet, activeSet, z) when e' > e
+ *
+ * @param state Current Safrole state
+ * @param input Safrole input with new slot
+ * @param stagingSet Global staging validator set
+ * @param activeSet Global active validator set
+ * @param offenders Set of offending validators to blacklist
  */
 function handleEpochTransition(
   state: SafroleState,
-  input: SafroleInput,
+  _input: SafroleInput,
+  stagingSet: ValidatorKey[],
+  activeSet: ValidatorKey[],
+  offenders: Set<string> = new Set(),
 ): SafroleOutput {
   logger.debug('Handling epoch transition', {
-    fromSlot: state.slot,
-    toSlot: input.slot,
+    stagingSetSize: stagingSet.length,
+    activeSetSize: activeSet.length,
+    offendersCount: offenders.size,
   })
 
-  // Rotate validator sets
-  const newActiveSet = state.pendingset
-  const newPendingSet = state.activeset
-  const newPreviousSet = state.activeset
+  // Apply blacklist filter Φ(stagingSet) - Gray Paper equation (119-128)
+  const filteredStagingSet = applyBlacklistFilter(stagingSet, offenders)
 
-  // Update entropy
-  const newEntropy = [...input.entropy]
+  // Key rotation according to Gray Paper equation (115-118)
+  const newPendingSet = filteredStagingSet // pendingSet' = Φ(stagingSet)
+  // Note: activeSet' = pendingSet is used for global state updates, not internal Safrole state
 
-  // Compute new epoch root using Bandersnatch VRF
-  const newEpochRoot = computeEpochRoot(newActiveSet)
+  // Compute new epoch root z = getRingRoot(...) - Gray Paper equation (118)
+  const newEpochRoot = computeEpochRoot(newPendingSet)
 
-  // Generate fallback seal tickets using Ring VRF
-  const fallbackTickets = generateFallbackSealTickets(
-    newActiveSet,
-    input.entropy,
-  )
+  // Note: Fallback seal tickets would be generated here for the new epoch
+  // const fallbackTickets = generateFallbackSealTickets(newActiveSet, input.entropy)
 
   const newState: SafroleState = {
-    slot: input.slot,
-    entropy: newEntropy,
     pendingSet: newPendingSet,
-    activeSet: newActiveSet,
-    previousSet: newPreviousSet,
     epochRoot: newEpochRoot,
-    sealTickets: fallbackTickets,
-    ticketAccumulator: [],
+    sealTickets: state.sealTickets, // Preserve current epoch seal tickets
+    ticketAccumulator: state.ticketAccumulator, // Preserve ticket accumulator
   }
 
   return {
@@ -153,10 +247,10 @@ function handleRegularSlot(
 
   // Update state
   const newState: SafroleState = {
-    ...state,
-    slot: input.slot,
-    entropy: input.entropy,
-    ticketAccumulator: [...state.ticketAccumulator, ...tickets],
+    pendingSet: state.pendingSet,
+    epochRoot: state.epochRoot,
+    sealTickets: state.sealTickets,
+    ticketAccumulator: state.ticketAccumulator,
   }
 
   return {
@@ -218,17 +312,17 @@ function processTickets(
  */
 function extractTicketId(
   signature: string,
-  entropy: string[],
+  entropy: HexString,
   entryIndex: number,
 ): string {
   // Use IETF VRF to generate deterministic ticket ID
   const secretKey = {
-    Uint8Array: new Uint8Array(Buffer.from(signature, 'hex')),
+    bytes: new Uint8Array(Buffer.from(signature, 'hex')),
   }
 
   const input = {
     message: new Uint8Array([
-      ...Buffer.from(entropy.join(''), 'hex'),
+      ...Buffer.from(entropy, 'hex'),
       ...new Uint8Array([entryIndex]),
     ]),
   }
@@ -249,7 +343,7 @@ function extractTicketId(
     // Fallback to simple hash if VRF fails - ensure uniqueness by including entry index
     const fallbackInput = new Uint8Array([
       ...Buffer.from(signature, 'hex'),
-      ...Buffer.from(entropy.join(''), 'hex'),
+      ...Buffer.from(entropy, 'hex'),
       ...new Uint8Array([
         entryIndex & 0xff,
         (entryIndex >> 8) & 0xff,
@@ -260,7 +354,7 @@ function extractTicketId(
 
     logger.debug('Fallback input data', {
       signatureLength: signature.length,
-      entropyLength: entropy.join('').length,
+      entropyLength: entropy.length,
       entryIndex,
       fallbackInputLength: fallbackInput.length,
     })
@@ -280,17 +374,17 @@ function extractTicketId(
 /**
  * Compute epoch root using Bandersnatch VRF
  */
-function computeEpochRoot(validators: ValidatorKey[]): string {
+function computeEpochRoot(validators: ValidatorKey[]): HexString {
   // Use Ring VRF to compute epoch root from validator keys
   if (validators.length === 0) {
-    return '0x0000000000000000000000000000000000000000000000000000000000000000'
+    return '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
   }
 
   try {
     // Create a ring of validator public keys
     const ring = {
       publicKeys: validators.map((v) => ({
-        Uint8Array: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
+        bytes: hexToBytes(v.bandersnatch),
       })),
       size: validators.length,
       commitment: new Uint8Array(32).fill(0),
@@ -311,17 +405,13 @@ function computeEpochRoot(validators: ValidatorKey[]): string {
 
     // Generate Ring VRF proof
     const secretKey = {
-      Uint8Array: new Uint8Array(
-        Buffer.from(validators[0].bandersnatch, 'hex'),
-      ),
+      bytes: hexToBytes(validators[0].bandersnatch),
     }
 
     const ringVrfResult = RingVRFProver.prove(secretKey, input)
 
     // Use the ring commitment as epoch root
-    const epochRoot = Buffer.from(ringVrfResult.output.ringCommitment).toString(
-      'hex',
-    )
+    const epochRoot = bytesToHex(ringVrfResult.output.ringCommitment)
     return `0x${epochRoot}`
   } catch (error) {
     logger.error('Ring VRF epoch root computation failed', {
@@ -329,92 +419,92 @@ function computeEpochRoot(validators: ValidatorKey[]): string {
     })
 
     // Fallback to simple hash
-    const keys = validators.map((v) => v.bandersnatch).join('')
-    const fallbackHash = Buffer.from(keys, 'hex').toString('hex').slice(0, 64)
-    return `0x${fallbackHash}`
+    const fallbackHash = blake2b(
+      new Uint8Array(Buffer.from('epoch_root', 'utf8')),
+      32,
+    )
+    return bytesToHex(fallbackHash)
   }
 }
 
 /**
  * Generate fallback seal tickets using Ring VRF
  */
-function generateFallbackSealTickets(
-  validators: ValidatorKey[],
-  entropy: string[],
-): string[] {
-  if (validators.length === 0) {
-    return []
-  }
+// function generateFallbackSealTickets(
+//   validators: ValidatorKey[],
+//   entropy: HexString,
+// ): string[] {
+//   if (validators.length === 0) {
+//     return []
+//   }
 
-  const tickets: string[] = []
+//   const tickets: string[] = []
 
-  try {
-    // Create a ring of validator public keys
-    const ring = {
-      publicKeys: validators.map((v) => ({
-        Uint8Array: new Uint8Array(Buffer.from(v.bandersnatch, 'hex')),
-      })),
-      size: validators.length,
-      commitment: new Uint8Array(32).fill(0),
-    }
+//   try {
+//     // Create a ring of validator public keys
+//     const ring = {
+//       publicKeys: validators.map((v) => ({
+//         bytes: hexToBytes(v.bandersnatch),
+//       })),
+//       size: validators.length,
+//       commitment: new Uint8Array(32).fill(0),
+//     }
 
-    const params = {
-      ringSize: validators.length,
-      securityParam: 128,
-      hashFunction: 'sha256',
-    }
+//     const params = {
+//       ringSize: validators.length,
+//       securityParam: 128,
+//       hashFunction: 'sha256',
+//     }
 
-    // Generate tickets for each validator
-    for (
-      let i = 0;
-      i < Math.min(validators.length, SAFROLE_CONSTANTS.MAX_SEAL_TICKETS);
-      i++
-    ) {
-      const input = {
-        message: new Uint8Array([
-          ...Buffer.from(entropy.join(''), 'hex'),
-          ...new Uint8Array([i]),
-        ]),
-        ring,
-        proverIndex: i,
-        params,
-      }
+//     // Generate tickets for each validator
+//     for (
+//       let i = 0;
+//       i < Math.min(validators.length, SAFROLE_CONSTANTS.MAX_SEAL_TICKETS);
+//       i++
+//     ) {
+//       const input = {
+//         message: new Uint8Array([
+//           ...Buffer.from(entropy, 'hex'),
+//           ...new Uint8Array([i]),
+//         ]),
+//         ring,
+//         proverIndex: i,
+//         params,
+//       }
 
-      const secretKey = {
-        Uint8Array: new Uint8Array(
-          Buffer.from(validators[i].bandersnatch, 'hex'),
-        ),
-      }
+//       const secretKey = {
+//         bytes: hexToBytes(validators[i].bandersnatch),
+//       }
 
-      const ringVrfResult = RingVRFProver.prove(secretKey, input)
+//       const ringVrfResult = RingVRFProver.prove(secretKey, input)
 
-      // Use the VRF output hash as the seal ticket
-      const ticket = Buffer.from(ringVrfResult.output.hash).toString('hex')
-      tickets.push(`0x${ticket}`)
-    }
-  } catch (error) {
-    logger.error('Ring VRF seal ticket generation failed', {
-      error: error instanceof Error ? error.message : String(error),
-    })
+//       // Use the VRF output hash as the seal ticket
+//       const ticket = Buffer.from(ringVrfResult.output.hash).toString('hex')
+//       tickets.push(`0x${ticket}`)
+//     }
+//   } catch (error) {
+//     logger.error('Ring VRF seal ticket generation failed', {
+//       error: error instanceof Error ? error.message : String(error),
+//     })
 
-    // Fallback to simple tickets
-    for (
-      let i = 0;
-      i < Math.min(validators.length, SAFROLE_CONSTANTS.MAX_SEAL_TICKETS);
-      i++
-    ) {
-      const fallbackTicket = Buffer.from(
-        entropy.join('') + i.toString(),
-        'utf8',
-      )
-        .toString('hex')
-        .slice(0, 64)
-      tickets.push(`0x${fallbackTicket}`)
-    }
-  }
+//     // Fallback to simple tickets
+//     for (
+//       let i = 0;
+//       i < Math.min(validators.length, SAFROLE_CONSTANTS.MAX_SEAL_TICKETS);
+//       i++
+//     ) {
+//       const fallbackTicket = Buffer.from(
+//         entropy + i.toString(),
+//         'utf8',
+//       )
+//         .toString('hex')
+//         .slice(0, 64)
+//       tickets.push(`0x${fallbackTicket}`)
+//     }
+//   }
 
-  return tickets
-}
+//   return tickets
+// }
 
 /**
  * Validate ticket order
@@ -441,3 +531,76 @@ function generateFallbackSealTickets(
 //     seen.add(ticket.id)
 //   }
 // }
+
+/**
+ * Apply blacklist filter Φ(k) - Gray Paper equation (119-128)
+ * Replace keys of offending validators with null keys (all zeros)
+ */
+function applyBlacklistFilter(
+  validatorKeys: ValidatorKey[],
+  offenders: Set<string>,
+): ValidatorKey[] {
+  return validatorKeys.map((key) => {
+    // Check if validator's Ed25519 key is in offenders set
+    const ed25519Key = key.ed25519
+    if (ed25519Key && offenders.has(ed25519Key)) {
+      // Replace with null key (all zeros) - Gray Paper line 122-123
+      return {
+        ...key,
+        bandersnatch: ('0x' + '00'.repeat(32)) as `0x${string}`,
+        ed25519: ('0x' + '00'.repeat(32)) as `0x${string}`,
+        bls: ('0x' + '00'.repeat(144)) as `0x${string}`,
+        metadata: ('0x' + '00'.repeat(128)) as `0x${string}`,
+      }
+    }
+    return key
+  })
+}
+
+/**
+ * Compute guarantor assignments using validator shuffling
+ * Gray Paper equations (212-217): P(e, t) = R(fyshuffle(...), ...)
+ *
+ * This is where validator shuffling occurs - for core assignments, not validator set rotation
+ */
+export function computeGuarantorAssignments(
+  epochalEntropy: HashValue,
+  currentTime: number,
+  activeSet: ValidatorKey[],
+  coreCount = 341,
+  rotationPeriod = 10,
+): number[] {
+  logger.debug('Computing guarantor assignments', {
+    epochalEntropy: epochalEntropy.slice(0, 10) + '...',
+    currentTime,
+    validatorCount: activeSet.length,
+    coreCount,
+  })
+
+  // Create validator indices [0, 1, 2, ..., validatorCount-1]
+  const validatorIndices = Array.from({ length: activeSet.length }, (_, i) => i)
+
+  // Map validator indices to core assignments
+  // Gray Paper line 214: floor(coreCount * i / validatorCount)
+  const coreAssignments = validatorIndices.map((i) =>
+    Math.floor((coreCount * i) / activeSet.length),
+  )
+
+  // Apply Fisher-Yates shuffle and rotation using epochal entropy
+  // Gray Paper line 212-217: P(e, t) = R(fyshuffle(..., e), rotationOffset)
+  const rotationOffset = Math.floor(
+    (currentTime % SAFROLE_CONSTANTS.EPOCH_LENGTH) / rotationPeriod,
+  )
+  const rotatedAssignments = shuffleAndRotateValidators(
+    coreAssignments,
+    epochalEntropy,
+    rotationOffset,
+  )
+
+  logger.debug('Guarantor assignments computed', {
+    rotationOffset,
+    assignmentSample: rotatedAssignments.slice(0, 5),
+  })
+
+  return rotatedAssignments
+}

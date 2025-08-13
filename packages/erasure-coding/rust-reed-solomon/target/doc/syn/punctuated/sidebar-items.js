@@ -1,0 +1,12 @@
+window.SIDEBAR_ITEMS = {
+  enum: ['Pair'],
+  struct: [
+    'IntoIter',
+    'IntoPairs',
+    'Iter',
+    'IterMut',
+    'Pairs',
+    'PairsMut',
+    'Punctuated',
+  ],
+}

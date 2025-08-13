@@ -6,13 +6,13 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { GenesisConfig } from '@pbnj/types'
 import { BlockSubmitter } from './block-submitter'
 import { ExtrinsicValidator } from './extrinsic-validator'
 import { GenesisManager } from './genesis-manager'
 import { HeaderConstructor } from './header-constructor'
 import { BaseService } from './service-interface'
 import { StateManager } from './state-manager'
-import type { GenesisConfig } from './types'
 import { WorkPackageProcessor } from './work-package-processor'
 
 /**

@@ -5,8 +5,8 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 /**
@@ -43,11 +43,11 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -89,11 +89,11 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -135,11 +135,11 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -181,11 +181,11 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -228,11 +228,11 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -274,11 +274,11 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -325,11 +325,11 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -376,11 +376,11 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -428,11 +428,11 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -479,11 +479,11 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediateX = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -532,11 +532,11 @@ export class BRANCH_EQInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)
@@ -579,11 +579,11 @@ export class BRANCH_NEInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)
@@ -626,11 +626,11 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)
@@ -682,11 +682,11 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)
@@ -730,11 +730,11 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)
@@ -787,11 +787,11 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const offset = this.getImmediateValue(operands, 2)

@@ -1,3 +1,4 @@
+import { bytesToHex, hexToBytes } from '@pbnj/core'
 import type { Bytes } from '@pbnj/types'
 import { and, eq } from 'drizzle-orm'
 import {
@@ -151,13 +152,13 @@ export class ServiceAccountStore {
     key: Bytes,
     value: Bytes,
   ): Promise<void> {
-    const valueHex = Buffer.from(value).toString('hex')
-    const keyHash = Buffer.from(key).toString('hex') // In practice, this would be Blake2b hash
+    const valueHex = bytesToHex(value)
+    const keyHash = bytesToHex(key) // In practice, this would be Blake2b hash
 
     const storageData: NewServiceStorage = {
       id: `${serviceId}:${keyHash}`,
       serviceId,
-      storageKey: Buffer.from(key).toString('hex'),
+      storageKey: bytesToHex(key),
       storageValue: valueHex,
       keyHash,
     }
@@ -174,18 +175,14 @@ export class ServiceAccountStore {
       })
 
     // Update the JSON storage in service account
-    await this.updateServiceAccountStorage(
-      serviceId,
-      Buffer.from(key).toString('hex'),
-      valueHex,
-    )
+    await this.updateServiceAccountStorage(serviceId, bytesToHex(key), valueHex)
   }
 
   /**
    * Get a storage item by key
    */
   async getStorageItem(serviceId: number, key: Bytes): Promise<Bytes | null> {
-    const keyHash = Buffer.from(key).toString('hex') // In practice, this would be Blake2b hash
+    const keyHash = bytesToHex(key) // In practice, this would be Blake2b hash
 
     const result = await this.db
       .select()
@@ -202,7 +199,7 @@ export class ServiceAccountStore {
       return null
     }
 
-    return Buffer.from(result[0].storageValue, 'hex')
+    return hexToBytes(result[0].storageValue as `0x${string}`)
   }
 
   /**
@@ -249,7 +246,7 @@ export class ServiceAccountStore {
     hash: string,
     preimage: Bytes,
   ): Promise<void> {
-    const preimageHex = Buffer.from(preimage).toString('hex')
+    const preimageHex = bytesToHex(preimage)
 
     const preimageData: NewServicePreimage = {
       id: `${serviceId}:${hash}`,
@@ -291,7 +288,7 @@ export class ServiceAccountStore {
       return null
     }
 
-    return Buffer.from(result[0].preimage, 'hex')
+    return hexToBytes(result[0].preimage as `0x${string}`)
   }
 
   /**
@@ -589,8 +586,8 @@ export class ServiceAccountStore {
       octets += 81n + BigInt(req.length) // 81 Uint8Array overhead per request
     }
     for (const item of storage) {
-      const keyLength = Buffer.from(item.storageKey, 'hex').length
-      const valueLength = Buffer.from(item.storageValue, 'hex').length
+      const keyLength = hexToBytes(item.storageKey as `0x${string}`).length
+      const valueLength = hexToBytes(item.storageValue as `0x${string}`).length
       octets += 34n + BigInt(keyLength) + BigInt(valueLength) // 34 Uint8Array overhead per storage item
     }
 

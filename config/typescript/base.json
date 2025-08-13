@@ -20,7 +20,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": true,
-    "types": ["bun-types"]
+    "typeRoots": ["./node_modules/@types"]
   },
   "exclude": [
     "**/__tests__/**",

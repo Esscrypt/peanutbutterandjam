@@ -1,44 +1,33 @@
 import { logger } from '@pbnj/core'
 import { MainServiceImpl } from '@pbnj/node'
-import { getOption, parseArgs } from '../utils/arg-parser'
+import { Command } from 'commander'
 import {
   isValidHex,
   isValidPath,
   isValidTimestamp,
 } from '../utils/validation.js'
 
-export async function createRunCommand(args: string[]): Promise<void> {
-  const parsedArgs = parseArgs(args)
+export function createRunCommand(): Command {
+  const command = new Command('run')
+    .description('Run a JAM node')
+    .option('--bootnode <address>', 'Bootnode address for network connection')
+    .option('--chain <file>', 'Chain specification file', 'chainspec.json')
+    .option('--data-path <path>', 'Path to store node data')
+    .option('--bandersnatch <key>', 'Bandersnatch key for consensus')
+    .option('--bls <key>', 'BLS key for consensus')
+    .option('--ed25519 <key>', 'Ed25519 key for networking')
+    .option('--genesis <file>', 'Genesis block file')
+    .option('--metadata <file>', 'Chain metadata file')
+    .option('--ts <timestamp>', 'Block timestamp')
+    .action(async (options) => {
+      await executeRunCommand(options)
+    })
 
-  // Extract options with defaults
-  const options = {
-    bootnode: getOption(parsedArgs, 'bootnode', ''),
-    chain: getOption(parsedArgs, 'chain', 'chainspec.json'),
-    'data-path': getOption(
-      parsedArgs,
-      'data-path',
-      '/Users/tanyageorgieva/.jamduna',
-    ),
-    datadir: getOption(parsedArgs, 'datadir', ''),
-    debug: getOption(parsedArgs, 'debug', 'r,g'),
-    'dev-validator': getOption(parsedArgs, 'dev-validator'),
-    validatorindex: getOption(parsedArgs, 'validatorindex'),
-    'external-ip': getOption(parsedArgs, 'external-ip', ''),
-    'listen-ip': getOption(parsedArgs, 'listen-ip', '::'),
-    'peer-id': getOption(parsedArgs, 'peer-id'),
-    port: getOption(parsedArgs, 'port', 40000),
-    'pvm-backend': getOption(parsedArgs, 'pvm-backend', 'interpreter'),
-    'rpc-listen-ip': getOption(parsedArgs, 'rpc-listen-ip', '::'),
-    'rpc-port': getOption(parsedArgs, 'rpc-port', 19800),
-    'start-time': getOption(parsedArgs, 'start-time', ''),
-    telemetry: getOption(parsedArgs, 'telemetry', ''),
-    bandersnatch: getOption(parsedArgs, 'bandersnatch', ''),
-    bls: getOption(parsedArgs, 'bls', ''),
-    ed25519: getOption(parsedArgs, 'ed25519', ''),
-    genesis: getOption(parsedArgs, 'genesis', ''),
-    metadata: getOption(parsedArgs, 'metadata', 'Alice'),
-    ts: getOption(parsedArgs, 'ts'),
-  }
+  return command
+}
+
+async function executeRunCommand(options: any): Promise<void> {
+  // options parameter already contains the parsed command line options from Commander.js
 
   try {
     // Validate hex arguments
@@ -84,15 +73,11 @@ export async function createRunCommand(args: string[]): Promise<void> {
     // Log configuration
     logger.info('Configuration:')
     logger.info(`  Chain: ${options.chain || 'chainspec.json'}`)
-    logger.info(
-      `  Data directory: ${options['data-path'] || options.datadir || '~/.jamduna'}`,
-    )
-    logger.info(`  Network port: ${options.port || 40000}`)
-    logger.info(`  RPC port: ${options['rpc-port'] || 19800}`)
+    logger.info(`  Data directory: ${options.dataPath || '~/.jamduna'}`)
     logger.info(`  Node metadata: ${options.metadata || 'Alice'}`)
 
-    if (options['validatorindex'] !== undefined) {
-      logger.info(`  Validator index: ${options['validatorindex']}`)
+    if (options.validatorIndex !== undefined) {
+      logger.info(`  Validator index: ${options.validatorIndex}`)
     }
 
     if (options.genesis) {
@@ -116,24 +101,36 @@ export async function createRunCommand(args: string[]): Promise<void> {
     }
 
     // Initialize and start the block authoring service
-    const blockAuthoringService = new MainServiceImpl({
+    const mainService = new MainServiceImpl({
       blockAuthoring: config,
       genesis: {
         genesisPath: options.genesis,
+        validation: {
+          validateGenesis: true,
+          allowEmptyGenesis: false,
+          requireValidators: true,
+          requireAccounts: true,
+        },
+        import: {
+          createMissingAccounts: true,
+          initializeValidators: true,
+          resetExistingState: false,
+          backupExistingState: false,
+        },
       },
       networking: {
-        validatorIndex: options['validatorindex'],
+        validatorIndex: options.validatorIndex || 0,
         nodeType: 'validator',
-        listenAddress: options['listen-ip'],
-        listenPort: options.port,
-        chainHash: options.chain,
+        listenAddress: '0.0.0.0',
+        listenPort: 30333,
+        chainHash: options.chain || 'dev',
         isBuilder: false,
       },
-      nodeId: options['peer-id'],
+      nodeId: 'jam-node-cli',
     })
 
     logger.info('Starting block authoring service...')
-    const started = await blockAuthoringService.start()
+    const started = await mainService.start()
     if (!started) {
       throw new Error('Failed to start block authoring service')
     }
@@ -150,7 +147,7 @@ export async function createRunCommand(args: string[]): Promise<void> {
     process.on('SIGINT', async () => {
       logger.info('Shutting down PeanutButterAndJam node...')
       clearInterval(keepAlive)
-      await blockAuthoringService.stop()
+      await mainService.stop()
       logger.info('Node stopped successfully')
       process.exit(0)
     })
@@ -158,7 +155,7 @@ export async function createRunCommand(args: string[]): Promise<void> {
     process.on('SIGTERM', async () => {
       logger.info('Received SIGTERM, shutting down...')
       clearInterval(keepAlive)
-      await blockAuthoringService.stop()
+      await mainService.stop()
       process.exit(0)
     })
   } catch (error) {

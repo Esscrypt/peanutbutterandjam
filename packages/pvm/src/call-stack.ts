@@ -1,4 +1,4 @@
-import type { CallStack, CallStackFrame } from './types'
+import type { CallStack, CallStackFrame } from '@pbnj/types'
 
 /**
  * PVM Call Stack Implementation

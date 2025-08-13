@@ -1,0 +1,43 @@
+{
+  "name": "jam-reed-solomon-native",
+  "version": "0.1.0",
+  "description": "Native Rust Reed-Solomon implementation for JAM erasure coding",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "jam-reed-solomon",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "x86_64-pc-windows-msvc",
+        "i686-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "aarch64-unknown-linux-musl",
+        "aarch64-linux-android",
+        "arm-linux-androideabi",
+        "armv7-unknown-linux-gnueabihf",
+        "armv7-unknown-linux-musleabihf"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">= 10"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "artifacts": "napi artifacts",
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "vitest",
+    "version": "napi version"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

@@ -6,8 +6,18 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { type GenesisJson, logger, parseGenesisJson } from '@pbnj/core'
-import type { Account, GenesisConfig, GenesisState, Validator } from './types'
+import {
+  type GenesisJson,
+  type Hex,
+  logger,
+  parseGenesisJson,
+} from '@pbnj/core'
+import type {
+  Account,
+  GenesisConfig,
+  GenesisState,
+  Validator,
+} from '@pbnj/types'
 
 /**
  * Genesis validation result
@@ -33,9 +43,10 @@ export class GenesisManager {
    */
   async loadGenesis(): Promise<GenesisState> {
     try {
-      let genesisData: GenesisState
-
-      genesisData = await this.loadFromFile(this.config.genesisPath)
+      if (!this.config.genesisPath) {
+        throw new Error('Genesis path not configured')
+      }
+      const genesisData = await this.loadFromFile(this.config.genesisPath)
 
       // Validate genesis
       const validation = this.validateGenesis(genesisData)
@@ -83,7 +94,7 @@ export class GenesisManager {
     const genesisHeader = genesisJson.header
 
     // Create empty accounts and validators for now since they're not in the actual genesis.json
-    const accounts = new Map<string, Account>()
+    const accounts = new Map<Hex, Account>()
     const validators: Validator[] = []
 
     // Parse safrole state from header

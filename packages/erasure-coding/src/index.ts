@@ -1,28 +1,36 @@
 /**
- * Erasure Coding Package
+ * Erasure Coding Package for JAM Protocol
  *
- * Main exports for the JAM protocol erasure coding implementation
+ * This package provides JAM-compliant erasure coding functionality using
+ * a native Rust implementation with reed-solomon-simd for optimal performance.
  */
 
-// Algorithm implementations
-export {
-  GF2_16,
-  PolynomialOps,
-  ReedSolomon,
-} from './algorithms'
-
-// Main erasure coding implementation
-export { JAMErasureCoder } from './core'
-// Core types and interfaces
-export * from './types'
-// Default configurations
+// Export types from shared types package
+export type {
+  EncodedData,
+  ErasureCoder,
+  ErasureCodingParams,
+  ErasureCodingValidationResult,
+  FieldElement,
+  Polynomial,
+} from '@pbnj/types'
+// Export constants from shared types package
 export {
   BLOB_ERASURE_CODING_PARAMS,
+  CANTOR_BASIS,
   DEFAULT_ERASURE_CODING_PARAMS,
+  FIELD_GENERATOR,
+  IRREDUCIBLE_POLYNOMIAL,
   SEGMENT_ERASURE_CODING_PARAMS,
-} from './types'
-// Validation implementations
+} from '@pbnj/types'
+// Export Rust implementation
 export {
-  DecodingValidation,
-  EncodingValidation,
-} from './validation'
+  createRustReedSolomonCoder,
+  isRustModuleAvailable,
+  RustReedSolomonCoder,
+  testRustAgainstJAM,
+} from './rust-wrapper'
+
+// Default export - create Rust Reed-Solomon coder
+import { createRustReedSolomonCoder } from './rust-wrapper'
+export default createRustReedSolomonCoder

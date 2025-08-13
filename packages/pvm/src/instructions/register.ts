@@ -5,8 +5,8 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 /**
@@ -41,11 +41,11 @@ export class MOVE_REGInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterIndex(operands[0])
     const registerA = this.getRegisterIndex(operands[1])
     return `${this.name} r${registerD} r${registerA}`
@@ -83,11 +83,11 @@ export class SBRKInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -134,11 +134,11 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -186,11 +186,11 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -240,11 +240,11 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -295,11 +295,11 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -349,11 +349,11 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -404,11 +404,11 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -451,11 +451,11 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -499,11 +499,11 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -544,11 +544,11 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
@@ -560,7 +560,7 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
  * Reverse byte order as specified in Gray Paper
  */
 export class REVERSE_BYTESInstruction extends BaseInstruction {
-  readonly opcode = OPCODES.REVERSE_BYTES
+  readonly opcode = OPCODES.REVERSE_Uint8Array
   readonly name = 'REVERSE_BYTES'
   readonly description = 'Reverse byte order'
 
@@ -594,11 +594,11 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need two registers
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`

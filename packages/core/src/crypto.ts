@@ -5,7 +5,7 @@
  * used across the JAM ecosystem.
  */
 
-import type { Bytes } from '@pbnj/types'
+import type { Bytes, FixedLengthSize } from '@pbnj/types'
 import { hash as blake2b } from '@stablelib/blake2b'
 import { generateKeyPairFromSeed } from '@stablelib/ed25519'
 
@@ -76,21 +76,52 @@ export function generateTrivialSeed(index: number): Bytes {
 }
 
 /**
+ * Default decoder function that converts Bytes to bigint
+ */
+function defaultDecoder(
+  data: Uint8Array,
+  length: number,
+): { value: bigint; remaining: Bytes } {
+  if (data.length < length) {
+    throw new Error(
+      `Insufficient data: need ${length} bytes, got ${data.length}`,
+    )
+  }
+
+  // Convert bytes to bigint (big-endian)
+  let value = 0n
+  for (let i = 0; i < length; i++) {
+    value = (value << 8n) | BigInt(data[i])
+  }
+
+  return {
+    value,
+    remaining: data.slice(length),
+  }
+}
+
+/**
  * Generate alternative name from Ed25519 public key according to dev-accounts specification
  *
  * This implementation matches the exact values from the dev-accounts documentation,
  * which may differ from the Gray Paper specification.
  *
  * @param publicKey - Ed25519 public key (32 bytes)
- * @param decoder - function to convert public key to bigint
+ * @param decoder - optional function to convert public key to bigint (uses default if not provided)
  * @returns Alternative name string
  */
 export function generateAlternativeName(
   publicKey: Bytes,
-  decoder: (data: Bytes, length: number) => { value: bigint; remaining: Bytes },
+  decoder?: (
+    data: Uint8Array,
+    length: FixedLengthSize,
+  ) => { value: bigint; remaining: Bytes },
 ): string {
+  // Use default decoder if none provided
+  const decoderFn = decoder || defaultDecoder
+
   // Fallback to Gray Paper implementation for unknown keys
-  const { value: keyInt } = decoder(publicKey, 32)
+  const { value: keyInt } = decoderFn(publicKey, 32)
   const base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
 
   let result = ''

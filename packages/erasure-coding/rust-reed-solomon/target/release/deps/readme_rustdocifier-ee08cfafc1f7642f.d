@@ -1,0 +1,11 @@
+/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/deps/readme_rustdocifier-ee08cfafc1f7642f.d: /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/lib.rs /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/inner.rs /Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/build/readme-rustdocifier-5d190fd6e6b1a008/out/README-rustdocified.md
+
+/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/deps/libreadme_rustdocifier-ee08cfafc1f7642f.rlib: /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/lib.rs /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/inner.rs /Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/build/readme-rustdocifier-5d190fd6e6b1a008/out/README-rustdocified.md
+
+/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/deps/libreadme_rustdocifier-ee08cfafc1f7642f.rmeta: /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/lib.rs /Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/inner.rs /Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/build/readme-rustdocifier-5d190fd6e6b1a008/out/README-rustdocified.md
+
+/Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/lib.rs:
+/Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/readme-rustdocifier-0.1.1/src/inner.rs:
+/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/build/readme-rustdocifier-5d190fd6e6b1a008/out/README-rustdocified.md:
+
+# env-dep:OUT_DIR=/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/erasure-coding/rust-reed-solomon/target/release/build/readme-rustdocifier-5d190fd6e6b1a008/out

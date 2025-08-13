@@ -135,7 +135,7 @@ import {
   LEADING_ZERO_BITS_32Instruction,
   LEADING_ZERO_BITS_64Instruction,
   MOVE_REGInstruction,
-  REVERSE_Uint8ArrayInstruction,
+  REVERSE_BYTESInstruction,
   SBRKInstruction,
   SIGN_EXTEND_8Instruction,
   SIGN_EXTEND_16Instruction,
@@ -408,7 +408,7 @@ export class InstructionRegistry {
     this.register(new SIGN_EXTEND_8Instruction())
     this.register(new SIGN_EXTEND_16Instruction())
     this.register(new ZERO_EXTEND_16Instruction())
-    this.register(new REVERSE_Uint8ArrayInstruction())
+    this.register(new REVERSE_BYTESInstruction())
 
     logger.info('Instruction registry initialized', {
       instructionCount: this.handlers.size,

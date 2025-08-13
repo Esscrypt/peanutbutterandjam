@@ -1,9 +1,11 @@
-import { logger, z } from '@pbnj/core'
-import { createGenesisStateTrie, createStateKey } from '@pbnj/serialization'
+import { generateAlternativeName, hexToBytes, logger, z } from '@pbnj/core'
+import {
+  createGenesisStateTrie,
+  createStateKey,
+} from '@pbnj/serialization/dist/state/state-serialization'
 import type {
   Account,
-  GenesisState,
-  SafroleState,
+  SerializationGenesisState as GenesisState,
   ServiceAccount,
   Validator,
 } from '@pbnj/types'
@@ -11,8 +13,8 @@ import type {
 /**
  * Helper function to convert Uint8Array to hex without 0x prefix
  */
-function Uint8ArrayToHexNoPrefix(Uint8Array: Uint8Array): string {
-  return Array.from(Uint8Array)
+function Uint8ArrayToHexNoPrefix(bytes: Uint8Array): string {
+  return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
 }
@@ -107,11 +109,11 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
         altname: `validator-${validatorIndex}`,
       }
 
-      validators.push(validatorEntry)
+      validators.push(validatorEntry as unknown as Validator)
 
       // Add validator account to accounts
       accounts[address] = {
-        address,
+        address: address as `0x${string}`,
         balance: BigInt(validator.stake),
         nonce: 0,
         isValidator: true,
@@ -140,6 +142,8 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
         address,
         {
           ...account,
+          nonce: 0,
+          isValidator: false,
           storage: new Map(),
           preimages: new Map(),
           requests: new Map(),
@@ -153,10 +157,17 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
           created: 0,
           lastacc: 0,
           parent: 0,
-        } as ServiceAccount,
+          minbalance: '0',
+        } as unknown as ServiceAccount,
       ]),
     ) as Record<`0x${string}`, ServiceAccount>,
-    validators,
+    validators: validators.map((validator) => ({
+      address: validator.address,
+      publicKey: validator.publicKey,
+      stake: validator.stake.toString(),
+      isActive: validator.isActive,
+      altname: generateAlternativeName(hexToBytes(validator.publicKey)),
+    })),
     safrole: {
       epoch: 0,
       timeslot: 0,
@@ -168,18 +179,18 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
       sealtickets: [],
       ticketaccumulator:
         '0x0000000000000000000000000000000000000000000000000000000000000000',
-    } as SafroleState,
+    },
   }
 
   // Generate service accounts for each validator (Chapter 255) according to Gray Paper
   for (let i = 0; i < validators.length; i++) {
     const validator = validators[i]
     const serviceAccount: ServiceAccount = {
-      balance: validator.stake,
+      balance: String(validator.stake),
       nonce: 0,
       isValidator: true,
       validatorKey: validator.publicKey,
-      stake: validator.stake,
+      stake: String(validator.stake),
       storage: new Map(),
       preimages: new Map(),
       requests: new Map(),
@@ -193,6 +204,7 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
       created: 0,
       lastacc: 0,
       parent: 0,
+      minbalance: '0',
     }
 
     // Create service account key (Chapter 255 with service ID) according to Gray Paper

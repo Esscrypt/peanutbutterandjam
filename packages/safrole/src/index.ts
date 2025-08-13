@@ -7,9 +7,7 @@
 
 // Re-export specific types from centralized types package to avoid conflicts
 export type {
-  SAFROLE_CONSTANTS,
   SafroleError,
-  SafroleErrorCode,
   SafroleInput,
   SafroleOutput,
   SafroleState,

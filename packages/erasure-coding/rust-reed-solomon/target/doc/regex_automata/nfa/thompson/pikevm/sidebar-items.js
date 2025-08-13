@@ -1,0 +1,10 @@
+window.SIDEBAR_ITEMS = {
+  struct: [
+    'Builder',
+    'Cache',
+    'CapturesMatches',
+    'Config',
+    'FindMatches',
+    'PikeVM',
+  ],
+}

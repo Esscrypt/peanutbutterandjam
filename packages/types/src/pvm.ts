@@ -6,7 +6,7 @@
  */
 
 import type { Bytes, HashValue, HexString } from './core'
-import type { OperandTuple } from './serialization'
+import type { OperandTuple, ServiceAccount } from './serialization'
 
 // Gas types as specified in Gray Paper
 export type Gas = bigint // 64-bit unsigned integer (0 to 2^64-1)
@@ -43,6 +43,32 @@ export interface RegisterState {
 // Result codes as specified in PVM
 export type ResultCode = 0 | 1 | 2 | 3 | 4
 
+// Result code constants for cleaner code
+export const RESULT_CODES = {
+  HALT: 0 as const,
+  PANIC: 1 as const,
+  FAULT: 2 as const,
+  HOST: 3 as const,
+  OOG: 4 as const,
+} as const
+
+// Host-call result constants as specified in Gray Paper section 6.1
+export const HOST_CALL_RESULTS = {
+  OK: 0n as const,
+  HUH: 2n ** 64n - 9n, // Invalid operation/privilege level
+  LOW: 2n ** 64n - 8n, // Gas limit too low
+  CASH: 2n ** 64n - 7n, // Insufficient funds
+  CORE: 2n ** 64n - 6n, // Core index unknown
+  FULL: 2n ** 64n - 5n, // Storage full/resource allocated
+  WHO: 2n ** 64n - 4n, // Index unknown
+  OOB: 2n ** 64n - 3n, // Memory index not accessible
+  WHAT: 2n ** 64n - 2n, // Name unknown
+  NONE: 2n ** 64n - 1n, // Item does not exist
+} as const
+
+// Type for host call result values
+export type HostCallResult = bigint
+
 // Memory access types for fault handling
 export interface MemoryAccess {
   address: number
@@ -68,19 +94,13 @@ export interface FaultInfo {
 // RAM: dictionary from natural numbers to octets
 export interface RAM {
   // Map from address (natural number) to octet (8-bit value)
-  cells: Map<number, number>
-
-  // Read octet at address
-  readOctet(address: number): number
-
-  // Write octet at address
-  writeOctet(address: number, value: number): void
+  cells: Map<number, Uint8Array>
 
   // Read multiple octets
-  readOctets(address: number, count: number): number[]
+  readOctets(address: number, count: number): Uint8Array
 
   // Write multiple octets
-  writeOctets(address: number, values: number[]): void
+  writeOctets(address: number, values: Uint8Array): void
 
   // Check if address is readable (for fault detection)
   isReadable(address: number): boolean
@@ -131,19 +151,19 @@ export interface PVMState {
   ram: RAM // µ: RAM
   gasCounter: Gas // Gas counter as specified in Gray Paper
   stackPointer?: number // Stack pointer for stack operations
-  instructionData?: number[] // Raw instruction data
+  instructionData?: Uint8Array // Raw instruction data
   instructions?: PVMInstruction[] // Parsed instructions
 }
 
 export interface ProgramBlob {
-  instructionData: number[] // Raw instruction data
-  opcodeBitmask: number[] // Opcode bitmasks
+  instructionData: Uint8Array // Raw instruction data
+  opcodeBitmask: Uint8Array // Opcode bitmasks
   dynamicJumpTable: Map<number, number> // Dynamic jump table
 }
 
 export interface PVMInstruction {
   opcode: number
-  operands: number[]
+  operands: Uint8Array
   address: number
 }
 
@@ -160,12 +180,16 @@ export interface InstructionContext {
 export interface InstructionResult {
   resultCode: ResultCode
   newRegisters?: Partial<RegisterState>
-  newRam?: Map<number, number>
+  newRam?: Map<number, Uint8Array>
   newCallStack?: CallStackFrame[]
   newInstructionPointer?: number
   newStackPointer?: number
   newGasCounter?: Gas
-  memoryAccesses?: Array<{ address: number; value: number; isWrite: boolean }>
+  memoryAccesses?: Array<{
+    address: number
+    value: Uint8Array
+    isWrite: boolean
+  }>
   faultInfo?: FaultInfo
 }
 
@@ -267,7 +291,7 @@ export interface ParseResult {
 }
 
 export interface Parser {
-  parseInstruction(data: number[]): ParseResult
+  parseInstruction(data: Uint8Array): ParseResult
   parseProgram(blob: ProgramBlob): {
     success: boolean
     instructions: PVMInstruction[]
@@ -278,13 +302,13 @@ export interface Parser {
 
 export interface DeblobResult {
   success: boolean
-  instructionData: number[]
-  opcodeBitmask: number[]
+  instructionData: Uint8Array
+  opcodeBitmask: Uint8Array
   dynamicJumpTable: Map<number, number>
   errors: string[]
 }
 
-export type DeblobFunction = (blob: number[]) => DeblobResult
+export type DeblobFunction = (blob: Uint8Array) => DeblobResult
 
 // Host call system types
 export type ContextMutator<X> = (
@@ -328,14 +352,14 @@ export interface HostCallHandler {
 // Program initialization types
 export interface ProgramInitResult {
   success: boolean
-  instructionData?: number[]
+  instructionData?: Uint8Array
   registers?: RegisterState
   ram?: RAM
   error?: string
 }
 
 export interface ArgumentData {
-  data: number[]
+  data: Uint8Array
   size: number
 }
 
@@ -343,7 +367,7 @@ export interface ArgumentData {
 export interface BasicBlock {
   startAddress: number
   endAddress: number
-  instructions: number[]
+  instructions: Uint8Array
 }
 
 export interface JumpTableEntry {
@@ -381,22 +405,22 @@ export type IsAuthorizedContextMutator = (
 // ===== REFINE INVOCATION TYPES =====
 
 // PVM-specific service account interface (for PVM runtime)
-export interface ServiceAccount {
-  codehash: number[]
-  storage: Map<string, number[]>
-  requests: Map<string, number[][]>
-  balance: bigint
-  minaccgas: bigint
-  minmemogas: bigint
-  preimages: Map<string, number[]>
-  created: number
-  gratis: boolean
-  lastacc: number
-  parent: number
-  items: number
-  minbalance: bigint
-  octets: number
-}
+// export interface ServiceAccount {
+//   codehash: number[]
+//   storage: Map<string, number[]>
+//   requests: Map<string, number[][]>
+//   balance: bigint
+//   minaccgas: bigint
+//   minmemogas: bigint
+//   preimages: Map<string, number[]>
+//   created: number
+//   gratis: boolean
+//   lastacc: number
+//   parent: number
+//   items: number
+//   minbalance: bigint
+//   octets: number
+// }
 
 // Accounts state interface
 export interface Accounts {
@@ -404,11 +428,11 @@ export interface Accounts {
 }
 
 // Segment type (blob of length Csegmentsize)
-export type Segment = number[]
+export type Segment = Uint8Array
 
 // PVM Guest type as per Gray Paper equation eq:pvmguest
 export interface PVMGuest {
-  code: number[] // pg_code
+  code: Uint8Array // pg_code
   ram: RAM // pg_ram
   pc: number // pg_pc
 }
@@ -417,7 +441,7 @@ export interface PVMGuest {
 export type RefineContext = [Map<number, PVMGuest>, Segment[]]
 
 // Refine result type
-export type RefineResult = number[] | WorkError
+export type RefineResult = Uint8Array | WorkError
 
 // Refine context mutator function F as per Gray Paper equation eq:refinemutator
 export type RefineContextMutator = (
@@ -443,17 +467,17 @@ export type RefineContextMutator = (
 
 export interface PartialState {
   accounts: Map<number, ServiceAccount>
-  authqueue: Map<number, number[][]>
+  authqueue: Map<number, Uint8Array[]>
   assigners: Map<number, number>
-  stagingset: number[][]
+  stagingset: Uint8Array[]
   nextfreeid: number
   manager: number
   registrar: number
   delegator: number
   alwaysaccers: Map<number, bigint>
-  xfers: number[][]
-  provisions: Map<number, number[]>
-  yield: number[] | null
+  xfers: Uint8Array[]
+  provisions: Map<number, Uint8Array[]>
+  yield: Uint8Array | null
 }
 
 export interface DeferredTransfer {
@@ -469,8 +493,8 @@ export interface Implications {
   state: PartialState
   nextfreeid: number
   xfers: DeferredTransfer[]
-  yield: number[] | null
-  provisions: Map<number, number[]>
+  yield: Uint8Array | null
+  provisions: Map<number, Uint8Array>
 }
 
 export type ImplicationsPair = [Implications, Implications]
@@ -483,9 +507,9 @@ export interface AccumulateInput {
 export interface AccumulateOutput {
   poststate: PartialState
   defxfers: DeferredTransfer[]
-  yield: number[] | null
+  yield: Uint8Array | null
   gasused: bigint
-  provisions: Map<number, number[]>
+  provisions: Map<number, Uint8Array>
 }
 
 export type AccumulateInvocationResult = AccumulateOutput | WorkError

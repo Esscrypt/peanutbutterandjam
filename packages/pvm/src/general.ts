@@ -5,9 +5,14 @@
  * These functions are used by PVM invocations and do not mutate accumulation context.
  */
 
-import { logger } from '@pbnj/core'
+import { bytesToHex, logger } from '@pbnj/core'
+import type {
+  RAM,
+  RegisterState,
+  ServiceAccount,
+  WorkPackage,
+} from '@pbnj/types'
 import { ACCUMULATE_ERROR_CODES, GENERAL_FUNCTIONS } from './config'
-import type { RAM, RegisterState, ServiceAccount, WorkPackage } from './types'
 
 // General function context
 export interface GeneralContext {
@@ -37,11 +42,8 @@ function readMemoryRange(
   length: number,
 ): Uint8Array | 'error' {
   try {
-    const result = new Uint8Array(length)
-    for (let i = 0; i < length; i++) {
-      result[i] = memory.readOctet(start + i)
-    }
-    return result
+    // Use the RAM's bulk read method if available, otherwise read byte by byte
+    return memory.readOctets(start, length)
   } catch {
     return 'error'
   }
@@ -53,9 +55,8 @@ function writeMemoryRange(
   data: Uint8Array,
 ): boolean {
   try {
-    for (let i = 0; i < data.length; i++) {
-      memory.writeOctet(start + i, data[i])
-    }
+    // Use the RAM's bulk write method if available, otherwise write byte by byte
+    memory.writeOctets(start, data)
     return true
   } catch {
     return false
@@ -199,7 +200,7 @@ export function lookup(context: GeneralContext): GeneralResult {
   }
 
   // Look up data in preimages
-  const data = targetAccount.preimages.get(hash.toString())
+  const data = targetAccount.preimages.get(bytesToHex(hash))
   if (!data) {
     return {
       executionState: 'continue',
@@ -285,7 +286,7 @@ export function read(context: GeneralContext): GeneralResult {
   }
 
   // Look up data in storage
-  const data = targetAccount.storage?.get(key.toString())
+  const data = targetAccount.storage?.get(key.toString() as `0x${string}`)
   if (!data) {
     return {
       executionState: 'continue',
@@ -359,7 +360,7 @@ export function write(context: GeneralContext): GeneralResult {
   if (Number(valueLength) === 0) {
     const newServiceAccount = { ...serviceAccount }
     if (newServiceAccount.storage) {
-      newServiceAccount.storage.delete(key.toString())
+      newServiceAccount.storage.delete(key.toString() as `0x${string}`)
     }
 
     return {
@@ -384,8 +385,9 @@ export function write(context: GeneralContext): GeneralResult {
     }
   }
 
-  // Check balance constraint
-  if (serviceAccount.balance < serviceAccount.minbalance) {
+  // Check balance constraint (minimum balance requirement)
+  const minBalance = '100' // Minimum balance requirement
+  if (Number.parseInt(serviceAccount.balance) < Number.parseInt(minBalance)) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.FULL },
@@ -400,8 +402,8 @@ export function write(context: GeneralContext): GeneralResult {
   }
 
   const existingLength =
-    newServiceAccount.storage.get(key.toString())?.length || 0
-  newServiceAccount.storage.set(key.toString(), Array.from(value))
+    newServiceAccount.storage.get(bytesToHex(key))?.length || 0
+  newServiceAccount.storage.set(bytesToHex(key), value)
 
   return {
     executionState: 'continue',

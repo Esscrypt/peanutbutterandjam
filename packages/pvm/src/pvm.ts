@@ -4,21 +4,33 @@
  * Implements the PVM as specified in Gray Paper
  */
 
+import { readFileSync, writeFileSync } from 'node:fs'
 import { logger } from '@pbnj/core'
 import type {
+  DeblobFunction,
+  DeblobResult,
   ProgramBlob,
+  PVMInstruction,
   PVMRuntime,
   PVMState,
+  RegisterValue,
+  RegisterValue32,
+  ResultCode,
   SingleStepResult,
 } from '@pbnj/types'
+import { PVMError, RESULT_CODES } from '@pbnj/types'
+import { PVMCallStack } from './call-stack'
+import { DEFAULTS, GAS_CONFIG, INSTRUCTION_LENGTHS } from './config'
+import { InstructionRegistry } from './instructions/registry'
+import { PVMRAM } from './ram'
 
 // Default deblob function implementation
-const defaultDeblob: DeblobFunction = (blob: number[]): DeblobResult => {
+const defaultDeblob: DeblobFunction = (blob: Uint8Array): DeblobResult => {
   try {
     // Simple implementation - in practice this would parse the blob format
     // For now, we'll assume the blob contains instruction data directly
     const instructionData = blob
-    const opcodeBitmask = new Array(blob.length).fill(0xff) // Default bitmask
+    const opcodeBitmask = new Uint8Array(blob.length).fill(0xff) // Default bitmask
     const dynamicJumpTable = new Map<number, number>()
 
     return {
@@ -31,8 +43,8 @@ const defaultDeblob: DeblobFunction = (blob: number[]): DeblobResult => {
   } catch (error) {
     return {
       success: false,
-      instructionData: [],
-      opcodeBitmask: [],
+      instructionData: new Uint8Array(),
+      opcodeBitmask: new Uint8Array(),
       dynamicJumpTable: new Map(),
       errors: [`Deblob failed: ${error}`],
     }
@@ -118,7 +130,7 @@ export class PVM implements PVMRuntime {
   /**
    * Load program from raw instruction data
    */
-  public loadProgramFromData(instructionData: number[]): void {
+  public loadProgramFromData(instructionData: Uint8Array): void {
     try {
       // Parse instructions from the raw data
       this.instructions = this.parseInstructionsFromData(instructionData)
@@ -501,7 +513,7 @@ export class PVM implements PVMRuntime {
    * Parse instructions from instruction data
    */
   private parseInstructionsFromData(
-    instructionData: number[],
+    instructionData: Uint8Array,
   ): PVMInstruction[] {
     const instructions: PVMInstruction[] = []
     let address = 0

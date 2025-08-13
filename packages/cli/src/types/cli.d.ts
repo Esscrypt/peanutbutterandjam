@@ -24,7 +24,7 @@ declare module 'cli' {
     genesis?: string
     metadata?: string
     ts?: number
-    [key: string]: any
+    [key: string]: unknown
   }
 
   interface CliArgs {
@@ -32,7 +32,7 @@ declare module 'cli' {
   }
 
   function parse(
-    options: Record<string, [string, string, string, any]>,
+    options: Record<string, [string, string, string, unknown]>,
     args?: string[],
   ): CliOptions & CliArgs
 

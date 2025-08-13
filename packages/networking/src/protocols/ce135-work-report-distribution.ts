@@ -65,8 +65,7 @@ export class WorkReportDistributionProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          6, // Service ID 6 for work reports
-          Buffer.from(`work_report_${hashString}`),
+          `work_report_${hashString}`,
           workReport,
         )
 
@@ -82,8 +81,7 @@ export class WorkReportDistributionProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          6,
-          Buffer.from(`work_report_meta_${hashString}`),
+          `work_report_meta_${hashString}`,
           Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
@@ -122,15 +120,13 @@ export class WorkReportDistributionProtocol {
     try {
       const hashString = workReportHash.toString()
       const workReportData = await this.dbIntegration.getServiceStorage(
-        6,
-        Buffer.from(`work_report_${hashString}`),
+        `work_report_${hashString}`,
       )
 
       if (workReportData) {
         // Get metadata
         const metadataData = await this.dbIntegration.getServiceStorage(
-          6,
-          Buffer.from(`work_report_meta_${hashString}`),
+          `work_report_meta_${hashString}`,
         )
 
         let slot = 0

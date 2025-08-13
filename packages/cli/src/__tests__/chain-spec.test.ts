@@ -10,12 +10,14 @@ describe('Chain Spec Generator', () => {
         bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
         net_addr: '127.0.0.1:40000',
         validator_index: 0,
+        stake: '1000000000000000000',
       },
       {
         peer_id: 'validator2',
         bandersnatch: 'dee6d555b82024f1ccf8a1e37e60fa60fd40b1958c4bb3006af78647950e1b91',
         net_addr: '127.0.0.1:40001',
         validator_index: 1,
+        stake: '1000000000000000000',
       },
     ],
   }
@@ -55,6 +57,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
             validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -67,6 +70,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40001',
             validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -86,6 +90,8 @@ describe('Chain Spec Generator', () => {
             peer_id: 'validator1',
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
+            validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -116,6 +122,8 @@ describe('Chain Spec Generator', () => {
             peer_id: 'validator1',
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
+            validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -140,6 +148,8 @@ describe('Chain Spec Generator', () => {
             peer_id: 'validator1',
             bandersnatch: 'invalid-key',
             net_addr: '127.0.0.1:40000',
+            validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -156,6 +166,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
             stake: 'invalid-stake',
+            validator_index: 0,
           },
         ],
       }
@@ -171,12 +182,16 @@ describe('Chain Spec Generator', () => {
             peer_id: 'validator1',
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
+            validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
         accounts: [
           {
-            address: 'invalid-address',
+            address: 'invalid-address', // This is what we're testing - invalid address format
             balance: '1000000000000000000',
+            nonce: 0,
+            isValidator: false,
           },
         ],
       }
@@ -192,12 +207,16 @@ describe('Chain Spec Generator', () => {
             peer_id: 'validator1',
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
+            validator_index: 0,
+            stake: '1000000000000000000',
           },
         ],
         accounts: [
           {
             address: '0x1234567890123456789012345678901234567890',
-            balance: 'invalid-balance',
+            balance: 'invalid-balance', // This is what we're testing - invalid balance format
+            nonce: 0,
+            isValidator: false,
           },
         ],
       }
@@ -251,6 +270,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
             validator_index: 999999,
+            stake: '1000000000000000000',
           },
         ],
       }
@@ -269,6 +289,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
             stake: '0',
+            validator_index: 0,
           },
         ],
       }
@@ -287,6 +308,7 @@ describe('Chain Spec Generator', () => {
             bandersnatch: 'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
             net_addr: '127.0.0.1:40000',
             stake: '9999999999999999999999999999999999999999999999999999999999999999',
+            validator_index: 0,
           },
         ],
       }

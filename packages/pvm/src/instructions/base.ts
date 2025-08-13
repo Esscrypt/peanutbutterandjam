@@ -4,13 +4,14 @@
  * Defines the base interfaces and abstract class for all PVM instructions.
  */
 
+import { bytesToHex } from '@pbnj/core'
 import type {
   InstructionContext,
   InstructionResult,
   RegisterState,
   RegisterValue,
   RegisterValue32,
-} from '../types'
+} from '@pbnj/types'
 
 /**
  * Base interface for all PVM instruction handlers
@@ -28,12 +29,12 @@ export interface PVMInstructionHandler {
   /**
    * Validate instruction operands
    */
-  validate(operands: number[]): boolean
+  validate(operands: Uint8Array): boolean
 
   /**
    * Disassemble instruction to string representation
    */
-  disassemble(operands: number[]): string
+  disassemble(operands: Uint8Array): string
 }
 
 /**
@@ -56,7 +57,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Get register A from first operand byte
    */
-  protected getRegisterA(operands: number[]): number {
+  protected getRegisterA(operands: Uint8Array): number {
     if (operands.length < 1) return 0
     return this.getRegisterIndex(operands[0])
   }
@@ -64,7 +65,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Get register B from second operand byte (for 2-register instructions)
    */
-  protected getRegisterB(operands: number[]): number {
+  protected getRegisterB(operands: Uint8Array): number {
     if (operands.length < 2) return 0
     return this.getRegisterIndex(operands[1])
   }
@@ -72,7 +73,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Get register D from third operand byte (for 3-register instructions)
    */
-  protected getRegisterD(operands: number[]): number {
+  protected getRegisterD(operands: Uint8Array): number {
     if (operands.length < 3) return 0
     return this.getRegisterIndex(operands[2])
   }
@@ -82,7 +83,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    * l_X = min(4, skip_length) for basic immediates
    */
   protected getImmediateValue(
-    operands: number[],
+    operands: Uint8Array,
     startIndex = 1,
     length?: number,
   ): bigint {
@@ -110,28 +111,28 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Get 64-bit immediate value (8 Uint8Array)
    */
-  protected getImmediate64(operands: number[], startIndex = 1): bigint {
+  protected getImmediate64(operands: Uint8Array, startIndex = 1): bigint {
     return this.getImmediateValue(operands, startIndex, 8)
   }
 
   /**
    * Get 32-bit immediate value (4 Uint8Array)
    */
-  protected getImmediate32(operands: number[], startIndex = 1): number {
+  protected getImmediate32(operands: Uint8Array, startIndex = 1): number {
     return Number(this.getImmediateValue(operands, startIndex, 4))
   }
 
   /**
    * Get 16-bit immediate value (2 Uint8Array)
    */
-  protected getImmediate16(operands: number[], startIndex = 1): number {
+  protected getImmediate16(operands: Uint8Array, startIndex = 1): number {
     return Number(this.getImmediateValue(operands, startIndex, 2))
   }
 
   /**
    * Get 8-bit immediate value (1 byte)
    */
-  protected getImmediate8(operands: number[], startIndex = 1): number {
+  protected getImmediate8(operands: Uint8Array, startIndex = 1): number {
     return Number(this.getImmediateValue(operands, startIndex, 1))
   }
 
@@ -178,12 +179,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     registers: RegisterState,
     index: number,
   ): RegisterValue {
-    if (index >= 0 && index <= 7) {
-      return registers[`r${index}` as keyof RegisterState] as RegisterValue
-    } else if (index >= 8 && index <= 12) {
-      return registers[`r${index}` as keyof RegisterState] as RegisterValue
-    }
-    return 0n
+    return registers[`r${index}` as keyof RegisterState]
   }
 
   /**
@@ -193,16 +189,13 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     registers: RegisterState,
     index: number,
   ): RegisterValue32 {
-    if (index >= 8 && index <= 12) {
-      return registers[`r${index}` as keyof RegisterState] as RegisterValue32
-    }
-    throw new Error(`Invalid register index: ${index}`)
+    return registers[`r${index}` as keyof RegisterState]
   }
 
   /**
    * Default validation - check minimum operand count
    */
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     // For most instructions, we need at least 1 operand
     return operands.length >= 1
   }
@@ -210,8 +203,8 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Default disassembly - show opcode and operands
    */
-  disassemble(operands: number[]): string {
-    return `${this.name} ${operands.map((op) => `0x${op.toString(16)}`).join(' ')}`
+  disassemble(operands: Uint8Array): string {
+    return `${this.name} ${bytesToHex(operands)}`
   }
 
   /**

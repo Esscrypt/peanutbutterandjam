@@ -5,8 +5,8 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 /**
@@ -45,11 +45,11 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and immediate
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -93,11 +93,11 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and immediate
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -140,11 +140,14 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -187,11 +190,14 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)

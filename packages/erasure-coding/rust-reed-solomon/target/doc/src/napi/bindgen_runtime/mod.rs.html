@@ -1,0 +1,90 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `/Users/tanyageorgieva/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/napi-2.16.17/src/bindgen_runtime/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="napi" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (2805e1dc4 2025-05-26)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../../static.files/storage-4e99c027.js"></script><script defer src="../../../static.files/src-script-63605ae7.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><h1><div class="sub-heading">napi/bindgen_runtime/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-2"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>std::ffi::c_void;
+<a href=#2 id=2 data-nosnippet>2</a><span class="kw">use </span>std::rc::Rc;
+<a href=#3 id=3 data-nosnippet>3</a>
+<a href=#4 id=4 data-nosnippet>4</a><span class="kw">pub use </span>callback_info::<span class="kw-2">*</span>;
+<a href=#5 id=5 data-nosnippet>5</a><span class="kw">pub use </span>ctor::ctor;
+<a href=#6 id=6 data-nosnippet>6</a><span class="kw">pub use </span>env::<span class="kw-2">*</span>;
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">pub use </span>iterator::Generator;
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">pub use </span>js_values::<span class="kw-2">*</span>;
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">pub use </span>module_register::<span class="kw-2">*</span>;
+<a href=#10 id=10 data-nosnippet>10</a>
+<a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span><span class="kw">super</span>::sys;
+<a href=#12 id=12 data-nosnippet>12</a><span class="kw">use crate</span>::{JsError, <span class="prelude-ty">Result</span>, Status};
+<a href=#13 id=13 data-nosnippet>13</a>
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">mod </span>callback_info;
+<a href=#15 id=15 data-nosnippet>15</a><span class="kw">mod </span>env;
+<a href=#16 id=16 data-nosnippet>16</a><span class="kw">mod </span>error;
+<a href=#17 id=17 data-nosnippet>17</a><span class="kw">pub mod </span>iterator;
+<a href=#18 id=18 data-nosnippet>18</a><span class="kw">mod </span>js_values;
+<a href=#19 id=19 data-nosnippet>19</a><span class="kw">mod </span>module_register;
+<a href=#20 id=20 data-nosnippet>20</a>
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">pub trait </span>ObjectFinalize: Sized {
+<a href=#22 id=22 data-nosnippet>22</a>  <span class="attr">#[allow(unused)]
+<a href=#23 id=23 data-nosnippet>23</a>  </span><span class="kw">fn </span>finalize(<span class="self">self</span>, env: Env) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+<a href=#24 id=24 data-nosnippet>24</a>    <span class="prelude-val">Ok</span>(())
+<a href=#25 id=25 data-nosnippet>25</a>  }
+<a href=#26 id=26 data-nosnippet>26</a>}
+<a href=#27 id=27 data-nosnippet>27</a>
+<a href=#28 id=28 data-nosnippet>28</a><span class="doccomment">/// # Safety
+<a href=#29 id=29 data-nosnippet>29</a>///
+<a href=#30 id=30 data-nosnippet>30</a>/// called when node wrapper objects destroyed
+<a href=#31 id=31 data-nosnippet>31</a></span><span class="attr">#[doc(hidden)]
+<a href=#32 id=32 data-nosnippet>32</a></span><span class="kw">pub unsafe extern </span><span class="string">"C" </span><span class="kw">fn </span>raw_finalize_unchecked&lt;T: ObjectFinalize&gt;(
+<a href=#33 id=33 data-nosnippet>33</a>  env: sys::napi_env,
+<a href=#34 id=34 data-nosnippet>34</a>  finalize_data: <span class="kw-2">*mut </span>c_void,
+<a href=#35 id=35 data-nosnippet>35</a>  _finalize_hint: <span class="kw-2">*mut </span>c_void,
+<a href=#36 id=36 data-nosnippet>36</a>) {
+<a href=#37 id=37 data-nosnippet>37</a>  <span class="kw">let </span>data: Box&lt;T&gt; = <span class="kw">unsafe </span>{ Box::from_raw(finalize_data.cast()) };
+<a href=#38 id=38 data-nosnippet>38</a>  <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = data.finalize(<span class="kw">unsafe </span>{ Env::from_raw(env) }) {
+<a href=#39 id=39 data-nosnippet>39</a>    <span class="kw">let </span>e: JsError = err.into();
+<a href=#40 id=40 data-nosnippet>40</a>    <span class="kw">unsafe </span>{ e.throw_into(env) };
+<a href=#41 id=41 data-nosnippet>41</a>    <span class="kw">return</span>;
+<a href=#42 id=42 data-nosnippet>42</a>  }
+<a href=#43 id=43 data-nosnippet>43</a>  <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, ref_val, finalize_callbacks_ptr)) =
+<a href=#44 id=44 data-nosnippet>44</a>    REFERENCE_MAP.with(|reference_map| reference_map.borrow_mut().remove(<span class="kw-2">&amp;</span>finalize_data))
+<a href=#45 id=45 data-nosnippet>45</a>  {
+<a href=#46 id=46 data-nosnippet>46</a>    <span class="kw">let </span>finalize_callbacks_rc = <span class="kw">unsafe </span>{ Rc::from_raw(finalize_callbacks_ptr) };
+<a href=#47 id=47 data-nosnippet>47</a>
+<a href=#48 id=48 data-nosnippet>48</a>    <span class="attr">#[cfg(all(debug_assertions, not(target_family = <span class="string">"wasm"</span>)))]
+<a href=#49 id=49 data-nosnippet>49</a>    </span>{
+<a href=#50 id=50 data-nosnippet>50</a>      <span class="kw">let </span>rc_strong_count = Rc::strong_count(<span class="kw-2">&amp;</span>finalize_callbacks_rc);
+<a href=#51 id=51 data-nosnippet>51</a>      <span class="comment">// If `Rc` strong count is 2, it means the finalize of referenced `Object` is called before the `fn drop` of the `Reference`
+<a href=#52 id=52 data-nosnippet>52</a>      // It always happened on exiting process
+<a href=#53 id=53 data-nosnippet>53</a>      // In general, the `fn drop` would happen first
+<a href=#54 id=54 data-nosnippet>54</a>      </span><span class="macro">assert!</span>(
+<a href=#55 id=55 data-nosnippet>55</a>        rc_strong_count == <span class="number">1 </span>|| rc_strong_count == <span class="number">2</span>,
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="string">"Rc strong count is: {}, it should be 1 or 2"</span>,
+<a href=#57 id=57 data-nosnippet>57</a>        rc_strong_count
+<a href=#58 id=58 data-nosnippet>58</a>      );
+<a href=#59 id=59 data-nosnippet>59</a>    }
+<a href=#60 id=60 data-nosnippet>60</a>    <span class="kw">let </span>finalize = <span class="kw">unsafe </span>{ Box::from_raw(finalize_callbacks_rc.get()) };
+<a href=#61 id=61 data-nosnippet>61</a>    finalize();
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">let </span>delete_reference_status = <span class="kw">unsafe </span>{ sys::napi_delete_reference(env, ref_val) };
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="macro">debug_assert!</span>(
+<a href=#64 id=64 data-nosnippet>64</a>      delete_reference_status == sys::Status::napi_ok,
+<a href=#65 id=65 data-nosnippet>65</a>      <span class="string">"Delete reference in finalize callback failed {}"</span>,
+<a href=#66 id=66 data-nosnippet>66</a>      Status::from(delete_reference_status)
+<a href=#67 id=67 data-nosnippet>67</a>    );
+<a href=#68 id=68 data-nosnippet>68</a>  }
+<a href=#69 id=69 data-nosnippet>69</a>}
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a><span class="doccomment">/// # Safety
+<a href=#72 id=72 data-nosnippet>72</a>///
+<a href=#73 id=73 data-nosnippet>73</a>/// called when node buffer is ready for gc
+<a href=#74 id=74 data-nosnippet>74</a></span><span class="attr">#[doc(hidden)]
+<a href=#75 id=75 data-nosnippet>75</a></span><span class="kw">pub unsafe extern </span><span class="string">"C" </span><span class="kw">fn </span>drop_buffer(
+<a href=#76 id=76 data-nosnippet>76</a>  _env: sys::napi_env,
+<a href=#77 id=77 data-nosnippet>77</a>  <span class="attr">#[allow(unused)] </span>finalize_data: <span class="kw-2">*mut </span>c_void,
+<a href=#78 id=78 data-nosnippet>78</a>  finalize_hint: <span class="kw-2">*mut </span>c_void,
+<a href=#79 id=79 data-nosnippet>79</a>) {
+<a href=#80 id=80 data-nosnippet>80</a>  <span class="attr">#[cfg(all(debug_assertions, not(windows)))]
+<a href=#81 id=81 data-nosnippet>81</a>  </span>{
+<a href=#82 id=82 data-nosnippet>82</a>    js_values::BUFFER_DATA.with(|buffer_data| {
+<a href=#83 id=83 data-nosnippet>83</a>      <span class="kw">let </span><span class="kw-2">mut </span>buffer = buffer_data.lock().expect(<span class="string">"Unlock Buffer data failed"</span>);
+<a href=#84 id=84 data-nosnippet>84</a>      buffer.remove(<span class="kw-2">&amp;</span>(finalize_data <span class="kw">as </span><span class="kw-2">*mut </span>u8));
+<a href=#85 id=85 data-nosnippet>85</a>    });
+<a href=#86 id=86 data-nosnippet>86</a>  }
+<a href=#87 id=87 data-nosnippet>87</a>  <span class="kw">unsafe </span>{
+<a href=#88 id=88 data-nosnippet>88</a>    drop(Box::from_raw(finalize_hint <span class="kw">as </span><span class="kw-2">*mut </span>Buffer));
+<a href=#89 id=89 data-nosnippet>89</a>  }
+<a href=#90 id=90 data-nosnippet>90</a>}</code></pre></div></section></main></body></html>

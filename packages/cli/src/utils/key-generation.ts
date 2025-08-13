@@ -39,7 +39,7 @@ export function generateValidatorKeys(index: number): ValidatorKeys {
 
   // Derive secret seeds using the networking package function
   const { ed25519_secret_seed, bandersnatch_secret_seed } = deriveSecretSeeds(
-    seedArray as any,
+    seedArray as unknown as Parameters<typeof deriveSecretSeeds>[0],
   )
 
   // For now, we'll use placeholder values for the public keys
@@ -48,10 +48,15 @@ export function generateValidatorKeys(index: number): ValidatorKeys {
   const bandersnatchPublic = bytesToHex(bandersnatch_secret_seed) // Placeholder
 
   // Generate DNS alternative name from Ed25519 public key
-  const dnsAltName = generateAlternativeName(
-    ed25519_secret_seed,
-    decodeFixedLength,
-  )
+  // Create adapter function to match expected signature
+  const decodeAdapter = (data: Uint8Array, length: number) => {
+    return decodeFixedLength(
+      data,
+      length as unknown as Parameters<typeof decodeFixedLength>[1],
+    )
+  }
+
+  const dnsAltName = generateAlternativeName(ed25519_secret_seed, decodeAdapter)
 
   return {
     seed: bytesToHex(seed),

@@ -6,7 +6,7 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { BasicBlock, JumpTableEntry } from './types'
+import type { BasicBlock, JumpTableEntry } from '@pbnj/types'
 
 /**
  * Basic Block Validator
@@ -20,14 +20,14 @@ export class BasicBlockValidator {
    * @param instructionData - Program instruction data
    * @returns Array of basic blocks
    */
-  analyzeBasicBlocks(instructionData: number[]): BasicBlock[] {
+  analyzeBasicBlocks(instructionData: Uint8Array): BasicBlock[] {
     const basicBlocks: BasicBlock[] = []
     let currentBlockStart = 0
-    let currentInstructions: number[] = []
+    let currentInstructions: Uint8Array = new Uint8Array()
 
     for (let i = 0; i < instructionData.length; i++) {
       const opcode = instructionData[i]
-      currentInstructions.push(opcode)
+      currentInstructions.set([opcode], i)
 
       // Check if this instruction is a jump or halt
       if (this.isJumpInstruction(opcode) || this.isHaltInstruction(opcode)) {
@@ -35,13 +35,13 @@ export class BasicBlockValidator {
         basicBlocks.push({
           startAddress: currentBlockStart,
           endAddress: i + 1,
-          instructions: [...currentInstructions],
+          instructions: new Uint8Array(currentInstructions),
         })
 
         // Start new basic block at next instruction (if any)
         if (i + 1 < instructionData.length) {
           currentBlockStart = i + 1
-          currentInstructions = []
+          currentInstructions = new Uint8Array()
         }
       }
     }
@@ -51,7 +51,7 @@ export class BasicBlockValidator {
       basicBlocks.push({
         startAddress: currentBlockStart,
         endAddress: instructionData.length,
-        instructions: currentInstructions,
+        instructions: new Uint8Array(currentInstructions),
       })
     }
 
@@ -66,7 +66,7 @@ export class BasicBlockValidator {
    * @returns Array of jump table entries with validation results
    */
   validateJumpTargets(
-    instructionData: number[],
+    instructionData: Uint8Array,
     basicBlocks: BasicBlock[],
   ): JumpTableEntry[] {
     const jumpEntries: JumpTableEntry[] = []
@@ -107,7 +107,7 @@ export class BasicBlockValidator {
    * @param instructionData - Program instruction data
    * @returns True if all jumps are valid, false otherwise
    */
-  validateAllJumps(instructionData: number[]): boolean {
+  validateAllJumps(instructionData: Uint8Array): boolean {
     const basicBlocks = this.analyzeBasicBlocks(instructionData)
     const jumpEntries = this.validateJumpTargets(instructionData, basicBlocks)
 
@@ -139,7 +139,7 @@ export class BasicBlockValidator {
    * @returns Target address or null if invalid
    */
   private extractJumpTarget(
-    instructionData: number[],
+    instructionData: Uint8Array,
     instructionIndex: number,
     opcode: number,
   ): number | null {

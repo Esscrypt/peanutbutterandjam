@@ -73,8 +73,7 @@ export class WorkPackageSharingProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          5, // Service ID 5 for work package sharing
-          Buffer.from(`bundle_${hashString}`),
+          `bundle_${hashString}`,
           bundle,
         )
 
@@ -86,8 +85,7 @@ export class WorkPackageSharingProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          5,
-          Buffer.from(`bundle_meta_${hashString}`),
+          `bundle_meta_${hashString}`,
           Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
@@ -113,8 +111,7 @@ export class WorkPackageSharingProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          5, // Service ID 5 for work package sharing
-          Buffer.from(`segments_root_${hashString}`),
+          `segments_root_${hashString}`,
           segmentsRoot,
         )
       } catch (error) {
@@ -157,15 +154,13 @@ export class WorkPackageSharingProtocol {
     try {
       const hashString = bundleHash.toString()
       const bundleData = await this.dbIntegration.getServiceStorage(
-        5,
-        Buffer.from(`bundle_${hashString}`),
+        `bundle_${hashString}`,
       )
 
       if (bundleData) {
         // Get metadata
         const metadataData = await this.dbIntegration.getServiceStorage(
-          5,
-          Buffer.from(`bundle_meta_${hashString}`),
+          `bundle_meta_${hashString}`,
         )
 
         let coreIndex = 0
@@ -212,8 +207,7 @@ export class WorkPackageSharingProtocol {
     try {
       const hashString = workPackageHash.toString()
       const segmentsRoot = await this.dbIntegration.getServiceStorage(
-        5,
-        Buffer.from(`segments_root_${hashString}`),
+        `segments_root_${hashString}`,
       )
 
       if (segmentsRoot) {

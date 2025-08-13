@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 export class CMOV_IZ_IMMInstruction extends BaseInstruction {
@@ -39,11 +39,11 @@ export class CMOV_IZ_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and immediate
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -87,11 +87,11 @@ export class CMOV_NZ_IMMInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 3 // Need two registers and immediate
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)

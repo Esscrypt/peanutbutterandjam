@@ -8,7 +8,6 @@
  */
 
 import { logger } from '@pbnj/core'
-import { RESULT_CODES } from './config'
 import type {
   ContextMutator,
   Gas,
@@ -16,7 +15,8 @@ import type {
   RAM,
   RegisterState,
   ResultCode,
-} from './types'
+} from '@pbnj/types'
+import { RESULT_CODES } from './config'
 
 export class HostCallSystem<X> {
   private contextMutator: ContextMutator<X>
@@ -37,7 +37,7 @@ export class HostCallSystem<X> {
    * @returns Result with updated state
    */
   execute(
-    instructionData: number[],
+    instructionData: Uint8Array,
     instructionPointer: number,
     gasCounter: Gas,
     registers: RegisterState,
@@ -156,7 +156,7 @@ export class HostCallSystem<X> {
    * This is a placeholder - in the real implementation, this would call the actual PVM
    */
   private executePVMStep(
-    instructionData: number[],
+    instructionData: Uint8Array,
     instructionPointer: number,
     gasCounter: Gas,
     registers: RegisterState,

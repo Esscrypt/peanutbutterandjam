@@ -90,8 +90,7 @@ export class StateRequestProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          3, // Service ID 3 for state trie
-          Buffer.from(`state_node_${hashString}`),
+          `state_node_${hashString}`,
           Buffer.from(JSON.stringify(nodeData), 'utf8'),
         )
       } catch (error) {
@@ -110,11 +109,7 @@ export class StateRequestProtocol {
     // Persist to database if available
     if (this.dbIntegration) {
       try {
-        await this.dbIntegration.setServiceStorage(
-          3, // Service ID 3 for state trie
-          Buffer.from(`kv_${keyString}`),
-          value,
-        )
+        await this.dbIntegration.setServiceStorage(`kv_${keyString}`, value)
       } catch (error) {
         console.error('Failed to persist key-value pair to database:', error)
       }
@@ -148,8 +143,7 @@ export class StateRequestProtocol {
     try {
       const hashString = hash.toString()
       const nodeData = await this.dbIntegration.getServiceStorage(
-        3,
-        Buffer.from(`state_node_${hashString}`),
+        `state_node_${hashString}`,
       )
 
       if (nodeData) {
@@ -194,8 +188,7 @@ export class StateRequestProtocol {
     try {
       const keyString = key.toString()
       const value = await this.dbIntegration.getServiceStorage(
-        3,
-        Buffer.from(`kv_${keyString}`),
+        `kv_${keyString}`,
       )
 
       if (value) {
@@ -316,20 +309,18 @@ export class StateRequestProtocol {
     // If we need more data, check database
     if (pairs.length < maximumSize && this.dbIntegration) {
       try {
-        const storage = await this.dbIntegration
-          .getServiceAccountStore()
-          .getServiceStorage(3)
+        const storage = await this.dbIntegration.getServiceAccountStore()
 
-        for (const item of storage) {
-          if (item.storageKey.startsWith('kv_')) {
-            const keyStr = item.storageKey.replace('kv_', '')
-            const key = Buffer.from(keyStr, 'hex')
-            const value = Buffer.from(item.storageValue, 'hex')
+        for (const [key, value] of storage) {
+          if (key.startsWith('kv_')) {
+            const keyStr = key.replace('kv_', '')
+            const keyBytes = Buffer.from(keyStr, 'hex')
+            const valueBytes = value
 
             // Check if we already have this pair
             const exists = pairs.some((pair) => pair.key.toString() === keyStr)
-            if (!exists && this.isKeyInRange(key, startKey, endKey)) {
-              pairs.push({ key, value })
+            if (!exists && this.isKeyInRange(keyBytes, startKey, endKey)) {
+              pairs.push({ key: keyBytes, value: valueBytes })
 
               if (pairs.length >= maximumSize) {
                 break
@@ -349,9 +340,9 @@ export class StateRequestProtocol {
   /**
    * Get path from root to a specific key
    */
-  private async getPathToKey(key: Bytes): Promise<Bytes[]> {
+  private async getPathToKey(_key: Bytes): Promise<Bytes[]> {
     const path: Bytes[] = []
-    const _currentKey = key
+    // const _currentKey = key
 
     // This is a simplified implementation
     // In practice, you would traverse the state trie to find the path

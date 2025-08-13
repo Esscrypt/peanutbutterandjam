@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 export class SHLO_L_IMM_32Instruction extends BaseInstruction {
@@ -39,11 +39,14 @@ export class SHLO_L_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -87,11 +90,14 @@ export class SHLO_R_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -139,11 +145,14 @@ export class SHAR_R_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)
@@ -201,11 +210,14 @@ export class NEG_ADD_IMM_32Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 2)

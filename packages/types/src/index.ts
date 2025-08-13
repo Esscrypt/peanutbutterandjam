@@ -15,7 +15,6 @@ export type {
   BlockAuthoringConfig,
   BlockAuthoringContext,
   BlockAuthoringError,
-  BlockAuthoringErrorType,
   BlockAuthoringMetrics,
   BlockAuthoringResult,
   BlockAuthoringService,
@@ -26,7 +25,6 @@ export type {
   GenesisState,
   HeaderConstructionContext,
   NetworkState,
-  PropagationStatus,
   SignatureValidationResult,
   State as BlockAuthoringState,
   StateTransitionContext,
@@ -46,6 +44,10 @@ export type {
   WorkPackageContext,
   WorkPackageProcessingContext,
   WorkReport,
+} from './block-authoring'
+export {
+  BlockAuthoringErrorType,
+  PropagationStatus,
 } from './block-authoring'
 // CLI types
 export * from './cli'
@@ -93,6 +95,7 @@ export type {
   SafroleState as ConsensusSafroleState,
   Ticket,
   TicketProof,
+  ValidatorKey,
   WinnerMarker,
 } from './consensus'
 export { SAFROLE_CONSTANTS, SafroleErrorCode } from './consensus'

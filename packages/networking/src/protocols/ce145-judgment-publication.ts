@@ -89,8 +89,7 @@ export class JudgmentPublicationProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          14, // Service ID 14 for judgments
-          Buffer.from(`judgment_${key}`),
+          `judgment_${key}`,
           Buffer.from(JSON.stringify(judgmentData), 'utf8'),
         )
       } catch (error) {
@@ -146,8 +145,7 @@ export class JudgmentPublicationProtocol {
     try {
       const key = `${epochIndex}_${validatorIndex}_${workReportHash.toString()}`
       const judgmentData = await this.dbIntegration.getServiceStorage(
-        14,
-        Buffer.from(`judgment_${key}`),
+        `judgment_${key}`,
       )
 
       if (judgmentData) {

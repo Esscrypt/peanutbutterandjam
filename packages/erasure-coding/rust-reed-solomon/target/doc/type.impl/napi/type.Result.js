@@ -1,0 +1,20 @@
+;(() => {
+  var type_impls = Object.fromEntries([
+    [
+      'napi',
+      [
+        [
+          '<details class="toggle implementors-toggle" open><summary><section id="impl-ToNapiValue-for-Result%3CT,+Error%3E" class="impl"><a class="src rightside" href="src/napi/bindgen_runtime/js_values.rs.html#237-257">Source</a><a href="#impl-ToNapiValue-for-Result%3CT,+Error%3E" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="napi/bindgen_prelude/trait.ToNapiValue.html" title="trait napi::bindgen_prelude::ToNapiValue">ToNapiValue</a> for <a class="type" href="napi/type.Result.html" title="type napi::Result">Result</a>&lt;T&gt;<div class="where">where\n    T: <a class="trait" href="napi/bindgen_prelude/trait.ToNapiValue.html" title="trait napi::bindgen_prelude::ToNapiValue">ToNapiValue</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.to_napi_value" class="method trait-impl"><a class="src rightside" href="src/napi/bindgen_runtime/js_values.rs.html#241-256">Source</a><a href="#method.to_napi_value" class="anchor">§</a><h4 class="code-header">unsafe fn <a href="napi/bindgen_prelude/trait.ToNapiValue.html#tymethod.to_napi_value" class="fn">to_napi_value</a>(env: <a class="type" href="napi_sys/types/type.napi_env.html" title="type napi_sys::types::napi_env">napi_env</a>, val: Self) -&gt; <a class="type" href="napi/type.Result.html" title="type napi::Result">Result</a>&lt;<a class="type" href="napi_sys/types/type.napi_value.html" title="type napi_sys::types::napi_value">napi_value</a>&gt;</h4></section></summary><div class=\'docblock\'>Safety <a href="napi/bindgen_prelude/trait.ToNapiValue.html#tymethod.to_napi_value">Read more</a></div></details></div></details>',
+          'ToNapiValue',
+          'napi::ContextlessResult',
+        ],
+      ],
+    ],
+  ])
+  if (window.register_type_impls) {
+    window.register_type_impls(type_impls)
+  } else {
+    window.pending_type_impls = type_impls
+  }
+})()
+//{"start":55,"fragment_lengths":[1823]}

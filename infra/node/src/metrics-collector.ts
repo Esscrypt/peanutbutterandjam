@@ -13,8 +13,8 @@ import { Resource } from '@opentelemetry/resources'
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
 import { logger } from '@pbnj/core'
+import type { BlockAuthoringMetrics } from '@pbnj/types'
 import { BaseService } from './service-interface'
-import type { BlockAuthoringMetrics } from './types'
 
 /**
  * Metrics Collector with OpenTelemetry
@@ -35,16 +35,27 @@ export class MetricsCollector extends BaseService {
   private tracer = trace.getTracer('pbnj-node')
 
   // OpenTelemetry metrics
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blockCreationTimeHistogram: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blockValidationTimeHistogram: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blockSubmissionTimeHistogram: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private memoryUsageGauge: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private cpuUsageGauge: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private extrinsicCountCounter: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private workPackageCountCounter: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blockSizeHistogram: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blocksCreatedCounter: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blocksSubmittedCounter: any
+  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blocksFailedCounter: any
 
   constructor(

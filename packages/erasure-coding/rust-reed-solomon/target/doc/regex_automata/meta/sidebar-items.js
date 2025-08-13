@@ -1,0 +1,13 @@
+window.SIDEBAR_ITEMS = {
+  struct: [
+    'BuildError',
+    'Builder',
+    'Cache',
+    'CapturesMatches',
+    'Config',
+    'FindMatches',
+    'Regex',
+    'Split',
+    'SplitN',
+  ],
+}

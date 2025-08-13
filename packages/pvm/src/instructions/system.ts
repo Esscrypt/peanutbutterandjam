@@ -5,17 +5,17 @@
  */
 
 import { logger } from '@pbnj/core'
+import type {
+  InstructionContext,
+  InstructionResult,
+  PartialState,
+} from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
 import { dispatchGeneralFunction, type GeneralContext } from '../general'
 import {
   type AccumulateContext,
   dispatchAccumulateFunction,
 } from '../invocations/accumulate-functions'
-import type {
-  InstructionContext,
-  InstructionResult,
-  PartialState,
-} from '../types'
 import { BaseInstruction } from './base'
 
 /**
@@ -152,11 +152,14 @@ export class ECALLIInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 1 // Need at least one immediate for host call ID
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 1) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const hostCallId = this.getImmediateValue(operands, 0)
     return `${this.name} ${hostCallId}`
   }

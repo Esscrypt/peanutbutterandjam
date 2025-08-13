@@ -1,0 +1,77 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Trait for compute-intensive low-level algorithms needed for Reed-Solomon encoding/decoding."><title>Engine in reed_solomon_simd::engine - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-84e720fa.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="reed_solomon_simd" data-themes="" data-resource-suffix="" data-rustdoc-version="1.89.0-nightly (2805e1dc4 2025-05-26)" data-channel="nightly" data-search-js="search-f7877310.js" data-settings-js="settings-5514c975.js" ><script src="../../static.files/storage-4e99c027.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-fd3af306.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-32bb7600.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../reed_solomon_simd/index.html">reed_<wbr>solomon_<wbr>simd</a><span class="version">3.0.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Engine</a></h2><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.fft" title="fft">fft</a></li><li><a href="#tymethod.ifft" title="ifft">ifft</a></li><li><a href="#tymethod.mul" title="mul">mul</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.eval_poly" title="eval_poly">eval_poly</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In reed_<wbr>solomon_<wbr>simd::<wbr>engine</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">reed_solomon_simd</a>::<wbr><a href="index.html">engine</a></div><h1>Trait <span class="trait">Engine</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/reed_solomon_simd/engine.rs.html#104-161">Source</a> </span></div><pre class="rust item-decl"><code>pub trait Engine {
+    // Required methods
+    fn <a href="#tymethod.fft" class="fn">fft</a>(
+        &amp;self,
+        data: &amp;mut <a class="struct" href="struct.ShardsRefMut.html" title="struct reed_solomon_simd::engine::ShardsRefMut">ShardsRefMut</a>&lt;'_&gt;,
+        pos: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        skew_delta: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    );
+<span class="item-spacer"></span>    fn <a href="#tymethod.ifft" class="fn">ifft</a>(
+        &amp;self,
+        data: &amp;mut <a class="struct" href="struct.ShardsRefMut.html" title="struct reed_solomon_simd::engine::ShardsRefMut">ShardsRefMut</a>&lt;'_&gt;,
+        pos: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+        skew_delta: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    );
+<span class="item-spacer"></span>    fn <a href="#tymethod.mul" class="fn">mul</a>(&amp;self, x: &amp;mut [[<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">64</a>]], log_m: <a class="type" href="type.GfElement.html" title="type reed_solomon_simd::engine::GfElement">GfElement</a>);
+
+    // Provided method
+    fn <a href="#method.eval_poly" class="fn">eval_poly</a>(erasures: &amp;mut [<a class="type" href="type.GfElement.html" title="type reed_solomon_simd::engine::GfElement">GfElement</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">65536</a>], truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)
+       <span class="where">where Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a></span> { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Trait for compute-intensive low-level algorithms needed
+for Reed-Solomon encoding/decoding.</p>
+<p>This is the trait you would implement to provide SIMD support
+for a CPU architecture not already provided.</p>
+<p><a href="struct.Naive.html" title="struct reed_solomon_simd::engine::Naive"><code>Naive</code></a> engine is provided for those who want to
+study the source code to understand <a href="trait.Engine.html" title="trait reed_solomon_simd::engine::Engine"><code>Engine</code></a>.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.fft" class="method"><a class="src rightside" href="../../src/reed_solomon_simd/engine.rs.html#119-126">Source</a><h4 class="code-header">fn <a href="#tymethod.fft" class="fn">fft</a>(
+    &amp;self,
+    data: &amp;mut <a class="struct" href="struct.ShardsRefMut.html" title="struct reed_solomon_simd::engine::ShardsRefMut">ShardsRefMut</a>&lt;'_&gt;,
+    pos: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    skew_delta: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+)</h4></section></summary><div class="docblock"><p>In-place decimation-in-time FFT (fast Fourier transform).</p>
+<ul>
+<li>FFT is done on chunk <code>data[pos .. pos + size]</code></li>
+<li><code>size</code> must be <code>2^n</code></li>
+<li>Before function call <code>data[pos .. pos + size]</code> must be valid.</li>
+<li>After function call
+<ul>
+<li><code>data[pos .. pos + truncated_size]</code>
+contains valid FFT result.</li>
+<li><code>data[pos + truncated_size .. pos + size]</code>
+contains valid FFT result if this contained
+only <code>0u8</code>:s and garbage otherwise.</li>
+</ul>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.ifft" class="method"><a class="src rightside" href="../../src/reed_solomon_simd/engine.rs.html#139-146">Source</a><h4 class="code-header">fn <a href="#tymethod.ifft" class="fn">ifft</a>(
+    &amp;self,
+    data: &amp;mut <a class="struct" href="struct.ShardsRefMut.html" title="struct reed_solomon_simd::engine::ShardsRefMut">ShardsRefMut</a>&lt;'_&gt;,
+    pos: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+    skew_delta: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>,
+)</h4></section></summary><div class="docblock"><p>In-place decimation-in-time IFFT (inverse fast Fourier transform).</p>
+<ul>
+<li>IFFT is done on chunk <code>data[pos .. pos + size]</code></li>
+<li><code>size</code> must be <code>2^n</code></li>
+<li>Before function call <code>data[pos .. pos + size]</code> must be valid.</li>
+<li>After function call
+<ul>
+<li><code>data[pos .. pos + truncated_size]</code>
+contains valid IFFT result.</li>
+<li><code>data[pos + truncated_size .. pos + size]</code>
+contains valid IFFT result if this contained
+only <code>0u8</code>:s and garbage otherwise.</li>
+</ul>
+</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.mul" class="method"><a class="src rightside" href="../../src/reed_solomon_simd/engine.rs.html#149">Source</a><h4 class="code-header">fn <a href="#tymethod.mul" class="fn">mul</a>(&amp;self, x: &amp;mut [[<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.u8.html">u8</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">64</a>]], log_m: <a class="type" href="type.GfElement.html" title="type reed_solomon_simd::engine::GfElement">GfElement</a>)</h4></section></summary><div class="docblock"><p><code>x[] *= log_m</code></p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.eval_poly" class="method"><a class="src rightside" href="../../src/reed_solomon_simd/engine.rs.html#155-160">Source</a><h4 class="code-header">fn <a href="#method.eval_poly" class="fn">eval_poly</a>(erasures: &amp;mut [<a class="type" href="type.GfElement.html" title="type reed_solomon_simd::engine::GfElement">GfElement</a>; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.array.html">65536</a>], truncated_size: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>)<div class="where">where
+    Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h4></section></summary><div class="docblock"><p>Evaluate polynomial.</p>
+</div></details></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"><section id="impl-Engine-for-DefaultEngine" class="impl"><a class="src rightside" href="../../src/reed_solomon_simd/engine/engine_default.rs.html#61-109">Source</a><a href="#impl-Engine-for-DefaultEngine" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.Engine.html" title="trait reed_solomon_simd::engine::Engine">Engine</a> for <a class="struct" href="struct.DefaultEngine.html" title="struct reed_solomon_simd::engine::DefaultEngine">DefaultEngine</a></h3></section><section id="impl-Engine-for-Naive" class="impl"><a class="src rightside" href="../../src/reed_solomon_simd/engine/engine_naive.rs.html#42-118">Source</a><a href="#impl-Engine-for-Naive" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.Engine.html" title="trait reed_solomon_simd::engine::Engine">Engine</a> for <a class="struct" href="struct.Naive.html" title="struct reed_solomon_simd::engine::Naive">Naive</a></h3></section><section id="impl-Engine-for-Neon" class="impl"><a class="src rightside" href="../../src/reed_solomon_simd/engine/engine_neon.rs.html#39-75">Source</a><a href="#impl-Engine-for-Neon" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.Engine.html" title="trait reed_solomon_simd::engine::Engine">Engine</a> for <a class="struct" href="struct.Neon.html" title="struct reed_solomon_simd::engine::Neon">Neon</a></h3></section><section id="impl-Engine-for-NoSimd" class="impl"><a class="src rightside" href="../../src/reed_solomon_simd/engine/engine_nosimd.rs.html#36-77">Source</a><a href="#impl-Engine-for-NoSimd" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="trait.Engine.html" title="trait reed_solomon_simd::engine::Engine">Engine</a> for <a class="struct" href="struct.NoSimd.html" title="struct reed_solomon_simd::engine::NoSimd">NoSimd</a></h3></section></div><script src="../../trait.impl/reed_solomon_simd/engine/trait.Engine.js" async></script></section></div></main></body></html>

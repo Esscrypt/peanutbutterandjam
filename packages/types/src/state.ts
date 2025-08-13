@@ -4,7 +4,8 @@
  * Types for state management and database operations
  */
 
-import type { Bytes, HashValue, Natural } from './core'
+import type { ConsensusTicket } from './consensus'
+import type { Bytes, HashValue, Natural, ValidatorKey } from './core'
 
 /**
  * Core account structure
@@ -27,8 +28,9 @@ export interface ValidatorAccount {
  * Safrole state structure
  */
 export interface SafroleState {
-  pendingset: any[]
-  sealtickets: any[]
+  currentslot: number
+  pendingset: ValidatorKey[]
+  sealtickets: ConsensusTicket[]
   entropy: HashValue
 }
 
@@ -79,8 +81,8 @@ export interface PrivilegesState {
  * Judgments state structure
  */
 export interface JudgmentsState {
-  disputes: any[]
-  resolutions: any[]
+  disputes: unknown[]
+  resolutions: unknown[]
 }
 
 /**

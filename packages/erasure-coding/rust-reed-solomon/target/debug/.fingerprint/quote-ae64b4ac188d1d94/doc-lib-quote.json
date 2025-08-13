@@ -1,0 +1,16 @@
+{
+  "rustc": 8838817330114404042,
+  "features": "[\"default\", \"proc-macro\"]",
+  "declared_features": "[\"default\", \"proc-macro\"]",
+  "target": 3570458776599611685,
+  "profile": 6319103369714392144,
+  "path": 9503333932645882733,
+  "deps": [
+    [3060637413840920116, "proc_macro2", false, 16116016075466973322],
+    [3060637413840920116, "proc_macro2", false, 2751705742877973012]
+  ],
+  "local": [{ "Precalculated": "1.0.40" }],
+  "rustflags": [],
+  "config": 2069994364910194474,
+  "compile_kind": 0
+}

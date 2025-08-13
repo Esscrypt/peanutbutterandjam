@@ -62,8 +62,7 @@ export class TicketDistributionProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          4, // Service ID 4 for tickets
-          Buffer.from(`ticket_${hashString}`),
+          `ticket_${hashString}`,
           ticket.proof,
         )
 
@@ -75,8 +74,7 @@ export class TicketDistributionProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          4,
-          Buffer.from(`ticket_meta_${hashString}`),
+          `ticket_meta_${hashString}`,
           Buffer.from(JSON.stringify(metadata), 'utf8'),
         )
       } catch (error) {
@@ -109,8 +107,7 @@ export class TicketDistributionProtocol {
     try {
       const hashString = `${epochIndex}_${attempt}`
       const ticketData = await this.dbIntegration.getServiceStorage(
-        4,
-        Buffer.from(`ticket_${hashString}`),
+        `ticket_${hashString}`,
       )
 
       if (ticketData) {

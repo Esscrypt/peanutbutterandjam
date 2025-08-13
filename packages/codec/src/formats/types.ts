@@ -2,8 +2,6 @@
  * Format-specific codec types
  */
 
-import type { Uint8Array } from '@pbnj/core'
-
 /**
  * Base interface for format-specific codecs
  */

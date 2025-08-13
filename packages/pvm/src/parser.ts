@@ -1,4 +1,4 @@
-import type { ParseResult, Parser, PVMInstruction } from './types'
+import type { ParseResult, Parser, PVMInstruction } from '@pbnj/types'
 
 /**
  * PVM Parser implementation
@@ -8,12 +8,12 @@ export class PVMParser implements Parser {
   /**
    * Parse a single instruction from raw data
    */
-  parseInstruction(data: number[]): ParseResult {
+  parseInstruction(data: Uint8Array): ParseResult {
     try {
       if (data.length < 4) {
         return {
           success: false,
-          error: 'Instruction data too short (minimum 4 Uint8Array required)',
+          error: 'Instruction data too short (minimum 4 bytes required)',
         }
       }
 
@@ -43,8 +43,8 @@ export class PVMParser implements Parser {
    * Parse a complete program from blob
    */
   parseProgram(blob: {
-    instructionData: number[]
-    opcodeBitmask: number[]
+    instructionData: Uint8Array
+    opcodeBitmask: Uint8Array
     dynamicJumpTable: Map<number, number>
   }): {
     success: boolean
@@ -58,13 +58,13 @@ export class PVMParser implements Parser {
     try {
       // Parse instructions in 4-byte chunks
       for (let i = 0; i < blob.instructionData.length; i += 4) {
-        const chunk = blob.instructionData.slice(i, i + 4)
+        let chunk = blob.instructionData.slice(i, i + 4)
 
         if (chunk.length < 4) {
           // Pad with zeros if incomplete
-          while (chunk.length < 4) {
-            chunk.push(0)
-          }
+          const paddedChunk = new Uint8Array(4)
+          paddedChunk.set(chunk, 0)
+          chunk = paddedChunk
         }
 
         const opcode = chunk[0] & (blob.opcodeBitmask[i] || 0xff)
@@ -100,11 +100,8 @@ export class PVMParser implements Parser {
    */
   disassemble(instruction: PVMInstruction): string {
     const opcodeName = this.getOpcodeName(instruction.opcode)
-    const operandsStr = instruction.operands
-      .map((op) => `0x${op.toString(16).padStart(2, '0')}`)
-      .join(', ')
 
-    return `${opcodeName} ${operandsStr}`
+    return `${opcodeName} ${instruction.operands.join(', ')}`
   }
 
   /**

@@ -1,0 +1,3 @@
+window.SIDEBAR_ITEMS = {
+  struct: ['One', 'OneIter', 'Three', 'ThreeIter', 'Two', 'TwoIter'],
+}

@@ -14,7 +14,7 @@ import {
   serializePayload,
   validateMessageFormat,
 } from '../serialization'
-import { MessageType } from '../types'
+import { MessageType } from '@pbnj/types'
 
 describe('Network Serialization', () => {
   describe('Message Encoding/Decoding', () => {
@@ -24,7 +24,7 @@ describe('Network Serialization', () => {
         type: MessageType.BLOCK_ANNOUNCE,
         payload: new Uint8Array([1, 2, 3, 4, 5]),
         timestamp: Date.now(),
-        signature: 'test-signature',
+        signature: new Uint8Array([1, 2, 3, 4]),
       }
 
       const encoded = encodeMessage(originalMessage)
@@ -107,7 +107,7 @@ describe('Network Serialization', () => {
         // Missing payload and timestamp
       }
 
-      const isValid = validateMessageFormat(message as unknown)
+      const isValid = validateMessageFormat(message as any)
       expect(isValid).toBe(false)
     })
 
@@ -163,9 +163,9 @@ describe('Network Serialization', () => {
   describe('Test Message Creation', () => {
     it('should create test messages correctly', () => {
       const payload = { test: 'data', number: 42 }
-      const message = createTestMessage(MessageType.BLOCK_ANNOUNCE, payload)
+      const message = createTestMessage('test-message', MessageType.BLOCK_ANNOUNCE, serializePayload(payload))
 
-      expect(message.id).toMatch(/^test-\d+-\w+$/)
+      expect(message.id).toBe('test-message')
       expect(message.type).toBe(MessageType.BLOCK_ANNOUNCE)
       expect(message.timestamp).toBeGreaterThan(0)
       expect(message.payload).toBeInstanceOf(Uint8Array)
@@ -201,15 +201,13 @@ describe('Network Serialization', () => {
 
     it('should handle variable-length natural numbers correctly', () => {
       // Test with different payload sizes to ensure variable-length encoding works
-      const _smallPayload = new Uint8Array([1])
-      const _largePayload = new Uint8Array(1000).fill(1)
 
-      const smallMessage = createTestMessage(MessageType.PING, {
+      const smallMessage = createTestMessage('small-msg', MessageType.PING, serializePayload({
         data: 'small',
-      })
-      const largeMessage = createTestMessage(MessageType.BLOCK_ANNOUNCE, {
+      }))
+      const largeMessage = createTestMessage('large-msg', MessageType.BLOCK_ANNOUNCE, serializePayload({
         data: 'large',
-      })
+      }))
 
       // Both should encode/decode correctly
       const smallEncoded = encodeMessage(smallMessage)

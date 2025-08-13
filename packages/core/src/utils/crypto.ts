@@ -9,7 +9,13 @@ import type { Hash } from '@pbnj/types'
 import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
 // Import blakejs for cryptographic operations
 import * as blakejs from 'blakejs'
-import { bytesToBigInt, bytesToHex, type Hex, hexToBytes } from 'viem'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  type Hex,
+  hexToBytes,
+  numberToBytes,
+} from 'viem'
 
 /**
  * Blake2b hash function
@@ -18,7 +24,7 @@ import { bytesToBigInt, bytesToHex, type Hex, hexToBytes } from 'viem'
  */
 export function blake2bHash(data: Uint8Array): Hash {
   const hash = blakejs.blake2b(data, undefined, 32)
-  return `0x${Buffer.from(hash).toString('hex')}` as Hash
+  return `0x${Buffer.from(hash).toString('hex')}`
 }
 
 /**
@@ -250,12 +256,12 @@ export function randomUint8Array(length: number): Uint8Array {
  */
 export function randomHex(length: number): Hex {
   const crypto = require('node:crypto')
-  const Uint8Array = crypto.randomUint8Array(length)
-  return bytesToHex(Uint8Array)
+  const randomBytes = crypto.randomUint8Array(length)
+  return bytesToHex(randomBytes)
 }
 
 // Re-export viem's hex functions directly
-export { bytesToHex, hexToBytes, bytesToBigInt }
+export { bytesToHex, hexToBytes, bytesToBigInt, numberToBytes }
 
 /**
  * Verify hex string format

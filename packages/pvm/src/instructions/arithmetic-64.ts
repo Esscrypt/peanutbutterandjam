@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 export class ADD_64Instruction extends BaseInstruction {
@@ -36,11 +36,18 @@ export class ADD_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -81,11 +88,18 @@ export class SUB_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -126,11 +140,18 @@ export class MUL_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -182,11 +203,18 @@ export class DIV_U_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -244,11 +272,18 @@ export class DIV_S_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -300,11 +335,18 @@ export class REM_U_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -362,11 +404,18 @@ export class REM_S_64Instruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    // validate that operands are 64-bit registers
+    if (operands.length !== 3) {
+      return false
+    }
+    if (operands[0] < 8 || operands[0] > 12) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)

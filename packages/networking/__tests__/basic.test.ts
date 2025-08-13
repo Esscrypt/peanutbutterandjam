@@ -2,9 +2,10 @@
  * Basic tests for JAMNP-S networking implementation
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, verifyEd25519 } from '@pbnj/core'
-import { generateAlternativeName, generateCertificate, validateCertificate } from '../src/crypto/certificates'
+import { generateCertificate, validateCertificate } from '../src/crypto/certificates'
+import { generateAlternativeName } from '@pbnj/core'
 import { generateALPNProtocol, parseALPNProtocol } from '../src/crypto/tls'
 import { StreamKind } from '@pbnj/types'
 

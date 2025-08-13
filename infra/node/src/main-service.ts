@@ -6,6 +6,7 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { BlockAuthoringConfig, GenesisConfig } from '@pbnj/types'
 import { BlockAuthoringServiceImpl } from './block-authoring-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
@@ -19,7 +20,6 @@ import {
   StateManagerService,
   WorkPackageProcessorService,
 } from './service-wrappers'
-import type { BlockAuthoringConfig, GenesisConfig } from './types'
 
 /**
  * Main service configuration

@@ -14,12 +14,16 @@ describe('generateChainSpec', () => {
         bandersnatch:
           'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
         net_addr: '127.0.0.1:40000',
+        validator_index: 0,
+        stake: '1000000000000000000',
       },
       {
         peer_id: 'en5ejs5b2tybkfh4ym5vpfh7nynby73xhtfzmazumtvcijpcsz6ma',
         bandersnatch:
           'dee6d555b82024f1ccf8a1e37e60fa60fd40b1958c4bb3006af78647950e1b91',
         net_addr: '127.0.0.1:40001',
+        validator_index: 1,
+        stake: '1000000000000000000',
       },
     ],
   }
@@ -43,6 +47,8 @@ describe('generateChainSpec', () => {
           bandersnatch:
             'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
           net_addr: '127.0.0.1:40000',
+          validator_index: 0,
+          stake: '1000000000000000000',
         },
       ],
     }
@@ -67,6 +73,8 @@ describe('generateChainSpec', () => {
           peer_id: 'test',
           bandersnatch: 'invalid-key', // Invalid format
           net_addr: '127.0.0.1:40000',
+          validator_index: 0,
+          stake: '1000000000000000000',
         },
       ],
     }
@@ -83,6 +91,8 @@ describe('generateChainSpec', () => {
           bandersnatch:
             'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
           net_addr: '127.0.0.1:40000',
+          validator_index: 0,
+          stake: '1000000000000000000',
         },
       ],
     }
@@ -99,6 +109,8 @@ describe('generateChainSpec', () => {
           bandersnatch:
             'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
           net_addr: '', // Empty string
+          validator_index: 0,
+          stake: '1000000000000000000',
         },
       ],
     }
@@ -115,18 +127,24 @@ describe('generateChainSpec', () => {
           bandersnatch:
             'ff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
           net_addr: '127.0.0.1:40000',
+          validator_index: 0,
+          stake: '1000000000000000000',
         },
         {
           peer_id: 'validator2',
           bandersnatch:
             'dee6d555b82024f1ccf8a1e37e60fa60fd40b1958c4bb3006af78647950e1b91',
           net_addr: '127.0.0.1:40001',
+          validator_index: 1,
+          stake: '1000000000000000000',
         },
         {
           peer_id: 'validator3',
           bandersnatch:
             '9326edb21e5541717fde24ec085000b28709847b8aab1ac51f84e94b37ca1b66',
           net_addr: '127.0.0.1:40002',
+          validator_index: 2,
+          stake: '1000000000000000000',
         },
       ],
     }

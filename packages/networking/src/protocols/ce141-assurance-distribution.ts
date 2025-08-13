@@ -76,8 +76,7 @@ export class AssuranceDistributionProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          10, // Service ID 10 for assurances
-          Buffer.from(`assurance_${hashString}`),
+          `assurance_${hashString}`,
           Buffer.from(JSON.stringify(assuranceData), 'utf8'),
         )
       } catch (error) {
@@ -118,8 +117,7 @@ export class AssuranceDistributionProtocol {
     try {
       const hashString = anchorHash.toString()
       const assuranceData = await this.dbIntegration.getServiceStorage(
-        10,
-        Buffer.from(`assurance_${hashString}`),
+        `assurance_${hashString}`,
       )
 
       if (assuranceData) {

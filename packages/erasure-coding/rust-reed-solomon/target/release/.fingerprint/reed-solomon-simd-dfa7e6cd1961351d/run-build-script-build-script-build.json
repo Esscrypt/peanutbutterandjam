@@ -1,0 +1,22 @@
+{
+  "rustc": 8838817330114404042,
+  "features": "",
+  "declared_features": "",
+  "target": 0,
+  "profile": 0,
+  "path": 0,
+  "deps": [
+    [860258989623235477, "build_script_build", false, 7843505568786435209]
+  ],
+  "local": [
+    {
+      "RerunIfChanged": {
+        "output": "release/build/reed-solomon-simd-dfa7e6cd1961351d/output",
+        "paths": ["README.md"]
+      }
+    }
+  ],
+  "rustflags": [],
+  "config": 0,
+  "compile_kind": 0
+}

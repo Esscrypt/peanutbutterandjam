@@ -81,8 +81,7 @@ export class PreimageAnnouncementProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          11, // Service ID 11 for preimage announcements
-          Buffer.from(`preimage_announcement_${hashString}`),
+          `preimage_announcement_${hashString}`,
           Buffer.from(JSON.stringify(announcementData), 'utf8'),
         )
       } catch (error) {
@@ -126,8 +125,7 @@ export class PreimageAnnouncementProtocol {
     try {
       const hashString = hash.toString()
       const announcementData = await this.dbIntegration.getServiceStorage(
-        11,
-        Buffer.from(`preimage_announcement_${hashString}`),
+        `preimage_announcement_${hashString}`,
       )
 
       if (announcementData) {

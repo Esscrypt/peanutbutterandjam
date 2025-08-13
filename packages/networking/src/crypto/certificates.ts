@@ -8,12 +8,12 @@
 import {
   deriveSecretSeeds,
   generateAlternativeName,
+  generateEd25519KeyPairFromSeed,
   signEd25519,
   verifyEd25519,
 } from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
 import type { Bytes, JAMNPCertificate } from '@pbnj/types'
-import { generateKeyPairFromSeed } from '@stablelib/ed25519'
 
 /**
  * Create Ed25519 private key in PEM format
@@ -182,10 +182,16 @@ export function generateCertificateFromSeed(seedHex: string): {
   const { ed25519_secret_seed } = deriveSecretSeeds(seed)
 
   // Generate Ed25519 key pair from secret seed
-  const { publicKey, secretKey } = generateKeyPairFromSeed(ed25519_secret_seed)
+  const { publicKey, privateKey: secretKey } =
+    generateEd25519KeyPairFromSeed(ed25519_secret_seed)
 
   // Generate alternative name from public key
-  const alternativeName = generateAlternativeName(publicKey, decodeFixedLength)
+  // Create adapter function for decodeFixedLength
+  const decoderAdapter = (data: Uint8Array, length: number) => {
+    const result = decodeFixedLength(data, length as any)
+    return { value: result.value, remaining: result.remaining }
+  }
+  const alternativeName = generateAlternativeName(publicKey, decoderAdapter)
 
   // Create real PEM encoded keys
   const privateKeyPEM = createEd25519PrivateKeyPEM(secretKey)
@@ -232,10 +238,11 @@ export function validateCertificate(cert: JAMNPCertificate): boolean {
     }
 
     // Verify alternative name matches public key
-    const expectedName = generateAlternativeName(
-      cert.publicKey,
-      decodeFixedLength,
-    )
+    const decoderAdapter = (data: Uint8Array, length: number) => {
+      const result = decodeFixedLength(data, length as any)
+      return { value: result.value, remaining: result.remaining }
+    }
+    const expectedName = generateAlternativeName(cert.publicKey, decoderAdapter)
     if (cert.alternativeName !== expectedName) {
       return false
     }
@@ -314,18 +321,4 @@ function validatePublicKey(publicKey: Bytes): boolean {
  */
 function validateSignature(signature: Bytes): boolean {
   return signature.length === 64
-}
-
-/**
- * Generate Ed25519 key pair from seed using @stablelib/ed25519
- *
- * @param seed - 32-byte seed
- * @returns Object with publicKey (32 bytes) and privateKey (64 bytes)
- */
-function _generateEd25519KeyPairFromSeed(seed: Uint8Array): {
-  publicKey: Uint8Array
-  privateKey: Uint8Array
-} {
-  const { publicKey, secretKey } = generateKeyPairFromSeed(seed)
-  return { publicKey, privateKey: secretKey }
 }

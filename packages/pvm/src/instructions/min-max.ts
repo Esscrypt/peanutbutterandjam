@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 export class MINInstruction extends BaseInstruction {
@@ -42,11 +42,14 @@ export class MINInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -91,11 +94,14 @@ export class MIN_UInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -142,11 +148,14 @@ export class MAXInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
@@ -191,11 +200,14 @@ export class MAX_UInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
-    return operands.length >= 3 // Need three registers
+  validate(operands: Uint8Array): boolean {
+    if (operands.length !== 3) {
+      return false
+    }
+    return true
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)

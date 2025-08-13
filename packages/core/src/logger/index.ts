@@ -1,5 +1,14 @@
 import pino from 'pino'
 
+// Declare Bun global if not available from types
+declare global {
+  const Bun:
+    | {
+        inspect: (value: unknown) => string
+      }
+    | undefined
+}
+
 /**
  * LoggerProvider is a class that provides logging functionality.
  * It is a wrapper around the pino logger.
@@ -71,16 +80,12 @@ export class LoggerProvider {
       const logMessage = `[${timestamp}] [${level.toUpperCase()}] ${message}`
 
       if (level === 'error') {
-        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
         console.error(logMessage, ...args)
       } else if (level === 'warn') {
-        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
         console.warn(logMessage, ...args)
       } else if (level === 'debug') {
-        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
         console.debug(logMessage, ...args)
       } else {
-        // biome-ignore lint/suspicious/noConsole: Fallback logging when logger not initialized
         console.log(logMessage, ...args)
       }
       return

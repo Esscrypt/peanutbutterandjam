@@ -61,8 +61,7 @@ export class PreimageRequestProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          12, // Service ID 12 for preimages
-          Buffer.from(`preimage_${hashString}`),
+          `preimage_${hashString}`,
           preimage,
         )
       } catch (error) {
@@ -91,8 +90,7 @@ export class PreimageRequestProtocol {
     try {
       const hashString = hash.toString()
       const preimage = await this.dbIntegration.getServiceStorage(
-        12,
-        Buffer.from(`preimage_${hashString}`),
+        `preimage_${hashString}`,
       )
 
       if (preimage) {
@@ -153,7 +151,7 @@ export class PreimageRequestProtocol {
   serializePreimageRequest(request: PreimageRequest): Bytes {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // hash (32 bytes)
-    const _view = new DataView(buffer)
+    // const _view = new DataView(buffer)
 
     // Write hash (32 bytes)
     new Uint8Array(buffer).set(request.hash, 0)

@@ -1,0 +1,17 @@
+{
+  "rustc": 8838817330114404042,
+  "features": "[\"default\", \"proc-macro\"]",
+  "declared_features": "[\"default\", \"nightly\", \"proc-macro\", \"span-locations\"]",
+  "target": 369203346396300798,
+  "profile": 6319103369714392144,
+  "path": 9374550346522237370,
+  "deps": [
+    [1988483478007900009, "unicode_ident", false, 1226885526398348466],
+    [1988483478007900009, "unicode_ident", false, 9144965611703751684],
+    [3060637413840920116, "build_script_build", false, 13732789254328513266]
+  ],
+  "local": [{ "Precalculated": "1.0.95" }],
+  "rustflags": [],
+  "config": 2069994364910194474,
+  "compile_kind": 0
+}

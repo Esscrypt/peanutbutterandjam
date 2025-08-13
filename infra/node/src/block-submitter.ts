@@ -6,14 +6,14 @@
  */
 
 import { blake2bHash, logger } from '@pbnj/core'
-import { encodeBlockBody, encodeBlockHeader } from '@pbnj/serialization'
+import { encodeBlockBody, encodeHeader } from '@pbnj/serialization'
 import type {
-  Block,
+  BlockAuthoringBlock as Block,
   BlockAuthoringConfig,
   BlockAuthoringError,
   SubmissionResult,
-} from './types'
-import { BlockAuthoringErrorType, PropagationStatus } from './types'
+} from '@pbnj/types'
+import { BlockAuthoringErrorType, PropagationStatus } from '@pbnj/types'
 
 /**
  * Block Submitter
@@ -27,7 +27,7 @@ export class BlockSubmitter {
     _config: BlockAuthoringConfig,
   ): Promise<SubmissionResult> {
     logger.debug('Submitting block', {
-      blockNumber: block.header.number,
+      blockSlot: block.header.slot,
     })
 
     try {
@@ -35,7 +35,7 @@ export class BlockSubmitter {
       const validationResult = await this.validateBlock(block)
       if (!validationResult.valid) {
         logger.error('Block validation failed', {
-          blockNumber: block.header.number,
+          blockSlot: block.header.slot,
           errors: validationResult.errors,
         })
 
@@ -59,7 +59,7 @@ export class BlockSubmitter {
       // Submit to network peers
       const submissionResult = await this.submitToNetwork(
         serializedBlock,
-        block.header.number,
+        block.header.slot,
       )
 
       if (!submissionResult.success) {
@@ -69,7 +69,7 @@ export class BlockSubmitter {
       const blockHash = (await this.calculateBlockHash(block)) as `0x${string}`
 
       logger.debug('Block submitted successfully', {
-        blockNumber: block.header.number,
+        blockSlot: block.header.slot,
         blockHash,
         peerCount: submissionResult.peerCount,
       })
@@ -81,7 +81,7 @@ export class BlockSubmitter {
       }
     } catch (error) {
       logger.error('Block submission failed', {
-        blockNumber: block.header.number,
+        blockSlot: block.header.slot,
         error,
       })
 
@@ -111,32 +111,35 @@ export class BlockSubmitter {
     const errors: string[] = []
 
     // Validate block header
-    if (!block.header.number || block.header.number <= 0) {
+    if (!block.header.slot || block.header.slot <= 0) {
       errors.push('Invalid block number')
     }
 
-    if (!block.header.parentHash || block.header.parentHash.length !== 66) {
+    if (!block.header.parent || block.header.parent.length !== 66) {
       // 0x + 64 hex chars
       errors.push('Invalid parent hash')
     }
 
-    if (!block.header.stateRoot || block.header.stateRoot.length !== 66) {
+    if (
+      !block.header.parent_state_root ||
+      block.header.parent_state_root.length !== 66
+    ) {
       errors.push('Invalid state root')
     }
 
     if (
-      !block.header.extrinsicsRoot ||
-      block.header.extrinsicsRoot.length !== 66
+      !block.header.extrinsic_hash ||
+      block.header.extrinsic_hash.length !== 66
     ) {
       errors.push('Invalid extrinsics root')
     }
 
-    if (!block.header.timestamp || block.header.timestamp <= 0) {
+    if (!block.header.slot || block.header.slot <= 0) {
       errors.push('Invalid timestamp')
     }
 
-    if (!block.header.author || block.header.author.length === 0) {
-      errors.push('Invalid author')
+    if (block.header.author_index < 0) {
+      errors.push('Invalid author index')
     }
 
     // Validate block body
@@ -160,23 +163,27 @@ export class BlockSubmitter {
    * Serialize block according to Gray Paper specifications
    */
   private async serializeBlock(block: Block): Promise<Uint8Array> {
-    // Convert core BlockHeader to serialization BlockHeader format
-    const serializationHeader = {
-      parentHash: block.header.parentHash,
-      priorStateRoot: block.header.stateRoot,
-      extrinsicHash: block.header.extrinsicsRoot,
-      timeslot: BigInt(block.header.timestamp),
-      epochMark: undefined,
-      winnersMark: undefined,
-      authorIndex: BigInt(0), // TODO: Get from block
-      vrfSignature:
-        '0x0000000000000000000000000000000000000000000000000000000000000000' as const,
-      offendersMark: new Uint8Array(0),
-      sealSignature: block.header.signature as `0x${string}`,
+    // JAM header is already in the correct format for serialization
+    // Convert BlockHeader to JamHeader format expected by encodeHeader
+    const jamHeader = {
+      parent: block.header.parent,
+      parent_state_root: block.header.parent_state_root,
+      extrinsic_hash: block.header.extrinsic_hash,
+      slot: block.header.slot,
+      epoch_mark: block.header.epoch_mark,
+      winners_mark: block.header.tickets_mark
+        ? ((Array.isArray(block.header.tickets_mark)
+            ? block.header.tickets_mark
+            : [block.header.tickets_mark]) as any)
+        : null,
+      offenders_mark: block.header.offenders_mark,
+      author_index: block.header.author_index,
+      vrf_sig: block.header.entropy_source,
+      seal_sig: block.header.seal,
     }
 
     // 1. Serialize header
-    const headerUint8Array = encodeBlockHeader(serializationHeader)
+    const headerUint8Array = encodeHeader(jamHeader)
 
     // 2. Serialize body (extrinsics)
     const extrinsicsData = block.body.map((ext) => ext.data)
@@ -265,7 +272,7 @@ export class BlockSubmitter {
     _config: BlockAuthoringConfig,
   ): Promise<SubmissionResult> {
     logger.debug('Submitting block (legacy method)', {
-      blockNumber: block.header.number,
+      blockSlot: block.header.slot,
     })
 
     try {
@@ -305,22 +312,25 @@ export class BlockSubmitter {
     // 2. Calculating the Blake2b hash
     // 3. Returning the hash
 
-    // Convert core BlockHeader to serialization BlockHeader format
-    const serializationHeader = {
-      parentHash: block.header.parentHash,
-      priorStateRoot: block.header.stateRoot,
-      extrinsicHash: block.header.extrinsicsRoot,
-      timeslot: BigInt(block.header.timestamp),
-      epochMark: undefined,
-      winnersMark: undefined,
-      authorIndex: BigInt(0), // TODO: Get from block
-      vrfSignature:
-        '0x0000000000000000000000000000000000000000000000000000000000000000' as const,
-      offendersMark: new Uint8Array(0),
-      sealSignature: block.header.signature as `0x${string}`,
+    // Convert BlockHeader to JamHeader format expected by encodeHeader
+    const jamHeader = {
+      parent: block.header.parent,
+      parent_state_root: block.header.parent_state_root,
+      extrinsic_hash: block.header.extrinsic_hash,
+      slot: block.header.slot,
+      epoch_mark: block.header.epoch_mark,
+      winners_mark: block.header.tickets_mark
+        ? ((Array.isArray(block.header.tickets_mark)
+            ? block.header.tickets_mark
+            : [block.header.tickets_mark]) as any)
+        : null,
+      offenders_mark: block.header.offenders_mark,
+      author_index: block.header.author_index,
+      vrf_sig: block.header.entropy_source,
+      seal_sig: block.header.seal,
     }
 
-    const headerUint8Array = encodeBlockHeader(serializationHeader)
+    const headerUint8Array = encodeHeader(jamHeader)
     return blake2bHash(headerUint8Array)
   }
 
@@ -347,7 +357,7 @@ export class BlockSubmitter {
     retryCount: number,
   ): Promise<SubmissionResult> {
     logger.debug('Retrying block submission', {
-      blockNumber: block.header.number,
+      blockSlot: block.header.slot,
       retryCount,
     })
 

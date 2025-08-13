@@ -97,8 +97,7 @@ export class AuditAnnouncementProtocol {
         }
 
         await this.dbIntegration.setServiceStorage(
-          13, // Service ID 13 for audit announcements
-          Buffer.from(`audit_announcement_${hashString}`),
+          `audit_announcement_${hashString}`,
           Buffer.from(JSON.stringify(announcementData), 'utf8'),
         )
       } catch (error) {
@@ -150,8 +149,7 @@ export class AuditAnnouncementProtocol {
     try {
       const hashString = headerHash.toString()
       const announcementData = await this.dbIntegration.getServiceStorage(
-        13,
-        Buffer.from(`audit_announcement_${hashString}`),
+        `audit_announcement_${hashString}`,
       )
 
       if (announcementData) {

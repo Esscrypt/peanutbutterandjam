@@ -6,8 +6,6 @@
  */
 
 import { logger } from '@pbnj/core'
-import { HostCallSystem } from './host-call'
-import { ProgramInitializer } from './program-init'
 import type {
   ArgumentData,
   ContextMutator,
@@ -15,8 +13,10 @@ import type {
   RAM,
   RegisterState,
   ResultCode,
-} from './types'
-import { PVM_CONSTANTS } from './types'
+} from '@pbnj/types'
+import { PVM_CONSTANTS } from '@pbnj/types'
+import { HostCallSystem } from './host-call'
+import { ProgramInitializer } from './program-init'
 
 /**
  * Ψ_M (Psi M) Function Implementation
@@ -27,8 +27,8 @@ import { PVM_CONSTANTS } from './types'
  * As specified in Gray Paper equation 7.8
  */
 export class ArgumentInvocationSystem<X> {
-  private programInitializer: ProgramInitializer
-  private hostCallSystem: HostCallSystem<X>
+  private readonly programInitializer: ProgramInitializer
+  private readonly hostCallSystem: HostCallSystem<X>
 
   constructor(contextMutator: ContextMutator<X>) {
     this.programInitializer = new ProgramInitializer()
@@ -47,14 +47,14 @@ export class ArgumentInvocationSystem<X> {
    * @returns Result with gas consumed and return data
    */
   execute(
-    programBlob: number[],
+    programBlob: Uint8Array,
     instructionPointer: number,
     gasLimit: Gas,
     argumentData: ArgumentData,
     context: X,
   ): {
     gasConsumed: Gas
-    result: number[] | 'panic' | 'oog'
+    result: Uint8Array | 'panic' | 'oog'
     context: X
   } {
     logger.debug('ArgumentInvocationSystem.execute called', {
@@ -109,7 +109,7 @@ export class ArgumentInvocationSystem<X> {
     finalRegisters: RegisterState,
   ): {
     gasConsumed: Gas
-    result: number[] | 'panic' | 'oog'
+    result: Uint8Array | 'panic' | 'oog'
     context: X
   } {
     const gasConsumed =
@@ -169,7 +169,7 @@ export class ArgumentInvocationSystem<X> {
     startAddress: bigint,
     length: number,
     ram: RAM,
-  ): number[] | null {
+  ): Uint8Array | null {
     try {
       const start = Number(startAddress)
       const end = start + length
@@ -188,13 +188,7 @@ export class ArgumentInvocationSystem<X> {
         }
       }
 
-      // Extract return data
-      const returnData: number[] = []
-      for (let i = start; i < end; i++) {
-        returnData.push(ram.readOctet(i))
-      }
-
-      return returnData
+      return ram.readOctets(start, length)
     } catch (error) {
       logger.error('Error extracting return data', { error })
       return null

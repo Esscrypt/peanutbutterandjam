@@ -5,8 +5,8 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import type { InstructionContext, InstructionResult } from '../types'
 import { BaseInstruction } from './base'
 
 /**
@@ -27,11 +27,11 @@ export class TRAPInstruction extends BaseInstruction {
     }
   }
 
-  validate(_operands: number[]): boolean {
+  validate(_operands: Uint8Array): boolean {
     return true // No operands required
   }
 
-  disassemble(_operands: number[]): string {
+  disassemble(_operands: Uint8Array): string {
     return this.name
   }
 }
@@ -54,11 +54,11 @@ export class FALLTHROUGHInstruction extends BaseInstruction {
     }
   }
 
-  validate(_operands: number[]): boolean {
+  validate(_operands: Uint8Array): boolean {
     return true // No operands required
   }
 
-  disassemble(_operands: number[]): string {
+  disassemble(_operands: Uint8Array): string {
     return this.name
   }
 }
@@ -86,11 +86,11 @@ export class JUMPInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 1 // Need offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const offset = operands[0]
     return `${this.name} ${offset}`
   }
@@ -124,11 +124,11 @@ export class JUMP_INDInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 2 // Need register and immediate
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerA} ${Number(immediate)}`
@@ -167,11 +167,11 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 4 // Need register, immediate, and offset
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const immediate = this.getImmediateValue(operands, 1)
     const offset = this.getImmediateValue(operands, 2, 2)
@@ -218,11 +218,11 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
     }
   }
 
-  validate(operands: number[]): boolean {
+  validate(operands: Uint8Array): boolean {
     return operands.length >= 5 // Need two registers and two immediates
   }
 
-  disassemble(operands: number[]): string {
+  disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     const immediateX = this.getImmediateValue(operands, 2)

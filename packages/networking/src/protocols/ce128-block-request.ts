@@ -41,15 +41,12 @@ export class BlockRequestProtocol {
     try {
       // Load blocks from database
       // We'll store blocks in service account storage (service ID 2 for blocks)
-      const storage = await this.dbIntegration
-        .getServiceAccountStore()
-        .getServiceStorage(2)
+      const storage = await this.dbIntegration.getServiceAccountStore()
 
-      for (const item of storage) {
-        if (item.storageKey.startsWith('block_')) {
-          const blockHash = item.storageKey.replace('block_', '')
-          const blockData = Buffer.from(item.storageValue, 'hex')
-          this.blockStore.set(blockHash, blockData)
+      for (const [key, value] of storage) {
+        if (key.startsWith('block_')) {
+          const blockHash = key.replace('block_', '')
+          this.blockStore.set(blockHash, value)
         }
       }
 
@@ -70,8 +67,7 @@ export class BlockRequestProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          2, // Service ID 2 for blocks
-          Buffer.from(`block_${hashString}`),
+          `block_${hashString}`,
           blockData,
         )
       } catch (error) {
@@ -92,8 +88,7 @@ export class BlockRequestProtocol {
     if (this.dbIntegration) {
       try {
         await this.dbIntegration.setServiceStorage(
-          2,
-          Buffer.from(`block_${hashString}`),
+          `removed_block_${hashString}`,
           Buffer.from('removed'),
         )
       } catch (error) {
@@ -129,8 +124,7 @@ export class BlockRequestProtocol {
     try {
       const hashString = blockHash.toString()
       const blockData = await this.dbIntegration.getServiceStorage(
-        2,
-        Buffer.from(`block_${hashString}`),
+        `block_${hashString}`,
       )
 
       if (blockData && blockData.toString() !== 'removed') {

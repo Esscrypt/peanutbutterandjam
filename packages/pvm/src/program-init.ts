@@ -11,8 +11,8 @@ import type {
   ProgramInitResult,
   RAM,
   RegisterState,
-} from './types'
-import { PVM_CONSTANTS } from './types'
+} from '@pbnj/types'
+import { PVM_CONSTANTS } from '@pbnj/types'
 
 /**
  * Y(𝐩, 𝐚) Function Implementation
@@ -31,7 +31,7 @@ export class ProgramInitializer {
    * @returns Initialization result with instruction data, registers, and RAM
    */
   initialize(
-    programBlob: number[],
+    programBlob: Uint8Array,
     argumentData: ArgumentData,
   ): ProgramInitResult {
     logger.debug('ProgramInitializer.initialize called', {
@@ -59,8 +59,8 @@ export class ProgramInitializer {
 
       // Initialize RAM as per Gray Paper equation 7.6
       const ram = this.initializeRAM(
-        parsed.readOnlyData || [],
-        parsed.readWriteData || [],
+        parsed.readOnlyData || new Uint8Array([]),
+        parsed.readWriteData || new Uint8Array([]),
         argumentData,
       )
 
@@ -84,11 +84,11 @@ export class ProgramInitializer {
    *
    * Format: E3(len_o) || E3(len_w) || E2(z) || E3(s) || o || w || E4(len_c) || c
    */
-  private parseProgramBlob(blob: number[]): {
+  private parseProgramBlob(blob: Uint8Array): {
     success: boolean
-    instructionData?: number[]
-    readOnlyData?: number[]
-    readWriteData?: number[]
+    instructionData?: Uint8Array
+    readOnlyData?: Uint8Array
+    readWriteData?: Uint8Array
     error?: string
   } {
     if (blob.length < 12) {
@@ -192,33 +192,33 @@ export class ProgramInitializer {
    * Initialize RAM as per Gray Paper equation 7.6
    */
   private initializeRAM(
-    readOnlyData: number[],
-    readWriteData: number[],
+    readOnlyData: Uint8Array,
+    readWriteData: Uint8Array,
     argumentData: ArgumentData,
   ): RAM {
     // Create RAM with proper memory layout
     const ram = new (class implements RAM {
-      public cells: Map<number, number> = new Map()
+      public cells: Map<number, Uint8Array> = new Map()
 
-      readOctet(address: number): number {
-        return this.cells.get(address) || 0
+      readOctet(address: number): Uint8Array {
+        return this.cells.get(address) || new Uint8Array([])
       }
 
-      writeOctet(address: number, value: number): void {
-        this.cells.set(address, value & 0xff)
+      writeOctet(address: number, value: Uint8Array): void {
+        this.cells.set(address, value)
       }
 
-      readOctets(address: number, count: number): number[] {
-        const result: number[] = []
+      readOctets(address: number, count: number): Uint8Array {
+        const result: Uint8Array = new Uint8Array(count)
         for (let i = 0; i < count; i++) {
-          result.push(this.readOctet(address + i))
+          result.set(this.readOctet(address + i), i)
         }
         return result
       }
 
-      writeOctets(address: number, values: number[]): void {
+      writeOctets(address: number, values: Uint8Array): void {
         values.forEach((value, index) => {
-          this.writeOctet(address + index, value)
+          this.writeOctet(address + index, new Uint8Array([value]))
         })
       }
 
@@ -248,7 +248,7 @@ export class ProgramInitializer {
     // Zone 1: Read-only data (INIT_ZONE_SIZE to INIT_ZONE_SIZE + len_o)
     const readOnlyStart = Number(PVM_CONSTANTS.INIT_ZONE_SIZE)
     readOnlyData.forEach((value, index) => {
-      ram.writeOctet(readOnlyStart + index, value)
+      ram.writeOctet(readOnlyStart + index, new Uint8Array([value]))
     })
 
     // Zone 2: Read-write data (2*INIT_ZONE_SIZE + aligned_len_o to 2*INIT_ZONE_SIZE + aligned_len_o + len_w)
@@ -256,7 +256,7 @@ export class ProgramInitializer {
       2 * Number(PVM_CONSTANTS.INIT_ZONE_SIZE) +
       this.alignToZone(readOnlyData.length)
     readWriteData.forEach((value, index) => {
-      ram.writeOctet(readWriteStart + index, value)
+      ram.writeOctet(readWriteStart + index, new Uint8Array([value]))
     })
 
     // Zone 3: Arguments (2^32 - INIT_ZONE_SIZE - INIT_INPUT_SIZE to 2^32 - INIT_ZONE_SIZE - INIT_INPUT_SIZE + len_a)
@@ -265,7 +265,7 @@ export class ProgramInitializer {
       Number(PVM_CONSTANTS.INIT_ZONE_SIZE) -
       Number(PVM_CONSTANTS.INIT_INPUT_SIZE)
     argumentData.data.forEach((value, index) => {
-      ram.writeOctet(argStart + index, value)
+      ram.writeOctet(argStart + index, new Uint8Array([value]))
     })
 
     return ram
@@ -275,15 +275,15 @@ export class ProgramInitializer {
    * Decode length from blob data
    */
   private decodeLength(
-    data: number[],
+    data: Uint8Array,
     offset: number,
-    Uint8Array: number,
+    length: number,
   ): number {
-    let length = 0
-    for (let i = 0; i < Uint8Array; i++) {
-      length |= data[offset + i] << (i * 8)
+    let result = 0
+    for (let i = 0; i < length; i++) {
+      result |= data[offset + i] << (i * 8)
     }
-    return length
+    return result
   }
 
   /**

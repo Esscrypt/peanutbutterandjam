@@ -4,11 +4,19 @@
  * Main exports for the networking package
  */
 
-export { deriveSecretSeeds } from './crypto/certificates'
+export {
+  deriveSecretSeeds,
+  generateAlternativeName,
+  generateTrivialSeed,
+} from '@pbnj/core'
 // Crypto utilities
 export { generateALPNProtocol, parseALPNProtocol } from './crypto/tls'
 // Database integration
-export { NetworkingDatabaseIntegration } from './db-integration'
+export type { NetworkingDatabaseIntegration } from './db-integration'
+export {
+  MockNetworkingDatabaseIntegration,
+  StateBasedNetworkingDatabaseIntegration,
+} from './db-integration'
 export { BuilderSlotsManager } from './peer/builder-slots'
 // Peer management
 export { ConnectionManager } from './peer/connection-manager'

@@ -34,6 +34,8 @@ export enum MessageType {
  * Base network message interface
  */
 export interface NetworkMessage {
+  /** Message identifier */
+  id: string
   /** Message type */
   type: MessageType
   /** Message payload */

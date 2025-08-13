@@ -6,15 +6,8 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BlockSubmitter } from './block-submitter'
-import { ExtrinsicValidator } from './extrinsic-validator'
-import { GenesisManager } from './genesis-manager'
-import { HeaderConstructor } from './header-constructor'
-import { MetricsCollector } from './metrics-collector'
-import { BaseService } from './service-interface'
-import { StateManager } from './state-manager'
 import type {
-  Block,
+  BlockAuthoringBlock as Block,
   BlockAuthoringConfig,
   BlockAuthoringContext,
   BlockAuthoringError,
@@ -22,16 +15,23 @@ import type {
   BlockAuthoringMetrics,
   BlockAuthoringResult,
   BlockAuthoringService,
-  BlockHeader,
+  SerializationBlockHeader as BlockHeader,
   Extrinsic,
   GenesisConfig,
   GenesisState,
-  State,
+  BlockAuthoringState as State,
   SubmissionResult,
-  ValidationResult,
-  WorkPackage,
+  BlockAuthoringValidationResult as ValidationResult,
+  BlockAuthoringWorkPackage as WorkPackage,
   WorkReport,
-} from './types'
+} from '@pbnj/types'
+import { BlockSubmitter } from './block-submitter'
+import { ExtrinsicValidator } from './extrinsic-validator'
+import { GenesisManager } from './genesis-manager'
+import { HeaderConstructor } from './header-constructor'
+import { MetricsCollector } from './metrics-collector'
+import { BaseService } from './service-interface'
+import { StateManager } from './state-manager'
 import { WorkPackageProcessor } from './work-package-processor'
 
 /**
@@ -127,7 +127,7 @@ export class BlockAuthoringServiceImpl
 
     try {
       logger.info('Starting block creation', {
-        parentBlock: context.parentHeader.number,
+        parentBlock: context.parentHeader.slot,
         extrinsicsCount: context.extrinsics.length,
         workPackagesCount: context.workPackages.length,
       })
@@ -193,7 +193,7 @@ export class BlockAuthoringServiceImpl
       })
 
       logger.info('Block created successfully', {
-        blockNumber: header.number,
+        blockSlot: header.slot,
         blockHash: submissionResult.blockHash,
         totalTime,
       })
@@ -228,14 +228,21 @@ export class BlockAuthoringServiceImpl
    * Process work packages
    */
   async processWorkPackages(packages: WorkPackage[]): Promise<WorkReport[]> {
-    return this.workPackageProcessor.process(packages, this.config)
+    // TODO: Implement proper conversion between WorkPackage types
+    return this.workPackageProcessor.process(packages as any, this.config)
   }
 
   /**
    * Validate extrinsics
    */
   async validateExtrinsics(extrinsics: Extrinsic[]): Promise<ValidationResult> {
-    return this.extrinsicValidator.validate(extrinsics, this.config)
+    // Convert core extrinsics to extended extrinsics for validation
+    const extendedExtrinsics = extrinsics.map((ext, index) => ({
+      ...ext,
+      id: `ext_${index}_${ext.hash}`,
+      author: `unknown`, // TODO: Extract author from signature
+    }))
+    return this.extrinsicValidator.validate(extendedExtrinsics, this.config)
   }
 
   /**

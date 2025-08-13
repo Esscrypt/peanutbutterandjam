@@ -1,0 +1,5 @@
+window.SIDEBAR_ITEMS = {
+  enum: ['Category'],
+  struct: ['Error'],
+  type: ['Result'],
+}

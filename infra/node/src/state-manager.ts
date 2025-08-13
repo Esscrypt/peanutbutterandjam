@@ -6,7 +6,11 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { Block, BlockAuthoringConfig, State } from './types'
+import type {
+  BlockAuthoringBlock as Block,
+  BlockAuthoringConfig,
+  BlockAuthoringState as State,
+} from '@pbnj/types'
 
 /**
  * State Manager
@@ -17,7 +21,7 @@ export class StateManager {
    */
   async update(block: Block, _config: BlockAuthoringConfig): Promise<State> {
     logger.debug('Updating state', {
-      blockNumber: block.header.number,
+      blockSlot: block.header.slot,
     })
 
     // TODO: Implement proper state transition logic
@@ -29,9 +33,9 @@ export class StateManager {
     // 5. Calculating new state root
 
     const newState: State = {
-      blockNumber: block.header.number,
-      stateRoot: block.header.stateRoot,
-      timestamp: block.header.timestamp,
+      blockNumber: block.header.slot, // JAM uses slots instead of sequential numbers
+      stateRoot: block.header.parent_state_root,
+      timestamp: block.header.slot, // JAM uses slot for timing
       validators: [], // TODO: Update from current validator set
     }
 
@@ -53,22 +57,22 @@ export class StateManager {
   ): Promise<boolean> {
     logger.debug('Validating state transition', {
       fromBlock: previousState.blockNumber,
-      toBlock: block.header.number,
+      toBlock: block.header.slot,
     })
 
-    // Basic validation
-    if (block.header.number !== previousState.blockNumber + 1) {
-      logger.error('Invalid block number sequence', {
-        expected: previousState.blockNumber + 1,
-        actual: block.header.number,
+    // Basic validation - JAM uses slots, not sequential numbers
+    if (block.header.slot <= previousState.blockNumber) {
+      logger.error('Invalid slot sequence', {
+        previousSlot: previousState.blockNumber,
+        actualSlot: block.header.slot,
       })
       return false
     }
 
-    if (block.header.timestamp <= previousState.timestamp) {
+    if (block.header.slot <= previousState.timestamp) {
       logger.error('Invalid timestamp sequence', {
         previous: previousState.timestamp,
-        current: block.header.timestamp,
+        current: block.header.slot,
       })
       return false
     }
