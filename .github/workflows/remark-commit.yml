@@ -1,0 +1,28 @@
+name: Remark Commit
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  remark-commit:
+    name: Remark Commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Remark Commit
+        run: |
+          cargo install remark-commit --locked -q
+          
+          SEED="${{ secrets.POLKADOT_SEED }}" \
+          remark-commit \
+          --org "PeanutButterAndJam" \
+          --repo "peanutbutterandjam" \
+          --commit "${{ github.sha }}"
