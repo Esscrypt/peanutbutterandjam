@@ -6,6 +6,7 @@ import { createGenKeysCommand } from './commands/gen-keys'
 import { createGenSpecCommand } from './commands/gen-spec'
 import { createListKeysCommand } from './commands/list-keys'
 import { createRunCommand } from './commands/run'
+
 import { createTestVectorsCommand } from './commands/test-vectors'
 
 // Load environment variables
@@ -98,6 +99,7 @@ Options:
       await runCommand.parseAsync(args, { from: 'user' })
       break
     }
+
     case 'gen-spec':
       if (isSubcommandHelp) {
         console.log(`

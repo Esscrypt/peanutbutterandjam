@@ -40,6 +40,36 @@ export interface MainServiceConfig {
   }
   /** Node ID for metrics */
   nodeId: string
+  /** Service enablement configuration */
+  services?: {
+    /** Enable block authoring service */
+    blockAuthoring?: boolean
+    /** Enable networking service */
+    networking?: boolean
+    /** Enable metrics collection */
+    metrics?: boolean
+    /** Enable block submitter */
+    blockSubmitter?: boolean
+    /** Enable extrinsic validator */
+    extrinsicValidator?: boolean
+    /** Enable genesis manager */
+    genesisManager?: boolean
+    /** Enable header constructor */
+    headerConstructor?: boolean
+    /** Enable state manager */
+    stateManager?: boolean
+    /** Enable work package processor */
+    workPackageProcessor?: boolean
+  }
+  /** Test mode configuration for development */
+  testMode?: {
+    /** Enable test message sending */
+    enableTestMessages?: boolean
+    /** Test message interval (ms) */
+    testMessageInterval?: number
+    /** Maximum test messages to send */
+    maxTestMessages?: number
+  }
 }
 
 /**
@@ -48,15 +78,15 @@ export interface MainServiceConfig {
 export class MainServiceImpl extends BaseService implements MainService {
   private config: MainServiceConfig
   private registry: ServiceRegistry
-  private blockAuthoringService!: BlockAuthoringServiceImpl
-  private networkingService!: NetworkingService
-  private metricsCollector!: MetricsCollector
-  private blockSubmitterService!: BlockSubmitterService
-  private extrinsicValidatorService!: ExtrinsicValidatorService
-  private genesisManagerService!: GenesisManagerService
-  private headerConstructorService!: HeaderConstructorService
-  private stateManagerService!: StateManagerService
-  private workPackageProcessorService!: WorkPackageProcessorService
+  private blockAuthoringService?: BlockAuthoringServiceImpl
+  private networkingService?: NetworkingService
+  private metricsCollector?: MetricsCollector
+  private blockSubmitterService?: BlockSubmitterService
+  private extrinsicValidatorService?: ExtrinsicValidatorService
+  private genesisManagerService?: GenesisManagerService
+  private headerConstructorService?: HeaderConstructorService
+  private stateManagerService?: StateManagerService
+  private workPackageProcessorService?: WorkPackageProcessorService
 
   constructor(config: MainServiceConfig) {
     super('main-service')
@@ -68,43 +98,109 @@ export class MainServiceImpl extends BaseService implements MainService {
   }
 
   /**
-   * Initialize all services
+   * Initialize all services based on configuration
    */
   private initializeServices(): void {
-    // Create services
-    this.blockAuthoringService = new BlockAuthoringServiceImpl()
-    this.metricsCollector = new MetricsCollector(this.config.nodeId)
-    this.blockSubmitterService = new BlockSubmitterService()
-    this.extrinsicValidatorService = new ExtrinsicValidatorService()
-    this.genesisManagerService = new GenesisManagerService(this.config.genesis)
-    this.headerConstructorService = new HeaderConstructorService()
-    this.stateManagerService = new StateManagerService()
-    this.workPackageProcessorService = new WorkPackageProcessorService()
+    // Default to enabling all services if not specified
+    const services = this.config.services || {
+      blockAuthoring: true,
+      networking: true,
+      metrics: true,
+      blockSubmitter: true,
+      extrinsicValidator: true,
+      genesisManager: true,
+      headerConstructor: true,
+      stateManager: true,
+      workPackageProcessor: true,
+    }
 
-    // Create networking service with dependencies
-    this.networkingService = new NetworkingService({
-      validatorIndex: this.config.networking.validatorIndex,
-      nodeType: this.config.networking.nodeType as any,
-      listenAddress: this.config.networking.listenAddress,
-      listenPort: this.config.networking.listenPort,
-      chainHash: this.config.networking.chainHash,
-      isBuilder: this.config.networking.isBuilder,
-      blockAuthoringService: this.blockAuthoringService,
-    })
+    logger.info('Initializing services based on configuration', { services })
 
-    // Register all services with the registry
-    this.registry.register(this.metricsCollector)
-    this.registry.register(this.stateManagerService)
-    this.registry.register(this.workPackageProcessorService)
-    this.registry.register(this.headerConstructorService)
-    this.registry.register(this.extrinsicValidatorService)
-    this.registry.register(this.genesisManagerService)
-    this.registry.register(this.blockSubmitterService)
-    this.registry.register(this.blockAuthoringService)
-    this.registry.register(this.networkingService)
+    // Create services conditionally
+    if (services.blockAuthoring) {
+      this.blockAuthoringService = new BlockAuthoringServiceImpl()
+      logger.debug('Block authoring service created')
+    }
+
+    if (services.metrics) {
+      this.metricsCollector = new MetricsCollector(this.config.nodeId)
+      logger.debug('Metrics collector created')
+    }
+
+    if (services.blockSubmitter) {
+      this.blockSubmitterService = new BlockSubmitterService()
+      logger.debug('Block submitter service created')
+    }
+
+    if (services.extrinsicValidator) {
+      this.extrinsicValidatorService = new ExtrinsicValidatorService()
+      logger.debug('Extrinsic validator service created')
+    }
+
+    if (services.genesisManager) {
+      this.genesisManagerService = new GenesisManagerService(
+        this.config.genesis,
+      )
+      logger.debug('Genesis manager service created')
+    }
+
+    if (services.headerConstructor) {
+      this.headerConstructorService = new HeaderConstructorService()
+      logger.debug('Header constructor service created')
+    }
+
+    if (services.stateManager) {
+      this.stateManagerService = new StateManagerService()
+      logger.debug('State manager service created')
+    }
+
+    if (services.workPackageProcessor) {
+      this.workPackageProcessorService = new WorkPackageProcessorService()
+      logger.debug('Work package processor service created')
+    }
+
+    // Create networking service with dependencies (if enabled)
+    if (services.networking) {
+      this.networkingService = new NetworkingService({
+        validatorIndex: this.config.networking.validatorIndex,
+        nodeType: this.config.networking.nodeType as any,
+        listenAddress: this.config.networking.listenAddress,
+        listenPort: this.config.networking.listenPort,
+        chainHash: this.config.networking.chainHash,
+        isBuilder: this.config.networking.isBuilder,
+        blockAuthoringService: this.blockAuthoringService || null,
+        testMode: this.config.testMode,
+      })
+      logger.debug('Networking service created')
+    }
+
+    // Register created services with the registry
+    if (this.metricsCollector) this.registry.register(this.metricsCollector)
+    if (this.stateManagerService)
+      this.registry.register(this.stateManagerService)
+    if (this.workPackageProcessorService)
+      this.registry.register(this.workPackageProcessorService)
+    if (this.headerConstructorService)
+      this.registry.register(this.headerConstructorService)
+    if (this.extrinsicValidatorService)
+      this.registry.register(this.extrinsicValidatorService)
+    if (this.genesisManagerService)
+      this.registry.register(this.genesisManagerService)
+    if (this.blockSubmitterService)
+      this.registry.register(this.blockSubmitterService)
+    if (this.blockAuthoringService)
+      this.registry.register(this.blockAuthoringService)
+    if (this.networkingService) this.registry.register(this.networkingService)
 
     // Register this service as the main service
     this.registry.registerMain(this)
+
+    logger.info('Service initialization completed', {
+      totalServices: this.registry.getAll().length,
+      enabledServices: Object.entries(services)
+        .filter(([_, enabled]) => enabled)
+        .map(([name]) => name),
+    })
   }
 
   /**
@@ -112,13 +208,25 @@ export class MainServiceImpl extends BaseService implements MainService {
    */
   async init(): Promise<void> {
     try {
+      if (this.initialized) {
+        logger.debug('Main service already initialized')
+        return
+      }
+
       logger.info('Initializing main service...')
 
-      // Configure block authoring service
-      this.blockAuthoringService.configure(this.config.blockAuthoring)
+      // Configure block authoring service if it exists
+      if (this.blockAuthoringService) {
+        this.blockAuthoringService.configure(this.config.blockAuthoring)
+      }
 
-      // Initialize all services
-      await this.registry.initAll()
+      // Initialize all services except this main service (to avoid circular dependency)
+      const allServices = this.registry.getAll()
+      for (const service of allServices) {
+        if (service !== this && !service.getStatus().initialized) {
+          await service.init()
+        }
+      }
 
       this.setInitialized(true)
       logger.info('Main service initialized successfully')
@@ -133,10 +241,25 @@ export class MainServiceImpl extends BaseService implements MainService {
    */
   async start(): Promise<boolean> {
     try {
+      if (this.running) {
+        logger.debug('Main service already running')
+        return true
+      }
+
       logger.info('Starting main service...')
 
-      // Start all services
-      const success = await this.registry.startAll()
+      // Start all services except this main service (to avoid circular dependency)
+      const allServices = this.registry.getAll()
+      let success = true
+      for (const service of allServices) {
+        if (service !== this && !service.getStatus().running) {
+          const started = await service.start()
+          if (!started) {
+            success = false
+            logger.error(`Failed to start service: ${service.constructor.name}`)
+          }
+        }
+      }
 
       if (success) {
         this.setRunning(true)
@@ -159,8 +282,22 @@ export class MainServiceImpl extends BaseService implements MainService {
     try {
       logger.info('Stopping main service...')
 
-      // Stop all services
-      await this.registry.stopAll()
+      // Stop all services except this main service (to avoid circular dependency)
+      const allServices = this.registry.getAll()
+      for (const service of allServices.reverse()) {
+        if (service !== this && service.getStatus().running) {
+          try {
+            logger.info('Stopping service', { name: service.name })
+            await service.stop()
+            logger.info('Service stopped successfully', { name: service.name })
+          } catch (error) {
+            logger.error('Error stopping service', {
+              name: service.name,
+              error: error instanceof Error ? error.message : String(error),
+            })
+          }
+        }
+      }
 
       this.setRunning(false)
       logger.info('Main service stopped successfully')
@@ -243,12 +380,21 @@ export class MainServiceImpl extends BaseService implements MainService {
    */
   getStatus() {
     const baseStatus = super.getStatus()
+
+    // Get status of other services (excluding this main service to avoid circular reference)
+    const otherServices = this.registry
+      .getAll()
+      .filter((service) => service !== this)
+    const servicesStatus = otherServices.map((service) => service.getStatus())
+
     return {
       ...baseStatus,
       details: {
         totalServices: this.registry.getAll().length,
-        servicesStatus: this.registry.getAllStatus(),
-        allServicesRunning: this.registry.areAllRunning(),
+        servicesStatus,
+        allServicesRunning: otherServices.every(
+          (service) => service.getStatus().running,
+        ),
       },
     }
   }

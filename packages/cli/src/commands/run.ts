@@ -19,6 +19,39 @@ export function createRunCommand(): Command {
     .option('--genesis <file>', 'Genesis block file')
     .option('--metadata <file>', 'Chain metadata file')
     .option('--ts <timestamp>', 'Block timestamp')
+    .option('--networking-only', 'Run only the networking service for testing')
+    .option('--validator-index <number>', 'Validator index for networking', '0')
+    .option('--listen-port <number>', 'Network listening port', '30333')
+    .option(
+      '--listen-address <address>',
+      'Network listening address',
+      '0.0.0.0',
+    )
+    .option('--test-messages', 'Enable test message sending for networking')
+    .option(
+      '--test-interval <ms>',
+      'Test message interval in milliseconds',
+      '6000',
+    )
+    .option(
+      '--max-test-messages <number>',
+      'Maximum test messages to send',
+      '100',
+    )
+    .option(
+      '--disable-service <services...>',
+      'Disable specific services (e.g., blockAuthoring,metrics)',
+    )
+    .option(
+      '--enable-service <services...>',
+      'Enable only specific services (e.g., networking,metrics)',
+    )
+    .option(
+      '--keepalive-interval <ms>',
+      'QUIC keepalive interval in milliseconds',
+      '30000',
+    )
+    .option('--disable-keepalive', 'Disable QUIC keepalive mechanism')
     .action(async (options) => {
       await executeRunCommand(options)
     })
@@ -100,7 +133,79 @@ async function executeRunCommand(options: any): Promise<void> {
       logger.info(`  Ed25519 seed: ${options.ed25519}`)
     }
 
-    // Initialize and start the block authoring service
+    // Configure services based on options
+    let services
+    if (options.networkingOnly) {
+      // Networking-only mode: only enable networking and minimal required services
+      services = {
+        blockAuthoring: false,
+        networking: true,
+        metrics: true,
+        blockSubmitter: false,
+        extrinsicValidator: false,
+        genesisManager: false,
+        headerConstructor: false,
+        stateManager: false,
+        workPackageProcessor: false,
+      }
+    } else if (options.enableService) {
+      // Enable only specified services
+      const enabledServices = options.enableService.join(',').split(',')
+      services = {
+        blockAuthoring: enabledServices.includes('blockAuthoring'),
+        networking: enabledServices.includes('networking'),
+        metrics: enabledServices.includes('metrics'),
+        blockSubmitter: enabledServices.includes('blockSubmitter'),
+        extrinsicValidator: enabledServices.includes('extrinsicValidator'),
+        genesisManager: enabledServices.includes('genesisManager'),
+        headerConstructor: enabledServices.includes('headerConstructor'),
+        stateManager: enabledServices.includes('stateManager'),
+        workPackageProcessor: enabledServices.includes('workPackageProcessor'),
+      }
+    } else {
+      // Default: enable all services, then disable specified ones
+      services = {
+        blockAuthoring: true,
+        networking: true,
+        metrics: true,
+        blockSubmitter: true,
+        extrinsicValidator: true,
+        genesisManager: true,
+        headerConstructor: true,
+        stateManager: true,
+        workPackageProcessor: true,
+      }
+
+      if (options.disableService) {
+        const disabledServices = options.disableService.join(',').split(',')
+        for (const service of disabledServices) {
+          if (service in services) {
+            ;(services as any)[service] = false
+          }
+        }
+      }
+    }
+
+    // Configure test mode
+    const testMode = {
+      enableTestMessages: options.testMessages || false,
+      testMessageInterval: Number.parseInt(options.testInterval || '6000'),
+      maxTestMessages: Number.parseInt(options.maxTestMessages || '100'),
+    }
+
+    // Configure keepalive
+    const keepaliveConfig = {
+      enabled: !options.disableKeepalive,
+      interval: Number.parseInt(options.keepaliveInterval || '30000'),
+    }
+
+    logger.info('Service configuration', {
+      services,
+      testMode,
+      keepalive: keepaliveConfig,
+    })
+
+    // Initialize and start the main service
     const mainService = new MainServiceImpl({
       blockAuthoring: config,
       genesis: {
@@ -119,45 +224,20 @@ async function executeRunCommand(options: any): Promise<void> {
         },
       },
       networking: {
-        validatorIndex: options.validatorIndex || 0,
+        validatorIndex: Number.parseInt(options.validatorIndex || '0'),
         nodeType: 'validator',
-        listenAddress: '0.0.0.0',
-        listenPort: 30333,
+        listenAddress: options.listenAddress || '0.0.0.0',
+        listenPort: Number.parseInt(options.listenPort || '30333'),
         chainHash: options.chain || 'dev',
         isBuilder: false,
       },
       nodeId: 'jam-node-cli',
+      services,
+      testMode,
     })
 
-    logger.info('Starting block authoring service...')
-    const started = await mainService.start()
-    if (!started) {
-      throw new Error('Failed to start block authoring service')
-    }
-
-    logger.info('PeanutButterAndJam node is running')
-    logger.info('Press Ctrl+C to stop the node')
-
-    // Keep the service running
-    const keepAlive = setInterval(() => {
-      // Keep the process alive
-    }, 1000)
-
-    // Handle shutdown
-    process.on('SIGINT', async () => {
-      logger.info('Shutting down PeanutButterAndJam node...')
-      clearInterval(keepAlive)
-      await mainService.stop()
-      logger.info('Node stopped successfully')
-      process.exit(0)
-    })
-
-    process.on('SIGTERM', async () => {
-      logger.info('Received SIGTERM, shutting down...')
-      clearInterval(keepAlive)
-      await mainService.stop()
-      process.exit(0)
-    })
+    logger.info('Starting JAM node...')
+    await mainService.run()
   } catch (error) {
     logger.error(
       'Failed to start node:',
