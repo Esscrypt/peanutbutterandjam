@@ -103,3 +103,6 @@ polkajam
 
 dist
 
+# Rust
+target/
+**/target/
