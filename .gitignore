@@ -106,3 +106,8 @@ dist
 # Rust
 target/
 **/target/
+
+# NAPI-RS
+native/
+**native/
+*.node
