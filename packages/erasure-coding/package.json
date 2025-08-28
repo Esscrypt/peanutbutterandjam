@@ -6,15 +6,15 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "bun run build:native && tsc",
-    "build:native": "cd rust-reed-solomon && npm run build",
-    "build:native:debug": "cd rust-reed-solomon && npm run build:debug",
+    "build:native": "cd rust-reed-solomon && bun run build",
+    "build:native:debug": "cd rust-reed-solomon && bun run build:debug",
     "build:ts": "tsc",
     "test": "vitest",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "clean": "rm -rf dist && cd rust-reed-solomon && rm -rf target",
+    "clean": "rm -rf dist && cd rust-reed-solomon && bun run clean",
     "prepare": "bun run build:native || echo 'Native build failed, continuing without native module'"
   },
   "dependencies": {
