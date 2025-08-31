@@ -219,12 +219,31 @@ export const CANTOR_BASIS: FieldElement[] = [
 ]
 
 /**
- * Irreducible polynomial for GF(2^16) as specified in Gray Paper
- * x^16 + x^5 + x^3 + x^2 + 1
- */
-export const IRREDUCIBLE_POLYNOMIAL = 0x1002d
-
-/**
  * Field generator α (root of irreducible polynomial)
  */
 export const FIELD_GENERATOR = 0x0002
+
+// =============================================================================
+// Layout and word-level types (H.3/H.4)
+// =============================================================================
+
+/**
+ * 16-bit word in little-endian representation as specified for JAM erasure coding
+ * Gray Paper (H.3): data is processed as 2-byte little-endian words.
+ */
+export type WordLE16 = number
+
+/**
+ * Result of padding a blob to the nearest multiple of the JAM piece size
+ * Gray Paper (H.4): blob is split into pieces of k=342 words (684 bytes); pad with zeros.
+ */
+export interface BlobPaddingResult {
+  /** Original number of bytes prior to padding */
+  originalLength: number
+  /** Number of zero bytes appended */
+  paddingBytes: number
+  /** Total number of pieces (each 684 bytes) after padding */
+  kPieces: number
+  /** The padded byte array (zero-extended to multiple of 684) */
+  padded: Uint8Array
+}

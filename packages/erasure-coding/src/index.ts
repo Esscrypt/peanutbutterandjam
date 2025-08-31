@@ -20,9 +20,33 @@ export {
   CANTOR_BASIS,
   DEFAULT_ERASURE_CODING_PARAMS,
   FIELD_GENERATOR,
-  IRREDUCIBLE_POLYNOMIAL,
   SEGMENT_ERASURE_CODING_PARAMS,
 } from '@pbnj/types'
+// Layout utilities (M1 - H.3/H.4)
+export { PIECE_BYTES, WORD_BYTES } from './config'
+// Field operations (M2)
+export {
+  cantorToPoly,
+  gfAdd,
+  gfDivide,
+  gfInverse,
+  gfMultiply,
+  gfPow,
+  mapIndexToField,
+  polyToCantor,
+} from './gf16'
+export {
+  joinWordsLE,
+  padBlobToPieceMultiple,
+  splitWordsLE,
+  transposeWords,
+} from './layout'
+// Reference TypeScript RS(1023,342) for single piece (M3)
+export {
+  encodePieceReference,
+  type IndexedWord,
+  recoverPieceReference,
+} from './rs-reference'
 // Export Rust implementation
 export {
   createRustReedSolomonCoder,
