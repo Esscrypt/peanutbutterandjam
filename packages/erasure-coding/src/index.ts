@@ -22,9 +22,16 @@ export {
   FIELD_GENERATOR,
   SEGMENT_ERASURE_CODING_PARAMS,
 } from '@pbnj/types'
-// Layout utilities (M1 - H.3/H.4)
+// Reference TypeScript blob path
+export {
+  type ChunkWithIndex,
+  type EncodedBlob,
+  encodeBlobReference,
+  recoverBlobReference,
+} from './blob-reference'
+// Layout utilities (H.3/H.4)
 export { PIECE_BYTES, WORD_BYTES } from './config'
-// Field operations (M2)
+// Field operations
 export {
   cantorToPoly,
   gfAdd,
@@ -41,7 +48,7 @@ export {
   splitWordsLE,
   transposeWords,
 } from './layout'
-// Reference TypeScript RS(1023,342) for single piece (M3)
+// Reference TypeScript RS(1023,342) for single piece
 export {
   encodePieceReference,
   type IndexedWord,
