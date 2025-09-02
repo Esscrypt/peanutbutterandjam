@@ -1,3 +1,0 @@
-window.SIDEBAR_ITEMS = {
-  struct: ['OnceBool', 'OnceBox', 'OnceNonZeroUsize', 'OnceRef'],
-}

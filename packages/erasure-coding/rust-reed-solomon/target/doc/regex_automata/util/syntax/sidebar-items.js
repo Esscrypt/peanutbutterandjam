@@ -1,4 +1,0 @@
-window.SIDEBAR_ITEMS = {
-  fn: ['parse', 'parse_many', 'parse_many_with', 'parse_with'],
-  struct: ['Config'],
-}

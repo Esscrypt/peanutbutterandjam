@@ -1,4 +1,0 @@
-window.SIDEBAR_ITEMS = {
-  struct: ['Finder', 'Pair'],
-  trait: ['HeuristicFrequencyRank'],
-}

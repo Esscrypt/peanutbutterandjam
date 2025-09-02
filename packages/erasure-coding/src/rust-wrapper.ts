@@ -42,26 +42,45 @@ export class RustReedSolomonCoder implements ErasureCoder {
     this.k = k
     this.n = n
 
+    // Load the native module (napi) with various filename patterns
     try {
-      // Try platform-specific filename first
       const platform = process.platform
       const arch = process.arch
-      this.nativeModule = require(
-        `../rust-reed-solomon/jam-reed-solomon.${platform}-${arch}.node`,
-      )
-      nativeModuleAvailable = true
-    } catch (_error) {
-      try {
-        // Fallback to generic filename
-        this.nativeModule = require('../rust-reed-solomon/jam-reed-solomon.node')
-      } catch (fallbackError) {
-        logger.warn(
-          'Native Rust module not available, falling back to error mode',
-          { error: fallbackError },
-        )
-        nativeModuleAvailable = true
+
+      const possibleFilenames = [
+        `jam-reed-solomon.${platform}-${arch}-gnu.node`,
+        `jam-reed-solomon.${platform}-${arch}-musl.node`,
+        `jam-reed-solomon.${platform}-${arch}.node`,
+        `jam-reed-solomon.${platform}-${arch}-android.node`,
+        `jam-reed-solomon.${platform}-${arch}-windows.node`,
+      ]
+
+      for (const filename of possibleFilenames) {
+        try {
+          this.nativeModule = require(`../rust-reed-solomon/native/${filename}`)
+          logger.debug(`Successfully loaded native module: ${filename}`)
+          break
+        } catch (_error) {
+          // try next filename
+        }
       }
+
+      if (!this.nativeModule) {
+        try {
+          this.nativeModule = require('../rust-reed-solomon/native/jam-reed-solomon.node')
+          logger.debug('Successfully loaded generic native module')
+        } catch (fallbackError) {
+          logger.warn(
+            'Native Rust module not available, falling back to error mode',
+            { error: fallbackError },
+          )
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to load native module', { error })
     }
+
+    nativeModuleAvailable = !!this.nativeModule
 
     if (!this.nativeModule) {
       throw new Error(
