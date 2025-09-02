@@ -11,6 +11,7 @@ import {
   type Hex,
   logger,
   parseGenesisJson,
+  zeroHash,
 } from '@pbnj/core'
 import type {
   Account,
@@ -99,18 +100,18 @@ export class GenesisManager {
 
     // Parse safrole state from header
     const safrole = {
-      epoch: 0, // TODO: Extract from header if available
-      timeslot: genesisHeader.slot,
+      epoch: 0n, // TODO: Extract from header if available
+      timeslot: BigInt(genesisHeader.slot),
       entropy: genesisHeader.epoch_mark.entropy,
       tickets: [], // TODO: Extract from header if available
     }
 
     return {
       genesisBlock: {
-        number: 0, // Genesis block is always 0
+        number: 0n, // Genesis block is always 0
         hash: genesisHeader.parent_state_root, // Use state root as hash
         parentHash: genesisHeader.parent,
-        timestamp: Date.now(), // TODO: Extract from header if available
+        timestamp: BigInt(Date.now()), // TODO: Extract from header if available
       },
       state: {
         accounts,
@@ -118,12 +119,12 @@ export class GenesisManager {
         safrole,
         authpool: [],
         recent: [],
-        lastAccount: 0,
+        lastAccount: BigInt(0),
         stagingset: [],
         activeset: [],
         previousset: [],
         reports: [],
-        thetime: Date.now(),
+        thetime: BigInt(Date.now()),
         authqueue: [],
         privileges: new Map(),
         disputes: [],
@@ -134,9 +135,9 @@ export class GenesisManager {
       network: {
         chainId: 'jam-dev', // Default chain ID
         protocolVersion: '1.0.0', // Default version
-        slotDuration: 6000, // Default 6 seconds
-        epochLength: 600, // Default 600 slots
-        maxValidators: 100, // Default max validators
+        slotDuration: 6000n, // Default 6 seconds
+        epochLength: 600n, // Default 600 slots
+        maxValidators: 100n, // Default max validators
         minStake: BigInt('1000000000000000000'), // Default 1 JAM
       },
       initialWorkPackages: [],
@@ -152,14 +153,11 @@ export class GenesisManager {
     const warnings: string[] = []
 
     // Validate genesis block
-    if (genesis.genesisBlock.number !== 0) {
+    if (genesis.genesisBlock.number !== 0n) {
       errors.push('Genesis block number must be 0')
     }
 
-    if (
-      genesis.genesisBlock.parentHash !==
-      '0x0000000000000000000000000000000000000000000000000000000000000000'
-    ) {
+    if (genesis.genesisBlock.parentHash !== zeroHash) {
       errors.push('Genesis block parent hash must be zero')
     }
 

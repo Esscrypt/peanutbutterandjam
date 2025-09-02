@@ -37,6 +37,7 @@
  * data flows while maintaining type safety and execution ordering.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type {
   AccumulateInput,
   DeferredTransfer,
@@ -62,25 +63,31 @@ import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
  */
 export function encodeAccumulateInput(
   accumulateInput: AccumulateInput,
-): Uint8Array {
-  if (accumulateInput.type === 0) {
+): Safe<Uint8Array> {
+  if (accumulateInput.type === 0n) {
     // encode{0, encode[U]{o}} for operand tuple
-    const operandEncoded = encodeOperandTuple(
+    const [error, operandEncoded] = encodeOperandTuple(
       accumulateInput.value as OperandTuple,
     )
+    if (error) {
+      return safeError(error)
+    }
     const result = new Uint8Array(1 + operandEncoded.length)
     result[0] = 0 // Discriminator for operand tuple
     result.set(operandEncoded, 1)
-    return result
+    return safeResult(result)
   } else {
     // encode{1, encode[X]{o}} for deferred transfer
-    const transferEncoded = encodeDeferredTransfer(
+    const [error, transferEncoded] = encodeDeferredTransfer(
       accumulateInput.value as DeferredTransfer,
     )
+    if (error) {
+      return safeError(error)
+    }
     const result = new Uint8Array(1 + transferEncoded.length)
     result[0] = 1 // Discriminator for deferred transfer
     result.set(transferEncoded, 1)
-    return result
+    return safeResult(result)
   }
 }
 
@@ -90,10 +97,10 @@ export function encodeAccumulateInput(
  * @param data - Octet sequence to decode
  * @returns Decoded accumulate input and remaining data
  */
-export function decodeAccumulateInput(data: Uint8Array): {
+export function decodeAccumulateInput(data: Uint8Array): Safe<{
   value: AccumulateInput
   remaining: Uint8Array
-} {
+}> {
   if (data.length === 0) {
     throw new Error('Insufficient data for accumulate input decoding')
   }
@@ -103,20 +110,32 @@ export function decodeAccumulateInput(data: Uint8Array): {
 
   if (discriminator === 0) {
     // Operand tuple: encode{0, encode[U]{o}}
-    const { value: operandTuple, remaining } = decodeOperandTuple(remainingData)
-    return {
-      value: { type: 0, value: operandTuple },
-      remaining,
+    const [error, operandTupleResult] = decodeOperandTuple(remainingData)
+    if (error) {
+      return safeError(error)
     }
+    const operandTuple = operandTupleResult.value
+    const remaining = operandTupleResult.remaining
+    return safeResult({
+      value: { type: 0n, value: operandTuple },
+      remaining,
+    })
   } else if (discriminator === 1) {
     // Deferred transfer: encode{1, encode[X]{o}}
-    const { value: deferredTransfer, remaining } =
+    const [error, deferredTransferResult] =
       decodeDeferredTransfer(remainingData)
-    return {
-      value: { type: 1, value: deferredTransfer },
-      remaining,
+    if (error) {
+      return safeError(error)
     }
+    const deferredTransfer = deferredTransferResult.value
+    const remaining = deferredTransferResult.remaining
+    return safeResult({
+      value: { type: 1n, value: deferredTransfer },
+      remaining,
+    })
   } else {
-    throw new Error(`Invalid accumulate input discriminator: ${discriminator}`)
+    return safeError(
+      new Error(`Invalid accumulate input discriminator: ${discriminator}`),
+    )
   }
 }

@@ -30,7 +30,6 @@ export type {
   StateTransitionContext,
   SubmissionResult,
   TicketValidationResult,
-  Timeslot,
   TimeslotValidationResult,
   ValidationError,
   ValidationResult as BlockAuthoringValidationResult,
@@ -100,42 +99,7 @@ export type {
 } from './consensus'
 export { SAFROLE_CONSTANTS, SafroleErrorCode } from './consensus'
 // Core types - export ValidatorKey from core as CoreValidatorKey
-export type {
-  Address,
-  Balance,
-  BitSequence,
-  BlockHeader,
-  Bytes,
-  Decoder,
-  DeserializationContext,
-  DeserializationResult,
-  Dictionary,
-  Encoder,
-  Extrinsic,
-  FixedLengthSize,
-  FixedOctetSequence,
-  Gas,
-  Hash,
-  HashValue,
-  HexString,
-  Natural,
-  OctetSequence,
-  Optional,
-  OptionalDecoder,
-  OptionalEncoder,
-  PublicKey,
-  Result,
-  Sequence,
-  SerializationContext,
-  SerializationError,
-  SerializationResult,
-  ServiceId,
-  Signature,
-  Tuple,
-  ValidatorKey as CoreValidatorKey,
-  VariableOctetSequence,
-} from './core'
-// Erasure coding types
+export * from './core'
 export * from './erasure-coding'
 // JAMNP-S types
 export * from './jamnp'
@@ -190,7 +154,6 @@ export type {
   ValidatorKeyTuple,
   ValidityDispute,
   WorkContext,
-  WorkError as SerializationWorkError,
   WorkItem as SerializationWorkItem,
   WorkPackage,
   WorkReport as SerializationWorkReport,
@@ -202,5 +165,7 @@ export {
 } from './serialization'
 // State types
 export * from './state'
+// Telemetry types
+export * from './telemetry'
 // VRF types
 export * from './vrf'

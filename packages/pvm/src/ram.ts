@@ -9,10 +9,10 @@ import { MEMORY_CONFIG } from './config'
  * Manages memory layout and access for the PVM runtime
  */
 export class PVMRAM implements RAM {
-  public cells: Map<number, Uint8Array> = new Map()
-  private readonly stackStart: number = 0
-  private readonly heapStart: number = MEMORY_CONFIG.INITIAL_ZONE_SIZE
-  private readonly totalSize: number = MEMORY_CONFIG.MAX_MEMORY_ADDRESS
+  public cells: Map<bigint, Uint8Array> = new Map()
+  private readonly stackStart: bigint = 0n
+  private readonly heapStart: bigint = BigInt(MEMORY_CONFIG.INITIAL_ZONE_SIZE)
+  private readonly totalSize: bigint = BigInt(MEMORY_CONFIG.MAX_MEMORY_ADDRESS)
 
   constructor() {
     this.heapStart = MEMORY_CONFIG.INITIAL_ZONE_SIZE
@@ -23,7 +23,7 @@ export class PVMRAM implements RAM {
     })
   }
 
-  readOctet(address: number): Uint8Array {
+  readOctet(address: bigint): Uint8Array {
     // Check if address is in reserved memory (first 64KB)
     if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
       throw new PVMError(
@@ -45,7 +45,7 @@ export class PVMRAM implements RAM {
     return this.cells.get(address) || new Uint8Array([])
   }
 
-  writeOctet(address: number, value: Uint8Array): void {
+  writeOctet(address: bigint, value: Uint8Array): void {
     // Check if address is in reserved memory (first 64KB)
     if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
       throw new PVMError(
@@ -77,43 +77,43 @@ export class PVMRAM implements RAM {
     this.cells.set(address, value)
   }
 
-  readOctets(address: number, count: number): Uint8Array {
-    const result = new Uint8Array(count)
-    for (let i = 0; i < count; i++) {
-      result.set(this.readOctet(address + i), i)
+  readOctets(address: bigint, count: bigint): Uint8Array {
+    const result = new Uint8Array(Number(count))
+    for (let i = 0; i < Number(count); i++) {
+      result.set(this.readOctet(address + BigInt(i)), i)
     }
     return result
   }
 
-  writeOctets(address: number, values: Uint8Array): void {
+  writeOctets(address: bigint, values: Uint8Array): void {
     values.forEach((value, index) => {
-      this.writeOctet(address + index, new Uint8Array([value]))
+      this.writeOctet(address + BigInt(index), new Uint8Array([value]))
     })
   }
 
-  read(address: number, size: number): Uint8Array {
+  read(address: bigint, size: bigint): Uint8Array {
     if (!this.isReadable(address, size)) {
       throw new Error(`Memory read access violation at address ${address}`)
     }
 
-    const result: Uint8Array = new Uint8Array(size)
-    for (let i = 0; i < size; i++) {
-      result.set(this.cells.get(address + i) || new Uint8Array([]), i)
+    const result: Uint8Array = new Uint8Array(Number(size))
+    for (let i = 0; i < Number(size); i++) {
+      result.set(this.cells.get(address + BigInt(i)) || new Uint8Array([]), i)
     }
     return result
   }
 
-  write(address: number, data: number[]): void {
-    if (!this.isWritable(address, data.length)) {
+  write(address: bigint, data: Uint8Array): void {
+    if (!this.isWritable(address, BigInt(data.length))) {
       throw new Error(`Memory write access violation at address ${address}`)
     }
 
     for (let i = 0; i < data.length; i++) {
-      this.cells.set(address + i, new Uint8Array([data[i]]))
+      this.cells.set(address + BigInt(i), new Uint8Array([data[i]]))
     }
   }
 
-  isReadable(address: number, size = 1): boolean {
+  isReadable(address: bigint, size = 1n): boolean {
     // Check bounds
     if (address < 0 || address + size > this.totalSize) {
       return false
@@ -127,7 +127,7 @@ export class PVMRAM implements RAM {
     return true
   }
 
-  isWritable(address: number, size = 1): boolean {
+  isWritable(address: bigint, size = 1n): boolean {
     // Check bounds
     if (address < 0 || address + size > this.totalSize) {
       return false
@@ -142,9 +142,9 @@ export class PVMRAM implements RAM {
   }
 
   getMemoryLayout(): {
-    stackStart: number
-    heapStart: number
-    totalSize: number
+    stackStart: bigint
+    heapStart: bigint
+    totalSize: bigint
   } {
     return {
       stackStart: this.stackStart,

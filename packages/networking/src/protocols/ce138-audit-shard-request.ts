@@ -5,29 +5,28 @@
  * This is a Common Ephemeral (CE) stream for requesting bundle shards from assurers.
  */
 
+import type { NetworkingStore } from '@pbnj/state'
 import type {
   AuditShardRequest,
   AuditShardResponse,
-  Bytes,
   StreamInfo,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Audit shard request protocol handler
  */
 export class AuditShardRequestProtocol {
-  private auditShards: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private auditShards: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -54,9 +53,9 @@ export class AuditShardRequestProtocol {
    * Store audit shard in local store and persist to database
    */
   async storeAuditShard(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    auditShard: Bytes,
+    auditShard: Uint8Array,
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_audit`
     this.auditShards.set(key, auditShard)
@@ -74,7 +73,10 @@ export class AuditShardRequestProtocol {
   /**
    * Get audit shard from local store
    */
-  getAuditShard(erasureRoot: Bytes, shardIndex: number): Bytes | undefined {
+  getAuditShard(
+    erasureRoot: Uint8Array,
+    shardIndex: number,
+  ): Uint8Array | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_audit`
     return this.auditShards.get(key)
   }
@@ -83,9 +85,9 @@ export class AuditShardRequestProtocol {
    * Get audit shard from database if not in local store
    */
   async getAuditShardFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes | null> {
+  ): Promise<Uint8Array | null> {
     if (this.getAuditShard(erasureRoot, shardIndex)) {
       return this.getAuditShard(erasureRoot, shardIndex) || null
     }
@@ -147,7 +149,7 @@ export class AuditShardRequestProtocol {
    * Create audit shard request message
    */
   createAuditShardRequest(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
   ): AuditShardRequest {
     return {
@@ -159,7 +161,7 @@ export class AuditShardRequestProtocol {
   /**
    * Serialize audit shard request message
    */
-  serializeAuditShardRequest(request: AuditShardRequest): Bytes {
+  serializeAuditShardRequest(request: AuditShardRequest): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32 + 4) // erasureRoot + shardIndex
     const view = new DataView(buffer)
@@ -178,7 +180,7 @@ export class AuditShardRequestProtocol {
   /**
    * Deserialize audit shard request message
    */
-  deserializeAuditShardRequest(data: Bytes): AuditShardRequest {
+  deserializeAuditShardRequest(data: Uint8Array): AuditShardRequest {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -198,7 +200,7 @@ export class AuditShardRequestProtocol {
   /**
    * Serialize audit shard response message
    */
-  serializeAuditShardResponse(response: AuditShardResponse): Bytes {
+  serializeAuditShardResponse(response: AuditShardResponse): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(
       4 + 4 + response.bundleShard.length + response.justification.length,
@@ -227,7 +229,7 @@ export class AuditShardRequestProtocol {
   /**
    * Deserialize audit shard response message
    */
-  deserializeAuditShardResponse(data: Bytes): AuditShardResponse {
+  deserializeAuditShardResponse(data: Uint8Array): AuditShardResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -257,7 +259,7 @@ export class AuditShardRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<AuditShardResponse | null> {
     try {
       const request = this.deserializeAuditShardRequest(data)

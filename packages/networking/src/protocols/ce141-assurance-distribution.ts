@@ -5,8 +5,8 @@
  * This is a Common Ephemeral (CE) stream for distributing availability assurances.
  */
 
-import type { AssuranceDistribution, Bytes, StreamInfo } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { AssuranceDistribution, StreamInfo } from '@pbnj/types'
 
 /**
  * Assurance distribution protocol handler
@@ -14,18 +14,23 @@ import type { NetworkingDatabaseIntegration } from '../db-integration'
 export class AssuranceDistributionProtocol {
   private assurances: Map<
     string,
-    { anchorHash: Bytes; bitfield: Bytes; signature: Bytes; timestamp: number }
+    {
+      anchorHash: Uint8Array
+      bitfield: Uint8Array
+      signature: Uint8Array
+      timestamp: number
+    }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -52,9 +57,9 @@ export class AssuranceDistributionProtocol {
    * Store assurance in local store and persist to database
    */
   async storeAssurance(
-    anchorHash: Bytes,
-    bitfield: Bytes,
-    signature: Bytes,
+    anchorHash: Uint8Array,
+    bitfield: Uint8Array,
+    signature: Uint8Array,
   ): Promise<void> {
     const hashString = anchorHash.toString()
     this.assurances.set(hashString, {
@@ -88,11 +93,11 @@ export class AssuranceDistributionProtocol {
   /**
    * Get assurance from local store
    */
-  getAssurance(anchorHash: Bytes):
+  getAssurance(anchorHash: Uint8Array):
     | {
-        anchorHash: Bytes
-        bitfield: Bytes
-        signature: Bytes
+        anchorHash: Uint8Array
+        bitfield: Uint8Array
+        signature: Uint8Array
         timestamp: number
       }
     | undefined {
@@ -102,10 +107,10 @@ export class AssuranceDistributionProtocol {
   /**
    * Get assurance from database if not in local store
    */
-  async getAssuranceFromDatabase(anchorHash: Bytes): Promise<{
-    anchorHash: Bytes
-    bitfield: Bytes
-    signature: Bytes
+  async getAssuranceFromDatabase(anchorHash: Uint8Array): Promise<{
+    anchorHash: Uint8Array
+    bitfield: Uint8Array
+    signature: Uint8Array
     timestamp: number
   } | null> {
     if (this.getAssurance(anchorHash)) {
@@ -167,9 +172,9 @@ export class AssuranceDistributionProtocol {
    * Create assurance distribution message
    */
   createAssuranceDistribution(
-    anchorHash: Bytes,
-    bitfield: Bytes,
-    signature: Bytes,
+    anchorHash: Uint8Array,
+    bitfield: Uint8Array,
+    signature: Uint8Array,
   ): AssuranceDistribution {
     return {
       anchorHash,
@@ -181,7 +186,7 @@ export class AssuranceDistributionProtocol {
   /**
    * Serialize assurance distribution message
    */
-  serializeAssuranceDistribution(assurance: AssuranceDistribution): Bytes {
+  serializeAssuranceDistribution(assurance: AssuranceDistribution): Uint8Array {
     // Calculate total size
     const totalSize = 32 + 4 + assurance.bitfield.length + 64 // anchorHash + bitfield length + bitfield + signature (64 bytes for Ed25519)
 
@@ -210,7 +215,7 @@ export class AssuranceDistributionProtocol {
   /**
    * Deserialize assurance distribution message
    */
-  deserializeAssuranceDistribution(data: Bytes): AssuranceDistribution {
+  deserializeAssuranceDistribution(data: Uint8Array): AssuranceDistribution {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -239,7 +244,7 @@ export class AssuranceDistributionProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const assurance = this.deserializeAssuranceDistribution(data)
       await this.processAssuranceDistribution(assurance)

@@ -44,10 +44,19 @@
  * re-executing everything, forming the basis of JAM's scalable validation.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  type Hex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+  stringToBytes,
+  zeroHash,
+} from '@pbnj/core'
 import type {
   AvailabilitySpec,
-  HashValue,
   WorkDigest,
   BlockAuthoringWorkError as WorkError,
   WorkPackageContext,
@@ -64,31 +73,57 @@ import { encodeWorkDigest } from './work-digest'
  * @param report - Work report to encode
  * @returns Encoded octet sequence
  */
-export function encodeWorkReport(report: WorkReport): Uint8Array {
+export function encodeWorkReport(report: WorkReport): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Availability specification
-  parts.push(encodeAvailabilitySpecification(report.availabilitySpec))
+  const [error0, encoded0] = encodeAvailabilitySpecification(
+    report.availabilitySpec,
+  )
+  if (error0) {
+    return safeError(error0)
+  }
+  parts.push(encoded0)
 
   // Context
-  parts.push(encodeWorkContext(report.context))
+  const [error1, encoded1] = encodeWorkContext(report.context)
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1)
 
   // Core index (4 bytes) - using coreIndex instead of raw core data
-  parts.push(encodeNatural(BigInt(report.coreIndex)))
+  const [error2, encoded2] = encodeNatural(report.coreIndex)
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Authorizer (string as hex)
-  parts.push(hexToBytes(report.authorizer as `0x${string}`))
+  parts.push(hexToBytes(report.authorizer))
 
   // Auth gas used (convert number to bigint)
-  parts.push(encodeNatural(BigInt(report.authGasUsed)))
+  const [error3, encoded3] = encodeNatural(report.authGasUsed)
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // Auth trace (variable length)
-  parts.push(encodeNatural(BigInt(report.authTrace.length))) // Length prefix
+  const [error4, encoded4] = encodeNatural(BigInt(report.authTrace.length))
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
   parts.push(report.authTrace)
 
   // State root lookup (Map<string, string> serialized)
   const srLookupEntries = Array.from(report.srLookup.entries())
-  parts.push(encodeNatural(BigInt(srLookupEntries.length))) // Number of entries
+  const [error5, encoded5] = encodeNatural(BigInt(srLookupEntries.length))
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
   for (const [key, value] of srLookupEntries) {
     parts.push(hexToBytes(key as `0x${string}`))
     parts.push(hexToBytes(value as `0x${string}`))
@@ -96,7 +131,11 @@ export function encodeWorkReport(report: WorkReport): Uint8Array {
 
   // Digests (array of work digests)
   for (const digest of report.digests) {
-    parts.push(encodeWorkDigest(digest))
+    const [error6, encoded6] = encodeWorkDigest(digest)
+    if (error6) {
+      return safeError(error6)
+    }
+    parts.push(encoded6)
   }
 
   // Concatenate all parts
@@ -109,7 +148,7 @@ export function encodeWorkReport(report: WorkReport): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -118,10 +157,10 @@ export function encodeWorkReport(report: WorkReport): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded work report and remaining data
  */
-export function decodeWorkReport(data: Uint8Array): {
+export function decodeWorkReport(data: Uint8Array): Safe<{
   value: WorkReport
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Availability specification (fixed size)
@@ -131,37 +170,51 @@ export function decodeWorkReport(data: Uint8Array): {
   currentData = currentData.slice(112)
 
   // Context (fixed size)
-  const context = decodeWorkContext(currentData.slice(0, 200))
-  currentData = currentData.slice(200)
+  const [error1, result1] = decodeWorkContext(currentData.slice(0, 200))
+  if (error1) {
+    return safeError(error1)
+  }
+  const context = result1.value
+  currentData = result1.remaining
 
   // Core index (number)
-  const { value: coreIndexBigInt, remaining: afterCoreIndex } =
-    decodeNatural(currentData)
-  const coreIndex = Number(coreIndexBigInt)
-  currentData = afterCoreIndex
+  const [error2, result2] = decodeNatural(currentData)
+  if (error2) {
+    return safeError(error2)
+  }
+  const coreIndex = result2.value
+  currentData = result2.remaining
 
   // Authorizer (32 Uint8Array)
   const authorizer = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
   // Auth gas used (convert bigint to number)
-  const { value: authGasUsedBigInt, remaining: afterAuthGas } =
-    decodeNatural(currentData)
-  const authGasUsed = Number(authGasUsedBigInt)
-  currentData = afterAuthGas
+  const [error3, result3] = decodeNatural(currentData)
+  if (error3) {
+    return safeError(error3)
+  }
+  const authGasUsed = result3.value
+  currentData = result3.remaining
 
   // Auth trace (variable length)
-  const { value: authTraceLength, remaining: afterAuthTraceLength } =
-    decodeNatural(currentData)
-  currentData = afterAuthTraceLength
+  const [error4, result4] = decodeNatural(currentData)
+  if (error4) {
+    return safeError(error4)
+  }
+  const authTraceLength = result4.value
+  currentData = result4.remaining
   const authTrace = currentData.slice(0, Number(authTraceLength))
   currentData = currentData.slice(Number(authTraceLength))
 
   // State root lookup (Map<string, string>)
-  const { value: srLookupEntryCount, remaining: afterSrCount } =
-    decodeNatural(currentData)
-  currentData = afterSrCount
-  const srLookup = new Map<string, string>()
+  const [error5, result5] = decodeNatural(currentData)
+  if (error5) {
+    return safeError(error5)
+  }
+  const srLookupEntryCount = result5.value
+  currentData = result5.remaining
+  const srLookup = new Map<Hex, Hex>()
   for (let i = 0; i < Number(srLookupEntryCount); i++) {
     const key = bytesToHex(currentData.slice(0, 32))
     currentData = currentData.slice(32)
@@ -173,15 +226,19 @@ export function decodeWorkReport(data: Uint8Array): {
   // Digests (array of work digests)
   const digests = []
   while (currentData.length > 0) {
-    const { value: digest, remaining } = decodeWorkDigest(currentData)
+    const [error6, result6] = decodeWorkDigest(currentData)
+    if (error6) {
+      return safeError(error6)
+    }
+    const digest = result6.value
+    currentData = result6.remaining
     digests.push(digest)
-    currentData = remaining
   }
 
-  return {
+  return safeResult({
     value: {
-      id: 'decoded-work-report', // TODO: extract from data if present
-      workPackageId: 'decoded-work-package', // TODO: extract from data if present
+      id: bytesToHex(stringToBytes('decoded-work-report')), // TODO: extract from data if present or autogenerate
+      workPackageId: zeroHash, // TODO: extract from data if present
       availabilitySpec: {
         packageHash: availabilitySpec.packageHash,
         bundleLength: availabilitySpec.bundleLength,
@@ -206,12 +263,12 @@ export function decodeWorkReport(data: Uint8Array): {
         extrinsicCount: digest.extrinsicCount,
         extrinsicSize: digest.extrinsicSize,
       })),
-      authGasUsed: Number(authGasUsed),
+      authGasUsed: authGasUsed,
       author: authorizer,
-      timestamp: Date.now(), // TODO: extract from context or data
+      timestamp: BigInt(Date.now()), // TODO: extract from context or data
     },
     remaining: currentData,
-  }
+  })
 }
 
 // Helper functions for decoding (simplified versions)
@@ -219,26 +276,17 @@ function decodeAvailabilitySpecification(data: Uint8Array): AvailabilitySpec {
   // Simplified implementation - in practice this would use the proper decoder
   return {
     packageHash: bytesToHex(data.slice(0, 32)),
-    bundleLength: Number(
-      BigInt(
-        `0x${Array.from(data.slice(32, 40))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}`,
-      ),
-    ),
+    bundleLength: bytesToBigInt(data.slice(32, 40)),
     erasureRoot: bytesToHex(data.slice(40, 72)),
     segmentRoot: bytesToHex(data.slice(72, 104)),
-    segmentCount: Number(
-      BigInt(
-        `0x${Array.from(data.slice(104, 112))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}`,
-      ),
-    ),
+    segmentCount: bytesToBigInt(data.slice(104, 112)),
   }
 }
 
-function decodeWorkContext(data: Uint8Array): WorkPackageContext {
+function decodeWorkContext(data: Uint8Array): Safe<{
+  value: WorkPackageContext
+  remaining: Uint8Array
+}> {
   // According to Gray Paper and test vectors, WorkPackageContext has these fields:
   // - anchor: HashValue (32 bytes)
   // - state_root: HashValue (32 bytes)
@@ -266,13 +314,7 @@ function decodeWorkContext(data: Uint8Array): WorkPackageContext {
   offset += 32
 
   // Lookup anchor slot (8 bytes)
-  const lookupAnchorSlot = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const lookupAnchorSlot = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Prerequisites (variable length - array of HashValues)
@@ -282,26 +324,29 @@ function decodeWorkContext(data: Uint8Array): WorkPackageContext {
       .join('')}`,
   )
   offset += 8
-  const prerequisites: HashValue[] = []
+  const prerequisites: Hex[] = []
   for (let i = 0; i < Number(prerequisitesCount); i++) {
     prerequisites.push(bytesToHex(data.slice(offset, offset + 32)))
     offset += 32
   }
 
-  return {
-    anchorhash: anchor,
-    anchorpoststate: stateRoot,
-    anchoraccoutlog: beefyRoot,
-    lookupanchorhash: lookupAnchor,
-    lookupanchortime: Number(lookupAnchorSlot),
-    prerequisites,
-  }
+  return safeResult({
+    value: {
+      anchorhash: anchor,
+      anchorpoststate: stateRoot,
+      anchoraccoutlog: beefyRoot,
+      lookupanchorhash: lookupAnchor,
+      lookupanchortime: lookupAnchorSlot,
+      prerequisites,
+    },
+    remaining: data.slice(offset),
+  })
 }
 
-function decodeWorkDigest(data: Uint8Array): {
+function decodeWorkDigest(data: Uint8Array): Safe<{
   value: WorkDigest
   remaining: Uint8Array
-} {
+}> {
   // According to Gray Paper and test vectors, WorkDigest has these fields:
   // - serviceIndex: number (8 bytes)
   // - codeHash: HashValue (32 bytes)
@@ -317,13 +362,7 @@ function decodeWorkDigest(data: Uint8Array): {
   let offset = 0
 
   // Service index (8 bytes)
-  const serviceIndex = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const serviceIndex = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Code hash (32 bytes)
@@ -335,13 +374,7 @@ function decodeWorkDigest(data: Uint8Array): {
   offset += 32
 
   // Gas limit (8 bytes)
-  const gasLimit = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const gasLimit = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Result (variable length)
@@ -372,56 +405,26 @@ function decodeWorkDigest(data: Uint8Array): {
   }
 
   // Gas used (8 bytes)
-  const gasUsed = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const gasUsed = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Import count (8 bytes)
-  const importCount = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const importCount = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Export count (8 bytes)
-  const exportCount = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const exportCount = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Extrinsic count (8 bytes)
-  const extrinsicCount = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const extrinsicCount = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Extrinsic size (8 bytes)
-  const extrinsicSize = Number(
-    BigInt(
-      `0x${Array.from(data.slice(offset, offset + 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const extrinsicSize = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
-  return {
+  return safeResult({
     value: {
       serviceIndex,
       codeHash,
@@ -435,5 +438,5 @@ function decodeWorkDigest(data: Uint8Array): {
       extrinsicSize,
     },
     remaining: data.slice(offset),
-  }
+  })
 }

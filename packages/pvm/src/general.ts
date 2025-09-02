@@ -38,8 +38,8 @@ export interface GeneralResult {
 // Helper functions for memory access
 function readMemoryRange(
   memory: RAM,
-  start: number,
-  length: number,
+  start: bigint,
+  length: bigint,
 ): Uint8Array | 'error' {
   try {
     // Use the RAM's bulk read method if available, otherwise read byte by byte
@@ -51,7 +51,7 @@ function readMemoryRange(
 
 function writeMemoryRange(
   memory: RAM,
-  start: number,
+  start: bigint,
   data: Uint8Array,
 ): boolean {
   try {
@@ -126,7 +126,7 @@ export function fetch(context: GeneralContext): GeneralResult {
   }
 
   // Write data to memory
-  const writeSuccess = writeMemoryRange(memory, Number(o), data)
+  const writeSuccess = writeMemoryRange(memory, BigInt(o), data)
   if (!writeSuccess) {
     return {
       executionState: 'panic',
@@ -171,7 +171,7 @@ export function lookup(context: GeneralContext): GeneralResult {
   const outputAddr = registers.r9
 
   // Read hash from memory
-  const hash = readMemoryRange(memory, Number(hashAddr), 32)
+  const hash = readMemoryRange(memory, hashAddr, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -212,7 +212,7 @@ export function lookup(context: GeneralContext): GeneralResult {
   // Write data to output
   const writeSuccess = writeMemoryRange(
     memory,
-    Number(outputAddr),
+    outputAddr,
     new Uint8Array(data),
   )
   if (!writeSuccess) {
@@ -276,7 +276,7 @@ export function read(context: GeneralContext): GeneralResult {
   }
 
   // Read key from memory
-  const key = readMemoryRange(memory, Number(keyOffset), Number(keyLength))
+  const key = readMemoryRange(memory, keyOffset, keyLength)
   if (key === 'error') {
     return {
       executionState: 'panic',
@@ -298,7 +298,7 @@ export function read(context: GeneralContext): GeneralResult {
   // Write data to output
   const writeSuccess = writeMemoryRange(
     memory,
-    Number(outputAddr),
+    outputAddr,
     new Uint8Array(data),
   )
   if (!writeSuccess) {
@@ -347,7 +347,7 @@ export function write(context: GeneralContext): GeneralResult {
   const valueLength = registers.r10
 
   // Read key from memory
-  const key = readMemoryRange(memory, Number(keyOffset), Number(keyLength))
+  const key = readMemoryRange(memory, keyOffset, keyLength)
   if (key === 'error') {
     return {
       executionState: 'panic',
@@ -372,11 +372,7 @@ export function write(context: GeneralContext): GeneralResult {
   }
 
   // Read value from memory
-  const value = readMemoryRange(
-    memory,
-    Number(valueOffset),
-    Number(valueLength),
-  )
+  const value = readMemoryRange(memory, valueOffset, valueLength)
   if (value === 'error') {
     return {
       executionState: 'panic',
@@ -386,8 +382,8 @@ export function write(context: GeneralContext): GeneralResult {
   }
 
   // Check balance constraint (minimum balance requirement)
-  const minBalance = '100' // Minimum balance requirement
-  if (Number.parseInt(serviceAccount.balance) < Number.parseInt(minBalance)) {
+  const minBalance = 100n // Minimum balance requirement
+  if (serviceAccount.balance < minBalance) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.FULL },
@@ -451,7 +447,7 @@ export function info(context: GeneralContext): GeneralResult {
   const infoData = new Uint8Array(64) // Placeholder for encoded info
 
   // Write info to memory
-  const writeSuccess = writeMemoryRange(memory, Number(outputAddr), infoData)
+  const writeSuccess = writeMemoryRange(memory, outputAddr, infoData)
   if (!writeSuccess) {
     return {
       executionState: 'panic',
@@ -536,7 +532,7 @@ export function expunge(context: GeneralContext): GeneralResult {
  * Dispatch function to route ECALLI calls to the correct General function
  */
 export function dispatchGeneralFunction(
-  functionId: number,
+  functionId: bigint,
   context: GeneralContext,
 ): GeneralResult {
   logger.debug('Dispatching General function', { functionId })

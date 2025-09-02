@@ -15,4 +15,5 @@ alwaysApply: true
 10. Test with `bun run test`
 11. Always try to follow SOLID principles
 12. Write polymorphic interfaces and implementations
+13. Always build using "turbo run build" instead of "bun run build"
 

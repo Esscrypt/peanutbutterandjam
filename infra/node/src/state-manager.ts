@@ -5,7 +5,7 @@
  * Reference: Gray Paper state transition specifications
  */
 
-import { logger } from '@pbnj/core'
+import { logger, type Safe, safeResult } from '@pbnj/core'
 import type {
   BlockAuthoringBlock as Block,
   BlockAuthoringConfig,
@@ -16,10 +16,14 @@ import type {
  * State Manager
  */
 export class StateManager {
+  // constructor(stateStore: StateStore) {
+  //   this.stateStore = stateStore
+  // }
+
   /**
    * Update state based on block
    */
-  async update(block: Block, _config: BlockAuthoringConfig): Promise<State> {
+  update(block: Block, _config: BlockAuthoringConfig): Safe<State> {
     logger.debug('Updating state', {
       blockSlot: block.header.slot,
     })
@@ -44,7 +48,7 @@ export class StateManager {
       stateRoot: newState.stateRoot,
     })
 
-    return newState
+    return safeResult(newState)
   }
 
   /**

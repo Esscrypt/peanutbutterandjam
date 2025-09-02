@@ -6,6 +6,7 @@
  */
 
 import { logger } from '@pbnj/core'
+import type { NodeType } from '@pbnj/types'
 import type { MainServiceConfig } from './main-service'
 import { MainServiceImpl } from './main-service'
 
@@ -18,10 +19,10 @@ const defaultConfig: MainServiceConfig = {
     validatorKey:
       process.env['VALIDATOR_KEY'] ||
       '0x0000000000000000000000000000000000000000000000000000000000000000',
-    slotDuration: 6000, // 6 seconds
-    epochLength: 600, // 600 slots
-    maxExtrinsicsPerBlock: 1000,
-    maxWorkPackagesPerBlock: 100,
+    slotDuration: 6000n, // 6 seconds
+    epochLength: 600n, // 600 slots
+    maxExtrinsicsPerBlock: 1000n,
+    maxWorkPackagesPerBlock: 100n,
     enableStrictValidation: true,
     enableAuditMode: false,
     enableSafroleValidation: true,
@@ -44,7 +45,7 @@ const defaultConfig: MainServiceConfig = {
   },
   networking: {
     validatorIndex: Number.parseInt(process.env['VALIDATOR_INDEX'] || '0'),
-    nodeType: process.env['NODE_TYPE'] || 'validator',
+    nodeType: (process.env['NODE_TYPE'] as NodeType) || 'validator',
     listenAddress: process.env['LISTEN_ADDRESS'] || '0.0.0.0',
     listenPort: Number.parseInt(process.env['LISTEN_PORT'] || '30333'),
     chainHash:
@@ -53,6 +54,18 @@ const defaultConfig: MainServiceConfig = {
     isBuilder: process.env['IS_BUILDER'] === 'true',
   },
   nodeId: process.env['NODE_ID'] || 'jam-node-1',
+  telemetry: {
+    enabled: true,
+    nodeInfo: {
+      protocolVersion: 0n,
+      peerId: new Uint8Array(32),
+      peerAddress: { address: new Uint8Array(16), port: 30303n },
+      nodeFlags: 1n,
+      implementationName: 'PeanutButterAndJam',
+      implementationVersion: '0.1.0',
+      additionalInfo: 'JAM node CLI implementation',
+    },
+  },
 }
 
 /**

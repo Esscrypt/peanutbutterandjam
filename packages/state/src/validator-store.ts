@@ -1,21 +1,20 @@
+//TODO: move this to a separate package
 import { bytesToHex } from '@pbnj/core'
-import type { Bytes } from '@pbnj/types'
 import { and, eq } from 'drizzle-orm'
-import { type NewValidator, type Validator, validators } from './schema'
+import type { CoreDb } from '.'
+import {
+  type NewValidator,
+  type Validator,
+  validators,
+} from './schema/core-schema'
 
 /**
  * Validator store implementation
  */
 export class ValidatorStore {
-  private db: ReturnType<
-    typeof import('./database').DatabaseManager.prototype.getDatabase
-  >
+  private db: CoreDb
 
-  constructor(
-    db: ReturnType<
-      typeof import('./database').DatabaseManager.prototype.getDatabase
-    >,
-  ) {
+  constructor(db: CoreDb) {
     this.db = db
   }
 
@@ -24,7 +23,7 @@ export class ValidatorStore {
    */
   async upsertValidator(info: {
     index: number
-    publicKey: Bytes
+    publicKey: Uint8Array
     metadata: { endpoint: { host: string; port: number } }
     epoch: number
     isActive: boolean

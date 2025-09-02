@@ -37,6 +37,7 @@
  * validators to participate while maintaining efficient encoding.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type { Credential, Guarantee } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
@@ -52,14 +53,22 @@ import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
  * @param credential - Credential to encode
  * @returns Encoded octet sequence
  */
-function encodeCredential(credential: Credential): Uint8Array {
+function encodeCredential(credential: Credential): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Value: encode[2](v)
-  parts.push(encodeFixedLength(BigInt(credential.value), 2))
+  const [error, encoded] = encodeFixedLength(BigInt(credential.value), 2n)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Signature: s (variable-length octet sequence)
-  parts.push(encodeNatural(BigInt(credential.signature.length))) // Length prefix
+  const [error2, encoded2] = encodeNatural(BigInt(credential.signature.length))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
   parts.push(credential.signature)
 
   // Concatenate all parts
@@ -72,7 +81,7 @@ function encodeCredential(credential: Credential): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -81,36 +90,44 @@ function encodeCredential(credential: Credential): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded credential and remaining data
  */
-function decodeCredential(data: Uint8Array): {
+function decodeCredential(data: Uint8Array): Safe<{
   value: Credential
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Value: encode[2](v)
-  const { value: credentialValue, remaining: valueRemaining } =
-    decodeFixedLength(currentData, 2)
-  currentData = valueRemaining
+  const [error, result] = decodeFixedLength(currentData, 2n)
+  if (error) {
+    return safeError(error)
+  }
+  currentData = result.remaining
 
   // Signature: s (variable-length octet sequence)
-  const { value: signatureLength, remaining: signatureLengthRemaining } =
-    decodeNatural(currentData)
+  const [error2, result2] = decodeNatural(currentData)
+  if (error2) {
+    return safeError(error2)
+  }
+  const signatureLength = result2.value
+  const signatureLengthRemaining = result2.remaining
   const signatureLengthNum = Number(signatureLength)
   if (signatureLengthRemaining.length < signatureLengthNum) {
-    throw new Error('Insufficient data for credential signature decoding')
+    return safeError(
+      new Error('Insufficient data for credential signature decoding'),
+    )
   }
   const signature = signatureLengthRemaining.slice(0, signatureLengthNum)
   currentData = signatureLengthRemaining.slice(signatureLengthNum)
 
   const credential: Credential = {
-    value: Number(credentialValue),
+    value: result.value,
     signature,
   }
 
-  return {
+  return safeResult({
     value: credential,
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -122,17 +139,32 @@ function decodeCredential(data: Uint8Array): {
  * @param guarantee - Guarantee to encode
  * @returns Encoded octet sequence
  */
-function encodeGuarantee(guarantee: Guarantee): Uint8Array {
+function encodeGuarantee(guarantee: Guarantee): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Work report: xg_workreport
-  parts.push(encodeWorkReport(guarantee.workReport))
+  const [error1, encoded1] = encodeWorkReport(guarantee.workReport)
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1)
 
   // Timeslot: encode[4](xg_timeslot)
-  parts.push(encodeFixedLength(BigInt(guarantee.timeslot), 4))
+  const [error2, encoded2] = encodeFixedLength(BigInt(guarantee.timeslot), 4n)
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Credentials: var{sq{build{tuple{encode[2](v), s}}{tuple{v, s} orderedin xg_credential}}}
-  parts.push(encodeSequenceGeneric(guarantee.credential, encodeCredential))
+  const [error3, encoded3] = encodeSequenceGeneric(
+    guarantee.credential,
+    encodeCredential,
+  )
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -144,7 +176,7 @@ function encodeGuarantee(guarantee: Guarantee): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -153,39 +185,49 @@ function encodeGuarantee(guarantee: Guarantee): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantee and remaining data
  */
-function decodeGuarantee(data: Uint8Array): {
+function decodeGuarantee(data: Uint8Array): Safe<{
   value: Guarantee
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Work report: xg_workreport
-  const { value: workReport, remaining: workReportRemaining } =
-    decodeWorkReport(currentData)
+  const [error, result] = decodeWorkReport(currentData)
+  if (error) {
+    return safeError(error)
+  }
+  const workReport = result.value
+  const workReportRemaining = result.remaining
   currentData = workReportRemaining
 
   // Timeslot: encode[4](xg_timeslot)
-  const { value: timeslot, remaining: timeslotRemaining } = decodeFixedLength(
-    currentData,
-    4,
-  )
+  const [error2, result2] = decodeFixedLength(currentData, 4n)
+  if (error2) {
+    return safeError(error2)
+  }
+  const timeslot = result2.value
+  const timeslotRemaining = result2.remaining
   currentData = timeslotRemaining
 
   // Credentials: var{sq{build{tuple{encode[2](v), s}}{tuple{v, s} orderedin xg_credential}}}
-  const { value: credential, remaining: credentialRemaining } =
-    decodeSequenceGeneric(currentData, decodeCredential)
+  const [error3, result3] = decodeSequenceGeneric(currentData, decodeCredential)
+  if (error3) {
+    return safeError(error3)
+  }
+  const credential = result3.value
+  const credentialRemaining = result3.remaining
   currentData = credentialRemaining
 
   const guarantee: Guarantee = {
     workReport,
-    timeslot: Number(timeslot),
+    timeslot,
     credential,
   }
 
-  return {
+  return safeResult({
     value: guarantee,
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -197,7 +239,7 @@ function decodeGuarantee(data: Uint8Array): {
  * @param guarantees - Array of guarantees to encode (ordered by work report)
  * @returns Encoded octet sequence
  */
-export function encodeGuarantees(guarantees: Guarantee[]): Uint8Array {
+export function encodeGuarantees(guarantees: Guarantee[]): Safe<Uint8Array> {
   // Sort guarantees by work report as required by Gray Paper
   // Sort by the authorizer hash which should be unique
   const sortedGuarantees = [...guarantees].sort((a, b) => {
@@ -213,9 +255,9 @@ export function encodeGuarantees(guarantees: Guarantee[]): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantees and remaining data
  */
-export function decodeGuarantees(data: Uint8Array): {
+export function decodeGuarantees(data: Uint8Array): Safe<{
   value: Guarantee[]
   remaining: Uint8Array
-} {
+}> {
   return decodeSequenceGeneric(data, decodeGuarantee)
 }

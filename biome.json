@@ -26,6 +26,7 @@
       "!**/tsconfig.*.json",
       "!**/ponder-env.d.ts",
       "!**/submodules/**",
+      "!**/packages/erasure-coding/rust-reed-solomon/**",
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/*.spec.ts",

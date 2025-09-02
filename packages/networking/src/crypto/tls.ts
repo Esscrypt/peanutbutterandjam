@@ -4,9 +4,14 @@
  * Provides TLS 1.3 handshake with certificate authentication
  */
 
-import { generateAlternativeName } from '@pbnj/core'
+import {
+  generateAlternativeName,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
-import type { Bytes, JAMNPCertificate } from '@pbnj/types'
+import type { JAMNPCertificate } from '@pbnj/types'
 import packageJson from '../../package.json'
 
 /**
@@ -16,7 +21,7 @@ export interface TLSConfig {
   /** Certificate for this node */
   certificate: JAMNPCertificate
   /** Private key for this node */
-  privateKey: Bytes
+  privateKey: Uint8Array
   /** ALPN protocols to support */
   alpnProtocols: string[]
   /** Whether to verify peer certificates */
@@ -27,14 +32,10 @@ export interface TLSConfig {
  * TLS handshake result
  */
 export interface TLSHandshakeResult {
-  /** Whether handshake was successful */
-  success: boolean
   /** Peer's public key (if verification succeeded) */
-  peerPublicKey?: Bytes
+  peerPublicKey?: Uint8Array
   /** Peer's alternative name (if verification succeeded) */
   peerAlternativeName?: string
-  /** Error message (if handshake failed) */
-  error?: string
 }
 
 /**
@@ -42,7 +43,7 @@ export interface TLSHandshakeResult {
  */
 export function createTLSConfig(
   certificate: JAMNPCertificate,
-  privateKey: Bytes,
+  privateKey: Uint8Array,
   alpnProtocols: string[],
   verifyPeer = true,
 ): TLSConfig {
@@ -59,48 +60,50 @@ export function createTLSConfig(
  */
 export function validatePeerCertificate(
   peerCertificate: JAMNPCertificate,
-  expectedPublicKey?: Bytes,
-): boolean {
-  try {
-    // Basic certificate validation
-    if (!validateCertificate(peerCertificate)) {
-      return false
-    }
-
-    // Check if public key matches expected value (if provided)
-    if (expectedPublicKey) {
-      if (!arraysEqual(peerCertificate.publicKey, expectedPublicKey)) {
-        return false
-      }
-    }
-
-    // Verify alternative name consistency
-    const decoderAdapter = (data: Uint8Array, length: number) => {
-      const result = decodeFixedLength(data, length as any)
-      return { value: result.value, remaining: result.remaining }
-    }
-    const expectedName = generateAlternativeName(
-      peerCertificate.publicKey,
-      decoderAdapter,
-    )
-    if (peerCertificate.alternativeName !== expectedName) {
-      return false
-    }
-
-    return true
-  } catch (_error) {
-    return false
+  expectedPublicKey?: Uint8Array,
+): Safe<boolean> {
+  // Basic certificate validation
+  if (!validateCertificate(peerCertificate)) {
+    return safeError(new Error('Invalid peer certificate'))
   }
+
+  // Check if public key matches expected value (if provided)
+  if (expectedPublicKey) {
+    if (!arraysEqual(peerCertificate.publicKey, expectedPublicKey)) {
+      return safeError(new Error('Public key mismatch'))
+    }
+  }
+
+  const [altNameError, altName] = generateAlternativeName(
+    peerCertificate.publicKey,
+    decodeFixedLength,
+  )
+  if (altNameError) {
+    return safeError(altNameError)
+  }
+  if (peerCertificate.alternativeName !== altName) {
+    return safeError(new Error('Alternative name mismatch'))
+  }
+
+  return safeResult(true)
 }
 
 /**
  * Generate ALPN protocol identifier for JAMNP-S
+ * Format: jamnp-s/V/H or jamnp-s/V/H/builder
+ * Where V is protocol version (0) and H is first 8 nibbles of genesis header hash
  */
 export function generateALPNProtocol(
   chainHash: string,
   isBuilder = false,
 ): string {
-  const base = `jamnp-s/${packageJson.version}/${chainHash}`
+  // Protocol version is always 0 per Gray Paper specification
+  const protocolVersion = '0'
+  // Take first 8 nibbles (4 bytes) of chain hash in lowercase hex
+  const hashPrefix = chainHash.startsWith('0x')
+    ? chainHash.slice(2, 10)
+    : chainHash.slice(0, 8)
+  const base = `jamnp-s/${protocolVersion}/${hashPrefix.toLowerCase()}`
   return isBuilder ? `${base}/builder` : base
 }
 
@@ -145,7 +148,7 @@ export function parseALPNProtocol(protocol: string): {
 /**
  * Create TLS context for QUIC connection
  */
-export function createTLSContext(config: TLSConfig): any {
+export function createTLSContext(config: TLSConfig): TLSConfig {
   // This would integrate with the QUIC library's TLS requirements
   // For now, we'll create a basic structure that can be extended
   return {
@@ -162,55 +165,37 @@ export function createTLSContext(config: TLSConfig): any {
 export function performTLSHandshake(
   config: TLSConfig,
   peerCertificate?: JAMNPCertificate,
-): TLSHandshakeResult {
-  try {
-    // If we're not verifying peers, accept any valid certificate
-    if (!config.verifyPeer) {
-      if (peerCertificate && validateCertificate(peerCertificate)) {
-        return {
-          success: true,
-          peerPublicKey: peerCertificate.publicKey,
-          peerAlternativeName: peerCertificate.alternativeName,
-        }
-      }
-      return {
-        success: true,
-      }
-    }
-
-    // Verify peer certificate
-    if (!peerCertificate) {
-      return {
-        success: false,
-        error: 'No peer certificate provided',
-      }
-    }
-
-    if (!validatePeerCertificate(peerCertificate)) {
-      return {
-        success: false,
-        error: 'Invalid peer certificate',
-      }
-    }
-
-    return {
-      success: true,
-      peerPublicKey: peerCertificate.publicKey,
-      peerAlternativeName: peerCertificate.alternativeName,
-    }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
+): Safe<TLSHandshakeResult> {
+  // If we're not verifying peers, accept any valid certificate
+  if (!config.verifyPeer) {
+    if (peerCertificate && validateCertificate(peerCertificate)) {
+      return safeResult({
+        peerPublicKey: peerCertificate.publicKey,
+        peerAlternativeName: peerCertificate.alternativeName,
+      })
     }
   }
+
+  // Verify peer certificate
+  if (!peerCertificate) {
+    return safeError(new Error('No peer certificate provided'))
+  }
+
+  if (!validatePeerCertificate(peerCertificate)) {
+    return safeError(new Error('Invalid peer certificate'))
+  }
+
+  return safeResult({
+    peerPublicKey: peerCertificate.publicKey,
+    peerAlternativeName: peerCertificate.alternativeName,
+  })
 }
 
 // Import helper functions
 import { validateCertificate } from './certificates'
 
 // Helper function to compare arrays
-function arraysEqual(a: Bytes, b: Bytes): boolean {
+function arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {
     return false
   }

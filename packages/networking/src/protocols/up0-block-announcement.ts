@@ -1,41 +1,100 @@
 /**
  * UP 0: Block Announcement Protocol
  *
- * Implements the block announcement protocol for JAMNP-S
+ * Implements the block announcement protocol for JAMNP-S.
  * This is a Unique Persistent (UP) stream that should be opened between neighbors
  * in the validator grid structure.
+ *
+ * This implementation is a placeholder and will be replaced with a more complete
+ * implementation in the future.
  */
-
-import { blake2bHash } from '@pbnj/core'
+import { blake2bHash, logger } from '@pbnj/core'
+import type { NetworkingStore } from '@pbnj/state'
 import type {
   BlockAnnouncement,
   BlockAnnouncementHandshake,
-  Bytes,
   StreamInfo,
   ValidatorGrid,
+  ValidatorIndex,
   ValidatorMetadata,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { ConnectionManager } from '../peer/connection-manager'
+import type { ValidatorSetManager } from '../peer/validator-set'
+import type { QuicStreamManager } from '../quic/stream'
 
 /**
  * Block announcement protocol handler
  */
 export class BlockAnnouncementProtocol {
-  private knownLeaves: Map<string, { hash: Bytes; slot: number }> = new Map()
-  private finalizedBlock: { hash: Bytes; slot: number } | null = null
+  private knownLeaves: Map<string, { hash: Uint8Array; slot: number }> =
+    new Map()
+  private finalizedBlock: { hash: Uint8Array; slot: number } | null = null
   private grid: ValidatorGrid | null = null
-  // private _validators: ValidatorMetadata[] = [] // TODO: Implement validator management
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
-    this.dbIntegration = dbIntegration || null
+  // JIP-5 integration components
+  private streamManager: QuicStreamManager
+  private connectionManager: ConnectionManager
+  private validatorSetManager: ValidatorSetManager
+  private localValidatorIndex: ValidatorIndex | null = null
+
+  // Active UP0 streams to neighbors
+  private activeStreams: Map<ValidatorIndex, string> = new Map()
+  private isStarted = false
+
+  constructor(
+    dbIntegration: NetworkingStore,
+    streamManager: QuicStreamManager,
+    connectionManager: ConnectionManager,
+    validatorSetManager: ValidatorSetManager,
+  ) {
+    this.dbIntegration = dbIntegration
+    this.streamManager = streamManager
+    this.connectionManager = connectionManager
+    this.validatorSetManager = validatorSetManager
+
+    if (!this.dbIntegration) {
+      throw new Error('Database integration is required')
+    }
+
+    if (!this.streamManager) {
+      throw new Error('Stream manager is required')
+    }
+
+    if (!this.connectionManager) {
+      throw new Error('Connection manager is required')
+    }
+
+    if (!this.validatorSetManager) {
+      throw new Error('Validator set manager is required')
+    }
   }
 
   /**
    * Set database integration for persistent state
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
+  }
+
+  /**
+   * Set local validator index
+   */
+  setLocalValidator(validatorIndex: ValidatorIndex): void {
+    this.localValidatorIndex = validatorIndex
+  }
+
+  /**
+   * Set networking components for JIP-5 integration
+   */
+  setNetworkingComponents(
+    streamManager: QuicStreamManager,
+    connectionManager: ConnectionManager,
+    validatorSetManager: ValidatorSetManager,
+  ): void {
+    this.streamManager = streamManager
+    this.connectionManager = connectionManager
+    this.validatorSetManager = validatorSetManager
   }
 
   /**
@@ -81,7 +140,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Update finalized block
    */
-  async updateFinalizedBlock(hash: Bytes, slot: number): Promise<void> {
+  async updateFinalizedBlock(hash: Uint8Array, slot: number): Promise<void> {
     this.finalizedBlock = { hash, slot }
 
     // Persist to database
@@ -97,7 +156,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Add known leaf (descendant of finalized block with no children)
    */
-  async addKnownLeaf(hash: Bytes, slot: number): Promise<void> {
+  async addKnownLeaf(hash: Uint8Array, slot: number): Promise<void> {
     this.knownLeaves.set(hash.toString(), { hash, slot })
 
     // Persist to database
@@ -113,7 +172,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Remove known leaf (when it becomes a parent)
    */
-  async removeKnownLeaf(hash: Bytes): Promise<void> {
+  async removeKnownLeaf(hash: Uint8Array): Promise<void> {
     this.knownLeaves.delete(hash.toString())
 
     // Remove from database
@@ -182,7 +241,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Create block announcement message
    */
-  createBlockAnnouncement(blockHeader: Bytes): BlockAnnouncement {
+  createBlockAnnouncement(blockHeader: Uint8Array): BlockAnnouncement {
     if (!this.finalizedBlock) {
       throw new Error('No finalized block set')
     }
@@ -218,10 +277,13 @@ export class BlockAnnouncementProtocol {
   /**
    * Process block header
    */
-  private async processBlockHeader(header: Bytes): Promise<void> {
+  private async processBlockHeader(header: Uint8Array): Promise<void> {
     try {
       // Extract block hash and slot from header
-      const blockHashHex = blake2bHash(header)
+      const [blockHashHexError, blockHashHex] = blake2bHash(header)
+      if (blockHashHexError) {
+        throw blockHashHexError
+      }
       const blockHash = Buffer.from(blockHashHex.replace('0x', ''), 'hex')
       const slot = this.extractSlotFromHeader(header)
 
@@ -239,7 +301,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Extract slot number from block header
    */
-  private extractSlotFromHeader(header: Bytes): number {
+  private extractSlotFromHeader(header: Uint8Array): number {
     // This is a simplified implementation
     // In practice, you would parse the actual block header structure
     if (header.length < 8) {
@@ -254,7 +316,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Check if we should announce a block to neighbors
    */
-  shouldAnnounceBlock(blockHash: Bytes): boolean {
+  shouldAnnounceBlock(blockHash: Uint8Array): boolean {
     // Announce if we have the block and it's not already known to all neighbors
     if (!this.knownLeaves.has(blockHash.toString())) {
       return false
@@ -267,7 +329,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Serialize handshake message
    */
-  serializeHandshake(handshake: BlockAnnouncementHandshake): Bytes {
+  serializeHandshake(handshake: BlockAnnouncementHandshake): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(
       4 + 32 + 4 + handshake.leaves.length * (32 + 4),
@@ -304,7 +366,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Deserialize handshake message
    */
-  deserializeHandshake(data: Bytes): BlockAnnouncementHandshake {
+  deserializeHandshake(data: Uint8Array): BlockAnnouncementHandshake {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -321,7 +383,7 @@ export class BlockAnnouncementProtocol {
     offset += 4
 
     // Read each leaf
-    const leaves: Array<{ hash: Bytes; slot: number }> = []
+    const leaves: Array<{ hash: Uint8Array; slot: number }> = []
     for (let i = 0; i < numLeaves; i++) {
       // Read leaf hash (32 bytes)
       const hash = data.slice(offset, offset + 32)
@@ -344,7 +406,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Serialize block announcement message
    */
-  serializeBlockAnnouncement(announcement: BlockAnnouncement): Bytes {
+  serializeBlockAnnouncement(announcement: BlockAnnouncement): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(announcement.header.length + 32 + 4)
     const view = new DataView(buffer)
@@ -368,7 +430,7 @@ export class BlockAnnouncementProtocol {
    * Deserialize block announcement message
    */
   deserializeBlockAnnouncement(
-    data: Bytes,
+    data: Uint8Array,
     headerLength: number,
   ): BlockAnnouncement {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
@@ -395,7 +457,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     if (data.length === 0) {
       // Initial handshake
       // const _handshake = this.createHandshake()
@@ -420,6 +482,277 @@ export class BlockAnnouncementProtocol {
       await this.processBlockAnnouncement(announcement)
     } catch (error) {
       console.error('Failed to parse block announcement data:', error)
+    }
+  }
+
+  /**
+   * Start block announcement protocol
+   * JIP-5 compliant startup method
+   */
+  async start(): Promise<void> {
+    if (this.isStarted) {
+      logger.info('Block announcement protocol already started')
+      return
+    }
+
+    logger.info('Starting block announcement protocol for JIP-5 compliance')
+
+    if (
+      !this.streamManager ||
+      !this.connectionManager ||
+      !this.validatorSetManager
+    ) {
+      logger.warn(
+        'Missing required networking components for block announcement protocol',
+        {
+          streamManager: !!this.streamManager,
+          connectionManager: !!this.connectionManager,
+          validatorSetManager: !!this.validatorSetManager,
+        },
+      )
+      return
+    }
+
+    try {
+      // Load persistent state
+      await this.loadState()
+
+      // Get neighboring validators from grid structure
+      const neighbors = await this.getNeighboringValidators()
+      logger.info(
+        `Found ${neighbors.length} neighboring validators for UP0 streams`,
+        {
+          neighborCount: neighbors.length,
+          neighbors: neighbors.map((n) => n.index),
+        },
+      )
+
+      // Initialize UP0 streams to all neighbors
+      for (const neighbor of neighbors) {
+        await this.initializeStreamToValidator(neighbor)
+      }
+
+      this.isStarted = true
+      logger.info('Block announcement protocol started successfully', {
+        activeStreams: this.activeStreams.size,
+        localValidator: this.localValidatorIndex,
+      })
+    } catch (error) {
+      logger.error('Failed to start block announcement protocol', { error })
+      throw error
+    }
+  }
+
+  /**
+   * Get neighboring validators from grid structure
+   */
+  private async getNeighboringValidators(): Promise<ValidatorMetadata[]> {
+    if (!this.validatorSetManager || this.localValidatorIndex === null) {
+      return []
+    }
+
+    // Get current validators
+    const currentValidators = this.validatorSetManager.getCurrentValidators()
+
+    // For now, treat all other validators as neighbors
+    // In a full implementation, this would use grid structure to find actual neighbors
+    const neighbors: ValidatorMetadata[] = []
+    for (const [index, validator] of currentValidators) {
+      if (index !== this.localValidatorIndex) {
+        neighbors.push(validator)
+      }
+    }
+
+    return neighbors
+  }
+
+  /**
+   * Initialize UP0 stream to a specific validator
+   */
+  private async initializeStreamToValidator(
+    validator: ValidatorMetadata,
+  ): Promise<void> {
+    if (!this.streamManager || !this.connectionManager) {
+      throw new Error('Missing required networking components')
+    }
+
+    try {
+      // Check if we already have a stream to this validator
+      if (this.activeStreams.has(validator.index)) {
+        logger.info(`UP0 stream to validator ${validator.index} already exists`)
+        return
+      }
+
+      // Get or create connection to validator
+      await this.connectionManager.connectToPeer(validator.endpoint)
+
+      // Create UP0 stream (stream kind 0 for block announcement)
+      const streamId = `up0-block-announcement-${validator.index}`
+
+      // Register stream with connection
+      console.log(
+        `Initializing UP0 stream to validator ${validator.index} at ${validator.endpoint.host}:${validator.endpoint.port}`,
+      )
+
+      // Store active stream
+      this.activeStreams.set(validator.index, streamId)
+
+      // Send handshake
+      await this.sendHandshake(streamId, validator.index)
+    } catch (error) {
+      console.error(
+        `Failed to initialize stream to validator ${validator.index}:`,
+        error,
+      )
+    }
+  }
+
+  /**
+   * Send UP0 handshake to establish block announcement stream
+   */
+  private async sendHandshake(
+    streamId: string,
+    validatorIndex: ValidatorIndex,
+  ): Promise<void> {
+    if (!this.streamManager || this.localValidatorIndex === null) {
+      throw new Error('Missing required components for handshake')
+    }
+
+    const handshake: BlockAnnouncementHandshake = {
+      finalBlockHash: new Uint8Array(32), // Placeholder for finalized block hash
+      finalBlockSlot: 0, // Placeholder for finalized block slot
+      leaves: [], // Placeholder for known leaves
+    }
+
+    try {
+      // Serialize handshake message
+      const handshakeData = this.serializeHandshake(handshake)
+
+      // Send via QUIC stream with proper JAMNP-S framing
+      await this.streamManager.sendMessage(streamId, handshakeData)
+
+      console.log(
+        `✅ UP0 handshake sent to validator ${validatorIndex} via stream ${streamId}`,
+      )
+    } catch (error) {
+      console.error(
+        `❌ Failed to send UP0 handshake to validator ${validatorIndex}:`,
+        error,
+      )
+      throw error
+    }
+  }
+
+  /**
+   * Stop block announcement protocol
+   * JIP-5 compliant shutdown method
+   */
+  async stop(): Promise<void> {
+    console.log('Stopping block announcement protocol')
+
+    try {
+      // Close all active streams
+      for (const [validatorIndex, _streamId] of this.activeStreams) {
+        console.log(`Closing UP0 stream to validator ${validatorIndex}`)
+        // TODO: Send stream close message
+        // if (this.streamManager) {
+        //   await this.streamManager.closeStream(streamId)
+        // }
+      }
+
+      this.activeStreams.clear()
+      this.isStarted = false
+      console.log('Block announcement protocol stopped successfully')
+    } catch (error) {
+      console.error('Error stopping block announcement protocol:', error)
+    }
+  }
+
+  /**
+   * Announce a block to connected peers
+   * JIP-5 compliant block announcement method
+   */
+  async announceBlock(blockData: {
+    slot: number
+    validatorIndex: number
+    sequenceNumber: number
+    headerData: Uint8Array
+  }): Promise<void> {
+    if (!this.isStarted) {
+      console.warn(
+        'Block announcement protocol not started - cannot announce block',
+      )
+      return
+    }
+
+    console.log('Announcing block via JIP-5 protocol', {
+      slot: blockData.slot,
+      validatorIndex: blockData.validatorIndex,
+      sequenceNumber: blockData.sequenceNumber,
+      headerSize: blockData.headerData.length,
+    })
+
+    // Create block announcement message
+    const announcement: BlockAnnouncement = {
+      header: blockData.headerData,
+      finalBlockHash: new Uint8Array(32), // Placeholder for finalized block hash
+      finalBlockSlot: 0, // Placeholder for finalized block slot
+    }
+
+    // Serialize announcement
+    const announcementData = this.serializeBlockAnnouncement(announcement)
+
+    // Send to all active streams
+    let successCount = 0
+    for (const [validatorIndex, streamId] of this.activeStreams) {
+      try {
+        await this.sendAnnouncementToStream(
+          streamId,
+          validatorIndex,
+          announcementData,
+        )
+        successCount++
+      } catch (error) {
+        console.error(
+          `Failed to send announcement to validator ${validatorIndex}:`,
+          error,
+        )
+      }
+    }
+
+    console.log(
+      `Block announcement sent successfully to ${successCount}/${this.activeStreams.size} neighbors`,
+    )
+  }
+
+  /**
+   * Send announcement data to a specific stream
+   */
+  private async sendAnnouncementToStream(
+    streamId: string,
+    validatorIndex: ValidatorIndex,
+    data: Uint8Array,
+  ): Promise<void> {
+    if (!this.streamManager) {
+      console.error(
+        `Stream manager not available for announcement to validator ${validatorIndex}`,
+      )
+      return
+    }
+
+    try {
+      // Send announcement via QUIC stream with proper JAMNP-S framing
+      await this.streamManager.sendMessage(streamId, data)
+
+      console.log(
+        `✅ Block announcement sent to validator ${validatorIndex} via stream ${streamId} (${data.length} bytes)`,
+      )
+    } catch (error) {
+      console.error(
+        `❌ Failed to send block announcement to validator ${validatorIndex}:`,
+        error,
+      )
+      throw error
     }
   }
 }

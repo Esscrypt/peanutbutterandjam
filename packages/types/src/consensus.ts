@@ -5,7 +5,7 @@
  * Reference: graypaper/text/safrole.tex
  */
 
-import type { Hash, HashValue, HexString } from './core'
+import type { Hex } from 'viem'
 
 // Define ConsensusState interface
 export interface ConsensusState {
@@ -14,7 +14,7 @@ export interface ConsensusState {
   pendingSet: ValidatorKey[]
   activeSet: ValidatorKey[]
   previousSet: ValidatorKey[]
-  epochRoot: Hash
+  epochRoot: Hex
   sealTickets: string[]
   ticketAccumulator: Ticket[]
 }
@@ -23,25 +23,25 @@ export interface Ticket {
   /** Ticket identifier (hash) */
   id: string
   /** Entry index */
-  entryIndex: number
+  entryIndex: bigint
   /** Ticket signature */
-  signature: string
+  signature: Hex
   /** Timestamp */
-  timestamp: number
+  timestamp: bigint
 }
 
 export interface TicketProof {
   /** Entry index */
-  entryIndex: number
+  entryIndex: bigint
   /** Ring proof signature */
-  signature: string
+  signature: Hex
 }
 
 export interface SafroleState {
   /** Pending validator set (next epoch) - Gray Paper: pendingSet */
   pendingSet: ValidatorKey[]
   /** Epoch root (Bandersnatch ring root) - Gray Paper: epochRoot */
-  epochRoot: HashValue
+  epochRoot: Hex
   /** Current epoch's seal tickets - Gray Paper: sealTickets */
   sealTickets: Ticket[] | ValidatorKey[]
   /** Ticket accumulator for next epoch - Gray Paper: ticketAccumulator */
@@ -53,9 +53,9 @@ export interface SafroleState {
 
 export interface SafroleInput {
   /** Block slot */
-  slot: number
+  slot: bigint
   /** Current entropy */
-  entropy: HashValue
+  entropy: Hex
   /** Ticket proofs in extrinsic */
   extrinsic: TicketProof[]
 }
@@ -122,9 +122,9 @@ export interface ConsensusInput {
  */
 export interface ConsensusExtrinsic {
   /** Entry index */
-  entryIndex: number
+  entryIndex: bigint
   /** Extrinsic signature */
-  signature: string
+  signature: Hex
   /** Extrinsic data */
   data?: Uint8Array
 }
@@ -148,11 +148,11 @@ export interface ConsensusTicket {
   /** Ticket ID */
   id: string
   /** Entry index */
-  entryIndex: number
+  entryIndex: bigint
   /** Ticket signature */
-  signature: string
+  signature: Hex
   /** Timestamp */
-  timestamp: number
+  timestamp: bigint
 }
 
 /**
@@ -160,17 +160,17 @@ export interface ConsensusTicket {
  */
 export const CONSENSUS_CONSTANTS = {
   /** Epoch length in slots */
-  EPOCH_LENGTH: 600,
+  EPOCH_LENGTH: 600n,
   /** Epoch tail start */
-  EPOCH_TAIL_START: 540,
+  EPOCH_TAIL_START: 540n,
   /** Maximum extrinsics per slot */
-  MAX_EXTRINSICS_PER_SLOT: 10,
+  MAX_EXTRINSICS_PER_SLOT: 10n,
   /** Maximum ticket entries */
-  MAX_TICKET_ENTRIES: 1000,
+  MAX_TICKET_ENTRIES: 1000n,
   /** Entropy size */
-  ENTROPY_SIZE: 1,
+  ENTROPY_SIZE: 1n,
   /** Maximum seal tickets */
-  MAX_SEAL_TICKETS: 10,
+  MAX_SEAL_TICKETS: 10n,
 } as const
 
 /**
@@ -202,13 +202,13 @@ export interface ConsensusError {
  */
 export interface ValidatorKey {
   /** Bandersnatch key (first 32 Uint8Array) */
-  bandersnatch: HexString
+  bandersnatch: Hex
   /** Ed25519 key (next 32 Uint8Array) */
-  ed25519: HexString
+  ed25519: Hex
   /** BLS key (next 144 Uint8Array) */
-  bls: HexString
+  bls: Hex
   /** Metadata (last 128 Uint8Array) */
-  metadata: HexString
+  metadata: Hex
 }
 
 /**
@@ -218,11 +218,11 @@ export interface EpochMarker {
   /** Epoch number */
   epoch: number
   /** Entropy accumulator */
-  entropyAccumulator: HexString
+  entropyAccumulator: Hex
   /** Validator keys */
   validatorKeys: ValidatorKey[]
   /** Epoch root */
-  epochRoot: Hash
+  epochRoot: Hex
 }
 
 /**

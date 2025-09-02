@@ -6,8 +6,16 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { BlockAuthoringConfig, GenesisConfig } from '@pbnj/types'
+import { NetworkingStore } from '@pbnj/state'
+import { TelemetryClient } from '@pbnj/telemetry'
+import type {
+  BlockAuthoringConfig,
+  GenesisConfig,
+  NodeType,
+  TelemetryConfig,
+} from '@pbnj/types'
 import { BlockAuthoringServiceImpl } from './block-authoring-service'
+import { db } from './db'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
 import type { MainService, Service } from './service-interface'
@@ -20,7 +28,7 @@ import {
   StateManagerService,
   WorkPackageProcessorService,
 } from './service-wrappers'
-
+import { TelemetryService } from './telemetry-service'
 /**
  * Main service configuration
  */
@@ -32,7 +40,7 @@ export interface MainServiceConfig {
   /** Networking configuration */
   networking: {
     validatorIndex: number
-    nodeType: string
+    nodeType: NodeType
     listenAddress: string
     listenPort: number
     chainHash: string
@@ -40,6 +48,8 @@ export interface MainServiceConfig {
   }
   /** Node ID for metrics */
   nodeId: string
+  /** Telemetry configuration */
+  telemetry: TelemetryConfig
   /** Service enablement configuration */
   services?: {
     /** Enable block authoring service */
@@ -60,15 +70,8 @@ export interface MainServiceConfig {
     stateManager?: boolean
     /** Enable work package processor */
     workPackageProcessor?: boolean
-  }
-  /** Test mode configuration for development */
-  testMode?: {
-    /** Enable test message sending */
-    enableTestMessages?: boolean
-    /** Test message interval (ms) */
-    testMessageInterval?: number
-    /** Maximum test messages to send */
-    maxTestMessages?: number
+    /** Enable telemetry */
+    telemetry?: boolean
   }
 }
 
@@ -87,20 +90,27 @@ export class MainServiceImpl extends BaseService implements MainService {
   private headerConstructorService?: HeaderConstructorService
   private stateManagerService?: StateManagerService
   private workPackageProcessorService?: WorkPackageProcessorService
+  private telemetryService?: TelemetryService
 
   constructor(config: MainServiceConfig) {
     super('main-service')
     this.config = config
     this.registry = new ServiceRegistry()
+  }
 
+  /**
+   * Initialize the service after construction
+   * This is called separately to allow async initialization
+   */
+  async initialize(): Promise<void> {
     // Initialize all services
-    this.initializeServices()
+    await this.initializeServices()
   }
 
   /**
    * Initialize all services based on configuration
    */
-  private initializeServices(): void {
+  private async initializeServices(): Promise<void> {
     // Default to enabling all services if not specified
     const services = this.config.services || {
       blockAuthoring: true,
@@ -112,13 +122,19 @@ export class MainServiceImpl extends BaseService implements MainService {
       headerConstructor: true,
       stateManager: true,
       workPackageProcessor: true,
+      telemetry: !!this.config.telemetry?.enabled,
     }
 
     logger.info('Initializing services based on configuration', { services })
 
+    const telemetryClient = new TelemetryClient(this.config.telemetry)
+    this.telemetryService = new TelemetryService(telemetryClient)
+
     // Create services conditionally
     if (services.blockAuthoring) {
-      this.blockAuthoringService = new BlockAuthoringServiceImpl()
+      this.blockAuthoringService = new BlockAuthoringServiceImpl(
+        this.telemetryService,
+      )
       logger.debug('Block authoring service created')
     }
 
@@ -159,20 +175,21 @@ export class MainServiceImpl extends BaseService implements MainService {
       logger.debug('Work package processor service created')
     }
 
-    // Create networking service with dependencies (if enabled)
-    if (services.networking) {
-      this.networkingService = new NetworkingService({
+    const networkingStore = new NetworkingStore(db)
+
+    this.networkingService = new NetworkingService(
+      {
         validatorIndex: this.config.networking.validatorIndex,
-        nodeType: this.config.networking.nodeType as any,
+        nodeType: this.config.networking.nodeType,
         listenAddress: this.config.networking.listenAddress,
         listenPort: this.config.networking.listenPort,
         chainHash: this.config.networking.chainHash,
         isBuilder: this.config.networking.isBuilder,
         blockAuthoringService: this.blockAuthoringService || null,
-        testMode: this.config.testMode,
-      })
-      logger.debug('Networking service created')
-    }
+      },
+      networkingStore,
+      this.telemetryService,
+    )
 
     // Register created services with the registry
     if (this.metricsCollector) this.registry.register(this.metricsCollector)
@@ -191,6 +208,7 @@ export class MainServiceImpl extends BaseService implements MainService {
     if (this.blockAuthoringService)
       this.registry.register(this.blockAuthoringService)
     if (this.networkingService) this.registry.register(this.networkingService)
+    if (this.telemetryService) this.registry.register(this.telemetryService)
 
     // Register this service as the main service
     this.registry.registerMain(this)
@@ -215,9 +233,17 @@ export class MainServiceImpl extends BaseService implements MainService {
 
       logger.info('Initializing main service...')
 
+      // Initialize the main service first (this sets up networking database integration)
+      await this.initialize()
+
       // Configure block authoring service if it exists
       if (this.blockAuthoringService) {
         this.blockAuthoringService.configure(this.config.blockAuthoring)
+      }
+
+      // Initialize telemetry service if it exists
+      if (this.telemetryService) {
+        await this.telemetryService.init()
       }
 
       // Initialize all services except this main service (to avoid circular dependency)
@@ -235,7 +261,6 @@ export class MainServiceImpl extends BaseService implements MainService {
       throw error
     }
   }
-
   /**
    * Start the main service
    */
@@ -274,13 +299,22 @@ export class MainServiceImpl extends BaseService implements MainService {
       return false
     }
   }
-
   /**
    * Stop the main service
    */
   async stop(): Promise<void> {
     try {
-      logger.info('Stopping main service...')
+      logger.info('Stopping man service...')
+
+      // Stop telemetry service if it exists
+      if (this.telemetryService) {
+        try {
+          await this.telemetryService.stop()
+          logger.info('Telemetry service stopped successfully')
+        } catch (error) {
+          logger.error('Error stopping telemetry service', { error })
+        }
+      }
 
       // Stop all services except this main service (to avoid circular dependency)
       const allServices = this.registry.getAll()
@@ -305,13 +339,12 @@ export class MainServiceImpl extends BaseService implements MainService {
       logger.error('Error stopping main service', { error })
     }
   }
-
   /**
    * Main entry point for the application
-   */
+   **/
   async run(): Promise<void> {
     try {
-      logger.info('Starting JAM node...')
+      logger.info('Starting JM node...')
 
       // Initialize and start the service
       await this.init()

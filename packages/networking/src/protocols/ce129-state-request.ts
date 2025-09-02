@@ -5,30 +5,25 @@
  * This is a Common Ephemeral (CE) stream for requesting ranges of state trie data.
  */
 
-import type {
-  Bytes,
-  StateRequest,
-  StateResponse,
-  StreamInfo,
-} from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { StateRequest, StateResponse, StreamInfo } from '@pbnj/types'
 
 /**
  * State trie node interface
  */
 interface StateTrieNode {
   /** Node hash */
-  hash: Bytes
+  hash: Uint8Array
   /** Node type: 'branch', 'leaf', or 'extension' */
   type: 'branch' | 'leaf' | 'extension'
   /** Children (for branch nodes) */
-  children?: Bytes[]
+  children?: Uint8Array[]
   /** Key (for leaf nodes) */
-  key?: Bytes
+  key?: Uint8Array
   /** Value (for leaf nodes) */
-  value?: Bytes
+  value?: Uint8Array
   /** Next node (for extension nodes) */
-  next?: Bytes
+  next?: Uint8Array
 }
 
 /**
@@ -36,17 +31,17 @@ interface StateTrieNode {
  */
 export class StateRequestProtocol {
   private stateStore: Map<string, StateTrieNode> = new Map()
-  private keyValueStore: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private keyValueStore: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -69,7 +64,7 @@ export class StateRequestProtocol {
   /**
    * Add state trie node to local store and persist to database
    */
-  async addStateNode(hash: Bytes, node: StateTrieNode): Promise<void> {
+  async addStateNode(hash: Uint8Array, node: StateTrieNode): Promise<void> {
     const hashString = hash.toString()
     this.stateStore.set(hashString, node)
 
@@ -102,7 +97,7 @@ export class StateRequestProtocol {
   /**
    * Add key-value pair to local store and persist to database
    */
-  async addKeyValue(key: Bytes, value: Bytes): Promise<void> {
+  async addKeyValue(key: Uint8Array, value: Uint8Array): Promise<void> {
     const keyString = key.toString()
     this.keyValueStore.set(keyString, value)
 
@@ -119,21 +114,23 @@ export class StateRequestProtocol {
   /**
    * Get state trie node from local store
    */
-  getStateNode(hash: Bytes): StateTrieNode | undefined {
+  getStateNode(hash: Uint8Array): StateTrieNode | undefined {
     return this.stateStore.get(hash.toString())
   }
 
   /**
    * Get key-value pair from local store
    */
-  getKeyValue(key: Bytes): Bytes | undefined {
+  getKeyValue(key: Uint8Array): Uint8Array | undefined {
     return this.keyValueStore.get(key.toString())
   }
 
   /**
    * Get state trie node from database if not in local store
    */
-  async getStateNodeFromDatabase(hash: Bytes): Promise<StateTrieNode | null> {
+  async getStateNodeFromDatabase(
+    hash: Uint8Array,
+  ): Promise<StateTrieNode | null> {
     if (this.getStateNode(hash)) {
       return this.getStateNode(hash) || null
     }
@@ -178,7 +175,7 @@ export class StateRequestProtocol {
   /**
    * Get key-value pair from database if not in local store
    */
-  async getKeyValueFromDatabase(key: Bytes): Promise<Bytes | null> {
+  async getKeyValueFromDatabase(key: Uint8Array): Promise<Uint8Array | null> {
     if (this.getKeyValue(key)) {
       return this.getKeyValue(key) || null
     }
@@ -208,9 +205,9 @@ export class StateRequestProtocol {
    * Create state request message
    */
   createStateRequest(
-    headerHash: Bytes,
-    startKey: Bytes,
-    endKey: Bytes,
+    headerHash: Uint8Array,
+    startKey: Uint8Array,
+    endKey: Uint8Array,
     maximumSize: number,
   ): StateRequest {
     return {
@@ -255,10 +252,10 @@ export class StateRequestProtocol {
    * Get boundary nodes for the requested range
    */
   private async getBoundaryNodes(
-    startKey: Bytes,
-    endKey: Bytes,
-  ): Promise<Bytes[]> {
-    const boundaryNodes: Bytes[] = []
+    startKey: Uint8Array,
+    endKey: Uint8Array,
+  ): Promise<Uint8Array[]> {
+    const boundaryNodes: Uint8Array[] = []
 
     // Get path to start key
     const startPath = await this.getPathToKey(startKey)
@@ -270,7 +267,7 @@ export class StateRequestProtocol {
 
     // Remove duplicates
     const uniqueNodes = new Set<string>()
-    const result: Bytes[] = []
+    const result: Uint8Array[] = []
 
     for (const node of boundaryNodes) {
       const hash = node.toString()
@@ -287,11 +284,11 @@ export class StateRequestProtocol {
    * Get key-value pairs in the requested range
    */
   private async getKeyValuePairs(
-    startKey: Bytes,
-    endKey: Bytes,
+    startKey: Uint8Array,
+    endKey: Uint8Array,
     maximumSize: number,
-  ): Promise<Array<{ key: Bytes; value: Bytes }>> {
-    const pairs: Array<{ key: Bytes; value: Bytes }> = []
+  ): Promise<Array<{ key: Uint8Array; value: Uint8Array }>> {
+    const pairs: Array<{ key: Uint8Array; value: Uint8Array }> = []
 
     // Iterate through all key-value pairs in local store
     for (const [keyStr, value] of this.keyValueStore.entries()) {
@@ -340,8 +337,8 @@ export class StateRequestProtocol {
   /**
    * Get path from root to a specific key
    */
-  private async getPathToKey(_key: Bytes): Promise<Bytes[]> {
-    const path: Bytes[] = []
+  private async getPathToKey(_key: Uint8Array): Promise<Uint8Array[]> {
+    const path: Uint8Array[] = []
     // const _currentKey = key
 
     // This is a simplified implementation
@@ -353,7 +350,11 @@ export class StateRequestProtocol {
   /**
    * Check if a key is in the specified range
    */
-  private isKeyInRange(key: Bytes, startKey: Bytes, endKey: Bytes): boolean {
+  private isKeyInRange(
+    key: Uint8Array,
+    startKey: Uint8Array,
+    endKey: Uint8Array,
+  ): boolean {
     const keyStr = key.toString()
     const startStr = startKey.toString()
     const endStr = endKey.toString()
@@ -364,7 +365,7 @@ export class StateRequestProtocol {
   /**
    * Compare two keys lexicographically
    */
-  private compareKeys(keyA: Bytes, keyB: Bytes): number {
+  private compareKeys(keyA: Uint8Array, keyB: Uint8Array): number {
     const strA = keyA.toString()
     const strB = keyB.toString()
 
@@ -376,7 +377,7 @@ export class StateRequestProtocol {
   /**
    * Serialize state request message
    */
-  serializeStateRequest(request: StateRequest): Bytes {
+  serializeStateRequest(request: StateRequest): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32 + 32 + 32 + 4)
     const view = new DataView(buffer)
@@ -403,7 +404,7 @@ export class StateRequestProtocol {
   /**
    * Deserialize state request message
    */
-  deserializeStateRequest(data: Bytes): StateRequest {
+  deserializeStateRequest(data: Uint8Array): StateRequest {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -433,7 +434,7 @@ export class StateRequestProtocol {
   /**
    * Serialize state response message
    */
-  serializeStateResponse(response: StateResponse): Bytes {
+  serializeStateResponse(response: StateResponse): Uint8Array {
     // Calculate total size
     let totalSize = 4 + 4 // number of boundary nodes + number of key-value pairs
 
@@ -488,7 +489,7 @@ export class StateRequestProtocol {
   /**
    * Deserialize state response message
    */
-  deserializeStateResponse(data: Bytes): StateResponse {
+  deserializeStateResponse(data: Uint8Array): StateResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -497,7 +498,7 @@ export class StateRequestProtocol {
     offset += 4
 
     // Read boundary nodes
-    const boundaryNodes: Bytes[] = []
+    const boundaryNodes: Uint8Array[] = []
     for (let i = 0; i < numBoundaryNodes; i++) {
       const node = data.slice(offset, offset + 32)
       offset += 32
@@ -509,7 +510,7 @@ export class StateRequestProtocol {
     offset += 4
 
     // Read key-value pairs
-    const keyValuePairs: Array<{ key: Bytes; value: Bytes }> = []
+    const keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }> = []
     for (let i = 0; i < numKeyValuePairs; i++) {
       // Read key length (4 bytes, little-endian)
       const keyLength = view.getUint32(offset, true)
@@ -541,7 +542,7 @@ export class StateRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<StateResponse | null> {
     try {
       const request = this.deserializeStateRequest(data)

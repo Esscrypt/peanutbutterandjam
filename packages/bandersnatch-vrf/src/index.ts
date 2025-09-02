@@ -14,7 +14,6 @@ export * from './prover'
 // Main exports for easy importing
 export {
   IETFVRFProver,
-  PedersenVRFProver,
   RingVRFProver,
 } from './prover'
 // Verifier exports

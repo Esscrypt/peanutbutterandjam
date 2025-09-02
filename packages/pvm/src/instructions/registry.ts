@@ -197,7 +197,7 @@ import { ECALLIInstruction } from './system'
  */
 export class InstructionRegistry {
   private static instance: InstructionRegistry
-  private handlers: Map<number, PVMInstructionHandler> = new Map()
+  private handlers: Map<bigint, PVMInstructionHandler> = new Map()
 
   private constructor() {
     this.registerInstructions()
@@ -432,21 +432,21 @@ export class InstructionRegistry {
   /**
    * Get instruction handler by opcode
    */
-  getHandler(opcode: number): PVMInstructionHandler | undefined {
+  getHandler(opcode: bigint): PVMInstructionHandler | undefined {
     return this.handlers.get(opcode)
   }
 
   /**
    * Check if opcode is registered
    */
-  hasHandler(opcode: number): boolean {
+  hasHandler(opcode: bigint): boolean {
     return this.handlers.has(opcode)
   }
 
   /**
    * Get all registered opcodes
    */
-  getRegisteredOpcodes(): number[] {
+  getRegisteredOpcodes(): bigint[] {
     return Array.from(this.handlers.keys())
   }
 

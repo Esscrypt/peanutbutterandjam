@@ -4,7 +4,6 @@
  * Provides Ed25519 key pair generation and signing functionality
  */
 
-import type { Bytes } from '@pbnj/types'
 import {
   generateKeyPair as generateEd25519KeyPair,
   sign,
@@ -15,8 +14,8 @@ import {
  * Key pair structure
  */
 export interface KeyPair {
-  publicKey: Bytes
-  privateKey: Bytes
+  publicKey: Uint8Array
+  privateKey: Uint8Array
 }
 
 /**
@@ -33,7 +32,10 @@ export function generateKeyPair(): KeyPair {
 /**
  * Sign message with Ed25519 private key
  */
-export function signMessage(privateKey: Bytes, message: Bytes): Bytes {
+export function signMessage(
+  privateKey: Uint8Array,
+  message: Uint8Array,
+): Uint8Array {
   return sign(privateKey, message)
 }
 
@@ -41,9 +43,9 @@ export function signMessage(privateKey: Bytes, message: Bytes): Bytes {
  * Verify Ed25519 signature
  */
 export function verifySignature(
-  publicKey: Bytes,
-  message: Bytes,
-  signature: Bytes,
+  publicKey: Uint8Array,
+  message: Uint8Array,
+  signature: Uint8Array,
 ): boolean {
   return verify(publicKey, message, signature)
 }

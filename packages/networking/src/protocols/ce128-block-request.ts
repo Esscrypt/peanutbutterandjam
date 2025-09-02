@@ -5,30 +5,25 @@
  * This is a Common Ephemeral (CE) stream for requesting sequences of blocks.
  */
 
-import type {
-  BlockRequest,
-  BlockResponse,
-  Bytes,
-  StreamInfo,
-} from '@pbnj/types'
+import type { NetworkingStore } from '@pbnj/state'
+import type { BlockRequest, BlockResponse, StreamInfo } from '@pbnj/types'
 import { BlockRequestDirection } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Block request protocol handler
  */
 export class BlockRequestProtocol {
-  private blockStore: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private blockStore: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -59,7 +54,7 @@ export class BlockRequestProtocol {
   /**
    * Add block to local store and persist to database
    */
-  async addBlock(blockHash: Bytes, blockData: Bytes): Promise<void> {
+  async addBlock(blockHash: Uint8Array, blockData: Uint8Array): Promise<void> {
     const hashString = blockHash.toString()
     this.blockStore.set(hashString, blockData)
 
@@ -79,7 +74,7 @@ export class BlockRequestProtocol {
   /**
    * Remove block from local store and database
    */
-  async removeBlock(blockHash: Bytes): Promise<void> {
+  async removeBlock(blockHash: Uint8Array): Promise<void> {
     const hashString = blockHash.toString()
     this.blockStore.delete(hashString)
 
@@ -100,21 +95,23 @@ export class BlockRequestProtocol {
   /**
    * Check if block is available locally
    */
-  hasBlock(blockHash: Bytes): boolean {
+  hasBlock(blockHash: Uint8Array): boolean {
     return this.blockStore.has(blockHash.toString())
   }
 
   /**
    * Get block from local store
    */
-  getBlock(blockHash: Bytes): Bytes | undefined {
+  getBlock(blockHash: Uint8Array): Uint8Array | undefined {
     return this.blockStore.get(blockHash.toString())
   }
 
   /**
    * Get block from database if not in local store
    */
-  async getBlockFromDatabase(blockHash: Bytes): Promise<Bytes | null> {
+  async getBlockFromDatabase(
+    blockHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
     if (this.hasBlock(blockHash)) {
       return this.getBlock(blockHash) || null
     }
@@ -144,7 +141,7 @@ export class BlockRequestProtocol {
    * Create block request message
    */
   createBlockRequest(
-    headerHash: Bytes,
+    headerHash: Uint8Array,
     direction: BlockRequestDirection,
     maximumBlocks: number,
   ): BlockRequest {
@@ -161,7 +158,7 @@ export class BlockRequestProtocol {
   async processBlockRequest(
     request: BlockRequest,
   ): Promise<BlockResponse | null> {
-    const blocks: Bytes[] = []
+    const blocks: Uint8Array[] = []
     let currentHash = request.headerHash
     let blocksFound = 0
 
@@ -219,7 +216,9 @@ export class BlockRequestProtocol {
    * Find child block by examining block data
    * This is a simplified implementation - in practice, you'd parse the block header
    */
-  private async findChildBlock(_parentHash: Bytes): Promise<Bytes | null> {
+  private async findChildBlock(
+    _parentHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
     // This would require parsing block headers to find child relationships
     // For now, we'll return null as this is a placeholder implementation
     return null
@@ -229,7 +228,9 @@ export class BlockRequestProtocol {
    * Find parent block by examining block data
    * This is a simplified implementation - in practice, you'd parse the block header
    */
-  private async findParentBlock(_childHash: Bytes): Promise<Bytes | null> {
+  private async findParentBlock(
+    _childHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
     // This would require parsing block headers to find parent relationships
     // For now, we'll return null as this is a placeholder implementation
     return null
@@ -239,7 +240,7 @@ export class BlockRequestProtocol {
    * Check if block can be finalized
    * This is a simplified implementation - in practice, you'd check finality criteria
    */
-  private async canBeFinalized(_blockHash: Bytes): Promise<boolean> {
+  private async canBeFinalized(_blockHash: Uint8Array): Promise<boolean> {
     // This would require checking finality criteria
     // For now, we'll assume all blocks can be finalized
     return true
@@ -248,7 +249,7 @@ export class BlockRequestProtocol {
   /**
    * Serialize block request message
    */
-  serializeBlockRequest(request: BlockRequest): Bytes {
+  serializeBlockRequest(request: BlockRequest): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32 + 1 + 4)
     const view = new DataView(buffer)
@@ -271,7 +272,7 @@ export class BlockRequestProtocol {
   /**
    * Deserialize block request message
    */
-  deserializeBlockRequest(data: Bytes): BlockRequest {
+  deserializeBlockRequest(data: Uint8Array): BlockRequest {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -296,7 +297,7 @@ export class BlockRequestProtocol {
   /**
    * Serialize block response message
    */
-  serializeBlockResponse(response: BlockResponse): Bytes {
+  serializeBlockResponse(response: BlockResponse): Uint8Array {
     // Serialize according to JAMNP-S specification
     const totalSize =
       4 + response.blocks.reduce((size, block) => size + 4 + block.length, 0)
@@ -325,7 +326,7 @@ export class BlockRequestProtocol {
   /**
    * Deserialize block response message
    */
-  deserializeBlockResponse(data: Bytes): BlockResponse {
+  deserializeBlockResponse(data: Uint8Array): BlockResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -334,7 +335,7 @@ export class BlockRequestProtocol {
     offset += 4
 
     // Read each block
-    const blocks: Bytes[] = []
+    const blocks: Uint8Array[] = []
     for (let i = 0; i < numBlocks; i++) {
       // Read block length (4 bytes, little-endian)
       const blockLength = view.getUint32(offset, true)
@@ -357,7 +358,7 @@ export class BlockRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<BlockResponse | null> {
     try {
       const request = this.deserializeBlockRequest(data)

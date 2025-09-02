@@ -5,7 +5,20 @@
  * Reference: Gray Paper work package specifications
  */
 
-import { blake2bHash, logger } from '@pbnj/core'
+import {
+  blake2bHash,
+  bytesToHex,
+  concatBytes,
+  type Hex,
+  hexToBytes,
+  logger,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+  stringToBytes,
+  zeroHash,
+} from '@pbnj/core'
 import type {
   AvailabilitySpec,
   BlockAuthoringConfig,
@@ -17,37 +30,39 @@ import type {
   WorkReport,
 } from '@pbnj/types'
 
+// import { merklize } from '@pbnj/core'
+
 // Gray Paper constants
 const GRAY_PAPER_CONSTANTS = {
   // Work package limits
-  MAX_PACKAGE_ITEMS: 100,
-  MAX_PACKAGE_EXPORTS: 3072,
-  MAX_PACKAGE_IMPORTS: 3072,
-  MAX_PACKAGE_EXTRINSICS: 128,
-  MAX_BUNDLE_SIZE: 13794305, // 13.6MB
+  MAX_PACKAGE_ITEMS: 100n,
+  MAX_PACKAGE_EXPORTS: 3072n,
+  MAX_PACKAGE_IMPORTS: 3072n,
+  MAX_PACKAGE_EXTRINSICS: 128n,
+  MAX_BUNDLE_SIZE: 13794305n, // 13.6MB
 
   // Segment constants
-  SEGMENT_SIZE: 4104,
-  EC_PIECE_SIZE: 684,
+  SEGMENT_SIZE: 4104n,
+  EC_PIECE_SIZE: 684n,
 
   // Gas limits
-  MAX_PACKAGE_REF_GAS: 1000000,
-  MAX_REPORT_ACC_GAS: 1000000,
+  MAX_PACKAGE_REF_GAS: 1000000n,
+  MAX_REPORT_ACC_GAS: 1000000n,
 
   // Report limits
-  MAX_REPORT_VAR_SIZE: 1024 * 1024, // 1MB
+  MAX_REPORT_VAR_SIZE: 1024n * 1024n, // 1MB
 
   // Epoch constants
-  EPOCH_LENGTH: 600,
-  MAX_LOOKUP_ANCHOR_AGE: 8 * 600, // 8 epochs
+  EPOCH_LENGTH: 600n,
+  MAX_LOOKUP_ANCHOR_AGE: 8n * 600n, // 8 epochs
 } as const
 
 /**
  * Work item result
  */
 export interface WorkItemResult {
-  result: Uint8Array | WorkError
-  gasUsed: number
+  result: WorkError | Uint8Array
+  gasUsed: bigint
   exports: Uint8Array[]
 }
 
@@ -61,42 +76,37 @@ export class WorkPackageProcessor {
   async process(
     packages: WorkPackage[],
     _config: BlockAuthoringConfig,
-  ): Promise<WorkReport[]> {
-    logger.debug('Processing work packages', {
-      packageCount: packages.length,
-    })
-
+  ): SafePromise<WorkReport[]> {
     const reports: WorkReport[] = []
 
     for (const workPackage of packages) {
-      try {
-        // Validate work package
-        const validationResult = this.validateWorkPackage(workPackage)
-        if (!validationResult.valid) {
-          logger.error('Work package validation failed', {
-            workPackageId: workPackage.id,
-            errors: validationResult.errors,
-          })
-          continue
-        }
+      // Validate work package
+      const validationResult = this.validateWorkPackage(workPackage)
 
-        // Process work package
-        const report = await this.processWorkPackage(workPackage, _config)
-        reports.push(report)
-      } catch (error) {
+      if (!validationResult.valid) {
+        logger.error('Work package validation failed', {
+          workPackageId: workPackage.id,
+          errors: validationResult.errors,
+        })
+        continue
+      }
+
+      // Process work package
+      const [reportError, report] = await this.processWorkPackage(
+        workPackage,
+        _config,
+      )
+      if (reportError) {
         logger.error('Failed to process work package', {
           workPackageId: workPackage.id,
-          error,
+          error: reportError,
         })
+        continue
       }
+      reports.push(report)
     }
 
-    logger.debug('Work packages processed', {
-      processedCount: reports.length,
-      totalCount: packages.length,
-    })
-
-    return reports
+    return safeResult(reports)
   }
 
   /**
@@ -119,7 +129,7 @@ export class WorkPackageProcessor {
     // Check total exports
     const totalExports = workPackage.workItems.reduce(
       (sum, item) => sum + item.exportcount,
-      0,
+      0n,
     )
     if (totalExports > GRAY_PAPER_CONSTANTS.MAX_PACKAGE_EXPORTS) {
       errors.push(
@@ -129,8 +139,8 @@ export class WorkPackageProcessor {
 
     // Check total imports
     const totalImports = workPackage.workItems.reduce(
-      (sum, item) => sum + item.importsegments.length,
-      0,
+      (sum, item) => sum + BigInt(item.importsegments.length),
+      0n,
     )
     if (totalImports > GRAY_PAPER_CONSTANTS.MAX_PACKAGE_IMPORTS) {
       errors.push(
@@ -140,8 +150,8 @@ export class WorkPackageProcessor {
 
     // Check total extrinsics
     const totalExtrinsics = workPackage.workItems.reduce(
-      (sum, item) => sum + item.extrinsics.length,
-      0,
+      (sum, item) => sum + BigInt(item.extrinsics.length),
+      0n,
     )
     if (totalExtrinsics > GRAY_PAPER_CONSTANTS.MAX_PACKAGE_EXTRINSICS) {
       errors.push(
@@ -159,8 +169,8 @@ export class WorkPackageProcessor {
 
     // Check gas limits
     const totalRefGas = workPackage.workItems.reduce(
-      (sum, item) => sum + Number(item.refgaslimit),
-      0,
+      (sum, item) => sum + item.refgaslimit,
+      0n,
     )
     if (totalRefGas > GRAY_PAPER_CONSTANTS.MAX_PACKAGE_REF_GAS) {
       errors.push(
@@ -169,8 +179,8 @@ export class WorkPackageProcessor {
     }
 
     const totalAccGas = workPackage.workItems.reduce(
-      (sum, item) => sum + Number(item.accgaslimit),
-      0,
+      (sum, item) => sum + item.accgaslimit,
+      0n,
     )
     if (totalAccGas > GRAY_PAPER_CONSTANTS.MAX_REPORT_ACC_GAS) {
       errors.push(
@@ -187,13 +197,16 @@ export class WorkPackageProcessor {
   /**
    * Calculate bundle size according to Gray Paper equation
    */
-  private calculateBundleSize(workPackage: WorkPackage): number {
-    let size = workPackage.authToken.length + workPackage.authConfig.length
+  private calculateBundleSize(workPackage: WorkPackage): bigint {
+    let size =
+      BigInt(workPackage.authToken.length) +
+      BigInt(workPackage.authConfig.length)
 
     for (const item of workPackage.workItems) {
-      size += item.payload.length
-      size += item.importsegments.length * GRAY_PAPER_CONSTANTS.SEGMENT_SIZE
-      size += item.extrinsics.reduce((sum, ref) => sum + ref.length, 0)
+      size += BigInt(item.payload.length)
+      size +=
+        BigInt(item.importsegments.length) * GRAY_PAPER_CONSTANTS.SEGMENT_SIZE
+      size += item.extrinsics.reduce((sum, ref) => sum + BigInt(ref.length), 0n)
     }
 
     return size
@@ -202,17 +215,16 @@ export class WorkPackageProcessor {
   /**
    * Process a single work package
    */
-  private async processWorkPackage(
+  private processWorkPackage(
     workPackage: WorkPackage,
     _config: BlockAuthoringConfig,
-  ): Promise<WorkReport> {
-    logger.debug('Processing work package', {
-      workPackageId: workPackage.id,
-      workItemsCount: workPackage.workItems.length,
-    })
-
+  ): Safe<WorkReport> {
     // Calculate authorizer hash
-    const authorizerHash = this.calculateAuthorizerHash(workPackage)
+    const [authorizerHashError, authorizerHash] =
+      this.calculateAuthorizerHash(workPackage)
+    if (authorizerHashError) {
+      return safeError(authorizerHashError)
+    }
 
     // Process each work item
     const workDigests: WorkDigest[] = []
@@ -221,106 +233,110 @@ export class WorkPackageProcessor {
     for (let i = 0; i < workPackage.workItems.length; i++) {
       const workItem = workPackage.workItems[i]
 
-      try {
-        // Execute work item
-        const result = await this.executeWorkItem(workItem, workPackage, i)
+      let shouldCreateErrorDigest = false
 
+      // Execute work item
+      const [resultError, result] = this.executeWorkItem(
+        workItem,
+        workPackage,
+        i,
+      )
+      if (resultError) {
+        shouldCreateErrorDigest = true
+      }
+
+      if (result) {
         // Create work digest
-        const digest = this.createWorkDigest(workItem, result)
-        workDigests.push(digest)
+        const [digestError, digest] = this.createWorkDigest(workItem, result)
+        if (digestError) {
+          shouldCreateErrorDigest = true
+        }
+        if (digest) {
+          workDigests.push(digest)
+        }
 
         // Add exports
         allExports.push(...result.exports)
-      } catch (error) {
-        logger.error('Work item execution failed', {
-          workItemIndex: i,
-          error,
-        })
-
-        // Create error digest
-        const errorDigest = this.createErrorDigest(
-          workItem,
-          'INVALID_RESULT' as any, // TODO: Fix WorkError usage
-        )
-        workDigests.push(errorDigest)
-
-        // Add zero exports
-        const zeroExports = new Array(workItem.exportcount).fill(
-          new Uint8Array(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE),
-        )
-        allExports.push(...zeroExports)
       }
+
+      if (!shouldCreateErrorDigest) {
+        continue
+      }
+      // Create error digest
+      const [errorDigestError, errorDigest] = this.createErrorDigest(
+        workItem,
+        'BAD',
+      )
+      if (errorDigestError) {
+        return safeError(errorDigestError)
+      }
+      workDigests.push(errorDigest)
+
+      // Add zero exports
+      const zeroExports = new Array(Number(workItem.exportcount)).fill(
+        new Uint8Array(Number(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE)),
+      )
+      allExports.push(...zeroExports)
     }
 
     // Create availability specification
-    const availabilitySpec = this.createAvailabilitySpec(
-      workPackage,
-      allExports,
-    )
+    const [availabilitySpecError, availabilitySpec] =
+      this.createAvailabilitySpec(workPackage, allExports)
+    if (availabilitySpecError) {
+      return safeError(availabilitySpecError)
+    }
 
     // Create work report
     const report: WorkReport = {
-      id: `report_${workPackage.id}`,
+      id: bytesToHex(stringToBytes(`report_${workPackage.id}`)),
       workPackageId: workPackage.id,
       availabilitySpec,
       context: workPackage.context,
-      coreIndex: 0, // TODO: Get from context
+      coreIndex: 0n, // TODO: Get from context
       authorizer: authorizerHash,
       authTrace: new Uint8Array(), // TODO: Implement authorization trace
       srLookup: new Map(), // TODO: Implement segment root lookup
-      digests: workDigests as any,
-      authGasUsed: 0, // TODO: Track authorization gas
-      timestamp: Date.now(),
+      digests: workDigests,
+      authGasUsed: 0n, // TODO: Track authorization gas
+      timestamp: BigInt(Date.now()),
       author: workPackage.author,
     }
 
-    logger.debug('Work package processed successfully', {
-      workPackageId: workPackage.id,
-      digestsCount: workDigests.length,
-      exportsCount: allExports.length,
-    })
-
-    return report
+    return safeResult(report)
   }
 
   /**
    * Calculate authorizer hash according to Gray Paper
    */
-  private calculateAuthorizerHash(workPackage: WorkPackage): `0x${string}` {
+  private calculateAuthorizerHash(workPackage: WorkPackage): Safe<Hex> {
     const authCodeHash = workPackage.authCodeHash
     const authConfig = workPackage.authConfig
 
     // Convert authCodeHash string to Uint8Array
-    const authCodeHashUint8Array = Buffer.from(
-      authCodeHash.replace('0x', ''),
-      'hex',
-    )
+    const authCodeHashBytes = hexToBytes(authCodeHash)
 
     // Convert authConfig string to Uint8Array
-    const authConfigUint8Array = Buffer.from(
-      authConfig.replace('0x', ''),
-      'hex',
-    )
+    const authConfigBytes = hexToBytes(authConfig)
 
     // Concatenate auth code hash and config
     const combined = new Uint8Array(
-      authCodeHashUint8Array.length + authConfigUint8Array.length,
+      authCodeHashBytes.length + authConfigBytes.length,
     )
-    combined.set(authCodeHashUint8Array)
-    combined.set(authConfigUint8Array, authCodeHashUint8Array.length)
+    combined.set(authCodeHashBytes)
+    combined.set(authConfigBytes, authCodeHashBytes.length)
 
     // Calculate Blake2b hash
-    return blake2bHash(combined) as `0x${string}`
+    return blake2bHash(combined)
   }
 
   /**
    * Execute a work item using PVM
    */
-  private async executeWorkItem(
+  private executeWorkItem(
     workItem: WorkItem,
     _workPackage: WorkPackage,
     itemIndex: number,
-  ): Promise<WorkItemResult> {
+  ): Safe<WorkItemResult> {
     logger.debug('Executing work item', {
       itemIndex,
       serviceIndex: workItem.serviceindex,
@@ -335,14 +351,14 @@ export class WorkPackageProcessor {
 
     // Placeholder implementation
     const result: WorkItemResult = {
-      result: new Uint8Array([1, 2, 3, 4]), // Placeholder result
-      gasUsed: Math.floor(Math.random() * Number(workItem.accgaslimit)),
-      exports: new Array(workItem.exportcount).fill(
-        new Uint8Array(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE),
+      result: 'BAD', // Placeholder result
+      gasUsed: BigInt(Math.floor(Math.random() * Number(workItem.accgaslimit))),
+      exports: new Array(Number(workItem.exportcount)).fill(
+        new Uint8Array(Number(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE)),
       ),
     }
 
-    return result
+    return safeResult(result)
   }
 
   /**
@@ -351,49 +367,63 @@ export class WorkPackageProcessor {
   private createWorkDigest(
     workItem: WorkItem,
     result: WorkItemResult,
-  ): WorkDigest {
+  ): Safe<WorkDigest> {
     // Calculate payload hash
-    const payloadHash = this.calculateHash(workItem.payload)
+    const [payloadHashError, payloadHash] = blake2bHash(
+      hexToBytes(workItem.payload),
+    )
+    if (payloadHashError) {
+      return safeError(payloadHashError)
+    }
 
     // Calculate extrinsic size
     const extrinsicSize = workItem.extrinsics.reduce(
-      (sum: number, ref: ExtrinsicReference) => sum + ref.length,
-      0,
+      (sum: bigint, ref: ExtrinsicReference) => sum + BigInt(ref.length),
+      0n,
     )
 
-    return {
+    return safeResult({
       serviceIndex: workItem.serviceindex,
       codeHash: workItem.codehash,
       payloadHash,
-      gasLimit: Number(workItem.accgaslimit),
-      result: result.result as any,
+      gasLimit: workItem.accgaslimit,
+      result: result.result,
       gasUsed: result.gasUsed,
-      importCount: workItem.importsegments.length,
+      importCount: BigInt(workItem.importsegments.length),
       exportCount: workItem.exportcount,
-      extrinsicCount: workItem.extrinsics.length,
-      extrinsicSize,
-    }
+      extrinsicCount: BigInt(workItem.extrinsics.length),
+      extrinsicSize: BigInt(extrinsicSize),
+    })
   }
 
   /**
    * Create error digest for failed work items
    */
-  private createErrorDigest(workItem: WorkItem, error: WorkError): WorkDigest {
-    return {
+  private createErrorDigest(
+    workItem: WorkItem,
+    error: WorkError,
+  ): Safe<WorkDigest> {
+    const [payloadHashError, payloadHash] = blake2bHash(
+      hexToBytes(workItem.payload),
+    )
+    if (payloadHashError) {
+      return safeError(payloadHashError)
+    }
+    return safeResult({
       serviceIndex: workItem.serviceindex,
       codeHash: workItem.codehash,
-      payloadHash: this.calculateHash(workItem.payload),
-      gasLimit: Number(workItem.accgaslimit),
-      result: error as any,
-      gasUsed: 0,
-      importCount: workItem.importsegments.length,
+      payloadHash,
+      gasLimit: workItem.accgaslimit,
+      result: error,
+      gasUsed: 0n,
+      importCount: BigInt(workItem.importsegments.length),
       exportCount: workItem.exportcount,
-      extrinsicCount: workItem.extrinsics.length,
+      extrinsicCount: BigInt(workItem.extrinsics.length),
       extrinsicSize: workItem.extrinsics.reduce(
-        (sum: number, ref: ExtrinsicReference) => sum + ref.length,
-        0,
+        (sum: bigint, ref: ExtrinsicReference) => sum + BigInt(ref.length),
+        0n,
       ),
-    }
+    })
   }
 
   /**
@@ -402,27 +432,41 @@ export class WorkPackageProcessor {
   private createAvailabilitySpec(
     workPackage: WorkPackage,
     exports: Uint8Array[],
-  ): AvailabilitySpec {
+  ): Safe<AvailabilitySpec> {
     // Calculate package hash
-    const packageHash = this.calculateHash(workPackage.data)
+    const [packageHashError, packageHash] = blake2bHash(
+      hexToBytes(workPackage.data),
+    )
+    if (packageHashError) {
+      return safeError(packageHashError)
+    }
 
     // Create bundle (work package + extrinsic data + import segments)
     const bundle = this.createBundle(workPackage)
-    const bundleLength = bundle.length
+    const bundleLength = BigInt(bundle.length)
 
     // Calculate erasure root
-    const erasureRoot = this.calculateErasureRoot(bundle, exports)
+    const [erasureRootError, erasureRoot] = this.calculateErasureRoot(
+      bundle,
+      exports,
+    )
+    if (erasureRootError) {
+      return safeError(erasureRootError)
+    }
 
     // Calculate segment root
-    const segmentRoot = this.calculateSegmentRoot(exports)
+    const [segmentRootError, segmentRoot] = this.calculateSegmentRoot(exports)
+    if (segmentRootError) {
+      return safeError(segmentRootError)
+    }
 
-    return {
+    return safeResult({
       packageHash,
       bundleLength,
       erasureRoot,
       segmentRoot,
-      segmentCount: exports.length,
-    }
+      segmentCount: BigInt(exports.length),
+    })
   }
 
   /**
@@ -438,9 +482,7 @@ export class WorkPackageProcessor {
     const bundleParts: Uint8Array[] = []
 
     // 1. Work package data
-    const workPackageData = new Uint8Array(
-      Buffer.from(workPackage.data.replace('0x', ''), 'hex'),
-    )
+    const workPackageData = hexToBytes(workPackage.data)
     bundleParts.push(workPackageData)
 
     // 2. Extrinsic data for all work items
@@ -448,7 +490,7 @@ export class WorkPackageProcessor {
       for (const extRef of workItem.extrinsics) {
         // TODO: Fetch actual extrinsic data from hash
         // For now, create placeholder data
-        const extrinsicData = new Uint8Array(extRef.length)
+        const extrinsicData = new Uint8Array(Number(extRef.length))
         bundleParts.push(extrinsicData)
       }
     }
@@ -458,7 +500,9 @@ export class WorkPackageProcessor {
       for (const _importSeg of workItem.importsegments) {
         // TODO: Fetch actual import segment data from hash
         // For now, create placeholder data
-        const segmentData = new Uint8Array(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE)
+        const segmentData = new Uint8Array(
+          Number(GRAY_PAPER_CONSTANTS.SEGMENT_SIZE),
+        )
         bundleParts.push(segmentData)
       }
     }
@@ -492,7 +536,7 @@ export class WorkPackageProcessor {
   private calculateErasureRoot(
     bundle: Uint8Array,
     exports: Uint8Array[],
-  ): `0x${string}` {
+  ): Safe<Hex> {
     // According to Gray Paper, the erasure root is calculated as:
     // merklize_wb(concat_all(transpose([bundle_erasure_coded, exports_erasure_coded])))
 
@@ -509,7 +553,7 @@ export class WorkPackageProcessor {
     )
 
     // 4. Concatenate all parts
-    const concatenated = this.concatenateAll(transposed)
+    const concatenated = concatBytes(transposed.flat())
 
     // 5. Calculate Merkle root with wide binary tree
     return this.merklizeWideBinary(concatenated)
@@ -550,47 +594,23 @@ export class WorkPackageProcessor {
   }
 
   /**
-   * Concatenate all parts
-   */
-  private concatenateAll(parts: Uint8Array[][]): Uint8Array {
-    const allParts: Uint8Array[] = []
-
-    for (const partArray of parts) {
-      for (const part of partArray) {
-        allParts.push(part)
-      }
-    }
-
-    const totalSize = allParts.reduce((sum, part) => sum + part.length, 0)
-    const result = new Uint8Array(totalSize)
-
-    let offset = 0
-    for (const part of allParts) {
-      result.set(part, offset)
-      offset += part.length
-    }
-
-    return result
-  }
-
-  /**
    * Calculate Merkle root with wide binary tree
    */
-  private merklizeWideBinary(data: Uint8Array): `0x${string}` {
+  private merklizeWideBinary(data: Uint8Array): Safe<Hex> {
     // TODO: Implement proper wide binary Merkle tree
     // For now, use simple hash
-    return blake2bHash(data) as `0x${string}`
+    return blake2bHash(data)
   }
 
   /**
    * Calculate segment root according to Gray Paper
    */
-  private calculateSegmentRoot(exports: Uint8Array[]): `0x${string}` {
+  private calculateSegmentRoot(exports: Uint8Array[]): Safe<Hex> {
     // According to Gray Paper, the segment root is calculated as:
     // merklize_cd(exports) - constant depth Merkle tree
 
     if (exports.length === 0) {
-      return '0x0000000000000000000000000000000000000000000000000000000000000000'
+      return safeResult(zeroHash)
     }
 
     return this.merklizeConstantDepth(exports)
@@ -599,27 +619,22 @@ export class WorkPackageProcessor {
   /**
    * Calculate constant depth Merkle root
    */
-  private merklizeConstantDepth(segments: Uint8Array[]): `0x${string}` {
+  private merklizeConstantDepth(segments: Uint8Array[]): Safe<Hex> {
     // Simple Merkle root calculation (for now, just hash all hashes together)
     if (segments.length === 0) {
-      return '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+      return safeResult(zeroHash)
     }
 
-    const hashes = segments.map((segment) => blake2bHash(segment))
-    // For simplicity, just hash all hashes together
-    const combinedHashes = new TextEncoder().encode(hashes.join(''))
-    return blake2bHash(combinedHashes) as `0x${string}`
-  }
-
-  /**
-   * Calculate hash using Blake2b
-   */
-  private calculateHash(data: Uint8Array | string): `0x${string}` {
-    if (typeof data === 'string') {
-      // Convert hex string to Uint8Array
-      const bytes = new Uint8Array(Buffer.from(data.replace('0x', ''), 'hex'))
-      return blake2bHash(bytes) as `0x${string}`
+    const hashResults = segments.map((segment) => blake2bHash(segment))
+    const hashes: Hex[] = []
+    for (const [error, hash] of hashResults) {
+      if (error) {
+        return safeError(error)
+      }
+      hashes.push(hash)
     }
-    return blake2bHash(data) as `0x${string}`
+    // return merklize(hashes)
+    //TODO: Fix this
+    return safeResult(hashes[0])
   }
 }

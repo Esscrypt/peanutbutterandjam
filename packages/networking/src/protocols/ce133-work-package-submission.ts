@@ -5,30 +5,38 @@
  * This is a Common Ephemeral (CE) stream for builders to submit work packages to guarantors.
  */
 
-import { blake2bHash } from '@pbnj/core'
-import type { Bytes, StreamInfo, WorkPackageSubmission } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import {
+  blake2bHash,
+  hexToBytes,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import type { NetworkingStore } from '@pbnj/state'
+import type { StreamInfo, WorkPackageSubmission } from '@pbnj/types'
 
 /**
  * Work package submission protocol handler
  */
 export class WorkPackageSubmissionProtocol {
-  private workPackages: Map<string, { workPackage: Bytes; extrinsic: Bytes }> =
-    new Map()
+  private workPackages: Map<
+    string,
+    { workPackage: Uint8Array; extrinsic: Uint8Array }
+  > = new Map()
   private pendingSubmissions: Map<
     string,
     { coreIndex: number; timestamp: number }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -74,9 +82,9 @@ export class WorkPackageSubmissionProtocol {
    * Add work package to local store
    */
   addWorkPackage(
-    workPackageHash: Bytes,
-    workPackage: Bytes,
-    extrinsic: Bytes,
+    workPackageHash: Uint8Array,
+    workPackage: Uint8Array,
+    extrinsic: Uint8Array,
   ): void {
     this.workPackages.set(workPackageHash.toString(), {
       workPackage,
@@ -88,8 +96,8 @@ export class WorkPackageSubmissionProtocol {
    * Get work package from local store
    */
   getWorkPackage(
-    workPackageHash: Bytes,
-  ): { workPackage: Bytes; extrinsic: Bytes } | undefined {
+    workPackageHash: Uint8Array,
+  ): { workPackage: Uint8Array; extrinsic: Uint8Array } | undefined {
     return this.workPackages.get(workPackageHash.toString())
   }
 
@@ -98,8 +106,8 @@ export class WorkPackageSubmissionProtocol {
    */
   createWorkPackageSubmission(
     coreIndex: number,
-    workPackage: Bytes,
-    extrinsic: Bytes,
+    workPackage: Uint8Array,
+    extrinsic: Uint8Array,
   ): WorkPackageSubmission {
     return {
       coreIndex,
@@ -113,64 +121,57 @@ export class WorkPackageSubmissionProtocol {
    */
   async processWorkPackageSubmission(
     submission: WorkPackageSubmission,
-  ): Promise<boolean> {
-    try {
-      // Validate work package
-      if (!this.validateWorkPackage(submission.workPackage)) {
-        console.error('Invalid work package')
-        return false
-      }
-
-      // Validate extrinsic data
-      if (!this.validateExtrinsic(submission.extrinsic)) {
-        console.error('Invalid extrinsic data')
-        return false
-      }
-
-      // Calculate work package hash
-      const workPackageHash = blake2bHash(submission.workPackage)
-      const workPackageHashBytes = Buffer.from(
-        workPackageHash.replace('0x', ''),
-        'hex',
-      )
-
-      // Store the work package locally
-      this.addWorkPackage(
-        workPackageHashBytes,
-        submission.workPackage,
-        submission.extrinsic,
-      )
-
-      // Record pending submission locally
-      this.pendingSubmissions.set(workPackageHash, {
-        coreIndex: submission.coreIndex,
-        timestamp: Date.now(),
-      })
-
-      // Persist to database if available
-      if (this.dbIntegration) {
-        try {
-          await this.dbIntegration.storeWorkPackage(
-            workPackageHashBytes.toString(),
-            submission.workPackage,
-          )
-        } catch (error) {
-          console.error('Failed to persist work package to database:', error)
-        }
-      }
-
-      console.log(`Work package submitted for core ${submission.coreIndex}`)
-      return true
-    } catch (error) {
-      console.error('Failed to process work package submission:', error)
-      return false
+  ): SafePromise<boolean> {
+    // Validate work package
+    if (!this.validateWorkPackage(submission.workPackage)) {
+      return safeError(new Error('Invalid work package'))
     }
+
+    // Validate extrinsic data
+    if (!this.validateExtrinsic(submission.extrinsic)) {
+      return safeError(new Error('Invalid extrinsic data'))
+    }
+
+    // Calculate work package hash
+    const [error, workPackageHash] = blake2bHash(submission.workPackage)
+    if (error) {
+      return safeError(new Error('Failed to calculate work package hash'))
+    }
+    const workPackageHashBytes = hexToBytes(workPackageHash)
+
+    // Store the work package locally
+    this.addWorkPackage(
+      workPackageHashBytes,
+      submission.workPackage,
+      submission.extrinsic,
+    )
+
+    // Record pending submission locally
+    this.pendingSubmissions.set(workPackageHash, {
+      coreIndex: submission.coreIndex,
+      timestamp: Date.now(),
+    })
+
+    // Persist to database if available
+    if (this.dbIntegration) {
+      try {
+        await this.dbIntegration.storeWorkPackage(
+          workPackageHashBytes.toString(),
+          submission.workPackage,
+        )
+      } catch (error) {
+        console.error('Failed to persist work package to database:', error)
+      }
+    }
+
+    console.log(`Work package submitted for core ${submission.coreIndex}`)
+    return safeResult(true)
   }
 
   /**
    * Validate work package structure
    */
-  private validateWorkPackage(workPackage: Bytes): boolean {
+  private validateWorkPackage(workPackage: Uint8Array): boolean {
     // Basic validation - check minimum size
     if (workPackage.length < 64) {
       return false
@@ -184,7 +185,7 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Validate extrinsic data
    */
-  private validateExtrinsic(extrinsic: Bytes): boolean {
+  private validateExtrinsic(extrinsic: Uint8Array): boolean {
     // Basic validation - check minimum size
     if (extrinsic.length < 32) {
       return false
@@ -200,8 +201,9 @@ export class WorkPackageSubmissionProtocol {
    */
   getPendingSubmissions(
     coreIndex: number,
-  ): Array<{ workPackageHash: Bytes; timestamp: number }> {
-    const pending: Array<{ workPackageHash: Bytes; timestamp: number }> = []
+  ): Array<{ workPackageHash: Uint8Array; timestamp: number }> {
+    const pending: Array<{ workPackageHash: Uint8Array; timestamp: number }> =
+      []
 
     for (const [hash, submission] of this.pendingSubmissions.entries()) {
       if (submission.coreIndex === coreIndex) {
@@ -218,7 +220,7 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Remove pending submission (when processed)
    */
-  async removePendingSubmission(workPackageHash: Bytes): Promise<void> {
+  async removePendingSubmission(workPackageHash: Uint8Array): Promise<void> {
     const hashString = workPackageHash.toString()
     this.pendingSubmissions.delete(hashString)
 
@@ -240,7 +242,9 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Serialize work package submission message
    */
-  serializeWorkPackageSubmission(submission: WorkPackageSubmission): Bytes {
+  serializeWorkPackageSubmission(
+    submission: WorkPackageSubmission,
+  ): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(
       4 + submission.workPackage.length + submission.extrinsic.length,
@@ -273,7 +277,7 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Deserialize work package submission message
    */
-  deserializeWorkPackageSubmission(data: Bytes): WorkPackageSubmission {
+  deserializeWorkPackageSubmission(data: Uint8Array): WorkPackageSubmission {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -306,13 +310,31 @@ export class WorkPackageSubmissionProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<boolean> {
-    try {
-      const submission = this.deserializeWorkPackageSubmission(data)
-      return await this.processWorkPackageSubmission(submission)
-    } catch (error) {
-      console.error('Failed to handle stream data:', error)
-      return false
-    }
+  async handleStreamData(
+    _stream: StreamInfo,
+    data: Uint8Array,
+  ): SafePromise<boolean> {
+    const submission = this.deserializeWorkPackageSubmission(data)
+    return await this.processWorkPackageSubmission(submission)
+  }
+
+  /**
+   * Start work package submission protocol
+   * JIP-5 compliant startup method
+   */
+  async start(): Promise<void> {
+    console.log(
+      'Starting work package submission protocol for JIP-5 compliance',
+    )
+    // TODO: Initialize work package submission streams
+  }
+
+  /**
+   * Stop work package submission protocol
+   * JIP-5 compliant shutdown method
+   */
+  async stop(): Promise<void> {
+    console.log('Stopping work package submission protocol')
+    // TODO: Close all submission streams
   }
 }

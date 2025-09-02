@@ -5,9 +5,10 @@
  * used across the JAM ecosystem.
  */
 
-import type { Bytes, FixedLengthSize } from '@pbnj/types'
+import type { AlternativeName, FixedLengthSize } from '@pbnj/types'
 import { hash as blake2b } from '@stablelib/blake2b'
 import { generateKeyPairFromSeed } from '@stablelib/ed25519'
+import { type Safe, safeError, safeResult } from './safe'
 
 /**
  * JIP-5: Secret key derivation
@@ -17,12 +18,12 @@ import { generateKeyPairFromSeed } from '@stablelib/ed25519'
  * @param seed - 32-byte seed
  * @returns Object containing ed25519_secret_seed and bandersnatch_secret_seed
  */
-export function deriveSecretSeeds(seed: Bytes): {
-  ed25519_secret_seed: Bytes
-  bandersnatch_secret_seed: Bytes
-} {
+export function deriveSecretSeeds(seed: Uint8Array): Safe<{
+  ed25519_secret_seed: Uint8Array
+  bandersnatch_secret_seed: Uint8Array
+}> {
   if (seed.length !== 32) {
-    throw new Error('Seed must be exactly 32 bytes')
+    return safeError(new Error('Seed must be exactly 32 bytes'))
   }
 
   // ASCII-encode the derivation strings
@@ -46,10 +47,10 @@ export function deriveSecretSeeds(seed: Bytes): {
   const ed25519_secret_seed = blake2b(ed25519Input, 32)
   const bandersnatch_secret_seed = blake2b(bandersnatchInput, 32)
 
-  return {
+  return safeResult({
     ed25519_secret_seed,
     bandersnatch_secret_seed,
-  }
+  })
 }
 
 /**
@@ -58,9 +59,9 @@ export function deriveSecretSeeds(seed: Bytes): {
  * @param index - 32-bit unsigned integer
  * @returns 32-byte seed with the index repeated 8 times in little-endian
  */
-export function generateTrivialSeed(index: number): Bytes {
+export function generateTrivialSeed(index: number): Safe<Uint8Array> {
   if (index < 0 || index > 0xffffffff) {
-    throw new Error('Index must be a 32-bit unsigned integer')
+    return safeError(new Error('Index must be a 32-bit unsigned integer'))
   }
 
   const seed = new Uint8Array(32)
@@ -72,32 +73,18 @@ export function generateTrivialSeed(index: number): Bytes {
     seed[i * 4 + 3] = (index >> 24) & 0xff
   }
 
-  return seed
+  return safeResult(seed)
 }
 
-/**
- * Default decoder function that converts Bytes to bigint
- */
-function defaultDecoder(
-  data: Uint8Array,
-  length: number,
-): { value: bigint; remaining: Bytes } {
-  if (data.length < length) {
-    throw new Error(
-      `Insufficient data: need ${length} bytes, got ${data.length}`,
-    )
+export function concatBytes(bytes: Uint8Array[]): Uint8Array {
+  const totalLength = bytes.reduce((acc, curr) => acc + curr.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const byte of bytes) {
+    result.set(byte, offset)
+    offset += byte.length
   }
-
-  // Convert bytes to bigint (big-endian)
-  let value = 0n
-  for (let i = 0; i < length; i++) {
-    value = (value << 8n) | BigInt(data[i])
-  }
-
-  return {
-    value,
-    remaining: data.slice(length),
-  }
+  return result
 }
 
 /**
@@ -111,21 +98,21 @@ function defaultDecoder(
  * @returns Alternative name string
  */
 export function generateAlternativeName(
-  publicKey: Bytes,
-  decoder?: (
+  publicKey: Uint8Array,
+  decoder: (
     data: Uint8Array,
     length: FixedLengthSize,
-  ) => { value: bigint; remaining: Bytes },
-): string {
-  // Use default decoder if none provided
-  const decoderFn = decoder || defaultDecoder
-
+  ) => Safe<{ value: bigint; remaining: Uint8Array }>,
+): Safe<AlternativeName> {
   // Fallback to Gray Paper implementation for unknown keys
-  const { value: keyInt } = decoderFn(publicKey, 32)
+  const [error, response] = decoder(publicKey, 32n)
+  if (error) {
+    return safeError(error)
+  }
   const base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
 
   let result = ''
-  let remaining = keyInt
+  let remaining = response.value
 
   for (let i = 0; i < 52; i++) {
     const digit = Number(remaining % 32n)
@@ -133,19 +120,19 @@ export function generateAlternativeName(
     remaining = remaining / 32n
   }
 
-  return `e${result}`
+  return safeResult(`e${result}` as AlternativeName)
 }
 
 /**
  * Generate Ed25519 key pair from seed
  */
-export function generateEd25519KeyPairFromSeed(seed: Uint8Array): {
+export function generateEd25519KeyPairFromSeed(seed: Uint8Array): Safe<{
   publicKey: Uint8Array
   privateKey: Uint8Array
-} {
+}> {
   const keyPair = generateKeyPairFromSeed(seed)
-  return {
+  return safeResult({
     publicKey: keyPair.publicKey,
     privateKey: keyPair.secretKey,
-  }
+  })
 }

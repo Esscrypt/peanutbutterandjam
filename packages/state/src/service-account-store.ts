@@ -1,6 +1,8 @@
+//TODO: move this to a separate package
+
 import { bytesToHex, hexToBytes } from '@pbnj/core'
-import type { Bytes } from '@pbnj/types'
 import { and, eq } from 'drizzle-orm'
+import type { CoreDb } from '.'
 import {
   type NewServiceAccount,
   type NewServicePreimage,
@@ -21,22 +23,16 @@ import {
   serviceStorage,
   stateTrieNodes,
   stateTrieRoot,
-} from './schema'
+} from './schema/core-schema'
 
 /**
  * Service account store for managing JAM state trie components
  * Based on Gray Paper accounts.tex and merklization.tex
  */
 export class ServiceAccountStore {
-  private db: ReturnType<
-    typeof import('./database').DatabaseManager.prototype.getDatabase
-  >
+  private db: CoreDb
 
-  constructor(
-    db: ReturnType<
-      typeof import('./database').DatabaseManager.prototype.getDatabase
-    >,
-  ) {
+  constructor(db: CoreDb) {
     this.db = db
   }
 
@@ -149,8 +145,8 @@ export class ServiceAccountStore {
    */
   async setStorageItem(
     serviceId: number,
-    key: Bytes,
-    value: Bytes,
+    key: Uint8Array,
+    value: Uint8Array,
   ): Promise<void> {
     const valueHex = bytesToHex(value)
     const keyHash = bytesToHex(key) // In practice, this would be Blake2b hash
@@ -181,7 +177,10 @@ export class ServiceAccountStore {
   /**
    * Get a storage item by key
    */
-  async getStorageItem(serviceId: number, key: Bytes): Promise<Bytes | null> {
+  async getStorageItem(
+    serviceId: number,
+    key: Uint8Array,
+  ): Promise<Uint8Array | null> {
     const keyHash = bytesToHex(key) // In practice, this would be Blake2b hash
 
     const result = await this.db
@@ -244,7 +243,7 @@ export class ServiceAccountStore {
   async setPreimage(
     serviceId: number,
     hash: string,
-    preimage: Bytes,
+    preimage: Uint8Array,
   ): Promise<void> {
     const preimageHex = bytesToHex(preimage)
 
@@ -272,7 +271,10 @@ export class ServiceAccountStore {
   /**
    * Get a preimage by hash
    */
-  async getPreimage(serviceId: number, hash: string): Promise<Bytes | null> {
+  async getPreimage(
+    serviceId: number,
+    hash: string,
+  ): Promise<Uint8Array | null> {
     const result = await this.db
       .select()
       .from(servicePreimages)

@@ -24,7 +24,7 @@ export class PVMCallStack implements CallStack {
     return this.frames.length === 0
   }
 
-  getDepth(): number {
-    return this.frames.length
+  getDepth(): bigint {
+    return BigInt(this.frames.length)
   }
 }

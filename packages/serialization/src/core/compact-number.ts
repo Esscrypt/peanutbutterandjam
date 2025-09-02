@@ -11,8 +11,6 @@
  * but with SCALE codec compatibility for test vector compliance.
  */
 
-import type { Natural } from '@pbnj/types'
-
 /**
  * Encode natural number using SCALE-like compact encoding
  *
@@ -24,7 +22,7 @@ import type { Natural } from '@pbnj/types'
  * @param value - Natural number to encode
  * @returns Encoded octet sequence
  */
-export function encodeCompactNatural(value: Natural): Uint8Array {
+export function encodeCompactNatural(value: bigint): Uint8Array {
   if (value < 0n) throw new Error(`Natural number cannot be negative: ${value}`)
 
   // Mode 0: single-byte (0-63)
@@ -70,7 +68,7 @@ export function encodeCompactNatural(value: Natural): Uint8Array {
  * @returns Decoded natural number and remaining data
  */
 export function decodeCompactNatural(data: Uint8Array): {
-  value: Natural
+  value: bigint
   remaining: Uint8Array
 } {
   if (data.length === 0)
@@ -118,7 +116,7 @@ export function decodeCompactNatural(data: Uint8Array): {
 /**
  * Get the length needed to encode a value in big-integer mode
  */
-function getCompactLength(value: Natural): number {
+function getCompactLength(value: bigint): number {
   let length = 4
   while (value >= 1n << BigInt(8 * length)) {
     length++
@@ -129,7 +127,7 @@ function getCompactLength(value: Natural): number {
 /**
  * Get the encoded length of a compact natural number
  */
-export function getCompactNaturalEncodedLength(value: Natural): number {
+export function getCompactNaturalEncodedLength(value: bigint): number {
   if (value <= 63n) return 1
   if (value <= 16383n) return 2
   if (value <= 1073741823n) return 4

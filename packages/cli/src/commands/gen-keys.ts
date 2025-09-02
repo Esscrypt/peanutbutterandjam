@@ -4,23 +4,23 @@ import { logger } from '@pbnj/core'
 import { generateValidatorKeys } from '../utils/key-generation'
 
 export function createGenKeysCommand(_args: string[]): void {
-  try {
-    const keysDir = join(process.env['HOME'] || '', '.pbnj', 'keys')
-    mkdirSync(keysDir, { recursive: true })
+  const keysDir = join(process.env['HOME'] || '', '.pbnj', 'keys')
+  mkdirSync(keysDir, { recursive: true })
 
-    // Generate 6 validator keys (0-5)
-    for (let i = 0; i < 6; i++) {
-      const keys = generateValidatorKeys(i)
-      const seedFile = join(keysDir, `seed_${i}`)
-
-      // Write seed file
-      writeFileSync(seedFile, keys.seed)
-      logger.info(`Seed file ${seedFile} created`)
+  // Generate 6 validator keys (0-5)
+  for (let i = 0; i < 6; i++) {
+    const [error, keys] = generateValidatorKeys(i)
+    if (error) {
+      logger.error('Failed to generate keys:', error)
+      process.exit(1)
     }
 
-    logger.info('Successfully generated keys for all validators')
-  } catch (error) {
-    logger.error('Failed to generate keys:', error)
-    process.exit(1)
+    const seedFile = join(keysDir, `seed_${i}`)
+
+    // Write seed file
+    writeFileSync(seedFile, keys.seed)
+    logger.info(`Seed file ${seedFile} created`)
   }
+
+  logger.info('Successfully generated keys for all validators')
 }

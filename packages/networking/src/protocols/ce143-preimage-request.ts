@@ -5,29 +5,24 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type {
-  Bytes,
-  PreimageRequest,
-  PreimageResponse,
-  StreamInfo,
-} from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { PreimageRequest, PreimageResponse, StreamInfo } from '@pbnj/types'
 
 /**
  * Preimage request protocol handler
  */
 export class PreimageRequestProtocol {
-  private preimages: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private preimages: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -53,7 +48,7 @@ export class PreimageRequestProtocol {
   /**
    * Store preimage in local store and persist to database
    */
-  async storePreimage(hash: Bytes, preimage: Bytes): Promise<void> {
+  async storePreimage(hash: Uint8Array, preimage: Uint8Array): Promise<void> {
     const hashString = hash.toString()
     this.preimages.set(hashString, preimage)
 
@@ -73,14 +68,14 @@ export class PreimageRequestProtocol {
   /**
    * Get preimage from local store
    */
-  getPreimage(hash: Bytes): Bytes | undefined {
+  getPreimage(hash: Uint8Array): Uint8Array | undefined {
     return this.preimages.get(hash.toString())
   }
 
   /**
    * Get preimage from database if not in local store
    */
-  async getPreimageFromDatabase(hash: Bytes): Promise<Bytes | null> {
+  async getPreimageFromDatabase(hash: Uint8Array): Promise<Uint8Array | null> {
     if (this.getPreimage(hash)) {
       return this.getPreimage(hash) || null
     }
@@ -139,7 +134,7 @@ export class PreimageRequestProtocol {
   /**
    * Create preimage request message
    */
-  createPreimageRequest(hash: Bytes): PreimageRequest {
+  createPreimageRequest(hash: Uint8Array): PreimageRequest {
     return {
       hash,
     }
@@ -148,7 +143,7 @@ export class PreimageRequestProtocol {
   /**
    * Serialize preimage request message
    */
-  serializePreimageRequest(request: PreimageRequest): Bytes {
+  serializePreimageRequest(request: PreimageRequest): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // hash (32 bytes)
     // const _view = new DataView(buffer)
@@ -162,7 +157,7 @@ export class PreimageRequestProtocol {
   /**
    * Deserialize preimage request message
    */
-  deserializePreimageRequest(data: Bytes): PreimageRequest {
+  deserializePreimageRequest(data: Uint8Array): PreimageRequest {
     // Read hash (32 bytes)
     const hash = data.slice(0, 32)
 
@@ -174,7 +169,7 @@ export class PreimageRequestProtocol {
   /**
    * Serialize preimage response message
    */
-  serializePreimageResponse(response: PreimageResponse): Bytes {
+  serializePreimageResponse(response: PreimageResponse): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + response.preimage.length)
     const view = new DataView(buffer)
@@ -193,7 +188,7 @@ export class PreimageRequestProtocol {
   /**
    * Deserialize preimage response message
    */
-  deserializePreimageResponse(data: Bytes): PreimageResponse {
+  deserializePreimageResponse(data: Uint8Array): PreimageResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -214,7 +209,7 @@ export class PreimageRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<PreimageResponse | null> {
     try {
       const request = this.deserializePreimageRequest(data)

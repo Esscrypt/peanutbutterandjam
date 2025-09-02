@@ -5,7 +5,7 @@
  * Reference: Gray Paper validation specifications
  */
 
-import type { Hash, HexString } from '@pbnj/types'
+import type { Hex } from 'viem'
 import { isValidHex, isValidHexLength } from './crypto'
 import { isValidBase58, isValidBase64 } from './encoding'
 
@@ -477,7 +477,7 @@ export function validateNumberRange(
  * Validate array length
  */
 export function validateArrayLength(
-  value: unknown[],
+  value: Uint8Array[],
   fieldName: string,
   minLength: number,
   maxLength?: number,
@@ -588,14 +588,14 @@ export function validatePattern(
 /**
  * Type guard for Hash
  */
-export function isHash(value: unknown): value is Hash {
+export function isHash(value: unknown): value is Hex {
   return typeof value === 'string' && isValidHex(value)
 }
 
 /**
  * Type guard for HexString
  */
-export function isHexString(value: unknown): value is HexString {
+export function isHexString(value: unknown): value is Hex {
   return typeof value === 'string' && isValidHex(value)
 }
 

@@ -7,7 +7,7 @@ import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, ve
 import { generateCertificate, validateCertificate } from '../src/crypto/certificates'
 import { generateAlternativeName } from '@pbnj/core'
 import { generateALPNProtocol, parseALPNProtocol } from '../src/crypto/tls'
-import { StreamKind } from '@pbnj/types'
+import { decodeFixedLength } from '@pbnj/serialization'
 
 describe('JAMNP-S Networking Implementation', () => {
   describe('Key Management', () => {
@@ -24,7 +24,10 @@ describe('JAMNP-S Networking Implementation', () => {
       const keyPair = generateEd25519KeyPair()
       const data = new TextEncoder().encode('Hello, JAMNP-S!')
       
-      const signature = signEd25519(data, keyPair.privateKey)
+      const [signatureError, signature] = signEd25519(data, keyPair.privateKey)
+      if (signatureError) {
+        throw signatureError
+      }
       const isValid = verifyEd25519(data, signature, keyPair.publicKey)
       
       expect(signature).toBeInstanceOf(Uint8Array)
@@ -37,7 +40,10 @@ describe('JAMNP-S Networking Implementation', () => {
       const data = new TextEncoder().encode('Hello, JAMNP-S!')
       const wrongData = new TextEncoder().encode('Wrong data!')
       
-      const signature = signEd25519(data, keyPair.privateKey)
+      const [signatureError, signature] = signEd25519(data, keyPair.privateKey)
+      if (signatureError) {
+        throw signatureError
+      }
       const isValid = verifyEd25519(wrongData, signature, keyPair.publicKey)
       
       expect(isValid).toBe(false)
@@ -45,19 +51,28 @@ describe('JAMNP-S Networking Implementation', () => {
   })
 
   describe('Certificate Management', () => {
-    it('should generate alternative names from Ed25519 public keys', () => {
+        it('should generate alternative names from Ed25519 public keys', () => {
       const keyPair = generateEd25519KeyPair()
-      const alternativeName = generateAlternativeName(keyPair.publicKey)
-      
+      const [alternativeNameError, alternativeName] = generateAlternativeName(keyPair.publicKey, decodeFixedLength)
+      if (alternativeNameError) {
+        throw alternativeNameError
+      }
+
       expect(alternativeName).toBeTypeOf('string')
-      expect(alternativeName.startsWith('$e')).toBe(true)
-      expect(alternativeName.length).toBe(54) // $e + 52 characters
+      expect(alternativeName.startsWith('$e')).toBe(false) // Raw format doesn't have $e prefix
+      expect(alternativeName.length).toBe(52) // 52 characters without $e prefix
     })
 
     it('should generate consistent alternative names for the same key', () => {
       const keyPair = generateEd25519KeyPair()
-      const name1 = generateAlternativeName(keyPair.publicKey)
-      const name2 = generateAlternativeName(keyPair.publicKey)
+      const [name1Error, name1] = generateAlternativeName(keyPair.publicKey, decodeFixedLength)
+      if (name1Error) {
+        throw name1Error
+      }
+      const [name2Error, name2] = generateAlternativeName(keyPair.publicKey, decodeFixedLength)
+      if (name2Error) {
+        throw name2Error
+      }
       
       expect(name1).toBe(name2)
     })
@@ -65,30 +80,46 @@ describe('JAMNP-S Networking Implementation', () => {
     it('should generate different alternative names for different keys', () => {
       const keyPair1 = generateEd25519KeyPair()
       const keyPair2 = generateEd25519KeyPair()
-      
-      const name1 = generateAlternativeName(keyPair1.publicKey)
-      const name2 = generateAlternativeName(keyPair2.publicKey)
+
+      const [name1Error, name1] = generateAlternativeName(keyPair1.publicKey, decodeFixedLength)
+      if (name1Error) {
+        throw name1Error
+      }
+      const [name2Error, name2] = generateAlternativeName(keyPair2.publicKey, decodeFixedLength)
+      if (name2Error) {
+        throw name2Error
+      }
       
       expect(name1).not.toBe(name2)
     })
 
     it('should generate and validate certificates', () => {
       const keyPair = generateEd25519KeyPair()
-      const alternativeName = generateAlternativeName(keyPair.publicKey)
+        const [alternativeNameError, alternativeName] = generateAlternativeName(keyPair.publicKey, decodeFixedLength)
+      if (alternativeNameError) {
+        throw alternativeNameError
+      }
       
-      const certificate = generateCertificate(
+      const [certificateError, certificate] = generateCertificate(
         keyPair.publicKey,
         keyPair.privateKey,
         alternativeName
       )
-      
+      if (certificateError) {
+        throw certificateError
+      }
+
       expect(certificate.certificate).toBeInstanceOf(Uint8Array)
       expect(certificate.publicKey).toEqual(keyPair.publicKey)
       expect(certificate.alternativeName).toBe(alternativeName)
       expect(certificate.signature).toBeInstanceOf(Uint8Array)
       expect(certificate.signature.length).toBe(64)
       
-      const isValid = validateCertificate(certificate)
+      const [isValidError, isValid] = validateCertificate(certificate)
+      if (isValidError) {
+        throw isValidError
+      }
+
       expect(isValid).toBe(true)
     })
   })
@@ -130,13 +161,4 @@ describe('JAMNP-S Networking Implementation', () => {
     })
   })
 
-  describe('Stream Kinds', () => {
-    it('should have correct stream kind values', () => {
-      expect(StreamKind.UP_BLOCK_ANNOUNCEMENT).toBe(0)
-      expect(StreamKind.CE_BLOCK_REQUEST).toBe(128)
-      expect(StreamKind.CE_STATE_REQUEST).toBe(129)
-      expect(StreamKind.CE_WORK_PACKAGE_SUBMISSION).toBe(133)
-      expect(StreamKind.CE_JUDGMENT_PUBLICATION).toBe(145)
-    })
-  })
 }) 

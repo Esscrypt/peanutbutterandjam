@@ -5,11 +5,11 @@
  * Validates conformance to the Gray Paper Fisher-Yates shuffle specification (Appendix F)
  */
 
-import { logger } from '../logger'
-import { jamShuffle, shuffleValidatorIndices } from '../shuffle'
+import { logger } from '../src/logger'
+import { jamShuffle, shuffleValidatorIndices } from '../src/shuffle'
 import { readFileSync } from 'fs'
 import { beforeAll, describe, expect, it } from 'vitest'
-import type { HashValue } from '@pbnj/types'
+import type { Hex } from 'viem'
 
 beforeAll(() => {
   logger.init()
@@ -37,9 +37,9 @@ function loadShuffleTestVectors(): ShuffleTestVector[] {
 }
 
 // Helper function to normalize entropy to HashValue format
-function normalizeEntropy(entropy: string): string {
+function normalizeEntropy(entropy: string): Hex {
   // Test vectors don't have 0x prefix, so add it
-  return entropy.startsWith('0x') ? entropy : `0x${entropy}`
+  return entropy.startsWith('0x') ? entropy as Hex : `0x${entropy}`
 }
 
 // Helper function to create input sequence from length
@@ -70,7 +70,7 @@ describe('JAM Shuffle Test Vectors', () => {
         const entropy = normalizeEntropy(testVector.entropy)
         
         // Perform shuffle
-        const result = jamShuffle(inputSequence, entropy as HashValue)
+        const result = jamShuffle(inputSequence, entropy)
         
         // Verify result matches expected output
         expect(result).toEqual(testVector.output)
@@ -95,9 +95,9 @@ describe('JAM Shuffle Test Vectors', () => {
         
         const shuffleResult = jamShuffle(
           createInputSequence(testVector.input), 
-          entropy as HashValue
+          entropy
         )
-        const validatorResult = shuffleValidatorIndices(testVector.input, entropy as HashValue)
+        const validatorResult = shuffleValidatorIndices(testVector.input, entropy)
         
         expect(validatorResult).toEqual(shuffleResult)
         expect(validatorResult).toEqual(testVector.output)

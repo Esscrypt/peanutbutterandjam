@@ -28,15 +28,7 @@ export {
   REGISTER_CONFIG,
   RESULT_CODES,
 } from './config'
-// Gas metering utilities
-export {
-  calculateAllocationCost,
-  calculateMemoryReadCost,
-  calculateMemoryWriteCost,
-  calculateTotalGasCost,
-  getInstructionGasCost,
-  isGasSufficient,
-} from './gas-metering'
+
 // Host call system
 export { DefaultHostCallHandler, HostCallSystem } from './host-call'
 // Advanced bitwise instructions

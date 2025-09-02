@@ -5,29 +5,28 @@
  * This is a Common Ephemeral (CE) stream for requesting missing work reports.
  */
 
+import type { NetworkingStore } from '@pbnj/state'
 import type {
-  Bytes,
   StreamInfo,
   WorkReportRequest,
   WorkReportResponse,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Work report request protocol handler
  */
 export class WorkReportRequestProtocol {
-  private workReports: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private workReports: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -54,8 +53,8 @@ export class WorkReportRequestProtocol {
    * Store work report in local store and persist to database
    */
   async storeWorkReport(
-    workReportHash: Bytes,
-    workReport: Bytes,
+    workReportHash: Uint8Array,
+    workReport: Uint8Array,
   ): Promise<void> {
     const hashString = workReportHash.toString()
     this.workReports.set(hashString, workReport)
@@ -76,7 +75,7 @@ export class WorkReportRequestProtocol {
   /**
    * Get work report from local store
    */
-  getWorkReport(workReportHash: Bytes): Bytes | undefined {
+  getWorkReport(workReportHash: Uint8Array): Uint8Array | undefined {
     return this.workReports.get(workReportHash.toString())
   }
 
@@ -84,8 +83,8 @@ export class WorkReportRequestProtocol {
    * Get work report from database if not in local store
    */
   async getWorkReportFromDatabase(
-    workReportHash: Bytes,
-  ): Promise<Bytes | null> {
+    workReportHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
     if (this.getWorkReport(workReportHash)) {
       return this.getWorkReport(workReportHash) || null
     }
@@ -146,7 +145,7 @@ export class WorkReportRequestProtocol {
   /**
    * Create work report request message
    */
-  createWorkReportRequest(workReportHash: Bytes): WorkReportRequest {
+  createWorkReportRequest(workReportHash: Uint8Array): WorkReportRequest {
     return {
       workReportHash,
     }
@@ -155,7 +154,7 @@ export class WorkReportRequestProtocol {
   /**
    * Serialize work report request message
    */
-  serializeWorkReportRequest(request: WorkReportRequest): Bytes {
+  serializeWorkReportRequest(request: WorkReportRequest): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32) // workReportHash (32 bytes)
     // const _view = new DataView(buffer)
@@ -169,7 +168,7 @@ export class WorkReportRequestProtocol {
   /**
    * Deserialize work report request message
    */
-  deserializeWorkReportRequest(data: Bytes): WorkReportRequest {
+  deserializeWorkReportRequest(data: Uint8Array): WorkReportRequest {
     // Read work report hash (32 bytes)
     const workReportHash = data.slice(0, 32)
 
@@ -181,7 +180,7 @@ export class WorkReportRequestProtocol {
   /**
    * Serialize work report response message
    */
-  serializeWorkReportResponse(response: WorkReportResponse): Bytes {
+  serializeWorkReportResponse(response: WorkReportResponse): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + response.workReport.length)
     const view = new DataView(buffer)
@@ -200,7 +199,7 @@ export class WorkReportRequestProtocol {
   /**
    * Deserialize work report response message
    */
-  deserializeWorkReportResponse(data: Bytes): WorkReportResponse {
+  deserializeWorkReportResponse(data: Uint8Array): WorkReportResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -221,7 +220,7 @@ export class WorkReportRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<WorkReportResponse | null> {
     try {
       const request = this.deserializeWorkReportRequest(data)

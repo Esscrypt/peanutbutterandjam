@@ -34,7 +34,14 @@
  * the entire system's data remains accessible.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { Assurance } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
@@ -44,7 +51,7 @@ import { encodeNatural } from '../core/natural-number'
  * @param assurance - Assurance to encode
  * @returns Encoded octet sequence
  */
-export function encodeAssurance(assurance: Assurance): Uint8Array {
+export function encodeAssurance(assurance: Assurance): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Anchor (32 Uint8Array)
@@ -54,10 +61,22 @@ export function encodeAssurance(assurance: Assurance): Uint8Array {
   parts.push(assurance.availabilities)
 
   // Assurer (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(assurance.assurer)))
+  const [encodedAssurerError, encodedAssurer] = encodeNatural(
+    BigInt(assurance.assurer),
+  )
+  if (encodedAssurerError) {
+    return safeError(encodedAssurerError)
+  }
+  parts.push(encodedAssurer)
 
   // Signature (variable length)
-  parts.push(encodeNatural(BigInt(assurance.signature.length))) // Length prefix
+  const [encodedSignatureLengthError, encodedSignatureLength] = encodeNatural(
+    BigInt(assurance.signature.length),
+  )
+  if (encodedSignatureLengthError) {
+    return safeError(encodedSignatureLengthError)
+  }
+  parts.push(encodedSignatureLength) // Length prefix
   parts.push(assurance.signature)
 
   // Concatenate all parts
@@ -70,7 +89,7 @@ export function encodeAssurance(assurance: Assurance): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -79,10 +98,9 @@ export function encodeAssurance(assurance: Assurance): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded assurance and remaining data
  */
-export function decodeAssurance(data: Uint8Array): {
-  value: Assurance
-  remaining: Uint8Array
-} {
+export function decodeAssurance(
+  data: Uint8Array,
+): Safe<{ value: Assurance; remaining: Uint8Array }> {
   let currentData = data
 
   // Anchor (32 Uint8Array)
@@ -95,26 +113,16 @@ export function decodeAssurance(data: Uint8Array): {
   currentData = currentData.slice(112)
 
   // Assurer (8 Uint8Array)
-  const assurer = Number(
-    BigInt(
-      `0x${Array.from(currentData.slice(0, 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const assurer = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Signature (variable length)
-  const signatureLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const signatureLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
   const signature = currentData.slice(0, Number(signatureLength))
   currentData = currentData.slice(Number(signatureLength))
 
-  return {
+  return safeResult({
     value: {
       anchor,
       availabilities,
@@ -122,5 +130,5 @@ export function decodeAssurance(data: Uint8Array): {
       signature,
     },
     remaining: currentData,
-  }
+  })
 }

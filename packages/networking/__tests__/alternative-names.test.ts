@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { generateAlternativeName } from '@pbnj/core'
+import { decodeFixedLength } from '@pbnj/serialization'
 
 describe('generateAlternativeName', () => {
   it('should generate alternative names according to Gray Paper specification', () => {
@@ -45,7 +46,10 @@ describe('generateAlternativeName', () => {
     ]
 
     for (const testCase of testCases) {
-      const result = generateAlternativeName(testCase.publicKey)
+      const [resultError, result] = generateAlternativeName(testCase.publicKey, decodeFixedLength)
+      if (resultError) {
+        throw resultError
+      }
       expect(result).toBe(testCase.expected)
     }
   })
@@ -53,12 +57,18 @@ describe('generateAlternativeName', () => {
   it('should handle edge cases', () => {
     // Test with all zeros
     const zeroKey = new Uint8Array(32)
-    const zeroResult = generateAlternativeName(zeroKey)
+    const [zeroResultError, zeroResult] = generateAlternativeName(zeroKey, decodeFixedLength)
+    if (zeroResultError) {
+      throw zeroResultError
+    }
     expect(zeroResult).toMatch(/^e[a-z2-7]{52}$/)
 
     // Test with all ones
     const onesKey = new Uint8Array(32).fill(255)
-    const onesResult = generateAlternativeName(onesKey)
+    const [onesResultError, onesResult] = generateAlternativeName(onesKey, decodeFixedLength)
+    if (onesResultError) {
+      throw onesResultError
+    }
     expect(onesResult).toMatch(/^e[a-z2-7]{52}$/)
   })
 }) 

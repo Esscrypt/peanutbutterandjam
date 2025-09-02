@@ -53,7 +53,15 @@
  * deterministic gas accounting and data flow dependencies.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  type Hex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type {
   Authorizer,
   ExtrinsicReference,
@@ -69,46 +77,84 @@ import { encodeWorkContext } from './context'
 
 // Define the WorkPackage interface for serialization
 interface SerializationWorkPackage {
-  authorization: string // hex string
-  auth_code_host: number
+  authorization: Hex
+  auth_code_host: bigint
   authorizer: Authorizer
   context: WorkContext
   items: WorkItem[]
 }
 
-export function encodeWorkItem(workItem: WorkItem): Uint8Array {
+export function encodeWorkItem(workItem: WorkItem): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Service (8 bytes)
-  parts.push(encodeNatural(BigInt(workItem.serviceindex || 0)))
+  const [error1, encoded1] = encodeNatural(BigInt(workItem.serviceindex || 0))
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1)
 
   // Code hash (32 bytes) - convert hex to bytes
   parts.push(hexToBytes(workItem.codehash))
 
   // Refine gas limit (8 bytes)
-  parts.push(encodeNatural(BigInt(workItem.refgaslimit || 0)))
+  const [error2, encoded2] = encodeNatural(BigInt(workItem.refgaslimit || 0))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Accumulate gas limit (8 bytes)
-  parts.push(encodeNatural(BigInt(workItem.accgaslimit || 0)))
+  const [error3, encoded3] = encodeNatural(BigInt(workItem.accgaslimit || 0))
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // Export count (8 bytes)
-  parts.push(encodeNatural(BigInt(workItem.exportcount || 0)))
+  const [error4, encoded4] = encodeNatural(BigInt(workItem.exportcount || 0))
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
 
   // Payload (variable length) - convert hex to bytes
   const payloadBytes = hexToBytes(workItem.payload)
-  parts.push(encodeNatural(BigInt(payloadBytes.length))) // Length prefix
+  const [error5, encoded5] = encodeNatural(BigInt(payloadBytes.length)) // Length prefix
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
   parts.push(payloadBytes)
 
   // Import segments (array of import references)
-  parts.push(encodeNatural(BigInt(workItem.importsegments.length))) // Array length
+  const [error6, encoded6] = encodeNatural(
+    BigInt(workItem.importsegments.length),
+  ) // Array length
+  if (error6) {
+    return safeError(error6)
+  }
+  parts.push(encoded6)
   for (const importRef of workItem.importsegments) {
-    parts.push(encodeImportReference(importRef))
+    const [error7, encoded7] = encodeImportReference(importRef)
+    if (error7) {
+      return safeError(error7)
+    }
+    parts.push(encoded7)
   }
 
   // Extrinsic (array of extrinsic references)
-  parts.push(encodeNatural(BigInt(workItem.extrinsics.length))) // Array length
+  const [error8, encoded8] = encodeNatural(BigInt(workItem.extrinsics.length)) // Array length
+  if (error8) {
+    return safeError(error8)
+  }
+  parts.push(encoded8)
   for (const extrinsicRef of workItem.extrinsics) {
-    parts.push(encodeExtrinsicReference(extrinsicRef))
+    const [error9, encoded9] = encodeExtrinsicReference(extrinsicRef)
+    if (error9) {
+      return safeError(error9)
+    }
+    parts.push(encoded9)
   }
 
   // Concatenate all parts
@@ -121,7 +167,7 @@ export function encodeWorkItem(workItem: WorkItem): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -132,14 +178,18 @@ export function encodeWorkItem(workItem: WorkItem): Uint8Array {
  */
 export function encodeExtrinsicReference(
   extrinsicRef: ExtrinsicReference,
-): Uint8Array {
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Hash (32 bytes) - convert hex to bytes
   parts.push(hexToBytes(extrinsicRef.hash))
 
   // Len (8 bytes)
-  parts.push(encodeNatural(BigInt(extrinsicRef.length)))
+  const [error, encoded] = encodeNatural(BigInt(extrinsicRef.length))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -151,7 +201,7 @@ export function encodeExtrinsicReference(
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -162,32 +212,56 @@ export function encodeExtrinsicReference(
  */
 export function encodeWorkPackage(
   workPackage: SerializationWorkPackage,
-): Uint8Array {
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Auth code host (8 bytes)
-  parts.push(encodeNatural(BigInt(workPackage.auth_code_host)))
+  const [error1, encoded1] = encodeNatural(BigInt(workPackage.auth_code_host))
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1)
 
   // Auth code hash (32 bytes) - convert hex to bytes
   parts.push(hexToBytes(workPackage.authorizer.code_hash))
 
   // Context
-  parts.push(encodeWorkContext(workPackage.context))
+  const [error2, encoded2] = encodeWorkContext(workPackage.context)
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Auth token (variable length) - convert hex to bytes
   const authTokenBytes = hexToBytes(workPackage.authorization as `0x${string}`)
-  parts.push(encodeNatural(BigInt(authTokenBytes.length))) // Length prefix
+  const [error3, encoded3] = encodeNatural(BigInt(authTokenBytes.length)) // Length prefix
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
   parts.push(authTokenBytes)
 
   // Auth config (variable length) - convert hex to bytes
   const authConfigBytes = hexToBytes(workPackage.authorizer.params)
-  parts.push(encodeNatural(BigInt(authConfigBytes.length))) // Length prefix
+  const [error4, encoded4] = encodeNatural(BigInt(authConfigBytes.length)) // Length prefix
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
   parts.push(authConfigBytes)
 
   // Work items (array of work items)
-  parts.push(encodeNatural(BigInt(workPackage.items.length))) // Array length
+  const [error5, encoded5] = encodeNatural(BigInt(workPackage.items.length)) // Array length
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
   for (const workItem of workPackage.items) {
-    parts.push(encodeWorkItem(workItem))
+    const [error5, encoded5] = encodeWorkItem(workItem)
+    if (error5) {
+      return safeError(error5)
+    }
+    parts.push(encoded5)
   }
 
   // Concatenate all parts
@@ -200,7 +274,7 @@ export function encodeWorkPackage(
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -209,18 +283,14 @@ export function encodeWorkPackage(
  * @param data - Octet sequence to decode
  * @returns Decoded work package and remaining data
  */
-export function decodeWorkPackage(data: Uint8Array): {
+export function decodeWorkPackage(data: Uint8Array): Safe<{
   value: SerializationWorkPackage
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Auth code host (8 bytes)
-  const authCodeHost = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const authCodeHost = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Auth code hash (32 bytes)
@@ -228,59 +298,53 @@ export function decodeWorkPackage(data: Uint8Array): {
   currentData = currentData.slice(32)
 
   // Context (fixed size)
-  const context = decodeWorkContext(currentData.slice(0, 200))
+  const [error6, context] = decodeWorkContext(currentData.slice(0, 200))
+  if (error6) {
+    return safeError(error6)
+  }
   currentData = currentData.slice(200)
 
   // Auth token (variable length)
-  const authTokenLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const authTokenLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
   const authToken = bytesToHex(currentData.slice(0, Number(authTokenLength)))
   currentData = currentData.slice(Number(authTokenLength))
 
   // Auth config (variable length)
-  const authConfigLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const authConfigLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
   const authConfig = bytesToHex(currentData.slice(0, Number(authConfigLength)))
   currentData = currentData.slice(Number(authConfigLength))
 
   // Work items (array of work items)
-  const workItemsLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const workItemsLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
-  const workItems = []
+  const workItems: WorkItem[] = []
   for (let i = 0; i < Number(workItemsLength); i++) {
-    const { value: workItem, remaining } = decodeWorkItem(currentData)
-    workItems.push(workItem)
-    currentData = remaining
+    const [workItemError, result] = decodeWorkItem(currentData)
+    if (workItemError) {
+      return safeError(workItemError)
+    }
+    workItems.push(result.value)
+    currentData = result.remaining
   }
 
-  return {
+  return safeResult({
     value: {
       authorization: authToken,
-      auth_code_host: Number(authCodeHost),
+      auth_code_host: authCodeHost,
       authorizer: {
         code_hash: authCodeHash as `0x${string}`,
         params: authConfig as `0x${string}`,
         publicKey:
           '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
-        weight: 0,
+        weight: 0n,
       },
       context,
       items: workItems,
     },
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -289,10 +353,10 @@ export function decodeWorkPackage(data: Uint8Array): {
  * @param data - Octet sequence to decode
  * @returns Decoded work item and remaining data
  */
-export function decodeWorkItem(data: Uint8Array): {
+export function decodeWorkItem(data: Uint8Array): Safe<{
   value: WorkItem
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Service index (8 bytes)
@@ -350,9 +414,12 @@ export function decodeWorkItem(data: Uint8Array): {
   currentData = currentData.slice(8)
   const importSegments = []
   for (let i = 0; i < Number(importSegmentsLength); i++) {
-    const { value: importRef, remaining } = decodeImportReference(currentData)
-    importSegments.push(importRef)
-    currentData = remaining
+    const [error, result] = decodeImportReference(currentData)
+    if (error) {
+      return safeError(error)
+    }
+    importSegments.push(result.value)
+    currentData = result.remaining
   }
 
   // Extrinsics (array of extrinsic references)
@@ -364,25 +431,27 @@ export function decodeWorkItem(data: Uint8Array): {
   currentData = currentData.slice(8)
   const extrinsics = []
   for (let i = 0; i < Number(extrinsicsLength); i++) {
-    const { value: extrinsicRef, remaining } =
-      decodeExtrinsicReference(currentData)
-    extrinsics.push(extrinsicRef)
-    currentData = remaining
+    const [error, result] = decodeExtrinsicReference(currentData)
+    if (error) {
+      return safeError(error)
+    }
+    extrinsics.push(result.value)
+    currentData = result.remaining
   }
 
-  return {
+  return safeResult({
     value: {
-      serviceindex: Number(serviceIndex),
+      serviceindex: serviceIndex,
       codehash: codeHash,
       refgaslimit: refGasLimit,
       accgaslimit: accGasLimit,
-      exportcount: Number(exportCount),
+      exportcount: exportCount,
       payload,
       importsegments: importSegments,
       extrinsics: extrinsics,
     },
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -391,10 +460,10 @@ export function decodeWorkItem(data: Uint8Array): {
  * @param data - Octet sequence to decode
  * @returns Decoded extrinsic reference and remaining data
  */
-export function decodeExtrinsicReference(data: Uint8Array): {
+export function decodeExtrinsicReference(data: Uint8Array): Safe<{
   value: ExtrinsicReference
   remaining: Uint8Array
-} {
+}> {
   // Hash (32 bytes)
   const hash = bytesToHex(data.slice(0, 32))
   const remaining = data.slice(32)
@@ -406,30 +475,24 @@ export function decodeExtrinsicReference(data: Uint8Array): {
       .join('')}`,
   )
 
-  return {
+  return safeResult({
     value: {
       hash,
-      length: Number(len),
+      length: len,
     },
     remaining: remaining.slice(8),
-  }
+  })
 }
 
 // Helper function for decoding work context
-function decodeWorkContext(data: Uint8Array): WorkContext {
+function decodeWorkContext(data: Uint8Array): Safe<WorkContext> {
   // Simplified implementation - in practice this would use the proper decoder
-  return {
+  return safeResult({
     anchorhash: bytesToHex(data.slice(0, 32)),
     anchorpoststate: bytesToHex(data.slice(32, 64)),
     anchoraccoutlog: bytesToHex(data.slice(64, 96)),
     lookupanchorhash: bytesToHex(data.slice(96, 128)),
-    lookupanchortime: Number(
-      BigInt(
-        `0x${Array.from(data.slice(128, 136))
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('')}`,
-      ),
-    ),
+    lookupanchortime: bytesToBigInt(data.slice(128, 136)),
     prerequisites: [], // Simplified - not handling complex prerequisites yet
-  }
+  })
 }

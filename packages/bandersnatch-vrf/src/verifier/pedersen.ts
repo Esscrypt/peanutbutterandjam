@@ -4,7 +4,7 @@
  * Implements verification for Pedersen VRF scheme
  */
 
-import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
+import type { VRFOutput } from '@pbnj/types'
 import type { VerificationResult, VerifierConfig } from './types'
 
 /**
@@ -16,10 +16,10 @@ export class PedersenVRFVerifier {
    * Verify Pedersen VRF proof
    */
   static verify(
-    _publicKey: VRFPublicKey,
-    _input: VRFInput,
+    _publicKey: Uint8Array,
+    _input: Uint8Array,
     _output: VRFOutput,
-    _proof: VRFProof,
+    _proof: Uint8Array,
     _auxData?: Uint8Array,
     _config?: VerifierConfig,
   ): boolean {
@@ -31,10 +31,10 @@ export class PedersenVRFVerifier {
    * Verify Pedersen VRF proof with detailed result
    */
   static verifyWithResult(
-    _publicKey: VRFPublicKey,
-    _input: VRFInput,
+    _publicKey: Uint8Array,
+    _input: Uint8Array,
     _output: VRFOutput,
-    _proof: VRFProof,
+    _proof: Uint8Array,
     _auxData?: Uint8Array,
     _config?: VerifierConfig,
   ): VerificationResult {

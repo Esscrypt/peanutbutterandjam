@@ -30,7 +30,8 @@
  * common integer sizes and memory alignment requirements.
  */
 
-import type { FixedLengthSize, Natural } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { FixedLengthSize } from '@pbnj/types'
 
 /**
  * Encode natural number using fixed-length little-endian encoding
@@ -44,9 +45,9 @@ import type { FixedLengthSize, Natural } from '@pbnj/types'
  * @returns Encoded octet sequence of specified length
  */
 export function encodeFixedLength(
-  value: Natural,
+  value: bigint,
   length: FixedLengthSize,
-): Uint8Array {
+): Safe<Uint8Array> {
   // Validate input
   if (value < 0n) {
     throw new Error(`Natural number cannot be negative: ${value}`)
@@ -67,7 +68,7 @@ export function encodeFixedLength(
     result[i] = Number((value >> BigInt(8 * i)) & 0xffn)
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -80,11 +81,13 @@ export function encodeFixedLength(
 export function decodeFixedLength(
   data: Uint8Array,
   length: FixedLengthSize,
-): { value: Natural; remaining: Uint8Array } {
+): Safe<{ value: bigint; remaining: Uint8Array }> {
   const lengthNum = Number(length)
   if (data.length < lengthNum) {
-    throw new Error(
-      `Insufficient data for ${lengthNum}-byte decoding (got ${data.length} Uint8Array)`,
+    return safeError(
+      new Error(
+        `Insufficient data for ${lengthNum}-byte decoding (got ${data.length} Uint8Array)`,
+      ),
     )
   }
 
@@ -95,10 +98,10 @@ export function decodeFixedLength(
     value |= BigInt(data[i]) << BigInt(8 * i)
   }
 
-  return {
+  return safeResult({
     value,
     remaining: data.slice(lengthNum),
-  }
+  })
 }
 
 /**
@@ -113,19 +116,22 @@ export function decodeFixedLength(
  * @returns Encoded octet sequence
  */
 export function encodeFixedLengthTuple(
-  tuple: readonly Natural[],
+  tuple: readonly bigint[],
   length: FixedLengthSize,
-): Uint8Array {
+): Safe<Uint8Array> {
   const lengthNum = Number(length)
   const totalLength = tuple.length * lengthNum
   const result = new Uint8Array(totalLength)
 
   for (let i = 0; i < tuple.length; i++) {
-    const element = encodeFixedLength(tuple[i], length)
+    const [error, element] = encodeFixedLength(tuple[i], length)
+    if (error) {
+      return safeError(error)
+    }
     result.set(element, i * lengthNum)
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -140,28 +146,33 @@ export function decodeFixedLengthTuple(
   data: Uint8Array,
   length: FixedLengthSize,
   count: number,
-): { value: Natural[]; remaining: Uint8Array } {
+): Safe<{ value: bigint[]; remaining: Uint8Array }> {
   const lengthNum = Number(length)
   const totalLength = count * lengthNum
 
   if (data.length < totalLength) {
-    throw new Error(
-      `Insufficient data for tuple decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
+    return safeError(
+      new Error(
+        `Insufficient data for tuple decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
+      ),
     )
   }
 
-  const result: Natural[] = []
+  const result: bigint[] = []
 
   for (let i = 0; i < count; i++) {
     const elementData = data.slice(i * lengthNum, (i + 1) * lengthNum)
-    const { value } = decodeFixedLength(elementData, length)
-    result.push(value)
+    const [error, result2] = decodeFixedLength(elementData, length)
+    if (error) {
+      return safeError(error)
+    }
+    result.push(result2.value)
   }
 
-  return {
+  return safeResult({
     value: result,
     remaining: data.slice(totalLength),
-  }
+  })
 }
 
 /**
@@ -175,9 +186,9 @@ export function decodeFixedLengthTuple(
  * @returns Encoded octet sequence
  */
 export function encodeFixedLengthSequence(
-  sequence: Natural[],
+  sequence: bigint[],
   length: FixedLengthSize,
-): Uint8Array {
+): Safe<Uint8Array> {
   return encodeFixedLengthTuple(sequence, length)
 }
 
@@ -193,7 +204,7 @@ export function decodeFixedLengthSequence(
   data: Uint8Array,
   length: FixedLengthSize,
   count: number,
-): { value: Natural[]; remaining: Uint8Array } {
+): Safe<{ value: bigint[]; remaining: Uint8Array }> {
   return decodeFixedLengthTuple(data, length, count)
 }
 
@@ -204,101 +215,101 @@ export function decodeFixedLengthSequence(
 /**
  * Encode 8-bit unsigned integer
  */
-export function encodeUint8(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 1)
+export function encodeUint8(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 1n)
 }
 
 /**
  * Decode 8-bit unsigned integer
  */
-export function decodeUint8(data: Uint8Array): {
-  value: Natural
+export function decodeUint8(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 1)
+}> {
+  return decodeFixedLength(data, 1n)
 }
 
 /**
  * Encode 16-bit unsigned integer
  */
-export function encodeUint16(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 2)
+export function encodeUint16(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 2n)
 }
 
 /**
  * Decode 16-bit unsigned integer
  */
-export function decodeUint16(data: Uint8Array): {
-  value: Natural
+export function decodeUint16(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 2)
+}> {
+  return decodeFixedLength(data, 2n)
 }
 
 /**
  * Encode 32-bit unsigned integer
  */
-export function encodeUint32(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 4)
+export function encodeUint32(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 4n)
 }
 
 /**
  * Decode 32-bit unsigned integer
  */
-export function decodeUint32(data: Uint8Array): {
-  value: Natural
+export function decodeUint32(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 4)
+}> {
+  return decodeFixedLength(data, 4n)
 }
 
 /**
  * Encode 64-bit unsigned integer
  */
-export function encodeUint64(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 8)
+export function encodeUint64(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 8n)
 }
 
 /**
  * Decode 64-bit unsigned integer
  */
-export function decodeUint64(data: Uint8Array): {
-  value: Natural
+export function decodeUint64(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 8)
+}> {
+  return decodeFixedLength(data, 8n)
 }
 
 /**
  * Encode 128-bit unsigned integer
  */
-export function encodeUint128(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 16)
+export function encodeUint128(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 16n)
 }
 
 /**
  * Decode 128-bit unsigned integer
  */
-export function decodeUint128(data: Uint8Array): {
-  value: Natural
+export function decodeUint128(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 16)
+}> {
+  return decodeFixedLength(data, 16n)
 }
 
 /**
  * Encode 256-bit unsigned integer
  */
-export function encodeUint256(value: Natural): Uint8Array {
-  return encodeFixedLength(value, 32)
+export function encodeUint256(value: bigint): Safe<Uint8Array> {
+  return encodeFixedLength(value, 32n)
 }
 
 /**
  * Decode 256-bit unsigned integer
  */
-export function decodeUint256(data: Uint8Array): {
-  value: Natural
+export function decodeUint256(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
-  return decodeFixedLength(data, 32)
+}> {
+  return decodeFixedLength(data, 32n)
 }

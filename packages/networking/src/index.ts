@@ -9,14 +9,15 @@ export {
   generateAlternativeName,
   generateTrivialSeed,
 } from '@pbnj/core'
+export {
+  createCertificateFromKeyPair,
+  extractAlternativeNameFromCertificate,
+  generateCertificate,
+  generateCertificateFromSeed,
+  validateCertificate,
+} from './crypto/certificates'
 // Crypto utilities
 export { generateALPNProtocol, parseALPNProtocol } from './crypto/tls'
-// Database integration
-export type { NetworkingDatabaseIntegration } from './db-integration'
-export {
-  MockNetworkingDatabaseIntegration,
-  StateBasedNetworkingDatabaseIntegration,
-} from './db-integration'
 export { BuilderSlotsManager } from './peer/builder-slots'
 // Peer management
 export { ConnectionManager } from './peer/connection-manager'

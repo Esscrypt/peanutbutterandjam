@@ -6,8 +6,10 @@
 
 import { EventEmitter } from 'node:events'
 import type { QUICConfig } from '@infisical/quic/dist/types'
-import type { Bytes, ConnectionEndpoint } from '@pbnj/types'
-import { QuicConnectionManager } from './connection'
+import { type SafePromise, safeError, safeResult } from '@pbnj/core'
+import type { ConnectionEndpoint, StreamKind } from '@pbnj/types'
+import { ConnectionState, QuicConnectionManager } from './connection'
+import type { StreamInfo } from './stream'
 import { QuicStreamManager } from './stream'
 
 /**
@@ -48,7 +50,7 @@ export interface TransportEvents {
   /** Stream closed */
   onStreamClosed?: (streamId: string) => void
   /** Message received */
-  onMessageReceived?: (streamId: string, data: Bytes) => void
+  onMessageReceived?: (streamId: string, data: Uint8Array) => void
   /** Error occurred */
   onError?: (error: Error) => void
 }
@@ -71,6 +73,13 @@ export class QuicTransport extends EventEmitter {
     this.streamManager = new QuicStreamManager()
 
     this.setupEventHandlers()
+  }
+
+  /**
+   * Get the stream manager instance
+   */
+  getStreamManager(): QuicStreamManager {
+    return this.streamManager
   }
 
   /**
@@ -147,79 +156,74 @@ export class QuicTransport extends EventEmitter {
   /**
    * Disconnect from a peer
    */
-  async disconnectFromPeer(connectionId: string): Promise<void> {
-    try {
-      await this.connectionManager.closeConnection(connectionId)
-    } catch (error) {
-      console.error('Failed to disconnect from peer:', error)
-      throw error
-    }
+  async disconnectFromPeer(connectionId: string): SafePromise<boolean> {
+    return this.connectionManager.closeConnection(connectionId)
   }
 
   /**
    * Create a stream
    * JAMNP-S specification requires all streams to be bidirectional
    */
-  async createStream(connectionId: string, kind: number): Promise<string> {
-    try {
-      // Get connection info
-      const connectionInfo =
-        this.connectionManager.getConnectionInfo(connectionId)
-      if (!connectionInfo) {
-        throw new Error(`Connection ${connectionId} not found`)
-      }
-
-      // Create actual QUIC stream through the connection
-      // JAMNP-S specification requires bidirectional streams
-      const quicStream = await this.connectionManager.createStream(connectionId)
-
-      // Create stream in the stream manager
-      const streamId = await this.streamManager.createStream(
-        connectionId,
-        kind,
-        quicStream,
-        true,
-      )
-
-      // Trigger stream created event
-      if (this.events.onStreamCreated) {
-        this.events.onStreamCreated(streamId, kind, connectionId)
-      }
-
-      return streamId
-    } catch (error) {
-      console.error('Failed to create stream:', error)
-      throw error
+  async createStream(
+    connectionId: string,
+    kind: StreamKind,
+  ): SafePromise<string> {
+    // Get connection info
+    const connectionInfo =
+      this.connectionManager.getConnectionInfo(connectionId)
+    if (!connectionInfo) {
+      return safeError(new Error(`Connection ${connectionId} not found`))
     }
+
+    // Create actual QUIC stream through the connection
+    // JAMNP-S specification requires bidirectional streams
+    const [quicStreamError, quicStream] =
+      await this.connectionManager.createStream(connectionId)
+    if (quicStreamError) {
+      return safeError(quicStreamError)
+    }
+
+    // Create stream in the stream manager
+    const [streamError, streamId] = await this.streamManager.createStream(
+      connectionId,
+      kind,
+      quicStream,
+      true,
+    )
+    if (streamError) {
+      return safeError(streamError)
+    }
+
+    // Trigger stream created event
+    if (this.events.onStreamCreated) {
+      this.events.onStreamCreated(streamId, kind, connectionId)
+    }
+
+    return safeResult(streamId)
   }
 
   /**
    * Send message on stream
    */
-  async sendMessage(streamId: string, data: Bytes): Promise<void> {
-    try {
-      await this.streamManager.sendMessage(streamId, data)
-    } catch (error) {
-      console.error('Failed to send message:', error)
-      throw error
-    }
+  async sendMessage(streamId: string, data: Uint8Array): SafePromise<void> {
+    return this.streamManager.sendMessage(streamId, data)
   }
 
   /**
    * Close stream
    */
-  async closeStream(streamId: string): Promise<void> {
-    try {
-      await this.streamManager.closeStream(streamId)
-
-      // Trigger stream closed event
-      if (this.events.onStreamClosed) {
-        this.events.onStreamClosed(streamId)
-      }
-    } catch (error) {
-      console.error('Failed to close stream:', error)
-      throw error
+  async closeStream(streamId: string): SafePromise<boolean> {
+    const [closeStreamError] = await this.streamManager.closeStream(streamId)
+    if (closeStreamError) {
+      return safeError(closeStreamError)
     }
+
+    // Trigger stream closed event
+    if (this.events.onStreamClosed) {
+      this.events.onStreamClosed(streamId)
+    }
+
+    return safeResult(true)
   }
 
   /**
@@ -253,7 +257,7 @@ export class QuicTransport extends EventEmitter {
   /**
    * Get streams by kind
    */
-  getStreamsByKind(kind: number) {
+  getStreamsByKind(kind: StreamKind) {
     return this.streamManager.getStreamsByKind(kind)
   }
 
@@ -273,7 +277,7 @@ export class QuicTransport extends EventEmitter {
       const connectionInfo =
         this.connectionManager.getConnectionInfo(connectionId)
       if (connectionInfo) {
-        if (connectionInfo.state === 'connected') {
+        if (connectionInfo.state === ConnectionState.CONNECTED) {
           // Trigger connection established event
           if (this.events.onConnectionEstablished) {
             this.events.onConnectionEstablished(
@@ -318,7 +322,7 @@ export class QuicTransport extends EventEmitter {
   /**
    * Handle stream message
    */
-  private handleStreamMessage(stream: any, data: Bytes): void {
+  private handleStreamMessage(stream: StreamInfo, data: Uint8Array): void {
     // Trigger message received event
     if (this.events.onMessageReceived) {
       this.events.onMessageReceived(stream.id, data)

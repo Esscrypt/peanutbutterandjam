@@ -4,13 +4,8 @@
  * Implements RFC-9381 VRF proof generation
  */
 
-import { bytesToBigInt, logger } from '@pbnj/core'
-import type {
-  VRFInput,
-  VRFProof,
-  VRFProofWithOutput,
-  VRFSecretKey,
-} from '@pbnj/types'
+import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
+import type { VRFProofWithOutput } from '@pbnj/types'
 import { BandersnatchCurve } from '../curve'
 import { DEFAULT_PROVER_CONFIG } from './config'
 import type { ProverConfig } from './types'
@@ -24,8 +19,8 @@ export class IETFVRFProver {
    * Generate VRF proof and output
    */
   static prove(
-    _secretKey: VRFSecretKey,
-    _input: VRFInput,
+    _secretKey: Uint8Array,
+    _input: Uint8Array,
     _auxData?: Uint8Array,
     config?: ProverConfig,
   ): VRFProofWithOutput {
@@ -33,17 +28,17 @@ export class IETFVRFProver {
     const mergedConfig = { ...DEFAULT_PROVER_CONFIG, ...config }
 
     logger.debug('Generating IETF VRF proof', {
-      inputLength: _input.message.length,
+      inputLength: _input.length,
       hasAuxData: !!_auxData,
       config: mergedConfig,
     })
 
     try {
       // 1. Hash input to curve point (H1)
-      const alpha = this.hashToCurve(_input.message, mergedConfig)
+      const alpha = this.hashToCurve(_input, mergedConfig)
 
       // 2. Scalar multiplication: gamma = alpha * secretKey
-      const gamma = this.scalarMultiply(alpha, _secretKey.bytes)
+      const gamma = this.scalarMultiply(alpha, _secretKey)
 
       // 3. Generate proof
       const proof = this.generateProof(_secretKey, alpha, gamma, _auxData)
@@ -55,7 +50,7 @@ export class IETFVRFProver {
 
       logger.debug('IETF VRF proof generated successfully', {
         generationTime,
-        proofSize: proof.bytes.length,
+        proofSize: proof.length,
         outputSize: hash.length,
       })
 
@@ -102,11 +97,11 @@ export class IETFVRFProver {
    * Generate VRF proof
    */
   private static generateProof(
-    secretKey: VRFSecretKey,
+    secretKey: Uint8Array,
     alpha: Uint8Array,
     gamma: Uint8Array,
     auxData?: Uint8Array,
-  ): VRFProof {
+  ): Uint8Array {
     // IETF VRF proof generation (RFC-9381)
     // Proof = (c, s) where:
     // c = H2(g || h || g^s * h^c)
@@ -142,16 +137,16 @@ export class IETFVRFProver {
     const c = this.hashToScalar(challengeInput)
 
     // Calculate s = k + c * x (mod q)
-    const x = bytesToBigInt(secretKey.bytes)
+    const x = bytesToBigInt(secretKey)
     const s = (k + c * x) % BandersnatchCurve.CURVE_ORDER
 
     // Serialize proof as (c, s)
     const proofUint8Array = new Uint8Array([
-      ...this.bigintToUint8Array(c, 32),
-      ...this.bigintToUint8Array(s, 32),
+      ...numberToBytes(c),
+      ...numberToBytes(s),
     ])
 
-    return { bytes: proofUint8Array }
+    return proofUint8Array
   }
 
   /**
@@ -191,20 +186,5 @@ export class IETFVRFProver {
 
     const point = BandersnatchCurve.bytesToPoint(gamma)
     return BandersnatchCurve.hashPoint(point)
-  }
-
-  /**
-   * Convert bigint to Uint8Array with specified length
-   */
-  private static bigintToUint8Array(value: bigint, length: number): Uint8Array {
-    const bytes = new Uint8Array(length)
-    let temp = value
-
-    for (let i = length - 1; i >= 0; i--) {
-      bytes[i] = Number(temp & 0xffn)
-      temp = temp >> 8n
-    }
-
-    return bytes
   }
 }

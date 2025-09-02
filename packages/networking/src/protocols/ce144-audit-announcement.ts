@@ -5,8 +5,8 @@
  * This is a Common Ephemeral (CE) stream for announcing audit requirements.
  */
 
-import type { AuditAnnouncement, Bytes, StreamInfo } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { AuditAnnouncement, StreamInfo } from '@pbnj/types'
 
 /**
  * Audit announcement protocol handler
@@ -15,26 +15,26 @@ export class AuditAnnouncementProtocol {
   private auditAnnouncements: Map<
     string,
     {
-      headerHash: Bytes
+      headerHash: Uint8Array
       tranche: number
       announcement: {
-        workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
-        signature: Bytes
+        workReports: Array<{ coreIndex: number; workReportHash: Uint8Array }>
+        signature: Uint8Array
       }
-      evidence: Bytes
+      evidence: Uint8Array
       timestamp: number
     }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -61,13 +61,13 @@ export class AuditAnnouncementProtocol {
    * Store audit announcement in local store and persist to database
    */
   async storeAuditAnnouncement(
-    headerHash: Bytes,
+    headerHash: Uint8Array,
     tranche: number,
     announcement: {
-      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
-      signature: Bytes
+      workReports: Array<{ coreIndex: number; workReportHash: Uint8Array }>
+      signature: Uint8Array
     },
-    evidence: Bytes,
+    evidence: Uint8Array,
   ): Promise<void> {
     const hashString = headerHash.toString()
     this.auditAnnouncements.set(hashString, {
@@ -112,15 +112,15 @@ export class AuditAnnouncementProtocol {
   /**
    * Get audit announcement from local store
    */
-  getAuditAnnouncement(headerHash: Bytes):
+  getAuditAnnouncement(headerHash: Uint8Array):
     | {
-        headerHash: Bytes
+        headerHash: Uint8Array
         tranche: number
         announcement: {
-          workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
-          signature: Bytes
+          workReports: Array<{ coreIndex: number; workReportHash: Uint8Array }>
+          signature: Uint8Array
         }
-        evidence: Bytes
+        evidence: Uint8Array
         timestamp: number
       }
     | undefined {
@@ -130,14 +130,14 @@ export class AuditAnnouncementProtocol {
   /**
    * Get audit announcement from database if not in local store
    */
-  async getAuditAnnouncementFromDatabase(headerHash: Bytes): Promise<{
-    headerHash: Bytes
+  async getAuditAnnouncementFromDatabase(headerHash: Uint8Array): Promise<{
+    headerHash: Uint8Array
     tranche: number
     announcement: {
-      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
-      signature: Bytes
+      workReports: Array<{ coreIndex: number; workReportHash: Uint8Array }>
+      signature: Uint8Array
     }
-    evidence: Bytes
+    evidence: Uint8Array
     timestamp: number
   } | null> {
     if (this.getAuditAnnouncement(headerHash)) {
@@ -158,10 +158,12 @@ export class AuditAnnouncementProtocol {
           headerHash: Buffer.from(parsedData.headerHash, 'hex'),
           tranche: parsedData.tranche,
           announcement: {
-            workReports: parsedData.announcement.workReports.map((wr: any) => ({
-              coreIndex: wr.coreIndex,
-              workReportHash: Buffer.from(wr.workReportHash, 'hex'),
-            })),
+            workReports: parsedData.announcement.workReports.map(
+              (wr: { coreIndex: number; workReportHash: string }) => ({
+                coreIndex: wr.coreIndex,
+                workReportHash: Buffer.from(wr.workReportHash, 'hex'),
+              }),
+            ),
             signature: Buffer.from(parsedData.announcement.signature, 'hex'),
           },
           evidence: Buffer.from(parsedData.evidence, 'hex'),
@@ -207,13 +209,13 @@ export class AuditAnnouncementProtocol {
    * Create audit announcement message
    */
   createAuditAnnouncement(
-    headerHash: Bytes,
+    headerHash: Uint8Array,
     tranche: number,
     announcement: {
-      workReports: Array<{ coreIndex: number; workReportHash: Bytes }>
-      signature: Bytes
+      workReports: Array<{ coreIndex: number; workReportHash: Uint8Array }>
+      signature: Uint8Array
     },
-    evidence: Bytes,
+    evidence: Uint8Array,
   ): AuditAnnouncement {
     return {
       headerHash,
@@ -226,7 +228,7 @@ export class AuditAnnouncementProtocol {
   /**
    * Serialize audit announcement message
    */
-  serializeAuditAnnouncement(announcement: AuditAnnouncement): Bytes {
+  serializeAuditAnnouncement(announcement: AuditAnnouncement): Uint8Array {
     // Calculate total size
     let totalSize = 32 + 4 + 4 // headerHash + tranche + number of work reports
 
@@ -282,7 +284,7 @@ export class AuditAnnouncementProtocol {
   /**
    * Deserialize audit announcement message
    */
-  deserializeAuditAnnouncement(data: Bytes): AuditAnnouncement {
+  deserializeAuditAnnouncement(data: Uint8Array): AuditAnnouncement {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -299,7 +301,10 @@ export class AuditAnnouncementProtocol {
     offset += 4
 
     // Read work reports
-    const workReports: Array<{ coreIndex: number; workReportHash: Bytes }> = []
+    const workReports: Array<{
+      coreIndex: number
+      workReportHash: Uint8Array
+    }> = []
     for (let i = 0; i < numWorkReports; i++) {
       // Read core index (4 bytes, little-endian)
       const coreIndex = view.getUint32(offset, true)
@@ -337,7 +342,7 @@ export class AuditAnnouncementProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const announcement = this.deserializeAuditAnnouncement(data)
       await this.processAuditAnnouncement(announcement)

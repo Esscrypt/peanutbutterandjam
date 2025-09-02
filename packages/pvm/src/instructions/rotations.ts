@@ -11,7 +11,7 @@ export class ROT_R_64_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
 
     // Ensure rotation amount is within 64-bit range
@@ -32,7 +32,7 @@ export class ROT_R_64_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -48,7 +48,7 @@ export class ROT_R_64_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 
@@ -79,7 +79,7 @@ export class ROT_R_64_IMM_ALTInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
 
     // Alternative rotation implementation (same as regular for now)
@@ -100,7 +100,7 @@ export class ROT_R_64_IMM_ALTInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -116,7 +116,7 @@ export class ROT_R_64_IMM_ALTInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 
@@ -147,7 +147,7 @@ export class ROT_R_32_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -169,7 +169,7 @@ export class ROT_R_32_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -185,7 +185,7 @@ export class ROT_R_32_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 
@@ -216,7 +216,7 @@ export class ROT_R_32_IMM_ALTInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -238,7 +238,7 @@ export class ROT_R_32_IMM_ALTInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -254,7 +254,7 @@ export class ROT_R_32_IMM_ALTInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 

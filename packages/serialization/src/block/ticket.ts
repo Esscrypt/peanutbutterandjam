@@ -36,7 +36,14 @@
  * BABE-style slot-based authorship and finality mechanisms.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { SafroleTicket } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
@@ -46,14 +53,18 @@ import { encodeNatural } from '../core/natural-number'
  * @param ticket - Safrole ticket to encode
  * @returns Encoded octet sequence
  */
-export function encodeSafroleTicket(ticket: SafroleTicket): Uint8Array {
+export function encodeSafroleTicket(ticket: SafroleTicket): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // ID (32 Uint8Array)
   parts.push(hexToBytes(ticket.id))
 
   // Entry index (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(ticket.entryIndex)))
+  const [error, encoded] = encodeNatural(ticket.entryIndex)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -65,7 +76,7 @@ export function encodeSafroleTicket(ticket: SafroleTicket): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -74,10 +85,10 @@ export function encodeSafroleTicket(ticket: SafroleTicket): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded Safrole ticket and remaining data
  */
-export function decodeSafroleTicket(data: Uint8Array): {
+export function decodeSafroleTicket(data: Uint8Array): Safe<{
   value: SafroleTicket
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // ID (32 Uint8Array)
@@ -85,18 +96,14 @@ export function decodeSafroleTicket(data: Uint8Array): {
   currentData = currentData.slice(32)
 
   // Entry index (8 Uint8Array)
-  const entryIndex = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b: number) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const entryIndex = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
-  return {
+  return safeResult({
     value: {
       id,
-      entryIndex: Number(entryIndex),
+      entryIndex,
     },
     remaining: currentData,
-  }
+  })
 }

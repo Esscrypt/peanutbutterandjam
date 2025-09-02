@@ -5,7 +5,14 @@
  */
 
 import type { QUICStream } from '@infisical/quic'
-import type { Bytes, StreamKind } from '@pbnj/types'
+import {
+  logger,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import type { StreamKind } from '@pbnj/types'
 
 /**
  * Stream state
@@ -52,7 +59,7 @@ export interface MessageFrame {
   /** Message length (32-bit little-endian) */
   length: number
   /** Message content */
-  content: Bytes
+  content: Uint8Array
 }
 
 /**
@@ -62,7 +69,7 @@ export class QuicStreamManager {
   private streams: Map<string, StreamInfo> = new Map()
   private streamHandlers: Map<
     StreamKind,
-    (stream: StreamInfo, data: Bytes) => void
+    (stream: StreamInfo, data: Uint8Array) => void
   > = new Map()
 
   /**
@@ -70,7 +77,7 @@ export class QuicStreamManager {
    */
   registerStreamHandler(
     kind: StreamKind,
-    handler: (stream: StreamInfo, data: Bytes) => void,
+    handler: (stream: StreamInfo, data: Uint8Array) => void,
   ): void {
     this.streamHandlers.set(kind, handler)
   }
@@ -83,7 +90,7 @@ export class QuicStreamManager {
     kind: StreamKind,
     quicStream: QUICStream,
     isInitiator = true,
-  ): Promise<string> {
+  ): SafePromise<string> {
     const streamId = this.generateStreamId()
 
     const streamInfo: StreamInfo = {
@@ -102,13 +109,22 @@ export class QuicStreamManager {
 
     // Send stream kind byte if we're the initiator
     if (isInitiator) {
-      await this.sendStreamKind(streamId, kind)
+      const [sendStreamKindError] = await this.sendStreamKind(streamId, kind)
+      if (sendStreamKindError) {
+        return safeError(sendStreamKindError)
+      }
     }
 
     // Set up event handlers for the stream
-    this.setupStreamEventHandlers(streamId, quicStream)
+    const [setupStreamEventHandlersError] = this.setupStreamEventHandlers(
+      streamId,
+      quicStream,
+    )
+    if (setupStreamEventHandlersError) {
+      return safeError(setupStreamEventHandlersError)
+    }
 
-    return streamId
+    return safeResult(streamId)
   }
 
   /**
@@ -117,7 +133,7 @@ export class QuicStreamManager {
   async handleIncomingStream(
     connectionId: string,
     quicStream: QUICStream,
-  ): Promise<void> {
+  ): SafePromise<boolean> {
     try {
       // Read stream kind byte
       const kindByte = await this.readStreamKind(quicStream)
@@ -140,56 +156,72 @@ export class QuicStreamManager {
       this.streams.set(streamId, streamInfo)
 
       // Set up event handlers for the stream
-      this.setupStreamEventHandlers(streamId, quicStream)
+      const [setupStreamEventHandlersError] = this.setupStreamEventHandlers(
+        streamId,
+        quicStream,
+      )
+      if (setupStreamEventHandlersError) {
+        return safeError(setupStreamEventHandlersError)
+      }
 
-      console.log(`Incoming stream ${streamId} established with kind ${kind}`)
+      logger.info(`Incoming stream ${streamId} established with kind ${kind}`)
     } catch (error) {
-      console.error('Failed to handle incoming stream:', error)
-      throw error
+      return safeError(error as Error)
     }
+
+    return safeResult(true)
   }
 
   /**
    * Send message on stream
    */
-  async sendMessage(streamId: string, content: Bytes): Promise<void> {
+  async sendMessage(streamId: string, content: Uint8Array): SafePromise<void> {
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo) {
-      throw new Error(`Stream ${streamId} not found`)
+      return safeError(new Error(`Stream ${streamId} not found`))
     }
 
     if (streamInfo.state !== StreamState.OPEN) {
-      throw new Error(
-        `Stream ${streamId} is not open (state: ${streamInfo.state})`,
+      return safeError(
+        new Error(
+          `Stream ${streamId} is not open (state: ${streamInfo.state})`,
+        ),
       )
     }
 
     if (!streamInfo.quicStream) {
-      throw new Error(`Stream ${streamId} has no QUIC stream available`)
+      return safeError(
+        new Error(`Stream ${streamId} has no QUIC stream available`),
+      )
     }
 
     // Create message frame
     const frame = this.createMessageFrame(content)
 
     // Send frame
-    await this.sendFrame(streamId, frame)
+    const [sendFrameError] = await this.sendFrame(streamId, frame)
+    if (sendFrameError) {
+      return safeError(sendFrameError)
+    }
 
     // Update last activity
     streamInfo.lastActivity = Date.now()
     this.streams.set(streamId, streamInfo)
+
+    return safeResult(undefined)
   }
 
   /**
    * Close stream
    */
-  async closeStream(streamId: string): Promise<void> {
+  async closeStream(streamId: string): SafePromise<boolean> {
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo) {
-      return
+      return safeError(new Error(`Stream ${streamId} not found`))
     }
 
     if (streamInfo.state === StreamState.CLOSED) {
-      return
+      return safeResult(true)
     }
 
     streamInfo.state = StreamState.CLOSING
@@ -201,16 +233,18 @@ export class QuicStreamManager {
       }
 
       streamInfo.state = StreamState.CLOSED
-      console.log(`Stream ${streamId} closed`)
+      logger.info(`Stream ${streamId} closed`)
     } catch (error) {
       streamInfo.state = StreamState.ERROR
       streamInfo.error =
         error instanceof Error ? error.message : 'Unknown error'
-      console.error(`Failed to close stream ${streamId}:`, error)
-      throw error
+      logger.error(`Failed to close stream ${streamId}:`, error)
+      return safeError(error as Error)
     } finally {
       this.streams.set(streamId, streamInfo)
     }
+
+    return safeResult(true)
   }
 
   /**
@@ -241,7 +275,7 @@ export class QuicStreamManager {
   /**
    * Create message frame
    */
-  private createMessageFrame(content: Bytes): MessageFrame {
+  private createMessageFrame(content: Uint8Array): MessageFrame {
     return {
       length: content.length,
       content,
@@ -254,11 +288,11 @@ export class QuicStreamManager {
   private async sendFrame(
     streamId: string,
     frame: MessageFrame,
-  ): Promise<void> {
+  ): SafePromise<void> {
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo || !streamInfo.quicStream) {
-      throw new Error(
-        `Stream ${streamId} not found or no QUIC stream available`,
+      return safeError(
+        new Error(`Stream ${streamId} not found or no QUIC stream available`),
       )
     }
 
@@ -275,12 +309,14 @@ export class QuicStreamManager {
     const writer = streamInfo.quicStream.writable.getWriter()
     try {
       await writer.write(totalBuffer)
-      console.log(
+      logger.info(
         `Sent frame on stream ${streamId}: ${totalBuffer.length} bytes`,
       )
     } finally {
       writer.releaseLock()
     }
+
+    return safeResult(undefined)
   }
 
   /**
@@ -311,12 +347,12 @@ export class QuicStreamManager {
   private async sendStreamKind(
     streamId: string,
     kind: StreamKind,
-  ): Promise<void> {
+  ): SafePromise<void> {
     // Send single byte representing stream kind
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo || !streamInfo.quicStream) {
-      throw new Error(
-        `Stream ${streamId} not found or no QUIC stream available`,
+      return safeError(
+        new Error(`Stream ${streamId} not found or no QUIC stream available`),
       )
     }
 
@@ -327,10 +363,12 @@ export class QuicStreamManager {
     const writer = streamInfo.quicStream.writable.getWriter()
     try {
       await writer.write(kindBuffer)
-      console.log(`Sent stream kind ${kind} on stream ${streamId}`)
+      logger.info(`Sent stream kind ${kind} on stream ${streamId}`)
     } finally {
       writer.releaseLock()
     }
+
+    return safeResult(undefined)
   }
 
   /**
@@ -339,7 +377,7 @@ export class QuicStreamManager {
   private setupStreamEventHandlers(
     streamId: string,
     quicStream: QUICStream,
-  ): void {
+  ): Safe<boolean> {
     // Set up readable stream handler
     const reader = quicStream.readable.getReader()
 
@@ -348,7 +386,7 @@ export class QuicStreamManager {
         const { value, done } = await reader.read()
         if (done) {
           this.handleStreamClose(streamId)
-          return
+          return safeResult(true)
         }
         if (value) {
           this.handleStreamData(streamId, value)
@@ -357,6 +395,7 @@ export class QuicStreamManager {
         readChunk()
       } catch (error) {
         this.handleStreamError(streamId, error as Error)
+        return safeError(error as Error)
       }
     }
 
@@ -371,12 +410,14 @@ export class QuicStreamManager {
       .catch((error) => {
         this.handleStreamError(streamId, error as Error)
       })
+
+    return safeResult(true)
   }
 
   /**
    * Handle stream data
    */
-  private handleStreamData(streamId: string, data: Bytes): void {
+  private handleStreamData(streamId: string, data: Uint8Array): void {
     const streamInfo = this.streams.get(streamId)
     if (!streamInfo) {
       return
@@ -385,44 +426,43 @@ export class QuicStreamManager {
     streamInfo.lastActivity = Date.now()
     this.streams.set(streamId, streamInfo)
 
-    // Parse message frame
-    try {
-      const frame = this.parseMessageFrame(data)
-
-      // Handle message based on stream kind
-      const handler = this.streamHandlers.get(streamInfo.kind)
-      if (handler) {
-        handler(streamInfo, frame.content)
-      }
-    } catch (error) {
-      console.error(
+    const [frameError, frame] = this.parseMessageFrame(data)
+    if (frameError) {
+      logger.error(
         `Failed to parse message frame on stream ${streamId}:`,
-        error,
+        frameError,
       )
+      return
+    }
+
+    // Handle message based on stream kind
+    const handler = this.streamHandlers.get(streamInfo.kind)
+    if (handler) {
+      handler(streamInfo, frame?.content ?? new Uint8Array())
     }
   }
 
   /**
    * Parse message frame
    */
-  private parseMessageFrame(data: Bytes): MessageFrame {
+  private parseMessageFrame(data: Uint8Array): Safe<MessageFrame> {
     if (data.length < 4) {
-      throw new Error('Message frame too short')
+      return safeError(new Error('Message frame too short'))
     }
 
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     const length = view.getUint32(0, true) // 32-bit little-endian
 
     if (data.length < 4 + length) {
-      throw new Error('Message frame incomplete')
+      return safeError(new Error('Message frame incomplete'))
     }
 
     const content = data.slice(4, 4 + length)
 
-    return {
+    return safeResult({
       length,
       content,
-    }
+    })
   }
 
   /**

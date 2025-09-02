@@ -4,12 +4,11 @@
  * Implements Ring VRF proving with anonymity
  */
 
-import { bytesToBigInt, logger } from '@pbnj/core'
+import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
 import type {
   RingVRFInput,
   RingVRFProofWithOutput,
   RingVRFRing,
-  VRFSecretKey,
 } from '@pbnj/types'
 import { BandersnatchCurve, type CurvePoint } from '../curve'
 import { DEFAULT_PROVER_CONFIG, RING_VRF_CONFIG } from './config'
@@ -25,7 +24,7 @@ export class RingVRFProver {
    * Generate Ring VRF proof
    */
   static prove(
-    secretKey: VRFSecretKey,
+    secretKey: Uint8Array,
     input: RingVRFInput,
     auxData?: Uint8Array,
     config?: ProverConfig,
@@ -34,7 +33,7 @@ export class RingVRFProver {
     const mergedConfig = { ...DEFAULT_PROVER_CONFIG, ...config }
 
     logger.debug('Generating Ring VRF proof', {
-      inputLength: input.message.length,
+      inputLength: input.ring.publicKeys.length,
       ringSize: input.ring.size,
       proverIndex: input.proverIndex,
       hasAuxData: !!auxData,
@@ -55,10 +54,13 @@ export class RingVRFProver {
       )
 
       // 4. Hash input to curve point (H1)
-      const alpha = IETFVRFProver.hashToCurve(input.message, mergedConfig)
+      const alpha = IETFVRFProver.hashToCurve(
+        input.ring.commitment,
+        mergedConfig,
+      )
 
       // 5. Generate VRF output
-      const gamma = this.scalarMultiply(alpha, secretKey.bytes)
+      const gamma = this.scalarMultiply(alpha, secretKey)
       const hash = this.hashOutput(gamma, mergedConfig)
 
       // 6. Generate zero-knowledge proof of ring membership
@@ -141,7 +143,7 @@ export class RingVRFProver {
     // Ring commitment using Merkle tree construction
     // Commit to all public keys in the ring
 
-    const allKeys = ring.publicKeys.map((key) => key.bytes)
+    const allKeys = ring.publicKeys.map((key) => key)
     const commitment = this.merkleRoot(allKeys)
     return commitment
   }
@@ -151,7 +153,7 @@ export class RingVRFProver {
    */
   private static generatePositionCommitment(
     proverIndex: number,
-    secretKey: VRFSecretKey,
+    secretKey: Uint8Array,
   ): Uint8Array {
     // Position commitment using Pedersen commitment
     // Commit(proverIndex, secretKey) = g^secretKey * h^proverIndex
@@ -161,7 +163,7 @@ export class RingVRFProver {
 
     const gToSecret = BandersnatchCurve.scalarMultiply(
       g,
-      bytesToBigInt(secretKey.bytes),
+      bytesToBigInt(secretKey),
     )
     const hToIndex = BandersnatchCurve.scalarMultiply(h, BigInt(proverIndex))
 
@@ -173,7 +175,7 @@ export class RingVRFProver {
    * Generate zero-knowledge proof of ring membership
    */
   private static generateZKProof(
-    secretKey: VRFSecretKey,
+    secretKey: Uint8Array,
     input: RingVRFInput,
     _alpha: Uint8Array,
     _gamma: Uint8Array,
@@ -209,7 +211,7 @@ export class RingVRFProver {
       (-sum + BandersnatchCurve.CURVE_ORDER) % BandersnatchCurve.CURVE_ORDER
 
     // Compute the prover's random value
-    const secretScalar = bytesToBigInt(secretKey.bytes)
+    const secretScalar = bytesToBigInt(secretKey)
 
     let randomSum = 0n
     for (let i = 0; i < ringSize; i++) {
@@ -225,16 +227,10 @@ export class RingVRFProver {
 
     // Serialize the proof
     const proofData: number[] = []
-    proofData.push(...Array.from(this.bigintToUint8Array(BigInt(ringSize), 4)))
-    proofData.push(
-      ...Array.from(this.bigintToUint8Array(BigInt(proverIndex), 4)),
-    )
-    randomValues.forEach((v) =>
-      proofData.push(...Array.from(this.bigintToUint8Array(v, 32))),
-    )
-    challenges.forEach((c) =>
-      proofData.push(...Array.from(this.bigintToUint8Array(c, 32))),
-    )
+    proofData.push(...Array.from(numberToBytes(BigInt(ringSize))))
+    proofData.push(...Array.from(numberToBytes(BigInt(proverIndex))))
+    randomValues.forEach((v) => proofData.push(...Array.from(numberToBytes(v))))
+    challenges.forEach((c) => proofData.push(...Array.from(numberToBytes(c))))
 
     return this.hashToBytes(new Uint8Array(proofData))
   }
@@ -243,7 +239,7 @@ export class RingVRFProver {
    * Generate ring signature
    */
   private static generateRingSignature(
-    secretKey: VRFSecretKey,
+    secretKey: Uint8Array,
     input: RingVRFInput,
     _alpha: Uint8Array,
     _gamma: Uint8Array,
@@ -264,15 +260,13 @@ export class RingVRFProver {
         commitments.push(new Uint8Array(32)) // Will be computed
       } else {
         randomValues.push(this.generateRandomScalar())
-        const commitment = this.hashToBytes(
-          this.bigintToUint8Array(randomValues[i], 32),
-        )
+        const commitment = this.hashToBytes(numberToBytes(randomValues[i]))
         commitments.push(commitment)
       }
     }
 
     // Compute the prover's commitment to make the ring signature valid
-    const secretScalar = bytesToBigInt(secretKey.bytes)
+    const secretScalar = bytesToBigInt(secretKey)
 
     // Calculate the prover's random value
     let randomSum = 0n
@@ -289,20 +283,16 @@ export class RingVRFProver {
 
     // Compute the prover's commitment
     const proverCommitment = this.hashToBytes(
-      this.bigintToUint8Array(randomValues[proverIndex], 32),
+      numberToBytes(randomValues[proverIndex]),
     )
     commitments[proverIndex] = proverCommitment
 
     // Create the signature
     const signatureData: number[] = []
-    signatureData.push(
-      ...Array.from(this.bigintToUint8Array(BigInt(ringSize), 4)),
-    )
-    signatureData.push(
-      ...Array.from(this.bigintToUint8Array(BigInt(proverIndex), 4)),
-    )
+    signatureData.push(...Array.from(numberToBytes(BigInt(ringSize))))
+    signatureData.push(...Array.from(numberToBytes(BigInt(proverIndex))))
     randomValues.forEach((v) =>
-      signatureData.push(...Array.from(this.bigintToUint8Array(v, 32))),
+      signatureData.push(...Array.from(numberToBytes(v))),
     )
     commitments.forEach((c) => signatureData.push(...Array.from(c)))
 
@@ -405,19 +395,5 @@ export class RingVRFProver {
     }
 
     return currentLevel[0]
-  }
-
-  /**
-   * Convert bigint to Uint8Array
-   */
-  private static bigintToUint8Array(
-    value: bigint,
-    byteLength: number,
-  ): Uint8Array {
-    const bytes = new Uint8Array(byteLength)
-    for (let i = 0; i < byteLength; i++) {
-      bytes[i] = Number(value >> BigInt(8 * (byteLength - 1 - i)))
-    }
-    return bytes
   }
 }

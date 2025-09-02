@@ -39,7 +39,8 @@
  * may be missing or have variable sizes (like epoch marks in headers).
  */
 
-import type { Optional } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { Decoder, Encoder, Optional } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -51,15 +52,18 @@ import { decodeNatural, encodeNatural } from './natural-number'
  * @param data - Variable-length data to encode
  * @returns Encoded octet sequence with length prefix
  */
-export function encodeVariableLength(data: Uint8Array): Uint8Array {
+export function encodeVariableLength(data: Uint8Array): Safe<Uint8Array> {
   const length = data.length
-  const encodedLength = encodeNatural(BigInt(length))
+  const [encodedLengthError, encodedLength] = encodeNatural(BigInt(length))
+  if (encodedLengthError) {
+    return safeError(encodedLengthError)
+  }
 
   const result = new Uint8Array(encodedLength.length + data.length)
   result.set(encodedLength, 0)
   result.set(data, encodedLength.length)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -68,27 +72,35 @@ export function encodeVariableLength(data: Uint8Array): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded data and remaining octet sequence
  */
-export function decodeVariableLength(data: Uint8Array): {
+export function decodeVariableLength(data: Uint8Array): Safe<{
   value: Uint8Array
   remaining: Uint8Array
-} {
-  const { value: length, remaining: lengthRemaining } = decodeNatural(data)
+}> {
+  const [error, result] = decodeNatural(data)
+  if (error) {
+    return safeError(error)
+  }
+
+  const length = result.value
+  const lengthRemaining = result.remaining
 
   if (length < 0n) {
-    throw new Error('Variable length cannot be negative')
+    return safeError(new Error('Variable length cannot be negative'))
   }
 
   const lengthNum = Number(length)
   if (lengthRemaining.length < lengthNum) {
-    throw new Error(
-      `Insufficient data for variable-length decoding (expected ${lengthNum} Uint8Array, got ${lengthRemaining.length})`,
+    return safeError(
+      new Error(
+        `Insufficient data for variable-length decoding (expected ${lengthNum} Uint8Array, got ${lengthRemaining.length})`,
+      ),
     )
   }
 
   const value = lengthRemaining.slice(0, lengthNum)
   const remaining = lengthRemaining.slice(lengthNum)
 
-  return { value, remaining }
+  return safeResult({ value, remaining })
 }
 
 /**
@@ -103,18 +115,22 @@ export function decodeVariableLength(data: Uint8Array): {
  */
 export function encodeOptional<T>(
   value: Optional<T>,
-  encoder: (value: T) => Uint8Array,
-): Uint8Array {
+  encoder: Encoder<T>,
+): Safe<Uint8Array> {
   if (value === null || value === undefined) {
-    return new Uint8Array([0])
+    return safeResult(new Uint8Array([0]))
   }
 
-  const encodedValue = encoder(value)
+  const [encodedValueError, encodedValue] = encoder(value)
+  if (encodedValueError) {
+    return safeError(encodedValueError)
+  }
+
   const result = new Uint8Array(1 + encodedValue.length)
   result[0] = 1
   result.set(encodedValue, 1)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -126,30 +142,39 @@ export function encodeOptional<T>(
  */
 export function decodeOptional<T>(
   data: Uint8Array,
-  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
-): {
+  decoder: Decoder<T>,
+): Safe<{
   value: Optional<T>
   remaining: Uint8Array
-} {
+}> {
   if (data.length === 0) {
-    throw new Error('Cannot decode optional value from empty data')
+    return safeError(new Error('Cannot decode optional value from empty data'))
   }
 
   const discriminator = data[0]
 
   if (discriminator === 0) {
-    return {
+    return safeResult({
       value: null,
       remaining: data.slice(1),
-    }
+    })
   }
 
   if (discriminator === 1) {
-    const { value, remaining } = decoder(data.slice(1))
-    return { value, remaining }
+    const [error, result] = decoder(data.slice(1))
+    if (error) {
+      return safeError(error)
+    }
+
+    const value = result.value
+    const remaining = result.remaining
+
+    return safeResult({ value, remaining })
   }
 
-  throw new Error(`Invalid optional discriminator: ${discriminator}`)
+  return safeError(
+    new Error(`Invalid optional discriminator: ${discriminator}`),
+  )
 }
 
 /**
@@ -162,16 +187,18 @@ export function decodeOptional<T>(
 export function encodeDiscriminatedUnion(
   discriminator: number,
   data: Uint8Array,
-): Uint8Array {
+): Safe<Uint8Array> {
   if (discriminator < 0 || discriminator > 255) {
-    throw new Error(`Discriminator must be 0-255, got ${discriminator}`)
+    return safeError(
+      new Error(`Discriminator must be 0-255, got ${discriminator}`),
+    )
   }
 
   const result = new Uint8Array(1 + data.length)
   result[0] = discriminator
   result.set(data, 1)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -183,24 +210,30 @@ export function encodeDiscriminatedUnion(
  */
 export function decodeDiscriminatedUnion<T>(
   data: Uint8Array,
-  decoders: Map<
-    number,
-    (data: Uint8Array) => { value: T; remaining: Uint8Array }
-  >,
-): {
+  decoders: Map<number, Decoder<T>>,
+): Safe<{
   value: T
   remaining: Uint8Array
-} {
+}> {
   if (data.length === 0) {
-    throw new Error('Cannot decode discriminated union from empty data')
+    return safeError(
+      new Error('Cannot decode discriminated union from empty data'),
+    )
   }
 
   const discriminator = data[0]
   const decoder = decoders.get(discriminator)
 
   if (!decoder) {
-    throw new Error(`No decoder found for discriminator: ${discriminator}`)
+    return safeError(
+      new Error(`No decoder found for discriminator: ${discriminator}`),
+    )
   }
 
-  return decoder(data.slice(1))
+  const [error, result] = decoder(data.slice(1))
+  if (error) {
+    return safeError(error)
+  }
+
+  return safeResult({ value: result.value, remaining: result.remaining })
 }

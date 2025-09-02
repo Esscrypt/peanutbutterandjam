@@ -41,10 +41,16 @@
  * complete header contents while including the signature in the commitment.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToHex,
+  type Hex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type {
   EpochMark,
-  HashValue,
   JamHeader,
   SafroleTicketHeader,
   ValidatorKeyPair,
@@ -52,20 +58,11 @@ import type {
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
-// Helper functions for hash values
-function encodeHashValue(hash: HashValue): Uint8Array {
-  return hexToBytes(hash)
-}
-
-function decodeHashValue(data: Uint8Array): HashValue {
-  return bytesToHex(data)
-}
-
 // Validator key pair encoding/decoding
 function encodeValidatorKeyPair(validator: ValidatorKeyPair): Uint8Array {
   const parts: Uint8Array[] = []
-  parts.push(encodeHashValue(validator.bandersnatch))
-  parts.push(encodeHashValue(validator.ed25519))
+  parts.push(hexToBytes(validator.bandersnatch))
+  parts.push(hexToBytes(validator.ed25519))
 
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
@@ -81,9 +78,9 @@ function decodeValidatorKeyPair(
   data: Uint8Array,
   offset: number,
 ): { result: ValidatorKeyPair; newOffset: number } {
-  const bandersnatch = decodeHashValue(data.slice(offset, offset + 32))
+  const bandersnatch = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
-  const ed25519 = decodeHashValue(data.slice(offset, offset + 32))
+  const ed25519 = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   return {
@@ -93,10 +90,10 @@ function decodeValidatorKeyPair(
 }
 
 // Epoch mark encoding/decoding (optional)
-function encodeEpochMark(epochMark: EpochMark | null): Uint8Array {
+function encodeEpochMark(epochMark: EpochMark | null): Safe<Uint8Array> {
   if (epochMark === null) {
     // Encode as None (1 byte with value 0)
-    return new Uint8Array([0])
+    return safeResult(new Uint8Array([0]))
   }
 
   const parts: Uint8Array[] = []
@@ -104,13 +101,17 @@ function encodeEpochMark(epochMark: EpochMark | null): Uint8Array {
   parts.push(new Uint8Array([1]))
 
   // Encode entropy (32 bytes)
-  parts.push(encodeHashValue(epochMark.entropy))
+  parts.push(hexToBytes(epochMark.entropy))
 
   // Encode tickets_entropy (32 bytes)
-  parts.push(encodeHashValue(epochMark.tickets_entropy))
+  parts.push(hexToBytes(epochMark.tickets_entropy))
 
   // Encode validators count and validators
-  parts.push(encodeNatural(BigInt(epochMark.validators.length)))
+  const [error, encoded] = encodeNatural(BigInt(epochMark.validators.length))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
   for (const validator of epochMark.validators) {
     parts.push(encodeValidatorKeyPair(validator))
   }
@@ -122,30 +123,33 @@ function encodeEpochMark(epochMark: EpochMark | null): Uint8Array {
     result.set(part, offset)
     offset += part.length
   }
-  return result
+  return safeResult(result)
 }
 
 function decodeEpochMark(
   data: Uint8Array,
   offset: number,
-): { result: EpochMark | null; newOffset: number } {
+): Safe<{ value: EpochMark | null; remaining: Uint8Array }> {
   const optionTag = data[offset]
   offset += 1
 
   if (optionTag === 0) {
-    return { result: null, newOffset: offset }
+    return safeResult({ value: null, remaining: data.slice(offset) })
   }
 
   // Decode entropy
-  const entropy = decodeHashValue(data.slice(offset, offset + 32))
+  const entropy = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   // Decode tickets_entropy
-  const ticketsEntropy = decodeHashValue(data.slice(offset, offset + 32))
+  const ticketsEntropy = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   // Decode validators count
-  const validatorsCountResult = decodeNatural(data.slice(offset))
+  const [error, validatorsCountResult] = decodeNatural(data.slice(offset))
+  if (error) {
+    return safeError(error)
+  }
   const validatorsCount = Number(validatorsCountResult.value)
   offset += data.slice(offset).length - validatorsCountResult.remaining.length
 
@@ -157,23 +161,23 @@ function decodeEpochMark(
     offset = validatorResult.newOffset
   }
 
-  return {
-    result: {
+  return safeResult({
+    value: {
       entropy,
       tickets_entropy: ticketsEntropy,
       validators,
     },
-    newOffset: offset,
-  }
+    remaining: data.slice(offset),
+  })
 }
 
 // Winners mark encoding/decoding (optional array of tickets)
 function encodeWinnersMark(
   winnersMark: SafroleTicketHeader[] | null,
-): Uint8Array {
+): Safe<Uint8Array> {
   if (winnersMark === null) {
     // Encode as None (1 byte with value 0)
-    return new Uint8Array([0])
+    return safeResult(new Uint8Array([0]))
   }
 
   const parts: Uint8Array[] = []
@@ -181,10 +185,18 @@ function encodeWinnersMark(
   parts.push(new Uint8Array([1]))
 
   // Encode tickets count and tickets
-  parts.push(encodeNatural(BigInt(winnersMark.length)))
+  const [error, encoded] = encodeNatural(BigInt(winnersMark.length))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
   for (const ticket of winnersMark) {
-    parts.push(encodeFixedLength(BigInt(ticket.attempt), 4 as const))
-    parts.push(encodeHashValue(ticket.signature))
+    const [error2, encoded2] = encodeFixedLength(BigInt(ticket.attempt), 4n)
+    if (error2) {
+      return safeError(error2)
+    }
+    parts.push(encoded2)
+    parts.push(hexToBytes(ticket.signature))
   }
 
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -194,51 +206,61 @@ function encodeWinnersMark(
     result.set(part, offset)
     offset += part.length
   }
-  return result
+  return safeResult(result)
 }
 
 function decodeWinnersMark(
   data: Uint8Array,
   offset: number,
-): { result: SafroleTicketHeader[] | null; newOffset: number } {
+): Safe<{ value: SafroleTicketHeader[] | null; remaining: Uint8Array }> {
   const optionTag = data[offset]
   offset += 1
 
   if (optionTag === 0) {
-    return { result: null, newOffset: offset }
+    return safeResult({ value: null, remaining: data.slice(offset) })
   }
 
   // Decode tickets count
-  const ticketsCountResult = decodeNatural(data.slice(offset))
+  const [error, ticketsCountResult] = decodeNatural(data.slice(offset))
+  if (error) {
+    return safeError(error)
+  }
   const ticketsCount = Number(ticketsCountResult.value)
   offset += data.slice(offset).length - ticketsCountResult.remaining.length
 
   // Decode tickets
   const tickets: SafroleTicketHeader[] = []
   for (let i = 0; i < ticketsCount; i++) {
-    const attemptResult = decodeFixedLength(data.slice(offset), 4 as const)
-    const attempt = Number(attemptResult.value)
+    const [error, attemptResult] = decodeFixedLength(data.slice(offset), 4n)
+    if (error) {
+      return safeError(error)
+    }
+    const attempt = attemptResult.value
     offset += 4
 
-    const signature = decodeHashValue(data.slice(offset, offset + 32))
+    const signature = bytesToHex(data.slice(offset, offset + 32))
     offset += 32
 
     tickets.push({ attempt, signature })
   }
 
-  return { result: tickets, newOffset: offset }
+  return safeResult({ value: tickets, remaining: data.slice(offset) })
 }
 
 // Offenders mark encoding/decoding (array of Ed25519 keys)
-function encodeOffendersMark(offendersMark: HashValue[]): Uint8Array {
+function encodeOffendersMark(offendersMark: Hex[]): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Encode count
-  parts.push(encodeNatural(BigInt(offendersMark.length)))
+  const [error, encoded] = encodeNatural(BigInt(offendersMark.length))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Encode keys
   for (const key of offendersMark) {
-    parts.push(encodeHashValue(key))
+    parts.push(hexToBytes(key))
   }
 
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -248,61 +270,84 @@ function encodeOffendersMark(offendersMark: HashValue[]): Uint8Array {
     result.set(part, offset)
     offset += part.length
   }
-  return result
+  return safeResult(result)
 }
 
 function decodeOffendersMark(
   data: Uint8Array,
   offset: number,
-): { result: HashValue[]; newOffset: number } {
+): Safe<{ value: Hex[]; remaining: Uint8Array }> {
   // Decode count
-  const countResult = decodeNatural(data.slice(offset))
+  const [error, countResult] = decodeNatural(data.slice(offset))
+  if (error) {
+    return safeError(error)
+  }
   const count = Number(countResult.value)
   offset += data.slice(offset).length - countResult.remaining.length
 
   // Decode keys
-  const keys: HashValue[] = []
+  const keys: Hex[] = []
   for (let i = 0; i < count; i++) {
-    const key = decodeHashValue(data.slice(offset, offset + 32))
+    const key = bytesToHex(data.slice(offset, offset + 32))
     keys.push(key)
     offset += 32
   }
 
-  return { result: keys, newOffset: offset }
+  return safeResult({ value: keys, remaining: data.slice(offset) })
 }
 
-export function encodeJamHeader(header: JamHeader): Uint8Array {
+export function encodeJamHeader(header: JamHeader): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // parent (32 bytes)
-  parts.push(encodeHashValue(header.parent))
+  parts.push(hexToBytes(header.parent))
 
   // parent_state_root (32 bytes)
-  parts.push(encodeHashValue(header.parent_state_root))
+  parts.push(hexToBytes(header.parent_state_root))
 
   // extrinsic_hash (32 bytes)
-  parts.push(encodeHashValue(header.extrinsic_hash))
+  parts.push(hexToBytes(header.extrinsic_hash))
 
   // slot (4 bytes)
-  parts.push(encodeFixedLength(BigInt(header.slot), 4 as const))
+  const [error, encoded] = encodeFixedLength(BigInt(header.slot), 4n)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // epoch_mark (optional)
-  parts.push(encodeEpochMark(header.epoch_mark))
+  const [error2, encoded2] = encodeEpochMark(header.epoch_mark)
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // winners_mark (optional)
-  parts.push(encodeWinnersMark(header.winners_mark))
+  const [error3, encoded3] = encodeWinnersMark(header.winners_mark)
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // author_index (2 bytes)
-  parts.push(encodeFixedLength(BigInt(header.author_index), 2 as const))
+  const [error4, encoded4] = encodeFixedLength(BigInt(header.author_index), 2n)
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
 
   // vrf_sig (96 bytes)
-  parts.push(encodeHashValue(header.vrf_sig))
+  parts.push(hexToBytes(header.vrf_sig))
 
   // offenders_mark (variable)
-  parts.push(encodeOffendersMark(header.offenders_mark))
+  const [error5, encoded5] = encodeOffendersMark(header.offenders_mark)
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
 
   // seal_sig (96 bytes) - this is part of the signed header, not unsigned
-  parts.push(encodeHashValue(header.seal_sig))
+  parts.push(hexToBytes(header.seal_sig))
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -313,68 +358,88 @@ export function encodeJamHeader(header: JamHeader): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
-export function decodeJamHeader(data: Uint8Array): JamHeader {
+export function decodeJamHeader(
+  data: Uint8Array,
+): Safe<{ value: JamHeader; remaining: Uint8Array }> {
   let offset = 0
 
   // parent (32 bytes)
-  const parent = decodeHashValue(data.slice(offset, offset + 32))
+  const parent = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   // parent_state_root (32 bytes)
-  const parentStateRoot = decodeHashValue(data.slice(offset, offset + 32))
+  const parentStateRoot = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   // extrinsic_hash (32 bytes)
-  const extrinsicHash = decodeHashValue(data.slice(offset, offset + 32))
+  const extrinsicHash = bytesToHex(data.slice(offset, offset + 32))
   offset += 32
 
   // slot (4 bytes)
-  const slotResult = decodeFixedLength(data.slice(offset), 4 as const)
-  const slot = Number(slotResult.value)
+  const [error, slotResult] = decodeFixedLength(data.slice(offset), 4n)
+  if (error) {
+    return safeError(error)
+  }
+  const slot = slotResult.value
   offset += 4
 
   // epoch_mark (optional)
-  const epochMarkResult = decodeEpochMark(data, offset)
-  const epochMark = epochMarkResult.result
-  offset = epochMarkResult.newOffset
+  const [error2, epochMarkResult] = decodeEpochMark(data, offset)
+  if (error2) {
+    return safeError(error2)
+  }
+  const epochMark = epochMarkResult.value
+  offset = epochMarkResult.remaining.length
 
   // winners_mark (optional)
-  const winnersMarkResult = decodeWinnersMark(data, offset)
-  const winnersMark = winnersMarkResult.result
-  offset = winnersMarkResult.newOffset
+  const [error3, winnersMarkResult] = decodeWinnersMark(data, offset)
+  if (error3) {
+    return safeError(error3)
+  }
+  const winnersMark = winnersMarkResult.value
+  offset = winnersMarkResult.remaining.length
 
   // author_index (2 bytes)
-  const authorIndexResult = decodeFixedLength(data.slice(offset), 2 as const)
-  const authorIndex = Number(authorIndexResult.value)
+  const [error4, authorIndexResult] = decodeFixedLength(data.slice(offset), 2n)
+  if (error4) {
+    return safeError(error4)
+  }
+  const authorIndex = authorIndexResult.value
   offset += 2
 
   // vrf_sig (96 bytes)
-  const vrfSig = decodeHashValue(data.slice(offset, offset + 96))
+  const vrfSig = bytesToHex(data.slice(offset, offset + 96))
   offset += 96
 
   // offenders_mark (variable)
-  const offendersMarkResult = decodeOffendersMark(data, offset)
-  const offendersMark = offendersMarkResult.result
-  offset = offendersMarkResult.newOffset
+  const [error5, offendersMarkResult] = decodeOffendersMark(data, offset)
+  if (error5) {
+    return safeError(error5)
+  }
+  const offendersMark = offendersMarkResult.value
+  offset = offendersMarkResult.remaining.length
 
   // seal_sig (96 bytes)
-  const sealSig = decodeHashValue(data.slice(offset, offset + 96))
+  const sealSig = bytesToHex(data.slice(offset, offset + 96))
 
-  return {
-    parent,
-    parent_state_root: parentStateRoot,
-    extrinsic_hash: extrinsicHash,
-    slot,
-    epoch_mark: epochMark,
-    winners_mark: winnersMark,
-    offenders_mark: offendersMark,
-    author_index: authorIndex,
-    vrf_sig: vrfSig,
-    seal_sig: sealSig,
-  }
+  return safeResult({
+    value: {
+      parent,
+      parent_state_root: parentStateRoot,
+      extrinsic_hash: extrinsicHash,
+      slot,
+      epoch_mark: epochMark,
+      winners_mark: winnersMark,
+      offenders_mark: offendersMark,
+      author_index: authorIndex,
+      vrf_sig: vrfSig,
+      seal_sig: sealSig,
+    },
+    remaining: data.slice(offset),
+  })
 }
 
 // Legacy function aliases for compatibility

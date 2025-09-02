@@ -40,7 +40,13 @@
  * type safety and integrity through cryptographic commitments.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { ImportSegment } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
@@ -50,14 +56,20 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * @param importRef - Import reference to encode
  * @returns Encoded octet sequence
  */
-export function encodeImportReference(importRef: ImportSegment): Uint8Array {
+export function encodeImportReference(
+  importRef: ImportSegment,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Tree root (32 bytes) - convert hex to bytes
   parts.push(hexToBytes(importRef.hash))
 
   // Index (variable length natural number)
-  parts.push(encodeNatural(BigInt(importRef.index)))
+  const [error, encoded] = encodeNatural(BigInt(importRef.index))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -69,7 +81,7 @@ export function encodeImportReference(importRef: ImportSegment): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -78,22 +90,27 @@ export function encodeImportReference(importRef: ImportSegment): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded import reference and remaining data
  */
-export function decodeImportReference(data: Uint8Array): {
+export function decodeImportReference(data: Uint8Array): Safe<{
   value: ImportSegment
   remaining: Uint8Array
-} {
+}> {
   // Tree root (32 bytes)
   const treeRoot = bytesToHex(data.slice(0, 32))
   const remaining = data.slice(32)
 
   // Index (variable length natural number)
-  const { value: index, remaining: indexRemaining } = decodeNatural(remaining)
+  const [error, result] = decodeNatural(remaining)
+  if (error) {
+    return safeError(error)
+  }
+  const index = result.value
+  const indexRemaining = result.remaining
 
-  return {
+  return safeResult({
     value: {
       hash: treeRoot,
-      index: Number(index),
+      index,
     },
     remaining: indexRemaining,
-  }
+  })
 }

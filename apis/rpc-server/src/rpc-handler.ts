@@ -1,16 +1,6 @@
-import { logger } from '@pbnj/core'
+import { bytesToHex, type Hex, logger } from '@pbnj/core'
 import type { SubscriptionManager } from './subscription-manager'
-import type {
-  Blob,
-  CoreIndex,
-  Hash,
-  Parameters,
-  RpcParams,
-  RpcResult,
-  ServiceId,
-  Slot,
-  WebSocket,
-} from './types'
+import type { Parameters, RpcParams, RpcResult, WebSocket } from './types'
 
 export class RpcHandler {
   constructor(private subscriptionManager: SubscriptionManager) {}
@@ -40,68 +30,100 @@ export class RpcHandler {
         return this.subscribeFinalizedBlock(ws!)
 
       case 'parent':
-        return this.parent(params[0])
+        return this.parent(params[0] as Hex)
 
       case 'stateRoot':
-        return this.stateRoot(params[0])
+        return this.stateRoot(params[0] as Hex)
 
       // Statistics methods
       case 'statistics':
-        return this.statistics(params[0])
+        return this.statistics(params[0] as Hex)
 
       case 'subscribeStatistics':
-        return this.subscribeStatistics(params[0], ws!)
+        return this.subscribeStatistics(params[0] as boolean, ws!)
 
       // Service data methods
       case 'serviceData':
-        return this.serviceData(params[0], params[1])
+        return this.serviceData(params[0] as Hex, params[1] as number)
 
       case 'subscribeServiceData':
-        return this.subscribeServiceData(params[0], params[1], ws!)
+        return this.subscribeServiceData(
+          params[0] as number,
+          params[1] as boolean,
+          ws!,
+        )
 
       case 'serviceValue':
-        return this.serviceValue(params[0], params[1], params[2])
+        return this.serviceValue(
+          params[0] as Hex,
+          params[1] as number,
+          params[2] as unknown as Uint8Array,
+        )
 
       case 'subscribeServiceValue':
-        return this.subscribeServiceValue(params[0], params[1], params[2], ws!)
+        return this.subscribeServiceValue(
+          params[0] as number,
+          params[1] as unknown as Uint8Array,
+          params[2] as boolean,
+          ws!,
+        )
 
       case 'servicePreimage':
-        return this.servicePreimage(params[0], params[1], params[2])
+        return this.servicePreimage(
+          params[0] as Hex,
+          params[1] as number,
+          params[2] as unknown as Hex,
+        )
 
       case 'subscribeServicePreimage':
         return this.subscribeServicePreimage(
-          params[0],
-          params[1],
-          params[2],
+          params[0] as number,
+          params[1] as Hex,
+          params[2] as boolean,
           ws!,
         )
 
       case 'serviceRequest':
-        return this.serviceRequest(params[0], params[1], params[2], params[3])
+        return this.serviceRequest(
+          params[0] as Hex,
+          params[1] as number,
+          params[2] as Hex,
+          params[3] as number,
+        )
 
       case 'subscribeServiceRequest':
         return this.subscribeServiceRequest(
-          params[0],
-          params[1],
-          params[2],
-          params[3],
+          params[0] as number,
+          params[1] as Hex,
+          params[2] as number,
+          params[3] as boolean,
           ws!,
         )
 
       // BEEFY methods
       case 'beefyRoot':
-        return this.beefyRoot(params[0])
+        return this.beefyRoot(params[0] as Hex)
 
       // Submission methods
       case 'submitWorkPackage':
-        return this.submitWorkPackage(params[0], params[1], params[2])
+        this.submitWorkPackage(
+          params[0] as unknown as bigint,
+          params[1] as unknown as Uint8Array,
+          params[2] as unknown as Uint8Array[],
+        )
+        return null
 
       case 'submitPreimage':
-        return this.submitPreimage(params[0], params[1], params[2])
+        this.submitPreimage(
+          params[0] as unknown as bigint,
+          params[1] as unknown as Uint8Array,
+          params[2] as unknown as Hex,
+        )
+        return null
 
       // Service listing
       case 'listServices':
-        return this.listServices(params[0])
+        return this.listServices(params[0] as Hex)
 
       default:
         throw new Error(`Unknown method: ${method}`)
@@ -144,10 +166,10 @@ export class RpcHandler {
     }
   }
 
-  private bestBlock(): { hash: Hash; slot: Slot } {
+  private bestBlock(): { hash: Hex; slot: bigint } {
     // Mock implementation - replace with actual implementation
     return {
-      hash: this.generateMockHash(),
+      hash: `0x${'0'.repeat(32)}` as Hex, // TODO: replace with actual hash
       slot: BigInt(12345),
     }
   }
@@ -161,10 +183,10 @@ export class RpcHandler {
     return subscriptionId
   }
 
-  private finalizedBlock(): { hash: Hash; slot: Slot } {
+  private finalizedBlock(): { hash: Hex; slot: bigint } {
     // Mock implementation - replace with actual implementation
     return {
-      hash: this.generateMockHash(),
+      hash: `0x${'0'.repeat(32)}` as Hex, // TODO: replace with actual hash
       slot: BigInt(12340),
     }
   }
@@ -178,20 +200,20 @@ export class RpcHandler {
     return subscriptionId
   }
 
-  private parent(_childHash: Hash): { hash: Hash; slot: Slot } | null {
+  private parent(_childHash: Hex): { hash: Hex; slot: bigint } | null {
     // Mock implementation - replace with actual implementation
     return {
-      hash: this.generateMockHash(),
+      hash: `0x${'0'.repeat(32)}` as Hex, // TODO: replace with actual hash
       slot: BigInt(12344),
     }
   }
 
-  private stateRoot(_blockHash: Hash): Hash | null {
+  private stateRoot(_blockHash: Hex): Hex | null {
     // Mock implementation - replace with actual implementation
-    return this.generateMockHash()
+    return `0x${'0'.repeat(32)}` as Hex // TODO: replace with actual hash
   }
 
-  private statistics(_blockHash: Hash): Blob | null {
+  private statistics(_blockHash: Hex): Uint8Array | null {
     // Mock implementation - replace with actual implementation
     return new Uint8Array([1, 2, 3, 4, 5])
   }
@@ -205,13 +227,13 @@ export class RpcHandler {
     return subscriptionId
   }
 
-  private serviceData(_blockHash: Hash, _serviceId: ServiceId): Blob | null {
+  private serviceData(_blockHash: Hex, _serviceId: number): Uint8Array | null {
     // Mock implementation - replace with actual implementation
     return new Uint8Array([1, 2, 3, 4, 5])
   }
 
   private subscribeServiceData(
-    serviceId: ServiceId,
+    serviceId: number,
     finalized: boolean,
     ws: WebSocket,
   ): string {
@@ -224,40 +246,40 @@ export class RpcHandler {
   }
 
   private serviceValue(
-    _blockHash: Hash,
-    _serviceId: ServiceId,
-    _key: Blob,
-  ): Blob | null {
+    _blockHash: Hex,
+    _serviceId: number,
+    _key: Uint8Array,
+  ): Uint8Array | null {
     // Mock implementation - replace with actual implementation
     return new Uint8Array([1, 2, 3, 4, 5])
   }
 
   private subscribeServiceValue(
-    serviceId: ServiceId,
-    key: Blob,
+    serviceId: number,
+    key: Uint8Array,
     finalized: boolean,
     ws: WebSocket,
   ): string {
     const subscriptionId = this.subscriptionManager.addSubscription(
       ws,
       'serviceValue',
-      [serviceId, key, finalized],
+      [serviceId, bytesToHex(key), finalized],
     )
     return subscriptionId
   }
 
   private servicePreimage(
-    _blockHash: Hash,
-    _serviceId: ServiceId,
-    _hash: Hash,
-  ): Blob | null {
+    _blockHash: Hex,
+    _serviceId: number,
+    _hash: Hex,
+  ): Uint8Array | null {
     // Mock implementation - replace with actual implementation
     return new Uint8Array([1, 2, 3, 4, 5])
   }
 
   private subscribeServicePreimage(
-    serviceId: ServiceId,
-    hash: Hash,
+    serviceId: number,
+    hash: Hex,
     finalized: boolean,
     ws: WebSocket,
   ): string {
@@ -270,18 +292,18 @@ export class RpcHandler {
   }
 
   private serviceRequest(
-    _blockHash: Hash,
-    _serviceId: ServiceId,
-    _hash: Hash,
+    _blockHash: Hex,
+    _serviceId: number,
+    _hash: Hex,
     _len: number,
-  ): Slot[] | null {
+  ): bigint[] | null {
     // Mock implementation - replace with actual implementation
     return [BigInt(12345), BigInt(12346)]
   }
 
   private subscribeServiceRequest(
-    serviceId: ServiceId,
-    hash: Hash,
+    serviceId: number,
+    hash: Hex,
     len: number,
     finalized: boolean,
     ws: WebSocket,
@@ -294,15 +316,15 @@ export class RpcHandler {
     return subscriptionId
   }
 
-  private beefyRoot(_blockHash: Hash): Hash | null {
+  private beefyRoot(_blockHash: Hex): Hex | null {
     // Mock implementation - replace with actual implementation
-    return this.generateMockHash()
+    return `0x${'0'.repeat(32)}` as Hex // TODO: replace with actual hash
   }
 
   private submitWorkPackage(
-    coreIndex: CoreIndex,
-    workPackage: Blob,
-    extrinsics: Blob[],
+    coreIndex: bigint,
+    workPackage: Uint8Array,
+    extrinsics: Uint8Array[],
   ): void {
     // Mock implementation - replace with actual implementation
     logger.info('Submitting work package', {
@@ -313,9 +335,9 @@ export class RpcHandler {
   }
 
   private submitPreimage(
-    serviceId: ServiceId,
-    preimage: Blob,
-    blockHash: Hash,
+    serviceId: bigint,
+    preimage: Uint8Array,
+    blockHash: Hex,
   ): void {
     // Mock implementation - replace with actual implementation
     logger.info('Submitting preimage', {
@@ -325,17 +347,8 @@ export class RpcHandler {
     })
   }
 
-  private listServices(_blockHash: Hash): ServiceId[] {
+  private listServices(_blockHash: Hex): bigint[] {
     // Mock implementation - replace with actual implementation
-    return [1, 2, 3, 4, 5]
-  }
-
-  private generateMockHash(): Hash {
-    // Generate a mock 32-byte hash
-    const hash = new Uint8Array(32)
-    for (let i = 0; i < 32; i++) {
-      hash[i] = Math.floor(Math.random() * 256)
-    }
-    return hash
+    return [1n, 2n, 3n, 4n, 5n]
   }
 }

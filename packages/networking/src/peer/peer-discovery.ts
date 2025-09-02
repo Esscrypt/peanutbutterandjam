@@ -6,26 +6,12 @@
  */
 
 import type {
-  ConnectionEndpoint,
   NodeType,
+  PeerInfo,
   ValidatorIndex,
   ValidatorMetadata,
 } from '@pbnj/types'
 import { PreferredInitiator } from '@pbnj/types'
-
-/**
- * Peer information
- */
-interface PeerInfo {
-  validatorIndex: ValidatorIndex
-  metadata: ValidatorMetadata
-  endpoint: ConnectionEndpoint
-  isConnected: boolean
-  lastSeen: number
-  connectionAttempts: number
-  lastConnectionAttempt: number
-  preferredInitiator: PreferredInitiator
-}
 
 /**
  * Peer discovery manager
@@ -393,5 +379,50 @@ export class PeerDiscoveryManager {
       peer.connectionAttempts = 0
       peer.lastConnectionAttempt = 0
     }
+  }
+
+  /**
+   * Start peer discovery process
+   * JIP-5 compliant startup method
+   */
+  async start(): Promise<void> {
+    console.log('Starting peer discovery for JIP-5 compliance')
+
+    // For testing, add a hardcoded peer (polkaJAM) if we're not that peer
+    if (this.localValidatorIndex !== 1) {
+      this.addPeer(1, {
+        index: 1,
+        publicKey: new Uint8Array(32), // Placeholder
+        endpoint: {
+          host: '127.0.0.1',
+          port: 30334,
+          publicKey: new Uint8Array(32), // Placeholder
+        },
+      })
+      console.log(
+        'Added polkaJAM peer for testing (validator index 1 at 127.0.0.1:30334)',
+      )
+    }
+
+    // For testing, add our own node as a discoverable peer if we're validator 0
+    if (this.localValidatorIndex === 0) {
+      // polkaJAM should be able to discover us at 127.0.0.1:30333
+      console.log(
+        'Local node discoverable at 127.0.0.1:30333 for validator index 0',
+      )
+    }
+
+    console.log(
+      `Peer discovery started for validator ${this.localValidatorIndex}`,
+    )
+  }
+
+  /**
+   * Stop peer discovery process
+   * JIP-5 compliant shutdown method
+   */
+  async stop(): Promise<void> {
+    console.log('Stopping peer discovery')
+    // TODO: Implement graceful shutdown
   }
 }

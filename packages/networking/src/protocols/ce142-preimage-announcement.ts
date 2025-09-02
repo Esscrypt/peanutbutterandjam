@@ -5,8 +5,8 @@
  * This is a Common Ephemeral (CE) stream for announcing possession of preimages.
  */
 
-import type { Bytes, PreimageAnnouncement, StreamInfo } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { PreimageAnnouncement, StreamInfo } from '@pbnj/types'
 
 /**
  * Preimage announcement protocol handler
@@ -16,21 +16,21 @@ export class PreimageAnnouncementProtocol {
     string,
     {
       serviceId: number
-      hash: Bytes
+      hash: Uint8Array
       preimageLength: number
       timestamp: number
     }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -58,7 +58,7 @@ export class PreimageAnnouncementProtocol {
    */
   async storePreimageAnnouncement(
     serviceId: number,
-    hash: Bytes,
+    hash: Uint8Array,
     preimageLength: number,
   ): Promise<void> {
     const hashString = hash.toString()
@@ -96,10 +96,10 @@ export class PreimageAnnouncementProtocol {
   /**
    * Get preimage announcement from local store
    */
-  getPreimageAnnouncement(hash: Bytes):
+  getPreimageAnnouncement(hash: Uint8Array):
     | {
         serviceId: number
-        hash: Bytes
+        hash: Uint8Array
         preimageLength: number
         timestamp: number
       }
@@ -110,9 +110,9 @@ export class PreimageAnnouncementProtocol {
   /**
    * Get preimage announcement from database if not in local store
    */
-  async getPreimageAnnouncementFromDatabase(hash: Bytes): Promise<{
+  async getPreimageAnnouncementFromDatabase(hash: Uint8Array): Promise<{
     serviceId: number
-    hash: Bytes
+    hash: Uint8Array
     preimageLength: number
     timestamp: number
   } | null> {
@@ -176,7 +176,7 @@ export class PreimageAnnouncementProtocol {
    */
   createPreimageAnnouncement(
     serviceId: number,
-    hash: Bytes,
+    hash: Uint8Array,
     preimageLength: number,
   ): PreimageAnnouncement {
     return {
@@ -189,7 +189,9 @@ export class PreimageAnnouncementProtocol {
   /**
    * Serialize preimage announcement message
    */
-  serializePreimageAnnouncement(announcement: PreimageAnnouncement): Bytes {
+  serializePreimageAnnouncement(
+    announcement: PreimageAnnouncement,
+  ): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + 32 + 4) // serviceId + hash + preimageLength
     const view = new DataView(buffer)
@@ -212,7 +214,7 @@ export class PreimageAnnouncementProtocol {
   /**
    * Deserialize preimage announcement message
    */
-  deserializePreimageAnnouncement(data: Bytes): PreimageAnnouncement {
+  deserializePreimageAnnouncement(data: Uint8Array): PreimageAnnouncement {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -237,7 +239,7 @@ export class PreimageAnnouncementProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const announcement = this.deserializePreimageAnnouncement(data)
       await this.processPreimageAnnouncement(announcement)

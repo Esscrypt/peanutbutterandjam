@@ -15,7 +15,11 @@ export function createListKeysCommand(_args: string[]): void {
 
     // List keys for all 6 validators (0-5)
     for (let i = 0; i < 6; i++) {
-      const keys = generateValidatorKeys(i)
+      const [error, keys] = generateValidatorKeys(i)
+      if (error) {
+        logger.error('Failed to generate keys:', error)
+        process.exit(1)
+      }
       logger.info(`Validator ${i}: ${keys.bandersnatch_public}`)
     }
 

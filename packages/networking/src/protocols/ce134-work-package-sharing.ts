@@ -5,13 +5,12 @@
  * This is a Common Ephemeral (CE) stream for guarantors to share work packages.
  */
 
+import type { NetworkingStore } from '@pbnj/state'
 import type {
-  Bytes,
   StreamInfo,
   WorkPackageSharing,
   WorkPackageSharingResponse,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Work package sharing protocol handler
@@ -19,19 +18,19 @@ import type { NetworkingDatabaseIntegration } from '../db-integration'
 export class WorkPackageSharingProtocol {
   private workPackageBundles: Map<
     string,
-    { bundle: Bytes; coreIndex: number; timestamp: number }
+    { bundle: Uint8Array; coreIndex: number; timestamp: number }
   > = new Map()
-  private segmentsRootMappings: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private segmentsRootMappings: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -58,8 +57,8 @@ export class WorkPackageSharingProtocol {
    * Store work package bundle in local store and persist to database
    */
   async storeWorkPackageBundle(
-    bundleHash: Bytes,
-    bundle: Bytes,
+    bundleHash: Uint8Array,
+    bundle: Uint8Array,
     coreIndex: number,
   ): Promise<void> {
     const hashString = bundleHash.toString()
@@ -101,8 +100,8 @@ export class WorkPackageSharingProtocol {
    * Store segments root mapping in local store and persist to database
    */
   async storeSegmentsRootMapping(
-    workPackageHash: Bytes,
-    segmentsRoot: Bytes,
+    workPackageHash: Uint8Array,
+    segmentsRoot: Uint8Array,
   ): Promise<void> {
     const hashString = workPackageHash.toString()
     this.segmentsRootMappings.set(hashString, segmentsRoot)
@@ -127,24 +126,26 @@ export class WorkPackageSharingProtocol {
    * Get work package bundle from local store
    */
   getWorkPackageBundle(
-    bundleHash: Bytes,
-  ): { bundle: Bytes; coreIndex: number; timestamp: number } | undefined {
+    bundleHash: Uint8Array,
+  ): { bundle: Uint8Array; coreIndex: number; timestamp: number } | undefined {
     return this.workPackageBundles.get(bundleHash.toString())
   }
 
   /**
    * Get segments root mapping from local store
    */
-  getSegmentsRootMapping(workPackageHash: Bytes): Bytes | undefined {
+  getSegmentsRootMapping(workPackageHash: Uint8Array): Uint8Array | undefined {
     return this.segmentsRootMappings.get(workPackageHash.toString())
   }
 
   /**
    * Get work package bundle from database if not in local store
    */
-  async getWorkPackageBundleFromDatabase(
-    bundleHash: Bytes,
-  ): Promise<{ bundle: Bytes; coreIndex: number; timestamp: number } | null> {
+  async getWorkPackageBundleFromDatabase(bundleHash: Uint8Array): Promise<{
+    bundle: Uint8Array
+    coreIndex: number
+    timestamp: number
+  } | null> {
     if (this.getWorkPackageBundle(bundleHash)) {
       return this.getWorkPackageBundle(bundleHash) || null
     }
@@ -196,8 +197,8 @@ export class WorkPackageSharingProtocol {
    * Get segments root mapping from database if not in local store
    */
   async getSegmentsRootMappingFromDatabase(
-    workPackageHash: Bytes,
-  ): Promise<Bytes | null> {
+    workPackageHash: Uint8Array,
+  ): Promise<Uint8Array | null> {
     if (this.getSegmentsRootMapping(workPackageHash)) {
       return this.getSegmentsRootMapping(workPackageHash) || null
     }
@@ -267,10 +268,10 @@ export class WorkPackageSharingProtocol {
   createWorkPackageSharing(
     coreIndex: number,
     segmentsRootMappings: Array<{
-      workPackageHash: Bytes
-      segmentsRoot: Bytes
+      workPackageHash: Uint8Array
+      segmentsRoot: Uint8Array
     }>,
-    workPackageBundle: Bytes,
+    workPackageBundle: Uint8Array,
   ): WorkPackageSharing {
     return {
       coreIndex,
@@ -282,7 +283,7 @@ export class WorkPackageSharingProtocol {
   /**
    * Serialize work package sharing message
    */
-  serializeWorkPackageSharing(sharing: WorkPackageSharing): Bytes {
+  serializeWorkPackageSharing(sharing: WorkPackageSharing): Uint8Array {
     // Calculate total size
     let totalSize = 4 + 4 // coreIndex + number of mappings
 
@@ -330,7 +331,7 @@ export class WorkPackageSharingProtocol {
   /**
    * Deserialize work package sharing message
    */
-  deserializeWorkPackageSharing(data: Bytes): WorkPackageSharing {
+  deserializeWorkPackageSharing(data: Uint8Array): WorkPackageSharing {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -344,8 +345,8 @@ export class WorkPackageSharingProtocol {
 
     // Read segments root mappings
     const segmentsRootMappings: Array<{
-      workPackageHash: Bytes
-      segmentsRoot: Bytes
+      workPackageHash: Uint8Array
+      segmentsRoot: Uint8Array
     }> = []
     for (let i = 0; i < numMappings; i++) {
       // Read work package hash (32 bytes)
@@ -378,7 +379,7 @@ export class WorkPackageSharingProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<WorkPackageSharingResponse | null> {
     try {
       const sharing = this.deserializeWorkPackageSharing(data)

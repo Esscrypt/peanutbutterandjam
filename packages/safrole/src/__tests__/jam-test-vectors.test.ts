@@ -22,13 +22,13 @@ interface SafroleTestVector {
 }
 
 interface SafroleInput {
-  slot: number
+  slot: bigint
   entropy: string
   extrinsic: TicketProof[]
 }
 
 interface SafroleState {
-  tau: number // slot
+  tau: bigint // slot
   eta: string[] // entropy array
   lambda: ValidatorKey[] // pending set
   kappa: ValidatorKey[] // active set 
@@ -55,13 +55,13 @@ interface ValidatorKey {
 }
 
 interface TicketProof {
-  attempt: number
+  attempt: bigint
   signature: string
 }
 
 interface Ticket {
   id: string
-  attempt: number
+  attempt: bigint
 }
 
 function loadSafroleTestVectors(directory: string): Array<{ file: string, testVector: SafroleTestVector }> {
@@ -178,8 +178,8 @@ function shouldTriggerEpochChange(state: SafroleState, input: SafroleInput): boo
   // Simplified epoch change detection
   // In tiny vectors: epoch length = 12
   const EPOCH_LENGTH = 12
-  const currentEpoch = Math.floor(state.tau / EPOCH_LENGTH)
-  const inputEpoch = Math.floor(input.slot / EPOCH_LENGTH)
+  const currentEpoch = Math.floor(Number(state.tau) / EPOCH_LENGTH)
+  const inputEpoch = Math.floor(Number(input.slot) / EPOCH_LENGTH)
   return inputEpoch > currentEpoch
 }
 
@@ -271,7 +271,7 @@ describe('JAM Safrole Test Vectors', () => {
   describe('Safrole edge cases', () => {
     it('should reject invalid slot progression', () => {
       const state: SafroleState = {
-        tau: 5,
+        tau: 5n,
         eta: ['0x1234'],
         lambda: [],
         kappa: [],
@@ -282,7 +282,7 @@ describe('JAM Safrole Test Vectors', () => {
       }
 
       const input: SafroleInput = {
-        slot: 3, // Invalid: less than current slot
+        slot: 3n, // Invalid: less than current slot
         entropy: '0x5678',
         extrinsic: []
       }
@@ -294,7 +294,7 @@ describe('JAM Safrole Test Vectors', () => {
 
     it('should handle empty extrinsics', () => {
       const state: SafroleState = {
-        tau: 0,
+        tau: 0n,
         eta: [],
         lambda: [],
         kappa: [],
@@ -305,14 +305,14 @@ describe('JAM Safrole Test Vectors', () => {
       }
 
       const input: SafroleInput = {
-        slot: 1,
+        slot: 1n,
         entropy: '0x1234',
         extrinsic: []
       }
 
       const result = safroleSSTF(state, input)
       expect(result.err).toBeUndefined()
-      expect(result.state.tau).toBe(1)
+      expect(result.state.tau).toBe(1n)
     })
   })
 })

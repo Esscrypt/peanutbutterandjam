@@ -36,6 +36,7 @@
  * work package sizes manageable.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type { Preimage } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
@@ -50,14 +51,22 @@ import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
  * @param preimage - Preimage to encode
  * @returns Encoded octet sequence
  */
-function encodePreimage(preimage: Preimage): Uint8Array {
+function encodePreimage(preimage: Preimage): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Service index: encode[4](xp_serviceindex)
-  parts.push(encodeFixedLength(BigInt(preimage.serviceIndex), 4))
+  const [error, encoded] = encodeFixedLength(preimage.serviceIndex, 4n)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Data: var{xp_data} (variable-length octet sequence)
-  parts.push(encodeNatural(BigInt(preimage.data.length))) // Length prefix
+  const [error2, encoded2] = encodeNatural(BigInt(preimage.data.length))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
   parts.push(preimage.data)
 
   // Concatenate all parts
@@ -70,7 +79,7 @@ function encodePreimage(preimage: Preimage): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -79,20 +88,28 @@ function encodePreimage(preimage: Preimage): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded preimage and remaining data
  */
-function decodePreimage(data: Uint8Array): {
+function decodePreimage(data: Uint8Array): Safe<{
   value: Preimage
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Service index: encode[4](xp_serviceindex)
-  const { value: serviceIndex, remaining: serviceIndexRemaining } =
-    decodeFixedLength(currentData, 4)
+  const [error, serviceIndexResult] = decodeFixedLength(currentData, 4n)
+  if (error) {
+    return safeError(error)
+  }
+  const serviceIndex = serviceIndexResult.value
+  const serviceIndexRemaining = serviceIndexResult.remaining
   currentData = serviceIndexRemaining
 
   // Data: var{xp_data} (variable-length octet sequence)
-  const { value: dataLength, remaining: dataLengthRemaining } =
-    decodeNatural(currentData)
+  const [error2, dataLengthResult] = decodeNatural(currentData)
+  if (error2) {
+    return safeError(error2)
+  }
+  const dataLength = dataLengthResult.value
+  const dataLengthRemaining = dataLengthResult.remaining
   const dataLengthNum = Number(dataLength)
   if (dataLengthRemaining.length < dataLengthNum) {
     throw new Error('Insufficient data for preimage data decoding')
@@ -101,14 +118,14 @@ function decodePreimage(data: Uint8Array): {
   currentData = dataLengthRemaining.slice(dataLengthNum)
 
   const preimage: Preimage = {
-    serviceIndex: Number(serviceIndex),
+    serviceIndex,
     data: preimageData,
   }
 
-  return {
+  return safeResult({
     value: preimage,
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -120,7 +137,7 @@ function decodePreimage(data: Uint8Array): {
  * @param preimages - Array of preimages to encode (ordered by service index)
  * @returns Encoded octet sequence
  */
-export function encodePreimages(preimages: Preimage[]): Uint8Array {
+export function encodePreimages(preimages: Preimage[]): Safe<Uint8Array> {
   // Sort preimages by service index as required by Gray Paper
   const sortedPreimages = [...preimages].sort((a, b) => {
     if (a.serviceIndex < b.serviceIndex) return -1
@@ -137,9 +154,9 @@ export function encodePreimages(preimages: Preimage[]): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded preimages and remaining data
  */
-export function decodePreimages(data: Uint8Array): {
+export function decodePreimages(data: Uint8Array): Safe<{
   value: Preimage[]
   remaining: Uint8Array
-} {
+}> {
   return decodeSequenceGeneric(data, decodePreimage)
 }

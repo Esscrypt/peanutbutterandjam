@@ -12,9 +12,6 @@
 import { logger } from '@pbnj/core'
 import type {
   Accounts,
-  Gas,
-  HashValue,
-  HexString,
   RAM,
   RefineContext,
   RefineContextMutator,
@@ -25,6 +22,7 @@ import type {
   WorkPackage,
 } from '@pbnj/types'
 import { HOST_CALL_RESULTS } from '@pbnj/types'
+import type { Hex } from 'viem'
 import { ArgumentInvocationSystem } from '../argument-invocation'
 import { REFINE_CONFIG } from '../config'
 
@@ -65,14 +63,14 @@ export class RefineInvocationSystem {
    * @returns Tuple of [result, export_sequence, gas_used]
    */
   execute(
-    coreIndex: number,
-    workItemIndex: number,
+    coreIndex: bigint,
+    workItemIndex: bigint,
     workPackage: WorkPackage,
-    authorizerTrace: HashValue,
+    authorizerTrace: Hex,
     importSegments: Segment[],
-    exportSegmentOffset: number,
+    exportSegmentOffset: bigint,
     accounts: Accounts,
-  ): [RefineResult, Segment[], Gas] {
+  ): [RefineResult, Segment[], bigint] {
     logger.debug('RefineInvocationSystem.execute called', {
       coreIndex,
       workItemIndex,
@@ -83,19 +81,23 @@ export class RefineInvocationSystem {
       accountsCount: Object.keys(accounts).length,
     })
 
-    const workItem = workPackage.items[workItemIndex]
+    const workItem = workPackage.items[Number(workItemIndex)]
     if (!workItem) {
       logger.debug('Refine: work item not found, returning BAD')
       return ['BAD', [], 0n]
     }
 
     // Check if service account exists
-    if (!(workItem.serviceindex in accounts)) {
+    if (!accounts.has(workItem.serviceindex)) {
       logger.debug('Refine: service account not found, returning BAD')
       return ['BAD', [], 0n]
     }
 
-    const serviceAccount = accounts[workItem.serviceindex]
+    const serviceAccount = accounts.get(workItem.serviceindex)
+    if (!serviceAccount) {
+      logger.debug('Refine: service account not found, returning BAD')
+      return ['BAD', [], 0n]
+    }
 
     // Historical lookup for service code
     const historicalCode = this.historicalLookup(
@@ -122,7 +124,7 @@ export class RefineInvocationSystem {
     const encodedArgs = this.encodeArguments(
       coreIndex,
       workItemIndex,
-      workItem.serviceindex,
+      BigInt(workItem.serviceindex),
       workItem.payload,
       workPackage,
     )
@@ -130,9 +132,9 @@ export class RefineInvocationSystem {
     // Execute the argument invocation with service code
     const result = this.argumentInvocationSystem.execute(
       new Uint8Array(Buffer.from(historicalCode, 'hex')), // service code
-      0, // instruction pointer starts at 0
+      0n, // instruction pointer starts at 0
       workItem.refgaslimit, // gas limit from work item
-      { data: new Uint8Array(encodedArgs), size: encodedArgs.length }, // argument data
+      { data: new Uint8Array(encodedArgs), size: BigInt(encodedArgs.length) }, // argument data
       [new Map(), []], // initial context: empty PVM guests map and empty segments
     )
 
@@ -166,8 +168,8 @@ export class RefineInvocationSystem {
    */
   private createContextMutator(): RefineContextMutator {
     return (
-      hostCallId: number,
-      gasCounter: Gas,
+      hostCallId: bigint,
+      gasCounter: bigint,
       registers: RegisterState,
       ram: RAM,
       context: RefineContext,
@@ -176,13 +178,13 @@ export class RefineInvocationSystem {
 
       // Handle different host call functions
       switch (hostCallId) {
-        case 0: // gas function
+        case 0n: // gas function
           return this.handleGasCall(gasCounter, registers, ram, context)
 
-        case 1: // fetch function
+        case 1n: // fetch function
           return this.handleFetchCall(gasCounter, registers, ram, context)
 
-        case 6: // historical_lookup function
+        case 6n: // historical_lookup function
           return this.handleHistoricalLookupCall(
             gasCounter,
             registers,
@@ -190,25 +192,25 @@ export class RefineInvocationSystem {
             context,
           )
 
-        case 7: // export function
+        case 7n: // export function
           return this.handleExportCall(gasCounter, registers, ram, context)
 
-        case 8: // machine function
+        case 8n: // machine function
           return this.handleMachineCall(gasCounter, registers, ram, context)
 
-        case 9: // peek function
+        case 9n: // peek function
           return this.handlePeekCall(gasCounter, registers, ram, context)
 
-        case 10: // poke function
+        case 10n: // poke function
           return this.handlePokeCall(gasCounter, registers, ram, context)
 
-        case 11: // pages function
+        case 11n: // pages function
           return this.handlePagesCall(gasCounter, registers, ram, context)
 
-        case 12: // invoke function
+        case 12n: // invoke function
           return this.handleInvokeCall(gasCounter, registers, ram, context)
 
-        case 13: // expunge function
+        case 13n: // expunge function
           return this.handleExpungeCall(gasCounter, registers, ram, context)
 
         default:
@@ -232,13 +234,13 @@ export class RefineInvocationSystem {
    * Handle gas function call (Ω_G)
    */
   private handleGasCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -261,13 +263,13 @@ export class RefineInvocationSystem {
    * Handle fetch function call (Ω_Y)
    */
   private handleFetchCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -291,13 +293,13 @@ export class RefineInvocationSystem {
    * Handle historical lookup function call (Ω_H)
    */
   private handleHistoricalLookupCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -321,13 +323,13 @@ export class RefineInvocationSystem {
    * Handle export function call (Ω_E)
    */
   private handleExportCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -351,13 +353,13 @@ export class RefineInvocationSystem {
    * Handle machine function call (Ω_M)
    */
   private handleMachineCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -381,13 +383,13 @@ export class RefineInvocationSystem {
    * Handle peek function call (Ω_P)
    */
   private handlePeekCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -411,13 +413,13 @@ export class RefineInvocationSystem {
    * Handle poke function call (Ω_O)
    */
   private handlePokeCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -441,13 +443,13 @@ export class RefineInvocationSystem {
    * Handle pages function call (Ω_Z)
    */
   private handlePagesCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -471,13 +473,13 @@ export class RefineInvocationSystem {
    * Handle invoke function call (Ω_K)
    */
   private handleInvokeCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -501,13 +503,13 @@ export class RefineInvocationSystem {
    * Handle expunge function call (Ω_X)
    */
   private handleExpungeCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: RefineContext,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: RefineContext
@@ -537,9 +539,9 @@ export class RefineInvocationSystem {
    */
   private historicalLookup(
     serviceAccount: ServiceAccount,
-    _lookupAnchorTime: number,
-    codehash: HashValue,
-  ): HashValue | null {
+    _lookupAnchorTime: bigint,
+    codehash: Hex,
+  ): Hex | null {
     // Simplified implementation - return the service account code if codehash matches
     if (serviceAccount.codehash === codehash) {
       return serviceAccount.codehash
@@ -558,17 +560,17 @@ export class RefineInvocationSystem {
    * @returns Encoded arguments
    */
   private encodeArguments(
-    coreIndex: number,
-    workItemIndex: number,
-    serviceIndex: number,
-    payload: HexString,
+    coreIndex: bigint,
+    workItemIndex: bigint,
+    serviceIndex: bigint,
+    payload: Hex,
     _workPackage: WorkPackage,
   ): Uint8Array {
     // Simplified encoding - concatenate all values
     const coreBytes = this.encodeUint32(coreIndex)
     const workItemBytes = this.encodeUint32(workItemIndex)
     const serviceBytes = this.encodeUint32(serviceIndex)
-    const payloadLengthBytes = this.encodeUint32(payload.length)
+    const payloadLengthBytes = this.encodeUint32(BigInt(payload.length))
 
     return new Uint8Array([
       ...coreBytes,
@@ -582,10 +584,10 @@ export class RefineInvocationSystem {
   /**
    * Encode 32-bit unsigned integer
    */
-  private encodeUint32(value: number): Uint8Array {
+  private encodeUint32(value: bigint): Uint8Array {
     const buffer = new ArrayBuffer(4)
     const view = new DataView(buffer)
-    view.setUint32(0, value, false) // big-endian
+    view.setUint32(0, Number(value), false) // big-endian
     return new Uint8Array(buffer)
   }
 }

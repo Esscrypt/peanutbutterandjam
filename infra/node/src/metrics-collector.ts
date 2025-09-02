@@ -6,14 +6,25 @@
  */
 
 // OpenTelemetry imports
-import { metrics, SpanStatusCode, trace } from '@opentelemetry/api'
+import {
+  type Meter,
+  metrics,
+  SpanStatusCode,
+  type Tracer,
+  trace,
+} from '@opentelemetry/api'
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node'
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { Resource } from '@opentelemetry/resources'
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
-import { logger } from '@pbnj/core'
-import type { BlockAuthoringMetrics } from '@pbnj/types'
+import type { SafePromise } from '@pbnj/core'
+import { logger, safeError } from '@pbnj/core'
+import {
+  createTelemetrySystem,
+  type TelemetryEventEmitter,
+} from '@pbnj/telemetry'
+import type { BlockAuthoringMetrics, TelemetryConfig } from '@pbnj/types'
 import { BaseService } from './service-interface'
 
 /**
@@ -21,14 +32,14 @@ import { BaseService } from './service-interface'
  */
 export class MetricsCollector extends BaseService {
   private metrics: BlockAuthoringMetrics = {
-    creationTime: 0,
-    validationTime: 0,
-    submissionTime: 0,
-    memoryUsage: 0,
-    cpuUsage: 0,
-    extrinsicCount: 0,
-    workPackageCount: 0,
-    blockSize: 0,
+    creationTime: 0n,
+    validationTime: 0n,
+    submissionTime: 0n,
+    memoryUsage: 0n,
+    cpuUsage: 0n,
+    extrinsicCount: 0n,
+    workPackageCount: 0n,
+    blockSize: 0n,
   }
 
   private meter = metrics.getMeter('pbnj-node')
@@ -58,19 +69,32 @@ export class MetricsCollector extends BaseService {
   // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   private blocksFailedCounter: any
 
+  // JIP-3 Telemetry
+  private telemetrySystem?: ReturnType<typeof createTelemetrySystem>
+  private telemetryEvents?: TelemetryEventEmitter
+
   constructor(
     private nodeId: string,
     private serviceName = 'pbnj-node',
+    private telemetryConfig?: TelemetryConfig,
   ) {
     super('metrics-collector')
     this.initializeOpenTelemetry()
     this.initializeMetrics()
+    this.initializeTelemetry()
   }
 
   async init(): Promise<void> {
     try {
       logger.info('Initializing metrics collector...')
       // OpenTelemetry is already initialized in constructor
+
+      // Initialize telemetry if configured
+      if (this.telemetrySystem) {
+        await this.telemetrySystem.start()
+        logger.info('JIP-3 telemetry initialized successfully')
+      }
+
       this.setInitialized(true)
       logger.info('Metrics collector initialized successfully')
     } catch (error) {
@@ -94,6 +118,13 @@ export class MetricsCollector extends BaseService {
   async stop(): Promise<void> {
     try {
       logger.info('Stopping metrics collector...')
+
+      // Stop telemetry if initialized
+      if (this.telemetrySystem) {
+        await this.telemetrySystem.stop()
+        logger.info('JIP-3 telemetry stopped')
+      }
+
       this.setRunning(false)
       logger.info('Metrics collector stopped successfully')
     } catch (error) {
@@ -128,6 +159,34 @@ export class MetricsCollector extends BaseService {
         'Failed to initialize OpenTelemetry SDK, continuing without observability',
         {
           nodeId: this.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      )
+    }
+  }
+
+  /**
+   * Initialize JIP-3 Telemetry
+   */
+  private initializeTelemetry(): void {
+    if (!this.telemetryConfig) {
+      logger.debug(
+        'No telemetry configuration provided, skipping JIP-3 telemetry',
+      )
+      return
+    }
+
+    try {
+      this.telemetrySystem = createTelemetrySystem(this.telemetryConfig)
+      this.telemetryEvents = this.telemetrySystem.events
+      logger.info('JIP-3 telemetry system created', {
+        enabled: this.telemetryConfig.enabled,
+        endpoint: this.telemetryConfig.endpoint,
+      })
+    } catch (error) {
+      logger.warn(
+        'Failed to initialize JIP-3 telemetry, continuing without telemetry',
+        {
           error: error instanceof Error ? error.message : String(error),
         },
       )
@@ -321,11 +380,13 @@ export class MetricsCollector extends BaseService {
   }
 
   /**
-   * Record block creation with tracing
+   * Record block creation with tracing and telemetry
    */
   recordBlockCreation(
     blockNumber: number,
     metrics: Partial<BlockAuthoringMetrics>,
+    headerHash?: Uint8Array,
+    parentHeaderHash?: Uint8Array,
   ): void {
     try {
       const span = this.tracer.startSpan('block_creation', {
@@ -344,11 +405,25 @@ export class MetricsCollector extends BaseService {
           })
         }
 
+        // Emit JIP-3 telemetry events
+        if (this.telemetryEvents && headerHash && parentHeaderHash) {
+          this.emitBlockAuthoringEvents(
+            BigInt(blockNumber),
+            metrics,
+            headerHash,
+            parentHeaderHash,
+          ).catch((error) => {
+            logger.warn('Failed to emit telemetry events for block creation', {
+              error,
+            })
+          })
+        }
+
         span.setStatus({ code: SpanStatusCode.OK })
         span.setAttributes({
-          'block.creation_time_ms': metrics.creationTime || 0,
-          'block.size_bytes': metrics.blockSize || 0,
-          'block.extrinsic_count': metrics.extrinsicCount || 0,
+          'block.creation_time_ms': Number(metrics.creationTime) || 0,
+          'block.size_bytes': Number(metrics.blockSize) || 0,
+          'block.extrinsic_count': Number(metrics.extrinsicCount) || 0,
         })
 
         logger.info('Block creation recorded', {
@@ -410,7 +485,7 @@ export class MetricsCollector extends BaseService {
           code: success ? SpanStatusCode.OK : SpanStatusCode.ERROR,
         })
         span.setAttributes({
-          'block.submission_time_ms': metrics.submissionTime || 0,
+          'block.submission_time_ms': Number(metrics.submissionTime) || 0,
         })
 
         logger.info('Block submission recorded', {
@@ -450,14 +525,14 @@ export class MetricsCollector extends BaseService {
    */
   reset(): void {
     this.metrics = {
-      creationTime: 0,
-      validationTime: 0,
-      submissionTime: 0,
-      memoryUsage: 0,
-      cpuUsage: 0,
-      extrinsicCount: 0,
-      workPackageCount: 0,
-      blockSize: 0,
+      creationTime: 0n,
+      validationTime: 0n,
+      submissionTime: 0n,
+      memoryUsage: 0n,
+      cpuUsage: 0n,
+      extrinsicCount: 0n,
+      workPackageCount: 0n,
+      blockSize: 0n,
     }
   }
 
@@ -481,9 +556,9 @@ export class MetricsCollector extends BaseService {
   } {
     // TODO: Implement performance summary calculation
     return {
-      averageCreationTime: this.metrics.creationTime,
-      averageValidationTime: this.metrics.validationTime,
-      averageSubmissionTime: this.metrics.submissionTime,
+      averageCreationTime: Number(this.metrics.creationTime),
+      averageValidationTime: Number(this.metrics.validationTime),
+      averageSubmissionTime: Number(this.metrics.submissionTime),
       totalBlocks: 1, // TODO: Track total blocks
       successRate: 1.0, // TODO: Track success rate
     }
@@ -492,11 +567,132 @@ export class MetricsCollector extends BaseService {
   /**
    * Get OpenTelemetry metrics
    */
-  getOpenTelemetryMetrics(): any {
+  getOpenTelemetryMetrics(): {
+    meter: Meter
+    tracer: Tracer
+    nodeId: string
+  } {
     return {
       meter: this.meter,
       tracer: this.tracer,
       nodeId: this.nodeId,
     }
+  }
+
+  /**
+   * Get telemetry system
+   */
+  getTelemetrySystem(): ReturnType<typeof createTelemetrySystem> | undefined {
+    return this.telemetrySystem
+  }
+
+  /**
+   * Get telemetry events emitter
+   */
+  getTelemetryEvents(): TelemetryEventEmitter | undefined {
+    return this.telemetryEvents
+  }
+
+  /**
+   * Emit periodic status telemetry
+   */
+  async emitStatusTelemetry(status: {
+    totalPeerCount: bigint
+    validatorPeerCount: bigint
+    blockAnnouncementStreamPeerCount: bigint
+    guaranteesByCore: Uint8Array
+    shardCount: bigint
+    shardTotalSizeBytes: bigint
+    readyPreimageCount: bigint
+    readyPreimageTotalSizeBytes: bigint
+  }): SafePromise<void> {
+    if (!this.telemetryEvents)
+      return safeError(new Error('Telemetry emitter not initialized'))
+
+    return this.telemetryEvents.emitStatus(status)
+  }
+
+  /**
+   * Emit best block changed telemetry
+   */
+  async emitBestBlockChanged(
+    slot: bigint,
+    headerHash: Uint8Array,
+  ): Promise<void> {
+    if (!this.telemetryEvents) return
+
+    try {
+      await this.telemetryEvents.emitBestBlockChanged(slot, headerHash)
+    } catch (error) {
+      logger.warn('Failed to emit best block changed telemetry', { error })
+    }
+  }
+
+  /**
+   * Emit finalized block changed telemetry
+   */
+  async emitFinalizedBlockChanged(
+    slot: bigint,
+    headerHash: Uint8Array,
+  ): Promise<void> {
+    if (!this.telemetryEvents) return
+
+    try {
+      await this.telemetryEvents.emitFinalizedBlockChanged(slot, headerHash)
+    } catch (error) {
+      logger.warn('Failed to emit finalized block changed telemetry', { error })
+    }
+  }
+
+  /**
+   * Emit sync status changed telemetry
+   */
+  async emitSyncStatusChanged(isSynced: boolean): Promise<void> {
+    if (!this.telemetryEvents) return
+
+    try {
+      await this.telemetryEvents.emitSyncStatusChanged(isSynced)
+    } catch (error) {
+      logger.warn('Failed to emit sync status changed telemetry', { error })
+    }
+  }
+
+  /**
+   * Helper method to emit block authoring telemetry events
+   */
+  private async emitBlockAuthoringEvents(
+    blockNumber: bigint,
+    metrics: Partial<BlockAuthoringMetrics>,
+    headerHash: Uint8Array,
+    parentHeaderHash: Uint8Array,
+  ): SafePromise<void> {
+    if (!this.telemetryEvents)
+      return safeError(new Error('Telemetry emitter not initialized'))
+
+    // Emit authoring event
+    const [authoringEventIdError, authoringEventId] =
+      await this.telemetryEvents.emitAuthoring(
+        BigInt(blockNumber), // Using block number as slot for now
+        parentHeaderHash,
+      )
+    if (authoringEventIdError) return safeError(authoringEventIdError)
+
+    // Create block outline from metrics
+    const blockOutline = {
+      sizeInBytes: metrics.blockSize || 0n,
+      headerHash,
+      ticketCount: 0n, // Would need actual ticket data
+      preimageCount: 0n, // Would need actual preimage data
+      preimagesSizeInBytes: 0n,
+      guaranteeCount: 0n, // Would need actual guarantee data
+      assuranceCount: 0n, // Would need actual assurance data
+      disputeVerdictCount: 0n,
+    }
+
+    // Emit authored event
+    return await this.telemetryEvents.emitAuthored(
+      authoringEventId,
+      blockOutline,
+    )
   }
 }

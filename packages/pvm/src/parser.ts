@@ -22,9 +22,9 @@ export class PVMParser implements Parser {
       const address = 0 // Will be set by caller
 
       const instruction: PVMInstruction = {
-        opcode,
+        opcode: BigInt(opcode),
         operands,
-        address,
+        address: BigInt(address),
       }
 
       return {
@@ -45,7 +45,7 @@ export class PVMParser implements Parser {
   parseProgram(blob: {
     instructionData: Uint8Array
     opcodeBitmask: Uint8Array
-    dynamicJumpTable: Map<number, number>
+    dynamicJumpTable: Map<bigint, bigint>
   }): {
     success: boolean
     instructions: PVMInstruction[]
@@ -53,7 +53,7 @@ export class PVMParser implements Parser {
   } {
     const instructions: PVMInstruction[] = []
     const errors: string[] = []
-    let address = 0
+    let address = 0n
 
     try {
       // Parse instructions in 4-byte chunks
@@ -71,13 +71,13 @@ export class PVMParser implements Parser {
         const operands = chunk.slice(1, 4)
 
         const instruction: PVMInstruction = {
-          opcode,
+          opcode: BigInt(opcode),
           operands,
           address,
         }
 
         instructions.push(instruction)
-        address += 4
+        address += 4n
       }
 
       return {
@@ -107,28 +107,28 @@ export class PVMParser implements Parser {
   /**
    * Get human-readable opcode name
    */
-  private getOpcodeName(opcode: number): string {
-    const opcodeNames: Record<number, string> = {
-      0x00: 'NOP',
-      0x01: 'HALT',
-      0x02: 'ERROR',
-      0x10: 'LOAD',
-      0x11: 'STORE',
-      0x20: 'ADD',
-      0x21: 'SUB',
-      0x22: 'MUL',
-      0x23: 'DIV',
-      0x30: 'JMP',
-      0x31: 'JZ',
-      0x32: 'JNZ',
-      0x40: 'CALL',
-      0x41: 'RET',
-      0x50: 'PUSH',
-      0x51: 'POP',
-    }
+  private getOpcodeName(opcode: bigint): string {
+    const opcodeNames: Map<bigint, string> = new Map([
+      [0x00n, 'NOP'],
+      [0x01n, 'HALT'],
+      [0x02n, 'ERROR'],
+      [0x10n, 'LOAD'],
+      [0x11n, 'STORE'],
+      [0x20n, 'ADD'],
+      [0x21n, 'SUB'],
+      [0x22n, 'MUL'],
+      [0x23n, 'DIV'],
+      [0x30n, 'JMP'],
+      [0x31n, 'JZ'],
+      [0x32n, 'JNZ'],
+      [0x40n, 'CALL'],
+      [0x41n, 'RET'],
+      [0x50n, 'PUSH'],
+      [0x51n, 'POP'],
+    ])
 
     return (
-      opcodeNames[opcode] ||
+      opcodeNames.get(opcode) ||
       `UNKNOWN_${opcode.toString(16).padStart(2, '0').toUpperCase()}`
     )
   }

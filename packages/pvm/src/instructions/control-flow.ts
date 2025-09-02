@@ -49,7 +49,7 @@ export class FALLTHROUGHInstruction extends BaseInstruction {
     logger.debug('Executing FALLTHROUGH instruction')
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -74,8 +74,8 @@ export class JUMPInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     // For JUMP: operands[0] = offset (8-bit immediate)
-    const offset = Number(context.instruction.operands[0])
-    const targetAddress = context.instructionPointer + offset
+    const offset = context.instruction.operands[0]
+    const targetAddress = context.instructionPointer + BigInt(offset)
 
     logger.debug('Executing JUMP instruction', { offset, targetAddress })
 
@@ -107,9 +107,9 @@ export class JUMP_INDInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    const immediate = this.getImmediateValue(context.instruction.operands, 1n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
-    const targetAddress = Number((registerValue + immediate) % 2n ** 32n)
+    const targetAddress = (registerValue + immediate) % 2n ** 32n
 
     logger.debug('Executing JUMP_IND instruction', {
       registerA,
@@ -130,8 +130,8 @@ export class JUMP_INDInstruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${Number(immediate)}`
+    const immediate = this.getImmediateValue(operands, 1n)
+    return `${this.name} r${registerA} ${immediate}`
   }
 }
 
@@ -146,9 +146,9 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
-    const targetAddress = context.instructionPointer + Number(offset)
+    const immediate = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
+    const targetAddress = context.instructionPointer + offset
 
     logger.debug('Executing LOAD_IMM_JUMP instruction', {
       registerA,
@@ -173,9 +173,9 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
-    return `${this.name} r${registerA} ${Number(immediate)} ${Number(offset)}`
+    const immediate = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
+    return `${this.name} r${registerA} ${immediate} ${offset}`
   }
 }
 
@@ -191,14 +191,14 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 2n)
     const immediateY = this.getImmediateValue(
       context.instruction.operands,
-      3,
-      2,
+      3n,
+      2n,
     )
     const registerValue = this.getRegisterValue(context.registers, registerB)
-    const targetAddress = Number((registerValue + immediateY) % 2n ** 32n)
+    const targetAddress = (registerValue + immediateY) % 2n ** 32n
 
     logger.debug('Executing LOAD_IMM_JUMP_IND instruction', {
       registerA,
@@ -225,8 +225,8 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const immediateX = this.getImmediateValue(operands, 2)
-    const immediateY = this.getImmediateValue(operands, 3, 2)
-    return `${this.name} r${registerA} r${registerB} ${Number(immediateX)} ${Number(immediateY)}`
+    const immediateX = this.getImmediateValue(operands, 2n)
+    const immediateY = this.getImmediateValue(operands, 3n, 2n)
+    return `${this.name} r${registerA} r${registerB} ${immediateX} ${immediateY}`
   }
 }

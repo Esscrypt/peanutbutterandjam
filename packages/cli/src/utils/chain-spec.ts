@@ -1,8 +1,19 @@
-import { generateAlternativeName, hexToBytes, logger, z } from '@pbnj/core'
+import {
+  bytesToHex,
+  generateAlternativeName,
+  hexToBytes,
+  logger,
+  type Safe,
+  safeError,
+  safeResult,
+  z,
+  zeroHash,
+} from '@pbnj/core'
 import {
   createGenesisStateTrie,
   createStateKey,
-} from '@pbnj/serialization/dist/state/state-serialization'
+  decodeFixedLength,
+} from '@pbnj/serialization'
 import type {
   Account,
   SerializationGenesisState as GenesisState,
@@ -76,7 +87,9 @@ export interface ChainSpec {
   genesis_state: Record<string, string>
 }
 
-export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
+export function generateChainSpec(
+  inputConfig: ChainSpecConfig,
+): Safe<ChainSpec> {
   logger.info('Generating chain spec', {
     id: inputConfig.id,
     validatorsCount: inputConfig.genesis_validators.length,
@@ -115,7 +128,7 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
       accounts[address] = {
         address: address as `0x${string}`,
         balance: BigInt(validator.stake),
-        nonce: 0,
+        nonce: 0n,
         isValidator: true,
         validatorKey: `0x${validator.bandersnatch}`,
         stake: BigInt(validator.stake),
@@ -137,48 +150,50 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
 
   // Create genesis state with proper types according to Gray Paper specification
   const genesisState: GenesisState = {
-    accounts: Object.fromEntries(
+    accounts: new Map(
       Object.entries(accounts).map(([address, account]) => [
-        address,
+        address as `0x${string}`,
         {
           ...account,
-          nonce: 0,
+          nonce: 0n,
           isValidator: false,
           storage: new Map(),
           preimages: new Map(),
           requests: new Map(),
           gratis: 0n,
-          codehash:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
+          codehash: zeroHash,
           minaccgas: 1000n,
           minmemogas: 100n,
           octets: 0n,
-          items: 0,
-          created: 0,
-          lastacc: 0,
-          parent: 0,
-          minbalance: '0',
-        } as unknown as ServiceAccount,
+          items: 0n,
+          created: 0n,
+          lastacc: 0n,
+          parent: 0n,
+          minbalance: 0n,
+        },
       ]),
-    ) as Record<`0x${string}`, ServiceAccount>,
+    ),
     validators: validators.map((validator) => ({
       address: validator.address,
       publicKey: validator.publicKey,
-      stake: validator.stake.toString(),
+      stake: validator.stake,
       isActive: validator.isActive,
-      altname: generateAlternativeName(hexToBytes(validator.publicKey)),
+      altname: (() => {
+        const [error, altname] = generateAlternativeName(
+          hexToBytes(validator.publicKey),
+          decodeFixedLength,
+        )
+        return error ? undefined : altname
+      })(),
     })),
     safrole: {
-      epoch: 0,
-      timeslot: 0,
-      entropy:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      epoch: 0n,
+      timeslot: 0n,
+      entropy: zeroHash,
       pendingset: [],
-      epochroot:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      epochroot: zeroHash,
       sealtickets: [],
-      ticketaccumulator:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      ticketaccumulator: zeroHash,
     },
   }
 
@@ -186,37 +201,39 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
   for (let i = 0; i < validators.length; i++) {
     const validator = validators[i]
     const serviceAccount: ServiceAccount = {
-      balance: String(validator.stake),
-      nonce: 0,
+      balance: validator.stake,
+      nonce: 0n,
       isValidator: true,
       validatorKey: validator.publicKey,
-      stake: String(validator.stake),
+      stake: validator.stake,
       storage: new Map(),
       preimages: new Map(),
       requests: new Map(),
       gratis: 0n,
-      codehash:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: zeroHash,
       minaccgas: 1000n,
       minmemogas: 100n,
       octets: 0n,
-      items: 0,
-      created: 0,
-      lastacc: 0,
-      parent: 0,
-      minbalance: '0',
+      items: 0n,
+      created: 0n,
+      lastacc: 0n,
+      parent: 0n,
+      minbalance: 0n,
     }
 
     // Create service account key (Chapter 255 with service ID) according to Gray Paper
-    const serviceKey = createStateKey(255, i)
-    const serviceKeyHex = `0x${Uint8ArrayToHexNoPrefix(serviceKey)}`
-    ;(genesisState.accounts as Record<string, ServiceAccount>)[serviceKeyHex] =
-      serviceAccount
+    const serviceKey = createStateKey(255, BigInt(i))
+    const serviceKeyHex = bytesToHex(serviceKey)
+    genesisState.accounts.set(serviceKeyHex, serviceAccount)
   }
 
   // Generate genesis state trie according to Gray Paper specification
   // This includes chapters 1-16 and 255 (service accounts)
-  const genesisStateTrie = createGenesisStateTrie(genesisState)
+  const [genesisError, genesisStateTrie] = createGenesisStateTrie(genesisState)
+
+  if (genesisError) {
+    return safeError(genesisError)
+  }
 
   // Convert keys to match Polkajam format (remove 0x prefix)
   const convertedStateTrie: Record<string, string> = {}
@@ -238,5 +255,5 @@ export function generateChainSpec(inputConfig: ChainSpecConfig): ChainSpec {
     stateTrieEntries: Object.keys(convertedStateTrie).length,
   })
 
-  return chainSpec
+  return safeResult(chainSpec)
 }

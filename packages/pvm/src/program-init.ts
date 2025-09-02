@@ -151,17 +151,16 @@ export class ProgramInitializer {
   /**
    * Initialize registers as per Gray Paper equation 7.7
    */
-  private initializeRegisters(argumentSize: number): RegisterState {
+  private initializeRegisters(argumentSize: bigint): RegisterState {
     return {
       // r0: Stack pointer (2^32 - 2^16)
-      r0: BigInt(2 ** 32 - 2 ** 16),
+      r0: 2n ** 32n - 2n ** 16n,
 
       // r1: Stack pointer (2^32 - 2*INIT_ZONE_SIZE - INIT_INPUT_SIZE)
-      r1: BigInt(
-        2 ** 32 -
-          2 * Number(PVM_CONSTANTS.INIT_ZONE_SIZE) -
-          Number(PVM_CONSTANTS.INIT_INPUT_SIZE),
-      ),
+      r1:
+        2n ** 32n -
+        2n * PVM_CONSTANTS.INIT_ZONE_SIZE -
+        PVM_CONSTANTS.INIT_INPUT_SIZE,
 
       // r2-r6: Initialize to 0
       r2: 0n,
@@ -171,11 +170,10 @@ export class ProgramInitializer {
       r6: 0n,
 
       // r7: Argument pointer (2^32 - INIT_ZONE_SIZE - INIT_INPUT_SIZE)
-      r7: BigInt(
-        2 ** 32 -
-          Number(PVM_CONSTANTS.INIT_ZONE_SIZE) -
-          Number(PVM_CONSTANTS.INIT_INPUT_SIZE),
-      ),
+      r7:
+        2n ** 32n -
+        PVM_CONSTANTS.INIT_ZONE_SIZE -
+        PVM_CONSTANTS.INIT_INPUT_SIZE,
 
       // r8: Argument length
       r8: BigInt(argumentSize),
@@ -198,47 +196,47 @@ export class ProgramInitializer {
   ): RAM {
     // Create RAM with proper memory layout
     const ram = new (class implements RAM {
-      public cells: Map<number, Uint8Array> = new Map()
+      public cells: Map<bigint, Uint8Array> = new Map()
 
-      readOctet(address: number): Uint8Array {
+      readOctet(address: bigint): Uint8Array {
         return this.cells.get(address) || new Uint8Array([])
       }
 
-      writeOctet(address: number, value: Uint8Array): void {
+      writeOctet(address: bigint, value: Uint8Array): void {
         this.cells.set(address, value)
       }
 
-      readOctets(address: number, count: number): Uint8Array {
-        const result: Uint8Array = new Uint8Array(count)
-        for (let i = 0; i < count; i++) {
-          result.set(this.readOctet(address + i), i)
+      readOctets(address: bigint, count: bigint): Uint8Array {
+        const result: Uint8Array = new Uint8Array(Number(count))
+        for (let i = 0; i < Number(count); i++) {
+          result.set(this.readOctet(address + BigInt(i)), i)
         }
         return result
       }
 
-      writeOctets(address: number, values: Uint8Array): void {
+      writeOctets(address: bigint, values: Uint8Array): void {
         values.forEach((value, index) => {
-          this.writeOctet(address + index, new Uint8Array([value]))
+          this.writeOctet(address + BigInt(index), new Uint8Array([value]))
         })
       }
 
-      isReadable(address: number): boolean {
-        return address >= Number(PVM_CONSTANTS.RESERVED_MEMORY_START)
+      isReadable(address: bigint): boolean {
+        return address >= PVM_CONSTANTS.RESERVED_MEMORY_START
       }
 
-      isWritable(address: number): boolean {
-        return address >= Number(PVM_CONSTANTS.RESERVED_MEMORY_START)
+      isWritable(address: bigint): boolean {
+        return address >= PVM_CONSTANTS.RESERVED_MEMORY_START
       }
 
       getMemoryLayout(): {
-        stackStart: number
-        heapStart: number
-        totalSize: number
+        stackStart: bigint
+        heapStart: bigint
+        totalSize: bigint
       } {
         return {
-          stackStart: 0,
-          heapStart: Number(PVM_CONSTANTS.INIT_ZONE_SIZE),
-          totalSize: Number(PVM_CONSTANTS.MAX_MEMORY_ADDRESS),
+          stackStart: 0n,
+          heapStart: PVM_CONSTANTS.INIT_ZONE_SIZE,
+          totalSize: PVM_CONSTANTS.MAX_MEMORY_ADDRESS,
         }
       }
     })()
@@ -246,26 +244,24 @@ export class ProgramInitializer {
     // Initialize memory zones as per Gray Paper equation 7.6
 
     // Zone 1: Read-only data (INIT_ZONE_SIZE to INIT_ZONE_SIZE + len_o)
-    const readOnlyStart = Number(PVM_CONSTANTS.INIT_ZONE_SIZE)
+    const readOnlyStart = PVM_CONSTANTS.INIT_ZONE_SIZE
     readOnlyData.forEach((value, index) => {
-      ram.writeOctet(readOnlyStart + index, new Uint8Array([value]))
+      ram.writeOctet(readOnlyStart + BigInt(index), new Uint8Array([value]))
     })
 
     // Zone 2: Read-write data (2*INIT_ZONE_SIZE + aligned_len_o to 2*INIT_ZONE_SIZE + aligned_len_o + len_w)
     const readWriteStart =
-      2 * Number(PVM_CONSTANTS.INIT_ZONE_SIZE) +
-      this.alignToZone(readOnlyData.length)
+      2n * PVM_CONSTANTS.INIT_ZONE_SIZE +
+      BigInt(this.alignToZone(readOnlyData.length))
     readWriteData.forEach((value, index) => {
-      ram.writeOctet(readWriteStart + index, new Uint8Array([value]))
+      ram.writeOctet(readWriteStart + BigInt(index), new Uint8Array([value]))
     })
 
     // Zone 3: Arguments (2^32 - INIT_ZONE_SIZE - INIT_INPUT_SIZE to 2^32 - INIT_ZONE_SIZE - INIT_INPUT_SIZE + len_a)
     const argStart =
-      2 ** 32 -
-      Number(PVM_CONSTANTS.INIT_ZONE_SIZE) -
-      Number(PVM_CONSTANTS.INIT_INPUT_SIZE)
+      2n ** 32n - PVM_CONSTANTS.INIT_ZONE_SIZE - PVM_CONSTANTS.INIT_INPUT_SIZE
     argumentData.data.forEach((value, index) => {
-      ram.writeOctet(argStart + index, new Uint8Array([value]))
+      ram.writeOctet(argStart + BigInt(index), new Uint8Array([value]))
     })
 
     return ram

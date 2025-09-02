@@ -57,16 +57,17 @@ export class GridStructureManager {
   }
 
   /**
-   * Compute optimal grid dimensions
+   * Compute optimal grid dimensions according to Gray Paper specification
+   * W = floor(sqrt(V)) where V is the number of validators
    */
   private computeGridDimensions(validatorCount: number): {
     rows: number
     columns: number
   } {
-    // Try to make the grid as square as possible
-    const sqrt = Math.sqrt(validatorCount)
-    const rows = Math.ceil(sqrt)
-    const columns = Math.ceil(validatorCount / rows)
+    // Gray Paper specification: W = floor(sqrt(V))
+    const W = Math.floor(Math.sqrt(validatorCount))
+    const columns = W
+    const rows = Math.ceil(validatorCount / W)
 
     return { rows, columns }
   }
@@ -295,4 +296,110 @@ export class GridStructureManager {
   ): ValidatorGrid {
     return this.computeGridStructure(validators)
   }
+
+  /**
+   * Determine preferred initiator between two validators according to Gray Paper
+   * Given two Ed25519 public keys (a, b), the Preferred Initiator P(a, b) ∈ {a, b} is:
+   * P(a, b) ≡ a when (a₃₁ > 127) ⊕ (b₃₁ > 127) ⊕ (a < b)
+   * P(a, b) ≡ b otherwise
+   */
+  static determinePreferredInitiator(
+    publicKeyA: Uint8Array,
+    publicKeyB: Uint8Array,
+  ): 'A' | 'B' {
+    if (publicKeyA.length !== 32 || publicKeyB.length !== 32) {
+      throw new Error('Ed25519 public keys must be 32 bytes')
+    }
+
+    // Extract the last byte (31st index) from each key
+    const a31 = publicKeyA[31]
+    const b31 = publicKeyB[31]
+
+    // Compare keys lexicographically (a < b)
+    const aLessThanB = compareKeys(publicKeyA, publicKeyB) < 0
+
+    // Compute the XOR condition: (a₃₁ > 127) ⊕ (b₃₁ > 127) ⊕ (a < b)
+    const a31Greater127 = a31 > 127
+    const b31Greater127 = b31 > 127
+    const xorResult = (a31Greater127 !== b31Greater127) !== aLessThanB
+
+    return xorResult ? 'A' : 'B'
+  }
+
+  /**
+   * Check if current validator should initiate connection to target validator
+   */
+  shouldInitiateConnection(
+    ownPublicKey: Uint8Array,
+    targetPublicKey: Uint8Array,
+  ): boolean {
+    const preferred = GridStructureManager.determinePreferredInitiator(
+      ownPublicKey,
+      targetPublicKey,
+    )
+    return preferred === 'A'
+  }
+
+  /**
+   * Get neighbors across epochs (including previous, current, and next validators)
+   * Two validators are neighbors if they have the same index in different epochs
+   */
+  getCrossEpochNeighbors(
+    validatorIndex: ValidatorIndex,
+    previousEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+    _currentEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+    nextEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): ValidatorIndex[] {
+    const neighbors: ValidatorIndex[] = []
+
+    // Add validators with same index from other epochs
+    if (previousEpochValidators.has(validatorIndex)) {
+      neighbors.push(validatorIndex)
+    }
+    if (nextEpochValidators.has(validatorIndex)) {
+      neighbors.push(validatorIndex)
+    }
+
+    return neighbors
+  }
+
+  /**
+   * Get all validators that should have block announcement streams (UP 0)
+   * This includes grid neighbors and validators from other epochs with same index
+   */
+  getBlockAnnouncementTargets(
+    validatorIndex: ValidatorIndex,
+    previousEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+    currentEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+    nextEpochValidators: Map<ValidatorIndex, ValidatorMetadata>,
+  ): ValidatorIndex[] {
+    const targets = new Set<ValidatorIndex>()
+
+    // Add grid neighbors from current epoch
+    const gridNeighbors = this.getNeighbors(validatorIndex)
+    gridNeighbors.forEach((neighbor) => targets.add(neighbor))
+
+    // Add cross-epoch neighbors (same index in other epochs)
+    const crossEpochNeighbors = this.getCrossEpochNeighbors(
+      validatorIndex,
+      previousEpochValidators,
+      currentEpochValidators,
+      nextEpochValidators,
+    )
+    crossEpochNeighbors.forEach((neighbor) => targets.add(neighbor))
+
+    return Array.from(targets).sort((a, b) => a - b)
+  }
+}
+
+/**
+ * Compare two Ed25519 public keys lexicographically
+ * Returns -1 if keyA < keyB, 0 if equal, 1 if keyA > keyB
+ */
+function compareKeys(keyA: Uint8Array, keyB: Uint8Array): number {
+  for (let i = 0; i < Math.min(keyA.length, keyB.length); i++) {
+    if (keyA[i] < keyB[i]) return -1
+    if (keyA[i] > keyB[i]) return 1
+  }
+  return keyA.length - keyB.length
 }
