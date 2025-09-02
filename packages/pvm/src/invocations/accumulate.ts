@@ -5,13 +5,12 @@
  * This is the main orchestration system for Accumulate invocations
  */
 
-import { blake2bHash, logger } from '@pbnj/core'
+import { blake2bHash, hexToBigInt, logger } from '@pbnj/core'
 import type {
   AccumulateContextMutator,
   AccumulateInput,
   AccumulateInvocationResult,
   DeferredTransfer,
-  Gas,
   Implications,
   ImplicationsPair,
   PartialState,
@@ -42,43 +41,43 @@ export class AccumulateInvocationSystem {
     this.argumentInvocation = new ArgumentInvocationSystem<ImplicationsPair>(
       this.createContextMutator([
         {
-          id: 0,
+          id: 0n,
           state: {
             accounts: new Map(),
             authqueue: new Map(),
             assigners: new Map(),
             stagingset: [],
-            nextfreeid: 0,
-            manager: 0,
-            registrar: 0,
-            delegator: 0,
+            nextfreeid: 0n,
+            manager: 0n,
+            registrar: 0n,
+            delegator: 0n,
             alwaysaccers: new Map(),
             xfers: [],
             provisions: new Map(),
             yield: null,
           },
-          nextfreeid: 0,
+          nextfreeid: 0n,
           xfers: [],
           yield: null,
           provisions: new Map(),
         },
         {
-          id: 0,
+          id: 0n,
           state: {
             accounts: new Map(),
             authqueue: new Map(),
             assigners: new Map(),
             stagingset: [],
-            nextfreeid: 0,
-            manager: 0,
-            registrar: 0,
-            delegator: 0,
+            nextfreeid: 0n,
+            manager: 0n,
+            registrar: 0n,
+            delegator: 0n,
             alwaysaccers: new Map(),
             xfers: [],
             provisions: new Map(),
             yield: null,
           },
-          nextfreeid: 0,
+          nextfreeid: 0n,
           xfers: [],
           yield: null,
           provisions: new Map(),
@@ -99,9 +98,9 @@ export class AccumulateInvocationSystem {
    */
   execute(
     partialState: PartialState,
-    timeslot: number,
-    serviceId: number,
-    gas: Gas,
+    timeslot: bigint,
+    serviceId: bigint,
+    gas: bigint,
     inputs: AccumulateInput,
   ): AccumulateInvocationResult {
     try {
@@ -146,15 +145,15 @@ export class AccumulateInvocationSystem {
       const encodedArgs = this.encodeArguments(
         timeslot,
         serviceId,
-        0, // TODO: Fix input length calculation based on actual AccumulateInput structure
+        0n, // TODO: Fix input length calculation based on actual AccumulateInput structure
       )
 
       // Execute the service code using Argument Invocation System
       const executionResult = this.argumentInvocation.execute(
         serviceCode,
-        0, // instruction pointer starts at 0
+        0n, // instruction pointer starts at 0
         gas,
-        { data: encodedArgs, size: encodedArgs.length },
+        { data: encodedArgs, size: BigInt(encodedArgs.length) },
         initialContext,
       )
 
@@ -178,8 +177,8 @@ export class AccumulateInvocationSystem {
    */
   private initializeContext(
     partialState: PartialState,
-    serviceId: number,
-    timeslot: number,
+    serviceId: bigint,
+    timeslot: bigint,
   ): ImplicationsPair {
     // Generate deterministic next free ID using entropy accumulator and timeslot
     const nextFreeId = this.generateNextFreeId(
@@ -207,10 +206,10 @@ export class AccumulateInvocationSystem {
    * Formula: check((decode[4]{blake{encode{im_id, entropyaccumulator', H_timeslot}}} mod (2^32-Cminpublicindex-2^8)) + Cminpublicindex)
    */
   private generateNextFreeId(
-    serviceId: number,
-    timeslot: number,
+    serviceId: bigint,
+    timeslot: bigint,
     partialState: PartialState,
-  ): number {
+  ): bigint {
     // Encode the inputs: serviceId, entropyaccumulator', timeslot
     const entropyAccumulator = ACCUMULATE_INVOCATION_CONFIG.ENTROPY_ACCUMULATOR
     const encodedData = this.encodeForBlake2(
@@ -220,15 +219,17 @@ export class AccumulateInvocationSystem {
     )
 
     // Generate Blake2 hash
-    const hash = blake2bHash(encodedData)
+    const [error, hash] = blake2bHash(encodedData)
+    if (error) {
+      throw error
+    }
 
     // Decode first 4 Uint8Array and convert to number
-    const hashUint8Array = Buffer.from(hash.replace('0x', ''), 'hex')
-    const decodedValue = hashUint8Array.readUInt32BE(0)
+    const decodedValue = hexToBigInt(hash) >> 32n
 
     // Apply the formula: (decoded mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex
     const modulus =
-      2 ** 32 - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX - 256
+      2n ** 32n - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX - 256n
     const baseId =
       (decodedValue % modulus) + ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX
 
@@ -239,21 +240,21 @@ export class AccumulateInvocationSystem {
    * Encode data for Blake2 hashing
    */
   private encodeForBlake2(
-    serviceId: number,
+    serviceId: bigint,
     entropyAccumulator: string,
-    timeslot: number,
+    timeslot: bigint,
   ): Buffer {
     // Create a buffer to hold the encoded data
     const buffer = Buffer.alloc(4 + entropyAccumulator.length + 4) // serviceId (4) + entropy (var) + timeslot (4)
 
     // Write serviceId as 4 Uint8Array (big-endian)
-    buffer.writeUInt32BE(serviceId, 0)
+    buffer.writeUInt32BE(Number(serviceId), 0)
 
     // Write entropy accumulator as string
     buffer.write(entropyAccumulator, 4, 'utf8')
 
     // Write timeslot as 4 Uint8Array (big-endian)
-    buffer.writeUInt32BE(timeslot, 4 + entropyAccumulator.length)
+    buffer.writeUInt32BE(Number(timeslot), 4 + entropyAccumulator.length)
 
     return buffer
   }
@@ -262,15 +263,15 @@ export class AccumulateInvocationSystem {
    * Check function from Gray Paper eq:newserviceindex
    * Finds first available service ID in sequence
    */
-  private checkServiceId(id: number, partialState: PartialState): number {
+  private checkServiceId(id: bigint, partialState: PartialState): bigint {
     if (!partialState.accounts.has(id)) {
       return id
     }
 
     // Recursively check next ID in sequence
     const nextId =
-      ((id - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX + 1) %
-        (2 ** 32 - 256 - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX)) +
+      ((id - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX + 1n) %
+        (2n ** 32n - 256n - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX)) +
       ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX
 
     return this.checkServiceId(nextId, partialState)
@@ -281,7 +282,7 @@ export class AccumulateInvocationSystem {
    */
   private calculatePostTransferState(
     partialState: PartialState,
-    serviceId: number,
+    serviceId: bigint,
     inputs: AccumulateInput,
   ): PartialState {
     const serviceAccount = partialState.accounts.get(serviceId)
@@ -321,29 +322,29 @@ export class AccumulateInvocationSystem {
    * Encode arguments for PVM execution
    */
   private encodeArguments(
-    timeslot: number,
-    serviceId: number,
-    inputLength: number,
+    timeslot: bigint,
+    serviceId: bigint,
+    inputLength: bigint,
   ): Uint8Array {
     const result = new Uint8Array(12)
 
     // Encode timeslot as 4 Uint8Array
-    result[0] = (timeslot >> 24) & 0xff
-    result[1] = (timeslot >> 16) & 0xff
-    result[2] = (timeslot >> 8) & 0xff
-    result[3] = timeslot & 0xff
+    result[0] = (Number(timeslot) >> 24) & 0xff
+    result[1] = (Number(timeslot) >> 16) & 0xff
+    result[2] = (Number(timeslot) >> 8) & 0xff
+    result[3] = Number(timeslot) & 0xff
 
     // Encode service ID as 4 Uint8Array
-    result[4] = (serviceId >> 24) & 0xff
-    result[5] = (serviceId >> 16) & 0xff
-    result[6] = (serviceId >> 8) & 0xff
-    result[7] = serviceId & 0xff
+    result[4] = (Number(serviceId) >> 24) & 0xff
+    result[5] = (Number(serviceId) >> 16) & 0xff
+    result[6] = (Number(serviceId) >> 8) & 0xff
+    result[7] = Number(serviceId) & 0xff
 
     // Encode input length as 4 Uint8Array
-    result[8] = (inputLength >> 24) & 0xff
-    result[9] = (inputLength >> 16) & 0xff
-    result[10] = (inputLength >> 8) & 0xff
-    result[11] = inputLength & 0xff
+    result[8] = (Number(inputLength) >> 24) & 0xff
+    result[9] = (Number(inputLength) >> 16) & 0xff
+    result[10] = (Number(inputLength) >> 8) & 0xff
+    result[11] = Number(inputLength) & 0xff
 
     return result
   }
@@ -356,8 +357,8 @@ export class AccumulateInvocationSystem {
     _initialContext: ImplicationsPair,
   ): AccumulateContextMutator {
     return (
-      hostCallId: number,
-      gasCounter: Gas,
+      hostCallId: bigint,
+      gasCounter: bigint,
       registers: RegisterState,
       ram: RAM,
       context: ImplicationsPair,
@@ -456,13 +457,13 @@ export class AccumulateInvocationSystem {
 
   // Host call handlers - simplified implementations
   private handleGasCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -479,13 +480,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleFetchCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -502,13 +503,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleReadCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -540,13 +541,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleWriteCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -578,13 +579,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleLookupCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -601,13 +602,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleInfoCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -625,13 +626,13 @@ export class AccumulateInvocationSystem {
 
   // Accumulate function handlers - simplified implementations
   private handleBlessCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -648,13 +649,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleAssignCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -671,13 +672,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleDesignateCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -694,13 +695,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleCheckpointCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -723,13 +724,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleNewCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -746,13 +747,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleUpgradeCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -769,13 +770,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleTransferCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -792,13 +793,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleEjectCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -815,13 +816,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleQueryCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -838,13 +839,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleSolicitCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -861,13 +862,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleForgetCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -884,13 +885,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleYieldCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -907,13 +908,13 @@ export class AccumulateInvocationSystem {
   }
 
   private handleProvideCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: ImplicationsPair,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: ImplicationsPair
@@ -934,7 +935,10 @@ export class AccumulateInvocationSystem {
    * Selects between regular and exceptional dimensions based on termination type
    */
   private collapseResult(
-    executionResult: { gasUsed: Gas; result: Uint8Array | 'oog' | 'panic' },
+    executionResult: {
+      gasUsed: bigint
+      result: Uint8Array | 'oog' | 'panic'
+    },
     context: ImplicationsPair,
   ): AccumulateInvocationResult {
     const [imX, imY] = context

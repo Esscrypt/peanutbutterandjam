@@ -6,30 +6,29 @@
  * CE 140: With justification
  */
 
+import type { NetworkingStore } from '@pbnj/state'
 import type {
-  Bytes,
   SegmentShardRequest,
   SegmentShardResponse,
   StreamInfo,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Segment shard request protocol handler
  */
 export class SegmentShardRequestProtocol {
-  private segmentShards: Map<string, Bytes[]> = new Map()
-  private justifications: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private segmentShards: Map<string, Uint8Array[]> = new Map()
+  private justifications: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -56,9 +55,9 @@ export class SegmentShardRequestProtocol {
    * Store segment shards in local store and persist to database
    */
   async storeSegmentShards(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    segmentShards: Bytes[],
+    segmentShards: Uint8Array[],
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     this.segmentShards.set(key, segmentShards)
@@ -95,9 +94,9 @@ export class SegmentShardRequestProtocol {
    * Store justification in local store and persist to database
    */
   async storeJustification(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    justification: Bytes,
+    justification: Uint8Array,
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_justification`
     this.justifications.set(key, justification)
@@ -116,9 +115,9 @@ export class SegmentShardRequestProtocol {
    * Get segment shards from local store
    */
   getSegmentShards(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Bytes[] | undefined {
+  ): Uint8Array[] | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     return this.segmentShards.get(key)
   }
@@ -126,7 +125,10 @@ export class SegmentShardRequestProtocol {
   /**
    * Get justification from local store
    */
-  getJustification(erasureRoot: Bytes, shardIndex: number): Bytes | undefined {
+  getJustification(
+    erasureRoot: Uint8Array,
+    shardIndex: number,
+  ): Uint8Array | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_justification`
     return this.justifications.get(key)
   }
@@ -135,9 +137,9 @@ export class SegmentShardRequestProtocol {
    * Get segment shards from database if not in local store
    */
   async getSegmentShardsFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes[] | null> {
+  ): Promise<Uint8Array[] | null> {
     if (this.getSegmentShards(erasureRoot, shardIndex)) {
       return this.getSegmentShards(erasureRoot, shardIndex) || null
     }
@@ -155,7 +157,7 @@ export class SegmentShardRequestProtocol {
       if (!metadataData) return null
 
       const metadata = JSON.parse(metadataData.toString())
-      const segmentShards: Bytes[] = []
+      const segmentShards: Uint8Array[] = []
 
       // Get each segment shard
       for (let i = 0; i < metadata.count; i++) {
@@ -185,9 +187,9 @@ export class SegmentShardRequestProtocol {
    * Get justification from database if not in local store
    */
   async getJustificationFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes | null> {
+  ): Promise<Uint8Array | null> {
     if (this.getJustification(erasureRoot, shardIndex)) {
       return this.getJustification(erasureRoot, shardIndex) || null
     }
@@ -219,8 +221,8 @@ export class SegmentShardRequestProtocol {
   ): Promise<SegmentShardResponse | null> {
     try {
       // Process all requests in the array
-      const allSegmentShards: Bytes[] = []
-      const allJustifications: Bytes[] = []
+      const allSegmentShards: Uint8Array[] = []
+      const allJustifications: Uint8Array[] = []
 
       for (const req of request.requests) {
         // Get segment shards from local store or database
@@ -273,7 +275,7 @@ export class SegmentShardRequestProtocol {
    */
   createSegmentShardRequest(
     requests: Array<{
-      erasureRoot: Bytes
+      erasureRoot: Uint8Array
       shardIndex: number
       segmentIndices: number[]
     }>,
@@ -286,7 +288,7 @@ export class SegmentShardRequestProtocol {
   /**
    * Serialize segment shard request message
    */
-  serializeSegmentShardRequest(request: SegmentShardRequest): Bytes {
+  serializeSegmentShardRequest(request: SegmentShardRequest): Uint8Array {
     // Calculate total size
     let totalSize = 4 // number of requests
 
@@ -330,7 +332,7 @@ export class SegmentShardRequestProtocol {
   /**
    * Deserialize segment shard request message
    */
-  deserializeSegmentShardRequest(data: Bytes): SegmentShardRequest {
+  deserializeSegmentShardRequest(data: Uint8Array): SegmentShardRequest {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -339,7 +341,7 @@ export class SegmentShardRequestProtocol {
     offset += 4
 
     const requests: Array<{
-      erasureRoot: Bytes
+      erasureRoot: Uint8Array
       shardIndex: number
       segmentIndices: number[]
     }> = []
@@ -381,7 +383,7 @@ export class SegmentShardRequestProtocol {
   /**
    * Serialize segment shard response message
    */
-  serializeSegmentShardResponse(response: SegmentShardResponse): Bytes {
+  serializeSegmentShardResponse(response: SegmentShardResponse): Uint8Array {
     // Calculate total size
     let totalSize = 4 + 4 // number of segment shards + number of justifications
 
@@ -442,7 +444,7 @@ export class SegmentShardRequestProtocol {
   /**
    * Deserialize segment shard response message
    */
-  deserializeSegmentShardResponse(data: Bytes): SegmentShardResponse {
+  deserializeSegmentShardResponse(data: Uint8Array): SegmentShardResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -451,7 +453,7 @@ export class SegmentShardRequestProtocol {
     offset += 4
 
     // Read segment shards
-    const segmentShards: Bytes[] = []
+    const segmentShards: Uint8Array[] = []
     for (let i = 0; i < numSegmentShards; i++) {
       // Read segment shard length (4 bytes, little-endian)
       const segmentShardLength = view.getUint32(offset, true)
@@ -469,7 +471,7 @@ export class SegmentShardRequestProtocol {
     offset += 4
 
     // Read justifications
-    const justifications: Bytes[] = []
+    const justifications: Uint8Array[] = []
     for (let i = 0; i < numJustifications; i++) {
       // Read justification length (4 bytes, little-endian)
       const justificationLength = view.getUint32(offset, true)
@@ -493,7 +495,7 @@ export class SegmentShardRequestProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<SegmentShardResponse | null> {
     try {
       const request = this.deserializeSegmentShardRequest(data)

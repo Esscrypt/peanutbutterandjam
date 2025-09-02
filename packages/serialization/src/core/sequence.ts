@@ -30,7 +30,8 @@
  * so deserialization can parse elements sequentially.
  */
 
-import type { Decoder, Encoder, Natural, Sequence } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { Decoder, Encoder, Sequence } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -42,7 +43,7 @@ import { decodeNatural, encodeNatural } from './natural-number'
  * @param sequence - Sequence of natural numbers to encode
  * @returns Encoded octet sequence
  */
-export function encodeSequence(sequence: Sequence<Natural>): Uint8Array {
+export function encodeSequence(sequence: Sequence<bigint>): Safe<Uint8Array> {
   return encodeSequenceGeneric(sequence, encodeNatural)
 }
 
@@ -59,13 +60,16 @@ export function encodeSequence(sequence: Sequence<Natural>): Uint8Array {
 export function encodeSequenceGeneric<T>(
   sequence: T[],
   encoder: Encoder<T>,
-): Uint8Array {
+): Safe<Uint8Array> {
   // Calculate total size needed
   let totalSize = 0
   const encodedElements: Uint8Array[] = []
 
   for (const element of sequence) {
-    const encoded = encoder(element)
+    const [error, encoded] = encoder(element)
+    if (error) {
+      return safeError(error)
+    }
     encodedElements.push(encoded)
     totalSize += encoded.length
   }
@@ -79,7 +83,7 @@ export function encodeSequenceGeneric<T>(
     offset += encoded.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -92,7 +96,7 @@ export function encodeSequenceGeneric<T>(
 export function decodeSequence(
   data: Uint8Array,
   count?: number,
-): { value: Natural[]; remaining: Uint8Array } {
+): Safe<{ value: bigint[]; remaining: Uint8Array }> {
   return decodeSequenceGeneric(data, decodeNatural, count)
 }
 
@@ -108,7 +112,7 @@ export function decodeSequenceGeneric<T>(
   data: Uint8Array,
   decoder: Decoder<T>,
   count?: number,
-): { value: T[]; remaining: Uint8Array } {
+): Safe<{ value: T[]; remaining: Uint8Array }> {
   const result: T[] = []
   let remaining = data
 
@@ -116,11 +120,18 @@ export function decodeSequenceGeneric<T>(
     // Decode known number of elements
     for (let i = 0; i < count; i++) {
       if (remaining.length === 0) {
-        throw new Error(
-          `Insufficient data for sequence decoding (expected ${count} elements, got ${i})`,
+        return safeError(
+          new Error(
+            `Insufficient data for sequence decoding (expected ${count} elements, got ${i})`,
+          ),
         )
       }
-      const { value, remaining: nextRemaining } = decoder(remaining)
+      const [error, result2] = decoder(remaining)
+      if (error) {
+        return safeError(error)
+      }
+      const value = result2.value
+      const nextRemaining = result2.remaining
       result.push(value)
       remaining = nextRemaining
     }
@@ -128,7 +139,12 @@ export function decodeSequenceGeneric<T>(
     // Decode until no more data
     while (remaining.length > 0) {
       try {
-        const { value, remaining: nextRemaining } = decoder(remaining)
+        const [error, result2] = decoder(remaining)
+        if (error) {
+          return safeError(error)
+        }
+        const value = result2.value
+        const nextRemaining = result2.remaining
         result.push(value)
         remaining = nextRemaining
       } catch {
@@ -138,10 +154,10 @@ export function decodeSequenceGeneric<T>(
     }
   }
 
-  return {
+  return safeResult({
     value: result,
     remaining,
-  }
+  })
 }
 
 /**
@@ -151,17 +167,26 @@ export function decodeSequenceGeneric<T>(
  * @returns Encoded octet sequence with length prefix
  */
 export function encodeSequenceWithLength(
-  sequence: Sequence<Natural>,
-): Uint8Array {
-  const encodedSequence = encodeSequence(sequence)
+  sequence: Sequence<bigint>,
+): Safe<Uint8Array> {
+  const [error, encodedSequence2] = encodeSequence(sequence)
+  if (error) {
+    return safeError(error)
+  }
   const length = BigInt(sequence.length)
-  const encodedLength = encodeNatural(length)
+  const [error2, encodedLength] = encodeNatural(length)
+  if (error2) {
+    return safeError(error2)
+  }
+  const encodedLengthResult = encodedLength
 
-  const result = new Uint8Array(encodedLength.length + encodedSequence.length)
-  result.set(encodedLength, 0)
-  result.set(encodedSequence, encodedLength.length)
+  const result = new Uint8Array(
+    encodedLengthResult.length + encodedSequence2.length,
+  )
+  result.set(encodedLengthResult, 0)
+  result.set(encodedSequence2, encodedLengthResult.length)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -170,22 +195,32 @@ export function encodeSequenceWithLength(
  * @param data - Octet sequence to decode
  * @returns Decoded sequence and remaining data
  */
-export function decodeSequenceWithLength(data: Uint8Array): {
-  value: Natural[]
+export function decodeSequenceWithLength(data: Uint8Array): Safe<{
+  value: bigint[]
   remaining: Uint8Array
-} {
+}> {
   // First decode the length
-  const { value: length, remaining: lengthRemaining } = decodeNatural(data)
+  const [error, result] = decodeNatural(data)
+  if (error) {
+    return safeError(error)
+  }
+  const length = result.value
+  const lengthRemaining = result.remaining
   const count = Number(length)
 
   if (count < 0 || count > Number.MAX_SAFE_INTEGER) {
-    throw new Error(`Invalid sequence length: ${length}`)
+    return safeError(new Error(`Invalid sequence length: ${length}`))
   }
 
   // Then decode the sequence
-  const { value, remaining } = decodeSequence(lengthRemaining, count)
+  const [error2, result2] = decodeSequence(lengthRemaining, count)
+  if (error2) {
+    return safeError(error2)
+  }
+  const value = result2.value
+  const remaining = result2.remaining
 
-  return { value, remaining }
+  return safeResult({ value, remaining })
 }
 
 /**
@@ -194,7 +229,9 @@ export function decodeSequenceWithLength(data: Uint8Array): {
  * @param sequence - Sequence of octet sequences
  * @returns Concatenated octet sequence
  */
-export function encodeUint8Array(sequence: Sequence<Uint8Array>): Uint8Array {
+export function encodeUint8Array(
+  sequence: Sequence<Uint8Array>,
+): Safe<Uint8Array> {
   // Calculate total size
   const totalSize = sequence.reduce((sum, element) => sum + element.length, 0)
   const result = new Uint8Array(totalSize)
@@ -205,7 +242,7 @@ export function encodeUint8Array(sequence: Sequence<Uint8Array>): Uint8Array {
     offset += element.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -220,12 +257,14 @@ export function decodeUint8Array(
   data: Uint8Array,
   elementLength: number,
   count: number,
-): { value: Uint8Array[]; remaining: Uint8Array } {
+): Safe<{ value: Uint8Array[]; remaining: Uint8Array }> {
   const totalLength = elementLength * count
 
   if (data.length < totalLength) {
-    throw new Error(
-      `Insufficient data for octet sequence decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
+    return safeError(
+      new Error(
+        `Insufficient data for octet sequence decoding (expected ${totalLength} Uint8Array, got ${data.length})`,
+      ),
     )
   }
 
@@ -238,8 +277,8 @@ export function decodeUint8Array(
     result.push(element)
   }
 
-  return {
+  return safeResult({
     value: result,
     remaining: data.slice(totalLength),
-  }
+  })
 }

@@ -44,6 +44,7 @@
  * clear separation and gas accounting between services.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type { DeferredTransfer } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
@@ -59,24 +60,44 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  */
 export function encodeDeferredTransfer(
   deferredTransfer: DeferredTransfer,
-): Uint8Array {
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Source: encode[4](dxX_source) (4-byte fixed-length)
-  parts.push(encodeFixedLength(BigInt(deferredTransfer.source), 4))
+  const [error, encoded] = encodeFixedLength(deferredTransfer.source, 4n)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Destination: encode[4](dxX_dest) (4-byte fixed-length)
-  parts.push(encodeFixedLength(BigInt(deferredTransfer.dest), 4))
+  const [error2, encoded2] = encodeFixedLength(deferredTransfer.dest, 4n)
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Amount: encode[8](dxX_amount) (8-byte fixed-length)
-  parts.push(encodeFixedLength(deferredTransfer.amount, 8))
+  const [error3, encoded3] = encodeFixedLength(deferredTransfer.amount, 8n)
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // Memo: dxX_memo (variable-length octet sequence)
-  parts.push(encodeNatural(BigInt(deferredTransfer.memo.length))) // Length prefix
+  const [error4, encoded4] = encodeNatural(BigInt(deferredTransfer.memo.length))
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
   parts.push(deferredTransfer.memo)
 
   // Gas: encode[8](dxX_gas) (8-byte fixed-length)
-  parts.push(encodeFixedLength(deferredTransfer.gas, 8))
+  const [error5, encoded5] = encodeFixedLength(deferredTransfer.gas, 8n)
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -88,7 +109,7 @@ export function encodeDeferredTransfer(
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -97,34 +118,46 @@ export function encodeDeferredTransfer(
  * @param data - Octet sequence to decode
  * @returns Decoded deferred transfer and remaining data
  */
-export function decodeDeferredTransfer(data: Uint8Array): {
+export function decodeDeferredTransfer(data: Uint8Array): Safe<{
   value: DeferredTransfer
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Source: encode[4](dxX_source) (4-byte fixed-length)
-  const { value: source, remaining: sourceRemaining } = decodeFixedLength(
-    currentData,
-    4,
-  )
+  const [error, sourceResult] = decodeFixedLength(currentData, 4n)
+  if (error) {
+    return safeError(error)
+  }
+  const source = sourceResult.value
+  const sourceRemaining = sourceResult.remaining
   currentData = sourceRemaining
 
   // Destination: encode[4](dxX_dest) (4-byte fixed-length)
-  const { value: destination, remaining: destinationRemaining } =
-    decodeFixedLength(currentData, 4)
+  const [error2, destinationResult] = decodeFixedLength(currentData, 4n)
+  if (error2) {
+    return safeError(error2)
+  }
+  const destination = destinationResult.value
+  const destinationRemaining = destinationResult.remaining
   currentData = destinationRemaining
 
   // Amount: encode[8](dxX_amount) (8-byte fixed-length)
-  const { value: amount, remaining: amountRemaining } = decodeFixedLength(
-    currentData,
-    8,
-  )
+  const [error3, amountResult] = decodeFixedLength(currentData, 8n)
+  if (error3) {
+    return safeError(error3)
+  }
+  const amount = amountResult.value
+  const amountRemaining = amountResult.remaining
   currentData = amountRemaining
 
   // Memo: dxX_memo (variable-length octet sequence)
-  const { value: memoLength, remaining: memoLengthRemaining } =
-    decodeNatural(currentData)
+  const [error4, memoLengthResult] = decodeNatural(currentData)
+  if (error4) {
+    return safeError(error4)
+  }
+  const memoLength = memoLengthResult.value
+  const memoLengthRemaining = memoLengthResult.remaining
   const memoLengthNum = Number(memoLength)
   if (memoLengthRemaining.length < memoLengthNum) {
     throw new Error('Insufficient data for deferred transfer memo decoding')
@@ -133,22 +166,24 @@ export function decodeDeferredTransfer(data: Uint8Array): {
   currentData = memoLengthRemaining.slice(memoLengthNum)
 
   // Gas: encode[8](dxX_gas) (8-byte fixed-length)
-  const { value: gas, remaining: gasRemaining } = decodeFixedLength(
-    currentData,
-    8,
-  )
+  const [error5, gasResult] = decodeFixedLength(currentData, 8n)
+  if (error5) {
+    return safeError(error5)
+  }
+  const gas = gasResult.value
+  const gasRemaining = gasResult.remaining
   currentData = gasRemaining
 
   const deferredTransfer: DeferredTransfer = {
-    source: Number(source),
-    dest: Number(destination),
+    source,
+    dest: destination,
     amount,
     memo,
     gas,
   }
 
-  return {
+  return safeResult({
     value: deferredTransfer,
     remaining: currentData,
-  }
+  })
 }

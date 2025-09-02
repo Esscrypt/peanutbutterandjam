@@ -5,14 +5,15 @@
  * Reference: Gray Paper serialization specifications
  */
 
-import type { Address, Bytes, HashValue, HexString } from './core'
-
+import type { Address, Hex } from 'viem'
+import type { AlternativeName } from './core'
+import type { WorkError } from './pvm'
 /**
  * Preimage structure for data referenced by hash
  */
 export interface Preimage {
-  serviceIndex: number
-  data: Bytes
+  serviceIndex: bigint
+  data: Uint8Array
 }
 
 /**
@@ -20,7 +21,7 @@ export interface Preimage {
  */
 export interface Guarantee {
   workReport: WorkReport
-  timeslot: number
+  timeslot: bigint
   credential: Credential[]
 }
 
@@ -28,16 +29,16 @@ export interface Guarantee {
  * Credential structure for validator signatures
  */
 export interface Credential {
-  value: number
-  signature: Bytes
+  value: bigint
+  signature: Uint8Array
 }
 
 /**
  * Validity dispute structure
  */
 export interface ValidityDispute {
-  reportHash: HashValue
-  epochIndex: number
+  reportHash: Hex
+  epochIndex: bigint
   judgments: Judgment[]
 }
 
@@ -46,58 +47,58 @@ export interface ValidityDispute {
  */
 export interface Judgment {
   validity: boolean
-  judgeIndex: number
-  signature: Bytes
+  judgeIndex: bigint
+  signature: Uint8Array
 }
 
 /**
  * Assurance structure for data availability
  */
 export interface Assurance {
-  anchor: HashValue
-  availabilities: Bytes
-  assurer: number
-  signature: Bytes
+  anchor: Hex
+  availabilities: Uint8Array
+  assurer: bigint
+  signature: Uint8Array
 }
 
 /**
  * Operand tuple structure for work item results
  */
 export interface OperandTuple {
-  packageHash: HashValue
-  segmentRoot: HashValue
-  authorizer: HashValue
-  payloadHash: HashValue
-  gasLimit: number
+  packageHash: Hex
+  segmentRoot: Hex
+  authorizer: Hex
+  payloadHash: Hex
+  gasLimit: bigint
   result: WorkResult
-  authTrace: Bytes
+  authTrace: Uint8Array
 }
 
 /**
  * Availability specification structure
  */
 export interface AvailabilitySpecification {
-  packageHash: HashValue
-  bundleLength: number
-  erasureRoot: HashValue
-  segmentRoot: HashValue
-  segmentCount: number
+  packageHash: Hex
+  bundleLength: bigint
+  erasureRoot: Hex
+  segmentRoot: Hex
+  segmentCount: bigint
 }
 
 /**
  * Extrinsic reference structure
  */
 export interface ExtrinsicReference {
-  hash: HashValue
-  length: number
+  hash: Hex
+  length: bigint
 }
 
 /**
  * Authorizer structure
  */
 export interface Authorizer {
-  publicKey: HashValue
-  weight: number
+  publicKey: Hex
+  weight: bigint
 }
 
 // ============================================================================
@@ -108,16 +109,16 @@ export interface Authorizer {
  * Validator structure (matches test vectors)
  */
 export interface ValidatorKeyTuple {
-  bandersnatch: HashValue
-  ed25519: HashValue
+  bandersnatch: Hex
+  ed25519: Hex
 }
 
 /**
  * Epoch mark structure (matches test vectors)
  */
 export interface EpochMark {
-  entropy: HashValue
-  tickets_entropy: HashValue
+  entropy: Hex
+  tickets_entropy: Hex
   validators: ValidatorKeyTuple[]
 }
 
@@ -125,48 +126,48 @@ export interface EpochMark {
  * Ticket structure (single object format - matches test vectors)
  */
 export interface SafroleTicketSingle {
-  id: HashValue
-  entry_index: number
+  id: Hex
+  entry_index: bigint
 }
 
 /**
  * Ticket structure (array format - matches test vectors)
  */
 export interface SafroleTicketArray {
-  id: HashValue
-  attempt: number
+  id: Hex
+  attempt: bigint
 }
 
 /**
  * Block header structure (matches test vectors exactly)
  */
 export interface BlockHeader {
-  parent: HashValue
-  parent_state_root: HashValue
-  extrinsic_hash: HashValue
-  slot: number
+  parent: Hex
+  parent_state_root: Hex
+  extrinsic_hash: Hex
+  slot: bigint
   epoch_mark: EpochMark | null
   tickets_mark: SafroleTicketSingle | SafroleTicketArray[] | null
-  offenders_mark: HashValue[]
-  author_index: number
-  entropy_source: HashValue
-  seal: HashValue
+  offenders_mark: Hex[]
+  author_index: bigint
+  entropy_source: Hex
+  seal: Hex
 }
 
 /**
  * JAM validator key pair for epoch marker
  */
 export interface ValidatorKeyPair {
-  bandersnatch: HashValue // 32-byte Bandersnatch key
-  ed25519: HashValue // 32-byte Ed25519 key
+  bandersnatch: Hex // 32-byte Bandersnatch key
+  ed25519: Hex // 32-byte Ed25519 key
 }
 
 /**
  * JAM epoch marker containing entropy and validators
  */
 export interface EpochMark {
-  entropy: HashValue // 32-byte entropy accumulator
-  tickets_entropy: HashValue // 32-byte tickets entropy
+  entropy: Hex // 32-byte entropy accumulator
+  tickets_entropy: Hex // 32-byte tickets entropy
   validators: ValidatorKeyPair[] // Validator key pairs
 }
 
@@ -174,13 +175,13 @@ export interface EpochMark {
  * JAM Safrole ticket for winning tickets marker
  */
 export interface SafroleTicketHeader {
-  attempt: number
-  signature: HashValue
+  attempt: bigint
+  signature: Hex
 }
 
 export interface SafroleTicketCore {
-  id: HashValue
-  entryIndex: number
+  id: Hex
+  entryIndex: bigint
 }
 
 /**
@@ -188,16 +189,16 @@ export interface SafroleTicketCore {
  * Matches the test vector structure for header_0.json
  */
 export interface JamHeader {
-  parent: HashValue // H_parent - parent block hash
-  parent_state_root: HashValue // H_priorstateroot - prior state root
-  extrinsic_hash: HashValue // H_extrinsichash - extrinsic data hash
-  slot: number // H_timeslot - time slot index (32-bit)
+  parent: Hex // H_parent - parent block hash
+  parent_state_root: Hex // H_priorstateroot - prior state root
+  extrinsic_hash: Hex // H_extrinsichash - extrinsic data hash
+  slot: bigint // H_timeslot - time slot index (32-bit)
   epoch_mark: EpochMark | null // H_epochmark - optional epoch marker
   winners_mark: SafroleTicketHeader[] | null // H_winnersmark - optional winning tickets
-  offenders_mark: HashValue[] // H_offendersmark - sequence of Ed25519 offender keys
-  author_index: number // H_authorindex - block author index (16-bit)
-  vrf_sig: HashValue // H_vrfsig - VRF signature (96 bytes but stored as hex)
-  seal_sig: HashValue // H_sealsig - block seal signature (96 bytes but stored as hex)
+  offenders_mark: Hex[] // H_offendersmark - sequence of Ed25519 offender keys
+  author_index: bigint // H_authorindex - block author index (16-bit)
+  vrf_sig: Hex // H_vrfsig - VRF signature (96 bytes but stored as hex)
+  seal_sig: Hex // H_sealsig - block seal signature (96 bytes but stored as hex)
 }
 
 // /**
@@ -205,10 +206,10 @@ export interface JamHeader {
 //  * Can be cast to/from BlockHeader for reuse in other packages
 //  */
 // export interface SerializationHeader {
-//   parent_hash: HashValue
-//   number: number
-//   state_root: HashValue
-//   extrinsics_root: HashValue
+//   parent_hash: Hex
+//   bigint: bigint
+//   state_root: Hex
+//   extrinsics_root: Hex
 //   digest: Digest
 // }
 
@@ -254,28 +255,28 @@ export interface BlockBody {
 /**
  * Work error types
  */
-export enum WorkError {
-  OVERSIZE = 'oversize',
-  BAD_EXPORTS = 'bad_exports',
-  INVALID_RESULT = 'invalid_result',
-  GAS_LIMIT_EXCEEDED = 'gas_limit_exceeded',
-  AUTHORIZATION_FAILED = 'authorization_failed',
-}
+// export enum WorkError {
+//   OVERSIZE = 'oversize',
+//   BAD_EXPORTS = 'bad_exports',
+//   INVALID_RESULT = 'invalid_result',
+//   GAS_LIMIT_EXCEEDED = 'gas_limit_exceeded',
+//   AUTHORIZATION_FAILED = 'authorization_failed',
+// }
 
 /**
  * Import segment structure
  */
 export interface ImportSegment {
-  hash: HashValue // Root hash of the import tree
-  index: number
+  hash: Hex // Root hash of the import tree
+  index: bigint
 }
 
 /**
  * Extrinsic reference structure
  */
 export interface ExtrinsicReference {
-  hash: HashValue
-  length: number
+  hash: Hex
+  length: bigint
 }
 
 /**
@@ -283,17 +284,17 @@ export interface ExtrinsicReference {
  */
 export interface WorkItem {
   /** Service index identifier */
-  serviceindex: number
+  serviceindex: bigint
   /** Code hash of the service */
-  codehash: HashValue
+  codehash: Hex
   /** Payload blob */
-  payload: HexString
+  payload: Hex
   /** Gas limit for Refinement (64-bit) */
   refgaslimit: bigint
   /** Gas limit for Accumulation (64-bit) */
   accgaslimit: bigint
   /** Number of data segments exported */
-  exportcount: number
+  exportcount: bigint
   /** Imported data segments */
   importsegments: ImportSegment[]
   /** Extrinsic references */
@@ -306,17 +307,17 @@ export interface WorkItem {
  */
 export interface WorkContext {
   /** Anchor block header hash */
-  anchorhash: HashValue
+  anchorhash: Hex
   /** Anchor block posterior state-root */
-  anchorpoststate: HashValue
+  anchorpoststate: Hex
   /** Anchor block accumulation output log super-peak */
-  anchoraccoutlog: HashValue
+  anchoraccoutlog: Hex
   /** Lookup-anchor block header hash */
-  lookupanchorhash: HashValue
+  lookupanchorhash: Hex
   /** Lookup-anchor block timeslot */
-  lookupanchortime: number
+  lookupanchortime: bigint
   /** Hash of any prerequisite work-packages */
-  prerequisites: HashValue[]
+  prerequisites: Hex[]
 }
 
 /**
@@ -328,32 +329,32 @@ export interface WorkPackageContext extends WorkContext {}
  * Work digest structure - unified with block-authoring WorkDigest
  */
 export interface WorkDigest {
-  serviceIndex: number
-  codeHash: HashValue
-  payloadHash: HashValue
-  gasLimit: number
+  serviceIndex: bigint
+  codeHash: Hex
+  payloadHash: Hex
+  gasLimit: bigint
   result: Uint8Array | WorkError
-  gasUsed: number
-  importCount: number
-  exportCount: number
-  extrinsicCount: number
-  extrinsicSize: number
+  gasUsed: bigint
+  importCount: bigint
+  exportCount: bigint
+  extrinsicCount: bigint
+  extrinsicSize: bigint
 }
 
 /**
  * Authorizer structure
  */
 export interface Authorizer {
-  code_hash: HashValue
-  params: HexString // hex string
+  code_hash: Hex
+  params: Hex // hex string
 }
 
 /**
  * Work package structure
  */
 export interface WorkPackage {
-  authorization: HexString // hex string
-  auth_code_host: number
+  authorization: Hex // hex string
+  auth_code_host: bigint
   authorizer: Authorizer
   context: WorkContext
   items: WorkItem[]
@@ -363,14 +364,14 @@ export interface WorkPackage {
  * Runtime work package structure - unified with block-authoring WorkPackage
  */
 export interface RuntimeWorkPackage {
-  id: string
-  data: HexString
-  author: HexString
-  timestamp: number
-  authToken: HexString
-  authCodeHost: number
-  authCodeHash: HexString
-  authConfig: HexString
+  id: Hex
+  data: Hex
+  author: Hex
+  timestamp: bigint
+  authToken: Hex
+  authCodeHost: bigint
+  authCodeHash: Hex
+  authConfig: Hex
   context: WorkContext
   workItems: WorkItem[]
 }
@@ -384,10 +385,10 @@ export interface RuntimeWorkPackage {
  */
 export interface SafroleTicket extends SafroleTicketCore {
   /** Additional ticket metadata for extended use cases */
-  hash?: HashValue
+  hash?: Hex
   owner?: Address // 20-byte address
   stake?: string
-  timestamp?: number
+  timestamp?: bigint
 }
 
 /**
@@ -395,19 +396,19 @@ export interface SafroleTicket extends SafroleTicketCore {
  */
 export interface SafroleState {
   /** Current epoch */
-  epoch: number
+  epoch: bigint
   /** Current timeslot */
-  timeslot: number
+  timeslot: bigint
   /** Current entropy */
-  entropy: HashValue
+  entropy: Hex
   /** Pending tickets */
   pendingset: SafroleTicket[]
   /** Epoch root hash */
-  epochroot: HashValue
+  epochroot: Hex
   /** Seal tickets (tickets or keys) */
   sealtickets: SafroleTicket[]
   /** Ticket accumulator */
-  ticketaccumulator: HashValue
+  ticketaccumulator: Hex
 }
 
 // ============================================================================
@@ -421,20 +422,20 @@ export interface Dispute {
   /** Validity disputes (V) */
   validityDisputes: ValidityDispute[]
   /** Challenge disputes (C) */
-  challengeDisputes: Bytes
+  challengeDisputes: Uint8Array
   /** Finality disputes (F) */
-  finalityDisputes: Bytes
+  finalityDisputes: Uint8Array
 }
 
 /**
  * Package specification structure
  */
 export interface PackageSpec {
-  hash: HashValue
-  length: number
-  erasure_root: HashValue
-  exports_root: HashValue
-  exports_count: number
+  hash: Hex
+  length: bigint
+  erasure_root: Hex
+  exports_root: Hex
+  exports_count: bigint
 }
 
 /**
@@ -446,21 +447,21 @@ export type WorkResult = Uint8Array | WorkError
  * Refine load structure
  */
 export interface RefineLoad {
-  gas_used: number
-  imports: number
-  extrinsic_count: number
-  extrinsic_size: number
-  exports: number
+  gas_used: bigint
+  imports: bigint
+  extrinsic_count: bigint
+  extrinsic_size: bigint
+  exports: bigint
 }
 
 /**
  * Work report result structure
  */
 export interface WorkReportResult {
-  service_id: number
-  code_hash: HashValue
-  payload_hash: HashValue
-  accumulate_gas: number
+  service_id: bigint
+  code_hash: Hex
+  payload_hash: Hex
+  accumulate_gas: bigint
   result: WorkResult
   refine_load: RefineLoad
 }
@@ -469,35 +470,36 @@ export interface WorkReportResult {
  * Work report structure - unified with block-authoring WorkReport
  */
 export interface WorkReport {
-  id: string
-  workPackageId: string
+  id: Hex
+  workPackageId: Hex
   availabilitySpec: {
-    packageHash: HashValue
-    bundleLength: number
-    erasureRoot: HashValue
-    segmentRoot: HashValue
-    segmentCount: number
+    packageHash: Hex
+    bundleLength: bigint
+    erasureRoot: Hex
+    segmentRoot: Hex
+    segmentCount: bigint
   }
   context: WorkContext
-  coreIndex: number
-  authorizer: HashValue
+  coreIndex: bigint
+  authorizer: Hex
   authTrace: Uint8Array
-  srLookup: Map<string, string> // segment root lookup
-  digests: Array<{
-    serviceIndex: number
-    codeHash: HashValue
-    payloadHash: HashValue
-    gasLimit: number
-    result: Uint8Array
-    gasUsed: number
-    importCount: number
-    exportCount: number
-    extrinsicCount: number
-    extrinsicSize: number
-  }>
-  authGasUsed: number
-  author: HexString
-  timestamp: number
+  srLookup: Map<Hex, Hex> // segment root lookup
+  // digests: Array<{
+  //   serviceIndex: bigint
+  //   codeHash: Hex
+  //   payloadHash: Hex
+  //   gasLimit: bigint
+  //   result: Uint8Array
+  //   gasUsed: bigint
+  //   importCount: bigint
+  //   exportCount: bigint
+  //   extrinsicCount: bigint
+  //   extrinsicSize: bigint
+  // }>
+  digests: WorkDigest[]
+  authGasUsed: bigint
+  author: Hex
+  timestamp: bigint
 }
 
 /**
@@ -505,13 +507,13 @@ export interface WorkReport {
  */
 export interface Privileges {
   /** Manager service ID */
-  manager: number
+  manager: bigint
   /** Assigners service ID */
-  assigners: number
+  assigners: bigint
   /** Delegator service ID */
-  delegator: number
+  delegator: bigint
   /** Registrar service ID */
-  registrar: number
+  registrar: bigint
   /** Always accessible services */
   alwaysaccers: Address[] // 20-byte addresses
 }
@@ -521,9 +523,9 @@ export interface Privileges {
  */
 export interface ActivityStats {
   /** Validator stats accumulator */
-  valstatsaccumulator: number
+  valstatsaccumulator: bigint
   /** Validator stats previous */
-  valstatsprevious: number
+  valstatsprevious: bigint
   /** Core statistics */
   corestats: Uint8Array
   /** Service statistics */
@@ -535,7 +537,7 @@ export interface ActivityStats {
  */
 export interface ReadyItem {
   /** Request hash */
-  request: HashValue
+  request: Hex
   /** Request data */
   data: Uint8Array
 }
@@ -553,9 +555,9 @@ export interface AccumulatedItem {
  */
 export interface LastAccountOut {
   /** Service ID */
-  serviceId: number
+  serviceId: bigint
   /** Account hash */
-  hash: HashValue
+  hash: Hex
 }
 
 /**
@@ -563,25 +565,25 @@ export interface LastAccountOut {
  */
 export interface ServiceAccount {
   /** Account balance */
-  balance: string
+  balance: bigint
   /** Account nonce */
-  nonce: number
+  nonce: bigint
   /** Is validator account */
   isValidator: boolean
   /** Validator public key */
-  validatorKey?: HashValue
+  validatorKey?: Hex
   /** Validator stake */
-  stake?: string
+  stake?: bigint
   /** Account storage */
-  storage: Map<HashValue, Uint8Array>
+  storage: Map<Hex, Uint8Array>
   /** Account preimages */
-  preimages: Map<HashValue, Uint8Array>
+  preimages: Map<Hex, Uint8Array>
   /** Account requests */
-  requests: Map<string, Uint8Array>
+  requests: Map<Hex, Uint8Array>
   /** Account gratis */
   gratis: bigint
   /** Account code hash */
-  codehash: HashValue
+  codehash: Hex
   /** Minimum accumulate gas */
   minaccgas: bigint
   /** Minimum memory gas */
@@ -589,15 +591,15 @@ export interface ServiceAccount {
   /** Account octets */
   octets: bigint
   /** Account items */
-  items: number
+  items: bigint
   /** Account created timestamp */
-  created: number
+  created: bigint
   /** Last account timestamp */
-  lastacc: number
+  lastacc: bigint
   /** Parent service ID */
-  parent: number
+  parent: bigint
   /** Minimum balance requirement */
-  minbalance: string
+  minbalance: bigint
 }
 
 /**
@@ -605,14 +607,14 @@ export interface ServiceAccount {
  */
 export interface GenesisState {
   /** Service accounts */
-  accounts: Record<`0x${string}`, ServiceAccount> // 20-byte addresses
+  accounts: Map<Address, ServiceAccount> // 20-byte addresses
   /** Validators */
   validators: Array<{
-    address: `0x${string}` // 20-byte address
-    publicKey: HashValue
-    stake: string
+    address: Address // 20-byte address
+    publicKey: Hex
+    stake: bigint
     isActive: boolean
-    altname?: string
+    altname?: AlternativeName
   }>
   /** Safrole state */
   safrole: SafroleState
@@ -623,15 +625,15 @@ export interface GenesisState {
  */
 export interface StateTrieEntry {
   /** State key (31 Uint8Array as hex) */
-  key: `0x${string}`
+  key: Hex
   /** State value (serialized data as hex) */
-  value: `0x${string}`
+  value: Hex
 }
 
 /**
  * State trie type
  */
-export type StateTrie = Record<`0x${string}`, `0x${string}`>
+export type StateTrie = Record<Hex, Hex>
 
 // ============================================================================
 // Constants

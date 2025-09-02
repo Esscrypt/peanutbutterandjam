@@ -35,7 +35,7 @@ export class MOVE_REGInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -77,7 +77,7 @@ export class SBRKInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -128,7 +128,7 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -180,7 +180,7 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -234,7 +234,7 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -289,7 +289,7 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -343,7 +343,7 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -398,7 +398,7 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -445,7 +445,7 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -493,7 +493,7 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -538,7 +538,7 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -588,7 +588,7 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }

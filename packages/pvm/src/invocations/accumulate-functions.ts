@@ -5,9 +5,8 @@
  * These functions are called via ECALLI instruction with function identifiers 14-26
  */
 
-import { bytesToHex, logger } from '@pbnj/core'
+import { bytesToHex, logger, numberToBytes, stringToBytes } from '@pbnj/core'
 import type {
-  HashValue,
   PartialState,
   RAM,
   RegisterState,
@@ -21,8 +20,8 @@ export interface AccumulateContext {
   registers: RegisterState
   memory: RAM
   state: PartialState
-  currentTime: number
-  currentServiceId: number
+  currentTime: bigint
+  currentServiceId: bigint
 }
 
 // Accumulate function result
@@ -38,8 +37,8 @@ export interface AccumulateResult {
 // Helper functions for memory access
 function readMemoryRange(
   memory: RAM,
-  start: number,
-  length: number,
+  start: bigint,
+  length: bigint,
 ): Uint8Array | 'error' {
   try {
     return memory.readOctets(start, length)
@@ -50,13 +49,13 @@ function readMemoryRange(
 
 function readMemorySequence(
   memory: RAM,
-  start: number,
-  count: number,
-  itemSize: number,
+  start: bigint,
+  count: bigint,
+  itemSize: bigint,
 ): Uint8Array[] | 'error' {
   try {
     const result: Uint8Array[] = []
-    for (let i = 0; i < count; i++) {
+    for (let i = 0n; i < count; i++) {
       const item = readMemoryRange(memory, start + i * itemSize, itemSize)
       if (item === 'error') return 'error'
       result.push(item)
@@ -97,7 +96,7 @@ export function bless(context: AccumulateContext): AccumulateResult {
   const n = registers.r12
 
   // Read authorization data
-  const authData = readMemoryRange(memory, Number(a), 4 * 341) // 4 * Ccorecount
+  const authData = readMemoryRange(memory, a, 4n * 341n) // 4 * Ccorecount
   if (authData === 'error') {
     return {
       executionState: 'panic',
@@ -110,7 +109,7 @@ export function bless(context: AccumulateContext): AccumulateResult {
   }
 
   // Read zone data
-  const zoneData = readMemorySequence(memory, Number(o), Number(n), 12)
+  const zoneData = readMemorySequence(memory, o, n, 12n)
   if (zoneData === 'error') {
     return {
       executionState: 'panic',
@@ -136,9 +135,9 @@ export function bless(context: AccumulateContext): AccumulateResult {
 
   // Success - update state
   const newState = { ...state }
-  newState.manager = Number(m)
-  newState.assigners.set(Number(v), Number(r))
-  newState.alwaysaccers.set(Number(r), 0n)
+  newState.manager = m
+  newState.assigners.set(v, r)
+  newState.alwaysaccers.set(r, 0n)
 
   return {
     executionState: 'continue',
@@ -175,7 +174,7 @@ export function assign(context: AccumulateContext): AccumulateResult {
   const a = registers.r9
 
   // Read queue data
-  const queueData = readMemorySequence(memory, Number(o), 80, 32) // Cauthqueuesize = 80
+  const queueData = readMemorySequence(memory, o, 80n, 32n) // Cauthqueuesize = 80
   if (queueData === 'error') {
     return {
       executionState: 'panic',
@@ -201,7 +200,7 @@ export function assign(context: AccumulateContext): AccumulateResult {
   }
 
   // Validate authorization
-  if (state.assigners.get(Number(c)) !== context.currentServiceId) {
+  if (state.assigners.get(c) !== context.currentServiceId) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.HUH },
@@ -226,8 +225,8 @@ export function assign(context: AccumulateContext): AccumulateResult {
 
   // Success - update state
   const newState = { ...state }
-  newState.authqueue.set(Number(c), queueData)
-  newState.assigners.set(Number(c), Number(a))
+  newState.authqueue.set(c, queueData)
+  newState.assigners.set(c, a)
 
   return {
     executionState: 'continue',
@@ -235,7 +234,7 @@ export function assign(context: AccumulateContext): AccumulateResult {
     memory,
     state: newState,
     implicationsX: queueData,
-    implicationsY: [new Uint8Array([Number(a)])],
+    implicationsY: [numberToBytes(a)],
   }
 }
 
@@ -262,7 +261,7 @@ export function designate(context: AccumulateContext): AccumulateResult {
   const o = registers.r7
 
   // Read validator data
-  const validatorData = readMemorySequence(memory, Number(o), 1023, 336) // Cvalcount = 1023
+  const validatorData = readMemorySequence(memory, o, 1023n, 336n) // Cvalcount = 1023
   if (validatorData === 'error') {
     return {
       executionState: 'panic',
@@ -360,7 +359,7 @@ export function newService(context: AccumulateContext): AccumulateResult {
   const desiredid = registers.r12
 
   // Read code hash (c in Gray Paper)
-  const cBytes = readMemoryRange(memory, Number(o), 32)
+  const cBytes = readMemoryRange(memory, o, 32n)
   if (cBytes === 'error' || l >= 2n ** 32n) {
     return {
       executionState: 'panic',
@@ -379,31 +378,29 @@ export function newService(context: AccumulateContext): AccumulateResult {
     codehash: c,
     storage: new Map(),
     requests: new Map(),
-    balance: '100', // Cbasedeposit
-    nonce: 0,
+    balance: 100n, // Cbasedeposit
+    nonce: 0n,
     isValidator: false,
     minaccgas: BigInt(minaccgas),
     minmemogas: BigInt(minmemogas),
     preimages: new Map(),
     created: context.currentTime,
-    gratis: BigInt(Number(gratis) !== 0 ? 1 : 0),
-    lastacc: 0,
+    gratis: BigInt(gratis !== 0n ? 1n : 0n),
+    lastacc: 0n,
     parent: context.currentServiceId,
-    items: 2,
+    items: 2n,
     octets: 81n,
-    minbalance: '100', // Cbasedeposit
+    minbalance: 100n, // Cbasedeposit
   }
 
   // Calculate new balance for current service (s in Gray Paper)
   const s = { ...state.accounts.get(context.currentServiceId)! }
-  s.balance = (
-    Number.parseInt(s.balance) - Number.parseInt(a.balance)
-  ).toString()
+  s.balance = s.balance - a.balance
 
   // Check if current service is registrar and desired ID is valid
   if (state.registrar === context.currentServiceId && desiredid < 65536n) {
     // Cminpublicindex = 2^16
-    if (state.accounts.has(Number(desiredid))) {
+    if (state.accounts.has(desiredid)) {
       return {
         executionState: 'continue',
         registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.FULL },
@@ -416,7 +413,7 @@ export function newService(context: AccumulateContext): AccumulateResult {
 
     // Success with desired ID - return desiredid as specified in Gray Paper
     const newState = { ...state }
-    newState.accounts.set(Number(desiredid), a)
+    newState.accounts.set(desiredid, a)
     newState.accounts.set(context.currentServiceId, s)
 
     return {
@@ -430,7 +427,7 @@ export function newService(context: AccumulateContext): AccumulateResult {
   }
 
   // Check if current service has sufficient balance
-  if (Number.parseInt(s.balance) < Number.parseInt(s.minbalance)) {
+  if (s.balance < s.minbalance) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.CASH },
@@ -446,7 +443,7 @@ export function newService(context: AccumulateContext): AccumulateResult {
   const newState = { ...state }
   newState.accounts.set(i_star, a)
   newState.accounts.set(context.currentServiceId, s)
-  newState.nextfreeid = i_star + 1
+  newState.nextfreeid = i_star + 1n
 
   // Return nextfreeid as specified in Gray Paper
   return {
@@ -484,7 +481,7 @@ export function upgrade(context: AccumulateContext): AccumulateResult {
   const m = registers.r9
 
   // Read new code hash
-  const codehashBytes = readMemoryRange(memory, Number(o), 32)
+  const codehashBytes = readMemoryRange(memory, o, 32n)
   if (codehashBytes === 'error') {
     return {
       executionState: 'panic',
@@ -496,7 +493,7 @@ export function upgrade(context: AccumulateContext): AccumulateResult {
     }
   }
 
-  const codehash = bytesToHex(codehashBytes) as HashValue
+  const codehash = bytesToHex(codehashBytes)
 
   // Update service
   const newState = { ...state }
@@ -543,7 +540,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
   const o = registers.r10
 
   // Read memo
-  const memo = readMemoryRange(memory, Number(o), 128) // Cmemosize = 128
+  const memo = readMemoryRange(memory, o, 128n) // Cmemosize = 128
   if (memo === 'error') {
     return {
       executionState: 'panic',
@@ -556,7 +553,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
   }
 
   // Validate destination
-  if (!state.accounts.has(Number(dest))) {
+  if (!state.accounts.has(dest)) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.WHO },
@@ -568,7 +565,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
   }
 
   // Validate gas
-  const destService = state.accounts.get(Number(dest))!
+  const destService = state.accounts.get(dest)!
   if (l < destService.minmemogas) {
     return {
       executionState: 'continue',
@@ -582,7 +579,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
 
   // Validate balance - Gray Paper checks amount < minbalance
   const currentService = state.accounts.get(context.currentServiceId)!
-  if (amount < Number.parseInt(currentService.minbalance)) {
+  if (amount < currentService.minbalance) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.CASH },
@@ -596,7 +593,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
   // Execute transfer
   const newState = { ...state }
   const transferData = new Uint8Array([
-    context.currentServiceId,
+    Number(context.currentServiceId),
     Number(dest),
     Number(amount),
     ...memo,
@@ -605,9 +602,7 @@ export function transfer(context: AccumulateContext): AccumulateResult {
 
   newState.xfers.push(transferData)
   const currentAccount = newState.accounts.get(context.currentServiceId)!
-  currentAccount.balance = (
-    Number.parseInt(currentAccount.balance) - Number(amount)
-  ).toString()
+  currentAccount.balance = currentAccount.balance - amount
 
   return {
     executionState: 'continue',
@@ -643,7 +638,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
   const o = registers.r8
 
   // Read hash
-  const hash = readMemoryRange(memory, Number(o), 32)
+  const hash = readMemoryRange(memory, o, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -656,10 +651,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
   }
 
   // Validate service
-  if (
-    d === BigInt(context.currentServiceId) ||
-    !state.accounts.has(Number(d))
-  ) {
+  if (d === BigInt(context.currentServiceId) || !state.accounts.has(d)) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.WHO },
@@ -670,7 +662,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
     }
   }
 
-  const targetService = state.accounts.get(Number(d))!
+  const targetService = state.accounts.get(d)!
   if (targetService.codehash.toString() !== hash.toString()) {
     return {
       executionState: 'continue',
@@ -684,7 +676,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
 
   // Check expunge period
   const l = Math.max(81, Number(targetService.octets)) - 81
-  const requestKey = `${hash.toString()}_${l}`
+  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${l}`))
   const request = targetService.requests.get(requestKey)
 
   if (!request || request.length !== 2) {
@@ -698,8 +690,8 @@ export function eject(context: AccumulateContext): AccumulateResult {
     }
   }
 
-  const requestTime = Number(request[1])
-  if (context.currentTime - requestTime < 19200) {
+  const requestTime = BigInt(request[1])
+  if (context.currentTime - BigInt(requestTime) < 19200n) {
     // Cexpungeperiod = 19200
     return {
       executionState: 'continue',
@@ -713,7 +705,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
 
   // Execute ejection
   const newState = { ...state }
-  newState.accounts.delete(Number(d))
+  newState.accounts.delete(d)
   newState.accounts.get(context.currentServiceId)!.balance +=
     targetService.balance
 
@@ -751,7 +743,7 @@ export function query(context: AccumulateContext): AccumulateResult {
   const z = registers.r8
 
   // Read hash
-  const hash = readMemoryRange(memory, Number(o), 32)
+  const hash = readMemoryRange(memory, o, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -764,7 +756,7 @@ export function query(context: AccumulateContext): AccumulateResult {
   }
 
   // Query request
-  const requestKey = `${hash.toString()}_${Number(z)}`
+  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
   const request = state.accounts
     .get(context.currentServiceId)
     ?.requests.get(requestKey)
@@ -859,7 +851,7 @@ export function solicit(context: AccumulateContext): AccumulateResult {
   const z = registers.r8
 
   // Read hash
-  const hash = readMemoryRange(memory, Number(o), 32)
+  const hash = readMemoryRange(memory, o, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -874,10 +866,10 @@ export function solicit(context: AccumulateContext): AccumulateResult {
   // Update service
   const newState = { ...state }
   const currentService = newState.accounts.get(context.currentServiceId)!
-  const requestKey = `${hash.toString()}_${Number(z)}`
+  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
 
-  if (!currentService.requests.has(requestKey as `0x${string}`)) {
-    currentService.requests.set(requestKey as `0x${string}`, new Uint8Array([]))
+  if (!currentService.requests.has(requestKey)) {
+    currentService.requests.set(requestKey, new Uint8Array([]))
   }
 
   const request = currentService.requests.get(requestKey as `0x${string}`)!
@@ -885,21 +877,13 @@ export function solicit(context: AccumulateContext): AccumulateResult {
   if (request.length === 2) {
     const newRequest = new Uint8Array(request.length + 4)
     newRequest.set(request)
-    newRequest.set(
-      [
-        context.currentTime & 0xff,
-        (context.currentTime >> 8) & 0xff,
-        (context.currentTime >> 16) & 0xff,
-        (context.currentTime >> 24) & 0xff,
-      ],
-      request.length,
-    )
-    currentService.requests.set(requestKey as `0x${string}`, newRequest)
+    newRequest.set(numberToBytes(context.currentTime), request.length)
+    currentService.requests.set(requestKey, newRequest)
   }
 
   // Check balance
-  const minBalance = '100' // Minimum balance requirement
-  if (Number.parseInt(currentService.balance) < Number.parseInt(minBalance)) {
+  const minBalance = 100n // Minimum balance requirement
+  if (currentService.balance < minBalance) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.FULL },
@@ -944,7 +928,7 @@ export function forget(context: AccumulateContext): AccumulateResult {
   const z = registers.r8
 
   // Read hash
-  const hash = readMemoryRange(memory, Number(o), 32)
+  const hash = readMemoryRange(memory, o, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -959,8 +943,8 @@ export function forget(context: AccumulateContext): AccumulateResult {
   // Update service
   const newState = { ...state }
   const currentService = newState.accounts.get(context.currentServiceId)!
-  const requestKey = `${hash.toString()}_${Number(z)}`
-  const request = currentService.requests.get(requestKey as `0x${string}`)
+  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
+  const request = currentService.requests.get(requestKey)
 
   if (!request) {
     return {
@@ -976,7 +960,7 @@ export function forget(context: AccumulateContext): AccumulateResult {
   // Handle different request states
   if (request.length === 0 || request.length === 2) {
     const requestTime = request.length === 2 ? Number(request[1]) : 0
-    if (context.currentTime - requestTime < 19200) {
+    if (context.currentTime - BigInt(requestTime) < 19200n) {
       // Cexpungeperiod
       return {
         executionState: 'continue',
@@ -987,25 +971,17 @@ export function forget(context: AccumulateContext): AccumulateResult {
         implicationsY: [],
       }
     }
-    currentService.requests.delete(requestKey as `0x${string}`)
-    currentService.preimages.delete(hash.toString() as `0x${string}`)
+    currentService.requests.delete(requestKey)
+    currentService.preimages.delete(bytesToHex(hash))
   } else if (request.length === 1) {
     // For this mock, simulate pushing timestamp as bytes
     const newRequest = new Uint8Array(request.length + 4)
     newRequest.set(request)
-    newRequest.set(
-      [
-        context.currentTime & 0xff,
-        (context.currentTime >> 8) & 0xff,
-        (context.currentTime >> 16) & 0xff,
-        (context.currentTime >> 24) & 0xff,
-      ],
-      request.length,
-    )
-    currentService.requests.set(requestKey as `0x${string}`, newRequest)
+    newRequest.set(numberToBytes(context.currentTime), request.length)
+    currentService.requests.set(requestKey, newRequest)
   } else if (request.length === 3) {
-    const requestTime = Number(request[1])
-    if (context.currentTime - requestTime < 19200) {
+    const requestTime = BigInt(request[1])
+    if (context.currentTime - BigInt(requestTime) < 19200n) {
       return {
         executionState: 'continue',
         registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.HUH },
@@ -1015,7 +991,7 @@ export function forget(context: AccumulateContext): AccumulateResult {
         implicationsY: [],
       }
     }
-    request[1] = context.currentTime
+    request[1] = Number(context.currentTime)
   }
 
   return {
@@ -1051,7 +1027,7 @@ export function yieldControl(context: AccumulateContext): AccumulateResult {
   const o = registers.r7
 
   // Read hash
-  const hash = readMemoryRange(memory, Number(o), 32)
+  const hash = readMemoryRange(memory, o, 32n)
   if (hash === 'error') {
     return {
       executionState: 'panic',
@@ -1102,10 +1078,10 @@ export function provide(context: AccumulateContext): AccumulateResult {
   const s =
     registers.r7 === 2n ** 64n - 1n
       ? context.currentServiceId
-      : Number(registers.r7)
+      : BigInt(registers.r7)
 
   // Read input data
-  const inputData = readMemoryRange(memory, Number(o), Number(z))
+  const inputData = readMemoryRange(memory, o, z)
   if (inputData === 'error') {
     return {
       executionState: 'panic',
@@ -1132,7 +1108,7 @@ export function provide(context: AccumulateContext): AccumulateResult {
 
   // Check if request exists
   const hash = inputData.toString()
-  const requestKey = `${hash}_${Number(z)}`
+  const requestKey = bytesToHex(stringToBytes(`${hash}_${z}`))
   if (targetService.requests.get(requestKey)?.length !== 0) {
     return {
       executionState: 'continue',
@@ -1172,7 +1148,7 @@ export function provide(context: AccumulateContext): AccumulateResult {
 
 // Main dispatch function
 export function dispatchAccumulateFunction(
-  functionId: number,
+  functionId: bigint,
   context: AccumulateContext,
 ): AccumulateResult {
   logger.debug('Dispatching Accumulate function', { functionId })

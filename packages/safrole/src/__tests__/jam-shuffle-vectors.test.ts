@@ -134,7 +134,7 @@ describe('JAM Shuffle Test Vectors', () => {
 describe('Guarantor Assignment Shuffle Integration', () => {
   it('should integrate shuffle into guarantor assignments', () => {
     const epochalEntropy = ('0x' + 'ab'.repeat(32)) as `0x${string}`
-    const currentTime = 100
+    const currentTime = 100n
     const activeSet = Array.from({ length: 10 }, (_, _i) => ({
       bandersnatch: `0x${'00'.repeat(32)}` as `0x${string}`,
       ed25519: `0x${'00'.repeat(32)}` as `0x${string}`,

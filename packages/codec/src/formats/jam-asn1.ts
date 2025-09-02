@@ -74,7 +74,7 @@ export interface JamHeader {
 
 export interface JamBlock {
   header: JamHeader
-  extrinsic: any // TODO: Define Extrinsic structure
+  extrinsic: unknown // TODO: Define Extrinsic structure
 }
 
 /**

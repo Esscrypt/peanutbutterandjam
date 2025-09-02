@@ -7,8 +7,8 @@
  * Reference: graypaper/text/utilities.tex, Equation 329 and 331
  */
 
-import type { HashValue } from '@pbnj/types'
 import { hash as blake2b } from '@stablelib/blake2b'
+import type { Hex } from 'viem'
 import { logger } from './logger'
 
 /**
@@ -103,7 +103,7 @@ function fisherYatesShuffle<T>(sequence: T[], randomSequence: number[]): T[] {
  * @param entropy - 32-byte hash as entropy source (HashValue format: '0x...')
  * @returns Shuffled copy of the input array
  */
-export function jamShuffle<T>(input: T[], entropy: HashValue): T[] {
+export function jamShuffle<T>(input: T[], entropy: Hex): T[] {
   logger.debug('JAM shuffle starting', {
     inputLength: input.length,
     entropy: `${entropy.slice(0, 10)}...`,
@@ -167,7 +167,7 @@ export function jamShuffle<T>(input: T[], entropy: HashValue): T[] {
  */
 export function shuffleValidatorIndices(
   validatorCount: number,
-  entropy: HashValue,
+  entropy: Hex,
 ): number[] {
   if (validatorCount < 0) {
     throw new Error(`Invalid validator count: ${validatorCount}`)
@@ -218,7 +218,7 @@ export function rotateArray<T>(array: T[], positions: number): T[] {
  */
 export function shuffleAndRotateValidators<T>(
   validators: T[],
-  entropy: HashValue,
+  entropy: Hex,
   rotationOffset: number,
 ): T[] {
   // First shuffle using entropy

@@ -5,6 +5,8 @@
  * the specification in jamtestvectors/lib/jam-types.asn
  */
 
+import type { Extrinsic } from '@pbnj/types'
+
 // ASN.1 Tag Classes
 export enum Asn1TagClass {
   UNIVERSAL = 0x00,
@@ -72,7 +74,7 @@ export interface JamHeader {
 
 export interface JamBlock {
   header: JamHeader
-  extrinsic: any // TODO: Define Extrinsic structure
+  extrinsic: Extrinsic
 }
 
 /**
@@ -89,24 +91,25 @@ export class JamAsn1Decoder {
   /**
    * Decode a complete JAM block
    */
-  decodeBlock(): JamBlock {
-    const tlv = this.readTLV()
+  // TODO: fix this
+  // decodeBlock(): JamBlock {
+  //   const tlv = this.readTLV()
 
-    if (tlv.tag !== Asn1UniversalTag.SEQUENCE) {
-      throw new Error('Expected SEQUENCE for Block')
-    }
+  //   if (tlv.tag !== Asn1UniversalTag.SEQUENCE) {
+  //     throw new Error('Expected SEQUENCE for Block')
+  //   }
 
-    const children = this.decodeSequence(tlv.value)
+  //   const children = this.decodeSequence(tlv.value)
 
-    if (children.length < 2) {
-      throw new Error('Block must have at least header and extrinsic')
-    }
+  //   if (children.length < 2) {
+  //     throw new Error('Block must have at least header and extrinsic')
+  //   }
 
-    return {
-      header: this.decodeHeader(children[0]),
-      extrinsic: children[1], // TODO: Implement extrinsic decoding
-    }
-  }
+  //   return {
+  //     header: this.decodeHeader(children[0]),
+  //     extrinsic: this.decodeExtrinsic(children[1]),
+  //   }
+  // }
 
   /**
    * Decode a JAM header

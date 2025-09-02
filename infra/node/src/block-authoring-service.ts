@@ -5,13 +5,21 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import { logger } from '@pbnj/core'
+import { randomBytes } from 'node:crypto'
+import type { Safe } from '@pbnj/core'
+import {
+  bytesToHex,
+  logger,
+  numberToBytes,
+  type SafePromise,
+  safeError,
+  safeResult,
+  stringToBytes,
+} from '@pbnj/core'
 import type {
   BlockAuthoringBlock as Block,
   BlockAuthoringConfig,
   BlockAuthoringContext,
-  BlockAuthoringError,
-  BlockAuthoringErrorType,
   BlockAuthoringMetrics,
   BlockAuthoringResult,
   BlockAuthoringService,
@@ -19,6 +27,7 @@ import type {
   Extrinsic,
   GenesisConfig,
   GenesisState,
+  RuntimeWorkPackage,
   BlockAuthoringState as State,
   SubmissionResult,
   BlockAuthoringValidationResult as ValidationResult,
@@ -32,6 +41,7 @@ import { HeaderConstructor } from './header-constructor'
 import { MetricsCollector } from './metrics-collector'
 import { BaseService } from './service-interface'
 import { StateManager } from './state-manager'
+import type { TelemetryService } from './telemetry-service'
 import { WorkPackageProcessor } from './work-package-processor'
 
 /**
@@ -50,8 +60,9 @@ export class BlockAuthoringServiceImpl
   private stateManager: StateManager
   private blockSubmitter: BlockSubmitter
   private metricsCollector: MetricsCollector
+  private telemetryService: TelemetryService
 
-  constructor() {
+  constructor(telemetryService: TelemetryService) {
     super('block-authoring-service')
     this.headerConstructor = new HeaderConstructor()
     this.workPackageProcessor = new WorkPackageProcessor()
@@ -61,6 +72,7 @@ export class BlockAuthoringServiceImpl
     this.metricsCollector = new MetricsCollector(
       process.env['NODE_ID'] || 'default-node',
     )
+    this.telemetryService = telemetryService
   }
 
   async init(): Promise<void> {
@@ -122,38 +134,63 @@ export class BlockAuthoringServiceImpl
    */
   async createBlock(
     context: BlockAuthoringContext,
-  ): Promise<BlockAuthoringResult> {
+  ): SafePromise<BlockAuthoringResult> {
     const startTime = Date.now()
 
+    // Emit telemetry event for block authoring start
+    const parentHeaderHash = numberToBytes(context.parentHeader.slot)
+    const fullParentHash = new Uint8Array(32)
+    fullParentHash.set(parentHeaderHash)
+    const [authoringEventIdError, authoringEventId] =
+      await this.telemetryService.emitAuthoring(
+        BigInt(context.parentHeader.slot) + 1n,
+        fullParentHash,
+      )
+    if (authoringEventIdError) return safeError(authoringEventIdError)
     try {
       logger.info('Starting block creation', {
         parentBlock: context.parentHeader.slot,
         extrinsicsCount: context.extrinsics.length,
         workPackagesCount: context.workPackages.length,
+        telemetryEventId: authoringEventId,
       })
 
       // Validate extrinsics
       const validationStart = Date.now()
-      const validationResult = await this.validateExtrinsics(context.extrinsics)
+      const [validationResultError, validationResult] =
+        await this.validateExtrinsics(context.extrinsics)
+      if (validationResultError) {
+        return safeError(validationResultError)
+      }
       const validationTime = Date.now() - validationStart
 
       if (!validationResult.valid) {
-        return this.createErrorResult(
-          'INVALID_EXTRINSICS',
-          'Extrinsic validation failed',
-          { errors: validationResult.errors },
-          false,
-        )
+        // Emit telemetry event for authoring failure
+        if (authoringEventId) {
+          await this.telemetryService.emitAuthoringFailed(
+            authoringEventId,
+            'Extrinsic validation failed',
+          )
+        }
+        return safeError(new Error('Extrinsic validation failed'))
       }
 
       // Process work packages
-      await this.processWorkPackages(context.workPackages)
+      const [workPackagesError, _workPackages] = await this.processWorkPackages(
+        context.workPackages,
+      )
+      if (workPackagesError) {
+        return safeError(workPackagesError)
+      }
 
       // Construct block header
-      const header = await this.constructHeader(
+      const [error, header] = this.constructHeader(
         context.parentHeader,
         context.extrinsics,
       )
+      if (error) {
+        return safeError(error)
+      }
 
       // Create block
       const block: Block = {
@@ -162,54 +199,89 @@ export class BlockAuthoringServiceImpl
       }
 
       // Update state
-      await this.updateState(block)
+      const [stateError, _state] = await this.updateState(block)
+      if (stateError) {
+        return safeError(stateError)
+      }
 
       // Submit block
       const submissionStart = Date.now()
-      const submissionResult = await this.submitBlock(block)
+      const [submissionError, submissionResult] = await this.submitBlock(block)
       const submissionTime = Date.now() - submissionStart
 
-      if (!submissionResult.success) {
-        return this.createErrorResult(
-          'SUBMISSION_FAILED',
-          'Block submission failed',
-          { error: submissionResult.error },
-          true,
-        )
+      if (submissionError || !submissionResult) {
+        // Emit telemetry event for authoring failure
+        if (authoringEventId) {
+          await this.telemetryService.emitAuthoringFailed(
+            authoringEventId,
+            'Block submission failed',
+          )
+        }
+        return safeError(new Error('Block submission failed'))
       }
 
       const totalTime = Date.now() - startTime
 
       // Update metrics
       this.metricsCollector.updateMetrics({
-        creationTime: totalTime,
-        validationTime,
-        submissionTime,
-        memoryUsage: process.memoryUsage().heapUsed,
-        cpuUsage: 0, // TODO: Implement CPU usage tracking
-        extrinsicCount: context.extrinsics.length,
-        workPackageCount: context.workPackages.length,
-        blockSize: JSON.stringify(block).length,
+        creationTime: BigInt(totalTime),
+        validationTime: BigInt(validationTime),
+        submissionTime: BigInt(submissionTime),
+        memoryUsage: BigInt(process.memoryUsage().heapUsed),
+        cpuUsage: 0n, // TODO: Implement CPU usage tracking
+        extrinsicCount: BigInt(context.extrinsics.length),
+        workPackageCount: BigInt(context.workPackages.length),
+        blockSize: BigInt(JSON.stringify(block).length),
       })
+
+      // Emit telemetry event for successful block authoring
+      if (authoringEventId) {
+        const headerHash = new TextEncoder()
+          .encode(
+            submissionResult.blockHash?.toString() || header.slot.toString(),
+          )
+          .slice(0, 32)
+        const fullHeaderHash = new Uint8Array(32)
+        fullHeaderHash.set(headerHash)
+
+        const blockOutline = {
+          sizeInBytes: BigInt(JSON.stringify(block).length),
+          headerHash: fullHeaderHash,
+          ticketCount: 0n,
+          preimageCount: 0n,
+          preimagesSizeInBytes: 0n,
+          guaranteeCount: 0n,
+          assuranceCount: 0n,
+          disputeVerdictCount: 0n,
+        }
+
+        await this.telemetryService.emitAuthored(authoringEventId, blockOutline)
+      }
 
       logger.info('Block created successfully', {
         blockSlot: header.slot,
         blockHash: submissionResult.blockHash,
         totalTime,
+        telemetryEventId: authoringEventId,
       })
 
-      return {
+      return safeResult({
         success: true,
         block,
         metrics: this.metricsCollector.getMetrics(),
-      }
+      })
     } catch (error) {
-      logger.error('Block creation failed', { error })
-      return this.createErrorResult(
-        'CREATION_FAILED',
-        'Block creation failed',
-        { error: error instanceof Error ? error.message : String(error) },
-        true,
+      // Emit telemetry event for authoring failure
+      if (authoringEventId) {
+        await this.telemetryService.emitAuthoringFailed(
+          authoringEventId,
+          `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        )
+      }
+      return safeError(
+        new Error(
+          `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        ),
       )
     }
   }
@@ -217,29 +289,45 @@ export class BlockAuthoringServiceImpl
   /**
    * Construct block header
    */
-  async constructHeader(
+  constructHeader(
     parent: BlockHeader | null,
     extrinsics: Extrinsic[],
-  ): Promise<BlockHeader> {
+  ): Safe<BlockHeader> {
     return this.headerConstructor.construct(parent, extrinsics, this.config)
   }
 
   /**
    * Process work packages
    */
-  async processWorkPackages(packages: WorkPackage[]): Promise<WorkReport[]> {
+  async processWorkPackages(
+    packages: WorkPackage[],
+  ): SafePromise<WorkReport[]> {
     // TODO: Implement proper conversion between WorkPackage types
-    return this.workPackageProcessor.process(packages as any, this.config)
+    const convertedPackages: RuntimeWorkPackage[] = packages.map((pkg) => ({
+      ...pkg,
+      id: bytesToHex(randomBytes(32)),
+      authToken: pkg.authorization,
+      authCodeHost: pkg.auth_code_host,
+      authCodeHash: pkg.authorizer.code_hash,
+      authConfig: pkg.authorizer.params,
+      workItems: pkg.items,
+      data: bytesToHex(randomBytes(32)), // Generate random data hash
+      author: pkg.authorization, // Use authorization as author
+      timestamp: BigInt(Date.now()), // Add current timestamp
+    }))
+    return this.workPackageProcessor.process(convertedPackages, this.config)
   }
 
   /**
    * Validate extrinsics
    */
-  async validateExtrinsics(extrinsics: Extrinsic[]): Promise<ValidationResult> {
+  async validateExtrinsics(
+    extrinsics: Extrinsic[],
+  ): SafePromise<ValidationResult> {
     // Convert core extrinsics to extended extrinsics for validation
     const extendedExtrinsics = extrinsics.map((ext, index) => ({
       ...ext,
-      id: `ext_${index}_${ext.hash}`,
+      id: bytesToHex(stringToBytes(`ext_${index}_${ext.hash}`)),
       author: `unknown`, // TODO: Extract author from signature
     }))
     return this.extrinsicValidator.validate(extendedExtrinsics, this.config)
@@ -248,14 +336,14 @@ export class BlockAuthoringServiceImpl
   /**
    * Update state
    */
-  async updateState(block: Block): Promise<State> {
+  updateState(block: Block): Safe<State> {
     return this.stateManager.update(block, this.config)
   }
 
   /**
    * Submit block
    */
-  async submitBlock(block: Block): Promise<SubmissionResult> {
+  async submitBlock(block: Block): SafePromise<SubmissionResult> {
     return this.blockSubmitter.submit(block, this.config)
   }
 
@@ -329,28 +417,5 @@ export class BlockAuthoringServiceImpl
    */
   resetMetrics(): void {
     this.metricsCollector.reset()
-  }
-
-  /**
-   * Create error result
-   */
-  private createErrorResult(
-    type: string,
-    message: string,
-    details?: Record<string, unknown>,
-    recoverable = false,
-  ): BlockAuthoringResult {
-    const error: BlockAuthoringError = {
-      type: type as BlockAuthoringErrorType, // TODO: Fix type casting
-      message,
-      details,
-      recoverable,
-    }
-
-    return {
-      success: false,
-      error,
-      metrics: this.metricsCollector.getMetrics(),
-    }
   }
 }

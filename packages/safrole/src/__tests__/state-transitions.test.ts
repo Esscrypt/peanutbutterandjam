@@ -39,7 +39,7 @@ describe('Safrole State Transitions', () => {
 
   it('should handle regular slot progression', async () => {
     const input: SafroleInput = {
-      slot: 1,
+      slot: 1n,
       entropy: '0x5555555555555555555555555555555555555555555555555555555555555555',
       extrinsic: [],
     }
@@ -58,7 +58,7 @@ describe('Safrole State Transitions', () => {
 
   it('should handle epoch transition', async () => {
     const input: SafroleInput = {
-      slot: 600, // Start of new epoch
+      slot: 600n, // Start of new epoch
       entropy: '0x6666666666666666666666666666666666666666666666666666666666666666',
       extrinsic: [],
     }
@@ -77,7 +77,7 @@ describe('Safrole State Transitions', () => {
 
   it('should validate slot progression', async () => {
     const input: SafroleInput = {
-      slot: 0, // Same slot as current state
+      slot: 0n, // Same slot as current state
       entropy: '0x7777777777777777777777777777777777777777777777777777777777777777',
       extrinsic: [],
     }
@@ -94,10 +94,10 @@ describe('Safrole State Transitions', () => {
 
   it('should validate extrinsic limits', async () => {
     const input: SafroleInput = {
-      slot: 1,
+      slot: 1n,
       entropy: '0x8888888888888888888888888888888888888888888888888888888888888888',
       extrinsic: Array(11).fill({
-        entryIndex: 0,
+        entryIndex: 0n,
         signature: `0x${'0'.repeat(128)}`,
       }),
     }
@@ -114,16 +114,16 @@ describe('Safrole State Transitions', () => {
 
   it('should process ticket submissions', async () => {
     const input: SafroleInput = {
-      slot: 1,
+      slot: 1n,
       entropy: '0x9999999999999999999999999999999999999999999999999999999999999999',
       extrinsic: [
         {
-          entryIndex: 0,
+          entryIndex: 0n,
           signature:
             '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         },
         {
-          entryIndex: 1,
+          entryIndex: 1n,
           signature:
             '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         },
@@ -144,10 +144,10 @@ describe('Safrole State Transitions', () => {
 
   it('should validate ticket entry indices', async () => {
     const input: SafroleInput = {
-      slot: 1,
+      slot: 1n,
       entropy: '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       extrinsic: [
-        { entryIndex: 1001, signature: `0x${'0'.repeat(128)}` }, // Exceeds MAX_TICKET_ENTRIES
+        { entryIndex: 1001n, signature: `0x${'0'.repeat(128)}` }, // Exceeds MAX_TICKET_ENTRIES
       ],
     }
 

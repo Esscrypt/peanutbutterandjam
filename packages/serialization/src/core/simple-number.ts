@@ -12,7 +12,7 @@
  * This is a direct identity encoding for blob sequences.
  */
 
-import type { Natural } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 
 /**
  * Encode natural number using simple hex encoding
@@ -20,7 +20,9 @@ import type { Natural } from '@pbnj/types'
  * @param value - Natural number to encode
  * @returns Encoded octet sequence
  */
-export function encodeSimpleNatural(value: Natural): Uint8Array {
+export function encodeSimpleNatural(
+  value: bigint,
+): Safe<{ value: Uint8Array; remaining: Uint8Array }> {
   if (value < 0n) throw new Error(`Natural number cannot be negative: ${value}`)
 
   // Convert to hex string and pad to even length
@@ -33,7 +35,7 @@ export function encodeSimpleNatural(value: Natural): Uint8Array {
     result[i] = Number.parseInt(paddedHex.substring(i * 2, i * 2 + 2), 16)
   }
 
-  return result
+  return safeResult({ value: result, remaining: new Uint8Array(0) })
 }
 
 /**
@@ -42,12 +44,13 @@ export function encodeSimpleNatural(value: Natural): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded natural number and remaining data
  */
-export function decodeSimpleNatural(data: Uint8Array): {
-  value: Natural
-  remaining: Uint8Array
-} {
+export function decodeSimpleNatural(
+  data: Uint8Array,
+): Safe<{ value: bigint; remaining: Uint8Array }> {
   if (data.length === 0)
-    throw new Error('Cannot decode simple natural number from empty data')
+    return safeError(
+      new Error('Cannot decode simple natural number from empty data'),
+    )
 
   // Convert Uint8Array back to hex string (big-endian)
   let hexStr = ''
@@ -58,14 +61,5 @@ export function decodeSimpleNatural(data: Uint8Array): {
   // Parse hex string to BigInt
   const value = BigInt(`0x${hexStr}`)
 
-  return { value, remaining: data.slice(data.length) }
-}
-
-/**
- * Get the encoded length of a simple natural number
- */
-export function getSimpleNaturalEncodedLength(value: Natural): number {
-  if (value === 0n) return 1
-  const hexStr = value.toString(16)
-  return Math.ceil(hexStr.length / 2)
+  return safeResult({ value, remaining: new Uint8Array(0) })
 }

@@ -31,7 +31,7 @@
  * which are common in blockchain operations (balances, indices, etc.).
  */
 
-import type { Natural } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 
 /**
  * Encode natural number using Gray Paper variable-length encoding
@@ -44,18 +44,19 @@ import type { Natural } from '@pbnj/types'
  * @param value - Natural number to encode (0 to 2^64-1)
  * @returns Encoded octet sequence (1-9 Uint8Array)
  */
-export function encodeNatural(value: Natural): Uint8Array {
-  if (value < 0n) throw new Error(`Natural number cannot be negative: ${value}`)
+export function encodeNatural(value: bigint): Safe<Uint8Array> {
+  if (value < 0n)
+    return safeError(new Error(`Natural number cannot be negative: ${value}`))
   if (value > 2n ** 64n - 1n)
-    throw new Error('Natural number exceeds maximum value')
+    return safeError(new Error('Natural number exceeds maximum value'))
 
   const length = getNaturalEncodedLength(value)
 
   // Case 1: x = 0 (1 byte)
-  if (value === 0n) return new Uint8Array([0])
+  if (value === 0n) return safeResult(new Uint8Array([0]))
 
   // Case 2: Simple encoding for values 1-127 (1 byte)
-  if (length === 1) return new Uint8Array([Number(value)])
+  if (length === 1) return safeResult(new Uint8Array([Number(value)]))
 
   // Case 3: Large number encoding (9 Uint8Array) - prefix 0xff
   if (length === 9) {
@@ -67,7 +68,7 @@ export function encodeNatural(value: Natural): Uint8Array {
       const Uint8Arraytr = valueStr.slice((7 - i) * 2, (8 - i) * 2)
       result[1 + i] = Number.parseInt(Uint8Arraytr, 16)
     }
-    return result
+    return safeResult(result)
   }
 
   // Case 4: Variable-length encoding (2-8 Uint8Array)
@@ -94,7 +95,7 @@ export function encodeNatural(value: Natural): Uint8Array {
     result[1 + i] = Number.parseInt(Uint8Arraytr, 16)
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -103,31 +104,32 @@ export function encodeNatural(value: Natural): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded natural number and remaining data
  */
-export function decodeNatural(data: Uint8Array): {
-  value: Natural
+export function decodeNatural(data: Uint8Array): Safe<{
+  value: bigint
   remaining: Uint8Array
-} {
+}> {
   if (data.length === 0)
-    throw new Error('Cannot decode natural number from empty data')
+    return safeError(new Error('Cannot decode natural number from empty data'))
 
   const first = data[0]
 
   // Case 1: x = 0
-  if (first === 0) return { value: 0n, remaining: data.slice(1) }
+  if (first === 0) return safeResult({ value: 0n, remaining: data.slice(1) })
 
   // Case 2: Simple encoding for values 1-127
-  if (first <= 127) return { value: BigInt(first), remaining: data.slice(1) }
+  if (first <= 127)
+    return safeResult({ value: BigInt(first), remaining: data.slice(1) })
 
   // Case 3: Large number encoding (9 Uint8Array) - prefix 0xff
   if (first === 0xff) {
     if (data.length < 9)
-      throw new Error('Insufficient data for large number encoding')
+      return safeError(new Error('Insufficient data for large number encoding'))
     let value = 0n
     // decode[8](x) - little-endian decoding
     for (let i = 0; i < 8; i++) {
       value |= BigInt(data[1 + i]) << BigInt(8 * i)
     }
-    return { value, remaining: data.slice(9) }
+    return safeResult({ value, remaining: data.slice(9) })
   }
 
   // Case 4: Variable-length encoding
@@ -152,7 +154,7 @@ export function decodeNatural(data: Uint8Array): {
   }
 
   if (data.length < 1 + l)
-    throw new Error('Insufficient data for variable-length natural')
+    return safeError(new Error('Insufficient data for variable-length natural'))
 
   // Extract the high bits from the prefix
   const prefix = BigInt(first)
@@ -166,7 +168,7 @@ export function decodeNatural(data: Uint8Array): {
   }
 
   const value = highBits | lowBits
-  return { value, remaining: data.slice(1 + l) }
+  return safeResult({ value, remaining: data.slice(1 + l) })
 }
 
 /**
@@ -175,7 +177,7 @@ export function decodeNatural(data: Uint8Array): {
  * @param value - Natural number
  * @returns Expected encoded length in Uint8Array
  */
-export function getNaturalEncodedLength(value: Natural): number {
+export function getNaturalEncodedLength(value: bigint): number {
   if (value === 0n) return 1
 
   // Simple encoding for values 1-127

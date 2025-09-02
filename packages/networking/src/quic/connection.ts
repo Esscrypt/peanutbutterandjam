@@ -11,6 +11,7 @@ import type {
   QUICConfig,
   QUICServerCrypto,
 } from '@infisical/quic/dist/types'
+import { type SafePromise, safeError, safeResult } from '@pbnj/core'
 import type { ConnectionEndpoint } from '@pbnj/types'
 
 /**
@@ -191,33 +192,35 @@ export class QuicConnectionManager {
    * Create a stream on a connection
    * JAMNP-S specification requires all streams to be bidirectional
    */
-  async createStream(connectionId: string): Promise<QUICStream> {
+  async createStream(connectionId: string): SafePromise<QUICStream> {
     const connectionInfo = this.connections.get(connectionId)
     if (!connectionInfo || !connectionInfo.quicConnection) {
-      throw new Error(
-        `Connection ${connectionId} not found or no QUIC connection available`,
+      return safeError(
+        new Error(
+          `Connection ${connectionId} not found or no QUIC connection available`,
+        ),
       )
     }
 
     // JAMNP-S specification requires bidirectional streams
     const quicStream = connectionInfo.quicConnection.newStream('bidi')
-    return quicStream
+    return safeResult(quicStream)
   }
 
   /**
    * Close a connection
    */
-  async closeConnection(connectionId: string): Promise<void> {
+  async closeConnection(connectionId: string): SafePromise<boolean> {
     const connection = this.connections.get(connectionId)
     if (!connection) {
-      return
+      return safeError(new Error(`Connection ${connectionId} not found`))
     }
 
     if (
       connection.state === ConnectionState.DISCONNECTED ||
       connection.state === ConnectionState.ERROR
     ) {
-      return
+      return safeResult(true)
     }
 
     connection.state = ConnectionState.DISCONNECTING
@@ -229,8 +232,10 @@ export class QuicConnectionManager {
       }
 
       this.handleConnectionClosed(connectionId)
+      return safeResult(true)
     } catch (error) {
       this.handleConnectionError(connectionId, error as Error)
+      return safeError(error as Error)
     }
   }
 

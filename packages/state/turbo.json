@@ -1,0 +1,10 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "generate": {
+      "inputs": ["src/schema.ts"],
+      "outputs": ["src/migrations/**"],
+      "cache": false
+    }
+  }
+}

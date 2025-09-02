@@ -30,14 +30,14 @@ export class ANDInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return BigInt(operands.length) >= 3n // Need three registers
   }
 
   disassemble(operands: Uint8Array): string {
@@ -75,14 +75,14 @@ export class XORInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return BigInt(operands.length) >= 3n // Need three registers
   }
 
   disassemble(operands: Uint8Array): string {
@@ -120,14 +120,14 @@ export class ORInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return BigInt(operands.length) >= 3n // Need three registers
   }
 
   disassemble(operands: Uint8Array): string {

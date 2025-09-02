@@ -5,9 +5,11 @@
  * Handles connection establishment, maintenance, and preferred initiator logic
  */
 
+import { type SafePromise, safeError, safeResult } from '@pbnj/core'
 import type {
   ConnectionEndpoint,
   NodeType,
+  PeerInfo,
   StreamInfo,
   StreamKind,
   ValidatorIndex,
@@ -43,7 +45,7 @@ export class ConnectionManager {
   private gridStructureManager: GridStructureManager
   private localValidatorIndex: ValidatorIndex | null = null
   private localNodeType: NodeType | null = null
-  private connectionTimeout = 5000 // 5 seconds (Gray Paper recommendation for connection initiation)
+
   private keepAliveInterval = 30000 // 30 seconds (QUIC keepalive interval)
   private pingTimer: NodeJS.Timeout | null = null
 
@@ -141,15 +143,21 @@ export class ConnectionManager {
    */
   private setupEventHandlers(): void {
     // Listen for connection events from transport
-    this.transport.on('connection', (connectionInfo: any) => {
-      this.handleIncomingConnection(connectionInfo)
-    })
+    this.transport.on(
+      'connection',
+      (connectionInfo: { connectionId: string }) => {
+        this.handleIncomingConnection(connectionInfo)
+      },
+    )
 
-    this.transport.on('disconnection', (connectionInfo: any) => {
-      this.handleConnectionClosed(connectionInfo)
-    })
+    this.transport.on(
+      'disconnection',
+      (connectionInfo: { connectionId: string }) => {
+        this.handleConnectionClosed(connectionInfo)
+      },
+    )
 
-    this.transport.on('stream', (streamInfo: any) => {
+    this.transport.on('stream', (streamInfo: StreamInfo) => {
       this.handleStreamEvent(streamInfo)
     })
   }
@@ -157,7 +165,9 @@ export class ConnectionManager {
   /**
    * Handle incoming connection
    */
-  private handleIncomingConnection(connectionInfo: any): void {
+  private handleIncomingConnection(connectionInfo: {
+    connectionId: string
+  }): void {
     // Extract validator index from connection info
     const validatorIndex = this.extractValidatorIndex(connectionInfo)
 
@@ -169,7 +179,9 @@ export class ConnectionManager {
   /**
    * Handle connection closed
    */
-  private handleConnectionClosed(connectionInfo: any): void {
+  private handleConnectionClosed(connectionInfo: {
+    connectionId: string
+  }): void {
     const validatorIndex = this.extractValidatorIndex(connectionInfo)
 
     if (validatorIndex !== null) {
@@ -183,6 +195,35 @@ export class ConnectionManager {
   private handleStreamEvent(streamInfo: StreamInfo): void {
     // Route stream to appropriate protocol handler
     this.routeStreamToProtocol(streamInfo)
+  }
+
+  /**
+   * Connect to a peer and return connection ID
+   * Used by protocol handlers to establish connections
+   */
+  async connectToPeer(endpoint: ConnectionEndpoint): Promise<string> {
+    try {
+      // Attempt connection via transport
+      const connectionInfo = await this.transport.connectToPeer(endpoint)
+
+      if (connectionInfo) {
+        // connectionInfo is a string (connectionId) from transport
+        const connectionId =
+          typeof connectionInfo === 'string'
+            ? connectionInfo
+            : `conn-${Date.now()}`
+        console.log(`Connected to peer at ${endpoint.host}:${endpoint.port}`)
+        return connectionId
+      }
+
+      throw new Error('Failed to establish connection')
+    } catch (error) {
+      console.error(
+        `Failed to connect to peer at ${endpoint.host}:${endpoint.port}:`,
+        error,
+      )
+      throw error
+    }
   }
 
   /**
@@ -202,7 +243,9 @@ export class ConnectionManager {
       )
 
       if (connectionInfo) {
-        this.markConnectionEstablished(validatorIndex, connectionInfo)
+        this.markConnectionEstablished(validatorIndex, {
+          connectionId: connectionInfo,
+        })
         return true
       }
 
@@ -218,7 +261,7 @@ export class ConnectionManager {
    */
   private markConnectionEstablished(
     validatorIndex: ValidatorIndex,
-    connectionInfo: any,
+    connectionInfo: { connectionId: string },
   ): void {
     const peer = this.peerDiscoveryManager.getPeer(validatorIndex)
     if (!peer) {
@@ -260,9 +303,9 @@ export class ConnectionManager {
   /**
    * Extract validator index from connection info
    */
-  private extractValidatorIndex(
-    _connectionInfo: unknown,
-  ): ValidatorIndex | null {
+  private extractValidatorIndex(_connectionInfo: {
+    connectionId: string
+  }): ValidatorIndex | null {
     // TODO: Implement validator index extraction from connection info
     return null
   }
@@ -282,35 +325,33 @@ export class ConnectionManager {
   async createStream(
     validatorIndex: ValidatorIndex,
     streamKind: StreamKind,
-  ): Promise<StreamInfo | null> {
+  ): SafePromise<StreamInfo | null> {
     const connection = this.connections.get(validatorIndex)
     if (!connection || !connection.isConnected) {
-      return null
+      return safeError(new Error('Connection not found'))
     }
 
-    try {
-      // Create stream through transport
-      const streamId = await this.transport.createStream(
-        connection.connectionId!,
-        streamKind,
-      )
-
-      // Create stream info
-      const streamInfo: StreamInfo = {
-        streamId,
-        streamKind,
-        isOpen: true,
-        isBidirectional: true,
-      }
-
-      // Store stream info
-      connection.streams.set(streamKind, streamInfo)
-
-      return streamInfo
-    } catch (error) {
-      console.error('Failed to create stream:', error)
-      return null
+    // Create stream through transport
+    const [error, streamId] = await this.transport.createStream(
+      connection.connectionId!,
+      streamKind,
+    )
+    if (error) {
+      return safeError(error)
     }
+
+    // Create stream info
+    const streamInfo: StreamInfo = {
+      streamId,
+      streamKind,
+      isOpen: true,
+      isBidirectional: true,
+    }
+
+    // Store stream info
+    connection.streams.set(streamKind, streamInfo)
+
+    return safeResult(streamInfo)
   }
 
   /**
@@ -320,28 +361,26 @@ export class ConnectionManager {
     validatorIndex: ValidatorIndex,
     streamKind: StreamKind,
     message: Uint8Array,
-  ): Promise<boolean> {
+  ): SafePromise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection || !connection.isConnected) {
-      return false
+      return safeError(new Error('Connection not found'))
     }
 
     const streamInfo = connection.streams.get(streamKind)
     if (!streamInfo) {
-      return false
+      return safeError(new Error('Stream not found'))
     }
 
-    try {
-      await this.transport.sendMessage(streamInfo.streamId, message)
-      connection.lastActivity = Date.now()
-      return true
-    } catch (error) {
-      console.error(
-        `Failed to send message to validator ${validatorIndex}:`,
-        error,
-      )
-      return false
+    const [error] = await this.transport.sendMessage(
+      streamInfo.streamId,
+      message,
+    )
+    if (error) {
+      return safeError(error)
     }
+    connection.lastActivity = Date.now()
+    return safeResult(true)
   }
 
   /**
@@ -350,59 +389,54 @@ export class ConnectionManager {
   async closeStream(
     validatorIndex: ValidatorIndex,
     streamKind: StreamKind,
-  ): Promise<boolean> {
+  ): SafePromise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection) {
-      return false
+      return safeError(new Error('Connection not found'))
     }
 
     const streamInfo = connection.streams.get(streamKind)
     if (!streamInfo) {
-      return false
+      return safeError(new Error('Stream not found'))
     }
 
-    try {
-      await this.transport.closeStream(streamInfo.streamId)
-      connection.streams.delete(streamKind)
-      return true
-    } catch (error) {
-      console.error(
-        `Failed to close stream ${streamKind} to validator ${validatorIndex}:`,
-        error,
-      )
-      return false
+    const [error] = await this.transport.closeStream(streamInfo.streamId)
+    if (error) {
+      return safeError(error)
     }
+    connection.streams.delete(streamKind)
+    return safeResult(true)
   }
 
   /**
    * Close connection to a validator
    */
-  async closeConnection(validatorIndex: ValidatorIndex): Promise<boolean> {
+  async closeConnection(validatorIndex: ValidatorIndex): SafePromise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection) {
-      return false
+      return safeError(new Error('Connection not found'))
     }
 
-    try {
-      // Close all streams
-      for (const [streamKind] of connection.streams) {
-        await this.closeStream(validatorIndex, streamKind)
+    // Close all streams
+    for (const [streamKind] of connection.streams) {
+      const [error] = await this.closeStream(validatorIndex, streamKind)
+      if (error) {
+        return safeError(error)
       }
+    }
 
-      // Close connection
-      if (connection.connectionId) {
-        await this.transport.disconnectFromPeer(connection.connectionId)
-      }
-
-      this.markConnectionClosed(validatorIndex)
-      return true
-    } catch (error) {
-      console.error(
-        `Failed to close connection to validator ${validatorIndex}:`,
-        error,
+    // Close connection
+    if (connection.connectionId) {
+      const [error] = await this.transport.disconnectFromPeer(
+        connection.connectionId,
       )
-      return false
+      if (error) {
+        return safeError(error)
+      }
     }
+
+    this.markConnectionClosed(validatorIndex)
+    return safeResult(true)
   }
 
   /**
@@ -575,11 +609,11 @@ export class ConnectionManager {
       )
 
       // Check each connection's health
-      for (const [validatorIndex, peer] of connectedPeers) {
+      for (const [validatorIndex, peerInfo] of connectedPeers) {
         try {
           const isHealthy = await this.checkConnectionHealth(
             validatorIndex,
-            peer,
+            peerInfo,
           )
           if (isHealthy) {
             healthyConnections.add(validatorIndex)
@@ -629,19 +663,17 @@ export class ConnectionManager {
    */
   private async checkConnectionHealth(
     validatorIndex: ValidatorIndex,
-    peer: any,
+    peerInfo: PeerInfo,
   ): Promise<boolean> {
     try {
-      // Basic check: peer exists and has a connection
-      if (!peer || !peer.connection) {
+      // Basic check: peer exists
+      if (!peerInfo) {
         return false
       }
 
-      // Check QUIC connection state (if available)
-      if (
-        peer.connection.state === 'closed' ||
-        peer.connection.state === 'error'
-      ) {
+      // Check if we have a connection to this validator
+      const connection = this.connections.get(peerInfo.validatorIndex)
+      if (!connection || !connection.isConnected) {
         return false
       }
 

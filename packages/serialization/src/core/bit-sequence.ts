@@ -33,6 +33,8 @@
  * and other boolean arrays common in consensus protocols.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
+
 // Uint8Array is a built-in type, no need to import
 
 /**
@@ -46,9 +48,9 @@
  * @param bits - Array of boolean values representing bits
  * @returns Encoded octet sequence
  */
-export function encodeBitSequence(bits: boolean[]): Uint8Array {
+export function encodeBitSequence(bits: boolean[]): Safe<Uint8Array> {
   if (bits.length === 0) {
-    return new Uint8Array(0)
+    return safeResult(new Uint8Array(0))
   }
 
   // Pack first 8 bits into an octet
@@ -56,14 +58,17 @@ export function encodeBitSequence(bits: boolean[]): Uint8Array {
 
   // Recursively encode remaining bits
   const remainingBits = bits.slice(8)
-  const remainingEncoded = encodeBitSequence(remainingBits)
+  const [error, remainingEncoded] = encodeBitSequence(remainingBits)
+  if (error) {
+    return safeError(error)
+  }
 
   // Concatenate octet with remaining encoded bits
   const result = new Uint8Array(1 + remainingEncoded.length)
   result[0] = octet
   result.set(remainingEncoded, 1)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -76,9 +81,9 @@ export function encodeBitSequence(bits: boolean[]): Uint8Array {
 export function decodeBitSequence(
   data: Uint8Array,
   bitCount?: number,
-): { value: boolean[]; remaining: Uint8Array } {
+): Safe<{ value: boolean[]; remaining: Uint8Array }> {
   if (data.length === 0) {
-    return { value: [], remaining: data }
+    return safeResult({ value: [], remaining: data })
   }
 
   // If bitCount is specified, decode exactly that many bits
@@ -97,10 +102,10 @@ export function decodeBitSequence(
       remainingData = remainingData.slice(1)
     }
 
-    return {
+    return safeResult({
       value: bits,
       remaining: remainingData,
-    }
+    })
   }
 
   // If no bitCount specified, decode all available bits (8 per octet)
@@ -110,10 +115,10 @@ export function decodeBitSequence(
     bits.push(...octetBits)
   }
 
-  return {
+  return safeResult({
     value: bits,
     remaining: new Uint8Array(0),
-  }
+  })
 }
 
 /**
@@ -122,18 +127,24 @@ export function decodeBitSequence(
  * @param bits - Array of boolean values representing bits
  * @returns Encoded octet sequence with length prefix
  */
-export function encodeBitSequenceWithLength(bits: boolean[]): Uint8Array {
-  const encodedBits = encodeBitSequence(bits)
+export function encodeBitSequenceWithLength(bits: boolean[]): Safe<Uint8Array> {
+  const [error, encodedBits] = encodeBitSequence(bits)
+  if (error) {
+    return safeError(error)
+  }
   const length = bits.length
 
   // Encode length as natural number
-  const encodedLength = encodeNatural(BigInt(length))
+  const [error2, encodedLength] = encodeNatural(BigInt(length))
+  if (error2) {
+    return safeError(error2)
+  }
 
   const result = new Uint8Array(encodedLength.length + encodedBits.length)
   result.set(encodedLength, 0)
   result.set(encodedBits, encodedLength.length)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -142,12 +153,17 @@ export function encodeBitSequenceWithLength(bits: boolean[]): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded bit array and remaining data
  */
-export function decodeBitSequenceWithLength(data: Uint8Array): {
+export function decodeBitSequenceWithLength(data: Uint8Array): Safe<{
   value: boolean[]
   remaining: Uint8Array
-} {
+}> {
   // First decode the length
-  const { value: length, remaining: lengthRemaining } = decodeNatural(data)
+  const [error, lengthResult] = decodeNatural(data)
+  if (error) {
+    return safeError(error)
+  }
+  const length = lengthResult.value
+  const lengthRemaining = lengthResult.remaining
   const bitCount = Number(length)
 
   if (bitCount < 0 || bitCount > Number.MAX_SAFE_INTEGER) {
@@ -155,9 +171,17 @@ export function decodeBitSequenceWithLength(data: Uint8Array): {
   }
 
   // Then decode the bit sequence
-  const { value, remaining } = decodeBitSequence(lengthRemaining, bitCount)
+  const [error2, bitSequenceResult] = decodeBitSequence(
+    lengthRemaining,
+    bitCount,
+  )
+  if (error2) {
+    return safeError(error2)
+  }
+  const value = bitSequenceResult.value
+  const remaining = bitSequenceResult.remaining
 
-  return { value, remaining }
+  return safeResult({ value, remaining })
 }
 
 /**

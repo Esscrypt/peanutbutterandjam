@@ -31,7 +31,7 @@
  * structures. Large dictionaries use the Merkle trie for efficiency.
  */
 
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex, type Safe, safeError, safeResult } from '@pbnj/core'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 
 /**
@@ -53,7 +53,7 @@ export interface DictionaryEntry {
  * @param entries - Array of key-value pairs to encode
  * @returns Encoded octet sequence
  */
-export function encodeDictionary(entries: DictionaryEntry[]): Uint8Array {
+export function encodeDictionary(entries: DictionaryEntry[]): Safe<Uint8Array> {
   // Sort entries by key (lexicographic order)
   const sortedEntries = [...entries].sort((a, b) => {
     const keyA = bytesToHex(a.key)
@@ -100,13 +100,18 @@ export function decodeDictionary(
   data: Uint8Array,
   keyLength: number,
   valueLength = -1,
-): { value: DictionaryEntry[]; remaining: Uint8Array } {
+): Safe<{ value: DictionaryEntry[]; remaining: Uint8Array }> {
   // Decode variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
-  const { value: concatenatedPairs, remaining } = decodeVariableLength(data)
+  const [error, concatenatedPairsResult] = decodeVariableLength(data)
+  if (error) {
+    return safeError(error)
+  }
+  const concatenatedPairs = concatenatedPairsResult.value
+  const remaining = concatenatedPairsResult.remaining
 
   // If no data, return empty dictionary
   if (concatenatedPairs.length === 0) {
-    return { value: [], remaining }
+    return safeResult({ value: [], remaining })
   }
 
   const result: DictionaryEntry[] = []
@@ -141,5 +146,5 @@ export function decodeDictionary(
     }
   }
 
-  return { value: result, remaining }
+  return safeResult({ value: result, remaining })
 }

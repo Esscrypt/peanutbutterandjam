@@ -13,8 +13,6 @@ import type {
   PVMInstruction,
   PVMRuntime,
   PVMState,
-  RegisterValue,
-  RegisterValue32,
   ResultCode,
   SingleStepResult,
 } from '@pbnj/types'
@@ -31,7 +29,7 @@ const defaultDeblob: DeblobFunction = (blob: Uint8Array): DeblobResult => {
     // For now, we'll assume the blob contains instruction data directly
     const instructionData = blob
     const opcodeBitmask = new Uint8Array(blob.length).fill(0xff) // Default bitmask
-    const dynamicJumpTable = new Map<number, number>()
+    const dynamicJumpTable = new Map<bigint, bigint>()
 
     return {
       success: true,
@@ -65,7 +63,7 @@ export class PVM implements PVMRuntime {
     // Initialize default state
     this.state = {
       resultCode: null,
-      instructionPointer: 0,
+      instructionPointer: 0n,
       registerState: {
         // 64-bit registers initialized to 0
         r0: 0n,
@@ -112,7 +110,7 @@ export class PVM implements PVMRuntime {
       )
 
       // Reset state
-      this.state.instructionPointer = 0
+      this.state.instructionPointer = 0n
       this.state.resultCode = null
       this.state.gasCounter = this.gasLimit
 
@@ -136,7 +134,7 @@ export class PVM implements PVMRuntime {
       this.instructions = this.parseInstructionsFromData(instructionData)
 
       // Reset state
-      this.state.instructionPointer = 0
+      this.state.instructionPointer = 0n
       this.state.resultCode = null
       this.state.gasCounter = this.gasLimit
 
@@ -160,7 +158,7 @@ export class PVM implements PVMRuntime {
   public step(): SingleStepResult {
     try {
       const currentInstruction =
-        this.instructions[this.state.instructionPointer]
+        this.instructions[Number(this.state.instructionPointer)]
 
       if (!currentInstruction) {
         // No more instructions - halt
@@ -177,7 +175,7 @@ export class PVM implements PVMRuntime {
       const newState: PVMState = {
         ...this.state,
         resultCode,
-        instructionPointer: this.state.instructionPointer + 1,
+        instructionPointer: this.state.instructionPointer + 1n,
       }
 
       this.state = newState
@@ -204,7 +202,7 @@ export class PVM implements PVMRuntime {
   public stepWithHostCall(): SingleStepResult {
     try {
       const currentInstruction =
-        this.instructions[this.state.instructionPointer]
+        this.instructions[Number(this.state.instructionPointer)]
 
       if (!currentInstruction) {
         // No more instructions - halt
@@ -221,7 +219,7 @@ export class PVM implements PVMRuntime {
       const newState: PVMState = {
         ...this.state,
         resultCode,
-        instructionPointer: this.state.instructionPointer + 1,
+        instructionPointer: this.state.instructionPointer + 1n,
       }
 
       this.state = newState
@@ -269,7 +267,7 @@ export class PVM implements PVMRuntime {
   public reset(): void {
     this.state = {
       resultCode: null,
-      instructionPointer: 0,
+      instructionPointer: 0n,
       registerState: {
         r0: 0n,
         r1: 0n,
@@ -326,7 +324,7 @@ export class PVM implements PVMRuntime {
   /**
    * Get register value (64-bit registers)
    */
-  public getRegister64(index: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): RegisterValue {
+  public getRegister64(index: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7): bigint {
     switch (index) {
       case 0:
         return this.state.registerState.r0
@@ -354,7 +352,7 @@ export class PVM implements PVMRuntime {
    */
   public setRegister64(
     index: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7,
-    value: RegisterValue,
+    value: bigint,
   ): void {
     switch (index) {
       case 0:
@@ -387,7 +385,7 @@ export class PVM implements PVMRuntime {
   /**
    * Get register value (32-bit registers)
    */
-  public getRegister32(index: 8 | 9 | 10 | 11 | 12): RegisterValue32 {
+  public getRegister32(index: 8 | 9 | 10 | 11 | 12): bigint {
     switch (index) {
       case 8:
         return this.state.registerState.r8
@@ -407,10 +405,7 @@ export class PVM implements PVMRuntime {
   /**
    * Set register value (32-bit registers)
    */
-  public setRegister32(
-    index: 8 | 9 | 10 | 11 | 12,
-    value: RegisterValue32,
-  ): void {
+  public setRegister32(index: 8 | 9 | 10 | 11 | 12, value: bigint): void {
     const maskedValue = value & 0xffffffffn // Ensure 32-bit
     switch (index) {
       case 8:
@@ -516,26 +511,27 @@ export class PVM implements PVMRuntime {
     instructionData: Uint8Array,
   ): PVMInstruction[] {
     const instructions: PVMInstruction[] = []
-    let address = 0
+    let address = 0n
 
     // Parse instructions using Gray Paper skip distance logic
-    while (address < instructionData.length) {
-      const opcode = instructionData[address]
+    while (address < BigInt(instructionData.length)) {
+      const opcode = instructionData[Number(address)]
       const instructionLength =
-        INSTRUCTION_LENGTHS[opcode as keyof typeof INSTRUCTION_LENGTHS] ||
-        DEFAULTS.UNKNOWN_INSTRUCTION_LENGTH
+        INSTRUCTION_LENGTHS[
+          opcode as unknown as keyof typeof INSTRUCTION_LENGTHS
+        ] || DEFAULTS.UNKNOWN_INSTRUCTION_LENGTH
 
-      if (address + instructionLength > instructionData.length) {
+      if (address + instructionLength > BigInt(instructionData.length)) {
         break // Not enough data for complete instruction
       }
 
       const operands = instructionData.slice(
-        address + 1,
-        address + instructionLength,
+        Number(address + 1n),
+        Number(address + instructionLength),
       )
 
       instructions.push({
-        opcode,
+        opcode: BigInt(opcode),
         operands,
         address,
       })
@@ -573,7 +569,7 @@ export class PVM implements PVMRuntime {
         ram: this.state.ram,
         callStack: this.state.callStack,
         instructionPointer: this.state.instructionPointer,
-        stackPointer: this.state.stackPointer || 0,
+        stackPointer: this.state.stackPointer || 0n,
         gasCounter: this.state.gasCounter,
       }
 

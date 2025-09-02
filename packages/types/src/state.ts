@@ -4,23 +4,24 @@
  * Types for state management and database operations
  */
 
+import type { Hex } from 'viem'
 import type { ConsensusTicket } from './consensus'
-import type { Bytes, HashValue, Natural, ValidatorKey } from './core'
+import type { ValidatorKey } from './core'
 
 /**
  * Core account structure
  */
 export interface CoreAccount {
-  balance: Natural
-  nonce: Natural
+  balance: bigint
+  nonce: bigint
 }
 
 /**
  * Validator account structure
  */
 export interface ValidatorAccount {
-  publicKey: Bytes
-  stake: Natural
+  publicKey: Uint8Array
+  stake: bigint
   active: boolean
 }
 
@@ -31,7 +32,7 @@ export interface SafroleState {
   currentslot: number
   pendingset: ValidatorKey[]
   sealtickets: ConsensusTicket[]
-  entropy: HashValue
+  entropy: Hex
 }
 
 /**
@@ -54,7 +55,7 @@ export interface CoreState {
  * Pending report structure
  */
 export interface PendingReport {
-  workReport: Bytes
+  workReport: Uint8Array
   timestamp: number
 }
 
@@ -62,7 +63,7 @@ export interface PendingReport {
  * Authorizer pool structure
  */
 export interface AuthorizerPool {
-  authorizers: Bytes[]
+  authorizers: Uint8Array[]
   nextIndex: number
 }
 
@@ -70,11 +71,11 @@ export interface AuthorizerPool {
  * Privileges state structure
  */
 export interface PrivilegesState {
-  manager: HashValue
-  assigners: HashValue[]
-  delegator: HashValue
-  registrar: HashValue
-  alwaysaccers: HashValue[]
+  manager: Hex
+  assigners: Hex[]
+  delegator: Hex
+  registrar: Hex
+  alwaysaccers: Hex[]
 }
 
 /**

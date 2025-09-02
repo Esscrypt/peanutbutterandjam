@@ -9,11 +9,18 @@
  * Validator shuffling (213-217): fyshuffle for core assignments
  */
 
+import * as crypto from 'node:crypto'
 import { IETFVRFProver, RingVRFProver } from '@pbnj/bandersnatch-vrf'
-import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
+import {
+  bytesToHex,
+  type Hex,
+  hexToBytes,
+  logger,
+  numberToBytes,
+  zeroHash,
+} from '@pbnj/core'
 import type {
-  HashValue,
-  HexString,
+  RingVRFInput,
   SafroleInput,
   SafroleOutput,
   ConsensusSafroleState as SafroleState,
@@ -121,7 +128,7 @@ export async function executeSafroleSTF(
     validateInput(input, currentSlot)
 
     // Handle epoch transition if needed
-    if (isEpochTransition(currentSlot, input.slot)) {
+    if (isEpochTransition(currentSlot, Number(input.slot))) {
       return handleEpochTransition(
         state,
         input,
@@ -283,7 +290,7 @@ function processTickets(
         id: ticketId,
         entryIndex: extrinsic.entryIndex,
         signature: extrinsic.signature,
-        timestamp: Date.now(),
+        timestamp: BigInt(Date.now()),
       }
 
       tickets.push(ticket)
@@ -311,21 +318,17 @@ function processTickets(
  * Extract ticket ID using Bandersnatch VRF
  */
 function extractTicketId(
-  signature: string,
-  entropy: HexString,
-  entryIndex: number,
-): string {
+  signature: Hex,
+  entropy: Hex,
+  entryIndex: bigint,
+): Hex {
   // Use IETF VRF to generate deterministic ticket ID
-  const secretKey = {
-    bytes: new Uint8Array(Buffer.from(signature, 'hex')),
-  }
+  const secretKey = hexToBytes(signature)
 
-  const input = {
-    message: new Uint8Array([
-      ...Buffer.from(entropy, 'hex'),
-      ...new Uint8Array([entryIndex]),
-    ]),
-  }
+  const input = new Uint8Array([
+    ...hexToBytes(entropy),
+    ...numberToBytes(entryIndex),
+  ])
 
   try {
     // Generate VRF proof and output
@@ -342,14 +345,9 @@ function extractTicketId(
 
     // Fallback to simple hash if VRF fails - ensure uniqueness by including entry index
     const fallbackInput = new Uint8Array([
-      ...Buffer.from(signature, 'hex'),
-      ...Buffer.from(entropy, 'hex'),
-      ...new Uint8Array([
-        entryIndex & 0xff,
-        (entryIndex >> 8) & 0xff,
-        (entryIndex >> 16) & 0xff,
-        (entryIndex >> 24) & 0xff,
-      ]),
+      ...hexToBytes(signature),
+      ...hexToBytes(entropy),
+      ...numberToBytes(entryIndex),
     ])
 
     logger.debug('Fallback input data', {
@@ -360,7 +358,6 @@ function extractTicketId(
     })
 
     // Use a simple hash function to generate unique ID
-    const crypto = require('node:crypto')
     const hash = crypto.createHash('sha256').update(fallbackInput).digest('hex')
     logger.debug('Generated fallback ticket ID', {
       hash,
@@ -374,39 +371,32 @@ function extractTicketId(
 /**
  * Compute epoch root using Bandersnatch VRF
  */
-function computeEpochRoot(validators: ValidatorKey[]): HexString {
+function computeEpochRoot(validators: ValidatorKey[]): Hex {
   // Use Ring VRF to compute epoch root from validator keys
   if (validators.length === 0) {
-    return '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`
+    return zeroHash as `0x${string}`
   }
 
   try {
     // Create a ring of validator public keys
     const ring = {
-      publicKeys: validators.map((v) => ({
-        bytes: hexToBytes(v.bandersnatch),
-      })),
+      publicKeys: validators.map((v) => hexToBytes(v.bandersnatch)),
       size: validators.length,
       commitment: new Uint8Array(32).fill(0),
     }
 
-    const params = {
-      ringSize: validators.length,
-      securityParam: 128,
-      hashFunction: 'sha256',
-    }
-
-    const input = {
-      message: new Uint8Array(Buffer.from('epoch_root', 'utf8')),
+    const input: RingVRFInput = {
       ring,
       proverIndex: 0, // Use first validator as prover
-      params,
+      params: {
+        ringSize: validators.length,
+        securityParam: 128,
+        hashFunction: 'sha256',
+      },
     }
 
     // Generate Ring VRF proof
-    const secretKey = {
-      bytes: hexToBytes(validators[0].bandersnatch),
-    }
+    const secretKey = hexToBytes(validators[0].bandersnatch)
 
     const ringVrfResult = RingVRFProver.prove(secretKey, input)
 
@@ -547,10 +537,10 @@ function applyBlacklistFilter(
       // Replace with null key (all zeros) - Gray Paper line 122-123
       return {
         ...key,
-        bandersnatch: ('0x' + '00'.repeat(32)) as `0x${string}`,
-        ed25519: ('0x' + '00'.repeat(32)) as `0x${string}`,
-        bls: ('0x' + '00'.repeat(144)) as `0x${string}`,
-        metadata: ('0x' + '00'.repeat(128)) as `0x${string}`,
+        bandersnatch: `0x${'00'.repeat(32)}` as `0x${string}`,
+        ed25519: `0x${'00'.repeat(32)}` as `0x${string}`,
+        bls: `0x${'00'.repeat(144)}` as `0x${string}`,
+        metadata: `0x${'00'.repeat(128)}` as `0x${string}`,
       }
     }
     return key
@@ -564,14 +554,14 @@ function applyBlacklistFilter(
  * This is where validator shuffling occurs - for core assignments, not validator set rotation
  */
 export function computeGuarantorAssignments(
-  epochalEntropy: HashValue,
-  currentTime: number,
+  epochalEntropy: Hex,
+  currentTime: bigint,
   activeSet: ValidatorKey[],
   coreCount = 341,
   rotationPeriod = 10,
 ): number[] {
   logger.debug('Computing guarantor assignments', {
-    epochalEntropy: epochalEntropy.slice(0, 10) + '...',
+    epochalEntropy: `${epochalEntropy.slice(0, 10)}...`,
     currentTime,
     validatorCount: activeSet.length,
     coreCount,
@@ -589,7 +579,7 @@ export function computeGuarantorAssignments(
   // Apply Fisher-Yates shuffle and rotation using epochal entropy
   // Gray Paper line 212-217: P(e, t) = R(fyshuffle(..., e), rotationOffset)
   const rotationOffset = Math.floor(
-    (currentTime % SAFROLE_CONSTANTS.EPOCH_LENGTH) / rotationPeriod,
+    (Number(currentTime) % SAFROLE_CONSTANTS.EPOCH_LENGTH) / rotationPeriod,
   )
   const rotatedAssignments = shuffleAndRotateValidators(
     coreAssignments,

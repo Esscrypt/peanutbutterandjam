@@ -5,8 +5,8 @@
  * This is a Common Ephemeral (CE) stream for publishing audit judgments.
  */
 
-import type { Bytes, JudgmentPublication, StreamInfo } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { JudgmentPublication, StreamInfo } from '@pbnj/types'
 
 /**
  * Judgment publication protocol handler
@@ -18,21 +18,21 @@ export class JudgmentPublicationProtocol {
       epochIndex: number
       validatorIndex: number
       validity: 0 | 1
-      workReportHash: Bytes
-      signature: Bytes
+      workReportHash: Uint8Array
+      signature: Uint8Array
       timestamp: number
     }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -62,8 +62,8 @@ export class JudgmentPublicationProtocol {
     epochIndex: number,
     validatorIndex: number,
     validity: 0 | 1,
-    workReportHash: Bytes,
-    signature: Bytes,
+    workReportHash: Uint8Array,
+    signature: Uint8Array,
   ): Promise<void> {
     const key = `${epochIndex}_${validatorIndex}_${workReportHash.toString()}`
     this.judgments.set(key, {
@@ -104,14 +104,14 @@ export class JudgmentPublicationProtocol {
   getJudgment(
     epochIndex: number,
     validatorIndex: number,
-    workReportHash: Bytes,
+    workReportHash: Uint8Array,
   ):
     | {
         epochIndex: number
         validatorIndex: number
         validity: 0 | 1
-        workReportHash: Bytes
-        signature: Bytes
+        workReportHash: Uint8Array
+        signature: Uint8Array
         timestamp: number
       }
     | undefined {
@@ -125,13 +125,13 @@ export class JudgmentPublicationProtocol {
   async getJudgmentFromDatabase(
     epochIndex: number,
     validatorIndex: number,
-    workReportHash: Bytes,
+    workReportHash: Uint8Array,
   ): Promise<{
     epochIndex: number
     validatorIndex: number
     validity: 0 | 1
-    workReportHash: Bytes
-    signature: Bytes
+    workReportHash: Uint8Array
+    signature: Uint8Array
     timestamp: number
   } | null> {
     if (this.getJudgment(epochIndex, validatorIndex, workReportHash)) {
@@ -202,8 +202,8 @@ export class JudgmentPublicationProtocol {
     epochIndex: number,
     validatorIndex: number,
     validity: 0 | 1,
-    workReportHash: Bytes,
-    signature: Bytes,
+    workReportHash: Uint8Array,
+    signature: Uint8Array,
   ): JudgmentPublication {
     return {
       epochIndex,
@@ -217,7 +217,7 @@ export class JudgmentPublicationProtocol {
   /**
    * Serialize judgment publication message
    */
-  serializeJudgmentPublication(judgment: JudgmentPublication): Bytes {
+  serializeJudgmentPublication(judgment: JudgmentPublication): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + 4 + 1 + 32 + 64) // epochIndex + validatorIndex + validity + workReportHash + signature
     const view = new DataView(buffer)
@@ -248,7 +248,7 @@ export class JudgmentPublicationProtocol {
   /**
    * Deserialize judgment publication message
    */
-  deserializeJudgmentPublication(data: Bytes): JudgmentPublication {
+  deserializeJudgmentPublication(data: Uint8Array): JudgmentPublication {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -283,7 +283,7 @@ export class JudgmentPublicationProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const judgment = this.deserializeJudgmentPublication(data)
       await this.processJudgmentPublication(judgment)

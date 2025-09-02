@@ -5,8 +5,8 @@
  * This is a Common Ephemeral (CE) stream for distributing guaranteed work reports.
  */
 
-import type { Bytes, GuaranteedWorkReport, StreamInfo } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { GuaranteedWorkReport, StreamInfo } from '@pbnj/types'
 
 /**
  * Work report distribution protocol handler
@@ -15,21 +15,21 @@ export class WorkReportDistributionProtocol {
   private workReports: Map<
     string,
     {
-      workReport: Bytes
+      workReport: Uint8Array
       slot: number
-      signatures: Array<{ validatorIndex: number; signature: Bytes }>
+      signatures: Array<{ validatorIndex: number; signature: Uint8Array }>
     }
   > = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -53,10 +53,10 @@ export class WorkReportDistributionProtocol {
    * Store work report in local store and persist to database
    */
   async storeWorkReport(
-    workReportHash: Bytes,
-    workReport: Bytes,
+    workReportHash: Uint8Array,
+    workReport: Uint8Array,
     slot: number,
-    signatures: Array<{ validatorIndex: number; signature: Bytes }>,
+    signatures: Array<{ validatorIndex: number; signature: Uint8Array }>,
   ): Promise<void> {
     const hashString = workReportHash.toString()
     this.workReports.set(hashString, { workReport, slot, signatures })
@@ -93,11 +93,11 @@ export class WorkReportDistributionProtocol {
   /**
    * Get work report from local store
    */
-  getWorkReport(workReportHash: Bytes):
+  getWorkReport(workReportHash: Uint8Array):
     | {
-        workReport: Bytes
+        workReport: Uint8Array
         slot: number
-        signatures: Array<{ validatorIndex: number; signature: Bytes }>
+        signatures: Array<{ validatorIndex: number; signature: Uint8Array }>
       }
     | undefined {
     return this.workReports.get(workReportHash.toString())
@@ -106,10 +106,10 @@ export class WorkReportDistributionProtocol {
   /**
    * Get work report from database if not in local store
    */
-  async getWorkReportFromDatabase(workReportHash: Bytes): Promise<{
-    workReport: Bytes
+  async getWorkReportFromDatabase(workReportHash: Uint8Array): Promise<{
+    workReport: Uint8Array
     slot: number
-    signatures: Array<{ validatorIndex: number; signature: Bytes }>
+    signatures: Array<{ validatorIndex: number; signature: Uint8Array }>
   } | null> {
     if (this.getWorkReport(workReportHash)) {
       return this.getWorkReport(workReportHash) || null
@@ -130,16 +130,21 @@ export class WorkReportDistributionProtocol {
         )
 
         let slot = 0
-        let signatures: Array<{ validatorIndex: number; signature: Bytes }> = []
+        let signatures: Array<{
+          validatorIndex: number
+          signature: Uint8Array
+        }> = []
 
         if (metadataData) {
           try {
             const metadata = JSON.parse(metadataData.toString())
             slot = metadata.slot
-            signatures = metadata.signatures.map((sig: any) => ({
-              validatorIndex: sig.validatorIndex,
-              signature: Buffer.from(sig.signature, 'hex'),
-            }))
+            signatures = metadata.signatures.map(
+              (sig: { validatorIndex: number; signature: string }) => ({
+                validatorIndex: sig.validatorIndex,
+                signature: Buffer.from(sig.signature, 'hex'),
+              }),
+            )
           } catch (error) {
             console.error('Failed to parse work report metadata:', error)
           }
@@ -191,9 +196,9 @@ export class WorkReportDistributionProtocol {
    * Create work report distribution message
    */
   createWorkReportDistribution(
-    workReport: Bytes,
+    workReport: Uint8Array,
     slot: number,
-    signatures: Array<{ validatorIndex: number; signature: Bytes }>,
+    signatures: Array<{ validatorIndex: number; signature: Uint8Array }>,
   ): GuaranteedWorkReport {
     return {
       workReport,
@@ -205,7 +210,7 @@ export class WorkReportDistributionProtocol {
   /**
    * Serialize work report distribution message
    */
-  serializeWorkReportDistribution(report: GuaranteedWorkReport): Bytes {
+  serializeWorkReportDistribution(report: GuaranteedWorkReport): Uint8Array {
     // Calculate total size
     let totalSize = 4 + 4 // slot + number of signatures
 
@@ -253,7 +258,7 @@ export class WorkReportDistributionProtocol {
   /**
    * Deserialize work report distribution message
    */
-  deserializeWorkReportDistribution(data: Bytes): GuaranteedWorkReport {
+  deserializeWorkReportDistribution(data: Uint8Array): GuaranteedWorkReport {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -266,7 +271,8 @@ export class WorkReportDistributionProtocol {
     offset += 4
 
     // Read signatures
-    const signatures: Array<{ validatorIndex: number; signature: Bytes }> = []
+    const signatures: Array<{ validatorIndex: number; signature: Uint8Array }> =
+      []
     for (let i = 0; i < numSignatures; i++) {
       // Read validator index (4 bytes, little-endian)
       const validatorIndex = view.getUint32(offset, true)
@@ -296,7 +302,7 @@ export class WorkReportDistributionProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const report = this.deserializeWorkReportDistribution(data)
       await this.processWorkReportDistribution(report)

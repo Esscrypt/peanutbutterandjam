@@ -2,7 +2,7 @@
  * Prover-specific types for Bandersnatch VRF
  */
 
-import type { VRFProofWithOutput, VRFSecretKey } from '@pbnj/types'
+import type { VRFProofWithOutput } from '@pbnj/types'
 
 /**
  * Prover configuration options
@@ -21,7 +21,7 @@ export interface ProverConfig {
  */
 export interface ProverState {
   /** Current secret key */
-  secretKey: VRFSecretKey
+  secretKey: Uint8Array
   /** Configuration options */
   config: ProverConfig
   /** Internal state for optimization */

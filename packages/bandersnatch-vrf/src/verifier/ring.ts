@@ -36,7 +36,7 @@ export class RingVRFVerifier {
     const mergedConfig = { ...DEFAULT_VERIFIER_CONFIG, ...config }
 
     logger.debug('Verifying Ring VRF proof', {
-      inputLength: input.message.length,
+      inputLength: input.ring.commitment.length,
       ringSize: ring.publicKeys.length,
       hasAuxData: !!auxData,
       config: mergedConfig,
@@ -67,7 +67,10 @@ export class RingVRFVerifier {
       }
 
       // 4. Hash input to curve point (H1)
-      const alpha = IETFVRFProver.hashToCurve(input.message, mergedConfig)
+      const alpha = IETFVRFProver.hashToCurve(
+        input.ring.commitment,
+        mergedConfig,
+      )
 
       // 5. Verify zero-knowledge proof
       if (!this.verifyZKProof(proof.zkProof, input, alpha, output.gamma)) {
@@ -186,7 +189,7 @@ export class RingVRFVerifier {
   private static constructRingCommitment(ring: RingVRFRing): Uint8Array {
     // TODO: Implement actual ring commitment
     // For now, use a simple hash of all public keys
-    const allKeys = ring.publicKeys.flatMap((key) => Array.from(key.bytes))
+    const allKeys = ring.publicKeys.flatMap((key) => Array.from(key))
     return this.hashToBytes(new Uint8Array(allKeys))
   }
 

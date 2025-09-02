@@ -5,7 +5,8 @@
  * Reference: Gray Paper merklization.tex section D
  */
 
-import type { Hash } from '@pbnj/types'
+import type { Hex } from 'viem'
+import { type Safe, safeError, safeResult } from './safe'
 import { blake2bHash, bytesToHex, hexToBytes } from './utils/crypto'
 import { validateHexString } from './utils/validation'
 
@@ -96,8 +97,11 @@ function encodeLeaf(key: Uint8Array, value: Uint8Array): Uint8Array {
     result.set(key, 1)
 
     // Copy hash of value (32 Uint8Array)
-    const valueHash = blake2bHash(value)
-    const hashUint8Array = hexToBytes(valueHash as `0x${string}`)
+    const [valueHashError, valueHash] = blake2bHash(value)
+    if (valueHashError) {
+      throw valueHashError
+    }
+    const hashUint8Array = hexToBytes(valueHash)
     result.set(hashUint8Array, 32)
   }
 
@@ -113,18 +117,21 @@ function encodeLeaf(key: Uint8Array, value: Uint8Array): Uint8Array {
 export function merklize(
   keyValuePairs: KeyValuePair[],
   bitIndex = 0,
-): Uint8Array {
+): Safe<Uint8Array> {
   if (keyValuePairs.length === 0) {
     // Empty trie returns zero hash
-    return new Uint8Array(32)
+    return safeResult(new Uint8Array(32))
   }
 
   if (keyValuePairs.length === 1) {
     // Single leaf node
     const { key, value } = keyValuePairs[0]
     const encoded = encodeLeaf(key, value)
-    const hashResult = blake2bHash(encoded)
-    return hexToBytes(hashResult as `0x${string}`)
+    const [hashResultError, hashResult] = blake2bHash(encoded)
+    if (hashResultError) {
+      return safeError(hashResultError)
+    }
+    return safeResult(hexToBytes(hashResult))
   }
 
   // Split by current bit
@@ -140,13 +147,22 @@ export function merklize(
   }
 
   // Recursively compute child hashes
-  const leftHash = merklize(left, bitIndex + 1)
-  const rightHash = merklize(right, bitIndex + 1)
+  const [leftHashError, leftHash] = merklize(left, bitIndex + 1)
+  if (leftHashError) {
+    return safeError(leftHashError)
+  }
+  const [rightHashError, rightHash] = merklize(right, bitIndex + 1)
+  if (rightHashError) {
+    return safeError(rightHashError)
+  }
 
   // Encode branch node
   const encoded = encodeBranch(leftHash, rightHash)
-  const hashResult: Hash = blake2bHash(encoded)
-  return hexToBytes(hashResult as `0x${string}`)
+  const [hashResultError, hashResult] = blake2bHash(encoded)
+  if (hashResultError) {
+    return safeError(hashResultError)
+  }
+  return safeResult(hexToBytes(hashResult))
 }
 
 /**
@@ -154,42 +170,52 @@ export function merklize(
  * @param input - Object mapping hex keys to hex values
  * @returns Hex string of merkle root
  */
-export function merklizeHex(input: TrieInput): string {
+export function merklizeHex(input: TrieInput): Safe<Uint8Array> {
   const keyValuePairs: KeyValuePair[] = []
 
   for (const [hexKey, hexValue] of Object.entries(input)) {
     // Ensure hex strings have 0x prefix for viem
-    const normalizedKey = hexKey.startsWith('0x') ? hexKey : `0x${hexKey}`
+    const normalizedKey: Hex = (
+      hexKey.startsWith('0x') ? hexKey : `0x${hexKey}`
+    ) as `0x${string}`
 
     // Validate key format
     const keyValidation = validateHexString(normalizedKey, 'key', 64) // 32 Uint8Array = 64 hex chars
     if (!keyValidation.isValid) {
-      throw new Error(`Invalid key format: ${keyValidation.errors[0]?.message}`)
+      return safeError(
+        new Error(`Invalid key format: ${keyValidation.errors[0]?.message}`),
+      )
     }
 
     // Handle empty values (they represent empty byte arrays)
-    let normalizedValue: string
+    let normalizedValue: Hex
     if (hexValue === '') {
       normalizedValue = '0x' // Empty hex string
     } else {
-      normalizedValue = hexValue.startsWith('0x') ? hexValue : `0x${hexValue}`
+      normalizedValue = (
+        hexValue.startsWith('0x') ? hexValue : `0x${hexValue}`
+      ) as `0x${string}`
 
       // Validate non-empty value format
       const valueValidation = validateHexString(normalizedValue, 'value')
       if (!valueValidation.isValid) {
-        throw new Error(
-          `Invalid value format: ${valueValidation.errors[0]?.message}`,
+        return safeError(
+          new Error(
+            `Invalid value format: ${valueValidation.errors[0]?.message}`,
+          ),
         )
       }
     }
 
     // Use viem's hexToBytes for consistent hex handling
-    const keyUint8Array = hexToBytes(normalizedKey as `0x${string}`)
-    const valueUint8Array = hexToBytes(normalizedValue as `0x${string}`)
+    const keyUint8Array = hexToBytes(normalizedKey)
+    const valueUint8Array = hexToBytes(normalizedValue)
 
     // Keys must be 32 Uint8Array, we take the first 31 Uint8Array for the leaf
     if (keyUint8Array.length !== 32) {
-      throw new Error(`Key must be 32 Uint8Array, got ${keyUint8Array.length}`)
+      return safeError(
+        new Error(`Key must be 32 Uint8Array, got ${keyUint8Array.length}`),
+      )
     }
 
     // Remove the last byte to get 31-byte state key
@@ -201,9 +227,12 @@ export function merklizeHex(input: TrieInput): string {
     })
   }
 
-  const rootHash = merklize(keyValuePairs)
+  const [rootHashError, rootHash] = merklize(keyValuePairs)
+  if (rootHashError) {
+    return safeError(rootHashError)
+  }
   // Remove 0x prefix to match test vector format
-  return bytesToHex(rootHash).replace('0x', '')
+  return safeResult(rootHash)
 }
 
 /**
@@ -212,11 +241,14 @@ export function merklizeHex(input: TrieInput): string {
  * @returns Array of verification results
  */
 export function verifyTestVectors(
-  testVectors: Array<{ input: TrieInput; output: string }>,
-): Array<{ passed: boolean; expected: string; actual: string }> {
+  testVectors: Array<{ input: TrieInput; output: Hex }>,
+): Array<{ passed: boolean; expected: string; actual: Uint8Array }> {
   return testVectors.map(({ input, output }) => {
-    const actual = merklizeHex(input)
-    const passed = actual === output
+    const [actualError, actual] = merklizeHex(input)
+    if (actualError) {
+      throw actualError
+    }
+    const passed = bytesToHex(actual) === output
     return { passed, expected: output, actual }
   })
 }

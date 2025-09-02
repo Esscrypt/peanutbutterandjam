@@ -42,7 +42,7 @@ export class MUL_UPPER_S_SInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -94,7 +94,7 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -154,7 +154,7 @@ export class MUL_UPPER_S_UInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }

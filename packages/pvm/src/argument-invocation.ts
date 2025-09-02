@@ -9,7 +9,6 @@ import { logger } from '@pbnj/core'
 import type {
   ArgumentData,
   ContextMutator,
-  Gas,
   RAM,
   RegisterState,
   ResultCode,
@@ -48,12 +47,12 @@ export class ArgumentInvocationSystem<X> {
    */
   execute(
     programBlob: Uint8Array,
-    instructionPointer: number,
-    gasLimit: Gas,
+    instructionPointer: bigint,
+    gasLimit: bigint,
     argumentData: ArgumentData,
     context: X,
   ): {
-    gasConsumed: Gas
+    gasConsumed: bigint
     result: Uint8Array | 'panic' | 'oog'
     context: X
   } {
@@ -97,18 +96,18 @@ export class ArgumentInvocationSystem<X> {
    * Process execution result according to Gray Paper equation 7.8
    */
   private processResult(
-    initialGas: Gas,
+    initialGas: bigint,
     executionResult: {
       resultCode: ResultCode
-      instructionPointer: number
-      gasCounter: Gas
+      instructionPointer: bigint
+      gasCounter: bigint
       registers: RegisterState
       ram: RAM
       context: X
     },
     finalRegisters: RegisterState,
   ): {
-    gasConsumed: Gas
+    gasConsumed: bigint
     result: Uint8Array | 'panic' | 'oog'
     context: X
   } {
@@ -130,7 +129,7 @@ export class ArgumentInvocationSystem<X> {
       // Halt - extract return data from memory
       const returnData = this.extractReturnData(
         finalRegisters['r7'], // Argument pointer
-        Number(finalRegisters['r8']), // Argument length
+        finalRegisters['r8'], // Argument length
         executionResult.ram,
       )
 
@@ -167,15 +166,15 @@ export class ArgumentInvocationSystem<X> {
    */
   private extractReturnData(
     startAddress: bigint,
-    length: number,
+    length: bigint,
     ram: RAM,
   ): Uint8Array | null {
     try {
-      const start = Number(startAddress)
+      const start = startAddress
       const end = start + length
 
       // Validate address range
-      if (start < 0 || end > Number(PVM_CONSTANTS.MAX_MEMORY_ADDRESS)) {
+      if (start < 0 || end > PVM_CONSTANTS.MAX_MEMORY_ADDRESS) {
         logger.error('Invalid return data address range', { start, end })
         return null
       }

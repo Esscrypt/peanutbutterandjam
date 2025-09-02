@@ -20,13 +20,13 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue === immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_EQ_IMM instruction', {
       registerA,
@@ -44,13 +44,13 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -66,13 +66,13 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue !== immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_NE_IMM instruction', {
       registerA,
@@ -90,13 +90,13 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -112,13 +112,13 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue < immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LT_U_IMM instruction', {
       registerA,
@@ -136,13 +136,13 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -158,13 +158,13 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue <= immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LE_U_IMM instruction', {
       registerA,
@@ -182,13 +182,13 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -205,13 +205,13 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue >= immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GE_U_IMM instruction', {
       registerA,
@@ -229,13 +229,13 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -251,13 +251,13 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const shouldBranch = registerValue > immediateX
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GT_U_IMM instruction', {
       registerA,
@@ -275,13 +275,13 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -297,8 +297,8 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     // Convert to signed comparison
     const signedRegister =
@@ -307,8 +307,8 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
       immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
     const shouldBranch = signedRegister < signedImmediate
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LT_S_IMM instruction', {
       registerA,
@@ -326,13 +326,13 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -348,8 +348,8 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     // Convert to signed comparison
     const signedRegister =
@@ -358,8 +358,8 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
       immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
     const shouldBranch = signedRegister <= signedImmediate
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LE_S_IMM instruction', {
       registerA,
@@ -377,13 +377,13 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -400,8 +400,8 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     // Convert to signed comparison
     const signedRegister =
@@ -410,8 +410,8 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
       immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
     const shouldBranch = signedRegister >= signedImmediate
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GE_S_IMM instruction', {
       registerA,
@@ -429,13 +429,13 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -451,8 +451,8 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const offset = this.getImmediateValue(context.instruction.operands, 2, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     // Convert to signed comparison
     const signedRegister =
@@ -461,8 +461,8 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
       immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
     const shouldBranch = signedRegister > signedImmediate
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GT_S_IMM instruction', {
       registerA,
@@ -480,13 +480,13 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 4 // Need register, immediate, and offset
+    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const offset = this.getImmediateValue(operands, 2n, 2n)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -509,13 +509,13 @@ export class BRANCH_EQInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     const shouldBranch = registerValueA === registerValueB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_EQ instruction', {
       registerA,
@@ -533,13 +533,13 @@ export class BRANCH_EQInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -556,13 +556,13 @@ export class BRANCH_NEInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     const shouldBranch = registerValueA !== registerValueB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_NE instruction', {
       registerA,
@@ -580,13 +580,13 @@ export class BRANCH_NEInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -603,13 +603,13 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     const shouldBranch = registerValueA < registerValueB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LT_U instruction', {
       registerA,
@@ -627,13 +627,13 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -650,7 +650,7 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     // Convert to signed comparison
@@ -664,8 +664,8 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
         : registerValueB
     const shouldBranch = signedA < signedB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_LT_S instruction', {
       registerA,
@@ -683,13 +683,13 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -707,13 +707,13 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     const shouldBranch = registerValueA >= registerValueB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GE_U instruction', {
       registerA,
@@ -731,13 +731,13 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -755,7 +755,7 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2)
+    const offset = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValueA = this.getRegisterValue(context.registers, registerA)
     const registerValueB = this.getRegisterValue(context.registers, registerB)
     // Convert to signed comparison
@@ -769,8 +769,8 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
         : registerValueB
     const shouldBranch = signedA >= signedB
     const targetAddress = shouldBranch
-      ? context.instructionPointer + Number(offset)
-      : context.instructionPointer + 1
+      ? context.instructionPointer + offset
+      : context.instructionPointer + 1n
 
     logger.debug('Executing BRANCH_GE_S instruction', {
       registerA,
@@ -788,13 +788,13 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
   }
 
   validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and offset
+    return BigInt(operands.length) >= 3n // Need two registers and offset
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2)
+    const offset = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }

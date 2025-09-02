@@ -5,7 +5,7 @@
  * Reference: Gray Paper specifications
  */
 
-import type { Hash } from '@pbnj/types'
+import * as crypto from 'node:crypto'
 import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
 // Import blakejs for cryptographic operations
 import * as blakejs from 'blakejs'
@@ -15,22 +15,41 @@ import {
   type Hex,
   hexToBytes,
   numberToBytes,
+  stringToBytes,
+  zeroAddress,
+  zeroHash,
 } from 'viem'
+import { type Safe, safeError, safeResult } from '../safe'
+
+// Re-export viem's hex functions directly
+export {
+  bytesToHex,
+  hexToBytes,
+  bytesToBigInt,
+  numberToBytes,
+  zeroHash,
+  zeroAddress,
+  stringToBytes,
+}
 
 /**
  * Blake2b hash function
  * @param data - Input data to hash
  * @returns 32-byte hash as hex string
  */
-export function blake2bHash(data: Uint8Array): Hash {
-  const hash = blakejs.blake2b(data, undefined, 32)
-  return `0x${Buffer.from(hash).toString('hex')}`
+export function blake2bHash(data: Uint8Array): Safe<Hex> {
+  try {
+    const hash = blakejs.blake2b(data, undefined, 32)
+    return safeResult(`0x${Buffer.from(hash).toString('hex')}` as Hex)
+  } catch (error) {
+    return safeError(error as Error)
+  }
 }
 
 /**
  * Blake2b hash function (alias for blake2bHash)
  */
-export function blake2b(data: Uint8Array): Hash {
+export function blake2b(data: Uint8Array): Safe<Hex> {
   return blake2bHash(data)
 }
 
@@ -40,15 +59,17 @@ export function blake2b(data: Uint8Array): Hash {
 export function signEd25519(
   data: Uint8Array,
   privateKey: Uint8Array,
-): Uint8Array {
+): Safe<Uint8Array> {
   // The @stablelib/ed25519 library expects the secret key to be exactly 64 Uint8Array
   // The secretKey from generateKeyPair() should already be in the correct format
   if (privateKey.length !== 64) {
-    throw new Error(
-      `Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`,
+    return safeError(
+      new Error(
+        `Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`,
+      ),
     )
   }
-  return new Uint8Array(sign(privateKey, data))
+  return safeResult(new Uint8Array(sign(privateKey, data)))
 }
 
 /**
@@ -128,11 +149,13 @@ export function generateBLSKeyPair(): {
 } {
   // Generate random secret key
   const secretKey = new Uint8Array(32)
-  const nodeCrypto = require('node:crypto')
-  nodeCrypto.randomFillSync(secretKey)
+  crypto.randomFillSync(secretKey)
 
   // Generate public key using blake2b
-  const publicKey = blake2bHash(secretKey)
+  const [publicKeyError, publicKey] = blake2bHash(secretKey)
+  if (publicKeyError) {
+    throw publicKeyError
+  }
   return {
     publicKey: Buffer.from(publicKey.replace('0x', ''), 'hex'),
     secretKey,
@@ -145,18 +168,22 @@ export function generateBLSKeyPair(): {
  * @param secretKey - Secret key for signing
  * @returns BLS signature as hex string
  */
-export function blsSign(message: Uint8Array, secretKey: Uint8Array): string {
-  try {
-    // BLS signature using blake2b
-    const hash = blake2bHash(message)
-    const signature = blake2bHash(
-      Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
-    )
-    return signature
-  } catch (_error) {
-    // Fallback
-    return `0x${Buffer.from(message.slice(0, 96)).toString('hex').padEnd(192, '0')}`
+export function blsSign(
+  message: Uint8Array,
+  secretKey: Uint8Array,
+): Safe<string> {
+  // BLS signature using blake2b
+  const [hashError, hash] = blake2bHash(message)
+  if (hashError) {
+    return safeError(hashError)
   }
+  const [signatureError, signature] = blake2bHash(
+    Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
+  )
+  if (signatureError) {
+    return safeError(signatureError)
+  }
+  return safeResult(signature)
 }
 
 /**
@@ -170,13 +197,8 @@ export function blsVerify(
   _message: Uint8Array,
   signature: string,
   _publicKey: Uint8Array,
-): boolean {
-  try {
-    // Simple verification for now
-    return signature.length === 194 && signature.startsWith('0x')
-  } catch (_error) {
-    return false
-  }
+): Safe<boolean> {
+  return safeResult(signature.length === 194 && signature.startsWith('0x'))
 }
 
 /**
@@ -189,11 +211,13 @@ export function generateBandersnatchKeyPair(): {
 } {
   // Generate random secret key
   const secretKey = new Uint8Array(32)
-  const nodeCrypto = require('node:crypto')
-  nodeCrypto.randomFillSync(secretKey)
+  crypto.randomFillSync(secretKey)
 
   // Bandersnatch public key generation using blake2b
-  const publicKey = blake2bHash(secretKey)
+  const [publicKeyError, publicKey] = blake2bHash(secretKey)
+  if (publicKeyError) {
+    throw publicKeyError
+  }
   return {
     publicKey: Buffer.from(publicKey.replace('0x', ''), 'hex'),
     secretKey,
@@ -209,18 +233,19 @@ export function generateBandersnatchKeyPair(): {
 export function bandersnatchVrfProof(
   message: Uint8Array,
   secretKey: Uint8Array,
-): string {
-  try {
-    // VRF proof using blake2b
-    const hash = blake2bHash(message)
-    const proof = blake2bHash(
-      Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
-    )
-    return proof
-  } catch (_error) {
-    // Fallback
-    return `0x${Buffer.from(message.slice(0, 64)).toString('hex').padEnd(128, '0')}`
+): Safe<string> {
+  // VRF proof using blake2b
+  const [hashError, hash] = blake2bHash(message)
+  if (hashError) {
+    throw hashError
   }
+  const [proofError, proof] = blake2bHash(
+    Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
+  )
+  if (proofError) {
+    throw proofError
+  }
+  return safeResult(proof)
 }
 
 /**
@@ -247,21 +272,16 @@ export function bandersnatchVrfVerify(
  * Generate random Uint8Array
  */
 export function randomUint8Array(length: number): Uint8Array {
-  const crypto = require('node:crypto')
-  return crypto.randomUint8Array(length)
+  return crypto.randomBytes(length)
 }
 
 /**
  * Generate random hex string
  */
 export function randomHex(length: number): Hex {
-  const crypto = require('node:crypto')
-  const randomBytes = crypto.randomUint8Array(length)
+  const randomBytes = crypto.randomBytes(length)
   return bytesToHex(randomBytes)
 }
-
-// Re-export viem's hex functions directly
-export { bytesToHex, hexToBytes, bytesToBigInt, numberToBytes }
 
 /**
  * Verify hex string format

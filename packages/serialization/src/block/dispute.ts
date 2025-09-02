@@ -40,7 +40,14 @@
  * while maintaining efficient encoding for the common case of no disputes.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { Dispute, Judgment, ValidityDispute } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
@@ -50,17 +57,25 @@ import { encodeNatural } from '../core/natural-number'
  * @param judgment - Judgment to encode
  * @returns Encoded octet sequence
  */
-export function encodeJudgment(judgment: Judgment): Uint8Array {
+export function encodeJudgment(judgment: Judgment): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Validity (1 byte: 0 for false, 1 for true)
   parts.push(new Uint8Array([judgment.validity ? 1 : 0]))
 
   // Judge index (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(judgment.judgeIndex)))
+  const [error, encoded] = encodeNatural(BigInt(judgment.judgeIndex))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Signature (variable length)
-  parts.push(encodeNatural(BigInt(judgment.signature.length))) // Length prefix
+  const [error2, encoded2] = encodeNatural(BigInt(judgment.signature.length))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2) // Length prefix
   parts.push(judgment.signature)
 
   // Concatenate all parts
@@ -73,7 +88,7 @@ export function encodeJudgment(judgment: Judgment): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -84,18 +99,26 @@ export function encodeJudgment(judgment: Judgment): Uint8Array {
  */
 export function encodeValidityDispute(
   validityDispute: ValidityDispute,
-): Uint8Array {
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Report hash (32 Uint8Array)
   parts.push(hexToBytes(validityDispute.reportHash))
 
   // Epoch index (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(validityDispute.epochIndex)))
+  const [error, encoded] = encodeNatural(BigInt(validityDispute.epochIndex))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Judgments (array of judgments)
   for (const judgment of validityDispute.judgments) {
-    parts.push(encodeJudgment(judgment))
+    const [error, encoded] = encodeJudgment(judgment)
+    if (error) {
+      return safeError(error)
+    }
+    parts.push(encoded)
   }
 
   // Concatenate all parts
@@ -108,7 +131,7 @@ export function encodeValidityDispute(
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -117,20 +140,36 @@ export function encodeValidityDispute(
  * @param dispute - Dispute to encode
  * @returns Encoded octet sequence
  */
-export function encodeDispute(dispute: Dispute): Uint8Array {
+export function encodeDispute(dispute: Dispute): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Validity disputes (array of validity disputes)
   for (const validityDispute of dispute.validityDisputes) {
-    parts.push(encodeValidityDispute(validityDispute))
+    const [error, encoded] = encodeValidityDispute(validityDispute)
+    if (error) {
+      return safeError(error)
+    }
+    parts.push(encoded)
   }
 
   // Challenge disputes (variable length)
-  parts.push(encodeNatural(BigInt(dispute.challengeDisputes.length))) // Length prefix
+  const [error1, encoded1] = encodeNatural(
+    BigInt(dispute.challengeDisputes.length),
+  )
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1) // Length prefix
   parts.push(dispute.challengeDisputes)
 
   // Finality disputes (variable length)
-  parts.push(encodeNatural(BigInt(dispute.finalityDisputes.length))) // Length prefix
+  const [error, encoded] = encodeNatural(
+    BigInt(dispute.finalityDisputes.length),
+  )
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded) // Length prefix
   parts.push(dispute.finalityDisputes)
 
   // Concatenate all parts
@@ -143,7 +182,7 @@ export function encodeDispute(dispute: Dispute): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -152,20 +191,22 @@ export function encodeDispute(dispute: Dispute): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded dispute and remaining data
  */
-export function decodeDispute(data: Uint8Array): {
+export function decodeDispute(data: Uint8Array): Safe<{
   value: Dispute
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Validity disputes (array of validity disputes)
   const validityDisputes = []
   while (currentData.length > 0) {
     try {
-      const { value: validityDispute, remaining } =
-        decodeValidityDispute(currentData)
-      validityDisputes.push(validityDispute)
-      currentData = remaining
+      const [error, result] = decodeValidityDispute(currentData)
+      if (error) {
+        return safeError(error)
+      }
+      validityDisputes.push(result.value)
+      currentData = result.remaining
     } catch {
       break
     }
@@ -194,14 +235,14 @@ export function decodeDispute(data: Uint8Array): {
   const finalityDisputes = currentData.slice(0, Number(finalityDisputesLength))
   currentData = currentData.slice(Number(finalityDisputesLength))
 
-  return {
+  return safeResult({
     value: {
       validityDisputes,
       challengeDisputes,
       finalityDisputes,
     },
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -210,10 +251,10 @@ export function decodeDispute(data: Uint8Array): {
  * @param data - Octet sequence to decode
  * @returns Decoded validity dispute and remaining data
  */
-export function decodeValidityDispute(data: Uint8Array): {
+export function decodeValidityDispute(data: Uint8Array): Safe<{
   value: ValidityDispute
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Report hash (32 Uint8Array)
@@ -221,35 +262,32 @@ export function decodeValidityDispute(data: Uint8Array): {
   currentData = currentData.slice(32)
 
   // Epoch index (8 Uint8Array)
-  const epochIndex = Number(
-    BigInt(
-      `0x${Array.from(currentData.slice(0, 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const epochIndex = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Judgments (array of judgments)
   const judgments = []
   while (currentData.length > 0) {
     try {
-      const { value: judgment, remaining } = decodeJudgment(currentData)
-      judgments.push(judgment)
-      currentData = remaining
+      const [error, result] = decodeJudgment(currentData)
+      if (error) {
+        return safeError(error)
+      }
+      judgments.push(result.value)
+      currentData = result.remaining
     } catch {
       break
     }
   }
 
-  return {
+  return safeResult({
     value: {
       reportHash,
       epochIndex,
       judgments,
     },
     remaining: currentData,
-  }
+  })
 }
 
 /**
@@ -258,10 +296,10 @@ export function decodeValidityDispute(data: Uint8Array): {
  * @param data - Octet sequence to decode
  * @returns Decoded judgment and remaining data
  */
-export function decodeJudgment(data: Uint8Array): {
+export function decodeJudgment(data: Uint8Array): Safe<{
   value: Judgment
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Validity (1 byte: 0 for false, 1 for true)
@@ -269,31 +307,21 @@ export function decodeJudgment(data: Uint8Array): {
   currentData = currentData.slice(1)
 
   // Judge index (8 Uint8Array)
-  const judgeIndex = Number(
-    BigInt(
-      `0x${Array.from(currentData.slice(0, 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const judgeIndex = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Signature (variable length)
-  const signatureLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const signatureLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
   const signature = currentData.slice(0, Number(signatureLength))
   currentData = currentData.slice(Number(signatureLength))
 
-  return {
+  return safeResult({
     value: {
       validity,
       judgeIndex,
       signature,
     },
     remaining: currentData,
-  }
+  })
 }

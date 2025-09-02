@@ -20,7 +20,7 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediate64(context.instruction.operands, 1)
+    const immediate = this.getImmediate64(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_IMM_64 instruction', { registerA, immediate })
 
@@ -29,7 +29,7 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -41,7 +41,7 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediate64(operands, 1)
+    const immediate = this.getImmediate64(operands, 1n)
     return `${this.name} r${registerA} ${immediate}`
   }
 }
@@ -56,8 +56,8 @@ export class STORE_IMM_U8Instruction extends BaseInstruction {
   readonly description = 'Store 8-bit immediate to memory'
 
   execute(context: InstructionContext): InstructionResult {
-    const immediateX = this.getImmediateValue(context.instruction.operands, 0)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 1)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 0n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 1n)
     // const value = Number(immediateY % 2n ** 8n)
 
     logger.debug('Executing STORE_IMM_U8 instruction', {
@@ -65,18 +65,18 @@ export class STORE_IMM_U8Instruction extends BaseInstruction {
       // value,
     })
 
-    context.ram.writeOctets(Number(immediateX), numberToBytes(immediateY))
+    context.ram.writeOctets(immediateX, numberToBytes(immediateY))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
 
   validate(operands: Uint8Array): boolean {
     // add check that value is less than 256
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateY = this.getImmediateValue(operands, 1n)
     if (immediateY >= 256) {
       return false
     }
@@ -84,8 +84,8 @@ export class STORE_IMM_U8Instruction extends BaseInstruction {
   }
 
   disassemble(operands: Uint8Array): string {
-    const immediateX = this.getImmediateValue(operands, 0)
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateX = this.getImmediateValue(operands, 0n)
+    const immediateY = this.getImmediateValue(operands, 1n)
     return `${this.name} ${immediateX} ${immediateY}`
   }
 }
@@ -100,8 +100,8 @@ export class STORE_IMM_U16Instruction extends BaseInstruction {
   readonly description = 'Store 16-bit immediate to memory'
 
   execute(context: InstructionContext): InstructionResult {
-    const immediateX = this.getImmediateValue(context.instruction.operands, 0)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 1)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 0n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 1n)
     // const value = Number(immediateY % 2n ** 16n)
 
     logger.debug('Executing STORE_IMM_U16 instruction', {
@@ -109,11 +109,11 @@ export class STORE_IMM_U16Instruction extends BaseInstruction {
       // value,
     })
 
-    context.ram.writeOctets(Number(immediateX), numberToBytes(immediateY))
+    context.ram.writeOctets(immediateX, numberToBytes(immediateY))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -123,8 +123,8 @@ export class STORE_IMM_U16Instruction extends BaseInstruction {
   }
 
   disassemble(operands: Uint8Array): string {
-    const immediateX = this.getImmediateValue(operands, 0)
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateX = this.getImmediateValue(operands, 0n)
+    const immediateY = this.getImmediateValue(operands, 1n)
     return `${this.name} ${immediateX} ${immediateY}`
   }
 }
@@ -139,8 +139,8 @@ export class STORE_IMM_U32Instruction extends BaseInstruction {
   readonly description = 'Store 32-bit immediate to memory'
 
   execute(context: InstructionContext): InstructionResult {
-    const immediateX = this.getImmediateValue(context.instruction.operands, 0)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 1)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 0n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 1n)
     // const value = Number(immediateY % 2n ** 32n)
 
     logger.debug('Executing STORE_IMM_U32 instruction', {
@@ -148,17 +148,17 @@ export class STORE_IMM_U32Instruction extends BaseInstruction {
       // value,
     })
 
-    context.ram.writeOctets(Number(immediateX), numberToBytes(immediateY))
+    context.ram.writeOctets(immediateX, numberToBytes(immediateY))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateY = this.getImmediateValue(operands, 1n)
     if (immediateY >= 2n ** 32n) {
       return false
     }
@@ -166,8 +166,8 @@ export class STORE_IMM_U32Instruction extends BaseInstruction {
   }
 
   disassemble(operands: Uint8Array): string {
-    const immediateX = this.getImmediateValue(operands, 0)
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateX = this.getImmediateValue(operands, 0n)
+    const immediateY = this.getImmediateValue(operands, 1n)
     return `${this.name} ${immediateX} ${immediateY}`
   }
 }
@@ -182,25 +182,25 @@ export class STORE_IMM_U64Instruction extends BaseInstruction {
   readonly description = 'Store 64-bit immediate to memory'
 
   execute(context: InstructionContext): InstructionResult {
-    const immediateX = this.getImmediateValue(context.instruction.operands, 0)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 1)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 0n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing STORE_IMM_U64 instruction', {
       address: immediateX,
       // value: immediateY,
     })
 
-    context.ram.writeOctets(Number(immediateX), numberToBytes(immediateY))
+    context.ram.writeOctets(immediateX, numberToBytes(immediateY))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateY = this.getImmediateValue(operands, 1n)
     if (immediateY >= 2n ** 64n) {
       return false
     }
@@ -208,8 +208,8 @@ export class STORE_IMM_U64Instruction extends BaseInstruction {
   }
 
   disassemble(operands: Uint8Array): string {
-    const immediateX = this.getImmediateValue(operands, 0)
-    const immediateY = this.getImmediateValue(operands, 1)
+    const immediateX = this.getImmediateValue(operands, 0n)
+    const immediateY = this.getImmediateValue(operands, 1n)
     return `${this.name} ${immediateX} ${immediateY}`
   }
 }
@@ -225,7 +225,7 @@ export class LOAD_IMMInstruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    const immediate = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_IMM instruction', { registerA, immediate })
 
@@ -234,7 +234,7 @@ export class LOAD_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -246,7 +246,7 @@ export class LOAD_IMMInstruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
+    const immediate = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${immediate}`
   }
 }
@@ -262,11 +262,11 @@ export class LOAD_U8Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_U8 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 1)
+    const value = context.ram.readOctets(address, 1n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -276,14 +276,14 @@ export class LOAD_U8Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
   }
 
   validate(operands: Uint8Array): boolean {
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     if (address >= 256) {
       return false
     }
@@ -292,7 +292,7 @@ export class LOAD_U8Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -308,11 +308,11 @@ export class LOAD_I8Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_I8 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 1)
+    const value = context.ram.readOctets(address, 1n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -322,7 +322,7 @@ export class LOAD_I8Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -334,7 +334,7 @@ export class LOAD_I8Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -350,11 +350,11 @@ export class LOAD_U16Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_U16 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 2)
+    const value = context.ram.readOctets(address, 2n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -364,7 +364,7 @@ export class LOAD_U16Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -376,7 +376,7 @@ export class LOAD_U16Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -392,11 +392,11 @@ export class LOAD_I16Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_I16 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 2)
+    const value = context.ram.readOctets(address, 2n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -406,7 +406,7 @@ export class LOAD_I16Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -418,7 +418,7 @@ export class LOAD_I16Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -434,11 +434,11 @@ export class LOAD_U32Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_U32 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 4)
+    const value = context.ram.readOctets(address, 4n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -448,7 +448,7 @@ export class LOAD_U32Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -460,7 +460,7 @@ export class LOAD_U32Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -476,11 +476,11 @@ export class LOAD_I32Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_I32 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 4)
+    const value = context.ram.readOctets(address, 4n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -490,7 +490,7 @@ export class LOAD_I32Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -502,7 +502,7 @@ export class LOAD_I32Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -518,11 +518,11 @@ export class LOAD_U64Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
 
     logger.debug('Executing LOAD_U64 instruction', { registerA, address })
 
-    const value = context.ram.readOctets(Number(address), 8)
+    const value = context.ram.readOctets(address, 8n)
     const newRegisters = { ...context.registers }
     this.setRegisterValue(
       newRegisters,
@@ -532,7 +532,7 @@ export class LOAD_U64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -544,7 +544,7 @@ export class LOAD_U64Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -560,7 +560,7 @@ export class STORE_U8Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
     const value = this.getRegisterValue(context.registers, registerA) % 2n ** 8n
 
     logger.debug('Executing STORE_U8 instruction', {
@@ -569,11 +569,11 @@ export class STORE_U8Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(Number(address), numberToBytes(value))
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -584,7 +584,7 @@ export class STORE_U8Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -600,7 +600,7 @@ export class STORE_U16Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
 
@@ -610,11 +610,11 @@ export class STORE_U16Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(Number(address), numberToBytes(value))
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -625,7 +625,7 @@ export class STORE_U16Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -641,7 +641,7 @@ export class STORE_U32Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -651,11 +651,11 @@ export class STORE_U32Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(Number(address), numberToBytes(value))
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -666,7 +666,7 @@ export class STORE_U32Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -682,7 +682,7 @@ export class STORE_U64Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const address = this.getImmediateValue(context.instruction.operands, 1)
+    const address = this.getImmediateValue(context.instruction.operands, 1n)
     const value = this.getRegisterValue(context.registers, registerA)
 
     logger.debug('Executing STORE_U64 instruction', {
@@ -691,11 +691,11 @@ export class STORE_U64Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(Number(address), numberToBytes(value))
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -706,7 +706,7 @@ export class STORE_U64Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
+    const address = this.getImmediateValue(operands, 1n)
     return `${this.name} r${registerA} ${address}`
   }
 }
@@ -723,8 +723,8 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const address = registerValue + immediateX
     // const value = Number(immediateY % 2n ** 8n)
@@ -737,11 +737,11 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
       // value,
     })
 
-    context.ram.writeOctets(Number(address), numberToBytes(immediateY))
+    context.ram.writeOctets(address, numberToBytes(immediateY))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -752,8 +752,8 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const immediateY = this.getImmediateValue(operands, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const immediateY = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} ${immediateX} ${immediateY}`
   }
 }
@@ -770,11 +770,11 @@ export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const address = registerValue + immediateX
-    const value = Number(immediateY % 2n ** 16n)
+    const value = immediateY % 2n ** 16n
 
     logger.debug('Executing STORE_IMM_IND_U16 instruction', {
       registerA,
@@ -784,14 +784,11 @@ export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(
-      Number(address),
-      new Uint8Array([value & 0xff, (value >> 8) & 0xff]),
-    )
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -802,8 +799,8 @@ export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const immediateY = this.getImmediateValue(operands, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const immediateY = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} ${immediateX} ${immediateY}`
   }
 }
@@ -820,11 +817,11 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const address = registerValue + immediateX
-    const value = Number(immediateY % 2n ** 32n)
+    const value = immediateY % 2n ** 32n
 
     logger.debug('Executing STORE_IMM_IND_U32 instruction', {
       registerA,
@@ -834,19 +831,11 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
       value,
     })
 
-    context.ram.writeOctets(
-      Number(address),
-      new Uint8Array([
-        value & 0xff,
-        (value >> 8) & 0xff,
-        (value >> 16) & 0xff,
-        (value >> 24) & 0xff,
-      ]),
-    )
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -857,8 +846,8 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const immediateY = this.getImmediateValue(operands, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const immediateY = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} ${immediateX} ${immediateY}`
   }
 }
@@ -875,8 +864,8 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1)
-    const immediateY = this.getImmediateValue(context.instruction.operands, 2)
+    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
+    const immediateY = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const address = registerValue + immediateX
 
@@ -887,12 +876,12 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
       address,
     })
 
-    const value = BigInt(immediateY)
-    context.ram.writeOctets(Number(address), numberToBytes(value))
+    const value = immediateY
+    context.ram.writeOctets(address, numberToBytes(value))
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
@@ -903,8 +892,8 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const immediateY = this.getImmediateValue(operands, 2)
+    const immediateX = this.getImmediateValue(operands, 1n)
+    const immediateY = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerA} ${immediateX} ${immediateY}`
   }
 }

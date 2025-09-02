@@ -5,30 +5,31 @@
  * Reference: Gray Paper Safrole specifications
  */
 
-import type { Hash, HashValue, Natural, Sequence } from '@pbnj/types'
+import type { Hex } from '@pbnj/core'
+import type { Sequence } from '@pbnj/types'
 
 /**
  * Safrole state as defined in Gray Paper
  */
 export interface SafroleState {
   /** Current slot number */
-  slot: Natural
+  slot: bigint
   /** Current epoch number */
-  epoch: Natural
+  epoch: bigint
   /** Current entropy accumulator */
-  entropy: Sequence<HashValue>
+  entropy: Sequence<Hex>
   /** Validators for current epoch */
-  activeSet: Sequence<HashValue>
+  activeSet: Sequence<Hex>
   /** Validators for next epoch */
-  pendingSet: Sequence<HashValue>
+  pendingSet: Sequence<Hex>
   /** Validator entries per epoch */
-  entriesPerEpoch: Natural
+  entriesPerEpoch: bigint
   /** Gamma value for epoch change */
-  gamma: Natural
+  gamma: bigint
   /** Lambda value for epoch change */
-  lambda: Natural
+  lambda: bigint
   /** Kappa value for epoch change */
-  kappa: Natural
+  kappa: bigint
 }
 
 /**
@@ -36,13 +37,13 @@ export interface SafroleState {
  */
 export interface SafroleInput {
   /** New entropy values */
-  entropy: Sequence<HashValue>
+  entropy: Sequence<Hex>
   /** New ticket entries */
   tickets: Sequence<SafroleTicket>
   /** New offenders */
-  offenders: Sequence<HashValue>
+  offenders: Sequence<Hex>
   /** Extrinsic hash */
-  extrinsicHash?: Hash
+  extrinsicHash?: Hex
 }
 
 /**
@@ -50,13 +51,13 @@ export interface SafroleInput {
  */
 export interface SafroleTicket {
   /** Ticket identifier */
-  id: HashValue
+  id: Hex
   /** Ticket attempt number */
-  attempt: Natural
+  attempt: bigint
   /** VRF signature */
   signature: Uint8Array
   /** Validator public key */
-  validator: HashValue
+  validator: Hex
 }
 
 /**
@@ -76,11 +77,11 @@ export interface SafroleOutput {
  */
 export interface ValidatorChange {
   /** Validator public key */
-  validator: HashValue
+  validator: Hex
   /** Change type */
   type: 'added' | 'removed' | 'slashed'
   /** Slot when change occurred */
-  slot: Natural
+  slot: bigint
 }
 
 /**
@@ -88,15 +89,15 @@ export interface ValidatorChange {
  */
 export interface SafroleConstants {
   /** Slots per epoch */
-  slotsPerEpoch: Natural
+  slotsPerEpoch: bigint
   /** Tickets per slot */
-  ticketsPerSlot: Natural
+  ticketsPerSlot: bigint
   /** Entropy size in Uint8Array */
-  entropySize: Natural
+  entropySize: bigint
   /** Maximum validator set size */
-  maxValidators: Natural
+  maxValidators: bigint
   /** Minimum validator set size */
-  minValidators: Natural
+  minValidators: bigint
 }
 
 /**

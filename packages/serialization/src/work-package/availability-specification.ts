@@ -43,7 +43,14 @@
  * every validator to store every piece of data.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { AvailabilitySpecification } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
@@ -55,14 +62,18 @@ import { encodeNatural } from '../core/natural-number'
  */
 export function encodeAvailabilitySpecification(
   spec: AvailabilitySpecification,
-): Uint8Array {
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Package hash (32 Uint8Array)
   parts.push(hexToBytes(spec.packageHash))
 
   // Bundle length (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(spec.bundleLength)))
+  const [error, encoded] = encodeNatural(spec.bundleLength)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Erasure root (32 Uint8Array)
   parts.push(hexToBytes(spec.erasureRoot))
@@ -71,7 +82,11 @@ export function encodeAvailabilitySpecification(
   parts.push(hexToBytes(spec.segmentRoot))
 
   // Segment count (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(spec.segmentCount)))
+  const [error3, encoded3] = encodeNatural(spec.segmentCount)
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -83,7 +98,7 @@ export function encodeAvailabilitySpecification(
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -92,9 +107,10 @@ export function encodeAvailabilitySpecification(
  * @param data - Octet sequence to decode
  * @returns Decoded availability specification
  */
-export function decodeAvailabilitySpecification(
-  data: Uint8Array,
-): AvailabilitySpecification {
+export function decodeAvailabilitySpecification(data: Uint8Array): Safe<{
+  value: AvailabilitySpecification
+  remaining: Uint8Array
+}> {
   let offset = 0
 
   // Package hash (32 Uint8Array)
@@ -102,11 +118,7 @@ export function decodeAvailabilitySpecification(
   offset += 32
 
   // Bundle length (8 Uint8Array)
-  const bundleLength = BigInt(
-    `0x${Array.from(data.slice(offset, offset + 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const bundleLength = bytesToBigInt(data.slice(offset, offset + 8))
   offset += 8
 
   // Erasure root (32 Uint8Array)
@@ -118,17 +130,16 @@ export function decodeAvailabilitySpecification(
   offset += 32
 
   // Segment count (8 Uint8Array)
-  const segmentCount = BigInt(
-    `0x${Array.from(data.slice(offset, offset + 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const segmentCount = bytesToBigInt(data.slice(offset, offset + 8))
 
-  return {
-    packageHash,
-    bundleLength: Number(bundleLength),
-    erasureRoot,
-    segmentRoot,
-    segmentCount: Number(segmentCount),
-  }
+  return safeResult({
+    value: {
+      packageHash,
+      bundleLength,
+      erasureRoot,
+      segmentRoot,
+      segmentCount,
+    },
+    remaining: data.slice(offset),
+  })
 }

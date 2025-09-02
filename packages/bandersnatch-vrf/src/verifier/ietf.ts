@@ -4,8 +4,8 @@
  * Implements verification for IETF VRF scheme
  */
 
-import { logger } from '@pbnj/core'
-import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
+import { bytesToBigInt, logger } from '@pbnj/core'
+import type { VRFOutput } from '@pbnj/types'
 import { BandersnatchCurve, type CurvePoint } from '../curve'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'
@@ -19,10 +19,10 @@ export class IETFVRFVerifier {
    * Verify VRF proof
    */
   static verify(
-    _publicKey: VRFPublicKey,
-    _input: VRFInput,
+    _publicKey: Uint8Array,
+    _input: Uint8Array,
     _output: VRFOutput,
-    _proof: VRFProof,
+    _proof: Uint8Array,
     _auxData?: Uint8Array,
     config?: VerifierConfig,
   ): boolean {
@@ -30,14 +30,14 @@ export class IETFVRFVerifier {
     const mergedConfig = { ...DEFAULT_VERIFIER_CONFIG, ...config }
 
     logger.debug('Verifying IETF VRF proof', {
-      inputLength: _input.message.length,
+      inputLength: _input.length,
       hasAuxData: !!_auxData,
       config: mergedConfig,
     })
 
     try {
       // 1. Hash input to curve point (H1)
-      const alphaPoint = BandersnatchCurve.hashToCurve(_input.message)
+      const alphaPoint = BandersnatchCurve.hashToCurve(_input)
       const alphaBytes = BandersnatchCurve.pointToBytes(alphaPoint)
 
       // 2. Verify proof
@@ -74,10 +74,10 @@ export class IETFVRFVerifier {
    * Verify VRF proof with detailed result
    */
   static verifyWithResult(
-    publicKey: VRFPublicKey,
-    input: VRFInput,
+    publicKey: Uint8Array,
+    input: Uint8Array,
     output: VRFOutput,
-    proof: VRFProof,
+    proof: Uint8Array,
     auxData?: Uint8Array,
     config?: VerifierConfig,
   ): VerificationResult {
@@ -123,30 +123,30 @@ export class IETFVRFVerifier {
    * Verify VRF proof
    */
   private static verifyProof(
-    publicKey: VRFPublicKey,
+    publicKey: Uint8Array,
     alpha: Uint8Array,
     gamma: Uint8Array,
-    proof: VRFProof,
+    proof: Uint8Array,
     auxData?: Uint8Array,
   ): boolean {
     // IETF VRF proof verification (RFC-9381)
     // Verify that: g^s = u * y^c and h^s = v * gamma^c
 
     // Parse proof as (c, s)
-    if (proof.bytes.length !== 64) {
+    if (proof.length !== 64) {
       return false
     }
 
-    const cUint8Array = proof.bytes.slice(0, 32)
-    const sUint8Array = proof.bytes.slice(32, 64)
+    const cUint8Array = proof.slice(0, 32)
+    const sUint8Array = proof.slice(32, 64)
 
-    const c = this.bytesToBigint(cUint8Array)
-    const s = this.bytesToBigint(sUint8Array)
+    const c = bytesToBigInt(cUint8Array)
+    const s = bytesToBigInt(sUint8Array)
 
     // Convert inputs to curve points
     const alphaPoint = BandersnatchCurve.bytesToPoint(alpha)
     const gammaPoint = BandersnatchCurve.bytesToPoint(gamma)
-    const publicKeyPoint = BandersnatchCurve.bytesToPoint(publicKey.bytes)
+    const publicKeyPoint = BandersnatchCurve.bytesToPoint(publicKey)
 
     // Calculate u = g^s
     const u = BandersnatchCurve.scalarMultiply(BandersnatchCurve.GENERATOR, s)
@@ -193,19 +193,8 @@ export class IETFVRFVerifier {
    */
   private static hashToScalar(_data: Uint8Array): bigint {
     const hash = BandersnatchCurve.hashPoint({ x: 0n, y: 0n, isInfinity: true })
-    const hashValue = this.bytesToBigint(hash)
+    const hashValue = bytesToBigInt(hash)
     return hashValue % BandersnatchCurve.CURVE_ORDER
-  }
-
-  /**
-   * Convert Uint8Array to bigint
-   */
-  private static bytesToBigint(Uint8Array: Uint8Array): bigint {
-    let result = 0n
-    for (let i = 0; i < Uint8Array.length; i++) {
-      result = (result << 8n) | BigInt(Uint8Array[i])
-    }
-    return result
   }
 
   /**
@@ -214,6 +203,6 @@ export class IETFVRFVerifier {
   private static pointsEqual(p1: CurvePoint, p2: CurvePoint): boolean {
     if (p1.isInfinity && p2.isInfinity) return true
     if (p1.isInfinity || p2.isInfinity) return false
-    return p1.x === p2.x && p2.y === p2.y
+    return p1.x === p2.x && p1.y === p2.y
   }
 }

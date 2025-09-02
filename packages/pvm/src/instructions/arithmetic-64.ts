@@ -30,7 +30,7 @@ export class ADD_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -38,10 +38,13 @@ export class ADD_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -82,7 +85,7 @@ export class SUB_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -90,10 +93,13 @@ export class SUB_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -134,7 +140,7 @@ export class MUL_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -142,10 +148,13 @@ export class MUL_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -197,7 +206,7 @@ export class DIV_U_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -205,10 +214,13 @@ export class DIV_U_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -266,7 +278,7 @@ export class DIV_S_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -274,10 +286,13 @@ export class DIV_S_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -329,7 +344,7 @@ export class REM_U_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -337,10 +352,13 @@ export class REM_U_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true
@@ -398,7 +416,7 @@ export class REM_S_64Instruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -406,10 +424,13 @@ export class REM_S_64Instruction extends BaseInstruction {
 
   validate(operands: Uint8Array): boolean {
     // validate that operands are 64-bit registers
-    if (operands.length !== 3) {
+    if (BigInt(operands.length) !== 3n) {
       return false
     }
-    if (operands[0] < 8 || operands[0] > 12) {
+    if (
+      this.getRegisterIndex(operands[0]) < 8n ||
+      this.getRegisterIndex(operands[0]) > 12n
+    ) {
       return false
     }
     return true

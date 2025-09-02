@@ -22,25 +22,28 @@ export class BasicBlockValidator {
    */
   analyzeBasicBlocks(instructionData: Uint8Array): BasicBlock[] {
     const basicBlocks: BasicBlock[] = []
-    let currentBlockStart = 0
+    let currentBlockStart = 0n
     let currentInstructions: Uint8Array = new Uint8Array()
 
-    for (let i = 0; i < instructionData.length; i++) {
-      const opcode = instructionData[i]
-      currentInstructions.set([opcode], i)
+    for (let i = 0n; i < BigInt(instructionData.length); i++) {
+      const opcode = instructionData[Number(i)]
+      currentInstructions.set([opcode], Number(i))
 
       // Check if this instruction is a jump or halt
-      if (this.isJumpInstruction(opcode) || this.isHaltInstruction(opcode)) {
+      if (
+        this.isJumpInstruction(BigInt(opcode)) ||
+        this.isHaltInstruction(BigInt(opcode))
+      ) {
         // End current basic block
         basicBlocks.push({
           startAddress: currentBlockStart,
-          endAddress: i + 1,
+          endAddress: i + 1n,
           instructions: new Uint8Array(currentInstructions),
         })
 
         // Start new basic block at next instruction (if any)
-        if (i + 1 < instructionData.length) {
-          currentBlockStart = i + 1
+        if (i + 1n < BigInt(instructionData.length)) {
+          currentBlockStart = i + 1n
           currentInstructions = new Uint8Array()
         }
       }
@@ -50,7 +53,7 @@ export class BasicBlockValidator {
     if (currentInstructions.length > 0) {
       basicBlocks.push({
         startAddress: currentBlockStart,
-        endAddress: instructionData.length,
+        endAddress: BigInt(instructionData.length),
         instructions: new Uint8Array(currentInstructions),
       })
     }
@@ -72,11 +75,15 @@ export class BasicBlockValidator {
     const jumpEntries: JumpTableEntry[] = []
     const validTargets = new Set(basicBlocks.map((block) => block.startAddress))
 
-    for (let i = 0; i < instructionData.length; i++) {
-      const opcode = instructionData[i]
+    for (let i = 0n; i < BigInt(instructionData.length); i++) {
+      const opcode = instructionData[Number(i)]
 
-      if (this.isJumpInstruction(opcode)) {
-        const targetAddress = this.extractJumpTarget(instructionData, i, opcode)
+      if (this.isJumpInstruction(BigInt(opcode))) {
+        const targetAddress = this.extractJumpTarget(
+          instructionData,
+          i,
+          BigInt(opcode),
+        )
 
         if (targetAddress !== null) {
           const isValid = validTargets.has(targetAddress)
@@ -117,17 +124,17 @@ export class BasicBlockValidator {
   /**
    * Check if instruction is a jump instruction
    */
-  private isJumpInstruction(opcode: number): boolean {
+  private isJumpInstruction(opcode: bigint): boolean {
     // Jump instructions: JUMP, JUMP_IF, JUMP_IF_NOT, CALL
-    return [0x04, 0x05, 0x06, 0x03].includes(opcode)
+    return [0x04n, 0x05n, 0x06n, 0x03n].includes(opcode)
   }
 
   /**
    * Check if instruction is a halt instruction
    */
-  private isHaltInstruction(opcode: number): boolean {
+  private isHaltInstruction(opcode: bigint): boolean {
     // Halt instruction: HALT
-    return opcode === 0x01
+    return opcode === 0x01n
   }
 
   /**
@@ -140,30 +147,30 @@ export class BasicBlockValidator {
    */
   private extractJumpTarget(
     instructionData: Uint8Array,
-    instructionIndex: number,
-    opcode: number,
-  ): number | null {
+    instructionIndex: bigint,
+    opcode: bigint,
+  ): bigint | null {
     try {
       switch (opcode) {
-        case 0x04: // JUMP
+        case 0x04n: // JUMP
           // JUMP has immediate target address
-          if (instructionIndex + 1 < instructionData.length) {
-            return instructionData[instructionIndex + 1]
+          if (instructionIndex + 1n < BigInt(instructionData.length)) {
+            return BigInt(instructionData[Number(instructionIndex + 1n)])
           }
           break
 
-        case 0x05: // JUMP_IF
-        case 0x06: // JUMP_IF_NOT
+        case 0x05n: // JUMP_IF
+        case 0x06n: // JUMP_IF_NOT
           // Conditional jumps have immediate target address
-          if (instructionIndex + 1 < instructionData.length) {
-            return instructionData[instructionIndex + 1]
+          if (instructionIndex + 1n < BigInt(instructionData.length)) {
+            return BigInt(instructionData[Number(instructionIndex + 1n)])
           }
           break
 
-        case 0x03: // CALL
+        case 0x03n: // CALL
           // CALL has immediate target address
-          if (instructionIndex + 1 < instructionData.length) {
-            return instructionData[instructionIndex + 1]
+          if (instructionIndex + 1n < BigInt(instructionData.length)) {
+            return BigInt(instructionData[Number(instructionIndex + 1n)])
           }
           break
       }

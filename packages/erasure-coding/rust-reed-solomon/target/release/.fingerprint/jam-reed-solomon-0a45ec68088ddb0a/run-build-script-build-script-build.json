@@ -13,7 +13,7 @@
     {
       "RerunIfEnvChanged": {
         "var": "TYPE_DEF_TMP_PATH",
-        "val": "/var/folders/2c/yr7n426s67ncprz7smw7n5d00000gn/T/jam_reed_solomon-2e6ab400.napi_type_def.tmp"
+        "val": "/tmp/jam_reed_solomon-2e6ab400.napi_type_def.tmp"
       }
     },
     {

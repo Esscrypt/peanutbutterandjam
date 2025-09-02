@@ -5,13 +5,9 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import type {
-  Extrinsic,
-  Hash,
-  HashValue,
-  HexString,
-  ValidatorKey,
-} from './core'
+import type { Safe, SafePromise } from '@pbnj/core'
+import type { Hex } from 'viem'
+import type { Extrinsic, ValidatorKey } from './core'
 import type {
   BlockHeader,
   SafroleTicket,
@@ -34,23 +30,23 @@ export type {
   WorkPackage,
   WorkItem,
 }
-export { WorkError } from './serialization'
+export type { WorkError } from './pvm'
 
 /**
  * Availability specification
  */
 export interface AvailabilitySpec {
-  packageHash: HashValue
-  bundleLength: number
-  erasureRoot: HashValue
-  segmentRoot: HashValue
-  segmentCount: number
+  packageHash: Hex
+  bundleLength: bigint
+  erasureRoot: Hex
+  segmentRoot: Hex
+  segmentCount: bigint
 }
 
 export interface State {
-  blockNumber: number
-  stateRoot: Hash
-  timestamp: number
+  blockNumber: bigint
+  stateRoot: Hex
+  timestamp: bigint
   validators: ValidatorKey[]
 }
 
@@ -58,10 +54,8 @@ export interface ValidatorSet {
   validators: ValidatorKey[]
   totalStake: bigint
   minStake: bigint
-  epoch: number
+  epoch: bigint
 }
-
-export type Timeslot = number
 
 export interface Block {
   header: BlockHeader
@@ -77,12 +71,12 @@ export interface BlockAuthoringConfig {
   validatorKey: string
 
   // Timing settings
-  slotDuration: number // 6 seconds
-  epochLength: number // 600 slots
+  slotDuration: bigint // 6 seconds
+  epochLength: bigint // 600 slots
 
   // Performance settings
-  maxExtrinsicsPerBlock: number
-  maxWorkPackagesPerBlock: number
+  maxExtrinsicsPerBlock: bigint
+  maxWorkPackagesPerBlock: bigint
 
   // Validation settings
   enableStrictValidation: boolean
@@ -102,11 +96,11 @@ export interface BlockAuthoringContext {
   parentState: State
 
   // Current timeslot
-  currentTimeslot: Timeslot
+  currentTimeslot: bigint
 
   // Validator information
   validatorSet: ValidatorSet
-  authorIndex: number
+  authorIndex: bigint
 
   // Available extrinsics and work packages
   extrinsics: Extrinsic[]
@@ -121,10 +115,10 @@ export interface BlockAuthoringContext {
  */
 export interface NetworkState {
   // Connected peers
-  connectedPeers: number
+  connectedPeers: bigint
 
   // Network latency
-  averageLatency: number
+  averageLatency: bigint
 
   // Block propagation status
   propagationStatus: PropagationStatus
@@ -174,18 +168,18 @@ export interface BlockAuthoringResult {
  */
 export interface BlockAuthoringMetrics {
   // Timing information
-  creationTime: number // milliseconds
-  validationTime: number // milliseconds
-  submissionTime: number // milliseconds
+  creationTime: bigint // milliseconds
+  validationTime: bigint // milliseconds
+  submissionTime: bigint // milliseconds
 
   // Resource usage
-  memoryUsage: number // Uint8Array
-  cpuUsage: number // percentage
+  memoryUsage: bigint // Uint8Array
+  cpuUsage: bigint // percentage
 
   // Block statistics
-  extrinsicCount: number
-  workPackageCount: number
-  blockSize: number // Uint8Array
+  extrinsicCount: bigint
+  workPackageCount: bigint
+  blockSize: bigint // Uint8Array
 }
 
 /**
@@ -244,7 +238,7 @@ export interface ValidationResult {
 export interface ValidationError {
   code: string
   message: string
-  extrinsicIndex?: number
+  extrinsicIndex?: bigint
   field?: string
 }
 
@@ -254,7 +248,7 @@ export interface ValidationError {
 export interface ValidationWarning {
   code: string
   message: string
-  extrinsicIndex?: number
+  extrinsicIndex?: bigint
   field?: string
 }
 
@@ -262,9 +256,7 @@ export interface ValidationWarning {
  * Submission result
  */
 export interface SubmissionResult {
-  success: boolean
-  blockHash?: Hash
-  error?: BlockAuthoringError
+  blockHash: Hex
   propagationStatus: PropagationStatus
 }
 
@@ -276,25 +268,25 @@ export interface BlockAuthoringService {
   configure(config: BlockAuthoringConfig): void
 
   // Block creation
-  createBlock(context: BlockAuthoringContext): Promise<BlockAuthoringResult>
+  createBlock(context: BlockAuthoringContext): SafePromise<BlockAuthoringResult>
 
   // Header management
   constructHeader(
     parent: BlockHeader | null,
     extrinsics: Extrinsic[],
-  ): Promise<BlockHeader>
+  ): Safe<BlockHeader>
 
   // Work package handling
-  processWorkPackages(packages: WorkPackage[]): Promise<WorkReport[]>
+  processWorkPackages(packages: WorkPackage[]): SafePromise<WorkReport[]>
 
   // Extrinsic management
-  validateExtrinsics(extrinsics: Extrinsic[]): Promise<ValidationResult>
+  validateExtrinsics(extrinsics: Extrinsic[]): SafePromise<ValidationResult>
 
   // State management
-  updateState(block: Block): Promise<State>
+  updateState(block: Block): Safe<State>
 
   // Submission
-  submitBlock(block: Block): Promise<SubmissionResult>
+  submitBlock(block: Block): SafePromise<SubmissionResult>
 
   // Utility methods
   getMetrics(): BlockAuthoringMetrics
@@ -308,9 +300,9 @@ export interface HeaderConstructionContext {
   parentHeader: BlockHeader
   extrinsics: Extrinsic[]
   workReports: WorkReport[]
-  currentTimeslot: Timeslot
+  currentTimeslot: bigint
   validatorSet: ValidatorSet
-  authorIndex: number
+  authorIndex: bigint
 }
 
 /**
@@ -320,7 +312,7 @@ export interface WorkPackageProcessingContext {
   packages: WorkPackage[]
   state: State
   gasLimit: bigint
-  timeLimit: number // milliseconds
+  timeLimit: bigint // milliseconds
 }
 
 /**
@@ -349,8 +341,8 @@ export interface ExtrinsicValidationContext {
 export interface BlockSubmissionContext {
   block: Block
   networkState: NetworkState
-  retryCount: number
-  timeout: number // milliseconds
+  retryCount: bigint
+  timeout: bigint // milliseconds
 }
 
 /**
@@ -359,7 +351,7 @@ export interface BlockSubmissionContext {
 export interface TicketValidationResult {
   valid: boolean
   ticket?: SafroleTicket
-  score?: number
+  score?: bigint
   error?: string
 }
 
@@ -378,8 +370,8 @@ export interface SignatureValidationResult {
  */
 export interface TimeslotValidationResult {
   valid: boolean
-  currentTimeslot: Timeslot
-  blockTimeslot: Timeslot
+  currentTimeslot: bigint
+  blockTimeslot: bigint
   error?: string
 }
 
@@ -388,7 +380,7 @@ export interface TimeslotValidationResult {
  */
 export interface AuthorValidationResult {
   valid: boolean
-  authorIndex: number
+  authorIndex: bigint
   validatorKey: Uint8Array
   error?: string
 }
@@ -401,19 +393,19 @@ export interface AuthorValidationResult {
  * Account structure
  */
 export interface Account {
-  address: HexString
+  address: Hex
   balance: bigint
-  nonce: number
+  nonce: bigint
   code?: Uint8Array
-  storage?: Map<HexString, HexString>
+  storage?: Map<Hex, Hex>
   isValidator?: boolean
-  validatorKey?: HexString
+  validatorKey?: Hex
   stake?: bigint
 }
 
 export interface Validator {
-  address: HexString
-  publicKey: HexString
+  address: Hex
+  publicKey: Hex
   stake: bigint
   isActive: boolean
 }
@@ -428,34 +420,34 @@ export interface Validator {
 export interface GenesisState {
   // Block information
   genesisBlock: {
-    number: number
-    hash: HexString
-    parentHash: HexString
-    timestamp: number
+    number: bigint
+    hash: Hex
+    parentHash: Hex
+    timestamp: bigint
   }
 
   // Initial state
   state: {
-    accounts: Map<HexString, Account>
+    accounts: Map<Hex, Account>
     validators: Validator[]
     safrole: {
-      epoch: number
-      timeslot: number
+      epoch: bigint
+      timeslot: bigint
       entropy: string
       tickets: SafroleTicket[]
     }
-    authpool: HexString[]
-    recent: HexString[]
-    lastAccount: number
-    stagingset: HexString[]
-    activeset: HexString[]
-    previousset: HexString[]
+    authpool: Hex[]
+    recent: Hex[]
+    lastAccount: bigint
+    stagingset: Hex[]
+    activeset: Hex[]
+    previousset: Hex[]
     reports: WorkReport[]
-    thetime: number
-    authqueue: HexString[]
-    privileges: Map<HexString, number>
+    thetime: bigint
+    authqueue: Hex[]
+    privileges: Map<Hex, bigint>
     disputes: unknown[]
-    activity: Map<HexString, number>
+    activity: Map<Hex, bigint>
     ready: boolean
     accumulated: unknown[]
   }
@@ -464,9 +456,9 @@ export interface GenesisState {
   network: {
     chainId: string
     protocolVersion: string
-    slotDuration: number
-    epochLength: number
-    maxValidators: number
+    slotDuration: bigint
+    epochLength: bigint
+    maxValidators: bigint
     minStake: bigint
   }
 

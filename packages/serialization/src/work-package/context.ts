@@ -42,7 +42,14 @@
  * - Efficient: State lookups reference specific known blocks
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
 import type { WorkContext } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
@@ -52,7 +59,7 @@ import { encodeNatural } from '../core/natural-number'
  * @param context - Work context to encode
  * @returns Encoded octet sequence
  */
-export function encodeWorkContext(context: WorkContext): Uint8Array {
+export function encodeWorkContext(context: WorkContext): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Anchor (32 bytes)
@@ -68,10 +75,18 @@ export function encodeWorkContext(context: WorkContext): Uint8Array {
   parts.push(hexToBytes(context.lookupanchorhash))
 
   // Lookup anchor slot (8 bytes)
-  parts.push(encodeNatural(BigInt(context.lookupanchortime)))
+  const [error, encoded] = encodeNatural(BigInt(context.lookupanchortime))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Prerequisites (variable length)
-  parts.push(encodeNatural(BigInt(context.prerequisites.length))) // Length prefix
+  const [error2, encoded2] = encodeNatural(BigInt(context.prerequisites.length))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2) // Length prefix
   // For now, handle prerequisites as empty array - this needs proper implementation
   if (context.prerequisites.length > 0) {
     throw new Error('Prerequisites not yet implemented')
@@ -87,7 +102,7 @@ export function encodeWorkContext(context: WorkContext): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -96,10 +111,10 @@ export function encodeWorkContext(context: WorkContext): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded work context and remaining data
  */
-export function decodeWorkContext(data: Uint8Array): {
+export function decodeWorkContext(data: Uint8Array): Safe<{
   value: WorkContext
   remaining: Uint8Array
-} {
+}> {
   let remaining = data
 
   // Anchor (32 bytes)
@@ -119,34 +134,24 @@ export function decodeWorkContext(data: Uint8Array): {
   remaining = remaining.slice(32)
 
   // Lookup anchor slot (8 bytes)
-  const lookupAnchorSlot = Number(
-    BigInt(
-      `0x${Array.from(remaining.slice(0, 8))
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('')}`,
-    ),
-  )
+  const lookupAnchorSlot = bytesToBigInt(remaining.slice(0, 8))
   remaining = remaining.slice(8)
 
   // Prerequisites (variable length)
-  const prerequisitesLength = BigInt(
-    `0x${Array.from(remaining.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const prerequisitesLength = bytesToBigInt(remaining.slice(0, 8))
   remaining = remaining.slice(8)
   // Parse prerequisites (not currently used in return object)
   remaining = remaining.slice(Number(prerequisitesLength))
 
-  return {
+  return safeResult({
     value: {
       anchorhash: anchor,
       anchorpoststate: stateRoot,
       anchoraccoutlog: beefyRoot,
       lookupanchorhash: lookupAnchor,
-      lookupanchortime: Number(lookupAnchorSlot),
+      lookupanchortime: lookupAnchorSlot,
       prerequisites: [], // Simplified - not handling complex prerequisites yet
     },
     remaining,
-  }
+  })
 }

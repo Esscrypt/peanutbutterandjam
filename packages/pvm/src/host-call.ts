@@ -10,7 +10,6 @@
 import { logger } from '@pbnj/core'
 import type {
   ContextMutator,
-  Gas,
   HostCallHandler,
   RAM,
   RegisterState,
@@ -38,15 +37,15 @@ export class HostCallSystem<X> {
    */
   execute(
     instructionData: Uint8Array,
-    instructionPointer: number,
-    gasCounter: Gas,
+    instructionPointer: bigint,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: X,
   ): {
     resultCode: ResultCode
-    instructionPointer: number
-    gasCounter: Gas
+    instructionPointer: bigint
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: X
@@ -100,16 +99,16 @@ export class HostCallSystem<X> {
    * @returns Updated state after host call
    */
   private handleHostCall(
-    hostCallId: number,
-    instructionPointer: number,
-    gasCounter: Gas,
+    hostCallId: bigint,
+    instructionPointer: bigint,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     context: X,
   ): {
     resultCode: ResultCode
-    instructionPointer: number
-    gasCounter: Gas
+    instructionPointer: bigint
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: X
@@ -157,17 +156,17 @@ export class HostCallSystem<X> {
    */
   private executePVMStep(
     instructionData: Uint8Array,
-    instructionPointer: number,
-    gasCounter: Gas,
+    instructionPointer: bigint,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
   ): {
     resultCode: ResultCode
-    instructionPointer: number
-    gasCounter: Gas
+    instructionPointer: bigint
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    hostCallId?: number
+    hostCallId?: bigint
   } {
     // Simplified PVM step simulation for testing host calls
     // In the real system, this would call the actual PVM
@@ -184,23 +183,26 @@ export class HostCallSystem<X> {
     }
 
     // Check for ECALLI instruction (opcode 0xB0)
-    const opcode = instructionData[instructionPointer]
-    if (opcode === 0xb0 && instructionData.length > instructionPointer + 1) {
-      const hostCallId = instructionData[instructionPointer + 1]
+    const opcode = instructionData[Number(instructionPointer)]
+    if (
+      opcode === 0xb0 &&
+      instructionData.length > Number(instructionPointer + 1n)
+    ) {
+      const hostCallId = instructionData[Number(instructionPointer + 1n)]
       return {
         resultCode: RESULT_CODES.HOST,
-        instructionPointer: instructionPointer + 2,
+        instructionPointer: instructionPointer + 2n,
         gasCounter: gasCounter - 1n,
         registers,
         ram,
-        hostCallId,
+        hostCallId: BigInt(hostCallId),
       }
     }
 
     // For other instructions, just continue
     return {
       resultCode: RESULT_CODES.HALT,
-      instructionPointer: instructionPointer + 1,
+      instructionPointer: instructionPointer + 1n,
       gasCounter: gasCounter - 1n,
       registers,
       ram,
@@ -213,20 +215,20 @@ export class HostCallSystem<X> {
  */
 export class DefaultHostCallHandler implements HostCallHandler {
   handleHostCall(
-    hostCallId: number,
-    gasCounter: Gas,
+    hostCallId: bigint,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
   ):
     | {
         resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-        gasCounter: Gas
+        gasCounter: bigint
         registers: RegisterState
         ram: RAM
       }
     | {
         resultCode: 'fault'
-        address: number
+        address: bigint
       } {
     logger.debug('DefaultHostCallHandler.handleHostCall called', { hostCallId })
 

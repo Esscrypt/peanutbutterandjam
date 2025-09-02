@@ -312,4 +312,30 @@ export class ValidatorSetManager {
       epochTransitionPending: this.epochTransitionPending,
     }
   }
+
+  /**
+   * Initialize validator set with provided validators
+   * JIP-5 compliant initialization method
+   */
+  async initializeValidatorSet(
+    validators: Array<{
+      index: number
+      publicKey: Uint8Array
+      endpoint: ConnectionEndpoint
+    }>,
+  ): Promise<void> {
+    this.currentValidators.clear()
+
+    for (const validator of validators) {
+      this.currentValidators.set(validator.index, {
+        index: validator.index,
+        publicKey: validator.publicKey,
+        endpoint: validator.endpoint,
+      })
+    }
+
+    console.log(
+      `Initialized validator set with ${validators.length} validators`,
+    )
+  }
 }

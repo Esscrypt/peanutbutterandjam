@@ -1,6 +1,8 @@
 // JIP-2 Node RPC Types
 // Based on https://docs.jamcha.in/advanced/rpc/jip2-node-rpc
 
+import type { Hex } from 'viem'
+
 // WebSocket types
 export interface WebSocket {
   send(data: string): void
@@ -8,13 +10,6 @@ export interface WebSocket {
   close(): void
   readyState: number
 }
-
-// Basic types as defined in the specification
-export type Hash = Uint8Array // 32 Uint8Array
-export type Slot = bigint // 0 to 2^32-1
-export type Blob = Uint8Array // arbitrary length
-export type ServiceId = number // 0 to 2^32-1
-export type CoreIndex = number // 0 to 2^32-1
 
 // Chain Parameters as defined in the specification
 export interface Parameters {
@@ -67,11 +62,11 @@ export interface Parameters {
 // RPC Result type - union of all possible return types
 export type RpcResult =
   | Parameters
-  | { hash: Hash; slot: Slot }
-  | Hash
-  | Blob
-  | ServiceId[]
-  | Slot[]
+  | { hash: Hex; slot: bigint }
+  | Hex
+  | Uint8Array
+  | number[]
+  | bigint[]
   | string // subscription ID
   | null
   | undefined
@@ -79,18 +74,18 @@ export type RpcResult =
 // RPC method parameter types
 export type RpcParams =
   | [] // no parameters
-  | [Hash] // parent, stateRoot, statistics, beefyRoot, listServices
-  | [Hash, ServiceId] // serviceData
-  | [Hash, ServiceId, Blob] // serviceValue
-  | [Hash, ServiceId, Hash] // servicePreimage
-  | [Hash, ServiceId, Hash, number] // serviceRequest
-  | [ServiceId, Blob, Blob[]] // submitWorkPackage
-  | [ServiceId, Blob, Hash] // submitPreimage
+  | [Hex] // parent, stateRoot, statistics, beefyRoot, listServices
+  | [Hex, number] // serviceData
+  | [Hex, number, Blob] // serviceValue
+  | [Hex, number, Hex] // servicePreimage
+  | [Hex, number, Hex, number] // serviceRequest
+  | [number, Blob, Blob[]] // submitWorkPackage
+  | [number, Blob, Hex] // submitPreimage
   | [boolean] // subscribeStatistics
-  | [ServiceId, boolean] // subscribeServiceData
-  | [ServiceId, Blob, boolean] // subscribeServiceValue
-  | [ServiceId, Hash, boolean] // subscribeServicePreimage
-  | [ServiceId, Hash, number, boolean] // subscribeServiceRequest
+  | [number, boolean] // subscribeServiceData
+  | [number, Blob, boolean] // subscribeServiceValue
+  | [number, Hex, boolean] // subscribeServicePreimage
+  | [number, Hex, number, boolean] // subscribeServiceRequest
 
 // Subscription types
 export interface Subscription {
@@ -174,19 +169,19 @@ export type RpcMethod =
 
 // Utility types for validation
 export interface HashValidator {
-  isValid(hash: unknown): hash is Hash
-  fromHex(hex: string): Hash
-  toHex(hash: Hash): string
+  isValid(hash: unknown): hash is Hex
+  fromHex(hex: string): Hex
+  toHex(hash: Hex): string
 }
 
 export interface BlobValidator {
-  isValid(blob: unknown): blob is Blob
-  fromHex(hex: string): Blob
-  toHex(blob: Blob): string
+  isValid(blob: unknown): blob is Uint8Array
+  fromHex(hex: string): Uint8Array
+  toHex(blob: Uint8Array): string
 }
 
 export interface SlotValidator {
-  isValid(slot: unknown): slot is Slot
-  fromNumber(num: number): Slot
-  toNumber(slot: Slot): number
+  isValid(slot: unknown): slot is bigint
+  fromNumber(num: number): bigint
+  toNumber(slot: bigint): number
 }

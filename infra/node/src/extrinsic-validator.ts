@@ -5,7 +5,7 @@
  * Reference: Gray Paper extrinsic validation
  */
 
-import { logger } from '@pbnj/core'
+import { logger, type SafePromise, safeError, safeResult } from '@pbnj/core'
 import type {
   BlockAuthoringConfig,
   BlockAuthoringValidationResult,
@@ -30,7 +30,7 @@ export class ExtrinsicValidator {
   async validate(
     extrinsics: Extrinsic[],
     config: BlockAuthoringConfig,
-  ): Promise<BlockAuthoringValidationResult> {
+  ): SafePromise<BlockAuthoringValidationResult> {
     logger.debug('Validating extrinsics', {
       extrinsicCount: extrinsics.length,
     })
@@ -47,14 +47,18 @@ export class ExtrinsicValidator {
     }
 
     // Validate each extrinsic
-    for (let i = 0; i < extrinsics.length; i++) {
-      const extrinsic = extrinsics[i]
-      const extrinsicErrors = await this.validateExtrinsic(extrinsic, i, config)
-      const extrinsicWarnings = await this.validateExtrinsicWarnings(
-        extrinsic,
-        i,
-        config,
-      )
+    for (let i = 0n; i < BigInt(extrinsics.length); i++) {
+      const extrinsic = extrinsics[Number(i)]
+      const [extrinsicErrorsError, extrinsicErrors] =
+        await this.validateExtrinsic(extrinsic, i, config)
+      if (extrinsicErrorsError) {
+        return safeError(extrinsicErrorsError)
+      }
+      const [extrinsicWarningsError, extrinsicWarnings] =
+        await this.validateExtrinsicWarnings(extrinsic, i, config)
+      if (extrinsicWarningsError) {
+        return safeError(extrinsicWarningsError)
+      }
 
       errors.push(...extrinsicErrors)
       warnings.push(...extrinsicWarnings)
@@ -68,11 +72,11 @@ export class ExtrinsicValidator {
       warningCount: warnings.length,
     })
 
-    return {
+    return safeResult({
       valid,
       errors,
       warnings,
-    }
+    })
   }
 
   /**
@@ -80,9 +84,9 @@ export class ExtrinsicValidator {
    */
   private async validateExtrinsic(
     extrinsic: Extrinsic,
-    index: number,
+    index: bigint,
     _config: BlockAuthoringConfig,
-  ): Promise<ValidationError[]> {
+  ): SafePromise<ValidationError[]> {
     const errors: ValidationError[] = []
 
     // Validate extrinsic ID
@@ -132,7 +136,7 @@ export class ExtrinsicValidator {
     // - Gas limit validation
     // - Fee validation
 
-    return errors
+    return safeResult(errors)
   }
 
   /**
@@ -140,9 +144,9 @@ export class ExtrinsicValidator {
    */
   private async validateExtrinsicWarnings(
     extrinsic: Extrinsic,
-    index: number,
+    index: bigint,
     _config: BlockAuthoringConfig,
-  ): Promise<ValidationWarning[]> {
+  ): SafePromise<ValidationWarning[]> {
     const warnings: ValidationWarning[] = []
 
     // Check for large extrinsic data
@@ -162,6 +166,6 @@ export class ExtrinsicValidator {
     // - Duplicate extrinsics
     // - Suspicious timing
 
-    return warnings
+    return safeResult(warnings)
   }
 }

@@ -5,31 +5,30 @@
  * This is a Common Ephemeral (CE) stream for requesting EC shards from guarantors.
  */
 
+import type { NetworkingStore } from '@pbnj/state'
 import type {
-  Bytes,
   ShardDistributionRequest,
   ShardDistributionResponse,
   StreamInfo,
 } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
 
 /**
  * Shard distribution protocol handler
  */
 export class ShardDistributionProtocol {
-  private bundleShards: Map<string, Bytes> = new Map()
-  private segmentShards: Map<string, Bytes[]> = new Map()
-  private justifications: Map<string, Bytes> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private bundleShards: Map<string, Uint8Array> = new Map()
+  private segmentShards: Map<string, Uint8Array[]> = new Map()
+  private justifications: Map<string, Uint8Array> = new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -56,9 +55,9 @@ export class ShardDistributionProtocol {
    * Store bundle shard in local store and persist to database
    */
   async storeBundleShard(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    bundleShard: Bytes,
+    bundleShard: Uint8Array,
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_bundle`
     this.bundleShards.set(key, bundleShard)
@@ -77,9 +76,9 @@ export class ShardDistributionProtocol {
    * Store segment shards in local store and persist to database
    */
   async storeSegmentShards(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    segmentShards: Bytes[],
+    segmentShards: Uint8Array[],
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     this.segmentShards.set(key, segmentShards)
@@ -116,9 +115,9 @@ export class ShardDistributionProtocol {
    * Store justification in local store and persist to database
    */
   async storeJustification(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-    justification: Bytes,
+    justification: Uint8Array,
   ): Promise<void> {
     const key = `${erasureRoot.toString()}_${shardIndex}_justification`
     this.justifications.set(key, justification)
@@ -136,7 +135,10 @@ export class ShardDistributionProtocol {
   /**
    * Get bundle shard from local store
    */
-  getBundleShard(erasureRoot: Bytes, shardIndex: number): Bytes | undefined {
+  getBundleShard(
+    erasureRoot: Uint8Array,
+    shardIndex: number,
+  ): Uint8Array | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_bundle`
     return this.bundleShards.get(key)
   }
@@ -145,9 +147,9 @@ export class ShardDistributionProtocol {
    * Get segment shards from local store
    */
   getSegmentShards(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Bytes[] | undefined {
+  ): Uint8Array[] | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_segments`
     return this.segmentShards.get(key)
   }
@@ -155,7 +157,10 @@ export class ShardDistributionProtocol {
   /**
    * Get justification from local store
    */
-  getJustification(erasureRoot: Bytes, shardIndex: number): Bytes | undefined {
+  getJustification(
+    erasureRoot: Uint8Array,
+    shardIndex: number,
+  ): Uint8Array | undefined {
     const key = `${erasureRoot.toString()}_${shardIndex}_justification`
     return this.justifications.get(key)
   }
@@ -164,9 +169,9 @@ export class ShardDistributionProtocol {
    * Get bundle shard from database if not in local store
    */
   async getBundleShardFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes | null> {
+  ): Promise<Uint8Array | null> {
     if (this.getBundleShard(erasureRoot, shardIndex)) {
       return this.getBundleShard(erasureRoot, shardIndex) || null
     }
@@ -194,9 +199,9 @@ export class ShardDistributionProtocol {
    * Get segment shards from database if not in local store
    */
   async getSegmentShardsFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes[] | null> {
+  ): Promise<Uint8Array[] | null> {
     if (this.getSegmentShards(erasureRoot, shardIndex)) {
       return this.getSegmentShards(erasureRoot, shardIndex) || null
     }
@@ -214,7 +219,7 @@ export class ShardDistributionProtocol {
       if (!metadataData) return null
 
       const metadata = JSON.parse(metadataData.toString())
-      const segmentShards: Bytes[] = []
+      const segmentShards: Uint8Array[] = []
 
       // Get each segment shard
       for (let i = 0; i < metadata.count; i++) {
@@ -244,9 +249,9 @@ export class ShardDistributionProtocol {
    * Get justification from database if not in local store
    */
   async getJustificationFromDatabase(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
-  ): Promise<Bytes | null> {
+  ): Promise<Uint8Array | null> {
     if (this.getJustification(erasureRoot, shardIndex)) {
       return this.getJustification(erasureRoot, shardIndex) || null
     }
@@ -326,7 +331,7 @@ export class ShardDistributionProtocol {
    * Create shard distribution request message
    */
   createShardDistributionRequest(
-    erasureRoot: Bytes,
+    erasureRoot: Uint8Array,
     shardIndex: number,
   ): ShardDistributionRequest {
     return {
@@ -338,7 +343,9 @@ export class ShardDistributionProtocol {
   /**
    * Serialize shard distribution request message
    */
-  serializeShardDistributionRequest(request: ShardDistributionRequest): Bytes {
+  serializeShardDistributionRequest(
+    request: ShardDistributionRequest,
+  ): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(32 + 4) // erasureRoot + shardIndex
     const view = new DataView(buffer)
@@ -357,7 +364,9 @@ export class ShardDistributionProtocol {
   /**
    * Deserialize shard distribution request message
    */
-  deserializeShardDistributionRequest(data: Bytes): ShardDistributionRequest {
+  deserializeShardDistributionRequest(
+    data: Uint8Array,
+  ): ShardDistributionRequest {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -379,7 +388,7 @@ export class ShardDistributionProtocol {
    */
   serializeShardDistributionResponse(
     response: ShardDistributionResponse,
-  ): Bytes {
+  ): Uint8Array {
     // Calculate total size
     let totalSize = 4 + 4 + 4 // bundle shard length + number of segment shards + justification length
 
@@ -434,7 +443,9 @@ export class ShardDistributionProtocol {
   /**
    * Deserialize shard distribution response message
    */
-  deserializeShardDistributionResponse(data: Bytes): ShardDistributionResponse {
+  deserializeShardDistributionResponse(
+    data: Uint8Array,
+  ): ShardDistributionResponse {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -451,7 +462,7 @@ export class ShardDistributionProtocol {
     offset += 4
 
     // Read segment shards
-    const segmentShards: Bytes[] = []
+    const segmentShards: Uint8Array[] = []
     for (let i = 0; i < numSegmentShards; i++) {
       // Read segment shard length (4 bytes, little-endian)
       const segmentShardLength = view.getUint32(offset, true)
@@ -483,7 +494,7 @@ export class ShardDistributionProtocol {
    */
   async handleStreamData(
     _stream: StreamInfo,
-    data: Bytes,
+    data: Uint8Array,
   ): Promise<ShardDistributionResponse | null> {
     try {
       const request = this.deserializeShardDistributionRequest(data)

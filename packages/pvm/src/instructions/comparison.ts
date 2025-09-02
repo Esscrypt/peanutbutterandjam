@@ -11,7 +11,7 @@ export class SET_LT_U_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const result = registerValue < immediate ? 1n : 0n
 
@@ -28,7 +28,7 @@ export class SET_LT_U_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -41,7 +41,7 @@ export class SET_LT_U_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -54,7 +54,7 @@ export class SET_LT_S_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
 
     // Convert to signed comparison
@@ -77,7 +77,7 @@ export class SET_LT_S_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -90,7 +90,7 @@ export class SET_LT_S_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 
@@ -111,7 +111,7 @@ export class SET_GT_U_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
     const result = registerValue > immediate ? 1n : 0n
 
@@ -128,7 +128,7 @@ export class SET_GT_U_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -141,7 +141,7 @@ export class SET_GT_U_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -154,7 +154,7 @@ export class SET_GT_S_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2)
+    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
     const registerValue = this.getRegisterValue(context.registers, registerA)
 
     // Convert to signed comparison
@@ -177,7 +177,7 @@ export class SET_GT_S_IMMInstruction extends BaseInstruction {
 
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters,
     }
@@ -190,7 +190,7 @@ export class SET_GT_S_IMMInstruction extends BaseInstruction {
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2)
+    const immediate = this.getImmediateValue(operands, 2n)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 

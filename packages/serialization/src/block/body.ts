@@ -38,6 +38,7 @@
  * possible to compute Merkle proofs for individual components.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import {
   decodeVariableLength,
   encodeVariableLength,
@@ -59,7 +60,7 @@ export interface BlockBody {
  * @param body - Block body to encode
  * @returns Encoded octet sequence
  */
-export function encodeBlockBody(body: BlockBody): Uint8Array {
+export function encodeBlockBody(body: BlockBody): Safe<Uint8Array> {
   // Encode extrinsics as a sequence
   const extrinsicsData = new Uint8Array(
     body.extrinsics.reduce((sum, ext) => sum + ext.length, 0),
@@ -81,21 +82,26 @@ export function encodeBlockBody(body: BlockBody): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded block body and remaining data
  */
-export function decodeBlockBody(data: Uint8Array): {
+export function decodeBlockBody(data: Uint8Array): Safe<{
   value: BlockBody
   remaining: Uint8Array
-} {
+}> {
   // Decode variable-length extrinsics data
-  const { value: extrinsicsData, remaining } = decodeVariableLength(data)
+  const [error, result] = decodeVariableLength(data)
+  if (error) {
+    return safeError(error)
+  }
+  const extrinsicsData = result.value
+  const remaining = result.remaining
 
   // For now, treat extrinsics as a single blob
   // In a real implementation, you would parse individual extrinsics
   const extrinsics: Uint8Array[] = [extrinsicsData]
 
-  return {
+  return safeResult({
     value: { extrinsics },
     remaining,
-  }
+  })
 }
 
 /**
@@ -121,24 +127,26 @@ export function encodeBlock(header: Uint8Array, body: Uint8Array): Uint8Array {
  */
 export function decodeBlock(
   data: Uint8Array,
-  headerLength: number,
-): {
+  headerLength: bigint,
+): Safe<{
   header: Uint8Array
   body: Uint8Array
   remaining: Uint8Array
-} {
+}> {
   if (data.length < headerLength) {
-    throw new Error(
-      `Insufficient data for block decoding (expected at least ${headerLength} Uint8Array)`,
+    return safeError(
+      new Error(
+        `Insufficient data for block decoding (expected at least ${headerLength} Uint8Array)`,
+      ),
     )
   }
 
-  const header = data.slice(0, headerLength)
-  const body = data.slice(headerLength)
+  const header = data.slice(0, Number(headerLength))
+  const body = data.slice(Number(headerLength))
 
-  return {
+  return safeResult({
     header,
     body,
     remaining: new Uint8Array(0),
-  }
+  })
 }

@@ -28,31 +28,31 @@ export class ECALLIInstruction extends BaseInstruction {
   readonly description = 'Host call with immediate value'
 
   execute(context: InstructionContext): InstructionResult {
-    const hostCallId = this.getImmediateValue(context.instruction.operands, 0)
+    const hostCallId = this.getImmediateValue(context.instruction.operands, 0n)
 
     logger.debug('Executing ECALLI instruction', { hostCallId })
 
     // Check if this is a General function call (0-13)
     if (hostCallId >= 0n && hostCallId <= 13n) {
-      return this.executeGeneralFunction(Number(hostCallId), context)
+      return this.executeGeneralFunction(hostCallId, context)
     }
 
     // Check if this is an Accumulate function call (14-26)
     if (hostCallId >= 14n && hostCallId <= 26n) {
-      return this.executeAccumulateFunction(Number(hostCallId), context)
+      return this.executeAccumulateFunction(hostCallId, context)
     }
 
     // Unknown function ID
     logger.error('Unknown host call function ID', { hostCallId })
     return {
       resultCode: RESULT_CODES.PANIC,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
     }
   }
 
   private executeGeneralFunction(
-    functionId: number,
+    functionId: bigint,
     context: InstructionContext,
   ): InstructionResult {
     // Create General context
@@ -71,7 +71,7 @@ export class ECALLIInstruction extends BaseInstruction {
     if (result.executionState === 'panic') {
       return {
         resultCode: RESULT_CODES.PANIC,
-        newInstructionPointer: context.instructionPointer + 1,
+        newInstructionPointer: context.instructionPointer + 1n,
         newGasCounter: context.gasCounter - 1n,
       }
     }
@@ -79,7 +79,7 @@ export class ECALLIInstruction extends BaseInstruction {
     if (result.executionState === 'oog') {
       return {
         resultCode: RESULT_CODES.OOG,
-        newInstructionPointer: context.instructionPointer + 1,
+        newInstructionPointer: context.instructionPointer + 1n,
         newGasCounter: 0n,
       }
     }
@@ -87,14 +87,14 @@ export class ECALLIInstruction extends BaseInstruction {
     // Success - update registers with result
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters: result.registers,
     }
   }
 
   private executeAccumulateFunction(
-    functionId: number,
+    functionId: bigint,
     context: InstructionContext,
   ): InstructionResult {
     // Initialize system state if not present
@@ -103,10 +103,10 @@ export class ECALLIInstruction extends BaseInstruction {
       authqueue: new Map(),
       assigners: new Map(),
       stagingset: [],
-      nextfreeid: 65536, // Cminpublicindex
-      manager: 0,
-      registrar: 0,
-      delegator: 0,
+      nextfreeid: 65536n, // Cminpublicindex
+      manager: 0n,
+      registrar: 0n,
+      delegator: 0n,
       alwaysaccers: new Map(),
       xfers: [],
       provisions: new Map(),
@@ -119,8 +119,8 @@ export class ECALLIInstruction extends BaseInstruction {
       registers: context.registers,
       memory: context.ram,
       state: systemState,
-      currentTime: Date.now(),
-      currentServiceId: 0, // Default service ID
+      currentTime: BigInt(Date.now()),
+      currentServiceId: 0n, // Default service ID
     }
 
     // Dispatch to Accumulate function
@@ -130,7 +130,7 @@ export class ECALLIInstruction extends BaseInstruction {
     if (result.executionState === 'panic') {
       return {
         resultCode: RESULT_CODES.PANIC,
-        newInstructionPointer: context.instructionPointer + 1,
+        newInstructionPointer: context.instructionPointer + 1n,
         newGasCounter: result.registers.r7,
       }
     }
@@ -138,7 +138,7 @@ export class ECALLIInstruction extends BaseInstruction {
     if (result.executionState === 'oog') {
       return {
         resultCode: RESULT_CODES.OOG,
-        newInstructionPointer: context.instructionPointer + 1,
+        newInstructionPointer: context.instructionPointer + 1n,
         newGasCounter: 0n,
       }
     }
@@ -146,7 +146,7 @@ export class ECALLIInstruction extends BaseInstruction {
     // Success - update registers with result
     return {
       resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1,
+      newInstructionPointer: context.instructionPointer + 1n,
       newGasCounter: context.gasCounter - 1n,
       newRegisters: result.registers,
     }
@@ -160,7 +160,7 @@ export class ECALLIInstruction extends BaseInstruction {
   }
 
   disassemble(operands: Uint8Array): string {
-    const hostCallId = this.getImmediateValue(operands, 0)
+    const hostCallId = this.getImmediateValue(operands, 0n)
     return `${this.name} ${hostCallId}`
   }
 }

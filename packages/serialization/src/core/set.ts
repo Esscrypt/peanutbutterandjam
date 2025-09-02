@@ -34,6 +34,10 @@
  * where order doesn't matter but deterministic encoding is required.
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { Decoder, Encoder } from '@pbnj/types'
+import { decodeNatural, encodeNatural } from './natural-number'
+
 /**
  * Encode set using Gray Paper set encoding
  *
@@ -48,8 +52,8 @@
  */
 export function encodeSet<T>(
   set: Set<T>,
-  encoder: (value: T) => Uint8Array,
-): Uint8Array {
+  encoder: Encoder<T>,
+): Safe<Uint8Array> {
   // Convert set to array and sort elements
   const elements = Array.from(set).sort((a, b) => {
     // For simple types, use string comparison
@@ -69,12 +73,15 @@ export function encodeSet<T>(
   const result = new Uint8Array(totalLength)
   let offset = 0
 
-  for (const element of encodedElements) {
-    result.set(element, offset)
-    offset += element.length
+  for (const [error, encoded] of encodedElements) {
+    if (error) {
+      return safeError(error)
+    }
+    result.set(encoded, offset)
+    offset += encoded.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -87,9 +94,9 @@ export function encodeSet<T>(
  */
 export function decodeSet<T>(
   data: Uint8Array,
-  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
+  decoder: Decoder<T>,
   elementCount?: number,
-): { value: Set<T>; remaining: Uint8Array } {
+): Safe<{ value: Set<T>; remaining: Uint8Array }> {
   const set = new Set<T>()
   let currentData = data
 
@@ -97,25 +104,40 @@ export function decodeSet<T>(
     // Decode specific number of elements
     for (let i = 0; i < elementCount; i++) {
       if (currentData.length === 0) {
-        throw new Error(
-          `Insufficient data for set decoding (expected ${elementCount} elements, got ${i})`,
+        return safeError(
+          new Error(
+            `Insufficient data for set decoding (expected ${elementCount} elements, got ${i})`,
+          ),
         )
       }
 
-      const { value, remaining } = decoder(currentData)
+      const [error, result] = decoder(currentData)
+      if (error) {
+        return safeError(error)
+      }
+
+      const value = result.value
+      const remaining = result.remaining
+
       set.add(value)
       currentData = remaining
     }
   } else {
     // Decode all available elements
     while (currentData.length > 0) {
-      const { value, remaining } = decoder(currentData)
+      const [error, result] = decoder(currentData)
+      if (error) {
+        return safeError(error)
+      }
+
+      const value = result.value
+      const remaining = result.remaining
       set.add(value)
       currentData = remaining
     }
   }
 
-  return { value: set, remaining: currentData }
+  return safeResult({ value: set, remaining: currentData })
 }
 
 /**
@@ -127,19 +149,26 @@ export function decodeSet<T>(
  */
 export function encodeSetWithLength<T>(
   set: Set<T>,
-  encoder: (value: T) => Uint8Array,
-): Uint8Array {
-  const encoded = encodeSet(set, encoder)
+  encoder: Encoder<T>,
+): Safe<Uint8Array> {
+  const [error, encoded] = encodeSet(set, encoder)
+  if (error) {
+    return safeError(error)
+  }
+
   const length = set.size
 
   // Encode length as natural number
-  const encodedLength = encodeNatural(BigInt(length))
+  const [encodedLengthError, encodedLength] = encodeNatural(BigInt(length))
+  if (encodedLengthError) {
+    return safeError(encodedLengthError)
+  }
 
   const result = new Uint8Array(encodedLength.length + encoded.length)
   result.set(encodedLength, 0)
   result.set(encoded, encodedLength.length)
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -151,21 +180,21 @@ export function encodeSetWithLength<T>(
  */
 export function decodeSetWithLength<T>(
   data: Uint8Array,
-  decoder: (data: Uint8Array) => { value: T; remaining: Uint8Array },
-): { value: Set<T>; remaining: Uint8Array } {
+  decoder: Decoder<T>,
+): Safe<{ value: Set<T>; remaining: Uint8Array }> {
   // First decode the length
-  const { value: length, remaining: lengthRemaining } = decodeNatural(data)
+  const [error, result] = decodeNatural(data)
+  if (error) {
+    return safeError(error)
+  }
+  const length = result.value
+  const lengthRemaining = result.remaining
   const elementCount = Number(length)
 
   if (elementCount < 0 || elementCount > Number.MAX_SAFE_INTEGER) {
-    throw new Error(`Invalid set length: ${length}`)
+    return safeError(new Error(`Invalid set length: ${length}`))
   }
 
   // Then decode the set
-  const { value, remaining } = decodeSet(lengthRemaining, decoder, elementCount)
-
-  return { value, remaining }
+  return decodeSet(lengthRemaining, decoder, elementCount)
 }
-
-// Import required functions
-import { decodeNatural, encodeNatural } from './natural-number'

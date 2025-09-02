@@ -46,12 +46,14 @@
  * that other work items can safely consume with full provenance.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
-import type {
-  OperandTuple,
-  SerializationWorkError as WorkError,
-  WorkResult,
-} from '@pbnj/types'
+import {
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import type { OperandTuple, WorkError, WorkResult } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
 /**
@@ -60,7 +62,9 @@ import { encodeNatural } from '../core/natural-number'
  * @param operandTuple - Operand tuple to encode
  * @returns Encoded octet sequence
  */
-export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
+export function encodeOperandTuple(
+  operandTuple: OperandTuple,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Package hash (32 Uint8Array)
@@ -76,25 +80,43 @@ export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
   parts.push(hexToBytes(operandTuple.payloadHash))
 
   // Gas limit (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(operandTuple.gasLimit)))
+  const [error, encoded] = encodeNatural(operandTuple.gasLimit)
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Result (variable length)
   if (typeof operandTuple.result === 'string') {
     // Error result
     const errorUint8Array = new TextEncoder().encode(operandTuple.result)
-    const lengthEncoded = encodeNatural(BigInt(errorUint8Array.length))
+    const [error2, lengthEncoded] = encodeNatural(
+      BigInt(errorUint8Array.length),
+    )
+    if (error2) {
+      return safeError(error2)
+    }
     parts.push(lengthEncoded)
     parts.push(errorUint8Array)
   } else {
     // Success result (hex string, convert to bytes)
     const resultBytes = operandTuple.result as Uint8Array
-    const lengthEncoded = encodeNatural(BigInt(resultBytes.length))
+    const [error3, lengthEncoded] = encodeNatural(BigInt(resultBytes.length))
+    if (error3) {
+      return safeError(error3)
+    }
     parts.push(lengthEncoded)
     parts.push(resultBytes)
   }
 
   // Auth trace (variable length)
-  parts.push(encodeNatural(BigInt(operandTuple.authTrace.length))) // Length prefix
+  const [error4, lengthEncoded] = encodeNatural(
+    BigInt(operandTuple.authTrace.length),
+  )
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(lengthEncoded)
   parts.push(operandTuple.authTrace)
 
   // Concatenate all parts
@@ -107,7 +129,7 @@ export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -116,10 +138,10 @@ export function encodeOperandTuple(operandTuple: OperandTuple): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded operand tuple and remaining data
  */
-export function decodeOperandTuple(data: Uint8Array): {
+export function decodeOperandTuple(data: Uint8Array): Safe<{
   value: OperandTuple
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Package hash (32 Uint8Array)
@@ -187,16 +209,16 @@ export function decodeOperandTuple(data: Uint8Array): {
   const authTrace = currentData.slice(0, Number(authTraceLength))
   currentData = currentData.slice(Number(authTraceLength))
 
-  return {
+  return safeResult({
     value: {
       packageHash,
       segmentRoot: segRoot,
       authorizer,
       payloadHash,
-      gasLimit: Number(gasLimit),
+      gasLimit,
       result,
       authTrace,
     },
     remaining: currentData,
-  }
+  })
 }

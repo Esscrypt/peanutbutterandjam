@@ -37,6 +37,7 @@
     "@pbnj/core": "workspace:*",
     "@pbnj/node": "workspace:*",
     "@pbnj/types": "workspace:*",
+    "@pbnj/serialization": "workspace:*",
     "dotenv": "^17.2.1"
   },
   "devDependencies": {

@@ -13,7 +13,10 @@ describe('JIP-5 Secret Key Derivation', () => {
   describe('Trivial Seed Generation', () => {
     it('should generate correct trivial seeds', () => {
       // Test vector 0
-      const seed0 = generateTrivialSeed(0)
+      const [seed0Error, seed0] = generateTrivialSeed(0)
+      if (seed0Error) {
+        throw seed0Error
+      }
       const expectedSeed0 = new Uint8Array(Buffer.from('0000000000000000000000000000000000000000000000000000000000000000', 'hex'))
       expect(seed0).toEqual(expectedSeed0)
 
@@ -23,7 +26,10 @@ describe('JIP-5 Secret Key Derivation', () => {
       expect(seed1).toEqual(expectedSeed1)
 
       // Test vector 2
-      const seed2 = generateTrivialSeed(2)
+      const [seed2Error, seed2] = generateTrivialSeed(2)
+      if (seed2Error) {
+        throw seed2Error
+      }
       const expectedSeed2 = new Uint8Array(Buffer.from('0200000002000000020000000200000002000000020000000200000002000000', 'hex'))
       expect(seed2).toEqual(expectedSeed2)
     })
@@ -37,40 +43,76 @@ describe('JIP-5 Secret Key Derivation', () => {
   describe('Secret Seed Derivation', () => {
     it('should derive correct Ed25519 secret seeds from test vectors', () => {
       // Test vector 0
-      const seed0 = generateTrivialSeed(0)
-      const { ed25519_secret_seed: secret0 } = deriveSecretSeeds(seed0)
+      const [seed0Error, seed0] = generateTrivialSeed(0)
+      if (seed0Error) {
+        throw seed0Error
+      }
+      const [secret0Error, secret0] = deriveSecretSeeds(seed0)
+      if (secret0Error) {
+        throw secret0Error
+      }
       const expectedSecret0 = new Uint8Array(Buffer.from('996542becdf1e78278dc795679c825faca2e9ed2bf101bf3c4a236d3ed79cf59', 'hex'))
       expect(secret0).toEqual(expectedSecret0)
 
       // Test vector 1
-      const seed1 = generateTrivialSeed(1)
-      const { ed25519_secret_seed: secret1 } = deriveSecretSeeds(seed1)
+      const [seed1Error, seed1] = generateTrivialSeed(1)
+      if (seed1Error) {
+        throw seed1Error
+      }
+      const [secret1Error, secret1] = deriveSecretSeeds(seed1)
+      if (secret1Error) {
+        throw secret1Error
+      }
       const expectedSecret1 = new Uint8Array(Buffer.from('b81e308145d97464d2bc92d35d227a9e62241a16451af6da5053e309be4f91d7', 'hex'))
       expect(secret1).toEqual(expectedSecret1)
 
       // Test vector 2
-      const seed2 = generateTrivialSeed(2)
-      const { ed25519_secret_seed: secret2 } = deriveSecretSeeds(seed2)
+      const [seed2Error, seed2] = generateTrivialSeed(2)
+      if (seed2Error) {
+        throw seed2Error
+      }
+      const [secret2Error, secret2] = deriveSecretSeeds(seed2)
+      if (secret2Error) {
+        throw secret2Error
+      }
       const expectedSecret2 = new Uint8Array(Buffer.from('0093c8c10a88ebbc99b35b72897a26d259313ee9bad97436a437d2e43aaafa0f', 'hex'))
       expect(secret2).toEqual(expectedSecret2)
     })
 
     it('should derive correct Bandersnatch secret seeds from test vectors', () => {
       // Test vector 0
-      const seed0 = generateTrivialSeed(0)
-      const { bandersnatch_secret_seed: secret0 } = deriveSecretSeeds(seed0)
+      const [seed0Error, seed0] = generateTrivialSeed(0)
+      if (seed0Error) {
+        throw seed0Error
+      }
+      const [secret0Error, secret0] = deriveSecretSeeds(seed0)
+      if (secret0Error) {
+        throw secret0Error
+      }
       const expectedSecret0 = new Uint8Array(Buffer.from('007596986419e027e65499cc87027a236bf4a78b5e8bd7f675759d73e7a9c799', 'hex'))
       expect(secret0).toEqual(expectedSecret0)
 
       // Test vector 1
-      const seed1 = generateTrivialSeed(1)
-      const { bandersnatch_secret_seed: secret1 } = deriveSecretSeeds(seed1)
+      const [seed1Error, seed1] = generateTrivialSeed(1)
+      if (seed1Error) {
+        throw seed1Error
+      }
+      const [secret1Error, secret1] = deriveSecretSeeds(seed1)
+      if (secret1Error) {
+        throw secret1Error
+      }
       const expectedSecret1 = new Uint8Array(Buffer.from('12ca375c9242101c99ad5fafe8997411f112ae10e0e5b7c4589e107c433700ac', 'hex'))
       expect(secret1).toEqual(expectedSecret1)
 
       // Test vector 2
-      const seed2 = generateTrivialSeed(2)
-      const { bandersnatch_secret_seed: secret2 } = deriveSecretSeeds(seed2)
+      const [seed2Error, seed2] = generateTrivialSeed(2)
+      if (seed2Error) {
+        throw seed2Error
+      }
+      const [secret2Error, secret2] = deriveSecretSeeds(seed2)
+      if (secret2Error) {
+        throw secret2Error
+      }
       const expectedSecret2 = new Uint8Array(Buffer.from('3d71dc0ffd02d90524fda3e4a220e7ec514a258c59457d3077ce4d4f003fd98a', 'hex'))
       expect(secret2).toEqual(expectedSecret2)
     })
@@ -87,23 +129,42 @@ describe('JIP-5 Secret Key Derivation', () => {
   describe('Public Key Generation from Secret Seeds', () => {
     it('should generate correct Ed25519 public keys from derived secret seeds', () => {
       // Test vector 0
-      const seed0 = generateTrivialSeed(0)
-      const { ed25519_secret_seed: secret0 } = deriveSecretSeeds(seed0)
-      const { publicKey: publicKey0 } = generateKeyPairFromSeed(secret0)
+      const [seed0Error, seed0] = generateTrivialSeed(0)
+      if (seed0Error) {
+        throw seed0Error
+      }
+
+      const [secret0Error, secret0] = deriveSecretSeeds(seed0)
+      if (secret0Error) {
+        throw secret0Error
+      }
+      const { publicKey: publicKey0 } = generateKeyPairFromSeed(secret0.ed25519_secret_seed)
       const expectedPublicKey0 = new Uint8Array(Buffer.from('4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace', 'hex'))
       expect(publicKey0).toEqual(expectedPublicKey0)
 
       // Test vector 1
-      const seed1 = generateTrivialSeed(1)
-      const { ed25519_secret_seed: secret1 } = deriveSecretSeeds(seed1)
-      const { publicKey: publicKey1 } = generateKeyPairFromSeed(secret1)
+      const [seed1Error, seed1] = generateTrivialSeed(1)
+      if (seed1Error) {
+        throw seed1Error
+      }
+      const [secret1Error, secret1] = deriveSecretSeeds(seed1)
+      if (secret1Error) {
+        throw secret1Error
+      }
+      const { publicKey: publicKey1 } = generateKeyPairFromSeed(secret1.ed25519_secret_seed)
       const expectedPublicKey1 = new Uint8Array(Buffer.from('ad93247bd01307550ec7acd757ce6fb805fcf73db364063265b30a949e90d933', 'hex'))
       expect(publicKey1).toEqual(expectedPublicKey1)
 
       // Test vector 2
-      const seed2 = generateTrivialSeed(2)
-      const { ed25519_secret_seed: secret2 } = deriveSecretSeeds(seed2)
-      const { publicKey: publicKey2 } = generateKeyPairFromSeed(secret2)
+      const [seed2Error, seed2] = generateTrivialSeed(2)
+      if (seed2Error) {
+        throw seed2Error
+      }
+      const [secret2Error, secret2] = deriveSecretSeeds(seed2)
+      if (secret2Error) {
+        throw secret2Error
+      }
+      const { publicKey: publicKey2 } = generateKeyPairFromSeed(secret2.ed25519_secret_seed)
       const expectedPublicKey2 = new Uint8Array(Buffer.from('cab2b9ff25c2410fbe9b8a717abb298c716a03983c98ceb4def2087500b8e341', 'hex'))
       expect(publicKey2).toEqual(expectedPublicKey2)
     })
@@ -114,20 +175,38 @@ describe('JIP-5 Secret Key Derivation', () => {
       // TODO: Add Bandersnatch key generation when available
       
       // Test vector 0
-      const seed0 = generateTrivialSeed(0)
-      const { bandersnatch_secret_seed: secret0 } = deriveSecretSeeds(seed0)
+      const [seed0Error, seed0] = generateTrivialSeed(0)
+      if (seed0Error) {
+        throw seed0Error
+      }
+      const [secret0Error, secret0] = deriveSecretSeeds(seed0)
+      if (secret0Error) {
+        throw secret0Error
+      }
       const expectedSecret0 = new Uint8Array(Buffer.from('007596986419e027e65499cc87027a236bf4a78b5e8bd7f675759d73e7a9c799', 'hex'))
       expect(secret0).toEqual(expectedSecret0)
 
       // Test vector 1
-      const seed1 = generateTrivialSeed(1)
-      const { bandersnatch_secret_seed: secret1 } = deriveSecretSeeds(seed1)
+      const [seed1Error, seed1] = generateTrivialSeed(1)
+      if (seed1Error) {
+        throw seed1Error
+      }
+      const [secret1Error, secret1] = deriveSecretSeeds(seed1)
+      if (secret1Error) {
+        throw secret1Error
+      }
       const expectedSecret1 = new Uint8Array(Buffer.from('12ca375c9242101c99ad5fafe8997411f112ae10e0e5b7c4589e107c433700ac', 'hex'))
       expect(secret1).toEqual(expectedSecret1)
 
       // Test vector 2
-      const seed2 = generateTrivialSeed(2)
-      const { bandersnatch_secret_seed: secret2 } = deriveSecretSeeds(seed2)
+      const [seed2Error, seed2] = generateTrivialSeed(2)
+      if (seed2Error) {
+        throw seed2Error
+      }
+      const [secret2Error, secret2] = deriveSecretSeeds(seed2)
+      if (secret2Error) {
+        throw secret2Error
+      }
       const expectedSecret2 = new Uint8Array(Buffer.from('3d71dc0ffd02d90524fda3e4a220e7ec514a258c59457d3077ce4d4f003fd98a', 'hex'))
       expect(secret2).toEqual(expectedSecret2)
     })
@@ -164,16 +243,26 @@ describe('JIP-5 Secret Key Derivation', () => {
 
       for (const vector of testVectors) {
         // Generate trivial seed
-        const seed = generateTrivialSeed(vector.index)
+        const [seedError, seed] = generateTrivialSeed(vector.index)
+        if (seedError) {
+          throw seedError
+        }
         expect(seed).toEqual(new Uint8Array(Buffer.from(vector.seed, 'hex')))
 
         // Derive secret seeds
-        const { ed25519_secret_seed, bandersnatch_secret_seed } = deriveSecretSeeds(seed)
+        const [ed25519_secret_seedError, ed25519_secret_seed] = deriveSecretSeeds(seed)
+        if (ed25519_secret_seedError) {
+          throw ed25519_secret_seedError
+        }
+        const [bandersnatch_secret_seedError, bandersnatch_secret_seed] = deriveSecretSeeds(seed)
+        if (bandersnatch_secret_seedError) {
+          throw bandersnatch_secret_seedError
+        }
         expect(ed25519_secret_seed).toEqual(new Uint8Array(Buffer.from(vector.ed25519_secret_seed, 'hex')))
         expect(bandersnatch_secret_seed).toEqual(new Uint8Array(Buffer.from(vector.bandersnatch_secret_seed, 'hex')))
 
         // Generate Ed25519 public key from secret seed
-        const { publicKey: ed25519_public } = generateKeyPairFromSeed(ed25519_secret_seed)
+        const { publicKey: ed25519_public } = generateKeyPairFromSeed(ed25519_secret_seed.ed25519_secret_seed)
         expect(ed25519_public).toEqual(new Uint8Array(Buffer.from(vector.ed25519_public, 'hex')))
 
         // TODO: Add Bandersnatch public key generation when available

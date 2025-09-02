@@ -46,12 +46,15 @@
  * while preserving all information needed for consensus verification.
  */
 
-import { bytesToHex, hexToBytes } from '@pbnj/core'
-import type {
-  WorkDigest,
-  SerializationWorkError as WorkError,
-  WorkResult,
-} from '@pbnj/types'
+import {
+  bytesToBigInt,
+  bytesToHex,
+  hexToBytes,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import type { WorkDigest, WorkError, WorkResult } from '@pbnj/types'
 import { encodeNatural } from '../core/natural-number'
 
 /**
@@ -60,11 +63,15 @@ import { encodeNatural } from '../core/natural-number'
  * @param digest - Work digest to encode
  * @returns Encoded octet sequence
  */
-export function encodeWorkDigest(digest: WorkDigest): Uint8Array {
+export function encodeWorkDigest(digest: WorkDigest): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Service index (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.serviceIndex)))
+  const [error, encoded] = encodeNatural(BigInt(digest.serviceIndex))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(encoded)
 
   // Code hash (32 Uint8Array)
   parts.push(hexToBytes(digest.codeHash as `0x${string}`))
@@ -73,36 +80,66 @@ export function encodeWorkDigest(digest: WorkDigest): Uint8Array {
   parts.push(hexToBytes(digest.payloadHash as `0x${string}`))
 
   // Gas limit (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.gasLimit)))
+  const [error2, encoded2] = encodeNatural(BigInt(digest.gasLimit))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
 
   // Result (variable length)
   if (typeof digest.result === 'string') {
     // Error result
     const errorUint8Array = new TextEncoder().encode(digest.result)
-    const lengthEncoded = encodeNatural(BigInt(errorUint8Array.length))
-    parts.push(lengthEncoded)
+    const [error3, encoded3] = encodeNatural(BigInt(errorUint8Array.length))
+    if (error3) {
+      return safeError(error3)
+    }
+    parts.push(encoded3)
     parts.push(errorUint8Array)
   } else {
     // Success result (octet sequence)
-    const lengthEncoded = encodeNatural(BigInt(digest.result.length))
-    parts.push(lengthEncoded)
+    const [error4, encoded4] = encodeNatural(BigInt(digest.result.length))
+    if (error4) {
+      return safeError(error4)
+    }
+    parts.push(encoded4)
     parts.push(digest.result)
   }
 
   // Gas used (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.gasUsed)))
+  const [error5, encoded5] = encodeNatural(BigInt(digest.gasUsed))
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
 
   // Import count (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.importCount)))
+  const [error6, encoded6] = encodeNatural(BigInt(digest.importCount))
+  if (error6) {
+    return safeError(error6)
+  }
+  parts.push(encoded6)
 
   // Extrinsic count (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.extrinsicCount)))
+  const [error7, encoded7] = encodeNatural(BigInt(digest.extrinsicCount))
+  if (error7) {
+    return safeError(error7)
+  }
+  parts.push(encoded7)
 
   // Extrinsic size (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.extrinsicSize)))
+  const [error8, encoded8] = encodeNatural(BigInt(digest.extrinsicSize))
+  if (error8) {
+    return safeError(error8)
+  }
+  parts.push(encoded8)
 
   // Export count (8 Uint8Array)
-  parts.push(encodeNatural(BigInt(digest.exportCount)))
+  const [error9, encoded9] = encodeNatural(BigInt(digest.exportCount))
+  if (error9) {
+    return safeError(error9)
+  }
+  parts.push(encoded9)
 
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -114,7 +151,7 @@ export function encodeWorkDigest(digest: WorkDigest): Uint8Array {
     offset += part.length
   }
 
-  return result
+  return safeResult(result)
 }
 
 /**
@@ -123,18 +160,14 @@ export function encodeWorkDigest(digest: WorkDigest): Uint8Array {
  * @param data - Octet sequence to decode
  * @returns Decoded work digest and remaining data
  */
-export function decodeWorkDigest(data: Uint8Array): {
+export function decodeWorkDigest(data: Uint8Array): Safe<{
   value: WorkDigest
   remaining: Uint8Array
-} {
+}> {
   let currentData = data
 
   // Service index (8 Uint8Array)
-  const serviceIndex = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const serviceIndex = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Code hash (32 Uint8Array)
@@ -146,19 +179,11 @@ export function decodeWorkDigest(data: Uint8Array): {
   currentData = currentData.slice(32)
 
   // Gas limit (8 Uint8Array)
-  const gasLimit = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const gasLimit = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Result (variable length)
-  const resultLength = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const resultLength = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   const resultData = currentData.slice(0, Number(resultLength))
@@ -182,58 +207,38 @@ export function decodeWorkDigest(data: Uint8Array): {
   }
 
   // Gas used (8 Uint8Array)
-  const gasUsed = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const gasUsed = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Import count (8 Uint8Array)
-  const importCount = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const importCount = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Extrinsic count (8 Uint8Array)
-  const extrinsicCount = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const extrinsicCount = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Extrinsic size (8 Uint8Array)
-  const extrinsicSize = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const extrinsicSize = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
   // Export count (8 Uint8Array)
-  const exportCount = BigInt(
-    `0x${Array.from(currentData.slice(0, 8))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')}`,
-  )
+  const exportCount = bytesToBigInt(currentData.slice(0, 8))
   currentData = currentData.slice(8)
 
-  return {
+  return safeResult({
     value: {
-      serviceIndex: Number(serviceIndex),
+      serviceIndex,
       codeHash,
       payloadHash,
-      gasLimit: Number(gasLimit),
+      gasLimit,
       result,
-      gasUsed: Number(gasUsed),
-      importCount: Number(importCount),
-      extrinsicCount: Number(extrinsicCount),
-      extrinsicSize: Number(extrinsicSize),
-      exportCount: Number(exportCount),
+      gasUsed,
+      importCount,
+      extrinsicCount,
+      extrinsicSize,
+      exportCount,
     },
     remaining: currentData,
-  }
+  })
 }

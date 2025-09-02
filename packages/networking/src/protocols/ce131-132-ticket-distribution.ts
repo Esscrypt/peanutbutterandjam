@@ -6,24 +6,25 @@
  * CE 132: Proxy validator to all current validators
  */
 
-import type { Bytes, StreamInfo, TicketDistribution } from '@pbnj/types'
-import type { NetworkingDatabaseIntegration } from '../db-integration'
+import type { NetworkingStore } from '@pbnj/state'
+import type { StreamInfo, TicketDistribution } from '@pbnj/types'
 
 /**
  * Ticket distribution protocol handler
  */
 export class TicketDistributionProtocol {
-  private tickets: Map<string, { ticket: Bytes; timestamp: number }> = new Map()
-  private dbIntegration: NetworkingDatabaseIntegration | null = null
+  private tickets: Map<string, { ticket: Uint8Array; timestamp: number }> =
+    new Map()
+  private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingDatabaseIntegration) {
+  constructor(dbIntegration?: NetworkingStore) {
     this.dbIntegration = dbIntegration || null
   }
 
   /**
    * Set database integration for persistent storage
    */
-  setDatabaseIntegration(dbIntegration: NetworkingDatabaseIntegration): void {
+  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
     this.dbIntegration = dbIntegration
   }
 
@@ -49,7 +50,7 @@ export class TicketDistributionProtocol {
    */
   async storeTicket(
     epochIndex: number,
-    ticket: { attempt: number; proof: Bytes },
+    ticket: { attempt: number; proof: Uint8Array },
   ): Promise<void> {
     const ticketHash = Buffer.from(`${epochIndex}_${ticket.attempt}`)
     const hashString = ticketHash.toString()
@@ -86,7 +87,7 @@ export class TicketDistributionProtocol {
   /**
    * Get ticket from local store
    */
-  getTicket(epochIndex: number, attempt: number): Bytes | undefined {
+  getTicket(epochIndex: number, attempt: number): Uint8Array | undefined {
     const hashString = `${epochIndex}_${attempt}`
     return this.tickets.get(hashString)?.ticket
   }
@@ -97,7 +98,7 @@ export class TicketDistributionProtocol {
   async getTicketFromDatabase(
     epochIndex: number,
     attempt: number,
-  ): Promise<Bytes | null> {
+  ): Promise<Uint8Array | null> {
     if (this.getTicket(epochIndex, attempt)) {
       return this.getTicket(epochIndex, attempt) || null
     }
@@ -149,7 +150,7 @@ export class TicketDistributionProtocol {
    */
   createTicketDistribution(
     epochIndex: number,
-    ticket: { attempt: number; proof: Bytes },
+    ticket: { attempt: number; proof: Uint8Array },
   ): TicketDistribution {
     return {
       epochIndex,
@@ -160,7 +161,7 @@ export class TicketDistributionProtocol {
   /**
    * Serialize ticket distribution message
    */
-  serializeTicketDistribution(distribution: TicketDistribution): Bytes {
+  serializeTicketDistribution(distribution: TicketDistribution): Uint8Array {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + 4 + 4 + distribution.ticket.proof.length)
     const view = new DataView(buffer)
@@ -187,7 +188,7 @@ export class TicketDistributionProtocol {
   /**
    * Deserialize ticket distribution message
    */
-  deserializeTicketDistribution(data: Bytes): TicketDistribution {
+  deserializeTicketDistribution(data: Uint8Array): TicketDistribution {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -218,7 +219,7 @@ export class TicketDistributionProtocol {
   /**
    * Handle incoming stream data
    */
-  async handleStreamData(_stream: StreamInfo, data: Bytes): Promise<void> {
+  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
     try {
       const distribution = this.deserializeTicketDistribution(data)
       await this.processTicketDistribution(distribution)

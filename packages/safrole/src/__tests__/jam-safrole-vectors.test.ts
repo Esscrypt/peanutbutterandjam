@@ -91,11 +91,11 @@ function loadSafroleTestVectors(directory: string): Array<{ file: string, testVe
 
 function convertTestVectorToSafroleInput(testInput: SafroleTestInput): SafroleInput {
   return {
-    slot: testInput.slot,
+    slot: BigInt(testInput.slot),
     entropy: testInput.entropy as `0x${string}`,
     extrinsic: testInput.extrinsic.map(ext => ({
-      entryIndex: ext.attempt.attempt,
-      signature: ext.signature,
+      entryIndex: BigInt(ext.attempt.attempt),
+      signature: ext.signature as `0x${string}`,
     }))
   }
 }

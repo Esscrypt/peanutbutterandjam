@@ -11,7 +11,7 @@ import trieTestVectors from './trie.json'
 describe('Merklization', () => {
   describe('Test Vector Verification', () => {
     it('should pass all test vectors from trie.json', () => {
-      const results = verifyTestVectors(trieTestVectors as Array<{ input: TrieInput; output: string }>)
+      const results = verifyTestVectors(trieTestVectors as Array<{ input: TrieInput; output: `0x${string}` }>)
       
       // Check if all tests passed
       const failedTests = results.filter(result => !result.passed)

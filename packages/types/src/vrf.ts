@@ -5,42 +5,12 @@
  * Reference: Gray Paper VRF specifications
  */
 
-import type { Bytes } from './core'
-
-/**
- * VRF secret key
- */
-export interface VRFSecretKey {
-  bytes: Bytes
-}
-
-/**
- * VRF public key
- */
-export interface VRFPublicKey {
-  bytes: Bytes
-}
-
-/**
- * VRF input message
- */
-export interface VRFInput {
-  message: Bytes
-}
-
 /**
  * VRF output
  */
 export interface VRFOutput {
-  gamma: Bytes
-  hash: Bytes
-}
-
-/**
- * VRF proof
- */
-export interface VRFProof {
-  bytes: Bytes
+  gamma: Uint8Array
+  hash: Uint8Array
 }
 
 /**
@@ -48,7 +18,7 @@ export interface VRFProof {
  */
 export interface VRFProofWithOutput {
   output: VRFOutput
-  proof: VRFProof
+  proof: Uint8Array
 }
 
 /**
@@ -81,11 +51,11 @@ export enum VRFError {
  */
 export interface RingVRFRing {
   /** Public keys in the ring */
-  publicKeys: VRFPublicKey[]
+  publicKeys: Uint8Array[]
   /** Ring size */
   size: number
   /** Ring commitment */
-  commitment: Bytes
+  commitment: Uint8Array
 }
 
 /**
@@ -93,13 +63,13 @@ export interface RingVRFRing {
  */
 export interface RingVRFProof {
   /** Zero-knowledge proof of ring membership */
-  zkProof: Bytes
+  zkProof: Uint8Array
   /** Commitment to the prover's position */
-  positionCommitment: Bytes
+  positionCommitment: Uint8Array
   /** Ring signature */
-  ringSignature: Bytes
+  ringSignature: Uint8Array
   /** Auxiliary proof data */
-  auxData?: Bytes
+  auxData?: Uint8Array
 }
 
 /**
@@ -117,7 +87,7 @@ export interface RingVRFParams {
 /**
  * Ring VRF input with ring context
  */
-export interface RingVRFInput extends VRFInput {
+export interface RingVRFInput {
   /** Ring of public keys */
   ring: RingVRFRing
   /** Prover's position in the ring (0-indexed) */
@@ -131,9 +101,9 @@ export interface RingVRFInput extends VRFInput {
  */
 export interface RingVRFOutput extends VRFOutput {
   /** Ring commitment */
-  ringCommitment: Bytes
+  ringCommitment: Uint8Array
   /** Position commitment */
-  positionCommitment: Bytes
+  positionCommitment: Uint8Array
   /** Anonymity set size */
   anonymitySetSize: number
 }

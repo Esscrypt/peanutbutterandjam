@@ -9,15 +9,13 @@ import type {
   InstructionContext,
   InstructionResult,
   RegisterState,
-  RegisterValue,
-  RegisterValue32,
 } from '@pbnj/types'
 
 /**
  * Base interface for all PVM instruction handlers
  */
 export interface PVMInstructionHandler {
-  readonly opcode: number
+  readonly opcode: bigint
   readonly name: string
   readonly description: string
 
@@ -42,7 +40,7 @@ export interface PVMInstructionHandler {
  * Implements Gray Paper instruction patterns
  */
 export abstract class BaseInstruction implements PVMInstructionHandler {
-  abstract readonly opcode: number
+  abstract readonly opcode: bigint
   abstract readonly name: string
   abstract readonly description: string
 
@@ -50,32 +48,33 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    * Get register index from operand byte (Gray Paper pattern)
    * r_A = min(12, operand_byte mod 16)
    */
-  protected getRegisterIndex(operandByte: number): number {
-    return Math.min(12, operandByte % 16)
+  // operandByte is a number, not a Uint8Array, since it's a single byte
+  protected getRegisterIndex(operandByte: number): bigint {
+    return BigInt(Math.min(12, operandByte % 16))
   }
 
   /**
    * Get register A from first operand byte
    */
-  protected getRegisterA(operands: Uint8Array): number {
-    if (operands.length < 1) return 0
-    return this.getRegisterIndex(operands[0])
+  protected getRegisterA(operands: Uint8Array): bigint {
+    if (operands.length < 1) return 0n
+    return BigInt(this.getRegisterIndex(operands[0]))
   }
 
   /**
    * Get register B from second operand byte (for 2-register instructions)
    */
-  protected getRegisterB(operands: Uint8Array): number {
-    if (operands.length < 2) return 0
-    return this.getRegisterIndex(operands[1])
+  protected getRegisterB(operands: Uint8Array): bigint {
+    if (operands.length < 2) return 0n
+    return BigInt(this.getRegisterIndex(operands[1]))
   }
 
   /**
    * Get register D from third operand byte (for 3-register instructions)
    */
-  protected getRegisterD(operands: Uint8Array): number {
-    if (operands.length < 3) return 0
-    return this.getRegisterIndex(operands[2])
+  protected getRegisterD(operands: Uint8Array): bigint {
+    if (operands.length < 3) return 0n
+    return BigInt(this.getRegisterIndex(operands[2]))
   }
 
   /**
@@ -84,24 +83,27 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected getImmediateValue(
     operands: Uint8Array,
-    startIndex = 1,
-    length?: number,
+    startIndex = 1n,
+    length?: bigint,
   ): bigint {
-    if (operands.length < startIndex + 1) return 0n
+    if (BigInt(operands.length) < startIndex + 1n) return 0n
 
-    const actualLength = length || Math.min(4, operands.length - startIndex)
+    const actualLength =
+      length ||
+      BigInt(Math.min(4, Number(BigInt(operands.length) - startIndex)))
     let value = 0n
 
-    for (let i = 0; i < actualLength && startIndex + i < operands.length; i++) {
-      value |= BigInt(operands[startIndex + i]) << BigInt(i * 8)
+    for (
+      let i = 0n;
+      i < actualLength && startIndex + i < BigInt(operands.length);
+      i++
+    ) {
+      value |= BigInt(operands[Number(startIndex + i)]) << (i * 8n)
     }
 
     // Sign extend if needed (for signed immediates)
-    if (
-      actualLength < 8 &&
-      (value & (1n << BigInt(actualLength * 8 - 1))) !== 0n
-    ) {
-      const mask = (1n << BigInt(actualLength * 8)) - 1n
+    if (actualLength < 8 && (value & (1n << (actualLength * 8n - 1n))) !== 0n) {
+      const mask = (1n << (actualLength * 8n)) - 1n
       value = -((~value + 1n) & mask)
     }
 
@@ -111,29 +113,29 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Get 64-bit immediate value (8 Uint8Array)
    */
-  protected getImmediate64(operands: Uint8Array, startIndex = 1): bigint {
-    return this.getImmediateValue(operands, startIndex, 8)
+  protected getImmediate64(operands: Uint8Array, startIndex = 1n): bigint {
+    return this.getImmediateValue(operands, startIndex, 8n)
   }
 
   /**
    * Get 32-bit immediate value (4 Uint8Array)
    */
-  protected getImmediate32(operands: Uint8Array, startIndex = 1): number {
-    return Number(this.getImmediateValue(operands, startIndex, 4))
+  protected getImmediate32(operands: Uint8Array, startIndex = 1n): bigint {
+    return this.getImmediateValue(operands, startIndex, 4n)
   }
 
   /**
    * Get 16-bit immediate value (2 Uint8Array)
    */
-  protected getImmediate16(operands: Uint8Array, startIndex = 1): number {
-    return Number(this.getImmediateValue(operands, startIndex, 2))
+  protected getImmediate16(operands: Uint8Array, startIndex = 1n): bigint {
+    return this.getImmediateValue(operands, startIndex, 2n)
   }
 
   /**
    * Get 8-bit immediate value (1 byte)
    */
-  protected getImmediate8(operands: Uint8Array, startIndex = 1): number {
-    return Number(this.getImmediateValue(operands, startIndex, 1))
+  protected getImmediate8(operands: Uint8Array, startIndex = 1n): bigint {
+    return this.getImmediateValue(operands, startIndex, 1n)
   }
 
   /**
@@ -141,16 +143,16 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected setRegisterValue(
     registers: RegisterState,
-    index: number,
-    value: RegisterValue,
+    index: bigint,
+    value: bigint,
   ): void {
-    if (index >= 0 && index <= 7) {
+    if (index >= 0n && index <= 7n) {
       const key = `r${index}` as keyof Pick<
         RegisterState,
         'r0' | 'r1' | 'r2' | 'r3' | 'r4' | 'r5' | 'r6' | 'r7'
       >
       registers[key] = value
-    } else if (index >= 8 && index <= 12) {
+    } else if (index >= 8n && index <= 12n) {
       const key = `r${index}` as keyof Pick<
         RegisterState,
         'r8' | 'r9' | 'r10' | 'r11' | 'r12'
@@ -164,21 +166,18 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected setRegisterValue32(
     registers: Record<string, bigint>,
-    index: number,
-    value: RegisterValue32,
+    index: bigint,
+    value: bigint,
   ): void {
-    if (index >= 8 && index <= 12) {
-      registers[`r${index}`] = BigInt(value) & 0xffffffffn
+    if (index >= 8n && index <= 12n) {
+      registers[`r${index}`] = value & 0xffffffffn
     }
   }
 
   /**
    * Get register value (64-bit)
    */
-  protected getRegisterValue(
-    registers: RegisterState,
-    index: number,
-  ): RegisterValue {
+  protected getRegisterValue(registers: RegisterState, index: bigint): bigint {
     return registers[`r${index}` as keyof RegisterState]
   }
 
@@ -187,8 +186,8 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected getRegisterValue32(
     registers: RegisterState,
-    index: number,
-  ): RegisterValue32 {
+    index: bigint,
+  ): bigint {
     return registers[`r${index}` as keyof RegisterState]
   }
 
@@ -197,7 +196,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   validate(operands: Uint8Array): boolean {
     // For most instructions, we need at least 1 operand
-    return operands.length >= 1
+    return BigInt(operands.length) >= 1n
   }
 
   /**

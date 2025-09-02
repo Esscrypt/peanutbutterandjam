@@ -1,3 +1,6 @@
+import type { Safe } from '@pbnj/core'
+import type { Hex } from 'viem'
+
 /**
  * Core Types for JAM Protocol
  *
@@ -6,15 +9,18 @@
  */
 
 // Basic type aliases
-export type Bytes = Uint8Array
-export type Hash = string
-export type Natural = bigint
-export type OctetSequence = Uint8Array
-export type VariableOctetSequence = number[]
-export type FixedOctetSequence = number[]
-export type BitSequence = boolean[]
-export type HashValue = `0x${string}`
-export type HexString = `0x${string}`
+
+/**
+ * Alternative name without display prefix
+ * The raw base32-encoded value derived from Ed25519 public key
+ */
+export type AlternativeName = `e${string}`
+
+/**
+ * Alternative name formatted for display with $e prefix
+ */
+export type DisplayAlternativeName = `$e${string}`
+
 export type Optional<T> = T | null
 export type Tuple<T extends readonly unknown[]> = T
 export type Sequence<T> = T[]
@@ -51,22 +57,14 @@ export interface DeserializationContext {
   options?: Record<string, unknown>
 }
 
-export type FixedLengthSize = 1 | 2 | 4 | 8 | 16 | 32
+export type FixedLengthSize = 1n | 2n | 4n | 8n | 16n | 32n
 
-// Additional basic types
-export type Balance = bigint
-export type Gas = bigint
-export type PublicKey = Bytes
-export type Signature = Bytes
-export type Address = `0x${string}` // 20-byte Ethereum-style address
-export type ServiceId = number // Service identifier
+export type Encoder<T> = (data: T) => Safe<Uint8Array>
 
-export type Encoder<T> = (data: T) => Uint8Array
-
-export type Decoder<T> = (data: Uint8Array) => {
+export type Decoder<T> = (data: Uint8Array) => Safe<{
   value: T
   remaining: Uint8Array
-}
+}>
 
 export interface OptionalEncoder<T> {
   encode(data: T | null): SerializationResult
@@ -78,24 +76,24 @@ export interface OptionalDecoder<_T> {
 
 // Block types
 export interface BlockHeader {
-  number: number
-  parentHash: Hash
-  timestamp: number
+  number: bigint
+  parentHash: Hex
+  timestamp: bigint
   author: string
-  stateRoot: Hash
-  extrinsicsRoot: Hash
+  stateRoot: Hex
+  extrinsicsRoot: Hex
   digest: string[]
 }
 
 export interface Extrinsic {
-  hash: Hash
-  data: Bytes
-  signature?: Bytes
+  hash: Hex
+  data: Uint8Array
+  signature?: Uint8Array
 }
 
 // Validator types
 export interface ValidatorKey {
-  publicKey: Bytes
+  publicKey: Uint8Array
   address: string
 }
 

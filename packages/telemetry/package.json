@@ -1,0 +1,41 @@
+{
+  "name": "@pbnj/telemetry",
+  "version": "0.0.1",
+  "description": "JIP-3 telemetry implementation for JAM nodes",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "test": "bun test",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --fix"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/types": "workspace:*",
+    "@pbnj/serialization": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "jam",
+    "telemetry",
+    "jip-3",
+    "protocol"
+  ],
+  "license": "MIT"
+}

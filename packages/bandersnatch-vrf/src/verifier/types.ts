@@ -2,7 +2,7 @@
  * Verifier-specific types for Bandersnatch VRF
  */
 
-import type { VRFInput, VRFOutput, VRFProof, VRFPublicKey } from '@pbnj/types'
+import type { VRFOutput } from '@pbnj/types'
 
 /**
  * Verifier configuration options
@@ -44,13 +44,13 @@ export interface VerificationResult {
  */
 export interface BatchVerificationInput {
   /** Public key */
-  publicKey: VRFPublicKey
+  publicKey: Uint8Array
   /** Input message */
-  input: VRFInput
+  input: Uint8Array
   /** VRF output */
   output: VRFOutput
   /** VRF proof */
-  proof: VRFProof
+  proof: Uint8Array
   /** Auxiliary data */
   auxData?: Uint8Array
 }

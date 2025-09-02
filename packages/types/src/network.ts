@@ -5,8 +5,12 @@
  * Reference: Gray Paper network specifications
  */
 
-// Remove the problematic import - Uint8Array is a built-in type
-// import type { Uint8Array } from './core'
+import type {
+  ConnectionEndpoint,
+  PreferredInitiator,
+  ValidatorIndex,
+  ValidatorMetadata,
+} from './jamnp'
 
 /**
  * Network message types
@@ -29,6 +33,85 @@ export enum MessageType {
   PING = 0x0f,
   PONG = 0x10,
 }
+
+/**
+ * Stream kinds for JAMNP-S protocols
+ * UP (Unique Persistent) streams: 0-127
+ * CE (Common Ephemeral) streams: 128+
+ */
+// export enum StreamKind {
+//   // UP 0: Block announcement
+//   UP_BLOCK_ANNOUNCEMENT = 0,
+
+//   // CE 128: Block request
+//   CE_BLOCK_REQUEST = 128,
+
+//   // CE 129: State request
+//   CE_STATE_REQUEST = 129,
+
+//   // CE 131: Ticket distribution (generator to proxy)
+//   CE_TICKET_DISTRIBUTION_GENERATOR = 131,
+
+//   // CE 132: Ticket distribution (proxy to validators)
+//   CE_TICKET_DISTRIBUTION_PROXY = 132,
+
+//   // CE 133: Work package submission
+//   CE_WORK_PACKAGE_SUBMISSION = 133,
+
+//   // CE 134: Work package sharing
+//   CE_WORK_PACKAGE_SHARING = 134,
+
+//   // CE 135: Work report distribution
+//   CE_WORK_REPORT_DISTRIBUTION = 135,
+
+//   // CE 136: Work report request
+//   CE_WORK_REPORT_REQUEST = 136,
+
+//   // CE 137: Shard distribution
+//   CE_SHARD_DISTRIBUTION = 137,
+
+//   // CE 138: Audit shard request
+//   CE_AUDIT_SHARD_REQUEST = 138,
+
+//   // CE 139: Segment shard request (no justification)
+//   CE_SEGMENT_SHARD_REQUEST_NO_JUSTIFICATION = 139,
+
+//   // CE 140: Segment shard request (with justification)
+//   CE_SEGMENT_SHARD_REQUEST_WITH_JUSTIFICATION = 140,
+
+//   // CE 141: Assurance distribution
+//   CE_ASSURANCE_DISTRIBUTION = 141,
+
+//   // CE 142: Preimage announcement
+//   CE_PREIMAGE_ANNOUNCEMENT = 142,
+
+//   // CE 143: Preimage request
+//   CE_PREIMAGE_REQUEST = 143,
+
+//   // CE 144: Audit announcement
+//   CE_AUDIT_ANNOUNCEMENT = 144,
+
+//   // CE 145: Judgment publication
+//   CE_JUDGMENT_PUBLICATION = 145,
+// }
+
+export type StreamKind =
+  | 0
+  | 128
+  | 129
+  | 133
+  | 134
+  | 135
+  | 136
+  | 137
+  | 138
+  | 139
+  | 140
+  | 141
+  | 142
+  | 143
+  | 144
+  | 145
 
 /**
  * Base network message interface
@@ -285,6 +368,20 @@ export interface Peer {
   lastSeen: number
   /** Peer capabilities */
   capabilities: string[]
+}
+
+/**
+ * Peer information
+ */
+export interface PeerInfo {
+  validatorIndex: ValidatorIndex
+  metadata: ValidatorMetadata
+  endpoint: ConnectionEndpoint
+  isConnected: boolean
+  lastSeen: number
+  connectionAttempts: number
+  lastConnectionAttempt: number
+  preferredInitiator: PreferredInitiator
 }
 
 /**

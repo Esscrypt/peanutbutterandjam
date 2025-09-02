@@ -10,7 +10,6 @@
 
 import { logger } from '@pbnj/core'
 import type {
-  Gas,
   IsAuthorizedContextMutator,
   IsAuthorizedResult,
   RAM,
@@ -49,7 +48,7 @@ export class IsAuthorizedInvocationSystem {
   execute(
     workPackage: WorkPackage,
     coreIndex: number,
-  ): [IsAuthorizedResult, Gas] {
+  ): [IsAuthorizedResult, bigint] {
     logger.debug('IsAuthorizedInvocationSystem.execute called', {
       workPackage,
       coreIndex,
@@ -79,9 +78,12 @@ export class IsAuthorizedInvocationSystem {
     // Execute the argument invocation with authcode and encoded core index
     const result = this.argumentInvocationSystem.execute(
       new Uint8Array([0x01]), // Simplified authcode - in real implementation this would be the actual authcode
-      0, // instruction pointer starts at 0
+      0n, // instruction pointer starts at 0
       IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS, // gas limit from config
-      { data: new Uint8Array(encodedCoreIndex), size: encodedCoreIndex.length }, // argument data
+      {
+        data: new Uint8Array(encodedCoreIndex),
+        size: BigInt(encodedCoreIndex.length),
+      }, // argument data
       null, // context is null for Is-Authorized
     )
 
@@ -104,7 +106,7 @@ export class IsAuthorizedInvocationSystem {
       resultSize: result.result.length,
       gasUsed: gasUsed,
     })
-    return [Array.from(result.result), gasUsed]
+    return [result.result, gasUsed]
   }
 
   /**
@@ -114,8 +116,8 @@ export class IsAuthorizedInvocationSystem {
    */
   private createContextMutator(): IsAuthorizedContextMutator {
     return (
-      hostCallId: number,
-      gasCounter: Gas,
+      hostCallId: bigint,
+      gasCounter: bigint,
       registers: RegisterState,
       ram: RAM,
       context: null,
@@ -124,10 +126,10 @@ export class IsAuthorizedInvocationSystem {
 
       // Handle different host call functions
       switch (hostCallId) {
-        case 0: // gas function
+        case 0n: // gas function
           return this.handleGasCall(gasCounter, registers, ram, context)
 
-        case 1: // fetch function
+        case 1n: // fetch function
           return this.handleFetchCall(gasCounter, registers, ram, context)
 
         default:
@@ -153,13 +155,13 @@ export class IsAuthorizedInvocationSystem {
    * Handle gas function call (ID 0)
    */
   private handleGasCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     _context: null,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: null
@@ -182,13 +184,13 @@ export class IsAuthorizedInvocationSystem {
    * Handle fetch function call (ID 1)
    */
   private handleFetchCall(
-    gasCounter: Gas,
+    gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
     _context: null,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: Gas
+    gasCounter: bigint
     registers: RegisterState
     ram: RAM
     context: null

@@ -29,6 +29,9 @@
     "gray-paper",
     "blockchain"
   ],
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "author": "JAM Protocol Team",
   "license": "MIT"
 }
