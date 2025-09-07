@@ -1102,7 +1102,7 @@ export class BlockStore {
         hasEpochMark: header.epochMark !== null,
         hasWinnersMark: header.winnersMark !== null,
         blockNumber: null,
-        isGenesis: header.parent === '0x' + '00'.repeat(32),
+        isGenesis: header.parent === `0x${'00'.repeat(32)}`,
       }
 
       await this.db

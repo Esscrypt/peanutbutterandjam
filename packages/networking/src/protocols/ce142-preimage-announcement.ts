@@ -26,9 +26,6 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
       timestamp: bigint
     }
   > = new Map()
-  constructor() {
-    super()
-  }
 
   /**
    * Store preimage announcement in local store and persist to database
@@ -138,7 +135,7 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
   }
 
   //TODO: double check if this is correct
-  serializeResponse(_response: void): Safe<Uint8Array> {
+  serializeResponse(_response: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -147,7 +144,7 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
     return safeResult(undefined)
   }
 
-  async processResponse(_response: void): SafePromise<void> {
+  async processResponse(_response: undefined): SafePromise<void> {
     return safeResult(undefined)
   }
 }

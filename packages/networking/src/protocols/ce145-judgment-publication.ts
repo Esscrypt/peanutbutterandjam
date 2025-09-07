@@ -60,7 +60,7 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
     // Store judgment data
     const judgmentData: Judgment = {
       judgeIndex: validatorIndex,
-      validity: validity === 0 ? false : true,
+      validity: validity !== 0,
       signature,
     }
 
@@ -208,7 +208,7 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
   }
 
   //TODO: double check if this is correct
-  serializeResponse(_judgment: void): Safe<Uint8Array> {
+  serializeResponse(_judgment: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -217,7 +217,7 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
     return safeResult(undefined)
   }
 
-  async processResponse(_response: void): SafePromise<void> {
+  async processResponse(_response: undefined): SafePromise<void> {
     return safeResult(undefined)
   }
 }

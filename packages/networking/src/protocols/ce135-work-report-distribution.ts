@@ -150,7 +150,7 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
   /**
    * Serialize work report distribution response
    */
-  serializeResponse(_response: void): Safe<Uint8Array> {
+  serializeResponse(_response: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -161,7 +161,7 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
     return safeResult(undefined)
   }
 
-  async processResponse(_response: void): SafePromise<void> {
+  async processResponse(_response: undefined): SafePromise<void> {
     return safeResult(undefined)
   }
 }

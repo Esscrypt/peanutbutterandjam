@@ -131,8 +131,8 @@ export class GenesisManagerImpl {
           })),
       },
       safrole: {
-        entropy: ('0x' + '00'.repeat(32)) as Hex,
-        epochRoot: ('0x' + '00'.repeat(32)) as Hex,
+        entropy: `0x${'00'.repeat(32)}` as Hex,
+        epochRoot: `0x${'00'.repeat(32)}` as Hex,
         ticketAccumulator: [],
         pendingSet: validators.map((v) => this.parseValidatorKeyFromConfig(v)),
       },
@@ -297,9 +297,9 @@ export class GenesisManagerImpl {
   }): ValidatorKey {
     return {
       bandersnatch: `0x${validator.bandersnatch}` as Hex,
-      ed25519: ('0x' + '00'.repeat(32)) as Hex,
-      bls: ('0x' + '00'.repeat(144)) as Hex,
-      metadata: ('0x' + '00'.repeat(128)) as Hex,
+      ed25519: `0x${'00'.repeat(32)}` as Hex,
+      bls: `0x${'00'.repeat(144)}` as Hex,
+      metadata: `0x${'00'.repeat(128)}` as Hex,
     } as ValidatorKey
   }
 
@@ -386,7 +386,7 @@ export class GenesisManagerImpl {
       entropy:
         safrole?.entropy ||
         chainSpec.genesis_state?.entropy ||
-        (('0x' + '00'.repeat(32)) as Hex),
+        (`0x${'00'.repeat(32)}` as Hex),
       epochRoot: safrole?.epoch_root || this.computeEpochRoot(pendingSet),
       ticketAccumulator,
       pendingSet,
@@ -433,10 +433,10 @@ export class GenesisManagerImpl {
     metadata?: string
   }): ValidatorKey {
     return {
-      bandersnatch: validator.publicKey || (('0x' + '00'.repeat(32)) as Hex),
-      ed25519: validator.ed25519 || (('0x' + '00'.repeat(32)) as Hex),
-      bls: validator.bls || (('0x' + '00'.repeat(144)) as Hex),
-      metadata: validator.metadata || (('0x' + '00'.repeat(128)) as Hex),
+      bandersnatch: validator.publicKey || (`0x${'00'.repeat(32)}` as Hex),
+      ed25519: validator.ed25519 || (`0x${'00'.repeat(32)}` as Hex),
+      bls: validator.bls || (`0x${'00'.repeat(144)}` as Hex),
+      metadata: validator.metadata || (`0x${'00'.repeat(128)}` as Hex),
     } as ValidatorKey
   }
 
@@ -461,15 +461,15 @@ export class GenesisManagerImpl {
   createGenesisHeader(genesisState: GenesisState) {
     return {
       parent: null,
-      priorStateRoot: ('0x' + '00'.repeat(32)) as Hex,
-      extrinsicHash: ('0x' + '00'.repeat(32)) as Hex,
+      priorStateRoot: `0x${'00'.repeat(32)}` as Hex,
+      extrinsicHash: `0x${'00'.repeat(32)}` as Hex,
       timeslot: genesisState.thetime,
       epochMark: null,
       winnersMark: null,
       offendersMark: [],
       authorIndex: 0n,
-      vrfSig: ('0x' + '00'.repeat(96)) as Hex,
-      sealSig: ('0x' + '00'.repeat(96)) as Hex,
+      vrfSig: `0x${'00'.repeat(96)}` as Hex,
+      sealSig: `0x${'00'.repeat(96)}` as Hex,
     }
   }
 
@@ -588,9 +588,9 @@ export class GenesisManagerImpl {
 
       recent: () => ({
         history: {
-          headerHash: ('0x' + '00'.repeat(32)) as Hex,
-          accoutLogSuperPeak: ('0x' + '00'.repeat(32)) as Hex,
-          stateRoot: ('0x' + '00'.repeat(32)) as Hex,
+          headerHash: `0x${'00'.repeat(32)}` as Hex,
+          accoutLogSuperPeak: `0x${'00'.repeat(32)}` as Hex,
+          stateRoot: `0x${'00'.repeat(32)}` as Hex,
           reportedPackageHashes: [],
         },
         accoutBelt: {
@@ -599,7 +599,7 @@ export class GenesisManagerImpl {
         },
       }),
 
-      lastaccout: () => ('0x' + '00'.repeat(32)) as Hex,
+      lastaccout: () => `0x${'00'.repeat(32)}` as Hex,
 
       safrole: (config) => ({
         pendingSet: [...config.safrole.pendingSet],
@@ -608,7 +608,7 @@ export class GenesisManagerImpl {
         ticketAccumulator: config.safrole.ticketAccumulator.map((t) => ({
           id: t.id,
           entryIndex: t.entryIndex,
-          signature: ('0x' + '00'.repeat(96)) as Hex,
+          signature: `0x${'00'.repeat(96)}` as Hex,
           timestamp: 0n,
         })),
       }),
@@ -618,7 +618,7 @@ export class GenesisManagerImpl {
           config.accounts.services.map((service) => [
             service.index,
             {
-              codehash: service.codeHash || (('0x' + '00'.repeat(32)) as Hex),
+              codehash: service.codeHash || (`0x${'00'.repeat(32)}` as Hex),
               balance: service.balance,
               minaccgas: service.minBalance,
               minmemogas: 100n,
@@ -636,7 +636,7 @@ export class GenesisManagerImpl {
 
       entropy: (config) => ({
         current: config.safrole.entropy,
-        previous: ('0x' + '00'.repeat(32)) as Hex,
+        previous: `0x${'00'.repeat(32)}` as Hex,
       }),
 
       stagingset: (config) => [
