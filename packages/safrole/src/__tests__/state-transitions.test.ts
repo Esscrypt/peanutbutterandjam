@@ -10,7 +10,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { executeSafroleSTF } from '../state-transitions'
 import type { 
   SafroleInput, 
-  ConsensusSafroleState as SafroleState,
+  SafroleState,
   ValidatorKey
 } from '@pbnj/types'
 

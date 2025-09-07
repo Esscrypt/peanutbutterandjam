@@ -1,10 +1,16 @@
 //TODO: move this to a separate package
-import { bytesToHex } from '@pbnj/core'
+import {
+  bytesToHex,
+  type SafePromise,
+  safeError,
+  safeResult,
+  safeTry,
+} from '@pbnj/core'
 import { and, eq } from 'drizzle-orm'
 import type { CoreDb } from '.'
 import {
-  type NewValidator,
-  type Validator,
+  type DbNewValidator,
+  type DbValidator,
   validators,
 } from './schema/core-schema'
 
@@ -22,13 +28,13 @@ export class ValidatorStore {
    * Store or update validator information
    */
   async upsertValidator(info: {
-    index: number
+    index: bigint
     publicKey: Uint8Array
     metadata: { endpoint: { host: string; port: number } }
-    epoch: number
+    epoch: bigint
     isActive: boolean
-  }): Promise<void> {
-    const validatorData: NewValidator = {
+  }): SafePromise<DbValidator> {
+    const validatorData: DbNewValidator = {
       index: info.index,
       publicKey: bytesToHex(info.publicKey),
       metadataHost: info.metadata.endpoint.host,
@@ -37,64 +43,104 @@ export class ValidatorStore {
       isActive: info.isActive,
     }
 
-    await this.db
-      .insert(validators)
-      .values(validatorData)
-      .onConflictDoUpdate({
-        target: validators.index,
-        set: {
-          publicKey: validatorData.publicKey,
-          metadataHost: validatorData.metadataHost,
-          metadataPort: validatorData.metadataPort,
-          epoch: validatorData.epoch,
-          isActive: validatorData.isActive,
-          updatedAt: new Date(),
-        },
-      })
+    const [err, result] = await safeTry(
+      this.db
+        .insert(validators)
+        .values(validatorData)
+        .onConflictDoUpdate({
+          target: validators.index,
+          set: {
+            publicKey: validatorData.publicKey,
+            metadataHost: validatorData.metadataHost,
+            metadataPort: validatorData.metadataPort,
+            epoch: validatorData.epoch,
+            isActive: validatorData.isActive,
+            updatedAt: new Date(),
+          },
+        })
+        .returning(),
+    )
+
+    if (err) {
+      return safeError(err)
+    }
+
+    return safeResult(result[0])
   }
 
   /**
    * Get validator information by index
    */
-  async getValidator(index: number): Promise<Validator | null> {
-    const result = await this.db
-      .select()
-      .from(validators)
-      .where(eq(validators.index, index))
-      .limit(1)
+  async getValidator(index: bigint): SafePromise<DbValidator | null> {
+    const [err, result] = await safeTry(
+      this.db
+        .select()
+        .from(validators)
+        .where(eq(validators.index, index))
+        .limit(1),
+    )
 
-    return result[0] || null
+    if (err) {
+      return safeError(err)
+    }
+
+    return safeResult(result[0] || null)
   }
 
   /**
    * Get all validators for a specific epoch
    */
-  async getValidatorsForEpoch(epoch: number): Promise<Validator[]> {
-    return await this.db
-      .select()
-      .from(validators)
-      .where(and(eq(validators.epoch, epoch), eq(validators.isActive, true)))
-      .orderBy(validators.index)
+  async getValidatorsForEpoch(epoch: bigint): SafePromise<DbValidator[]> {
+    const [err, result] = await safeTry(
+      this.db
+        .select()
+        .from(validators)
+        .where(and(eq(validators.epoch, epoch), eq(validators.isActive, true)))
+        .orderBy(validators.index),
+    )
+
+    if (err) {
+      return safeError(err)
+    }
+
+    return safeResult(result)
   }
 
   /**
    * Get all active validators
    */
-  async getActiveValidators(): Promise<Validator[]> {
-    return await this.db
-      .select()
-      .from(validators)
-      .where(eq(validators.isActive, true))
-      .orderBy(validators.index)
+  async getActiveValidators(): SafePromise<DbValidator[]> {
+    const [err, result] = await safeTry(
+      this.db
+        .select()
+        .from(validators)
+        .where(eq(validators.isActive, true))
+        .orderBy(validators.index),
+    )
+
+    if (err) {
+      return safeError(err)
+    }
+
+    return safeResult(result)
   }
 
   /**
    * Deactivate a validator
    */
-  async deactivateValidator(index: number): Promise<void> {
-    await this.db
-      .update(validators)
-      .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(validators.index, index))
+  async deactivateValidator(index: bigint): SafePromise<DbValidator> {
+    const [err, result] = await safeTry(
+      this.db
+        .update(validators)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(validators.index, index))
+        .returning(),
+    )
+
+    if (err) {
+      return safeError(err)
+    }
+
+    return safeResult(result[0])
   }
 }

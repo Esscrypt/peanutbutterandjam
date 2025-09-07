@@ -23,7 +23,7 @@ export interface JamEpochMark {
   validators: JamValidatorKeys[]
 }
 
-export interface JamHeader {
+export interface BlockHeader {
   parent: Uint8Array
   parentStateRoot: Uint8Array
   extrinsicHash: Uint8Array
@@ -37,7 +37,7 @@ export interface JamHeader {
 }
 
 export interface JamBlock {
-  header: JamHeader
+  header: BlockHeader
   extrinsics: Uint8Array[]
 }
 
@@ -181,7 +181,7 @@ export class JamDecoder {
   /**
    * Decode a JAM header
    */
-  decodeHeader(): JamHeader {
+  decodeHeader(): BlockHeader {
     // Read parent hash (32 bytes)
     const parent = this.readHash()
 

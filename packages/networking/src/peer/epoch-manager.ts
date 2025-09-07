@@ -6,7 +6,7 @@
  */
 
 import { logger } from '@pbnj/core'
-import type { EpochIndex, ValidatorIndex, ValidatorMetadata } from '@pbnj/types'
+import type { ValidatorMetadata } from '@pbnj/types'
 import type { GridStructureManager } from './grid-structure'
 import type { ValidatorSetManager } from './validator-set'
 
@@ -27,7 +27,7 @@ export interface EpochTransitionConfig {
  */
 export interface EpochState {
   /** Current epoch index */
-  currentEpoch: EpochIndex
+  currentEpoch: bigint
   /** Current slot within epoch */
   currentSlot: number
   /** Whether first block of epoch has been finalized */
@@ -46,8 +46,7 @@ export class EpochManager {
   private epochState: EpochState
   private gridStructureManager: GridStructureManager
   private validatorSetManager: ValidatorSetManager
-  private pendingConnectivityChanges: Map<ValidatorIndex, ValidatorMetadata> =
-    new Map()
+  private pendingConnectivityChanges: Map<bigint, ValidatorMetadata> = new Map()
 
   constructor(
     config: EpochTransitionConfig,
@@ -59,7 +58,7 @@ export class EpochManager {
     this.validatorSetManager = validatorSetManager
 
     this.epochState = {
-      currentEpoch: 0,
+      currentEpoch: 0n,
       currentSlot: 0,
       firstBlockFinalized: false,
       epochStartSlot: 0,
@@ -75,8 +74,8 @@ export class EpochManager {
 
     // Check if we've entered a new epoch
     const newEpoch = Math.floor(slot / this.config.slotsPerEpoch)
-    if (newEpoch !== this.epochState.currentEpoch) {
-      this.handleEpochTransition(newEpoch, slot)
+    if (BigInt(newEpoch) !== this.epochState.currentEpoch) {
+      this.handleEpochTransition(BigInt(newEpoch), slot)
     }
 
     // Check if we should apply pending connectivity changes
@@ -86,7 +85,7 @@ export class EpochManager {
   /**
    * Handle transition to a new epoch
    */
-  private handleEpochTransition(newEpoch: EpochIndex, slot: number): void {
+  private handleEpochTransition(newEpoch: bigint, slot: number): void {
     logger.info('Epoch transition detected', {
       previousEpoch: this.epochState.currentEpoch,
       newEpoch,
@@ -105,18 +104,16 @@ export class EpochManager {
   /**
    * Prepare validator set changes for new epoch
    */
-  private prepareValidatorSetChanges(epoch: EpochIndex): void {
+  private prepareValidatorSetChanges(epoch: bigint): void {
     try {
       // Get the next validator set (which becomes current in new epoch)
       const newValidators = this.validatorSetManager.getNextValidators()
 
       // Store as pending changes
       this.pendingConnectivityChanges.clear()
-      newValidators.forEach(
-        (metadata: ValidatorMetadata, index: ValidatorIndex) => {
-          this.pendingConnectivityChanges.set(index, metadata)
-        },
-      )
+      newValidators.forEach((metadata: ValidatorMetadata, index: bigint) => {
+        this.pendingConnectivityChanges.set(index, metadata)
+      })
 
       logger.info('Prepared validator set changes for epoch', {
         epoch,
@@ -166,7 +163,7 @@ export class EpochManager {
     try {
       logger.info('Applying epoch connectivity changes', {
         epoch: this.epochState.currentEpoch,
-        validatorCount: this.pendingConnectivityChanges.size,
+        validatorCount: Number(this.pendingConnectivityChanges.size),
       })
 
       // Update validator set
@@ -226,7 +223,7 @@ export class EpochManager {
    * Get validators that should be connected during transition
    * During transition, maintain old connections until new ones are established
    */
-  getTransitionValidators(): Map<ValidatorIndex, ValidatorMetadata> {
+  getTransitionValidators(): Map<bigint, ValidatorMetadata> {
     if (this.epochState.connectivityApplied || this.isInTransitionPeriod()) {
       // Return current validators during transition
       return this.validatorSetManager.getCurrentValidators()

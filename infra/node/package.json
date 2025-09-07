@@ -24,6 +24,7 @@
     "@pbnj/erasure-coding": "workspace:*",
     "@pbnj/networking": "workspace:*",
     "@pbnj/telemetry": "workspace:*",
+    "@pbnj/genesis": "workspace:*",
     "commander": "^12.0.0",
     "@pbnj/types": "workspace:*",
     "@opentelemetry/api": "^1.7.0",
@@ -45,7 +46,7 @@
     "tsx": "^4.19.2"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./index.ts"
   },
   "keywords": [
     "jam",

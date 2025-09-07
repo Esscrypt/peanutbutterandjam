@@ -1,8 +1,11 @@
 // import { z } from 'zod'
 
 export * as z from 'zod'
+
 // if needed, import viem for EVM types
 
+// Export chain spec schema
+export * from './schemas/chain-spec'
 // Export genesis header schema
 export * from './schemas/genesis-header'
 

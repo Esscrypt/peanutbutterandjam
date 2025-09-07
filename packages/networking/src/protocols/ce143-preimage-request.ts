@@ -5,218 +5,114 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type { NetworkingStore } from '@pbnj/state'
-import type { PreimageRequest, PreimageResponse, StreamInfo } from '@pbnj/types'
+import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
+import { decodePreimage, encodePreimage } from '@pbnj/serialization'
+import type { PreimageStore } from '@pbnj/state'
+import type { Preimage, PreimageRequest } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
 /**
  * Preimage request protocol handler
  */
-export class PreimageRequestProtocol {
-  private preimages: Map<string, Uint8Array> = new Map()
-  private dbIntegration: NetworkingStore | null = null
+export class PreimageRequestProtocol extends NetworkingProtocol<
+  PreimageRequest,
+  Preimage
+> {
+  private preimages: Map<Hex, Preimage> = new Map()
+  private preimageStore: PreimageStore
 
-  constructor(dbIntegration?: NetworkingStore) {
-    this.dbIntegration = dbIntegration || null
-  }
-
-  /**
-   * Set database integration for persistent storage
-   */
-  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
-    this.dbIntegration = dbIntegration
-  }
-
-  /**
-   * Load state from database
-   */
-  async loadState(): Promise<void> {
-    if (!this.dbIntegration) return
-
-    try {
-      // Load preimages from database (service ID 12 for preimages)
-      console.log(
-        'Preimage request state loading - protocol not yet fully implemented',
-      )
-    } catch (error) {
-      console.error(
-        'Failed to load preimage request state from database:',
-        error,
-      )
-    }
+  constructor(preimageStore: PreimageStore) {
+    super()
+    this.preimageStore = preimageStore
   }
 
   /**
    * Store preimage in local store and persist to database
    */
-  async storePreimage(hash: Uint8Array, preimage: Uint8Array): Promise<void> {
-    const hashString = hash.toString()
-    this.preimages.set(hashString, preimage)
+  async storePreimage(
+    hash: Hex,
+    serviceIndex: bigint,
+    preimage: Preimage,
+  ): Promise<void> {
+    this.preimages.set(hash, preimage)
 
-    // Persist to database if available
-    if (this.dbIntegration) {
-      try {
-        await this.dbIntegration.setServiceStorage(
-          `preimage_${hashString}`,
-          preimage,
-        )
-      } catch (error) {
-        console.error('Failed to persist preimage to database:', error)
-      }
-    }
+    await this.preimageStore.storePreimage(preimage, hash, serviceIndex)
   }
 
   /**
    * Get preimage from local store
    */
-  getPreimage(hash: Uint8Array): Uint8Array | undefined {
-    return this.preimages.get(hash.toString())
-  }
-
-  /**
-   * Get preimage from database if not in local store
-   */
-  async getPreimageFromDatabase(hash: Uint8Array): Promise<Uint8Array | null> {
-    if (this.getPreimage(hash)) {
-      return this.getPreimage(hash) || null
-    }
-
-    if (!this.dbIntegration) return null
-
-    try {
-      const hashString = hash.toString()
-      const preimage = await this.dbIntegration.getServiceStorage(
-        `preimage_${hashString}`,
-      )
-
-      if (preimage) {
-        // Cache in local store
-        this.preimages.set(hashString, preimage)
-        return preimage
-      }
-
-      return null
-    } catch (error) {
-      console.error('Failed to get preimage from database:', error)
-      return null
-    }
+  getPreimage(hash: Hex): Preimage | undefined {
+    return this.preimages.get(hash)
   }
 
   /**
    * Process preimage request and generate response
    */
-  async processPreimageRequest(
-    request: PreimageRequest,
-  ): Promise<PreimageResponse | null> {
-    try {
-      // Get preimage from local store or database
-      const preimage = await this.getPreimageFromDatabase(request.hash)
-
-      if (!preimage) {
-        console.log(
-          `Preimage not found for hash: ${request.hash.toString().substring(0, 16)}...`,
-        )
-        return null
-      }
-
-      console.log(
-        `Found preimage for hash: ${request.hash.toString().substring(0, 16)}...`,
-      )
-
-      return {
-        preimage,
-      }
-    } catch (error) {
-      console.error('Failed to process preimage request:', error)
-      return null
+  async processRequest(request: PreimageRequest): SafePromise<Preimage> {
+    if (this.preimages.has(request.hash)) {
+      return safeResult(this.preimages.get(request.hash)!)
     }
+
+    const [error, preimageFromDatabase] = await this.preimageStore.getPreimage(
+      request.hash,
+    )
+    if (error) {
+      return safeError(error)
+    }
+    if (preimageFromDatabase) {
+      return safeResult(preimageFromDatabase)
+    }
+    return safeError(new Error('Preimage not found'))
   }
 
   /**
    * Create preimage request message
    */
-  createPreimageRequest(hash: Uint8Array): PreimageRequest {
-    return {
-      hash,
-    }
-  }
+  // createPreimageRequest(hash: Hex): PreimageRequest {
+  //   return {
+  //     hash,
+  //   }
+  // }
 
   /**
    * Serialize preimage request message
    */
-  serializePreimageRequest(request: PreimageRequest): Uint8Array {
-    // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(32) // hash (32 bytes)
-    // const _view = new DataView(buffer)
-
-    // Write hash (32 bytes)
-    new Uint8Array(buffer).set(request.hash, 0)
-
-    return new Uint8Array(buffer)
+  serializeRequest(request: PreimageRequest): Safe<Uint8Array> {
+    return safeResult(hexToBytes(request.hash))
   }
 
   /**
    * Deserialize preimage request message
    */
-  deserializePreimageRequest(data: Uint8Array): PreimageRequest {
-    // Read hash (32 bytes)
-    const hash = data.slice(0, 32)
+  deserializeRequest(data: Uint8Array): Safe<PreimageRequest> {
+    const hash = bytesToHex(data.slice(0, 32))
 
-    return {
-      hash,
-    }
+    return safeResult({
+      hash: hash,
+    })
   }
 
   /**
    * Serialize preimage response message
    */
-  serializePreimageResponse(response: PreimageResponse): Uint8Array {
-    // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(4 + response.preimage.length)
-    const view = new DataView(buffer)
-    let offset = 0
-
-    // Write preimage length (4 bytes, little-endian)
-    view.setUint32(offset, response.preimage.length, true)
-    offset += 4
-
-    // Write preimage data
-    new Uint8Array(buffer).set(response.preimage, offset)
-
-    return new Uint8Array(buffer)
+  serializeResponse(response: Preimage): Safe<Uint8Array> {
+    return encodePreimage(response)
   }
 
   /**
    * Deserialize preimage response message
    */
-  deserializePreimageResponse(data: Uint8Array): PreimageResponse {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
-
-    // Read preimage length (4 bytes, little-endian)
-    const preimageLength = view.getUint32(offset, true)
-    offset += 4
-
-    // Read preimage data
-    const preimage = data.slice(offset, offset + preimageLength)
-
-    return {
-      preimage,
+  deserializeResponse(data: Uint8Array): Safe<Preimage> {
+    const [error, preimage] = decodePreimage(data)
+    if (error) {
+      return safeError(error)
     }
+    return safeResult(preimage.value)
   }
 
-  /**
-   * Handle incoming stream data
-   */
-  async handleStreamData(
-    _stream: StreamInfo,
-    data: Uint8Array,
-  ): Promise<PreimageResponse | null> {
-    try {
-      const request = this.deserializePreimageRequest(data)
-      return await this.processPreimageRequest(request)
-    } catch (error) {
-      console.error('Failed to handle preimage request stream data:', error)
-      return null
-    }
+  async processResponse(_response: Preimage): SafePromise<void> {
+    return safeResult(undefined)
   }
 }

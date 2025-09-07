@@ -7,47 +7,7 @@
  */
 
 // Block authoring types - export specific types to avoid conflicts
-export type {
-  Account,
-  AuthorValidationResult,
-  AvailabilitySpec,
-  Block as BlockAuthoringBlock,
-  BlockAuthoringConfig,
-  BlockAuthoringContext,
-  BlockAuthoringError,
-  BlockAuthoringMetrics,
-  BlockAuthoringResult,
-  BlockAuthoringService,
-  BlockSubmissionContext,
-  ExtrinsicValidationContext,
-  FinalizationStatus,
-  GenesisConfig,
-  GenesisState,
-  HeaderConstructionContext,
-  NetworkState,
-  SignatureValidationResult,
-  State as BlockAuthoringState,
-  StateTransitionContext,
-  SubmissionResult,
-  TicketValidationResult,
-  TimeslotValidationResult,
-  ValidationError,
-  ValidationResult as BlockAuthoringValidationResult,
-  ValidationWarning,
-  Validator,
-  ValidatorSet,
-  WorkDigest,
-  WorkError as BlockAuthoringWorkError,
-  // WorkItem is imported from serialization, not defined here
-  WorkPackage as BlockAuthoringWorkPackage,
-  WorkPackageContext,
-  WorkPackageProcessingContext,
-  WorkReport,
-} from './block-authoring'
-export {
-  BlockAuthoringErrorType,
-  PropagationStatus,
-} from './block-authoring'
+export * from './block-authoring'
 // CLI types
 export * from './cli'
 // Codec types - export specific types to avoid conflicts
@@ -57,8 +17,6 @@ export type {
   BaseConfig,
   BinaryConfig,
   BinaryData,
-  Block as CodecBlock,
-  BlockBody,
   BlockHeader as CodecBlockHeader,
   Codec,
   CodecConfig,
@@ -79,90 +37,23 @@ export {
   EncodingFormat,
 } from './codec'
 // Consensus types - export ValidatorKey from consensus to avoid conflict
-export type {
-  ConsensusError,
-  ConsensusErrorCode,
-  ConsensusExtrinsic,
-  ConsensusInput,
-  ConsensusOutput,
-  ConsensusState,
-  ConsensusTicket,
-  EpochMarker,
-  SafroleError,
-  SafroleInput,
-  SafroleOutput,
-  SafroleState as ConsensusSafroleState,
-  Ticket,
-  TicketProof,
-  ValidatorKey,
-  WinnerMarker,
-} from './consensus'
-export { SAFROLE_CONSTANTS, SafroleErrorCode } from './consensus'
+export * from './consensus'
 // Core types - export ValidatorKey from core as CoreValidatorKey
 export * from './core'
 export * from './erasure-coding'
+// Genesis and Global State types - comprehensive Gray Paper compliant state
+export * from './genesis'
+export * from './genesis-config'
+export * from './global-state'
 // JAMNP-S types
 export * from './jamnp'
 // Network types
 export * from './network'
 // Export PVM work types for compatibility
-export type {
-  ExportSegment as PVMExportSegment,
-  ExtrinsicReference as PVMExtrinsicReference,
-  ImportSegment as PVMImportSegment,
-  IsAuthorizedResult,
-  WorkContext as PVMWorkContext,
-  WorkError,
-  WorkItem as PVMWorkItem,
-} from './pvm'
 // PVM types
 export * from './pvm'
 // Serialization types - export specific types to avoid conflicts
-export type {
-  AccumulatedItem,
-  ActivityStats,
-  Assurance,
-  Authorizer,
-  AvailabilitySpecification,
-  BlockBody as SerializationBlockBody,
-  BlockHeader as SerializationBlockHeader,
-  Credential,
-  Dispute,
-  EpochMark,
-  ExtrinsicReference as SerializationExtrinsicReference,
-  GenesisState as SerializationGenesisState,
-  Guarantee,
-  ImportSegment,
-  JamHeader,
-  Judgment,
-  LastAccountOut,
-  OperandTuple,
-  Preimage,
-  Privileges,
-  ReadyItem,
-  RuntimeWorkPackage,
-  SafroleState as SerializationSafroleState,
-  SafroleTicket,
-  SafroleTicketArray,
-  SafroleTicketCore,
-  SafroleTicketHeader,
-  SafroleTicketSingle,
-  ServiceAccount,
-  StateTrie,
-  StateTrieEntry,
-  ValidatorKeyPair,
-  ValidatorKeyTuple,
-  ValidityDispute,
-  WorkContext,
-  WorkItem as SerializationWorkItem,
-  WorkPackage,
-  WorkReport as SerializationWorkReport,
-  WorkResult,
-} from './serialization'
-export {
-  isTicketsMarkArray,
-  isTicketsMarkSingle,
-} from './serialization'
+export * from './serialization'
 // State types
 export * from './state'
 // Telemetry types

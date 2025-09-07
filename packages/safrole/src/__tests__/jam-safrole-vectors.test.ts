@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { executeSafroleSTF } from '../state-transitions'
-import type { SafroleInput, SafroleOutput, ConsensusSafroleState as SafroleState, ValidatorKey } from '@pbnj/types'
+import type { SafroleInput, SafroleOutput, SafroleState, ValidatorKey } from '@pbnj/types'
 
 beforeAll(() => {
   logger.init()

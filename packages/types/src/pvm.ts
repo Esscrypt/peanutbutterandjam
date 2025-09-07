@@ -520,27 +520,6 @@ export type AccumulateContextMutator = (
     }
   | { resultCode: 'fault'; address: bigint }
 
-// Work types for PVM compatibility
-export interface WorkContext {
-  lookupanchortime: bigint
-}
-
-export interface WorkItem {
-  serviceindex: bigint
-  codehash: Hex
-  payload: Hex
-  refgaslimit: bigint
-  accgaslimit: bigint
-  importsegments: ImportSegment[]
-  exportsegments: ExportSegment[]
-  extrinsics: ExtrinsicReference[]
-}
-
-export interface ImportSegment {
-  hash: Hex // Root hash of the import tree
-  index: bigint
-}
-
 export interface ExportSegment {
   data: Hex
   size: bigint

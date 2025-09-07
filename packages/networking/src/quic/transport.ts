@@ -7,9 +7,8 @@
 import { EventEmitter } from 'node:events'
 import type { QUICConfig } from '@infisical/quic/dist/types'
 import { type SafePromise, safeError, safeResult } from '@pbnj/core'
-import type { ConnectionEndpoint, StreamKind } from '@pbnj/types'
+import type { ConnectionEndpoint, StreamInfo, StreamKind } from '@pbnj/types'
 import { ConnectionState, QuicConnectionManager } from './connection'
-import type { StreamInfo } from './stream'
 import { QuicStreamManager } from './stream'
 
 /**

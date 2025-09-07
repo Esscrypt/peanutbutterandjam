@@ -26,37 +26,6 @@ export type Tuple<T extends readonly unknown[]> = T
 export type Sequence<T> = T[]
 export type Dictionary<K extends string, V> = Record<K, V>
 
-// Serialization types
-export interface SerializationResult {
-  success: boolean
-  data?: Uint8Array
-  error?: string
-}
-
-export interface DeserializationResult {
-  success: boolean
-  data?: unknown
-  error?: string
-}
-
-export interface SerializationError {
-  code: string
-  message: string
-  context?: Record<string, unknown>
-}
-
-export interface SerializationContext {
-  format: string
-  version: string
-  options?: Record<string, unknown>
-}
-
-export interface DeserializationContext {
-  format: string
-  version: string
-  options?: Record<string, unknown>
-}
-
 export type FixedLengthSize = 1n | 2n | 4n | 8n | 16n | 32n
 
 export type Encoder<T> = (data: T) => Safe<Uint8Array>
@@ -66,25 +35,6 @@ export type Decoder<T> = (data: Uint8Array) => Safe<{
   remaining: Uint8Array
 }>
 
-export interface OptionalEncoder<T> {
-  encode(data: T | null): SerializationResult
-}
-
-export interface OptionalDecoder<_T> {
-  decode(data: Uint8Array): DeserializationResult
-}
-
-// Block types
-export interface BlockHeader {
-  number: bigint
-  parentHash: Hex
-  timestamp: bigint
-  author: string
-  stateRoot: Hex
-  extrinsicsRoot: Hex
-  digest: string[]
-}
-
 export interface Extrinsic {
   hash: Hex
   data: Uint8Array
@@ -92,10 +42,10 @@ export interface Extrinsic {
 }
 
 // Validator types
-export interface ValidatorKey {
-  publicKey: Uint8Array
-  address: string
-}
+// export interface ValidatorKey {
+//   publicKey: Uint8Array
+//   address: string
+// }
 
 // Result type
 export interface Result<T, E = Error> {

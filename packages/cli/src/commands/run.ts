@@ -1,5 +1,5 @@
 import { logger } from '@pbnj/core'
-import { MainServiceImpl } from '@pbnj/node'
+import { MainService } from '@pbnj/node'
 import { Command } from 'commander'
 import {
   isValidHex,
@@ -259,35 +259,22 @@ async function executeRunCommand(
     }
 
     // Initialize and start the main service
-    const mainService = new MainServiceImpl({
+    const mainService = new MainService({
       blockAuthoring: config,
       genesis: {
-        genesisPath: options['genesis'],
-        validation: {
-          validateGenesis: true,
-          allowEmptyGenesis: false,
-          requireValidators: true,
-          requireAccounts: true,
-        },
-        import: {
-          createMissingAccounts: true,
-          initializeValidators: true,
-          resetExistingState: false,
-          backupExistingState: false,
-        },
+        chainSpecPath: options['genesis'] || 'chainspec.json',
       },
       networking: {
-        validatorIndex: Number.parseInt(options['validatorIndex'] || '0'),
+        validatorIndex: BigInt(options['validatorIndex'] || '0'),
         nodeType: 'validator',
         listenAddress: options['listenAddress'] || '0.0.0.0',
-        listenPort: Number.parseInt(options['listenPort'] || '30333'),
+        listenPort: BigInt(options['listenPort'] || '30333'),
         chainHash: options['chain'] || 'dev',
         isBuilder: false,
       },
       nodeId: 'jam-node-cli',
       telemetry: telemetryConfig || {
         enabled: false,
-        endpoint: '',
         nodeInfo: {
           protocolVersion: 0n,
           peerId: new Uint8Array(32),
@@ -300,18 +287,11 @@ async function executeRunCommand(
           implementationVersion: '0.1.0',
           additionalInfo: 'JAM node CLI implementation',
         },
-        maxBufferSize: 1000n,
-        retrySettings: {
-          maxRetries: 10n,
-          retryDelayMs: 5000n,
-          backoffMultiplier: 2n,
-        },
       },
-      services,
     })
 
     logger.info('Starting JAM node...')
-    await mainService.run()
+    await mainService.start()
   } catch (error) {
     logger.error(
       'Failed to start node:',

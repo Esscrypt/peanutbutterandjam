@@ -72,9 +72,9 @@ OpaqueHash ::= ByteArray32
 -- Protocol time unit
 TimeSlot ::= U32
 -- Index identifying a validator in the current set
-ValidatorIndex ::= U16
+bigint ::= U16
 -- Index identifying a core in the system
-CoreIndex ::= U16
+bigint ::= U16
 
 -- Hash of a block header
 HeaderHash ::= OpaqueHash
@@ -360,7 +360,7 @@ WorkReport ::= SEQUENCE {
     -- Refinement context
     context RefineContext,
     -- Index of the core that executed this work
-    core-index CoreIndex,
+    core-index bigint,
     -- Hash of the authorizer
     authorizer-hash OpaqueHash,
     -- Output from the authorization process
@@ -569,7 +569,7 @@ Judgement ::= SEQUENCE {
     -- True for valid, False for invalid
     vote BOOLEAN,
     -- Index of the validator making the judgment
-    index ValidatorIndex,
+    index bigint,
     -- Signature of the validator
     signature Ed25519Signature
 }
@@ -660,7 +660,7 @@ AvailAssurance ::= SEQUENCE {
     -- is helped made available by this validator.
     bitfield OCTET STRING (SIZE(avail-bitfield-bytes)),
     -- Index of the validator providing the assurance
-    validator-index ValidatorIndex,
+    validator-index bigint,
     -- Signature of the validator
     signature Ed25519Signature
 }
@@ -677,7 +677,7 @@ AssurancesExtrinsic ::= SEQUENCE (SIZE(0..validators-count)) OF AvailAssurance
 -- Signature from a validator
 ValidatorSignature ::= SEQUENCE {
     -- Index of the validator
-    validator-index ValidatorIndex,
+    validator-index bigint,
     -- Signature of the validator
     signature Ed25519Signature
 }
@@ -789,7 +789,7 @@ Header ::= SEQUENCE {
     -- Mark for offenders
     offenders-mark     OffendersMark,
     -- Index of the validator who authored this block
-    author-index       ValidatorIndex,
+    author-index       bigint,
     -- Source of entropy for this block
     entropy-source     BandersnatchVrfSignature,
     -- Seal signature for this block

@@ -1,272 +1,272 @@
-/**
- * CE 138: Audit Shard Request Protocol
- *
- * Implements the audit shard request protocol for JAMNP-S
- * This is a Common Ephemeral (CE) stream for requesting bundle shards from assurers.
- */
+// /**
+//  * CE 138: Audit Shard Request Protocol
+//  *
+//  * Implements the audit shard request protocol for JAMNP-S
+//  * This is a Common Ephemeral (CE) stream for requesting bundle shards from assurers.
+//  */
 
-import type { NetworkingStore } from '@pbnj/state'
-import type {
-  AuditShardRequest,
-  AuditShardResponse,
-  StreamInfo,
-} from '@pbnj/types'
+// import type { NetworkingStore } from '@pbnj/state'
+// import type {
+//   AuditShardRequest,
+//   AuditShardResponse,
+//   StreamInfo,
+// } from '@pbnj/types'
 
-/**
- * Audit shard request protocol handler
- */
-export class AuditShardRequestProtocol {
-  private auditShards: Map<string, Uint8Array> = new Map()
-  private dbIntegration: NetworkingStore | null = null
+// /**
+//  * Audit shard request protocol handler
+//  */
+// export class AuditShardRequestProtocol {
+//   private auditShards: Map<string, Uint8Array> = new Map()
+//   private dbIntegration: NetworkingStore | null = null
 
-  constructor(dbIntegration?: NetworkingStore) {
-    this.dbIntegration = dbIntegration || null
-  }
+//   constructor(dbIntegration?: NetworkingStore) {
+//     this.dbIntegration = dbIntegration || null
+//   }
 
-  /**
-   * Set database integration for persistent storage
-   */
-  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
-    this.dbIntegration = dbIntegration
-  }
+//   /**
+//    * Set database integration for persistent storage
+//    */
+//   setDatabaseIntegration(dbIntegration: NetworkingStore): void {
+//     this.dbIntegration = dbIntegration
+//   }
 
-  /**
-   * Load state from database
-   */
-  async loadState(): Promise<void> {
-    if (!this.dbIntegration) return
+//   /**
+//    * Load state from database
+//    */
+//   async loadState(): Promise<void> {
+//     if (!this.dbIntegration) return
 
-    try {
-      // Load audit shards from database (service ID 8 for audit shards)
-      console.log(
-        'Audit shard request state loading - protocol not yet fully implemented',
-      )
-    } catch (error) {
-      console.error(
-        'Failed to load audit shard request state from database:',
-        error,
-      )
-    }
-  }
+//     try {
+//       // Load audit shards from database (service ID 8 for audit shards)
+//       console.log(
+//         'Audit shard request state loading - protocol not yet fully implemented',
+//       )
+//     } catch (error) {
+//       console.error(
+//         'Failed to load audit shard request state from database:',
+//         error,
+//       )
+//     }
+//   }
 
-  /**
-   * Store audit shard in local store and persist to database
-   */
-  async storeAuditShard(
-    erasureRoot: Uint8Array,
-    shardIndex: number,
-    auditShard: Uint8Array,
-  ): Promise<void> {
-    const key = `${erasureRoot.toString()}_${shardIndex}_audit`
-    this.auditShards.set(key, auditShard)
+//   /**
+//    * Store audit shard in local store and persist to database
+//    */
+//   async storeAuditShard(
+//     erasureRoot: Uint8Array,
+//     shardIndex: bigint,
+//     auditShard: Uint8Array,
+//   ): Promise<void> {
+//     const key = `${erasureRoot.toString()}_${shardIndex}_audit`
+//     this.auditShards.set(key, auditShard)
 
-    // Persist to database if available
-    if (this.dbIntegration) {
-      try {
-        await this.dbIntegration.setServiceStorage(key, auditShard)
-      } catch (error) {
-        console.error('Failed to persist audit shard to database:', error)
-      }
-    }
-  }
+//     // Persist to database if available
+//     if (this.dbIntegration) {
+//       try {
+//         await this.dbIntegration.setServiceStorage(key, auditShard)
+//       } catch (error) {
+//         console.error('Failed to persist audit shard to database:', error)
+//       }
+//     }
+//   }
 
-  /**
-   * Get audit shard from local store
-   */
-  getAuditShard(
-    erasureRoot: Uint8Array,
-    shardIndex: number,
-  ): Uint8Array | undefined {
-    const key = `${erasureRoot.toString()}_${shardIndex}_audit`
-    return this.auditShards.get(key)
-  }
+//   /**
+//    * Get audit shard from local store
+//    */
+//   getAuditShard(
+//     erasureRoot: Uint8Array,
+//     shardIndex: bigint,
+//   ): Uint8Array | undefined {
+//     const key = `${erasureRoot.toString()}_${shardIndex}_audit`
+//     return this.auditShards.get(key)
+//   }
 
-  /**
-   * Get audit shard from database if not in local store
-   */
-  async getAuditShardFromDatabase(
-    erasureRoot: Uint8Array,
-    shardIndex: number,
-  ): Promise<Uint8Array | null> {
-    if (this.getAuditShard(erasureRoot, shardIndex)) {
-      return this.getAuditShard(erasureRoot, shardIndex) || null
-    }
+//   /**
+//    * Get audit shard from database if not in local store
+//    */
+//   async getAuditShardFromDatabase(
+//     erasureRoot: Uint8Array,
+//     shardIndex: bigint,
+//   ): Promise<Uint8Array | null> {
+//     if (this.getAuditShard(erasureRoot, shardIndex)) {
+//       return this.getAuditShard(erasureRoot, shardIndex) || null
+//     }
 
-    if (!this.dbIntegration) return null
+//     if (!this.dbIntegration) return null
 
-    try {
-      const key = `${erasureRoot.toString()}_${shardIndex}_audit`
-      const auditShard = await this.dbIntegration.getServiceStorage(key)
+//     try {
+//       const key = `${erasureRoot.toString()}_${shardIndex}_audit`
+//       const auditShard = await this.dbIntegration.getServiceStorage(key)
 
-      if (auditShard) {
-        // Cache in local store
-        this.auditShards.set(key, auditShard)
-        return auditShard
-      }
+//       if (auditShard) {
+//         // Cache in local store
+//         this.auditShards.set(key, auditShard)
+//         return auditShard
+//       }
 
-      return null
-    } catch (error) {
-      console.error('Failed to get audit shard from database:', error)
-      return null
-    }
-  }
+//       return null
+//     } catch (error) {
+//       console.error('Failed to get audit shard from database:', error)
+//       return null
+//     }
+//   }
 
-  /**
-   * Process audit shard request and generate response
-   */
-  async processAuditShardRequest(
-    request: AuditShardRequest,
-  ): Promise<AuditShardResponse | null> {
-    try {
-      // Get audit shard from local store or database
-      const auditShard = await this.getAuditShardFromDatabase(
-        request.erasureRoot,
-        request.shardIndex,
-      )
+//   /**
+//    * Process audit shard request and generate response
+//    */
+//   async processAuditShardRequest(
+//     request: AuditShardRequest,
+//   ): Promise<AuditShardResponse | null> {
+//     try {
+//       // Get audit shard from local store or database
+//       const auditShard = await this.getAuditShardFromDatabase(
+//         request.erasureRoot,
+//         request.shardIndex,
+//       )
 
-      if (!auditShard) {
-        console.log(
-          `Audit shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
-        )
-        return null
-      }
+//       if (!auditShard) {
+//         console.log(
+//           `Audit shard not found for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+//         )
+//         return null
+//       }
 
-      console.log(
-        `Found audit shard for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
-      )
+//       console.log(
+//         `Found audit shard for erasure root: ${request.erasureRoot.toString().substring(0, 16)}..., shard index: ${request.shardIndex}`,
+//       )
 
-      return {
-        bundleShard: auditShard,
-        justification: Buffer.alloc(0), // Empty buffer if no justification
-      }
-    } catch (error) {
-      console.error('Failed to process audit shard request:', error)
-      return null
-    }
-  }
+//       return {
+//         bundleShard: auditShard,
+//         justification: Buffer.alloc(0), // Empty buffer if no justification
+//       }
+//     } catch (error) {
+//       console.error('Failed to process audit shard request:', error)
+//       return null
+//     }
+//   }
 
-  /**
-   * Create audit shard request message
-   */
-  createAuditShardRequest(
-    erasureRoot: Uint8Array,
-    shardIndex: number,
-  ): AuditShardRequest {
-    return {
-      erasureRoot,
-      shardIndex,
-    }
-  }
+//   /**
+//    * Create audit shard request message
+//    */
+//   createAuditShardRequest(
+//     erasureRoot: Uint8Array,
+//     shardIndex: bigint,
+//   ): AuditShardRequest {
+//     return {
+//       erasureRoot,
+//       shardIndex,
+//     }
+//   }
 
-  /**
-   * Serialize audit shard request message
-   */
-  serializeAuditShardRequest(request: AuditShardRequest): Uint8Array {
-    // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(32 + 4) // erasureRoot + shardIndex
-    const view = new DataView(buffer)
-    let offset = 0
+//   /**
+//    * Serialize audit shard request message
+//    */
+//   serializeAuditShardRequest(request: AuditShardRequest): Uint8Array {
+//     // Serialize according to JAMNP-S specification
+//     const buffer = new ArrayBuffer(32 + 4) // erasureRoot + shardIndex
+//     const view = new DataView(buffer)
+//     let offset = 0
 
-    // Write erasure root (32 bytes)
-    new Uint8Array(buffer).set(request.erasureRoot, offset)
-    offset += 32
+//     // Write erasure root (32 bytes)
+//     new Uint8Array(buffer).set(request.erasureRoot, offset)
+//     offset += 32
 
-    // Write shard index (4 bytes, little-endian)
-    view.setUint32(offset, request.shardIndex, true)
+//     // Write shard index (4 bytes, little-endian)
+//     view.setUint32(offset, Number(request.shardIndex), true)
 
-    return new Uint8Array(buffer)
-  }
+//     return new Uint8Array(buffer)
+//   }
 
-  /**
-   * Deserialize audit shard request message
-   */
-  deserializeAuditShardRequest(data: Uint8Array): AuditShardRequest {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
+//   /**
+//    * Deserialize audit shard request message
+//    */
+//   deserializeAuditShardRequest(data: Uint8Array): AuditShardRequest {
+//     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+//     let offset = 0
 
-    // Read erasure root (32 bytes)
-    const erasureRoot = data.slice(offset, offset + 32)
-    offset += 32
+//     // Read erasure root (32 bytes)
+//     const erasureRoot = data.slice(offset, offset + 32)
+//     offset += 32
 
-    // Read shard index (4 bytes, little-endian)
-    const shardIndex = view.getUint32(offset, true)
+//     // Read shard index (4 bytes, little-endian)
+//     const shardIndex = view.getUint32(offset, true)
 
-    return {
-      erasureRoot,
-      shardIndex,
-    }
-  }
+//     return {
+//       erasureRoot,
+//       shardIndex: BigInt(shardIndex),
+//     }
+//   }
 
-  /**
-   * Serialize audit shard response message
-   */
-  serializeAuditShardResponse(response: AuditShardResponse): Uint8Array {
-    // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(
-      4 + 4 + response.bundleShard.length + response.justification.length,
-    )
-    const view = new DataView(buffer)
-    let offset = 0
+//   /**
+//    * Serialize audit shard response message
+//    */
+//   serializeAuditShardResponse(response: AuditShardResponse): Uint8Array {
+//     // Serialize according to JAMNP-S specification
+//     const buffer = new ArrayBuffer(
+//       4 + 4 + response.bundleShard.length + response.justification.length,
+//     )
+//     const view = new DataView(buffer)
+//     let offset = 0
 
-    // Write bundle shard length (4 bytes, little-endian)
-    view.setUint32(offset, response.bundleShard.length, true)
-    offset += 4
+//     // Write bundle shard length (4 bytes, little-endian)
+//     view.setUint32(offset, response.bundleShard.length, true)
+//     offset += 4
 
-    // Write bundle shard data
-    new Uint8Array(buffer).set(response.bundleShard, offset)
-    offset += response.bundleShard.length
+//     // Write bundle shard data
+//     new Uint8Array(buffer).set(response.bundleShard, offset)
+//     offset += response.bundleShard.length
 
-    // Write justification length (4 bytes, little-endian)
-    view.setUint32(offset, response.justification.length, true)
-    offset += 4
+//     // Write justification length (4 bytes, little-endian)
+//     view.setUint32(offset, response.justification.length, true)
+//     offset += 4
 
-    // Write justification data
-    new Uint8Array(buffer).set(response.justification, offset)
+//     // Write justification data
+//     new Uint8Array(buffer).set(response.justification, offset)
 
-    return new Uint8Array(buffer)
-  }
+//     return new Uint8Array(buffer)
+//   }
 
-  /**
-   * Deserialize audit shard response message
-   */
-  deserializeAuditShardResponse(data: Uint8Array): AuditShardResponse {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
+//   /**
+//    * Deserialize audit shard response message
+//    */
+//   deserializeAuditShardResponse(data: Uint8Array): AuditShardResponse {
+//     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+//     let offset = 0
 
-    // Read bundle shard length (4 bytes, little-endian)
-    const bundleShardLength = view.getUint32(offset, true)
-    offset += 4
+//     // Read bundle shard length (4 bytes, little-endian)
+//     const bundleShardLength = view.getUint32(offset, true)
+//     offset += 4
 
-    // Read bundle shard data
-    const bundleShard = data.slice(offset, offset + bundleShardLength)
-    offset += bundleShardLength
+//     // Read bundle shard data
+//     const bundleShard = data.slice(offset, offset + bundleShardLength)
+//     offset += bundleShardLength
 
-    // Read justification length (4 bytes, little-endian)
-    const justificationLength = view.getUint32(offset, true)
-    offset += 4
+//     // Read justification length (4 bytes, little-endian)
+//     const justificationLength = view.getUint32(offset, true)
+//     offset += 4
 
-    // Read justification data
-    const justification = data.slice(offset, offset + justificationLength)
+//     // Read justification data
+//     const justification = data.slice(offset, offset + justificationLength)
 
-    return {
-      bundleShard,
-      justification,
-    }
-  }
+//     return {
+//       bundleShard,
+//       justification,
+//     }
+//   }
 
-  /**
-   * Handle incoming stream data
-   */
-  async handleStreamData(
-    _stream: StreamInfo,
-    data: Uint8Array,
-  ): Promise<AuditShardResponse | null> {
-    try {
-      const request = this.deserializeAuditShardRequest(data)
-      return await this.processAuditShardRequest(request)
-    } catch (error) {
-      console.error('Failed to handle audit shard request stream data:', error)
-      return null
-    }
-  }
-}
+//   /**
+//    * Handle incoming stream data
+//    */
+//   async handleStreamData(
+//     _stream: StreamInfo,
+//     data: Uint8Array,
+//   ): Promise<AuditShardResponse | null> {
+//     try {
+//       const request = this.deserializeAuditShardRequest(data)
+//       return await this.processAuditShardRequest(request)
+//     } catch (error) {
+//       console.error('Failed to handle audit shard request stream data:', error)
+//       return null
+//     }
+//   }
+// }

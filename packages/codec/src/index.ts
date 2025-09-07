@@ -7,9 +7,9 @@
 
 // Re-export specific types from centralized types package to avoid conflicts
 export type {
+  Block,
   BlockBody,
-  CodecBlock as Block,
-  CodecBlockHeader as BlockHeader,
+  BlockHeader,
   CodecConfig,
   CodecErrorWithContext,
   CodecNetworkMessage as NetworkMessage,
@@ -38,8 +38,6 @@ export { JamAsn1Codec, JamAsn1Decoder } from './formats/jam-asn1'
 export type {
   JamBlock,
   JamCodecConfig,
-  JamEpochMark,
-  JamHeader,
   JamValidatorKeys,
 } from './formats/jam-codec'
 export { JamCodec, JamDecoder } from './formats/jam-codec'

@@ -2,14 +2,18 @@
   "extends": "@pbnj/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src",
+    "rootDir": ".",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "allowImportingTsExtensions": false
   },
   "include": [
-    "src/**/*"
+    "services/**/*",
+    "db.ts",
+    "config.ts",
+    "interfaces/**/*",
+    "index.ts"
   ],
   "exclude": [
     "node_modules",

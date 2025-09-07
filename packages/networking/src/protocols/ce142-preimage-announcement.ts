@@ -5,216 +5,117 @@
  * This is a Common Ephemeral (CE) stream for announcing possession of preimages.
  */
 
-import type { NetworkingStore } from '@pbnj/state'
-import type { PreimageAnnouncement, StreamInfo } from '@pbnj/types'
+import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import { bytesToHex, hexToBytes, safeResult } from '@pbnj/core'
+import type { PreimageAnnouncement } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
 /**
  * Preimage announcement protocol handler
  */
-export class PreimageAnnouncementProtocol {
+export class PreimageAnnouncementProtocol extends NetworkingProtocol<
+  PreimageAnnouncement,
+  void
+> {
   private preimageAnnouncements: Map<
-    string,
+    Hex,
     {
-      serviceId: number
-      hash: Uint8Array
-      preimageLength: number
-      timestamp: number
+      serviceIndex: bigint
+      hash: Hex
+      preimageLength: bigint
+      timestamp: bigint
     }
   > = new Map()
-  private dbIntegration: NetworkingStore | null = null
-
-  constructor(dbIntegration?: NetworkingStore) {
-    this.dbIntegration = dbIntegration || null
-  }
-
-  /**
-   * Set database integration for persistent storage
-   */
-  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
-    this.dbIntegration = dbIntegration
-  }
-
-  /**
-   * Load state from database
-   */
-  async loadState(): Promise<void> {
-    if (!this.dbIntegration) return
-
-    try {
-      // Load preimage announcements from database (service ID 11 for preimage announcements)
-      console.log(
-        'Preimage announcement state loading - protocol not yet fully implemented',
-      )
-    } catch (error) {
-      console.error(
-        'Failed to load preimage announcement state from database:',
-        error,
-      )
-    }
+  constructor() {
+    super()
   }
 
   /**
    * Store preimage announcement in local store and persist to database
    */
   async storePreimageAnnouncement(
-    serviceId: number,
-    hash: Uint8Array,
-    preimageLength: number,
+    serviceId: bigint,
+    hash: Hex,
+    preimageLength: bigint,
   ): Promise<void> {
-    const hashString = hash.toString()
-    this.preimageAnnouncements.set(hashString, {
-      serviceId,
+    this.preimageAnnouncements.set(hash, {
+      serviceIndex: serviceId,
       hash,
       preimageLength,
-      timestamp: Date.now(),
+      timestamp: BigInt(Date.now()),
     })
-
-    // Persist to database if available
-    if (this.dbIntegration) {
-      try {
-        // Store preimage announcement data
-        const announcementData = {
-          serviceId,
-          hash: Buffer.from(hash).toString('hex'),
-          preimageLength,
-          timestamp: Date.now(),
-        }
-
-        await this.dbIntegration.setServiceStorage(
-          `preimage_announcement_${hashString}`,
-          Buffer.from(JSON.stringify(announcementData), 'utf8'),
-        )
-      } catch (error) {
-        console.error(
-          'Failed to persist preimage announcement to database:',
-          error,
-        )
-      }
-    }
   }
 
   /**
    * Get preimage announcement from local store
    */
-  getPreimageAnnouncement(hash: Uint8Array):
+  getPreimageAnnouncement(hash: Hex):
     | {
-        serviceId: number
-        hash: Uint8Array
-        preimageLength: number
-        timestamp: number
+        serviceIndex: bigint
+        hash: Hex
+        preimageLength: bigint
+        timestamp: bigint
       }
     | undefined {
-    return this.preimageAnnouncements.get(hash.toString())
-  }
-
-  /**
-   * Get preimage announcement from database if not in local store
-   */
-  async getPreimageAnnouncementFromDatabase(hash: Uint8Array): Promise<{
-    serviceId: number
-    hash: Uint8Array
-    preimageLength: number
-    timestamp: number
-  } | null> {
-    if (this.getPreimageAnnouncement(hash)) {
-      return this.getPreimageAnnouncement(hash) || null
-    }
-
-    if (!this.dbIntegration) return null
-
-    try {
-      const hashString = hash.toString()
-      const announcementData = await this.dbIntegration.getServiceStorage(
-        `preimage_announcement_${hashString}`,
-      )
-
-      if (announcementData) {
-        const parsedData = JSON.parse(announcementData.toString())
-        const announcement = {
-          serviceId: parsedData.serviceId,
-          hash: Buffer.from(parsedData.hash, 'hex'),
-          preimageLength: parsedData.preimageLength,
-          timestamp: parsedData.timestamp,
-        }
-
-        // Cache in local store
-        this.preimageAnnouncements.set(hashString, announcement)
-        return announcement
-      }
-
-      return null
-    } catch (error) {
-      console.error('Failed to get preimage announcement from database:', error)
-      return null
-    }
+    return this.preimageAnnouncements.get(hash)
   }
 
   /**
    * Process preimage announcement
    */
-  async processPreimageAnnouncement(
-    announcement: PreimageAnnouncement,
-  ): Promise<void> {
-    try {
-      // Store the preimage announcement
-      await this.storePreimageAnnouncement(
-        announcement.serviceId,
-        announcement.hash,
-        announcement.preimageLength,
-      )
+  async processRequest(announcement: PreimageAnnouncement): SafePromise<void> {
+    // Store the preimage
+    await this.storePreimageAnnouncement(
+      announcement.serviceId,
+      announcement.hash,
+      announcement.preimageLength,
+    )
 
-      console.log(
-        `Processed preimage announcement for service ${announcement.serviceId}, hash: ${announcement.hash.toString().substring(0, 16)}...`,
-      )
-    } catch (error) {
-      console.error('Failed to process preimage announcement:', error)
-    }
+    return safeResult(undefined)
   }
 
   /**
    * Create preimage announcement message
    */
-  createPreimageAnnouncement(
-    serviceId: number,
-    hash: Uint8Array,
-    preimageLength: number,
-  ): PreimageAnnouncement {
-    return {
-      serviceId,
-      hash,
-      preimageLength,
-    }
-  }
+  // createPreimageAnnouncement(
+  //   serviceId: bigint,
+  //   hash: Uint8Array,
+  //   preimageLength: bigint,
+  // ): PreimageAnnouncement {
+  //   return {
+  //     serviceId,
+  //     hash,
+  //     preimageLength,
+  //   }
+  // }
 
   /**
    * Serialize preimage announcement message
    */
-  serializePreimageAnnouncement(
-    announcement: PreimageAnnouncement,
-  ): Uint8Array {
+  serializeRequest(announcement: PreimageAnnouncement): Safe<Uint8Array> {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(4 + 32 + 4) // serviceId + hash + preimageLength
     const view = new DataView(buffer)
     let offset = 0
 
     // Write service ID (4 bytes, little-endian)
-    view.setUint32(offset, announcement.serviceId, true)
+    view.setUint32(offset, Number(announcement.serviceId), true)
     offset += 4
 
     // Write hash (32 bytes)
-    new Uint8Array(buffer).set(announcement.hash, offset)
+    new Uint8Array(buffer).set(hexToBytes(announcement.hash), offset)
     offset += 32
 
     // Write preimage length (4 bytes, little-endian)
-    view.setUint32(offset, announcement.preimageLength, true)
+    view.setUint32(offset, Number(announcement.preimageLength), true)
 
-    return new Uint8Array(buffer)
+    return safeResult(new Uint8Array(buffer))
   }
 
   /**
    * Deserialize preimage announcement message
    */
-  deserializePreimageAnnouncement(data: Uint8Array): PreimageAnnouncement {
+  deserializeRequest(data: Uint8Array): Safe<PreimageAnnouncement> {
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
     let offset = 0
 
@@ -229,25 +130,24 @@ export class PreimageAnnouncementProtocol {
     // Read preimage length (4 bytes, little-endian)
     const preimageLength = view.getUint32(offset, true)
 
-    return {
-      serviceId,
-      hash,
-      preimageLength,
-    }
+    return safeResult({
+      serviceId: BigInt(serviceId),
+      hash: bytesToHex(hash),
+      preimageLength: BigInt(preimageLength),
+    })
   }
 
-  /**
-   * Handle incoming stream data
-   */
-  async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
-    try {
-      const announcement = this.deserializePreimageAnnouncement(data)
-      await this.processPreimageAnnouncement(announcement)
-    } catch (error) {
-      console.error(
-        'Failed to handle preimage announcement stream data:',
-        error,
-      )
-    }
+  //TODO: double check if this is correct
+  serializeResponse(_response: void): Safe<Uint8Array> {
+    return safeResult(new Uint8Array())
+  }
+
+  //TODO: double check if this is correct
+  deserializeResponse(_data: Uint8Array): Safe<void> {
+    return safeResult(undefined)
+  }
+
+  async processResponse(_response: void): SafePromise<void> {
+    return safeResult(undefined)
   }
 }

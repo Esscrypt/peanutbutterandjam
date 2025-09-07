@@ -5,56 +5,51 @@
  * Handles epoch transitions and validator metadata
  */
 
-import type {
-  ConnectionEndpoint,
-  EpochIndex,
-  ValidatorIndex,
-  ValidatorMetadata,
-} from '@pbnj/types'
+import type { ConnectionEndpoint, ValidatorMetadata } from '@pbnj/types'
 
 /**
  * Validator set manager
  */
 export class ValidatorSetManager {
-  private currentEpoch: EpochIndex = 0
-  private currentValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
-  private previousValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
-  private nextValidators: Map<ValidatorIndex, ValidatorMetadata> = new Map()
+  private currentEpoch = 0n
+  private currentValidators: Map<bigint, ValidatorMetadata> = new Map()
+  private previousValidators: Map<bigint, ValidatorMetadata> = new Map()
+  private nextValidators: Map<bigint, ValidatorMetadata> = new Map()
   private epochTransitionPending = false
 
   /**
    * Get current epoch index
    */
-  getCurrentEpoch(): EpochIndex {
+  getCurrentEpoch(): bigint {
     return this.currentEpoch
   }
 
   /**
    * Get current validator set
    */
-  getCurrentValidators(): Map<ValidatorIndex, ValidatorMetadata> {
+  getCurrentValidators(): Map<bigint, ValidatorMetadata> {
     return new Map(this.currentValidators)
   }
 
   /**
    * Get previous validator set
    */
-  getPreviousValidators(): Map<ValidatorIndex, ValidatorMetadata> {
+  getPreviousValidators(): Map<bigint, ValidatorMetadata> {
     return new Map(this.previousValidators)
   }
 
   /**
    * Get next validator set
    */
-  getNextValidators(): Map<ValidatorIndex, ValidatorMetadata> {
+  getNextValidators(): Map<bigint, ValidatorMetadata> {
     return new Map(this.nextValidators)
   }
 
   /**
    * Get all validators that should be connected (current + previous + next)
    */
-  getAllConnectedValidators(): Map<ValidatorIndex, ValidatorMetadata> {
-    const allValidators = new Map<ValidatorIndex, ValidatorMetadata>()
+  getAllConnectedValidators(): Map<bigint, ValidatorMetadata> {
+    const allValidators = new Map<bigint, ValidatorMetadata>()
 
     // Add current validators
     for (const [index, metadata] of this.currentValidators) {
@@ -81,28 +76,28 @@ export class ValidatorSetManager {
   /**
    * Check if a validator is in the current set
    */
-  isCurrentValidator(validatorIndex: ValidatorIndex): boolean {
+  isCurrentValidator(validatorIndex: bigint): boolean {
     return this.currentValidators.has(validatorIndex)
   }
 
   /**
    * Check if a validator is in the previous set
    */
-  isPreviousValidator(validatorIndex: ValidatorIndex): boolean {
+  isPreviousValidator(validatorIndex: bigint): boolean {
     return this.previousValidators.has(validatorIndex)
   }
 
   /**
    * Check if a validator is in the next set
    */
-  isNextValidator(validatorIndex: ValidatorIndex): boolean {
+  isNextValidator(validatorIndex: bigint): boolean {
     return this.nextValidators.has(validatorIndex)
   }
 
   /**
    * Check if a validator should be connected (in any of the three sets)
    */
-  shouldConnectToValidator(validatorIndex: ValidatorIndex): boolean {
+  shouldConnectToValidator(validatorIndex: bigint): boolean {
     return (
       this.isCurrentValidator(validatorIndex) ||
       this.isPreviousValidator(validatorIndex) ||
@@ -113,9 +108,7 @@ export class ValidatorSetManager {
   /**
    * Get validator metadata
    */
-  getValidatorMetadata(
-    validatorIndex: ValidatorIndex,
-  ): ValidatorMetadata | undefined {
+  getValidatorMetadata(validatorIndex: bigint): ValidatorMetadata | undefined {
     return (
       this.currentValidators.get(validatorIndex) ||
       this.previousValidators.get(validatorIndex) ||
@@ -126,27 +119,21 @@ export class ValidatorSetManager {
   /**
    * Update current validator set
    */
-  updateCurrentValidators(
-    validators: Map<ValidatorIndex, ValidatorMetadata>,
-  ): void {
+  updateCurrentValidators(validators: Map<bigint, ValidatorMetadata>): void {
     this.currentValidators = new Map(validators)
   }
 
   /**
    * Update previous validator set
    */
-  updatePreviousValidators(
-    validators: Map<ValidatorIndex, ValidatorMetadata>,
-  ): void {
+  updatePreviousValidators(validators: Map<bigint, ValidatorMetadata>): void {
     this.previousValidators = new Map(validators)
   }
 
   /**
    * Update next validator set
    */
-  updateNextValidators(
-    validators: Map<ValidatorIndex, ValidatorMetadata>,
-  ): void {
+  updateNextValidators(validators: Map<bigint, ValidatorMetadata>): void {
     this.nextValidators = new Map(validators)
   }
 
@@ -154,8 +141,8 @@ export class ValidatorSetManager {
    * Prepare for epoch transition
    */
   prepareEpochTransition(
-    newEpoch: EpochIndex,
-    newValidators: Map<ValidatorIndex, ValidatorMetadata>,
+    newEpoch: bigint,
+    newValidators: Map<bigint, ValidatorMetadata>,
   ): void {
     if (newEpoch <= this.currentEpoch) {
       throw new Error(
@@ -195,8 +182,8 @@ export class ValidatorSetManager {
   /**
    * Get validators that are leaving (in previous but not in current)
    */
-  getLeavingValidators(): ValidatorIndex[] {
-    const leaving: ValidatorIndex[] = []
+  getLeavingValidators(): bigint[] {
+    const leaving: bigint[] = []
 
     for (const [index] of this.previousValidators) {
       if (!this.currentValidators.has(index)) {
@@ -210,8 +197,8 @@ export class ValidatorSetManager {
   /**
    * Get validators that are joining (in current but not in previous)
    */
-  getJoiningValidators(): ValidatorIndex[] {
-    const joining: ValidatorIndex[] = []
+  getJoiningValidators(): bigint[] {
+    const joining: bigint[] = []
 
     for (const [index] of this.currentValidators) {
       if (!this.previousValidators.has(index)) {
@@ -225,8 +212,8 @@ export class ValidatorSetManager {
   /**
    * Get validators that are staying (in both previous and current)
    */
-  getStayingValidators(): ValidatorIndex[] {
-    const staying: ValidatorIndex[] = []
+  getStayingValidators(): bigint[] {
+    const staying: bigint[] = []
 
     for (const [index] of this.currentValidators) {
       if (this.previousValidators.has(index)) {
@@ -240,37 +227,35 @@ export class ValidatorSetManager {
   /**
    * Get validator count for current epoch
    */
-  getCurrentValidatorCount(): number {
-    return this.currentValidators.size
+  getCurrentValidatorCount(): bigint {
+    return BigInt(this.currentValidators.size)
   }
 
   /**
    * Get validator count for previous epoch
    */
-  getPreviousValidatorCount(): number {
-    return this.previousValidators.size
+  getPreviousValidatorCount(): bigint {
+    return BigInt(this.previousValidators.size)
   }
 
   /**
    * Get validator count for next epoch
    */
-  getNextValidatorCount(): number {
-    return this.nextValidators.size
+  getNextValidatorCount(): bigint {
+    return BigInt(this.nextValidators.size)
   }
 
   /**
    * Get total number of validators to connect to
    */
-  getTotalConnectedValidatorCount(): number {
-    return this.getAllConnectedValidators().size
+  getTotalConnectedValidatorCount(): bigint {
+    return BigInt(this.getAllConnectedValidators().size)
   }
 
   /**
    * Find validator by endpoint
    */
-  findValidatorByEndpoint(
-    endpoint: ConnectionEndpoint,
-  ): ValidatorIndex | undefined {
+  findValidatorByEndpoint(endpoint: ConnectionEndpoint): bigint | undefined {
     const allValidators = this.getAllConnectedValidators()
 
     for (const [index, metadata] of allValidators) {
@@ -296,11 +281,11 @@ export class ValidatorSetManager {
    * Get validator set summary
    */
   getValidatorSetSummary(): {
-    currentEpoch: EpochIndex
-    currentCount: number
-    previousCount: number
-    nextCount: number
-    totalConnected: number
+    currentEpoch: bigint
+    currentCount: bigint
+    previousCount: bigint
+    nextCount: bigint
+    totalConnected: bigint
     epochTransitionPending: boolean
   } {
     return {
@@ -319,7 +304,7 @@ export class ValidatorSetManager {
    */
   async initializeValidatorSet(
     validators: Array<{
-      index: number
+      index: bigint
       publicKey: Uint8Array
       endpoint: ConnectionEndpoint
     }>,

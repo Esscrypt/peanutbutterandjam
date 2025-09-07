@@ -5,12 +5,23 @@
  * Reference: Gray Paper network specifications
  */
 
+import type { QUICStream } from '@infisical/quic'
 import type {
   ConnectionEndpoint,
   PreferredInitiator,
-  ValidatorIndex,
   ValidatorMetadata,
 } from './jamnp'
+
+/**
+ * Stream state
+ */
+export enum StreamState {
+  INITIAL = 'initial',
+  OPEN = 'open',
+  CLOSING = 'closing',
+  CLOSED = 'closed',
+  ERROR = 'error',
+}
 
 /**
  * Network message types
@@ -112,6 +123,35 @@ export type StreamKind =
   | 143
   | 144
   | 145
+
+/**
+ * Stream information
+ * JAMNP-S specification requires all streams to be bidirectional
+ */
+export interface StreamInfo {
+  /** Stream ID */
+  id: string
+  /** Stream kind */
+  kind: StreamKind
+  /** Stream state */
+  state: StreamState
+  /** Connection ID */
+  connectionId: string
+  /** Is initiator */
+  isInitiator: boolean
+  /** Creation time */
+  createdAt: number
+  /** Last activity time */
+  lastActivity: number
+  /** Error message (if any) */
+  error?: string
+  /** QUIC stream reference (for active streams) */
+  quicStream?: QUICStream
+  /** Stream is bidirectional (always true for JAMNP-S) */
+  isBidirectional: true
+}
+
+export type StreamHandler = (stream: StreamInfo, data: Uint8Array) => void
 
 /**
  * Base network message interface
@@ -374,7 +414,7 @@ export interface Peer {
  * Peer information
  */
 export interface PeerInfo {
-  validatorIndex: ValidatorIndex
+  validatorIndex: bigint
   metadata: ValidatorMetadata
   endpoint: ConnectionEndpoint
   isConnected: boolean

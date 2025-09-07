@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeJamHeader, encodeJamHeader } from '../block/header'
-import type { JamHeader } from '@pbnj/types'
+import type { BlockHeader } from '@pbnj/types'
+import { zeroHash } from '@pbnj/core'
 
 describe('JAM Header Codec Tests', () => {
   const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
@@ -24,31 +25,31 @@ describe('JAM Header Codec Tests', () => {
     
     // Verify the decoded header matches the JSON structure
     expect(decodedHeader.value.parent).toBe(jsonData.parent)
-    expect(decodedHeader.value.parent_state_root).toBe(jsonData.parent_state_root)
-    expect(decodedHeader.value.extrinsic_hash).toBe(jsonData.extrinsic_hash)
-    expect(decodedHeader.value.slot).toBe(jsonData.slot)
+    expect(decodedHeader.value.priorStateRoot).toBe(jsonData.parent_state_root)
+    expect(decodedHeader.value.extrinsicHash).toBe(jsonData.extrinsic_hash)
+    expect(decodedHeader.value.timeslot).toBe(jsonData.timeslot)
     
     // Check epoch mark
     if (jsonData.epoch_mark) {
-      expect(decodedHeader.value.epoch_mark).not.toBeNull()
-      expect(decodedHeader.value.epoch_mark!.entropy).toBe(jsonData.epoch_mark.entropy)
-      expect(decodedHeader.value.epoch_mark!.tickets_entropy).toBe(jsonData.epoch_mark.tickets_entropy)
-      expect(decodedHeader.value.epoch_mark!.validators).toHaveLength(jsonData.epoch_mark.validators.length)
+      expect(decodedHeader.value.epochMark).not.toBeNull()
+      expect(decodedHeader.value.epochMark!.entropy1).toBe(jsonData.epoch_mark.entropy)
+      expect(decodedHeader.value.epochMark!.entropyAccumulator).toBe(jsonData.epoch_mark.ticketsEntropy)
+      expect(decodedHeader.value.epochMark!.validators).toHaveLength(jsonData.epoch_mark.validators.length)
       
       // Check first few validators to avoid testing all 1024
       for (let i = 0; i < Math.min(5, jsonData.epoch_mark.validators.length); i++) {
-        expect(decodedHeader.value.epoch_mark!.validators[i].bandersnatch).toBe(jsonData.epoch_mark.validators[i].bandersnatch)
-        expect(decodedHeader.value.epoch_mark!.validators[i].ed25519).toBe(jsonData.epoch_mark.validators[i].ed25519)
+        expect(decodedHeader.value.epochMark!.validators[i].bandersnatch).toBe(jsonData.epoch_mark.validators[i].bandersnatch)
+        expect(decodedHeader.value.epochMark!.validators[i].ed25519).toBe(jsonData.epoch_mark.validators[i].ed25519)
       }
     } else {
-      expect(decodedHeader.value.epoch_mark).toBeNull()
+      expect(decodedHeader.value.epochMark).toBeNull()
     }
     
     // Check winners mark (should be null for header_0)
-    expect(decodedHeader.value.winners_mark).toBeNull()
+    expect(decodedHeader.value.winnersMark).toBeNull()
     
     // Check offenders mark (should be empty array for header_0) 
-    expect(decodedHeader.value.offenders_mark).toEqual([])
+    expect(decodedHeader.value.offendersMark).toEqual([])
     
     // Encode the decoded header back to binary
     const encodedData = encodeJamHeader(decodedHeader.value)
@@ -59,17 +60,17 @@ describe('JAM Header Codec Tests', () => {
   
   it('should handle round-trip encoding/decoding for simple header', () => {
     // Create a minimal test header
-    const testHeader: JamHeader = {
-      parent: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      parent_state_root: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      extrinsic_hash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-      slot: 0n,
-      epoch_mark: null,
-      winners_mark: null,
-      offenders_mark: [],
-      author_index: 0n,
-      vrf_sig: '0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
-      seal_sig: '0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+    const testHeader: BlockHeader = {
+      parent: zeroHash,
+      priorStateRoot: zeroHash,
+      extrinsicHash: zeroHash,
+      timeslot: 0n,
+      epochMark: null,
+      winnersMark: null,
+      offendersMark: [],
+      authorIndex: 0n,
+      vrfSig: '0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+      sealSig: '0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
     }
     
     // Encode the header
@@ -86,27 +87,27 @@ describe('JAM Header Codec Tests', () => {
     
     // Verify round-trip consistency
     expect(decodedHeader.value.parent).toBe(testHeader.parent)
-    expect(decodedHeader.value.parent_state_root).toBe(testHeader.parent_state_root)
-    expect(decodedHeader.value.extrinsic_hash).toBe(testHeader.extrinsic_hash)
-    expect(decodedHeader.value.slot).toBe(testHeader.slot)
-    expect(decodedHeader.value.epoch_mark).toBe(testHeader.epoch_mark)
-    expect(decodedHeader.value.winners_mark).toBe(testHeader.winners_mark)
-    expect(decodedHeader.value.offenders_mark).toEqual(testHeader.offenders_mark)
-    expect(decodedHeader.value.author_index).toBe(testHeader.author_index)
-    expect(decodedHeader.value.vrf_sig).toBe(testHeader.vrf_sig)
-    expect(decodedHeader.value.seal_sig).toBe(testHeader.seal_sig)
+    expect(decodedHeader.value.priorStateRoot).toBe(testHeader.priorStateRoot)
+    expect(decodedHeader.value.extrinsicHash).toBe(testHeader.extrinsicHash)
+    expect(decodedHeader.value.timeslot).toBe(testHeader.timeslot)
+    expect(decodedHeader.value.epochMark).toBe(testHeader.epochMark)
+    expect(decodedHeader.value.winnersMark).toBe(testHeader.winnersMark)
+    expect(decodedHeader.value.offendersMark).toEqual(testHeader.offendersMark)
+    expect(decodedHeader.value.authorIndex).toBe(testHeader.authorIndex)
+    expect(decodedHeader.value.vrfSig).toBe(testHeader.vrfSig)
+    expect(decodedHeader.value.sealSig).toBe(testHeader.sealSig)
   })
   
   it('should handle header with epoch mark', () => {
     // Create a test header with epoch mark
-    const testHeader: JamHeader = {
+    const testHeader: BlockHeader = {
       parent: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      parent_state_root: '0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
-      extrinsic_hash: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
-      slot: 42n,
-      epoch_mark: {
-        entropy: '0xae85d6635e9ae539d0846b911ec86a27fe000f619b78bcac8a74b77e36f6dbcf',
-        tickets_entropy: '0x333a7e328f0c4183f4b947e1d8f68aa4034f762e5ecdb5a7f6fbf0afea2fd8cd',
+        priorStateRoot: '0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
+      extrinsicHash: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      timeslot: 42n,
+      epochMark: {
+        entropyAccumulator: '0xae85d6635e9ae539d0846b911ec86a27fe000f619b78bcac8a74b77e36f6dbcf',
+        entropy1: '0x333a7e328f0c4183f4b947e1d8f68aa4034f762e5ecdb5a7f6fbf0afea2fd8cd',
         validators: [
           {
             bandersnatch: '0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
@@ -118,11 +119,11 @@ describe('JAM Header Codec Tests', () => {
           }
         ]
       },
-      winners_mark: null,
-      offenders_mark: [],
-      author_index: 1n,
-      vrf_sig: '0x111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111',
-      seal_sig: '0x222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222'
+      winnersMark: null,
+      offendersMark: [],
+      authorIndex: 1n,
+      vrfSig: '0x111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111',
+      sealSig: '0x222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222'
     }
     
     // Encode the header
@@ -139,44 +140,44 @@ describe('JAM Header Codec Tests', () => {
     
     // Verify round-trip consistency
     expect(decodedHeader.value.parent).toBe(testHeader.parent)
-    expect(decodedHeader.value.parent_state_root).toBe(testHeader.parent_state_root)
-    expect(decodedHeader.value.extrinsic_hash).toBe(testHeader.extrinsic_hash)
-    expect(decodedHeader.value.slot).toBe(testHeader.slot)
+    expect(decodedHeader.value.priorStateRoot).toBe(testHeader.priorStateRoot)
+    expect(decodedHeader.value.extrinsicHash).toBe(testHeader.extrinsicHash)
+    expect(decodedHeader.value.timeslot).toBe(testHeader.timeslot)
     
     // Check epoch mark
-    expect(decodedHeader.value.epoch_mark).not.toBeNull()
-    expect(decodedHeader.value.epoch_mark!.entropy).toBe(testHeader.epoch_mark!.entropy)
-    expect(decodedHeader.value.epoch_mark!.tickets_entropy).toBe(testHeader.epoch_mark!.tickets_entropy)
-    expect(decodedHeader.value.epoch_mark!.validators).toHaveLength(testHeader.epoch_mark!.validators.length)
+    expect(decodedHeader.value.epochMark).not.toBeNull()
+    expect(decodedHeader.value.epochMark!.entropy1).toBe(testHeader.epochMark!.entropy1)
+    expect(decodedHeader.value.epochMark!.entropyAccumulator).toBe(testHeader.epochMark!.entropyAccumulator)
+    expect(decodedHeader.value.epochMark!.validators).toHaveLength(testHeader.epochMark!.validators.length)
     
-    for (let i = 0; i < testHeader.epoch_mark!.validators.length; i++) {
-      expect(decodedHeader.value.epoch_mark!.validators[i].bandersnatch).toBe(testHeader.epoch_mark!.validators[i].bandersnatch)
-      expect(decodedHeader.value.epoch_mark!.validators[i].ed25519).toBe(testHeader.epoch_mark!.validators[i].ed25519)
+    for (let i = 0; i < testHeader.epochMark!.validators.length; i++) {
+      expect(decodedHeader.value.epochMark!.validators[i].bandersnatch).toBe(testHeader.epochMark!.validators[i].bandersnatch)
+      expect(decodedHeader.value.epochMark!.validators[i].ed25519).toBe(testHeader.epochMark!.validators[i].ed25519)
     }
     
-    expect(decodedHeader.value.winners_mark).toBe(testHeader.winners_mark)
-    expect(decodedHeader.value.offenders_mark).toEqual(testHeader.offenders_mark)
-    expect(decodedHeader.value.author_index).toBe(testHeader.author_index)
-    expect(decodedHeader.value.vrf_sig).toBe(testHeader.vrf_sig)
-    expect(decodedHeader.value.seal_sig).toBe(testHeader.seal_sig)
+    expect(decodedHeader.value.winnersMark).toBe(testHeader.winnersMark)
+    expect(decodedHeader.value.offendersMark).toEqual(testHeader.offendersMark)
+    expect(decodedHeader.value.authorIndex).toBe(testHeader.authorIndex)
+    expect(decodedHeader.value.vrfSig).toBe(testHeader.vrfSig)
+    expect(decodedHeader.value.sealSig).toBe(testHeader.sealSig)
   })
   
   it('should handle header with offenders', () => {
     // Create a test header with offenders
-    const testHeader: JamHeader = {
+    const testHeader: BlockHeader = {
       parent: '0x1111111111111111111111111111111111111111111111111111111111111111',
-      parent_state_root: '0x2222222222222222222222222222222222222222222222222222222222222222',
-      extrinsic_hash: '0x3333333333333333333333333333333333333333333333333333333333333333',
-      slot: 100n,
-      epoch_mark: null,
-      winners_mark: null,
-      offenders_mark: [
+      priorStateRoot: '0x2222222222222222222222222222222222222222222222222222222222222222',
+      extrinsicHash: '0x3333333333333333333333333333333333333333333333333333333333333333',
+      timeslot: 100n,
+      epochMark: null,
+      winnersMark: null,
+      offendersMark: [
         '0x4444444444444444444444444444444444444444444444444444444444444444',
         '0x5555555555555555555555555555555555555555555555555555555555555555'
       ],
-      author_index: 2n,
-      vrf_sig: '0x333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333',
-      seal_sig: '0x444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444'
+        authorIndex: 2n,
+      vrfSig: '0x333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333',
+      sealSig: '0x444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444'
     }
     
     // Encode the header
@@ -196,14 +197,14 @@ describe('JAM Header Codec Tests', () => {
     
     // Verify round-trip consistency
     expect(decodedHeader.value.parent).toBe(testHeader.parent)
-    expect(decodedHeader.value.parent_state_root).toBe(testHeader.parent_state_root)
-    expect(decodedHeader.value.extrinsic_hash).toBe(testHeader.extrinsic_hash)
-    expect(decodedHeader.value.slot).toBe(testHeader.slot)
-    expect(decodedHeader.value.epoch_mark).toBe(testHeader.epoch_mark)
-    expect(decodedHeader.value.winners_mark).toBe(testHeader.winners_mark)
-    expect(decodedHeader.value.offenders_mark).toEqual(testHeader.offenders_mark)
-    expect(decodedHeader.value.author_index).toBe(testHeader.author_index)
-    expect(decodedHeader.value.vrf_sig).toBe(testHeader.vrf_sig)
-    expect(decodedHeader.value.seal_sig).toBe(testHeader.seal_sig)
+      expect(decodedHeader.value.priorStateRoot).toBe(testHeader.priorStateRoot)
+    expect(decodedHeader.value.extrinsicHash).toBe(testHeader.extrinsicHash)
+    expect(decodedHeader.value.timeslot).toBe(testHeader.timeslot)
+    expect(decodedHeader.value.epochMark).toBe(testHeader.epochMark)
+    expect(decodedHeader.value.winnersMark).toBe(testHeader.winnersMark)
+    expect(decodedHeader.value.offendersMark).toEqual(testHeader.offendersMark)
+    expect(decodedHeader.value.authorIndex).toBe(testHeader.authorIndex)
+    expect(decodedHeader.value.vrfSig).toBe(testHeader.vrfSig)
+    expect(decodedHeader.value.sealSig).toBe(testHeader.sealSig)
   })
 })

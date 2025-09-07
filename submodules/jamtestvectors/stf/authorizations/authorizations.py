@@ -6,14 +6,14 @@ from jam_types import (
     TimeSlot,
     AuthPools,
     AuthQueues,
-    CoreIndex
+    bigint
 )
 from jam_types import class_name as n
 
 
 class CoreAuthorizer(Struct):
     type_mapping = [
-        ('core', n(CoreIndex)),
+        ('core', n(bigint)),
         ('auth_hash', n(OpaqueHash)),
     ]
 

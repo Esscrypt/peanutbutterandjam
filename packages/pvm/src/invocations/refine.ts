@@ -81,7 +81,7 @@ export class RefineInvocationSystem {
       accountsCount: Object.keys(accounts).length,
     })
 
-    const workItem = workPackage.items[Number(workItemIndex)]
+    const workItem = workPackage.workItems[Number(workItemIndex)]
     if (!workItem) {
       logger.debug('Refine: work item not found, returning BAD')
       return ['BAD', [], 0n]
@@ -102,7 +102,7 @@ export class RefineInvocationSystem {
     // Historical lookup for service code
     const historicalCode = this.historicalLookup(
       serviceAccount,
-      workPackage.context.lookupanchortime,
+      workPackage.context.lookupAnchorTime,
       workItem.codehash,
     )
 

@@ -13,6 +13,10 @@ type CoreDb = ReturnType<typeof createCoreDb>
 
 export { coreSchema, createCoreDb, type CoreDb }
 
-export { NetworkingStore } from './networking-store'
+export { BlockStore } from './block-store'
+export { JudgmentStore } from './judgement-store'
+export { PreimageStore } from './preimage-store'
 export { ServiceAccountStore } from './service-account-store'
+export { TicketStore } from './ticket-store'
 export { ValidatorStore } from './validator-store'
+export { WorkStore } from './work-store'

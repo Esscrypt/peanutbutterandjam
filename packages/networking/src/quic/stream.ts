@@ -12,45 +12,8 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { StreamKind } from '@pbnj/types'
-
-/**
- * Stream state
- */
-export enum StreamState {
-  INITIAL = 'initial',
-  OPEN = 'open',
-  CLOSING = 'closing',
-  CLOSED = 'closed',
-  ERROR = 'error',
-}
-
-/**
- * Stream information
- * JAMNP-S specification requires all streams to be bidirectional
- */
-export interface StreamInfo {
-  /** Stream ID */
-  id: string
-  /** Stream kind */
-  kind: StreamKind
-  /** Stream state */
-  state: StreamState
-  /** Connection ID */
-  connectionId: string
-  /** Is initiator */
-  isInitiator: boolean
-  /** Creation time */
-  createdAt: number
-  /** Last activity time */
-  lastActivity: number
-  /** Error message (if any) */
-  error?: string
-  /** QUIC stream reference (for active streams) */
-  quicStream?: QUICStream
-  /** Stream is bidirectional (always true for JAMNP-S) */
-  isBidirectional: boolean
-}
+import type { StreamHandler, StreamInfo, StreamKind } from '@pbnj/types'
+import { StreamState } from '@pbnj/types'
 
 /**
  * Message frame for JAMNP-S
@@ -67,18 +30,12 @@ export interface MessageFrame {
  */
 export class QuicStreamManager {
   private streams: Map<string, StreamInfo> = new Map()
-  private streamHandlers: Map<
-    StreamKind,
-    (stream: StreamInfo, data: Uint8Array) => void
-  > = new Map()
+  private streamHandlers: Map<StreamKind, StreamHandler> = new Map()
 
   /**
    * Register stream handler for a specific stream kind
    */
-  registerStreamHandler(
-    kind: StreamKind,
-    handler: (stream: StreamInfo, data: Uint8Array) => void,
-  ): void {
+  registerStreamHandler(kind: StreamKind, handler: StreamHandler): void {
     this.streamHandlers.set(kind, handler)
   }
 

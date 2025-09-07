@@ -115,7 +115,7 @@ export class QuicConnectionManager {
       // Create client with target endpoint
       const client = await QUICClient.createQUICClient({
         host: endpoint.host,
-        port: endpoint.port,
+        port: Math.floor(Number.parseInt(endpoint.port.toString())),
         crypto: clientCrypto,
         config: tlsConfig,
       })

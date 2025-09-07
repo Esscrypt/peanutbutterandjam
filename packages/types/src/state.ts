@@ -4,10 +4,6 @@
  * Types for state management and database operations
  */
 
-import type { Hex } from 'viem'
-import type { ConsensusTicket } from './consensus'
-import type { ValidatorKey } from './core'
-
 /**
  * Core account structure
  */
@@ -23,16 +19,6 @@ export interface ValidatorAccount {
   publicKey: Uint8Array
   stake: bigint
   active: boolean
-}
-
-/**
- * Safrole state structure
- */
-export interface SafroleState {
-  currentslot: number
-  pendingset: ValidatorKey[]
-  sealtickets: ConsensusTicket[]
-  entropy: Hex
 }
 
 /**
@@ -52,30 +38,11 @@ export interface CoreState {
 }
 
 /**
- * Pending report structure
- */
-export interface PendingReport {
-  workReport: Uint8Array
-  timestamp: number
-}
-
-/**
  * Authorizer pool structure
  */
 export interface AuthorizerPool {
   authorizers: Uint8Array[]
   nextIndex: number
-}
-
-/**
- * Privileges state structure
- */
-export interface PrivilegesState {
-  manager: Hex
-  assigners: Hex[]
-  delegator: Hex
-  registrar: Hex
-  alwaysaccers: Hex[]
 }
 
 /**

@@ -59,7 +59,7 @@ export interface JamEpochMark {
   validators: JamValidatorKeys[]
 }
 
-export interface JamHeader {
+export interface BlockHeader {
   parent: Uint8Array // 32 bytes
   parentStateRoot: Uint8Array // 32 bytes
   extrinsicHash: Uint8Array // 32 bytes
@@ -73,7 +73,7 @@ export interface JamHeader {
 }
 
 export interface JamBlock {
-  header: JamHeader
+  header: BlockHeader
   extrinsic: unknown // TODO: Define Extrinsic structure
 }
 
@@ -314,7 +314,7 @@ export class JamAsn1Decoder {
   /**
    * Decode a JAM header
    */
-  decodeHeader(tlv: Asn1TLV): JamHeader {
+  decodeHeader(tlv: Asn1TLV): BlockHeader {
     if (tlv.tag !== Asn1UniversalTag.SEQUENCE) {
       throw new Error('Expected SEQUENCE for Header')
     }

@@ -5,20 +5,15 @@
  * Handles peer discovery, connection establishment, and peer tracking
  */
 
-import type {
-  NodeType,
-  PeerInfo,
-  ValidatorIndex,
-  ValidatorMetadata,
-} from '@pbnj/types'
+import type { NodeType, PeerInfo, ValidatorMetadata } from '@pbnj/types'
 import { PreferredInitiator } from '@pbnj/types'
 
 /**
  * Peer discovery manager
  */
 export class PeerDiscoveryManager {
-  private peers: Map<ValidatorIndex, PeerInfo> = new Map()
-  private localValidatorIndex: ValidatorIndex | null = null
+  private peers: Map<bigint, PeerInfo> = new Map()
+  private localValidatorIndex: bigint | null = null
   private localNodeType: NodeType | null = null
   private discoveryInterval: NodeJS.Timeout | null = null
   // private connectionTimeout: number = 30000 // 30 seconds
@@ -28,7 +23,7 @@ export class PeerDiscoveryManager {
   /**
    * Set local validator information
    */
-  setLocalValidator(validatorIndex: ValidatorIndex, nodeType: NodeType): void {
+  setLocalValidator(validatorIndex: bigint, nodeType: NodeType): void {
     this.localValidatorIndex = validatorIndex
     this.localNodeType = nodeType
   }
@@ -37,7 +32,7 @@ export class PeerDiscoveryManager {
    * Add or update peer information
    */
   addPeer(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     metadata: ValidatorMetadata,
     preferredInitiator: PreferredInitiator = PreferredInitiator.NEITHER,
   ): void {
@@ -58,29 +53,29 @@ export class PeerDiscoveryManager {
   /**
    * Remove peer
    */
-  removePeer(validatorIndex: ValidatorIndex): void {
+  removePeer(validatorIndex: bigint): void {
     this.peers.delete(validatorIndex)
   }
 
   /**
    * Get peer information
    */
-  getPeer(validatorIndex: ValidatorIndex): PeerInfo | undefined {
+  getPeer(validatorIndex: bigint): PeerInfo | undefined {
     return this.peers.get(validatorIndex)
   }
 
   /**
    * Get all peers
    */
-  getAllPeers(): Map<ValidatorIndex, PeerInfo> {
+  getAllPeers(): Map<bigint, PeerInfo> {
     return new Map(this.peers)
   }
 
   /**
    * Get connected peers
    */
-  getConnectedPeers(): Map<ValidatorIndex, PeerInfo> {
-    const connected = new Map<ValidatorIndex, PeerInfo>()
+  getConnectedPeers(): Map<bigint, PeerInfo> {
+    const connected = new Map<bigint, PeerInfo>()
 
     for (const [index, peer] of this.peers) {
       if (peer.isConnected) {
@@ -94,8 +89,8 @@ export class PeerDiscoveryManager {
   /**
    * Get disconnected peers that should be connected
    */
-  getDisconnectedPeers(): Map<ValidatorIndex, PeerInfo> {
-    const disconnected = new Map<ValidatorIndex, PeerInfo>()
+  getDisconnectedPeers(): Map<bigint, PeerInfo> {
+    const disconnected = new Map<bigint, PeerInfo>()
     const now = Date.now()
 
     for (const [index, peer] of this.peers) {
@@ -132,7 +127,7 @@ export class PeerDiscoveryManager {
   /**
    * Mark peer as connected
    */
-  markPeerConnected(validatorIndex: ValidatorIndex): void {
+  markPeerConnected(validatorIndex: bigint): void {
     const peer = this.peers.get(validatorIndex)
     if (peer) {
       peer.isConnected = true
@@ -144,7 +139,7 @@ export class PeerDiscoveryManager {
   /**
    * Mark peer as disconnected
    */
-  markPeerDisconnected(validatorIndex: ValidatorIndex): void {
+  markPeerDisconnected(validatorIndex: bigint): void {
     const peer = this.peers.get(validatorIndex)
     if (peer) {
       peer.isConnected = false
@@ -154,7 +149,7 @@ export class PeerDiscoveryManager {
   /**
    * Record connection attempt
    */
-  recordConnectionAttempt(validatorIndex: ValidatorIndex): void {
+  recordConnectionAttempt(validatorIndex: bigint): void {
     const peer = this.peers.get(validatorIndex)
     if (peer) {
       peer.connectionAttempts++
@@ -165,7 +160,7 @@ export class PeerDiscoveryManager {
   /**
    * Update peer last seen time
    */
-  updatePeerLastSeen(validatorIndex: ValidatorIndex): void {
+  updatePeerLastSeen(validatorIndex: bigint): void {
     const peer = this.peers.get(validatorIndex)
     if (peer) {
       peer.lastSeen = Date.now()
@@ -176,11 +171,11 @@ export class PeerDiscoveryManager {
    * Get peers that need connection attempts
    */
   getPeersNeedingConnection(): Array<{
-    validatorIndex: ValidatorIndex
+    validatorIndex: bigint
     peer: PeerInfo
   }> {
     const now = Date.now()
-    const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
+    const peers: Array<{ validatorIndex: bigint; peer: PeerInfo }> = []
 
     for (const [index, peer] of this.peers) {
       if (this.shouldConnectToPeer(peer, now)) {
@@ -210,10 +205,10 @@ export class PeerDiscoveryManager {
    * Get peers where we should be the initiator
    */
   getPeersToInitiate(): Array<{
-    validatorIndex: ValidatorIndex
+    validatorIndex: bigint
     peer: PeerInfo
   }> {
-    const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
+    const peers: Array<{ validatorIndex: bigint; peer: PeerInfo }> = []
 
     for (const [index, peer] of this.peers) {
       if (peer.preferredInitiator === PreferredInitiator.LOCAL) {
@@ -228,10 +223,10 @@ export class PeerDiscoveryManager {
    * Get peers where remote should be the initiator
    */
   getPeersToAccept(): Array<{
-    validatorIndex: ValidatorIndex
+    validatorIndex: bigint
     peer: PeerInfo
   }> {
-    const peers: Array<{ validatorIndex: ValidatorIndex; peer: PeerInfo }> = []
+    const peers: Array<{ validatorIndex: bigint; peer: PeerInfo }> = []
 
     for (const [index, peer] of this.peers) {
       if (peer.preferredInitiator === PreferredInitiator.REMOTE) {
@@ -246,7 +241,7 @@ export class PeerDiscoveryManager {
    * Update preferred initiator for a peer
    */
   updatePreferredInitiator(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     preferredInitiator: PreferredInitiator,
   ): void {
     const peer = this.peers.get(validatorIndex)
@@ -259,8 +254,8 @@ export class PeerDiscoveryManager {
    * Compute preferred initiator based on validator indices
    */
   computePreferredInitiator(
-    validatorA: ValidatorIndex,
-    validatorB: ValidatorIndex,
+    validatorA: bigint,
+    validatorB: bigint,
   ): PreferredInitiator {
     // Simple rule: lower validator index initiates
     if (validatorA < validatorB) {
@@ -280,7 +275,7 @@ export class PeerDiscoveryManager {
     connectedPeers: number
     disconnectedPeers: number
     peersNeedingConnection: number
-    localValidatorIndex: ValidatorIndex | null
+    localValidatorIndex: bigint | null
     localNodeType: NodeType | null
   } {
     const totalPeers = this.peers.size
@@ -289,10 +284,10 @@ export class PeerDiscoveryManager {
     const peersNeedingConnection = this.getPeersNeedingConnection().length
 
     return {
-      totalPeers,
-      connectedPeers,
-      disconnectedPeers,
-      peersNeedingConnection,
+      totalPeers: Number(totalPeers),
+      connectedPeers: Number(connectedPeers),
+      disconnectedPeers: Number(disconnectedPeers),
+      peersNeedingConnection: Number(peersNeedingConnection),
       localValidatorIndex: this.localValidatorIndex,
       localNodeType: this.localNodeType,
     }
@@ -342,10 +337,7 @@ export class PeerDiscoveryManager {
   /**
    * Callback for when a peer needs connection
    */
-  private onPeerNeedsConnection(
-    validatorIndex: ValidatorIndex,
-    peer: PeerInfo,
-  ): void {
+  private onPeerNeedsConnection(validatorIndex: bigint, peer: PeerInfo): void {
     // This would be overridden by the connection manager
     console.log(
       `Peer ${validatorIndex} needs connection to ${peer.endpoint.host}:${peer.endpoint.port}`,
@@ -358,7 +350,7 @@ export class PeerDiscoveryManager {
   cleanupOldPeers(maxAgeMs = 300000): void {
     // 5 minutes
     const now = Date.now()
-    const toRemove: ValidatorIndex[] = []
+    const toRemove: bigint[] = []
 
     for (const [index, peer] of this.peers) {
       if (now - peer.lastSeen > maxAgeMs && !peer.isConnected) {
@@ -389,13 +381,13 @@ export class PeerDiscoveryManager {
     console.log('Starting peer discovery for JIP-5 compliance')
 
     // For testing, add a hardcoded peer (polkaJAM) if we're not that peer
-    if (this.localValidatorIndex !== 1) {
-      this.addPeer(1, {
-        index: 1,
+    if (this.localValidatorIndex !== 1n) {
+      this.addPeer(1n, {
+        index: 1n,
         publicKey: new Uint8Array(32), // Placeholder
         endpoint: {
           host: '127.0.0.1',
-          port: 30334,
+          port: 30334n,
           publicKey: new Uint8Array(32), // Placeholder
         },
       })
@@ -405,7 +397,7 @@ export class PeerDiscoveryManager {
     }
 
     // For testing, add our own node as a discoverable peer if we're validator 0
-    if (this.localValidatorIndex === 0) {
+    if (this.localValidatorIndex === 0n) {
       // polkaJAM should be able to discover us at 127.0.0.1:30333
       console.log(
         'Local node discoverable at 127.0.0.1:30333 for validator index 0',

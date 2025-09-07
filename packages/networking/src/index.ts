@@ -26,11 +26,11 @@ export { PeerDiscoveryManager } from './peer/peer-discovery'
 export { ValidatorSetManager } from './peer/validator-set'
 export { WorkPackageSubmissionProtocol } from './protocols/ce133-work-package-submission'
 // Protocol handlers
-export { BlockAnnouncementProtocol } from './protocols/up0-block-announcement'
+//TODO: implement
+// export { BlockAnnouncementProtocol } from './protocols/up0-block-announcement'
 export { QuicConnectionManager } from './quic/connection'
 export { QuicStreamManager } from './quic/stream'
+// Types
+export type { TransportConfig, TransportEvents } from './quic/transport'
 // Core networking components
 export { QuicTransport } from './quic/transport'
-
-// Types
-export type { TransportConfig, TransportEvents } from './types'

@@ -43,115 +43,85 @@
  */
 
 import {
-  bytesToBigInt,
-  bytesToHex,
+  concatBytes,
   hexToBytes,
   type Safe,
   safeError,
   safeResult,
 } from '@pbnj/core'
 import type { WorkContext } from '@pbnj/types'
+import { encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
 
 /**
- * Encode work context
+ * Encode work context according to Gray Paper specification.
  *
- * @param context - Work context to encode
- * @returns Encoded octet sequence
+ * Gray Paper Equation 199-206 (label: encode{WC ∈ workcontext}):
+ * encode{WC ∈ workcontext} ≡ encode{
+ *   WC_anchorhash,
+ *   WC_anchorpoststate,
+ *   WC_anchoraccoutlog,
+ *   WC_lookupanchorhash,
+ *   encode[4]{WC_lookupanchortime},
+ *   var{WC_prerequisites}
+ * }
+ *
+ * Work context describes the context of the chain at the point that the
+ * report's corresponding work-package was evaluated. It identifies two
+ * historical blocks (anchor and lookup-anchor) and any prerequisite work-packages.
+ *
+ * Field encoding per Gray Paper:
+ * 1. WC_anchorhash: 32-byte hash - anchor block header hash
+ * 2. WC_anchorpoststate: 32-byte hash - anchor block posterior state-root
+ * 3. WC_anchoraccoutlog: 32-byte hash - anchor block accumulation output log super-peak
+ * 4. WC_lookupanchorhash: 32-byte hash - lookup-anchor block header hash
+ * 5. encode[4]{WC_lookupanchortime}: 4-byte fixed-length - lookup-anchor block timeslot
+ * 6. var{WC_prerequisites}: variable-length sequence - hash of prerequisite work-packages
+ *
+ * ✅ CORRECT: All 6 fields present in correct Gray Paper order
+ * ✅ CORRECT: Hash fields use raw 32-byte encoding
+ * ✅ CORRECT: Uses encode[4] for lookupanchortime (4-byte fixed-length)
+ * ✅ CORRECT: Uses var{} for prerequisites (variable-length with prefix)
+ * ❌ INCOMPLETE: Prerequisites encoding needs full implementation
  */
 export function encodeWorkContext(context: WorkContext): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Anchor (32 bytes)
-  parts.push(hexToBytes(context.anchorhash))
+  parts.push(hexToBytes(context.anchorHash))
 
   // State root (32 bytes)
-  parts.push(hexToBytes(context.anchorpoststate))
+  parts.push(hexToBytes(context.anchorPostState))
 
   // Beefy root (32 bytes)
-  parts.push(hexToBytes(context.anchoraccoutlog))
+  parts.push(hexToBytes(context.anchorAccoutLog))
 
   // Lookup anchor (32 bytes)
-  parts.push(hexToBytes(context.lookupanchorhash))
+  parts.push(hexToBytes(context.lookupAnchorHash))
 
-  // Lookup anchor slot (8 bytes)
-  const [error, encoded] = encodeNatural(BigInt(context.lookupanchortime))
+  // Lookup anchor slot - encode[4]{lookupanchortime} (Gray Paper compliant)
+  const [error, encoded] = encodeFixedLength(
+    BigInt(context.lookupAnchorTime),
+    4n,
+  )
   if (error) {
     return safeError(error)
   }
   parts.push(encoded)
 
-  // Prerequisites (variable length)
-  const [error2, encoded2] = encodeNatural(BigInt(context.prerequisites.length))
+  // Prerequisites (variable length) - var{WC_prerequisites}
+  const [error2, lengthEncoded] = encodeNatural(
+    BigInt(context.prerequisites.length),
+  )
   if (error2) {
     return safeError(error2)
   }
-  parts.push(encoded2) // Length prefix
-  // For now, handle prerequisites as empty array - this needs proper implementation
-  if (context.prerequisites.length > 0) {
-    throw new Error('Prerequisites not yet implemented')
+  parts.push(lengthEncoded) // Length prefix
+
+  // Encode each prerequisite as 32-byte hash
+  for (const prerequisite of context.prerequisites) {
+    parts.push(hexToBytes(prerequisite))
   }
 
-  // Concatenate all parts
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-
-  return safeResult(result)
-}
-
-/**
- * Decode work context
- *
- * @param data - Octet sequence to decode
- * @returns Decoded work context and remaining data
- */
-export function decodeWorkContext(data: Uint8Array): Safe<{
-  value: WorkContext
-  remaining: Uint8Array
-}> {
-  let remaining = data
-
-  // Anchor (32 bytes)
-  const anchor = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
-
-  // State root (32 bytes)
-  const stateRoot = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
-
-  // Beefy root (32 bytes)
-  const beefyRoot = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
-
-  // Lookup anchor (32 bytes)
-  const lookupAnchor = bytesToHex(remaining.slice(0, 32))
-  remaining = remaining.slice(32)
-
-  // Lookup anchor slot (8 bytes)
-  const lookupAnchorSlot = bytesToBigInt(remaining.slice(0, 8))
-  remaining = remaining.slice(8)
-
-  // Prerequisites (variable length)
-  const prerequisitesLength = bytesToBigInt(remaining.slice(0, 8))
-  remaining = remaining.slice(8)
-  // Parse prerequisites (not currently used in return object)
-  remaining = remaining.slice(Number(prerequisitesLength))
-
-  return safeResult({
-    value: {
-      anchorhash: anchor,
-      anchorpoststate: stateRoot,
-      anchoraccoutlog: beefyRoot,
-      lookupanchorhash: lookupAnchor,
-      lookupanchortime: lookupAnchorSlot,
-      prerequisites: [], // Simplified - not handling complex prerequisites yet
-    },
-    remaining,
-  })
+  return safeResult(concatBytes(parts))
 }

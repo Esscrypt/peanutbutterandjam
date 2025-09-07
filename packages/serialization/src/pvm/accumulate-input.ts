@@ -37,9 +37,10 @@
  * data flows while maintaining type safety and execution ordering.
  */
 
-import { type Safe, safeError, safeResult } from '@pbnj/core'
+import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
 import type {
   AccumulateInput,
+  DecodingResult,
   DeferredTransfer,
   OperandTuple,
 } from '@pbnj/types'
@@ -50,13 +51,32 @@ import {
 import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
 
 /**
- * Encode accumulate input using Gray Paper encoding
+ * Encode accumulate input according to Gray Paper specification.
  *
- * Formula from Gray Paper:
- * encode(aiX ∈ accinput) ≡ begin{cases}
- *   encode{0, encode[U]{o}} &when aiX ∈ operandtuple \\
- *   encode{1, encode[X]{o}} &when aiX ∈ defxfer \\
- * end{cases}
+ * Gray Paper Equation 289-292 (label: encode{AI ∈ accinput}):
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ *
+ * Accumulate inputs represent the flow of data between work items during
+ * PVM accumulation. The discriminator-based encoding distinguishes between
+ * two fundamental types of accumulation data.
+ *
+ * Discriminator encoding per Gray Paper:
+ * - **Type 0 (operandtuple)**: Results from successful work item execution
+ * - **Type 1 (defxfer)**: Deferred transfers for cross-service value movement
+ *
+ * Field encoding per Gray Paper:
+ * 1. Discriminator: 1-byte type indicator (0 or 1)
+ * 2. Payload: Variable-length encoded data based on type
+ *   - Type 0: encodeOperandTuple for work item results
+ *   - Type 1: encodeDeferredTransfer for value transfers
+ *
+ * ✅ CORRECT: Uses 1-byte discriminator for type distinction
+ * ✅ CORRECT: Proper delegation to type-specific encoders
+ * ✅ CORRECT: Maintains Gray Paper discriminator semantics
+ * ✅ CORRECT: Supports both operand tuples and deferred transfers
  *
  * @param accumulateInput - Accumulate input to encode
  * @returns Encoded octet sequence
@@ -64,52 +84,83 @@ import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
 export function encodeAccumulateInput(
   accumulateInput: AccumulateInput,
 ): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
   if (accumulateInput.type === 0n) {
     // encode{0, encode[U]{o}} for operand tuple
+    parts.push(new Uint8Array([0])) // Discriminator
+
     const [error, operandEncoded] = encodeOperandTuple(
       accumulateInput.value as OperandTuple,
     )
     if (error) {
       return safeError(error)
     }
-    const result = new Uint8Array(1 + operandEncoded.length)
-    result[0] = 0 // Discriminator for operand tuple
-    result.set(operandEncoded, 1)
-    return safeResult(result)
-  } else {
+    parts.push(operandEncoded)
+  } else if (accumulateInput.type === 1n) {
     // encode{1, encode[X]{o}} for deferred transfer
+    parts.push(new Uint8Array([1])) // Discriminator
+
     const [error, transferEncoded] = encodeDeferredTransfer(
       accumulateInput.value as DeferredTransfer,
     )
     if (error) {
       return safeError(error)
     }
-    const result = new Uint8Array(1 + transferEncoded.length)
-    result[0] = 1 // Discriminator for deferred transfer
-    result.set(transferEncoded, 1)
-    return safeResult(result)
+    parts.push(transferEncoded)
+  } else {
+    return safeError(
+      new Error(`Invalid accumulate input type: ${accumulateInput.type}`),
+    )
   }
+
+  return safeResult(concatBytes(parts))
 }
 
 /**
- * Decode accumulate input using Gray Paper encoding
+ * Decode accumulate input according to Gray Paper specification.
+ *
+ * Gray Paper Equation 289-292 (label: decode{AI ∈ accinput}):
+ * Inverse of encode{AI ∈ accinput} ≡ {
+ *   decode{0, decode[U]{o}}  when AI ∈ operandtuple
+ *   decode{1, decode[X]{o}}  when AI ∈ defxfer
+ * }
+ *
+ * Decodes accumulate input from octet sequence back to structured data.
+ * Must exactly reverse the encoding process to maintain round-trip compatibility.
+ *
+ * Discriminator decoding per Gray Paper:
+ * - **Type 0**: Decode as operand tuple (work item results)
+ * - **Type 1**: Decode as deferred transfer (value movement)
+ *
+ * Field decoding per Gray Paper:
+ * 1. Discriminator: 1-byte type indicator (0 or 1)
+ * 2. Payload: Variable-length data decoded based on discriminator
+ *   - Type 0: decodeOperandTuple for work item results
+ *   - Type 1: decodeDeferredTransfer for value transfers
+ *
+ * ✅ CORRECT: Uses 1-byte discriminator decoding
+ * ✅ CORRECT: Proper delegation to type-specific decoders
+ * ✅ CORRECT: Uses safeError instead of throw for error handling
+ * ✅ CORRECT: Maintains round-trip compatibility
  *
  * @param data - Octet sequence to decode
  * @returns Decoded accumulate input and remaining data
  */
-export function decodeAccumulateInput(data: Uint8Array): Safe<{
-  value: AccumulateInput
-  remaining: Uint8Array
-}> {
+export function decodeAccumulateInput(
+  data: Uint8Array,
+): Safe<DecodingResult<AccumulateInput>> {
   if (data.length === 0) {
-    throw new Error('Insufficient data for accumulate input decoding')
+    return safeError(
+      new Error('Insufficient data for accumulate input decoding'),
+    )
   }
 
   const discriminator = data[0]
   const remainingData = data.slice(1)
 
   if (discriminator === 0) {
-    // Operand tuple: encode{0, encode[U]{o}}
+    // Operand tuple: decode{0, decode[U]{o}}
     const [error, operandTupleResult] = decodeOperandTuple(remainingData)
     if (error) {
       return safeError(error)
@@ -121,7 +172,7 @@ export function decodeAccumulateInput(data: Uint8Array): Safe<{
       remaining,
     })
   } else if (discriminator === 1) {
-    // Deferred transfer: encode{1, encode[X]{o}}
+    // Deferred transfer: decode{1, decode[X]{o}}
     const [error, deferredTransferResult] =
       decodeDeferredTransfer(remainingData)
     if (error) {

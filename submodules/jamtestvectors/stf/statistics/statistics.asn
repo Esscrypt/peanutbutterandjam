@@ -3,7 +3,7 @@
 StatisticsModule DEFINITIONS ::= BEGIN
 
 IMPORTS
-    TimeSlot, ValidatorIndex, ValidatorsStatistics, Extrinsic, ValidatorsData
+    TimeSlot, bigint, ValidatorsStatistics, Extrinsic, ValidatorsData
         FROM JamTypes;
 
 
@@ -22,7 +22,7 @@ Input ::= SEQUENCE {
     -- [H_t] Block timeslot
     slot TimeSlot,
     -- [H_i] Block author
-    author-index ValidatorIndex,
+    author-index bigint,
     -- [E] Extrinsic
     extrinsic Extrinsic
 }

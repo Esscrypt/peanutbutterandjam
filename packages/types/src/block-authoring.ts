@@ -5,11 +5,15 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import type { Safe, SafePromise } from '@pbnj/core'
 import type { Hex } from 'viem'
-import type { Extrinsic, ValidatorKey } from './core'
+import type { ValidatorKey } from './consensus'
+import type { Extrinsic } from './core'
+import type { BlockHeader } from './global-state'
 import type {
-  BlockHeader,
+  Assurance,
+  Dispute,
+  Guarantee,
+  Preimage,
   SafroleTicket,
   WorkDigest,
   WorkItem,
@@ -30,7 +34,6 @@ export type {
   WorkPackage,
   WorkItem,
 }
-export type { WorkError } from './pvm'
 
 /**
  * Availability specification
@@ -50,16 +53,29 @@ export interface State {
   validators: ValidatorKey[]
 }
 
-export interface ValidatorSet {
-  validators: ValidatorKey[]
-  totalStake: bigint
-  minStake: bigint
-  epoch: bigint
-}
+// Note: ValidatorSet removed - Gray Paper uses separate stagingset, activeset, previousset
+// Use those from GlobalState instead of a unified ValidatorSet abstraction
 
 export interface Block {
   header: BlockHeader
-  body: Extrinsic[]
+  body: BlockBody
+}
+
+export interface BlockBody {
+  /** XT_tickets: Safrole consensus tickets for slot sealing randomness */
+  tickets: SafroleTicket[]
+
+  /** XT_preimages: Data blobs referenced by hash in work packages */
+  preimages: Preimage[]
+
+  /** XT_guarantees: Validator attestations for work report validity */
+  guarantees: Guarantee[]
+
+  /** XT_assurances: Validator attestations for data availability */
+  assurances: Assurance[]
+
+  /** XT_disputes: Challenge proofs for invalid work or validator misbehavior */
+  disputes: Dispute[]
 }
 
 /**
@@ -99,7 +115,7 @@ export interface BlockAuthoringContext {
   currentTimeslot: bigint
 
   // Validator information
-  validatorSet: ValidatorSet
+  validatorSet: ValidatorKey[]
   authorIndex: bigint
 
   // Available extrinsics and work packages
@@ -261,39 +277,6 @@ export interface SubmissionResult {
 }
 
 /**
- * Block authoring service interface
- */
-export interface BlockAuthoringService {
-  // Configuration
-  configure(config: BlockAuthoringConfig): void
-
-  // Block creation
-  createBlock(context: BlockAuthoringContext): SafePromise<BlockAuthoringResult>
-
-  // Header management
-  constructHeader(
-    parent: BlockHeader | null,
-    extrinsics: Extrinsic[],
-  ): Safe<BlockHeader>
-
-  // Work package handling
-  processWorkPackages(packages: WorkPackage[]): SafePromise<WorkReport[]>
-
-  // Extrinsic management
-  validateExtrinsics(extrinsics: Extrinsic[]): SafePromise<ValidationResult>
-
-  // State management
-  updateState(block: Block): Safe<State>
-
-  // Submission
-  submitBlock(block: Block): SafePromise<SubmissionResult>
-
-  // Utility methods
-  getMetrics(): BlockAuthoringMetrics
-  resetMetrics(): void
-}
-
-/**
  * Header construction context
  */
 export interface HeaderConstructionContext {
@@ -301,7 +284,7 @@ export interface HeaderConstructionContext {
   extrinsics: Extrinsic[]
   workReports: WorkReport[]
   currentTimeslot: bigint
-  validatorSet: ValidatorSet
+  validatorSet: ValidatorKey[]
   authorIndex: bigint
 }
 
@@ -332,7 +315,7 @@ export interface ExtrinsicValidationContext {
   extrinsics: Extrinsic[]
   state: State
   blockHeader: BlockHeader
-  validatorSet: ValidatorSet
+  validatorSet: ValidatorKey[]
 }
 
 /**
@@ -410,88 +393,5 @@ export interface Validator {
   isActive: boolean
 }
 
-// ============================================================================
-// Genesis Types
-// ============================================================================
-
-/**
- * Genesis state structure
- */
-export interface GenesisState {
-  // Block information
-  genesisBlock: {
-    number: bigint
-    hash: Hex
-    parentHash: Hex
-    timestamp: bigint
-  }
-
-  // Initial state
-  state: {
-    accounts: Map<Hex, Account>
-    validators: Validator[]
-    safrole: {
-      epoch: bigint
-      timeslot: bigint
-      entropy: string
-      tickets: SafroleTicket[]
-    }
-    authpool: Hex[]
-    recent: Hex[]
-    lastAccount: bigint
-    stagingset: Hex[]
-    activeset: Hex[]
-    previousset: Hex[]
-    reports: WorkReport[]
-    thetime: bigint
-    authqueue: Hex[]
-    privileges: Map<Hex, bigint>
-    disputes: unknown[]
-    activity: Map<Hex, bigint>
-    ready: boolean
-    accumulated: unknown[]
-  }
-
-  // Network configuration
-  network: {
-    chainId: string
-    protocolVersion: string
-    slotDuration: bigint
-    epochLength: bigint
-    maxValidators: bigint
-    minStake: bigint
-  }
-
-  // Initial work packages (if unknown)
-  initialWorkPackages?: WorkPackage[]
-
-  // Initial extrinsics (if unknown)
-  initialExtrinsics?: Extrinsic[]
-}
-
-/**
- * Genesis configuration
- */
-export interface GenesisConfig {
-  // Genesis file path
-  genesisPath?: string
-
-  // Genesis data (if not loading from file)
-  genesisData?: GenesisState
-
-  // Genesis validation options
-  validation: {
-    validateGenesis: boolean
-    allowEmptyGenesis: boolean
-    requireValidators: boolean
-    requireAccounts: boolean
-  }
-
-  // Genesis import options
-  import: {
-    createMissingAccounts: boolean
-    initializeValidators: boolean
-    resetExistingState: boolean
-    backupExistingState: boolean
-  }
-}
+// Note: Genesis types moved to @pbnj/types/genesis and @pbnj/types/genesis-config
+// for Gray Paper compliance. Use those instead of non-compliant types.

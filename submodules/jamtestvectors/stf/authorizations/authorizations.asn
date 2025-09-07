@@ -3,7 +3,7 @@
 AuthorizationsModule DEFINITIONS ::= BEGIN
 
 IMPORTS
-    AuthPools, AuthQueues, OpaqueHash, TimeSlot, CoreIndex
+    AuthPools, AuthQueues, OpaqueHash, TimeSlot, bigint
         FROM JamTypes;
 
 
@@ -13,7 +13,7 @@ State ::= SEQUENCE {
 }
 
 CoreAuthorizer ::= SEQUENCE {
-    core CoreIndex,
+    core bigint,
     auth-hash OpaqueHash
 }
 

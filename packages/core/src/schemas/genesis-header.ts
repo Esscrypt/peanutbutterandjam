@@ -47,7 +47,7 @@ export const genesisHeaderSchema = z.object({
 })
 
 // Genesis state schema
-export const genesisStateSchema = z.object({
+export const genesisHeaderStateSchema = z.object({
   state_root: hex32Schema,
   keyvals: z.array(
     z.object({
@@ -60,12 +60,12 @@ export const genesisStateSchema = z.object({
 // Complete genesis.json schema
 export const genesisJsonSchema = z.object({
   header: genesisHeaderSchema,
-  state: genesisStateSchema,
+  state: genesisHeaderStateSchema,
 })
 
 // Type inference
 export type GenesisHeader = z.infer<typeof genesisHeaderSchema>
-export type GenesisState = z.infer<typeof genesisStateSchema>
+export type GenesisHeaderState = z.infer<typeof genesisHeaderStateSchema>
 export type GenesisJson = z.infer<typeof genesisJsonSchema>
 
 /**

@@ -6,6 +6,7 @@
  */
 
 import type { Hex } from 'viem'
+import type { SafroleTicketCore } from './serialization'
 
 // Define ConsensusState interface
 export interface ConsensusState {
@@ -19,11 +20,7 @@ export interface ConsensusState {
   ticketAccumulator: Ticket[]
 }
 
-export interface Ticket {
-  /** Ticket identifier (hash) */
-  id: string
-  /** Entry index */
-  entryIndex: bigint
+export interface Ticket extends SafroleTicketCore {
   /** Ticket signature */
   signature: Hex
   /** Timestamp */
@@ -37,6 +34,57 @@ export interface TicketProof {
   signature: Hex
 }
 
+/**
+ * Gray Paper Compliant Safrole State Structure
+ *
+ * Gray Paper Equation 50 (label: eq:consensusstatecomposition): safrole ≡ (
+ *   pendingset, epochroot, sealtickets, ticketaccumulator
+ * )
+ *
+ * This represents the CANONICAL Safrole consensus state as defined in the Gray Paper.
+ * Safrole manages the slot-sealing lottery system that determines which validators
+ * can author blocks in each timeslot.
+ *
+ * Fields (Gray Paper terminology):
+ * - pendingset: validator keys for the next epoch (ValidatorKey sequence)
+ * - epochroot: Bandersnatch ring root composed from pendingset keys
+ * - sealtickets: current epoch's slot-sealer sequence (union type)
+ * - ticketaccumulator: highest-scoring tickets for next epoch
+ *
+ * SealTickets Union Type (Gray Paper Equation 67):
+ * sealtickets ∈ sequence[C_epochlen]{safroleticket} ∪ sequence[C_epochlen]{bskey}
+ *
+ * Two modes:
+ * 1. Regular Mode: sequence[C_epochlen]{safroleticket} - uses winning tickets
+ * 2. Fallback Mode: sequence[C_epochlen]{bskey} - uses Bandersnatch keys directly
+ *
+ * SealTickets Generation (Gray Paper Equation 201):
+ * sealtickets' ≡ {
+ *   Z(ticketaccumulator)           when e' = e + 1 ∧ m ≥ C_epochtailstart ∧ |ticketaccumulator| = C_epochlen
+ *   sealtickets                    when e' = e
+ *   F(entropy'_2, activeset')      otherwise (fallback mode)
+ * }
+ *
+ * Where:
+ * - Z: outside-in sequencer function (ticket reordering)
+ * - F: fallback key sequence function (Bandersnatch key selection)
+ * - C_epochlen: 600 (epoch length in timeslots)
+ * - C_epochtailstart: ticket submission cutoff
+ *
+ * Ticket Structure (Gray Paper Equation 74):
+ * safroleticket ≡ (st_id, st_entryindex)
+ * - st_id: hash (32 bytes) - ticket identifier from Ring VRF
+ * - st_entryindex: natural number - entry index in ticket entries
+ *
+ * ✅ GRAY PAPER COMPLIANT:
+ * - All 4 required fields present
+ * - Correct field types and meanings
+ * - Union type for sealTickets handles both modes
+ * - ticketAccumulator uses proper ticket structure
+ *
+ * Usage: Core consensus state for Safrole protocol
+ * Related: ValidatorKey, Ticket interfaces; entropy accumulation
+ */
 export interface SafroleState {
   /** Pending validator set (next epoch) - Gray Paper: pendingSet */
   pendingSet: ValidatorKey[]
@@ -209,20 +257,6 @@ export interface ValidatorKey {
   bls: Hex
   /** Metadata (last 128 Uint8Array) */
   metadata: Hex
-}
-
-/**
- * Epoch marker
- */
-export interface EpochMarker {
-  /** Epoch number */
-  epoch: number
-  /** Entropy accumulator */
-  entropyAccumulator: Hex
-  /** Validator keys */
-  validatorKeys: ValidatorKey[]
-  /** Epoch root */
-  epochRoot: Hex
 }
 
 /**

@@ -65,20 +65,20 @@ export interface BlockHeader {
 /**
  * Block body structure
  */
-export interface BlockBody {
-  /** Block extrinsics */
-  extrinsics: Uint8Array[]
-}
+// export interface BlockBody {
+//   /** Block extrinsics */
+//   extrinsics: Uint8Array[]
+// }
 
 /**
  * Complete block structure
  */
-export interface Block {
-  /** Block header */
-  header: BlockHeader
-  /** Block body */
-  body: BlockBody
-}
+// export interface Block {
+//   /** Block header */
+//   header: BlockHeader
+//   /** Block body */
+//   body: BlockBody
+// }
 
 /**
  * Transaction structure

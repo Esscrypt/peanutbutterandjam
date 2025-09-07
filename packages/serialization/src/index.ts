@@ -8,20 +8,10 @@
 // Import local types to avoid circular dependencies
 // Types are imported directly from @pbnj/types
 
-export * from './block/body'
-// Block serialization
-export * from './block/header'
-export * from './core/compact-number'
-export * from './core/discriminator'
-export * from './core/fixed-length'
-// Core serialization functions
-export * from './core/natural-number'
-export * from './core/sequence'
-export * from './core/simple-number'
+export * from './block'
+export * from './core'
 // State serialization
 export * from './state/state-serialization'
+export * from './utils'
 // Work package serialization
-export * from './work-package/context'
-export * from './work-package/package'
-export * from './work-package/work-digest'
-export * from './work-package/work-report'
+export * from './work-package'

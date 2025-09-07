@@ -5,145 +5,89 @@
  * This is a Common Ephemeral (CE) stream for requesting sequences of blocks.
  */
 
-import type { NetworkingStore } from '@pbnj/state'
-import type { BlockRequest, BlockResponse, StreamInfo } from '@pbnj/types'
+import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import {
+  bytesToHex,
+  concatBytes,
+  hexToBytes,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import {
+  calculateBlockHash,
+  decodeBlock,
+  decodeFixedLength,
+  decodeNatural,
+  encodeBlock,
+  encodeFixedLength,
+  encodeNatural,
+} from '@pbnj/serialization'
+import type { BlockStore } from '@pbnj/state'
+import type { Block, BlockRequest, BlockResponse } from '@pbnj/types'
 import { BlockRequestDirection } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
 /**
  * Block request protocol handler
  */
-export class BlockRequestProtocol {
-  private blockStore: Map<string, Uint8Array> = new Map()
-  private dbIntegration: NetworkingStore | null = null
+export class BlockRequestProtocol extends NetworkingProtocol<
+  BlockRequest,
+  BlockResponse
+> {
+  private blockCache: Map<Hex, Block> = new Map()
+  private blockStore: BlockStore
 
-  constructor(dbIntegration?: NetworkingStore) {
-    this.dbIntegration = dbIntegration || null
-  }
-
-  /**
-   * Set database integration for persistent storage
-   */
-  setDatabaseIntegration(dbIntegration: NetworkingStore): void {
-    this.dbIntegration = dbIntegration
-  }
-
-  /**
-   * Load state from database
-   */
-  async loadState(): Promise<void> {
-    if (!this.dbIntegration) return
-
-    try {
-      // Load blocks from database
-      // We'll store blocks in service account storage (service ID 2 for blocks)
-      const storage = await this.dbIntegration.getServiceAccountStore()
-
-      for (const [key, value] of storage) {
-        if (key.startsWith('block_')) {
-          const blockHash = key.replace('block_', '')
-          this.blockStore.set(blockHash, value)
-        }
-      }
-
-      console.log(`Loaded ${this.blockStore.size} blocks from database`)
-    } catch (error) {
-      console.error('Failed to load blocks from database:', error)
-    }
-  }
-
-  /**
-   * Add block to local store and persist to database
-   */
-  async addBlock(blockHash: Uint8Array, blockData: Uint8Array): Promise<void> {
-    const hashString = blockHash.toString()
-    this.blockStore.set(hashString, blockData)
-
-    // Persist to database if available
-    if (this.dbIntegration) {
-      try {
-        await this.dbIntegration.setServiceStorage(
-          `block_${hashString}`,
-          blockData,
-        )
-      } catch (error) {
-        console.error('Failed to persist block to database:', error)
-      }
-    }
-  }
-
-  /**
-   * Remove block from local store and database
-   */
-  async removeBlock(blockHash: Uint8Array): Promise<void> {
-    const hashString = blockHash.toString()
-    this.blockStore.delete(hashString)
-
-    // Note: We don't have a delete method in the current interface
-    // For now, we'll mark it as removed by setting a special value
-    if (this.dbIntegration) {
-      try {
-        await this.dbIntegration.setServiceStorage(
-          `removed_block_${hashString}`,
-          Buffer.from('removed'),
-        )
-      } catch (error) {
-        console.error('Failed to remove block from database:', error)
-      }
-    }
+  constructor(blockStore: BlockStore) {
+    super()
+    this.blockStore = blockStore
   }
 
   /**
    * Check if block is available locally
    */
-  hasBlock(blockHash: Uint8Array): boolean {
-    return this.blockStore.has(blockHash.toString())
+  hasBlock(blockHash: Hex): boolean {
+    return this.blockCache.has(blockHash)
   }
 
   /**
    * Get block from local store
    */
-  getBlock(blockHash: Uint8Array): Uint8Array | undefined {
-    return this.blockStore.get(blockHash.toString())
+  getBlock(blockHash: Hex): Safe<Block | null> {
+    return safeResult(this.blockCache.get(blockHash) ?? null)
   }
 
   /**
    * Get block from database if not in local store
    */
-  async getBlockFromDatabase(
-    blockHash: Uint8Array,
-  ): Promise<Uint8Array | null> {
+  async getBlockFromDatabase(blockHash: Hex): SafePromise<Block | null> {
     if (this.hasBlock(blockHash)) {
-      return this.getBlock(blockHash) || null
+      return this.getBlock(blockHash)!
     }
 
-    if (!this.dbIntegration) return null
+    if (!this.blockStore) return safeError(new Error('Block store not found'))
 
-    try {
-      const hashString = blockHash.toString()
-      const blockData = await this.dbIntegration.getServiceStorage(
-        `block_${hashString}`,
-      )
+    const [error, blockData] = await this.blockStore.getBlock(blockHash)
 
-      if (blockData && blockData.toString() !== 'removed') {
-        // Cache in local store
-        this.blockStore.set(hashString, blockData)
-        return blockData
-      }
-
-      return null
-    } catch (error) {
-      console.error('Failed to get block from database:', error)
-      return null
+    if (error) {
+      return safeError(error)
     }
+
+    if (blockData) {
+      // Cache in local store
+      this.blockCache.set(blockHash, blockData)
+      return safeResult(blockData)
+    }
+
+    return safeResult(null)
   }
 
   /**
    * Create block request message
    */
   createBlockRequest(
-    headerHash: Uint8Array,
+    headerHash: Hex,
     direction: BlockRequestDirection,
-    maximumBlocks: number,
+    maximumBlocks: bigint,
   ): BlockRequest {
     return {
       headerHash,
@@ -155,92 +99,83 @@ export class BlockRequestProtocol {
   /**
    * Process block request and generate response
    */
-  async processBlockRequest(
-    request: BlockRequest,
-  ): Promise<BlockResponse | null> {
-    const blocks: Uint8Array[] = []
+  async processRequest(request: BlockRequest): SafePromise<BlockResponse> {
+    const rawBlocks: Block[] = []
     let currentHash = request.headerHash
     let blocksFound = 0
 
     if (request.direction === BlockRequestDirection.ASCENDING_EXCLUSIVE) {
       // Find children of the given block
       while (blocksFound < request.maximumBlocks) {
-        const childHash = await this.findChildBlock(currentHash)
-        if (!childHash) break
+        const [error, childBlock] =
+          await this.blockStore.getChildBlock(currentHash)
+        if (error) {
+          return safeError(error)
+        }
 
-        const blockData = await this.getBlockFromDatabase(childHash)
-        if (!blockData) break
+        if (!childBlock) break
+
+        const [childBlockHashError, childBlockHash] =
+          calculateBlockHash(childBlock)
+        if (childBlockHashError) {
+          return safeError(childBlockHashError)
+        }
 
         // Check if block can be finalized
-        if (!(await this.canBeFinalized(childHash))) break
+        if (!(await this.canBeFinalized(childBlockHash))) break
 
-        blocks.push(blockData)
+        rawBlocks.push(childBlock)
         blocksFound++
-        currentHash = childHash
+        currentHash = childBlockHash
       }
     } else if (
       request.direction === BlockRequestDirection.DESCENDING_INCLUSIVE
     ) {
-      // Start with the given block and go up the chain
-      let blockData = await this.getBlockFromDatabase(currentHash)
-      if (blockData && (await this.canBeFinalized(currentHash))) {
-        blocks.push(blockData)
-        blocksFound++
-      }
-
       while (blocksFound < request.maximumBlocks) {
-        const parentHash = await this.findParentBlock(currentHash)
-        if (!parentHash) break
+        const [error, parentBlock] =
+          await this.blockStore.getParentBlock(currentHash)
+        if (error) {
+          return safeError(error)
+        }
 
-        blockData = await this.getBlockFromDatabase(parentHash)
-        if (!blockData) break
+        if (!parentBlock) break
 
-        if (!(await this.canBeFinalized(parentHash))) break
+        const [parentBlockHashError, parentBlockHash] =
+          calculateBlockHash(parentBlock)
+        if (parentBlockHashError) {
+          return safeError(parentBlockHashError)
+        }
 
-        blocks.push(blockData)
+        if (!(await this.canBeFinalized(parentBlockHash))) break
+
+        rawBlocks.push(parentBlock)
         blocksFound++
-        currentHash = parentHash
+        currentHash = parentBlockHash
       }
     }
 
-    if (blocks.length === 0) {
-      return null
+    if (rawBlocks.length === 0) {
+      return safeResult({
+        blocks: [],
+      })
     }
 
-    return {
-      blocks,
+    // Encode blocks using Gray Paper serialization as per JAMNP-S specification
+    const encodedBlocks: Block[] = []
+    for (const block of rawBlocks) {
+      encodedBlocks.push(block)
     }
-  }
 
-  /**
-   * Find child block by examining block data
-   * This is a simplified implementation - in practice, you'd parse the block header
-   */
-  private async findChildBlock(
-    _parentHash: Uint8Array,
-  ): Promise<Uint8Array | null> {
-    // This would require parsing block headers to find child relationships
-    // For now, we'll return null as this is a placeholder implementation
-    return null
-  }
-
-  /**
-   * Find parent block by examining block data
-   * This is a simplified implementation - in practice, you'd parse the block header
-   */
-  private async findParentBlock(
-    _childHash: Uint8Array,
-  ): Promise<Uint8Array | null> {
-    // This would require parsing block headers to find parent relationships
-    // For now, we'll return null as this is a placeholder implementation
-    return null
+    return safeResult({
+      blocks: encodedBlocks,
+    })
   }
 
   /**
    * Check if block can be finalized
    * This is a simplified implementation - in practice, you'd check finality criteria
    */
-  private async canBeFinalized(_blockHash: Uint8Array): Promise<boolean> {
+  private async canBeFinalized(_blockHash: Hex): Promise<boolean> {
     // This would require checking finality criteria
     // For now, we'll assume all blocks can be finalized
     return true
@@ -249,123 +184,128 @@ export class BlockRequestProtocol {
   /**
    * Serialize block request message
    */
-  serializeBlockRequest(request: BlockRequest): Uint8Array {
+  serializeRequest(request: BlockRequest): Safe<Uint8Array> {
     // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(32 + 1 + 4)
-    const view = new DataView(buffer)
-    let offset = 0
+    const parts: Uint8Array[] = []
 
-    // Write header hash (32 bytes)
-    new Uint8Array(buffer).set(request.headerHash, offset)
-    offset += 32
+    parts.push(hexToBytes(request.headerHash))
 
-    // Write direction (1 byte)
-    view.setUint8(offset, request.direction)
-    offset += 1
+    const [error, direction] = encodeFixedLength(BigInt(request.direction), 1n)
+    if (error) {
+      return safeError(error)
+    }
+    parts.push(direction)
 
-    // Write maximum blocks (4 bytes, little-endian)
-    view.setUint32(offset, request.maximumBlocks, true)
+    const [error2, maximumBlocks] = encodeFixedLength(request.maximumBlocks, 4n)
+    if (error2) {
+      return safeError(error2)
+    }
+    parts.push(maximumBlocks)
 
-    return new Uint8Array(buffer)
+    return safeResult(concatBytes(parts))
   }
 
   /**
    * Deserialize block request message
    */
-  deserializeBlockRequest(data: Uint8Array): BlockRequest {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
+  deserializeRequest(data: Uint8Array): Safe<BlockRequest> {
+    let currentData = data
+    const headerHash = bytesToHex(currentData.slice(0, 32))
+    currentData = currentData.slice(32)
 
-    // Read header hash (32 bytes)
-    const headerHash = data.slice(offset, offset + 32)
-    offset += 32
-
-    // Read direction (1 byte)
-    const direction = view.getUint8(offset) as BlockRequestDirection
-    offset += 1
-
-    // Read maximum blocks (4 bytes, little-endian)
-    const maximumBlocks = view.getUint32(offset, true)
-
-    return {
-      headerHash,
-      direction,
-      maximumBlocks,
+    const [error2, direction] = decodeFixedLength(currentData, 1n)
+    if (error2) {
+      return safeError(error2)
     }
-  }
-
-  /**
-   * Serialize block response message
-   */
-  serializeBlockResponse(response: BlockResponse): Uint8Array {
-    // Serialize according to JAMNP-S specification
-    const totalSize =
-      4 + response.blocks.reduce((size, block) => size + 4 + block.length, 0)
-    const buffer = new ArrayBuffer(totalSize)
-    const view = new DataView(buffer)
-    let offset = 0
-
-    // Write number of blocks (4 bytes, little-endian)
-    view.setUint32(offset, response.blocks.length, true)
-    offset += 4
-
-    // Write each block
-    for (const block of response.blocks) {
-      // Write block length (4 bytes, little-endian)
-      view.setUint32(offset, block.length, true)
-      offset += 4
-
-      // Write block data
-      new Uint8Array(buffer).set(block, offset)
-      offset += block.length
+    currentData = direction.remaining
+    const directionValue =
+      direction.value === 0n
+        ? BlockRequestDirection.ASCENDING_EXCLUSIVE
+        : BlockRequestDirection.DESCENDING_INCLUSIVE
+    const [error3, maximumBlocksResult] = decodeFixedLength(currentData, 4n)
+    if (error3) {
+      return safeError(error3)
     }
 
-    return new Uint8Array(buffer)
+    return safeResult({
+      headerHash: headerHash,
+      direction: directionValue as BlockRequestDirection,
+      maximumBlocks: maximumBlocksResult.value,
+    })
   }
 
   /**
    * Deserialize block response message
    */
-  deserializeBlockResponse(data: Uint8Array): BlockResponse {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
-
-    // Read number of blocks (4 bytes, little-endian)
-    const numBlocks = view.getUint32(offset, true)
-    offset += 4
+  deserializeResponse(data: Uint8Array): Safe<BlockResponse> {
+    let currentData = data
+    const [error, numberOfBlocksResult] = decodeNatural(currentData)
+    if (error) {
+      return safeError(error)
+    }
+    const numBlocks = numberOfBlocksResult.value
+    currentData = numberOfBlocksResult.remaining
 
     // Read each block
-    const blocks: Uint8Array[] = []
+    const blocks: Block[] = []
     for (let i = 0; i < numBlocks; i++) {
-      // Read block length (4 bytes, little-endian)
-      const blockLength = view.getUint32(offset, true)
-      offset += 4
-
-      // Read block data
-      const block = data.slice(offset, offset + blockLength)
-      offset += blockLength
-
-      blocks.push(block)
+      const [error, block] = decodeBlock(currentData)
+      if (error) {
+        return safeError(error)
+      }
+      blocks.push(block.value)
     }
 
-    return {
-      blocks,
-    }
+    return safeResult({ blocks })
   }
 
   /**
-   * Handle incoming stream data
+   * Serialize block response message
+   * According to JAMNP-S specification: <-- [Block] where each Block = As in GP
    */
-  async handleStreamData(
-    _stream: StreamInfo,
-    data: Uint8Array,
-  ): Promise<BlockResponse | null> {
-    try {
-      const request = this.deserializeBlockRequest(data)
-      return await this.processBlockRequest(request)
-    } catch (error) {
-      console.error('Failed to handle stream data:', error)
-      return null
+  //   Direction = 0 (Ascending exclusive) OR 1 (Descending inclusive) (Single byte)
+  // Maximum Blocks = u32
+  // Block = As in GP
+
+  // Node -> Node
+
+  // --> Header Hash ++ Direction ++ Maximum Blocks
+  // --> FIN
+  // <-- [Block]
+  // <-- FIN
+  serializeResponse(response: BlockResponse): Safe<Uint8Array> {
+    // Serialize according to JAMNP-S specification
+
+    const parts: Uint8Array[] = []
+    const [error, numberOfBlocks] = encodeNatural(
+      BigInt(response.blocks.length),
+    )
+    if (error) {
+      return safeError(error)
     }
+    parts.push(numberOfBlocks)
+
+    // Write each serialized block (already Gray Paper encoded)
+    for (const block of response.blocks) {
+      const [error, encodedBlock] = encodeBlock(block)
+      if (error) {
+        return safeError(error)
+      }
+      parts.push(encodedBlock)
+    }
+
+    return safeResult(concatBytes(parts))
+  }
+
+  async processResponse(response: BlockResponse): SafePromise<void> {
+    for (const block of response.blocks) {
+      const [error, blockHash] = calculateBlockHash(block)
+      if (error) {
+        return safeError(error)
+      }
+      this.blockCache.set(blockHash, block)
+      this.blockStore.storeBlock(block)
+    }
+    return safeResult(undefined)
   }
 }

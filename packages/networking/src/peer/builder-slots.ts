@@ -5,40 +5,32 @@
  * Handles builder registration, slot assignment, and connection management
  */
 
-import type {
-  CoreIndex,
-  NodeType,
-  ValidatorIndex,
-  ValidatorMetadata,
-} from '@pbnj/types'
+import type { NodeType, ValidatorMetadata } from '@pbnj/types'
 
 /**
  * Builder information interface
  */
 interface BuilderInfo {
-  validatorIndex: ValidatorIndex
+  validatorIndex: bigint
   metadata: ValidatorMetadata
   isConnected: boolean
   connectionId: string | null
   lastActivity: number
-  assignedSlots: CoreIndex[]
+  assignedSlots: bigint[]
 }
 
 /**
  * Builder slots manager
  */
 export class BuilderSlotsManager {
-  private builders: Map<ValidatorIndex, BuilderInfo> = new Map()
-  private slotAssignments: Map<CoreIndex, ValidatorIndex> = new Map()
+  private builders: Map<bigint, BuilderInfo> = new Map()
+  private slotAssignments: Map<bigint, bigint> = new Map()
   private maxSlotsPerBuilder = 10
 
   /**
    * Set local validator information
    */
-  setLocalValidator(
-    _validatorIndex: ValidatorIndex,
-    _nodeType: NodeType,
-  ): void {
+  setLocalValidator(_validatorIndex: bigint, _nodeType: NodeType): void {
     // Store local validator info for future use
     // TODO: Implement local validator tracking
   }
@@ -46,10 +38,7 @@ export class BuilderSlotsManager {
   /**
    * Register a new builder
    */
-  registerBuilder(
-    validatorIndex: ValidatorIndex,
-    metadata: ValidatorMetadata,
-  ): void {
+  registerBuilder(validatorIndex: bigint, metadata: ValidatorMetadata): void {
     const builderInfo: BuilderInfo = {
       validatorIndex,
       metadata,
@@ -65,7 +54,7 @@ export class BuilderSlotsManager {
   /**
    * Unregister a builder
    */
-  unregisterBuilder(validatorIndex: ValidatorIndex): void {
+  unregisterBuilder(validatorIndex: bigint): void {
     // Remove slot assignments
     const builder = this.builders.get(validatorIndex)
     if (builder) {
@@ -81,22 +70,22 @@ export class BuilderSlotsManager {
   /**
    * Get builder information
    */
-  getBuilder(validatorIndex: ValidatorIndex): BuilderInfo | undefined {
+  getBuilder(validatorIndex: bigint): BuilderInfo | undefined {
     return this.builders.get(validatorIndex)
   }
 
   /**
    * Get all builders
    */
-  getAllBuilders(): Map<ValidatorIndex, BuilderInfo> {
+  getAllBuilders(): Map<bigint, BuilderInfo> {
     return new Map(this.builders)
   }
 
   /**
    * Get connected builders
    */
-  getConnectedBuilders(): Map<ValidatorIndex, BuilderInfo> {
-    const connected = new Map<ValidatorIndex, BuilderInfo>()
+  getConnectedBuilders(): Map<bigint, BuilderInfo> {
+    const connected = new Map<bigint, BuilderInfo>()
 
     for (const builder of this.builders.values()) {
       if (builder.isConnected) {
@@ -110,10 +99,7 @@ export class BuilderSlotsManager {
   /**
    * Mark builder as connected
    */
-  markBuilderConnected(
-    validatorIndex: ValidatorIndex,
-    connectionId: string,
-  ): void {
+  markBuilderConnected(validatorIndex: bigint, connectionId: string): void {
     const builder = this.builders.get(validatorIndex)
     if (builder) {
       builder.isConnected = true
@@ -125,7 +111,7 @@ export class BuilderSlotsManager {
   /**
    * Mark builder as disconnected
    */
-  markBuilderDisconnected(validatorIndex: ValidatorIndex): void {
+  markBuilderDisconnected(validatorIndex: bigint): void {
     const builder = this.builders.get(validatorIndex)
     if (builder) {
       builder.isConnected = false
@@ -137,7 +123,7 @@ export class BuilderSlotsManager {
   /**
    * Update builder last activity
    */
-  updateBuilderActivity(validatorIndex: ValidatorIndex): void {
+  updateBuilderActivity(validatorIndex: bigint): void {
     const builder = this.builders.get(validatorIndex)
     if (builder) {
       builder.lastActivity = Date.now()
@@ -147,10 +133,7 @@ export class BuilderSlotsManager {
   /**
    * Assign a slot to a builder
    */
-  assignSlotToBuilder(
-    coreIndex: CoreIndex,
-    validatorIndex: ValidatorIndex,
-  ): boolean {
+  assignSlotToBuilder(coreIndex: bigint, validatorIndex: bigint): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -175,10 +158,7 @@ export class BuilderSlotsManager {
   /**
    * Unassign a slot from a builder
    */
-  unassignSlotFromBuilder(
-    coreIndex: CoreIndex,
-    validatorIndex: ValidatorIndex,
-  ): boolean {
+  unassignSlotFromBuilder(coreIndex: bigint, validatorIndex: bigint): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -198,15 +178,15 @@ export class BuilderSlotsManager {
   /**
    * Get builder assigned to a slot
    */
-  getBuilderForSlot(coreIndex: CoreIndex): ValidatorIndex | undefined {
+  getBuilderForSlot(coreIndex: bigint): bigint | undefined {
     return this.slotAssignments.get(coreIndex)
   }
 
   /**
    * Get all builders for a slot (for future multi-builder support)
    */
-  getBuildersForSlot(coreIndex: CoreIndex): ValidatorIndex[] {
-    const builders: ValidatorIndex[] = []
+  getBuildersForSlot(coreIndex: bigint): bigint[] {
+    const builders: bigint[] = []
 
     for (const [slot, validatorIndex] of this.slotAssignments.entries()) {
       if (slot === coreIndex) {
@@ -220,7 +200,7 @@ export class BuilderSlotsManager {
   /**
    * Get slots assigned to a builder
    */
-  getSlotsForBuilder(validatorIndex: ValidatorIndex): CoreIndex[] {
+  getSlotsForBuilder(validatorIndex: bigint): bigint[] {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return []
@@ -231,24 +211,21 @@ export class BuilderSlotsManager {
   /**
    * Get all slot assignments
    */
-  getAllSlotAssignments(): Map<CoreIndex, ValidatorIndex> {
+  getAllSlotAssignments(): Map<bigint, bigint> {
     return new Map(this.slotAssignments)
   }
 
   /**
    * Check if a slot is assigned
    */
-  isSlotAssigned(coreIndex: CoreIndex): boolean {
+  isSlotAssigned(coreIndex: bigint): boolean {
     return this.slotAssignments.has(coreIndex)
   }
 
   /**
    * Check if a builder is assigned to a slot
    */
-  isBuilderAssignedToSlot(
-    validatorIndex: ValidatorIndex,
-    coreIndex: CoreIndex,
-  ): boolean {
+  isBuilderAssignedToSlot(validatorIndex: bigint, coreIndex: bigint): boolean {
     const builder = this.builders.get(validatorIndex)
     if (!builder) {
       return false
@@ -259,12 +236,12 @@ export class BuilderSlotsManager {
   /**
    * Get available slots (not assigned to any builder)
    */
-  getAvailableSlots(totalSlots: number): CoreIndex[] {
-    const available: CoreIndex[] = []
+  getAvailableSlots(totalSlots: number): bigint[] {
+    const available: bigint[] = []
 
     for (let i = 0; i < totalSlots; i++) {
-      if (!this.slotAssignments.has(i as CoreIndex)) {
-        available.push(i as CoreIndex)
+      if (!this.slotAssignments.has(BigInt(i))) {
+        available.push(BigInt(i))
       }
     }
 
@@ -275,11 +252,11 @@ export class BuilderSlotsManager {
    * Get overloaded builders (with more than max slots)
    */
   getOverloadedBuilders(): Array<{
-    validatorIndex: ValidatorIndex
+    validatorIndex: bigint
     slotCount: number
   }> {
     const overloaded: Array<{
-      validatorIndex: ValidatorIndex
+      validatorIndex: bigint
       slotCount: number
     }> = []
 
@@ -299,11 +276,11 @@ export class BuilderSlotsManager {
    * Get underutilized builders (with fewer than max slots)
    */
   getUnderutilizedBuilders(): Array<{
-    validatorIndex: ValidatorIndex
+    validatorIndex: bigint
     slotCount: number
   }> {
     const underutilized: Array<{
-      validatorIndex: ValidatorIndex
+      validatorIndex: bigint
       slotCount: number
     }> = []
 
@@ -380,25 +357,25 @@ export class BuilderSlotsManager {
     const disconnectedBuilders = totalBuilders - connectedBuilders
     const totalSlotAssignments = this.slotAssignments.size
 
-    let totalSlots = 0
+    let totalSlots = 0n
     for (const builder of this.builders.values()) {
-      totalSlots += builder.assignedSlots.length
+      totalSlots += BigInt(builder.assignedSlots.length)
     }
 
     const averageSlotsPerBuilder =
-      totalBuilders > 0 ? totalSlots / totalBuilders : 0
+      totalBuilders > 0 ? Number(totalSlots / BigInt(totalBuilders)) : 0
     const overloaded = this.getOverloadedBuilders().length
     const underutilized = this.getUnderutilizedBuilders().length
 
     return {
-      totalBuilders,
-      connectedBuilders,
-      disconnectedBuilders,
-      totalSlotAssignments,
-      averageSlotsPerBuilder,
+      totalBuilders: Number(totalBuilders),
+      connectedBuilders: Number(connectedBuilders),
+      disconnectedBuilders: Number(disconnectedBuilders),
+      totalSlotAssignments: Number(totalSlotAssignments),
+      averageSlotsPerBuilder: Number(averageSlotsPerBuilder),
       maxSlotsPerBuilder: this.maxSlotsPerBuilder,
-      overloadedBuilders: overloaded,
-      underutilizedBuilders: underutilized,
+      overloadedBuilders: Number(overloaded),
+      underutilizedBuilders: Number(underutilized),
     }
   }
 
@@ -423,7 +400,7 @@ export class BuilderSlotsManager {
   cleanupInactiveBuilders(maxInactiveTime = 300000): void {
     // 5 minutes
     const now = Date.now()
-    const toRemove: ValidatorIndex[] = []
+    const toRemove: bigint[] = []
 
     for (const [validatorIndex, builder] of this.builders) {
       if (

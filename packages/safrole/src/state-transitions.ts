@@ -23,7 +23,7 @@ import type {
   RingVRFInput,
   SafroleInput,
   SafroleOutput,
-  ConsensusSafroleState as SafroleState,
+  SafroleState,
   Ticket,
   ValidatorKey,
 } from '@pbnj/types'

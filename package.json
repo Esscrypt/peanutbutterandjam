@@ -12,7 +12,7 @@
     "build": "turbo run build --output-logs=full --log-order=stream",
     "check": "turbo run check --cache=local:r,remote:r --output-logs=full",
     "clean": "turbo run clean && rm -rf node_modules",
-    "db:migrate:core": "turbo run db:migrate:core --filter @oogabooga/database",
+    "db:migrate:core": "turbo run db:migrate:core --filter @pbnj/state",
     "format": "biome format . --write",
     "generate": "turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",

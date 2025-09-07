@@ -5,7 +5,7 @@ from jam_types import (
     ValidatorsStatistics,
     Struct,
     TimeSlot,
-    ValidatorIndex,
+    bigint,
     ValidatorsData,
 )
 from jam_types import class_name as n
@@ -28,7 +28,7 @@ class StatisticsInput(Struct):
         # [H_t] Block timeslot.
         ('slot', n(TimeSlot)),
         # [H_i] Block author index.
-        ('author_index', n(ValidatorIndex)),
+        ('author_index', n(bigint)),
         # [E] Extrinsics.
         ('extrinsic', n(Extrinsics)),
     ]

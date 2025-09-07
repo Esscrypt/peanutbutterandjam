@@ -12,10 +12,9 @@ import type {
   PeerInfo,
   StreamInfo,
   StreamKind,
-  ValidatorIndex,
   ValidatorMetadata,
 } from '@pbnj/types'
-import { PreferredInitiator } from '@pbnj/types'
+import { PreferredInitiator, StreamState } from '@pbnj/types'
 import type { QuicTransport } from '../quic/transport'
 import type { GridStructureManager } from './grid-structure'
 import type { PeerDiscoveryManager } from './peer-discovery'
@@ -25,7 +24,7 @@ import type { ValidatorSetManager } from './validator-set'
  * Connection information
  */
 interface ConnectionInfo {
-  validatorIndex: ValidatorIndex
+  validatorIndex: bigint
   endpoint: ConnectionEndpoint
   isConnected: boolean
   connectionId: string | null
@@ -38,12 +37,12 @@ interface ConnectionInfo {
  * Connection manager
  */
 export class ConnectionManager {
-  private connections: Map<ValidatorIndex, ConnectionInfo> = new Map()
+  private connections: Map<bigint, ConnectionInfo> = new Map()
   private transport: QuicTransport
   private validatorSetManager: ValidatorSetManager
   private peerDiscoveryManager: PeerDiscoveryManager
   private gridStructureManager: GridStructureManager
-  private localValidatorIndex: ValidatorIndex | null = null
+  private localValidatorIndex: bigint | null = null
   private localNodeType: NodeType | null = null
 
   private keepAliveInterval = 30000 // 30 seconds (QUIC keepalive interval)
@@ -64,7 +63,7 @@ export class ConnectionManager {
   /**
    * Set local validator information
    */
-  setLocalValidator(validatorIndex: ValidatorIndex, nodeType: NodeType): void {
+  setLocalValidator(validatorIndex: bigint, nodeType: NodeType): void {
     this.localValidatorIndex = validatorIndex
     this.localNodeType = nodeType
     this.peerDiscoveryManager.setLocalValidator(validatorIndex, nodeType)
@@ -230,7 +229,7 @@ export class ConnectionManager {
    * Attempt connection to a validator
    */
   async attemptConnection(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     metadata: ValidatorMetadata,
   ): Promise<boolean> {
     try {
@@ -260,7 +259,7 @@ export class ConnectionManager {
    * Mark connection as established
    */
   private markConnectionEstablished(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     connectionInfo: { connectionId: string },
   ): void {
     const peer = this.peerDiscoveryManager.getPeer(validatorIndex)
@@ -290,7 +289,7 @@ export class ConnectionManager {
   /**
    * Mark connection as closed
    */
-  private markConnectionClosed(validatorIndex: ValidatorIndex): void {
+  private markConnectionClosed(validatorIndex: bigint): void {
     // Update peer discovery
     this.peerDiscoveryManager.markPeerDisconnected(validatorIndex)
 
@@ -305,7 +304,7 @@ export class ConnectionManager {
    */
   private extractValidatorIndex(_connectionInfo: {
     connectionId: string
-  }): ValidatorIndex | null {
+  }): bigint | null {
     // TODO: Implement validator index extraction from connection info
     return null
   }
@@ -316,14 +315,14 @@ export class ConnectionManager {
   private routeStreamToProtocol(streamInfo: StreamInfo): void {
     // This would route the stream to the appropriate protocol handler
     // based on the stream kind
-    console.log(`Routing stream ${streamInfo.streamId} to protocol handler`)
+    console.log(`Routing stream ${streamInfo.id} to protocol handler`)
   }
 
   /**
    * Create stream to a validator
    */
   async createStream(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     streamKind: StreamKind,
   ): SafePromise<StreamInfo | null> {
     const connection = this.connections.get(validatorIndex)
@@ -342,9 +341,14 @@ export class ConnectionManager {
 
     // Create stream info
     const streamInfo: StreamInfo = {
-      streamId,
-      streamKind,
-      isOpen: true,
+      id: streamId,
+      kind: streamKind as StreamKind,
+      state: StreamState.OPEN,
+      connectionId: connection.connectionId!,
+      isInitiator: true,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      quicStream: undefined,
       isBidirectional: true,
     }
 
@@ -358,7 +362,7 @@ export class ConnectionManager {
    * Send message to a validator
    */
   async sendMessage(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     streamKind: StreamKind,
     message: Uint8Array,
   ): SafePromise<boolean> {
@@ -372,10 +376,7 @@ export class ConnectionManager {
       return safeError(new Error('Stream not found'))
     }
 
-    const [error] = await this.transport.sendMessage(
-      streamInfo.streamId,
-      message,
-    )
+    const [error] = await this.transport.sendMessage(streamInfo.id, message)
     if (error) {
       return safeError(error)
     }
@@ -387,7 +388,7 @@ export class ConnectionManager {
    * Close stream to a validator
    */
   async closeStream(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     streamKind: StreamKind,
   ): SafePromise<boolean> {
     const connection = this.connections.get(validatorIndex)
@@ -400,7 +401,7 @@ export class ConnectionManager {
       return safeError(new Error('Stream not found'))
     }
 
-    const [error] = await this.transport.closeStream(streamInfo.streamId)
+    const [error] = await this.transport.closeStream(streamInfo.id)
     if (error) {
       return safeError(error)
     }
@@ -411,7 +412,7 @@ export class ConnectionManager {
   /**
    * Close connection to a validator
    */
-  async closeConnection(validatorIndex: ValidatorIndex): SafePromise<boolean> {
+  async closeConnection(validatorIndex: bigint): SafePromise<boolean> {
     const connection = this.connections.get(validatorIndex)
     if (!connection) {
       return safeError(new Error('Connection not found'))
@@ -453,21 +454,21 @@ export class ConnectionManager {
   /**
    * Get connection information
    */
-  getConnection(validatorIndex: ValidatorIndex): ConnectionInfo | undefined {
+  getConnection(validatorIndex: bigint): ConnectionInfo | undefined {
     return this.connections.get(validatorIndex)
   }
 
   /**
    * Get all connections
    */
-  getAllConnections(): Map<ValidatorIndex, ConnectionInfo> {
+  getAllConnections(): Map<bigint, ConnectionInfo> {
     return new Map(this.connections)
   }
 
   /**
    * Get connected validators
    */
-  getConnectedValidators(): ValidatorIndex[] {
+  getConnectedValidators(): bigint[] {
     return Array.from(this.connections.keys()).filter(
       (index) => this.connections.get(index)?.isConnected,
     )
@@ -476,7 +477,7 @@ export class ConnectionManager {
   /**
    * Check if connected to a validator
    */
-  isConnected(validatorIndex: ValidatorIndex): boolean {
+  isConnected(validatorIndex: bigint): boolean {
     const connection = this.connections.get(validatorIndex)
     return connection?.isConnected || false
   }
@@ -488,17 +489,17 @@ export class ConnectionManager {
     totalConnections: number
     connectedCount: number
     disconnectedCount: number
-    localValidatorIndex: ValidatorIndex | null
+    localValidatorIndex: bigint | null
     localNodeType: NodeType | null
   } {
     const totalConnections = this.connections.size
     const connectedCount = this.getConnectedValidators().length
-    const disconnectedCount = totalConnections - connectedCount
+    const disconnectedCount = Number(totalConnections - connectedCount)
 
     return {
-      totalConnections,
-      connectedCount,
-      disconnectedCount,
+      totalConnections: Number(totalConnections),
+      connectedCount: Number(connectedCount),
+      disconnectedCount: Number(disconnectedCount),
       localValidatorIndex: this.localValidatorIndex,
       localNodeType: this.localNodeType,
     }
@@ -601,8 +602,8 @@ export class ConnectionManager {
   private async performKeepalive(): Promise<void> {
     try {
       const connectedPeers = this.peerDiscoveryManager.getAllPeers()
-      const healthyConnections = new Set<ValidatorIndex>()
-      const unhealthyConnections = new Set<ValidatorIndex>()
+      const healthyConnections = new Set<bigint>()
+      const unhealthyConnections = new Set<bigint>()
 
       console.log(
         `Performing keepalive check for ${connectedPeers.size} connections`,
@@ -662,7 +663,7 @@ export class ConnectionManager {
    * Uses QUIC connection state and UP 0 stream status as indicators
    */
   private async checkConnectionHealth(
-    validatorIndex: ValidatorIndex,
+    validatorIndex: bigint,
     peerInfo: PeerInfo,
   ): Promise<boolean> {
     try {

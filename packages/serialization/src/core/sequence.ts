@@ -31,7 +31,7 @@
  */
 
 import { type Safe, safeError, safeResult } from '@pbnj/core'
-import type { Decoder, Encoder, Sequence } from '@pbnj/types'
+import type { Decoder, DecodingResult, Encoder, Sequence } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**
@@ -96,7 +96,7 @@ export function encodeSequenceGeneric<T>(
 export function decodeSequence(
   data: Uint8Array,
   count?: number,
-): Safe<{ value: bigint[]; remaining: Uint8Array }> {
+): Safe<DecodingResult<bigint[]>> {
   return decodeSequenceGeneric(data, decodeNatural, count)
 }
 
@@ -112,7 +112,7 @@ export function decodeSequenceGeneric<T>(
   data: Uint8Array,
   decoder: Decoder<T>,
   count?: number,
-): Safe<{ value: T[]; remaining: Uint8Array }> {
+): Safe<DecodingResult<T[]>> {
   const result: T[] = []
   let remaining = data
 
@@ -195,10 +195,9 @@ export function encodeSequenceWithLength(
  * @param data - Octet sequence to decode
  * @returns Decoded sequence and remaining data
  */
-export function decodeSequenceWithLength(data: Uint8Array): Safe<{
-  value: bigint[]
-  remaining: Uint8Array
-}> {
+export function decodeSequenceWithLength(
+  data: Uint8Array,
+): Safe<DecodingResult<bigint[]>> {
   // First decode the length
   const [error, result] = decodeNatural(data)
   if (error) {
@@ -257,7 +256,7 @@ export function decodeUint8Array(
   data: Uint8Array,
   elementLength: number,
   count: number,
-): Safe<{ value: Uint8Array[]; remaining: Uint8Array }> {
+): Safe<DecodingResult<Uint8Array[]>> {
   const totalLength = elementLength * count
 
   if (data.length < totalLength) {

@@ -5,13 +5,14 @@
  * These functions are called via ECALLI instruction with function identifiers 14-26
  */
 
-import { bytesToHex, logger, numberToBytes, stringToBytes } from '@pbnj/core'
+import { bytesToHex, logger, numberToBytes } from '@pbnj/core'
 import type {
   PartialState,
   RAM,
   RegisterState,
   ServiceAccount,
 } from '@pbnj/types'
+import { PreimageRequestUtils } from '@pbnj/types'
 import { ACCUMULATE_ERROR_CODES, ACCUMULATE_FUNCTIONS } from '../config'
 
 // Accumulate context for individual function calls
@@ -376,21 +377,18 @@ export function newService(context: AccumulateContext): AccumulateResult {
   // Create service account (a in Gray Paper)
   const a: ServiceAccount = {
     codehash: c,
-    storage: new Map(),
-    requests: new Map(),
     balance: 100n, // Cbasedeposit
-    nonce: 0n,
-    isValidator: false,
     minaccgas: BigInt(minaccgas),
     minmemogas: BigInt(minmemogas),
-    preimages: new Map(),
-    created: context.currentTime,
+    octets: 81n,
     gratis: BigInt(gratis !== 0n ? 1n : 0n),
+    items: 2n,
+    created: context.currentTime,
     lastacc: 0n,
     parent: context.currentServiceId,
-    items: 2n,
-    octets: 81n,
-    minbalance: 100n, // Cbasedeposit
+    storage: new Map(),
+    preimages: new Map(),
+    requests: new Map(), // nested map structure
   }
 
   // Calculate new balance for current service (s in Gray Paper)
@@ -427,7 +425,8 @@ export function newService(context: AccumulateContext): AccumulateResult {
   }
 
   // Check if current service has sufficient balance
-  if (s.balance < s.minbalance) {
+  if (s.balance < 100n) {
+    // minbalance check
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.CASH },
@@ -578,8 +577,8 @@ export function transfer(context: AccumulateContext): AccumulateResult {
   }
 
   // Validate balance - Gray Paper checks amount < minbalance
-  const currentService = state.accounts.get(context.currentServiceId)!
-  if (amount < currentService.minbalance) {
+  if (amount < 100n) {
+    // minbalance check
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.CASH },
@@ -676,8 +675,12 @@ export function eject(context: AccumulateContext): AccumulateResult {
 
   // Check expunge period
   const l = Math.max(81, Number(targetService.octets)) - 81
-  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${l}`))
-  const request = targetService.requests.get(requestKey)
+  const hashHex = bytesToHex(hash)
+  const request = PreimageRequestUtils.getRequest(
+    targetService.requests,
+    hashHex,
+    BigInt(l),
+  )
 
   if (!request || request.length !== 2) {
     return {
@@ -690,7 +693,7 @@ export function eject(context: AccumulateContext): AccumulateResult {
     }
   }
 
-  const requestTime = BigInt(request[1])
+  const requestTime = request[1]
   if (context.currentTime - BigInt(requestTime) < 19200n) {
     // Cexpungeperiod = 19200
     return {
@@ -756,10 +759,11 @@ export function query(context: AccumulateContext): AccumulateResult {
   }
 
   // Query request
-  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
-  const request = state.accounts
-    .get(context.currentServiceId)
-    ?.requests.get(requestKey)
+  const hashHex = bytesToHex(hash)
+  const currentService = state.accounts.get(context.currentServiceId)
+  const request = currentService
+    ? PreimageRequestUtils.getRequest(currentService.requests, hashHex, z)
+    : undefined
 
   if (!request) {
     return {
@@ -788,7 +792,7 @@ export function query(context: AccumulateContext): AccumulateResult {
       executionState: 'continue',
       registers: {
         ...registers,
-        r7: 1n + (BigInt(request[0]) << 32n),
+        r7: 1n + (request[0] << 32n),
         r8: 0n,
       },
       memory,
@@ -803,8 +807,8 @@ export function query(context: AccumulateContext): AccumulateResult {
       executionState: 'continue',
       registers: {
         ...registers,
-        r7: 2n + (BigInt(request[0]) << 32n),
-        r8: BigInt(request[1]),
+        r7: 2n + (request[0] << 32n),
+        r8: request[1],
       },
       memory,
       state,
@@ -817,8 +821,8 @@ export function query(context: AccumulateContext): AccumulateResult {
     executionState: 'continue',
     registers: {
       ...registers,
-      r7: 3n + (BigInt(request[0]) << 32n),
-      r8: BigInt(request[1]) + (BigInt(request[2]) << 32n),
+      r7: 3n + (request[0] << 32n),
+      r8: request[1] + (request[2] << 32n),
     },
     memory,
     state,
@@ -866,19 +870,33 @@ export function solicit(context: AccumulateContext): AccumulateResult {
   // Update service
   const newState = { ...state }
   const currentService = newState.accounts.get(context.currentServiceId)!
-  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
+  const hashHex = bytesToHex(hash)
 
-  if (!currentService.requests.has(requestKey)) {
-    currentService.requests.set(requestKey, new Uint8Array([]))
-  }
-
-  const request = currentService.requests.get(requestKey as `0x${string}`)!
-  // For this mock implementation, we'll expand the Uint8Array if needed
-  if (request.length === 2) {
-    const newRequest = new Uint8Array(request.length + 4)
-    newRequest.set(request)
-    newRequest.set(numberToBytes(context.currentTime), request.length)
-    currentService.requests.set(requestKey, newRequest)
+  const existingRequest = PreimageRequestUtils.getRequest(
+    currentService.requests,
+    hashHex,
+    z,
+  )
+  if (!existingRequest) {
+    PreimageRequestUtils.setRequest(
+      currentService.requests,
+      hashHex,
+      z,
+      PreimageRequestUtils.createRequested(),
+    )
+  } else if (existingRequest.length === 2) {
+    // Expand to 3-element status (re-available)
+    const newStatus = PreimageRequestUtils.createReAvailable(
+      existingRequest[0],
+      existingRequest[1],
+      context.currentTime,
+    )
+    PreimageRequestUtils.setRequest(
+      currentService.requests,
+      hashHex,
+      z,
+      newStatus,
+    )
   }
 
   // Check balance
@@ -943,8 +961,12 @@ export function forget(context: AccumulateContext): AccumulateResult {
   // Update service
   const newState = { ...state }
   const currentService = newState.accounts.get(context.currentServiceId)!
-  const requestKey = bytesToHex(stringToBytes(`${hash.toString()}_${z}`))
-  const request = currentService.requests.get(requestKey)
+  const hashHex = bytesToHex(hash)
+  const request = PreimageRequestUtils.getRequest(
+    currentService.requests,
+    hashHex,
+    z,
+  )
 
   if (!request) {
     return {
@@ -959,8 +981,8 @@ export function forget(context: AccumulateContext): AccumulateResult {
 
   // Handle different request states
   if (request.length === 0 || request.length === 2) {
-    const requestTime = request.length === 2 ? Number(request[1]) : 0
-    if (context.currentTime - BigInt(requestTime) < 19200n) {
+    const requestTime = request.length === 2 ? request[1] : 0n
+    if (context.currentTime - requestTime < 19200n) {
       // Cexpungeperiod
       return {
         executionState: 'continue',
@@ -971,17 +993,30 @@ export function forget(context: AccumulateContext): AccumulateResult {
         implicationsY: [],
       }
     }
-    currentService.requests.delete(requestKey)
-    currentService.preimages.delete(bytesToHex(hash))
+    // Remove request and preimage
+    const hashRequests = currentService.requests.get(hashHex)
+    if (hashRequests) {
+      hashRequests.delete(z)
+      if (hashRequests.size === 0) {
+        currentService.requests.delete(hashHex)
+      }
+    }
+    currentService.preimages.delete(hashHex)
   } else if (request.length === 1) {
-    // For this mock, simulate pushing timestamp as bytes
-    const newRequest = new Uint8Array(request.length + 4)
-    newRequest.set(request)
-    newRequest.set(numberToBytes(context.currentTime), request.length)
-    currentService.requests.set(requestKey, newRequest)
+    // Mark as unavailable
+    const newStatus = PreimageRequestUtils.createUnavailable(
+      request[0],
+      context.currentTime,
+    )
+    PreimageRequestUtils.setRequest(
+      currentService.requests,
+      hashHex,
+      z,
+      newStatus,
+    )
   } else if (request.length === 3) {
-    const requestTime = BigInt(request[1])
-    if (context.currentTime - BigInt(requestTime) < 19200n) {
+    const requestTime = request[1]
+    if (context.currentTime - requestTime < 19200n) {
       return {
         executionState: 'continue',
         registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.HUH },
@@ -991,7 +1026,17 @@ export function forget(context: AccumulateContext): AccumulateResult {
         implicationsY: [],
       }
     }
-    request[1] = Number(context.currentTime)
+    // Update unavailable time
+    const newStatus = PreimageRequestUtils.createUnavailable(
+      request[0],
+      context.currentTime,
+    )
+    PreimageRequestUtils.setRequest(
+      currentService.requests,
+      hashHex,
+      z,
+      newStatus,
+    )
   }
 
   return {
@@ -1107,9 +1152,13 @@ export function provide(context: AccumulateContext): AccumulateResult {
   }
 
   // Check if request exists
-  const hash = inputData.toString()
-  const requestKey = bytesToHex(stringToBytes(`${hash}_${z}`))
-  if (targetService.requests.get(requestKey)?.length !== 0) {
+  const hashHex = bytesToHex(inputData)
+  const request = PreimageRequestUtils.getRequest(
+    targetService.requests,
+    hashHex,
+    z,
+  )
+  if (!request || request.length !== 0) {
     return {
       executionState: 'continue',
       registers: { ...registers, r7: ACCUMULATE_ERROR_CODES.HUH },

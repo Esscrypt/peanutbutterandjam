@@ -5,34 +5,28 @@
  * Reference: JAMNP-S specification
  */
 
-import type { AlternativeName } from './core'
-import type { StreamKind } from './network'
-
-/**
- * Core types for JAMNP-S
- */
-export type ValidatorIndex = number // 0 to 2^32-1
-export type CoreIndex = number // 0 to 2^32-1
-export type BuilderSlot = number // 0 to 2^32-1
-export type EpochIndex = number // 0 to 2^32-1
+import type { Hex } from '@pbnj/core'
+import type { Block } from './block-authoring'
+import type { AlternativeName, Extrinsic } from './core'
+import type { WorkPackage, WorkReport } from './serialization'
 
 /**
  * Grid position interface
  */
 export interface GridPosition {
-  row: number
-  column: number
+  row: bigint
+  column: bigint
 }
 
 /**
  * Stream information interface
  */
-export interface StreamInfo {
-  streamId: string
-  streamKind: StreamKind
-  isOpen: boolean
-  isBidirectional: boolean
-}
+// export interface StreamInfo {
+//   streamId: string
+//   streamKind: StreamKind
+//   isOpen: boolean
+//   isBidirectional: boolean
+// }
 
 /**
  * TLS configuration interface
@@ -76,7 +70,7 @@ export interface JAMNPCertificate {
  */
 export interface ValidatorMetadata {
   /** Validator index */
-  index: ValidatorIndex
+  index: bigint
   /** Ed25519 public key */
   publicKey: Uint8Array
   /** Connection endpoint */
@@ -90,11 +84,11 @@ export interface ValidatorMetadata {
  */
 export interface ValidatorSet {
   /** Epoch index */
-  epochIndex: number
+  epochIndex: bigint
   /** Validators in the set */
   validators: ValidatorMetadata[]
   /** Total number of validators */
-  totalValidators: number
+  totalValidators: bigint
 }
 
 /**
@@ -102,11 +96,11 @@ export interface ValidatorSet {
  */
 export interface ValidatorGrid {
   /** Grid rows */
-  rows: number
+  rows: bigint
   /** Grid columns */
-  columns: number
+  columns: bigint
   /** Validator positions */
-  positions: Map<ValidatorIndex, GridPosition>
+  positions: Map<bigint, GridPosition>
 }
 
 /**
@@ -116,7 +110,7 @@ export interface ConnectionEndpoint {
   /** IPv6 address */
   host: string
   /** Port number */
-  port: number
+  port: bigint
   /** Ed25519 public key */
   publicKey: Uint8Array
 }
@@ -137,11 +131,11 @@ export interface BlockAnnouncementHandshake {
   /** Latest finalized block hash */
   finalBlockHash: Uint8Array
   /** Latest finalized block slot */
-  finalBlockSlot: number
+  finalBlockSlot: bigint
   /** Known leaves (descendants of finalized block with no children) */
   leaves: Array<{
     hash: Uint8Array
-    slot: number
+    slot: bigint
   }>
 }
 
@@ -151,7 +145,7 @@ export interface BlockAnnouncement {
   /** Latest finalized block hash */
   finalBlockHash: Uint8Array
   /** Latest finalized block slot */
-  finalBlockSlot: number
+  finalBlockSlot: bigint
 }
 
 /**
@@ -164,16 +158,16 @@ export enum BlockRequestDirection {
 
 export interface BlockRequest {
   /** Header hash to start from */
-  headerHash: Uint8Array
+  headerHash: Hex
   /** Request direction */
   direction: BlockRequestDirection
   /** Maximum number of blocks to return */
-  maximumBlocks: number
+  maximumBlocks: bigint
 }
 
 export interface BlockResponse {
-  /** Sequence of blocks */
-  blocks: Uint8Array[]
+  /** Sequence of serialized blocks (Gray Paper encoded) */
+  blocks: Block[]
 }
 
 /**
@@ -187,7 +181,7 @@ export interface StateRequest {
   /** End key (31 bytes) */
   endKey: Uint8Array
   /** Maximum response size in bytes */
-  maximumSize: number
+  maximumSize: bigint
 }
 
 export interface StateResponse {
@@ -203,13 +197,13 @@ export interface StateResponse {
 /**
  * CE 131/132: Ticket Distribution Protocol Types
  */
-export interface TicketDistribution {
+export interface TicketDistributionRequest {
   /** Epoch index for ticket usage */
-  epochIndex: number
+  epochIndex: bigint
   /** Ticket data */
   ticket: {
     /** Attempt (0 or 1) */
-    attempt: number
+    attempt: bigint
     /** Bandersnatch RingVRF proof */
     proof: Uint8Array
   }
@@ -218,13 +212,13 @@ export interface TicketDistribution {
 /**
  * CE 133: Work Package Submission Protocol Types
  */
-export interface WorkPackageSubmission {
+export interface WorkPackageSubmissionRequest {
   /** Core index */
-  coreIndex: number
+  coreIndex: bigint
   /** Work package */
-  workPackage: Uint8Array
+  workPackage: WorkPackage
   /** Extrinsic data */
-  extrinsic: Uint8Array
+  extrinsic: Extrinsic
 }
 
 /**
@@ -232,21 +226,21 @@ export interface WorkPackageSubmission {
  */
 export interface WorkPackageSharing {
   /** Core index */
-  coreIndex: number
+  coreIndex: bigint
   /** Segments-root mappings */
   segmentsRootMappings: Array<{
-    workPackageHash: Uint8Array
-    segmentsRoot: Uint8Array
+    workPackageHash: Hex
+    segmentsRoot: Hex
   }>
   /** Work package bundle */
-  workPackageBundle: Uint8Array
+  workPackageBundle: WorkPackage
 }
 
 export interface WorkPackageSharingResponse {
   /** Work report hash */
-  workReportHash: Uint8Array
+  workReportHash: Hex
   /** Ed25519 signature */
-  signature: Uint8Array
+  signature: Hex
 }
 
 /**
@@ -254,13 +248,13 @@ export interface WorkPackageSharingResponse {
  */
 export interface GuaranteedWorkReport {
   /** Work report */
-  workReport: Uint8Array
+  workReport: WorkReport
   /** Slot */
-  slot: number
+  slot: bigint
   /** Validator signatures */
   signatures: Array<{
-    validatorIndex: number
-    signature: Uint8Array
+    validatorIndex: bigint
+    signature: Hex
   }>
 }
 
@@ -269,12 +263,12 @@ export interface GuaranteedWorkReport {
  */
 export interface WorkReportRequest {
   /** Work report hash */
-  workReportHash: Uint8Array
+  workReportHash: Hex
 }
 
 export interface WorkReportResponse {
   /** Work report */
-  workReport: Uint8Array
+  workReport: WorkReport
 }
 
 /**
@@ -282,14 +276,14 @@ export interface WorkReportResponse {
  */
 export interface ShardDistributionRequest {
   /** Erasure root */
-  erasureRoot: Uint8Array
+  erasureRoot: Hex
   /** Shard index */
-  shardIndex: number
+  shardIndex: bigint
 }
 
 export interface ShardDistributionResponse {
   /** Bundle shard */
-  bundleShard: Uint8Array
+  bundleShard: Hex
   /** Segment shards */
   segmentShards: Uint8Array[]
   /** Justification */
@@ -301,14 +295,14 @@ export interface ShardDistributionResponse {
  */
 export interface AuditShardRequest {
   /** Erasure root */
-  erasureRoot: Uint8Array
+  erasureRoot: Hex
   /** Shard index */
-  shardIndex: number
+  shardIndex: bigint
 }
 
 export interface AuditShardResponse {
   /** Bundle shard */
-  bundleShard: Uint8Array
+  bundleShard: Hex
   /** Justification */
   justification: Uint8Array
 }
@@ -319,15 +313,15 @@ export interface AuditShardResponse {
 export interface SegmentShardRequest {
   /** Requests for multiple erasure roots */
   requests: Array<{
-    erasureRoot: Uint8Array
-    shardIndex: number
+    erasureRoot: Hex
+    shardIndex: bigint
     segmentIndices: number[]
   }>
 }
 
 export interface SegmentShardResponse {
   /** Segment shards */
-  segmentShards: Uint8Array[]
+  segmentShards: Hex[]
   /** Justifications (only for protocol 140) */
   justifications?: Uint8Array[]
 }
@@ -335,13 +329,13 @@ export interface SegmentShardResponse {
 /**
  * CE 141: Assurance Distribution Protocol Types
  */
-export interface AssuranceDistribution {
+export interface AssuranceDistributionRequest {
   /** Header hash (anchor) */
-  anchorHash: Uint8Array
+  anchorHash: Hex
   /** Bitfield (one bit per core) */
   bitfield: Uint8Array
   /** Ed25519 signature */
-  signature: Uint8Array
+  signature: Hex
 }
 
 /**
@@ -349,11 +343,11 @@ export interface AssuranceDistribution {
  */
 export interface PreimageAnnouncement {
   /** Service ID */
-  serviceId: number
+  serviceId: bigint
   /** Preimage hash */
-  hash: Uint8Array
+  hash: Hex
   /** Preimage length */
-  preimageLength: number
+  preimageLength: bigint
 }
 
 /**
@@ -361,31 +355,32 @@ export interface PreimageAnnouncement {
  */
 export interface PreimageRequest {
   /** Preimage hash */
-  hash: Uint8Array
+  hash: Hex
 }
 
-export interface PreimageResponse {
-  /** Preimage data */
-  preimage: Uint8Array
-}
+// response is the Preimage directly
+// export interface PreimageResponse {
+//   /** Preimage data */
+//   preimage: Hex
+// }
 
 /**
  * CE 144: Audit Announcement Protocol Types
  */
 export interface AuditAnnouncement {
   /** Block header hash */
-  headerHash: Uint8Array
+  headerHash: Hex
   /** Tranche number */
-  tranche: number
+  tranche: bigint
   /** Announcement data */
   announcement: {
     /** Work reports to audit */
     workReports: Array<{
-      coreIndex: number
-      workReportHash: Uint8Array
+      coreIndex: bigint
+      workReportHash: Hex
     }>
     /** Ed25519 signature */
-    signature: Uint8Array
+    signature: Hex
   }
   /** Evidence for audit requirement */
   evidence: Uint8Array
@@ -394,17 +389,17 @@ export interface AuditAnnouncement {
 /**
  * CE 145: Judgment Publication Protocol Types
  */
-export interface JudgmentPublication {
+export interface JudgmentPublicationRequest {
   /** Epoch index */
-  epochIndex: number
+  epochIndex: bigint
   /** Validator index */
-  validatorIndex: number
+  validatorIndex: bigint
   /** Validity (0 = Invalid, 1 = Valid) */
   validity: 0 | 1
   /** Work report hash */
-  workReportHash: Uint8Array
+  workReportHash: Hex
   /** Ed25519 signature */
-  signature: Uint8Array
+  signature: Hex
 }
 
 /**
@@ -449,7 +444,7 @@ export interface JAMNPConfig {
   /** Listen address */
   listenAddress: string
   /** Listen port */
-  listenPort: number
+  listenPort: bigint
   /** Ed25519 key pair */
   keyPair: {
     publicKey: Uint8Array
@@ -460,7 +455,7 @@ export interface JAMNPConfig {
   /** Chain hash for ALPN */
   chainHash: string
   /** Maximum connections */
-  maxConnections: number
+  maxConnections: bigint
   /** Connection timeout (ms) */
   connectionTimeout: number
   /** Message timeout (ms) */
