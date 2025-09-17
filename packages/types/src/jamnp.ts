@@ -366,6 +366,42 @@ export interface PreimageRequest {
 
 /**
  * CE 144: Audit Announcement Protocol Types
+ *
+ * *** GRAY PAPER EXPLANATION - BANDERSNATCH SIGNATURE s_n(w) ***
+ *
+ * The evidence field contains Bandersnatch VRF signatures s_n(w) that prove
+ * the validator's right to audit specific work-reports. These signatures are
+ * contextualized VRF signatures that provide verifiable random selection.
+ *
+ * For Initial Tranche (n=0):
+ * s_0 ∈ bssignature{activeset[v]_bs}{Xaudit ∥ banderout{H_vrfsig}}{∅}
+ * - Public Key: activeset[v]_bs (validator's Bandersnatch public key)
+ * - Context: Xaudit ∥ banderout{H_vrfsig}
+ *   * Xaudit = token("$jam_audit") (audit context token)
+ *   * banderout{H_vrfsig} (VRF output from block header)
+ * - Message: ∅ (empty message)
+ *
+ * For Subsequent Tranches (n>0):
+ * s_n(w) ∈ bssignature{activeset[v]_bs}{Xaudit ∥ banderout{H_vrfsig} ∥ blake{w} ∥ n}{∅}
+ * - Public Key: activeset[v]_bs (validator's Bandersnatch public key)
+ * - Context: Xaudit ∥ banderout{H_vrfsig} ∥ blake{w} ∥ n
+ *   * Xaudit = token("$jam_audit") (audit context token)
+ *   * banderout{H_vrfsig} (VRF output from block header)
+ *   * blake{w} (Blake2b hash of the work-report)
+ *   * n (tranche number)
+ * - Message: ∅ (empty message)
+ *
+ * Key Properties:
+ * - Size: 96 bytes (as per Gray Paper definition)
+ * - VRF Output: 32-byte hash via banderout{s_n(w)}
+ * - Purpose: Verifiable random selection for audit requirements
+ * - Verification: Other validators can verify without knowing private key
+ * - Deterministic: Same inputs always produce same signature
+ * - Unpredictable: Cannot be gamed or manipulated
+ *
+ * The signature proves that a validator legitimately selected specific
+ * work-reports for auditing based on verifiable random selection, ensuring
+ * the audit process is fair and cannot be manipulated.
  */
 export interface AuditAnnouncement {
   /** Block header hash */

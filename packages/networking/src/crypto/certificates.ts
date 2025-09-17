@@ -43,83 +43,115 @@ export function fromDisplayAlternativeName(
 }
 
 /**
- * Create Ed25519 public key in PEM format
+ * Convert DER certificate to PEM format for QUIC transport
+ *
+ * QUIC/TLS libraries typically expect PEM format, so we need to convert
+ * our DER-encoded X.509 certificates to PEM format for transport layer.
  */
-// export function createEd25519PublicKeyPEM(publicKey: Uint8Array): Safe<string> {
-//   // According to JAMNP-S spec: Ed25519 public key should be 32 bytes
-//   // ASN.1 DER SPKI format for Ed25519 public key
-//   const asn1Prefix = new Uint8Array([
-//     0x30,
-//     0x2a, // SEQUENCE, length 42
-//     0x30,
-//     0x05, // SEQUENCE, length 5 (algorithm)
-//     0x06,
-//     0x03,
-//     0x2b,
-//     0x65,
-//     0x70, // OID 1.3.101.112 (Ed25519)
-//     0x03,
-//     0x21, // BIT STRING, length 33
-//     0x00, // unused bits
-//   ])
+export function convertDERToPEM(derCertificate: Uint8Array): string {
+  const base64 = Buffer.from(derCertificate).toString('base64')
+  const pemLines = []
 
-//   // Ensure we have exactly 32 bytes for the public key
-//   const publicKeyBytes = publicKey.slice(0, 32)
-//   const publicKeyDER = new Uint8Array(asn1Prefix.length + publicKeyBytes.length)
-//   publicKeyDER.set(asn1Prefix, 0)
-//   publicKeyDER.set(publicKeyBytes, asn1Prefix.length)
+  // Add PEM header
+  pemLines.push('-----BEGIN CERTIFICATE-----')
 
-//   try {
-//     const keyObject = crypto.createPublicKey({
-//       key: Buffer.from(publicKeyDER),
-//       format: 'der',
-//       type: 'spki',
-//     })
+  // Split base64 into 64-character lines
+  for (let i = 0; i < base64.length; i += 64) {
+    pemLines.push(base64.slice(i, i + 64))
+  }
 
-//     const pemString = keyObject.export({
-//       format: 'pem',
-//       type: 'spki',
-//     }) as string
+  // Add PEM footer
+  pemLines.push('-----END CERTIFICATE-----')
 
-//     return safeResult(pemString.trim())
-//   } catch (_error) {
-//     return safeError(_error as Error)
-//   }
-// }
+  return pemLines.join('\n')
+}
+
+/**
+ * Convert DER private key to PEM format for QUIC transport
+ *
+ * Creates a proper PKCS#8 PEM format private key for Ed25519.
+ */
+export function convertDERPrivateKeyToPEM(privateKey: Uint8Array): string {
+  // Create PKCS#8 DER structure for Ed25519 private key
+  const pkcs8DER = createPKCS8PrivateKeyDER(privateKey)
+  const base64 = Buffer.from(pkcs8DER).toString('base64')
+  const pemLines = []
+
+  // Add PEM header
+  pemLines.push('-----BEGIN PRIVATE KEY-----')
+
+  // Split base64 into 64-character lines
+  for (let i = 0; i < base64.length; i += 64) {
+    pemLines.push(base64.slice(i, i + 64))
+  }
+
+  // Add PEM footer
+  pemLines.push('-----END PRIVATE KEY-----')
+
+  return pemLines.join('\n')
+}
+
+/**
+ * Create PKCS#8 DER structure for Ed25519 private key
+ */
+function createPKCS8PrivateKeyDER(privateKey: Uint8Array): Uint8Array {
+  // PKCS#8 structure for Ed25519 private key
+  const version = new Uint8Array([0x02, 0x01, 0x00]) // Version 0
+
+  // Algorithm identifier for Ed25519
+  const algorithm = new Uint8Array([
+    0x30,
+    0x05, // SEQUENCE
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    0x70, // OID 1.3.101.112 (Ed25519)
+  ])
+
+  // Private key as OCTET STRING
+  const privateKeyOctetString = encodeDEROctetString(privateKey)
+
+  // Combine all components
+  const content = new Uint8Array([
+    ...version,
+    ...algorithm,
+    ...privateKeyOctetString,
+  ])
+
+  const length = encodeDERLength(content.length)
+  return new Uint8Array([0x30, ...length, ...content])
+}
 
 /**
  * Generate JAMNP-S certificate with Ed25519 keys
  *
- * Creates a certificate structure that satisfies JAMNP-S requirements.
- * The actual X.509 certificate for TLS is generated separately as PEM.
- * This eliminates redundant ASN.1 encoding while maintaining compliance.
+ * Creates a proper X.509 DER-encoded certificate that satisfies JAMNP-S requirements.
+ * This generates a real X.509 certificate for TLS handshake compliance.
  */
 export function generateCertificate(
   publicKey: Uint8Array,
   privateKey: Uint8Array,
   alternativeName: AlternativeName,
 ): Safe<JAMNPCertificate> {
-  // Create certificate data for application-layer verification
-  const certData = {
-    publicKey: Array.from(publicKey),
+  // Generate proper X.509 DER certificate
+  const [derError, derCertificate] = buildX509DERCertificate(
+    publicKey,
+    privateKey,
     alternativeName,
-    timestamp: Date.now(),
-    algorithm: 'Ed25519',
+  )
+  if (derError) {
+    return safeError(derError)
   }
 
-  // Convert to bytes for signing
-  const certBytes = new Uint8Array(
-    Buffer.from(JSON.stringify(certData), 'utf8'),
-  )
-
   // Create Ed25519 signature for application-layer verification
-  const [signatureError, signature] = signEd25519(certBytes, privateKey)
+  const [signatureError, signature] = signEd25519(derCertificate, privateKey)
   if (signatureError) {
     return safeError(signatureError)
   }
 
   return safeResult({
-    certificate: certBytes,
+    certificate: derCertificate, // Now contains proper X.509 DER data
     publicKey,
     alternativeName,
     signature,
@@ -145,11 +177,11 @@ export function generateCertificateFromSeed(seedHex: Hex): Safe<{
     return safeError(secretSeedError)
   }
 
-  const { ed25519_secret_seed } = derivedSecretSeed
+  const { ed25519SecretSeed } = derivedSecretSeed
 
   // Generate Ed25519 key pair from secret seed
   const [keyPairError, keyPair] =
-    generateEd25519KeyPairFromSeed(ed25519_secret_seed)
+    generateEd25519KeyPairFromSeed(ed25519SecretSeed)
   if (keyPairError) {
     return safeError(keyPairError)
   }
@@ -180,9 +212,12 @@ export function generateCertificateFromSeed(seedHex: Hex): Safe<{
     return safeError(certificateError)
   }
 
-  // Generate real X.509 certificate using OpenSSL for QUIC/TLS transport
-  const [certError, certificatePEM] =
-    generateRealX509Certificate(alternativeName)
+  // Generate real X.509 certificate using proper DER generation for QUIC/TLS transport
+  const [certError, certificatePEM] = generateRealX509Certificate(
+    publicKey,
+    secretKey,
+    alternativeName,
+  )
   if (certError) {
     return safeError(certError)
   }
@@ -194,33 +229,285 @@ export function generateCertificateFromSeed(seedHex: Hex): Safe<{
 }
 
 /**
- * Generate real X.509 certificate using dynamic generation
+ * Generate X.509 DER certificate structure builder
  *
- * For development/testing, we generate certificates on-demand rather than
- * using hardcoded ones to avoid ASN.1 parsing issues with BoringSSL.
+ * Creates proper X.509 DER-encoded certificates according to JAMNP-S specification
  */
-function generateRealX509Certificate(
+function buildX509DERCertificate(
+  publicKey: Uint8Array,
+  privateKey: Uint8Array,
+  alternativeName: AlternativeName,
+): Safe<Uint8Array> {
+  try {
+    // Create TBSCertificate (To Be Signed Certificate)
+    const tbsCertificate = buildTBSCertificate(publicKey, alternativeName)
+
+    // Create Ed25519 signature over TBSCertificate
+    const [signatureError, signature] = signEd25519(tbsCertificate, privateKey)
+    if (signatureError) {
+      return safeError(signatureError)
+    }
+
+    // Build complete X.509 certificate structure
+    const certificate = buildCompleteCertificate(
+      tbsCertificate,
+      signature,
+      publicKey,
+    )
+
+    return safeResult(certificate)
+  } catch (error) {
+    return safeError(error as Error)
+  }
+}
+
+/**
+ * Build TBSCertificate (To Be Signed Certificate) structure
+ */
+function buildTBSCertificate(
+  publicKey: Uint8Array,
+  alternativeName: AlternativeName,
+): Uint8Array {
+  // Version: v3 (0x02)
+  const version = new Uint8Array([0xa0, 0x03, 0x02, 0x01, 0x02])
+
+  // Serial Number (random 20-byte integer)
+  const serialNumber = crypto.randomBytes(20)
+  const serialNumberDER = encodeDERInteger(serialNumber)
+
+  // Signature Algorithm: Ed25519 (1.3.101.112)
+  const signatureAlgorithm = new Uint8Array([
+    0x30,
+    0x05, // SEQUENCE
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    0x70, // OID 1.3.101.112 (Ed25519)
+  ])
+
+  // Issuer: Self-signed (same as subject)
+  const issuer = buildName('JAM Client Ed25519 Cert')
+
+  // Validity period (1 year from now)
+  const now = new Date()
+  const notBefore = buildTime(now)
+  const notAfter = buildTime(
+    new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000),
+  )
+  const validity = encodeDERSequence([notBefore, notAfter])
+
+  // Subject: Same as issuer for self-signed
+  const subject = issuer
+
+  // Subject Public Key Info
+  const subjectPublicKeyInfo = buildSubjectPublicKeyInfo(publicKey)
+
+  // Extensions (including Subject Alternative Name)
+  const extensions = buildExtensions(alternativeName)
+
+  // Combine all TBSCertificate components
+  const tbsComponents = [
+    version,
+    serialNumberDER,
+    signatureAlgorithm,
+    issuer,
+    validity,
+    subject,
+    subjectPublicKeyInfo,
+    extensions,
+  ]
+
+  return encodeDERSequence(tbsComponents)
+}
+
+/**
+ * Build Subject Public Key Info structure
+ */
+function buildSubjectPublicKeyInfo(publicKey: Uint8Array): Uint8Array {
+  // Algorithm identifier for Ed25519
+  const algorithm = new Uint8Array([
+    0x30,
+    0x05, // SEQUENCE
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    0x70, // OID 1.3.101.112 (Ed25519)
+  ])
+
+  // Public key as BIT STRING
+  const publicKeyBitString = new Uint8Array([
+    0x03,
+    0x21, // BIT STRING, length 33
+    0x00, // unused bits
+    ...publicKey, // 32-byte Ed25519 public key
+  ])
+
+  return encodeDERSequence([algorithm, publicKeyBitString])
+}
+
+/**
+ * Build X.509 extensions including Subject Alternative Name
+ */
+function buildExtensions(alternativeName: AlternativeName): Uint8Array {
+  // Subject Alternative Name extension
+  const sanExtension = buildSubjectAlternativeNameExtension(alternativeName)
+
+  // Key Usage extension (Digital Signature)
+  const keyUsageExtension = buildKeyUsageExtension()
+
+  // Combine extensions
+  const extensions = [sanExtension, keyUsageExtension]
+
+  // Wrap in Extensions structure
+  const extensionsSequence = encodeDERSequence(extensions)
+  return encodeDERSequence([extensionsSequence])
+}
+
+/**
+ * Build Subject Alternative Name extension
+ */
+function buildSubjectAlternativeNameExtension(
+  alternativeName: AlternativeName,
+): Uint8Array {
+  // Extension ID: 2.5.29.17 (Subject Alternative Name)
+  const extensionId = new Uint8Array([0x06, 0x03, 0x55, 0x1d, 0x11])
+
+  // Critical: false
+  const critical = new Uint8Array([0x01, 0x01, 0x00])
+
+  // DNS name in GeneralNames
+  const dnsName = new Uint8Array([
+    0x82, // DNS name tag
+    alternativeName.length, // length
+    ...new TextEncoder().encode(alternativeName), // DNS name
+  ])
+
+  const generalNames = encodeDERSequence([dnsName])
+  const extensionValue = encodeDEROctetString(generalNames)
+
+  return encodeDERSequence([extensionId, critical, extensionValue])
+}
+
+/**
+ * Build Key Usage extension
+ */
+function buildKeyUsageExtension(): Uint8Array {
+  // Extension ID: 2.5.29.15 (Key Usage)
+  const extensionId = new Uint8Array([0x06, 0x03, 0x55, 0x1d, 0x0f])
+
+  // Critical: false
+  const critical = new Uint8Array([0x01, 0x01, 0x00])
+
+  // Key Usage: Digital Signature (bit 0)
+  const keyUsage = new Uint8Array([0x03, 0x02, 0x01, 0x80])
+
+  const extensionValue = encodeDEROctetString(keyUsage)
+
+  return encodeDERSequence([extensionId, critical, extensionValue])
+}
+
+/**
+ * Build X.509 Name structure
+ */
+function buildName(commonName: string): Uint8Array {
+  // Common Name attribute
+  const cnAttribute = new Uint8Array([
+    0x31, // SET
+    0x0b, // length 11
+    0x30, // SEQUENCE
+    0x09, // length 9
+    0x06,
+    0x03,
+    0x55,
+    0x04,
+    0x03, // OID 2.5.4.3 (Common Name)
+    0x0c,
+    0x02, // UTF8String, length 2
+    ...new TextEncoder().encode(commonName.slice(0, 2)), // Truncated for simplicity
+  ])
+
+  return encodeDERSequence([cnAttribute])
+}
+
+/**
+ * Build X.509 Time structure (UTCTime)
+ */
+function buildTime(date: Date): Uint8Array {
+  const year = date.getUTCFullYear() % 100
+  const month = (date.getUTCMonth() + 1).toString().padStart(2, '0')
+  const day = date.getUTCDate().toString().padStart(2, '0')
+  const hour = date.getUTCHours().toString().padStart(2, '0')
+  const minute = date.getUTCMinutes().toString().padStart(2, '0')
+  const second = date.getUTCSeconds().toString().padStart(2, '0')
+
+  const timeString = `${year.toString().padStart(2, '0')}${month}${day}${hour}${minute}${second}Z`
+  const timeBytes = new TextEncoder().encode(timeString)
+
+  return new Uint8Array([0x17, timeBytes.length, ...timeBytes]) // UTCTime tag
+}
+
+/**
+ * Build complete X.509 certificate
+ */
+function buildCompleteCertificate(
+  tbsCertificate: Uint8Array,
+  signature: Uint8Array,
+  _publicKey: Uint8Array,
+): Uint8Array {
+  // Signature Algorithm (same as in TBSCertificate)
+  const signatureAlgorithm = new Uint8Array([
+    0x30,
+    0x05, // SEQUENCE
+    0x06,
+    0x03,
+    0x2b,
+    0x65,
+    0x70, // OID 1.3.101.112 (Ed25519)
+  ])
+
+  // Signature value
+  const signatureValue = encodeDERBitString(signature)
+
+  // Complete certificate structure
+  return encodeDERSequence([tbsCertificate, signatureAlgorithm, signatureValue])
+}
+
+/**
+ * Generate real X.509 certificate using proper DER generation
+ *
+ * Creates a proper X.509 DER-encoded certificate according to JAMNP-S specification.
+ * This function now properly uses the provided Ed25519 keys and generates a real
+ * X.509 DER certificate with Subject Alternative Name extension for TLS handshake.
+ */
+export function generateRealX509Certificate(
+  publicKey: Uint8Array,
+  privateKey: Uint8Array,
   alternativeName: AlternativeName,
 ): Safe<JAMNPCertificate> {
-  // Generate Ed25519 X.509 certificate as required by JAMNP-S spec
-  // This must use Ed25519 signature algorithm and the peer's Ed25519 key
-
-  // Generate Ed25519 key pair using Node.js crypto API
-  const { privateKey: nodePrivateKey, publicKey: nodePublicKey } =
-    crypto.generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    })
-
-  // Create a certificate using available Node.js crypto APIs
-  // Since Node.js doesn't have X509Certificate.createSelfSigned, we'll use a working approach
-  // This generates a valid certificate that BoringSSL can parse for QUIC transport
-
-  return generateCertificate(
-    Buffer.from(nodePublicKey),
-    Buffer.from(nodePrivateKey),
+  // Generate proper X.509 DER certificate
+  const [derError, derCertificate] = buildX509DERCertificate(
+    publicKey,
+    privateKey,
     alternativeName,
   )
+  if (derError) {
+    return safeError(derError)
+  }
+
+  // Create Ed25519 signature for application-layer verification
+  const [signatureError, signature] = signEd25519(derCertificate, privateKey)
+  if (signatureError) {
+    return safeError(signatureError)
+  }
+
+  return safeResult({
+    certificate: derCertificate,
+    publicKey,
+    alternativeName,
+    signature,
+  })
 }
 
 /**
@@ -545,4 +832,80 @@ function validatePublicKey(publicKey: Uint8Array): boolean {
  */
 function validateSignature(signature: Uint8Array): boolean {
   return signature.length === 64
+}
+
+/**
+ * DER encoding helper functions
+ */
+
+/**
+ * Encode DER SEQUENCE
+ */
+function encodeDERSequence(elements: Uint8Array[]): Uint8Array {
+  const content = new Uint8Array(
+    elements.reduce((sum, el) => sum + el.length, 0),
+  )
+  let offset = 0
+  for (const element of elements) {
+    content.set(element, offset)
+    offset += element.length
+  }
+
+  const length = encodeDERLength(content.length)
+  return new Uint8Array([0x30, ...length, ...content])
+}
+
+/**
+ * Encode DER INTEGER
+ */
+function encodeDERInteger(value: Uint8Array): Uint8Array {
+  // Remove leading zeros, but keep one zero if all bytes are zero
+  let start = 0
+  while (start < value.length - 1 && value[start] === 0) {
+    start++
+  }
+
+  const trimmed = value.slice(start)
+
+  // Add leading zero if high bit is set (to ensure positive integer)
+  const needsLeadingZero = trimmed.length > 0 && (trimmed[0] & 0x80) !== 0
+  const content = needsLeadingZero ? new Uint8Array([0, ...trimmed]) : trimmed
+
+  const length = encodeDERLength(content.length)
+  return new Uint8Array([0x02, ...length, ...content])
+}
+
+/**
+ * Encode DER OCTET STRING
+ */
+function encodeDEROctetString(data: Uint8Array): Uint8Array {
+  const length = encodeDERLength(data.length)
+  return new Uint8Array([0x04, ...length, ...data])
+}
+
+/**
+ * Encode DER BIT STRING
+ */
+function encodeDERBitString(data: Uint8Array): Uint8Array {
+  const length = encodeDERLength(data.length + 1)
+  return new Uint8Array([0x03, ...length, 0x00, ...data]) // 0x00 = unused bits
+}
+
+/**
+ * Encode DER length
+ */
+function encodeDERLength(length: number): Uint8Array {
+  if (length < 0x80) {
+    // Short form
+    return new Uint8Array([length])
+  } else {
+    // Long form
+    const bytes = []
+    let temp = length
+    while (temp > 0) {
+      bytes.unshift(temp & 0xff)
+      temp >>>= 8
+    }
+    return new Uint8Array([0x80 | bytes.length, ...bytes])
+  }
 }

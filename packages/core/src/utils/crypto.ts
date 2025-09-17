@@ -5,10 +5,10 @@
  * Reference: Gray Paper specifications
  */
 
-import * as crypto from 'node:crypto'
-import { generateKeyPair, sign, verify } from '@stablelib/ed25519'
+import { bls12_381 } from '@noble/curves/bls12-381'
+import * as ed from '@noble/ed25519'
 // Import blakejs for cryptographic operations
-import * as blakejs from 'blakejs'
+import { blake2b } from '@noble/hashes/blake2.js'
 import {
   bytesToBigInt,
   bytesToHex,
@@ -33,24 +33,29 @@ export {
 }
 
 /**
- * Blake2b hash function
- * @param data - Input data to hash
- * @returns 32-byte hash as hex string
+ * Check if a string is a valid hex string
  */
-export function blake2bHash(data: Uint8Array): Safe<Hex> {
-  try {
-    const hash = blakejs.blake2b(data, undefined, 32)
-    return safeResult(`0x${Buffer.from(hash).toString('hex')}` as Hex)
-  } catch (error) {
-    return safeError(error as Error)
-  }
+export function isValidHex(value: string): boolean {
+  return /^0x[0-9a-fA-F]*$/.test(value)
+}
+
+/**
+ * Check if a hex string has a specific length
+ */
+export function isValidHexLength(value: string, length: number): boolean {
+  return isValidHex(value) && value.length === length * 2 + 2 // +2 for '0x'
 }
 
 /**
  * Blake2b hash function (alias for blake2bHash)
  */
-export function blake2b(data: Uint8Array): Safe<Hex> {
-  return blake2bHash(data)
+export function blake2bHash(data: Uint8Array): Safe<Hex> {
+  try {
+    const hash = blake2b(data)
+    return safeResult(bytesToHex(hash))
+  } catch (error) {
+    return safeError(error as Error)
+  }
 }
 
 /**
@@ -69,7 +74,7 @@ export function signEd25519(
       ),
     )
   }
-  return safeResult(new Uint8Array(sign(privateKey, data)))
+  return safeResult(ed.sign(data, privateKey))
 }
 
 /**
@@ -79,43 +84,22 @@ export function verifyEd25519(
   data: Uint8Array,
   signature: Uint8Array,
   publicKey: Uint8Array,
-): boolean {
-  try {
-    if (signature.length !== 64) {
-      return false
-    }
-    return verify(publicKey, data, signature)
-  } catch (_error) {
-    return false
+): Safe<boolean> {
+  if (signature.length !== 64) {
+    return safeError(new Error('Signature must be 64 bytes'))
   }
+  return safeResult(ed.verify(signature, data, publicKey))
 }
 
-/**
- * Generate a new Ed25519 key pair using @stablelib/ed25519
- */
 export function generateEd25519KeyPairStable(): {
   publicKey: Uint8Array
   privateKey: Uint8Array
 } {
-  const keyPair = generateKeyPair()
+  const keyPair = ed.keygen()
   return {
     publicKey: new Uint8Array(keyPair.publicKey),
     privateKey: new Uint8Array(keyPair.secretKey), // This is 64 Uint8Array (32 Uint8Array seed + 32 Uint8Array public key)
   }
-}
-
-/**
- * Serialize Ed25519 public key to hex string
- */
-export function serializePublicKey(publicKey: Uint8Array): string {
-  return Buffer.from(publicKey).toString('hex')
-}
-
-/**
- * Deserialize Ed25519 public key from hex string
- */
-export function deserializePublicKey(hexString: string): Uint8Array {
-  return new Uint8Array(Buffer.from(hexString, 'hex'))
 }
 
 /**
@@ -140,29 +124,6 @@ export function validateSignature(signature: Uint8Array): boolean {
 }
 
 /**
- * BLS key pair generation using blakejs
- * @returns Object with publicKey and secretKey
- */
-export function generateBLSKeyPair(): {
-  publicKey: Uint8Array
-  secretKey: Uint8Array
-} {
-  // Generate random secret key
-  const secretKey = new Uint8Array(32)
-  crypto.randomFillSync(secretKey)
-
-  // Generate public key using blake2b
-  const [publicKeyError, publicKey] = blake2bHash(secretKey)
-  if (publicKeyError) {
-    throw publicKeyError
-  }
-  return {
-    publicKey: Buffer.from(publicKey.replace('0x', ''), 'hex'),
-    secretKey,
-  }
-}
-
-/**
  * BLS signature using blakejs
  * @param message - Message to sign
  * @param secretKey - Secret key for signing
@@ -171,19 +132,14 @@ export function generateBLSKeyPair(): {
 export function blsSign(
   message: Uint8Array,
   secretKey: Uint8Array,
-): Safe<string> {
-  // BLS signature using blake2b
-  const [hashError, hash] = blake2bHash(message)
-  if (hashError) {
-    return safeError(hashError)
-  }
-  const [signatureError, signature] = blake2bHash(
-    Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
+): Safe<Uint8Array> {
+  const blss = bls12_381.shortSignatures
+  const digest = blss.hash(
+    message,
+    'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_',
   )
-  if (signatureError) {
-    return safeError(signatureError)
-  }
-  return safeResult(signature)
+  const signature = blss.sign(digest, secretKey)
+  return safeResult(signature.toBytes())
 }
 
 /**
@@ -194,108 +150,17 @@ export function blsSign(
  * @returns True if signature is valid
  */
 export function blsVerify(
-  _message: Uint8Array,
-  signature: string,
-  _publicKey: Uint8Array,
-): Safe<boolean> {
-  return safeResult(signature.length === 194 && signature.startsWith('0x'))
-}
-
-/**
- * Bandersnatch VRF key pair generation using blakejs
- * @returns Object with publicKey and secretKey
- */
-export function generateBandersnatchKeyPair(): {
-  publicKey: Uint8Array
-  secretKey: Uint8Array
-} {
-  // Generate random secret key
-  const secretKey = new Uint8Array(32)
-  crypto.randomFillSync(secretKey)
-
-  // Bandersnatch public key generation using blake2b
-  const [publicKeyError, publicKey] = blake2bHash(secretKey)
-  if (publicKeyError) {
-    throw publicKeyError
-  }
-  return {
-    publicKey: Buffer.from(publicKey.replace('0x', ''), 'hex'),
-    secretKey,
-  }
-}
-
-/**
- * Bandersnatch VRF proof generation using blakejs
- * @param message - Message to create VRF proof for
- * @param secretKey - Secret key for VRF
- * @returns VRF proof as hex string
- */
-export function bandersnatchVrfProof(
   message: Uint8Array,
-  secretKey: Uint8Array,
-): Safe<string> {
-  // VRF proof using blake2b
-  const [hashError, hash] = blake2bHash(message)
-  if (hashError) {
-    throw hashError
-  }
-  const [proofError, proof] = blake2bHash(
-    Buffer.concat([Buffer.from(hash.replace('0x', ''), 'hex'), secretKey]),
+  signature: Uint8Array,
+  publicKey: Uint8Array,
+): Safe<boolean> {
+  const blss = bls12_381.shortSignatures
+  const publicKeyPoint = bls12_381.G1.encodeToCurve(publicKey).toBytes()
+  const digest = blss.hash(
+    message,
+    'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_',
   )
-  if (proofError) {
-    throw proofError
-  }
-  return safeResult(proof)
-}
 
-/**
- * Bandersnatch VRF verification using blakejs
- * @param message - Original message
- * @param proof - VRF proof to verify
- * @param publicKey - Public key for verification
- * @returns True if proof is valid
- */
-export function bandersnatchVrfVerify(
-  _message: Uint8Array,
-  proof: string,
-  _publicKey: Uint8Array,
-): boolean {
-  try {
-    // Simple verification for now
-    return proof.length === 130 && proof.startsWith('0x')
-  } catch (_error) {
-    return false
-  }
-}
-
-/**
- * Generate random Uint8Array
- */
-export function randomUint8Array(length: number): Uint8Array {
-  return crypto.randomBytes(length)
-}
-
-/**
- * Generate random hex string
- */
-export function randomHex(length: number): Hex {
-  const randomBytes = crypto.randomBytes(length)
-  return bytesToHex(randomBytes)
-}
-
-/**
- * Verify hex string format
- */
-export function isValidHex(hex: string): boolean {
-  return /^0x[a-fA-F0-9]+$/.test(hex)
-}
-
-/**
- * Verify hex string length
- */
-export function isValidHexLength(hex: string, expectedLength: number): boolean {
-  if (!isValidHex(hex)) {
-    return false
-  }
-  return hex.length === expectedLength + 2 // +2 for '0x' prefix
+  const isValid = blss.verify(signature, digest, publicKeyPoint)
+  return safeResult(isValid)
 }

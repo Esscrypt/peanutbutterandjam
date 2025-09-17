@@ -6,7 +6,7 @@
  */
 
 import type { Hex } from '@pbnj/core'
-import type { ValidatorKey } from './consensus'
+import type { ValidatorPublicKeys } from './consensus'
 import type { GenesisResult, GenesisState } from './genesis'
 import type { GlobalState } from './global-state'
 
@@ -221,7 +221,7 @@ export interface GenesisValidatorConfig {
  */
 export interface NormalizedValidatorSpec {
   /** Complete validator key (all 4 components) */
-  readonly validatorKey: ValidatorKey
+  readonly validatorKey: ValidatorPublicKeys
   /** Validator address */
   readonly address: Hex
   /** Validator index */
@@ -272,7 +272,7 @@ export interface GenesisSafroleConfig {
   /** Initial ticket accumulator */
   readonly ticketAccumulator: readonly NormalizedTicketSpec[]
   /** Pending set (initial validators) */
-  readonly pendingSet: readonly ValidatorKey[]
+  readonly pendingSet: readonly ValidatorPublicKeys[]
 }
 
 /**

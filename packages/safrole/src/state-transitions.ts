@@ -25,7 +25,7 @@ import type {
   SafroleOutput,
   SafroleState,
   Ticket,
-  ValidatorKey,
+  ValidatorPublicKeys,
 } from '@pbnj/types'
 import { SAFROLE_CONSTANTS } from '@pbnj/types'
 import { hash as blake2b } from '@stablelib/blake2b'
@@ -112,8 +112,8 @@ export async function executeSafroleSTF(
   state: SafroleState,
   input: SafroleInput,
   currentSlot: number,
-  stagingSet: ValidatorKey[],
-  activeSet: ValidatorKey[],
+  stagingSet: ValidatorPublicKeys[],
+  activeSet: ValidatorPublicKeys[],
   offenders: Set<string> = new Set(),
 ): Promise<SafroleOutput> {
   logger.debug('Executing Safrole STF', {
@@ -203,8 +203,8 @@ function isEpochTransition(currentSlot: number, newSlot: number): boolean {
 function handleEpochTransition(
   state: SafroleState,
   _input: SafroleInput,
-  stagingSet: ValidatorKey[],
-  activeSet: ValidatorKey[],
+  stagingSet: ValidatorPublicKeys[],
+  activeSet: ValidatorPublicKeys[],
   offenders: Set<string> = new Set(),
 ): SafroleOutput {
   logger.debug('Handling epoch transition', {
@@ -371,7 +371,7 @@ function extractTicketId(
 /**
  * Compute epoch root using Bandersnatch VRF
  */
-function computeEpochRoot(validators: ValidatorKey[]): Hex {
+function computeEpochRoot(validators: ValidatorPublicKeys[]): Hex {
   // Use Ring VRF to compute epoch root from validator keys
   if (validators.length === 0) {
     return zeroHash as `0x${string}`
@@ -421,7 +421,7 @@ function computeEpochRoot(validators: ValidatorKey[]): Hex {
  * Generate fallback seal tickets using Ring VRF
  */
 // function generateFallbackSealTickets(
-//   validators: ValidatorKey[],
+//   validators: ValidatorPublicKeys[],
 //   entropy: HexString,
 // ): string[] {
 //   if (validators.length === 0) {
@@ -527,9 +527,9 @@ function computeEpochRoot(validators: ValidatorKey[]): Hex {
  * Replace keys of offending validators with null keys (all zeros)
  */
 function applyBlacklistFilter(
-  validatorKeys: ValidatorKey[],
+  validatorKeys: ValidatorPublicKeys[],
   offenders: Set<string>,
-): ValidatorKey[] {
+): ValidatorPublicKeys[] {
   return validatorKeys.map((key) => {
     // Check if validator's Ed25519 key is in offenders set
     const ed25519Key = key.ed25519
@@ -556,7 +556,7 @@ function applyBlacklistFilter(
 export function computeGuarantorAssignments(
   epochalEntropy: Hex,
   currentTime: bigint,
-  activeSet: ValidatorKey[],
+  activeSet: ValidatorPublicKeys[],
   coreCount = 341,
   rotationPeriod = 10,
 ): number[] {

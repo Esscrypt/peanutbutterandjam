@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { executeSafroleSTF } from '../state-transitions'
-import type { SafroleInput, SafroleOutput, SafroleState, ValidatorKey } from '@pbnj/types'
+import type { SafroleInput, SafroleOutput, SafroleState, ValidatorPublicKeys } from '@pbnj/types'
 
 beforeAll(() => {
   logger.init()
@@ -31,10 +31,10 @@ interface SafroleTestInput {
 interface SafroleTestPreState {
   tau: number // slot
   eta: string[] // entropy accumulator
-  lambda: ValidatorKey[] // pendingset
-  kappa: ValidatorKey[] // activeset  
-  gamma_k: ValidatorKey[] // stagingset
-  iota: ValidatorKey[] // previousset
+  lambda: ValidatorPublicKeys[] // pendingset
+  kappa: ValidatorPublicKeys[] // activeset  
+  gamma_k: ValidatorPublicKeys[] // stagingset
+  iota: ValidatorPublicKeys[] // previousset
   gamma_a: any[] // ticket accumulator
   gamma_s: { keys: string[] } // seal tickets
   gamma_z: string // epoch root
@@ -44,10 +44,10 @@ interface SafroleTestPreState {
 interface SafroleTestPostState {
   tau: number
   eta: string[]
-  lambda: ValidatorKey[]
-  kappa: ValidatorKey[]
-  gamma_k: ValidatorKey[]
-  iota: ValidatorKey[]
+  lambda: ValidatorPublicKeys[]
+  kappa: ValidatorPublicKeys[]
+  gamma_k: ValidatorPublicKeys[]
+  iota: ValidatorPublicKeys[]
   gamma_a: any[]
   gamma_s: { keys: string[] }
   gamma_z: string

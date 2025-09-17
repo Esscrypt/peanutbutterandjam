@@ -50,13 +50,13 @@ export function generateValidatorKeys(index: number): Safe<ValidatorKeys> {
 
   // For now, we'll use placeholder values for the public keys
   // In a real implementation, these would be derived from the secret seeds
-  const ed25519Public = bytesToHex(derivedSecretSeeds.ed25519_secret_seed) // Placeholder
+  const ed25519Public = bytesToHex(derivedSecretSeeds.ed25519SecretSeed) // Placeholder
   const bandersnatchPublic = bytesToHex(
-    derivedSecretSeeds.bandersnatch_secret_seed,
+    derivedSecretSeeds.bandersnatchSecretSeed,
   ) // Placeholder
 
   const [dnsAltNameError, dnsAltName] = generateAlternativeName(
-    derivedSecretSeeds.ed25519_secret_seed,
+    derivedSecretSeeds.ed25519SecretSeed,
     decodeFixedLength,
   )
   if (dnsAltNameError) {
@@ -65,10 +65,10 @@ export function generateValidatorKeys(index: number): Safe<ValidatorKeys> {
 
   return safeResult({
     seed: bytesToHex(seed),
-    ed25519_secret_seed: bytesToHex(derivedSecretSeeds.ed25519_secret_seed),
+    ed25519_secret_seed: bytesToHex(derivedSecretSeeds.ed25519SecretSeed),
     ed25519_public: ed25519Public,
     bandersnatch_secret_seed: bytesToHex(
-      derivedSecretSeeds.bandersnatch_secret_seed,
+      derivedSecretSeeds.bandersnatchSecretSeed,
     ),
     bandersnatch_public: bandersnatchPublic,
     dnsAltName,

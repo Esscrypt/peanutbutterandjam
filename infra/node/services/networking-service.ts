@@ -12,8 +12,9 @@ import {
   safeResult,
 } from '@pbnj/core'
 import {
-  // BlockAnnouncementProtocol,
   ConnectionManager,
+  convertDERPrivateKeyToPEM,
+  convertDERToPEM,
   GridStructureManager,
   generateALPNProtocol,
   generateCertificateFromSeed,
@@ -22,16 +23,15 @@ import {
   type TransportConfig,
   type TransportEvents,
   ValidatorSetManager,
-  // WorkPackageSubmissionProtocol,
 } from '@pbnj/networking'
 import {
   decodeHeader,
   decodeWorkPackage,
   encodeWorkPackage,
 } from '@pbnj/serialization'
-// import type { NetworkingStore } from '@pbnj/state'
 import type {
   BlockHeader,
+  JAMNPCertificate,
   NodeType,
   StreamKind,
   ValidatorMetadata,
@@ -62,6 +62,15 @@ export interface NetworkingServiceConfig {
 }
 
 /**
+ * Certificate data for QUIC transport
+ */
+export interface CertificateData {
+  privateKeyPEM: string
+  certificatePEM: string
+  alpnProtocol: string
+}
+
+/**
  * Networking service for JAM node
  */
 export class NetworkingService extends BaseService {
@@ -71,10 +80,7 @@ export class NetworkingService extends BaseService {
   private validatorSetManager: ValidatorSetManager
   private gridStructureManager: GridStructureManager
   private peerDiscoveryManager: PeerDiscoveryManager
-  // private blockAnnouncementProtocol: BlockAnnouncementProtocol
-  // private workPackageSubmissionProtocol: WorkPackageSubmissionProtocol
-  private ed25519Certificate: unknown // Gray Paper compliant Ed25519 certificate
-  private certificateCache: Map<string, unknown> = new Map() // Cache certificates by validator index
+  private ed25519Certificate!: JAMNPCertificate // Gray Paper compliant Ed25519 certificate
   private keepaliveEnabled = true
   private telemetryService: TelemetryService
 
@@ -282,14 +288,6 @@ export class NetworkingService extends BaseService {
       config.isBuilder || false,
     )
 
-    // Generate JAMNP-S compliant certificates for application layer verification
-    //TODO: check if and how this should be used or remove this code
-    const [jamnpCertificateError, _jamnpCertificate] =
-      this.generateJAMNPCertificates(config.validatorIndex, config.chainHash)
-    if (jamnpCertificateError) {
-      return safeError(jamnpCertificateError)
-    }
-
     logger.info('Generated Gray Paper compliant JAMNP-S certificates', {
       validatorIndex: config.validatorIndex,
       alpnProtocol,
@@ -306,88 +304,21 @@ export class NetworkingService extends BaseService {
     this.ed25519Certificate = ed25519Certificate.certificate
 
     return safeResult({
-      privateKeyPEM: Buffer.from(
+      privateKeyPEM: convertDERPrivateKeyToPEM(
+        ed25519Certificate.certificatePEM.publicKey,
+      ),
+      certificatePEM: convertDERToPEM(
         ed25519Certificate.certificatePEM.certificate,
-      ).toString('base64'),
-      certificatePEM: Buffer.from(
-        ed25519Certificate.certificatePEM.certificate,
-      ).toString('base64'),
+      ),
       alpnProtocol,
     })
-  }
-
-  /**
-   * Generate JAMNP-S compliant certificates using runtime generation
-   */
-  private generateJAMNPCertificates(
-    validatorIndex: bigint,
-    chainHash: string,
-  ): Safe<{
-    privateKeyPEM: string
-    certificatePEM: string
-    alpnProtocol: string
-  }> {
-    // Check cache first
-    const cacheKey = `validator-${validatorIndex}-${chainHash}`
-    if (this.certificateCache.has(cacheKey)) {
-      return safeResult(
-        this.certificateCache.get(cacheKey) as {
-          privateKeyPEM: string
-          certificatePEM: string
-          alpnProtocol: string
-        },
-      )
-    }
-
-    // Generate deterministic seed for Ed25519 keys per Gray Paper
-    // TODO: check how this should be derived
-    const testSeed = `test-seed-validator-${validatorIndex}-${chainHash}`
-    const seedBytes = new TextEncoder().encode(testSeed)
-    const paddedSeed = new Uint8Array(32)
-    paddedSeed.set(seedBytes.slice(0, 32))
-    const seedHex = Array.from(paddedSeed, (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('') as `0x${string}`
-
-    // Use the existing certificate generation utility from @pbnj/networking
-    const [ed25519CertificateError, ed25519Certificate] =
-      generateCertificateFromSeed(seedHex)
-    if (ed25519CertificateError) {
-      return safeError(ed25519CertificateError)
-    }
-
-    // Generate ALPN protocol string according to JAMNP-S spec
-    const alpnProtocol = generateALPNProtocol(chainHash, false)
-
-    // Store Ed25519 certificate for application-layer verification
-    this.ed25519Certificate = ed25519Certificate.certificate
-
-    logger.debug('Generated Ed25519 certificate for JAMNP-S', {
-      validatorIndex,
-      alternativeName: ed25519Certificate.certificate.alternativeName,
-      alpnProtocol,
-    })
-
-    // Cache the certificate data - use the runtime-generated certificates
-    const certificateData = {
-      privateKeyPEM: Buffer.from(
-        ed25519Certificate.certificatePEM.certificate,
-      ).toString('base64'),
-      certificatePEM: Buffer.from(
-        ed25519Certificate.certificatePEM.certificate,
-      ).toString('base64'),
-      alpnProtocol,
-    }
-    this.certificateCache.set(cacheKey, certificateData)
-
-    return safeResult(certificateData)
   }
 
   /**
    * Get the Ed25519 certificate for application-layer verification
    * This is used for Gray Paper compliant peer authentication
    */
-  getEd25519Certificate(): unknown {
+  getEd25519Certificate(): JAMNPCertificate {
     return this.ed25519Certificate
   }
 

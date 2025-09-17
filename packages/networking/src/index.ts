@@ -5,11 +5,8 @@
  */
 
 export {
-  deriveSecretSeeds,
-  generateAlternativeName,
-  generateTrivialSeed,
-} from '@pbnj/core'
-export {
+  convertDERPrivateKeyToPEM,
+  convertDERToPEM,
   createCertificateFromKeyPair,
   extractAlternativeNameFromCertificate,
   generateCertificate,

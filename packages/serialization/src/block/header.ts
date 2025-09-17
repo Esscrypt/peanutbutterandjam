@@ -167,6 +167,7 @@ function decodeEpochMark(
 
   // Decode validators - FIXED-LENGTH sequence of exactly C_valcount (1023) validators
   // No length prefix needed since it's sequence[C_valcount] not var{sequence}
+  // Each validator is just (bandersnatch_key, ed25519_key) - no entry index
   const C_VALCOUNT = 1023 // Gray Paper constant
   const validators: ValidatorKeyTuple[] = []
   for (let i = 0; i < C_VALCOUNT; i++) {
@@ -276,13 +277,8 @@ function decodeWinnersMark(
   }
 
   const C_EPOCHLEN = 600 // Gray Paper constant
-  if (currentData.length !== C_EPOCHLEN * 32 + 8) {
-    return safeError(
-      new Error(
-        `Winners mark must contain exactly ${C_EPOCHLEN} tickets, got ${currentData.length / 32 - 1} tickets`,
-      ),
-    )
-  }
+  // Don't validate length upfront since entryIndex is variable length
+  // We'll validate by counting actual tickets decoded
 
   // Fixed sequence of C_epochlen (600) tickets - no length prefix needed
   const tickets: SafroleTicketCore[] = []
@@ -300,6 +296,15 @@ function decodeWinnersMark(
       entryIndex: entryIndexResult.value,
     })
     currentData = entryIndexResult.remaining
+  }
+
+  // Validate we decoded exactly 600 tickets
+  if (tickets.length !== C_EPOCHLEN) {
+    return safeError(
+      new Error(
+        `Winners mark must contain exactly ${C_EPOCHLEN} tickets, got ${tickets.length} tickets`,
+      ),
+    )
   }
 
   return safeResult({ value: tickets, remaining: currentData })
@@ -383,7 +388,7 @@ function decodeOffendersMark(data: Uint8Array): Safe<DecodingResult<Hex[]>> {
  * ✅ CORRECT: Field order matches Gray Paper specification
  * ✅ CORRECT: All encoding functions used properly
  */
-export function encodeJamHeader(header: BlockHeader): Safe<Uint8Array> {
+export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // parent (32 bytes)
@@ -462,7 +467,7 @@ export function encodeJamHeader(header: BlockHeader): Safe<Uint8Array> {
  * ✅ CORRECT: Field order matches Gray Paper specification
  * ✅ CORRECT: All decoding functions used properly
  */
-export function decodeJamHeader(
+export function decodeHeader(
   data: Uint8Array,
 ): Safe<DecodingResult<BlockHeader>> {
   let currentData = data
@@ -543,7 +548,3 @@ export function decodeJamHeader(
     remaining: currentData,
   })
 }
-
-// Legacy function aliases for compatibility
-export const encodeHeader = encodeJamHeader
-export const decodeHeader = decodeJamHeader

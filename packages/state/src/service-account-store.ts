@@ -572,31 +572,6 @@ export class ServiceAccountStore {
     return safeResult(result)
   }
 
-  /**
-   * Update the JSON preimages field in service account
-   */
-
-  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: <explanation>
-  // private  async updateServiceAccountPreimages(
-  //     serviceId: number,
-  //     hash: Hex,
-  //     preimage: Hex,
-  //   ): SafePromise<DbServicePreimage> {
-  //     const [err, result] = await safeTry(
-  //       this.db
-  //         .update(servicePreimages)
-  //         .set({ preimage, hash: hash })
-  //         .where(eq(servicePreimages.serviceId, serviceId))
-  //         .returning(),
-  //     )
-
-  //     if (err) {
-  //       return safeError(err)
-  //     }
-
-  //     return safeResult(result[0])
-  //   }
-
   // ============================================================================
   // Privileges Management
   // ============================================================================

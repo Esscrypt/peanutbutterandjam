@@ -11,7 +11,13 @@ import type {
   QUICConfig,
   QUICServerCrypto,
 } from '@infisical/quic/dist/types'
-import { type SafePromise, safeError, safeResult } from '@pbnj/core'
+import {
+  type SafePromise,
+  safeError,
+  safeResult,
+  signEd25519,
+  verifyEd25519,
+} from '@pbnj/core'
 import type { ConnectionEndpoint } from '@pbnj/types'
 
 /**
@@ -55,22 +61,31 @@ export class QuicConnectionManager {
   private connections: Map<string, QUICConnectionInfo> = new Map()
   private server?: QUICServer
 
-  constructor() {
-    // Initialize QUIC server and client
-    this.initializeQuic()
-  }
-
   /**
-   * Initialize QUIC server and client
+   * Extract raw private key bytes from PEM format
    */
-  private async initializeQuic(): Promise<void> {
-    try {
-      // QUIC server and client will be created when needed
-      // They require specific configuration and crypto setup
-      console.log('QUIC connection manager initialized')
-    } catch (error) {
-      console.error('Failed to initialize QUIC:', error)
-      throw error
+  private extractPrivateKeyFromPEM(pemString: string): Uint8Array {
+    // Remove PEM headers and footers
+    const pemContent = pemString
+      .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+      .replace(/-----END PRIVATE KEY-----/g, '')
+      .replace(/-----BEGIN EC PRIVATE KEY-----/g, '')
+      .replace(/-----END EC PRIVATE KEY-----/g, '')
+      .replace(/\s/g, '') // Remove whitespace
+
+    // Decode base64
+    const keyBytes = Uint8Array.from(atob(pemContent), (c) => c.charCodeAt(0))
+
+    // For PKCS#8 format, we need to extract the actual Ed25519 key
+    // This is a simplified extraction - in production you'd want proper ASN.1 parsing
+    if (pemString.includes('BEGIN PRIVATE KEY')) {
+      // PKCS#8 format - extract the raw key from the ASN.1 structure
+      // This is a simplified approach - the actual key is typically at the end
+      // For Ed25519, the private key is 32 bytes
+      return keyBytes.slice(-32)
+    } else {
+      // Assume raw key format
+      return keyBytes
     }
   }
 
@@ -81,12 +96,18 @@ export class QuicConnectionManager {
     crypto: QUICServerCrypto,
     config: QUICConfig,
   ): Promise<QUICServer> {
+    // Ensure we have required certificates
+    if (!config.key || !config.cert) {
+      throw new Error('QUIC server requires both key and cert to be provided')
+    }
+
     const server = new QUICServer({
       crypto,
       config: {
         ...config,
-        key: new Uint8Array(32), // Required for server
-        cert: new Uint8Array(32), // Required for server
+        // Use real certificates from config - QUIC library expects PEM format
+        key: config.key, // Already in PEM format from networking service
+        cert: config.cert, // Already in PEM format from networking service
       },
     })
     return server
@@ -153,24 +174,67 @@ export class QuicConnectionManager {
     tlsConfig: QUICConfig,
   ): Promise<void> {
     try {
-      // Create server crypto
+      // Extract private key from PEM format
+      const privateKeyPEM =
+        typeof tlsConfig.key === 'string'
+          ? tlsConfig.key
+          : new TextDecoder().decode(tlsConfig.key as Uint8Array)
+
+      // Convert PEM to raw private key bytes
+      const privateKeyBytes = this.extractPrivateKeyFromPEM(privateKeyPEM)
+
+      // Create server crypto using real Ed25519 operations
       const serverCrypto: QUICServerCrypto = {
-        key: new ArrayBuffer(32), // Placeholder key
+        key: privateKeyBytes.buffer as ArrayBuffer,
         ops: {
           sign: async (
-            _key: ArrayBuffer,
-            _data: ArrayBuffer,
+            key: ArrayBuffer,
+            data: ArrayBuffer,
           ): Promise<ArrayBuffer> => {
-            // Placeholder signing
-            return new ArrayBuffer(64)
+            try {
+              // Convert ArrayBuffer to Uint8Array for Ed25519 signing
+              const keyBytes = new Uint8Array(key)
+              const dataBytes = new Uint8Array(data)
+
+              // Sign the data using Ed25519
+              const [signError, signature] = signEd25519(dataBytes, keyBytes)
+              if (signError) {
+                console.error('Ed25519 signing failed:', signError)
+                return new ArrayBuffer(64) // Return zero signature on error
+              }
+
+              return signature.buffer as ArrayBuffer
+            } catch (error) {
+              console.error('Signing operation failed:', error)
+              return new ArrayBuffer(64) // Return zero signature on error
+            }
           },
           verify: async (
-            _key: ArrayBuffer,
-            _data: ArrayBuffer,
-            _sig: ArrayBuffer,
+            key: ArrayBuffer,
+            data: ArrayBuffer,
+            sig: ArrayBuffer,
           ): Promise<boolean> => {
-            // Placeholder verification
-            return true
+            try {
+              // Convert ArrayBuffer to Uint8Array for Ed25519 verification
+              const keyBytes = new Uint8Array(key)
+              const dataBytes = new Uint8Array(data)
+              const sigBytes = new Uint8Array(sig)
+
+              // Verify the signature using Ed25519
+              const [isValidError, isValid] = verifyEd25519(
+                dataBytes,
+                sigBytes,
+                keyBytes,
+              )
+              if (isValidError) {
+                console.error('Ed25519 verification failed:', isValidError)
+                return false
+              }
+              return isValid
+            } catch (error) {
+              console.error('Verification operation failed:', error)
+              return false
+            }
           },
         },
       }

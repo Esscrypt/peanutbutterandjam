@@ -5,10 +5,10 @@
  * used across the JAM ecosystem.
  */
 
-import type { AlternativeName, FixedLengthSize } from '@pbnj/types'
-import { hash as blake2b } from '@stablelib/blake2b'
-import { generateKeyPairFromSeed } from '@stablelib/ed25519'
+import * as ed from '@noble/ed25519'
+import type { AlternativeName, FixedLengthSize, KeyPair } from '@pbnj/types'
 import { type Safe, safeError, safeResult } from './safe'
+import { blake2bHash, hexToBytes } from './utils/crypto'
 
 /**
  * JIP-5: Secret key derivation
@@ -19,8 +19,9 @@ import { type Safe, safeError, safeResult } from './safe'
  * @returns Object containing ed25519_secret_seed and bandersnatch_secret_seed
  */
 export function deriveSecretSeeds(seed: Uint8Array): Safe<{
-  ed25519_secret_seed: Uint8Array
-  bandersnatch_secret_seed: Uint8Array
+  ed25519SecretSeed: Uint8Array
+  bandersnatchSecretSeed: Uint8Array
+  blsSecretSeed: Uint8Array
 }> {
   if (seed.length !== 32) {
     return safeError(new Error('Seed must be exactly 32 bytes'))
@@ -31,6 +32,7 @@ export function deriveSecretSeeds(seed: Uint8Array): Safe<{
   const bandersnatchString = new TextEncoder().encode(
     'jam_val_key_bandersnatch',
   )
+  const blsString = new TextEncoder().encode('jam_val_key_bls')
 
   // Concatenate strings with seed
   const ed25519Input = new Uint8Array(ed25519String.length + seed.length)
@@ -43,13 +45,28 @@ export function deriveSecretSeeds(seed: Uint8Array): Safe<{
   bandersnatchInput.set(bandersnatchString, 0)
   bandersnatchInput.set(seed, bandersnatchString.length)
 
+  const blsInput = new Uint8Array(blsString.length + seed.length)
+  blsInput.set(blsString, 0)
+  blsInput.set(seed, blsString.length)
+
   // Compute BLAKE2b hashes with 32-byte output
-  const ed25519_secret_seed = blake2b(ed25519Input, 32)
-  const bandersnatch_secret_seed = blake2b(bandersnatchInput, 32)
+  const [error, ed25519SecretSeed] = blake2bHash(ed25519Input)
+  if (error) {
+    return safeError(error)
+  }
+  const [error2, bandersnatchSecretSeed] = blake2bHash(bandersnatchInput)
+  if (error2) {
+    return safeError(error2)
+  }
+  const [error3, blsSecretSeed] = blake2bHash(blsInput)
+  if (error3) {
+    return safeError(error3)
+  }
 
   return safeResult({
-    ed25519_secret_seed,
-    bandersnatch_secret_seed,
+    ed25519SecretSeed: hexToBytes(ed25519SecretSeed),
+    bandersnatchSecretSeed: hexToBytes(bandersnatchSecretSeed),
+    blsSecretSeed: hexToBytes(blsSecretSeed),
   })
 }
 
@@ -88,7 +105,44 @@ export function concatBytes(bytes: Uint8Array[]): Uint8Array {
 }
 
 /**
+ * Implements the B function from Gray Paper specification
+ * B(n, l) ≡ [abcdefghijklmnopqrstuvwxyz234567[n mod 32]] ⌢ B(⌊n/32⌋, l-1)
+ *
+ * @param n - The number to encode
+ * @param l - The length of the result string
+ * @returns Base32 encoded string
+ */
+function encodeBase32(n: bigint, l: number): string {
+  const base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
+
+  if (l === 0) {
+    return ''
+  }
+
+  const digit = Number(n % 32n)
+  const remaining = n / 32n
+
+  return encodeBase32(remaining, l - 1) + base32Alphabet[digit]
+}
+
+/**
+ * Implements the N function from Gray Paper specification
+ * N(k) ≡ $e ⌢ B(ℰ₃₂⁻¹(k), 52)
+ *
+ * @param k - The Ed25519 public key as bigint
+ * @returns Alternative name string
+ */
+function generateAlternativeNameFromKey(k: bigint): AlternativeName {
+  const base32Encoded = encodeBase32(k, 52)
+  return `e${base32Encoded}` as AlternativeName
+}
+
+/**
  * Generate alternative name from Ed25519 public key according to dev-accounts specification
+ *
+ * Implements the Gray Paper specification for alternative name generation:
+ * N(k) ≡ $e ⌢ B(ℰ₃₂⁻¹(k), 52)
+ * where B(n, l) ≡ [abcdefghijklmnopqrstuvwxyz234567[n mod 32]] ⌢ B(⌊n/32⌋, l-1)
  *
  * This implementation matches the exact values from the dev-accounts documentation,
  * which may differ from the Gray Paper specification.
@@ -98,39 +152,30 @@ export function concatBytes(bytes: Uint8Array[]): Uint8Array {
  * @returns Alternative name string
  */
 export function generateAlternativeName(
-  publicKey: Uint8Array,
+  ed25519PublicKey: Uint8Array,
   decoder: (
     data: Uint8Array,
     length: FixedLengthSize,
   ) => Safe<{ value: bigint; remaining: Uint8Array }>,
 ): Safe<AlternativeName> {
-  // Fallback to Gray Paper implementation for unknown keys
-  const [error, response] = decoder(publicKey, 32n)
+  // Decode the public key to bigint
+  const [error, response] = decoder(ed25519PublicKey, 32n)
   if (error) {
     return safeError(error)
   }
-  const base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567'
 
-  let result = ''
-  let remaining = response.value
-
-  for (let i = 0; i < 52; i++) {
-    const digit = Number(remaining % 32n)
-    result = base32Alphabet[digit] + result
-    remaining = remaining / 32n
-  }
-
-  return safeResult(`e${result}` as AlternativeName)
+  // Generate alternative name using the N function
+  const alternativeName = generateAlternativeNameFromKey(response.value)
+  return safeResult(alternativeName)
 }
 
 /**
  * Generate Ed25519 key pair from seed
  */
-export function generateEd25519KeyPairFromSeed(seed: Uint8Array): Safe<{
-  publicKey: Uint8Array
-  privateKey: Uint8Array
-}> {
-  const keyPair = generateKeyPairFromSeed(seed)
+export function generateEd25519KeyPairFromSeed(
+  seed: Uint8Array,
+): Safe<KeyPair> {
+  const keyPair = ed.keygen(seed)
   return safeResult({
     publicKey: keyPair.publicKey,
     privateKey: keyPair.secretKey,

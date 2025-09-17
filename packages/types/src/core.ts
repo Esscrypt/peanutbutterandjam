@@ -41,11 +41,10 @@ export interface Extrinsic {
   signature?: Uint8Array
 }
 
-// Validator types
-// export interface ValidatorKey {
-//   publicKey: Uint8Array
-//   address: string
-// }
+export interface KeyPair {
+  publicKey: Uint8Array
+  privateKey: Uint8Array
+}
 
 // Result type
 export interface Result<T, E = Error> {

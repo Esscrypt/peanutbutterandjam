@@ -1,353 +1,226 @@
-// /**
-//  * CE 144: Audit Announcement Protocol
-//  *
-//  * Implements the audit announcement protocol for JAMNP-S
-//  * This is a Common Ephemeral (CE) stream for announcing audit requirements.
-//  */
+/**
+ * CE 144: Audit Announcement Protocol
+ *
+ * Implements the audit announcement protocol for JAMNP-S
+ * This is a Common Ephemeral (CE) stream for announcing audit requirements.
+ */
 
-// import type { NetworkingStore } from '@pbnj/state'
-// import type { AuditAnnouncement, StreamInfo } from '@pbnj/types'
+import {
+  bytesToHex,
+  concatBytes,
+  type Hex,
+  hexToBytes,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
+import type { AuditAnnouncement } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
-// /**
-//  * Audit announcement protocol handler
-//  */
-// export class AuditAnnouncementProtocol {
-//   private auditAnnouncements: Map<
-//     string,
-//     {
-//       headerHash: Uint8Array
-//       tranche: bigint
-//       announcement: {
-//         workReports: Array<{ coreIndex: bigint; workReportHash: Uint8Array }>
-//         signature: Uint8Array
-//       }
-//       evidence: Uint8Array
-//       timestamp: number
-//     }
-//   > = new Map()
-//   private dbIntegration: NetworkingStore | null = null
+/**
+ * Audit announcement protocol handler
+ */
+// Tranche = u8
+// Announcement = len++[Core Index ++ Work-Report Hash] ++ Ed25519 Signature
 
-//   constructor(dbIntegration?: NetworkingStore) {
-//     this.dbIntegration = dbIntegration || null
-//   }
+// Bandersnatch Signature = [u8; 96]
+// First Tranche Evidence = Bandersnatch Signature (s_0 in GP)
+// No-Show = Validator Index ++ Announcement (From the previous tranche)
+// Subsequent Tranche Evidence = [Bandersnatch Signature (s_n(w) in GP) ++ len++[No-Show]] (One entry per announced work-report)
+// Evidence = First Tranche Evidence (If tranche is 0) OR Subsequent Tranche Evidence (If tranche is not 0)
 
-//   /**
-//    * Set database integration for persistent storage
-//    */
-//   setDatabaseIntegration(dbIntegration: NetworkingStore): void {
-//     this.dbIntegration = dbIntegration
-//   }
+// Auditor -> Auditor
 
-//   /**
-//    * Load state from database
-//    */
-//   async loadState(): Promise<void> {
-//     if (!this.dbIntegration) return
+// --> Header Hash ++ Tranche ++ Announcement
+// --> Evidence
+// --> FIN
+// <-- FIN
+export class AuditAnnouncementProtocol extends NetworkingProtocol<
+  AuditAnnouncement,
+  void
+> {
+  // private auditAnnouncements: Map<string, AuditAnnouncement> = new Map()
 
-//     try {
-//       // Load audit announcements from database (service ID 13 for audit announcements)
-//       console.log(
-//         'Audit announcement state loading - protocol not yet fully implemented',
-//       )
-//     } catch (error) {
-//       console.error(
-//         'Failed to load audit announcement state from database:',
-//         error,
-//       )
-//     }
-//   }
+  /**
+   * Process audit announcement
+   */
+  async processRequest(_announcement: AuditAnnouncement): SafePromise<void> {
+    //TODO: verify the audit announcement signature
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Store audit announcement in local store and persist to database
-//    */
-//   async storeAuditAnnouncement(
-//     headerHash: Uint8Array,
-//     tranche: bigint,
-//     announcement: {
-//       workReports: Array<{ coreIndex: bigint; workReportHash: Uint8Array }>
-//       signature: Uint8Array
-//     },
-//     evidence: Uint8Array,
-//   ): Promise<void> {
-//     const hashString = headerHash.toString()
-//     this.auditAnnouncements.set(hashString, {
-//       headerHash,
-//       tranche,
-//       announcement,
-//       evidence,
-//       timestamp: Date.now(),
-//     })
+  /**
+   * Serialize audit announcement message
+   */
+  serializeRequest(announcement: AuditAnnouncement): Safe<Uint8Array> {
+    const parts: Uint8Array[] = []
 
-//     // Persist to database if available
-//     if (this.dbIntegration) {
-//       try {
-//         // Store audit announcement data
-//         const announcementData = {
-//           headerHash: Buffer.from(headerHash).toString('hex'),
-//           tranche,
-//           announcement: {
-//             workReports: announcement.workReports.map((wr) => ({
-//               coreIndex: wr.coreIndex,
-//               workReportHash: Buffer.from(wr.workReportHash).toString('hex'),
-//             })),
-//             signature: Buffer.from(announcement.signature).toString('hex'),
-//           },
-//           evidence: Buffer.from(evidence).toString('hex'),
-//           timestamp: Date.now(),
-//         }
+    // 1. Header hash (32 bytes)
+    parts.push(hexToBytes(announcement.headerHash))
 
-//         await this.dbIntegration.setServiceStorage(
-//           `audit_announcement_${hashString}`,
-//           Buffer.from(JSON.stringify(announcementData), 'utf8'),
-//         )
-//       } catch (error) {
-//         console.error(
-//           'Failed to persist audit announcement to database:',
-//           error,
-//         )
-//       }
-//     }
-//   }
+    // 2. Tranche (4 bytes, little-endian)
+    const [trancheError, encodedTranche] = encodeFixedLength(
+      announcement.tranche,
+      4n,
+    )
+    if (trancheError) {
+      return safeError(trancheError)
+    }
+    parts.push(encodedTranche)
 
-//   /**
-//    * Get audit announcement from local store
-//    */
-//   getAuditAnnouncement(headerHash: Uint8Array):
-//     | {
-//         headerHash: Uint8Array
-//         tranche: bigint
-//         announcement: {
-//           workReports: Array<{ coreIndex: bigint; workReportHash: Uint8Array }>
-//           signature: Uint8Array
-//         }
-//         evidence: Uint8Array
-//         timestamp: number
-//       }
-//     | undefined {
-//     return this.auditAnnouncements.get(headerHash.toString())
-//   }
+    // 3. Number of work reports (4 bytes, little-endian)
+    const [countError, encodedCount] = encodeFixedLength(
+      BigInt(announcement.announcement.workReports.length),
+      4n,
+    )
+    if (countError) {
+      return safeError(countError)
+    }
+    parts.push(encodedCount)
 
-//   /**
-//    * Get audit announcement from database if not in local store
-//    */
-//   async getAuditAnnouncementFromDatabase(headerHash: Uint8Array): Promise<{
-//     headerHash: Uint8Array
-//     tranche: bigint
-//     announcement: {
-//       workReports: Array<{ coreIndex: bigint; workReportHash: Uint8Array }>
-//       signature: Uint8Array
-//     }
-//     evidence: Uint8Array
-//     timestamp: number
-//   } | null> {
-//     if (this.getAuditAnnouncement(headerHash)) {
-//       return this.getAuditAnnouncement(headerHash) || null
-//     }
+    // 4. Work reports
+    for (const workReport of announcement.announcement.workReports) {
+      // Core index (4 bytes, little-endian)
+      const [coreIndexError, encodedCoreIndex] = encodeFixedLength(
+        workReport.coreIndex,
+        4n,
+      )
+      if (coreIndexError) {
+        return safeError(coreIndexError)
+      }
+      parts.push(encodedCoreIndex)
 
-//     if (!this.dbIntegration) return null
+      // Work report hash (32 bytes)
+      parts.push(hexToBytes(workReport.workReportHash))
+    }
 
-//     try {
-//       const hashString = headerHash.toString()
-//       const announcementData = await this.dbIntegration.getServiceStorage(
-//         `audit_announcement_${hashString}`,
-//       )
+    // 5. Signature (64 bytes for Ed25519)
+    parts.push(hexToBytes(announcement.announcement.signature))
 
-//       if (announcementData) {
-//         const parsedData = JSON.parse(announcementData.toString())
-//         const announcement = {
-//           headerHash: Buffer.from(parsedData.headerHash, 'hex'),
-//           tranche: parsedData.tranche,
-//           announcement: {
-//             workReports: parsedData.announcement.workReports.map(
-//               (wr: { coreIndex: bigint; workReportHash: string }) => ({
-//                 coreIndex: wr.coreIndex,
-//                 workReportHash: Buffer.from(wr.workReportHash, 'hex'),
-//               }),
-//             ),
-//             signature: Buffer.from(parsedData.announcement.signature, 'hex'),
-//           },
-//           evidence: Buffer.from(parsedData.evidence, 'hex'),
-//           timestamp: parsedData.timestamp,
-//         }
+    // 6. Evidence length (4 bytes, little-endian)
+    const [evidenceLengthError, encodedEvidenceLength] = encodeFixedLength(
+      BigInt(announcement.evidence.length),
+      4n,
+    )
+    if (evidenceLengthError) {
+      return safeError(evidenceLengthError)
+    }
+    parts.push(encodedEvidenceLength)
 
-//         // Cache in local store
-//         this.auditAnnouncements.set(hashString, announcement)
-//         return announcement
-//       }
+    // 7. Evidence data
+    parts.push(announcement.evidence)
 
-//       return null
-//     } catch (error) {
-//       console.error('Failed to get audit announcement from database:', error)
-//       return null
-//     }
-//   }
+    return safeResult(concatBytes(parts))
+  }
 
-//   /**
-//    * Process audit announcement
-//    */
-//   async processAuditAnnouncement(
-//     announcement: AuditAnnouncement,
-//   ): Promise<void> {
-//     try {
-//       // Store the audit announcement
-//       await this.storeAuditAnnouncement(
-//         announcement.headerHash,
-//         announcement.tranche,
-//         announcement.announcement,
-//         announcement.evidence,
-//       )
+  /**
+   * Deserialize audit announcement message
+   */
+  deserializeRequest(data: Uint8Array): Safe<AuditAnnouncement> {
+    let currentData = data
 
-//       console.log(
-//         `Processed audit announcement for header hash: ${announcement.headerHash.toString().substring(0, 16)}..., tranche: ${announcement.tranche}`,
-//       )
-//     } catch (error) {
-//       console.error('Failed to process audit announcement:', error)
-//     }
-//   }
+    // 1. Read header hash (32 bytes)
+    if (currentData.length < 32) {
+      return safeError(new Error('Insufficient data for header hash'))
+    }
+    const headerHash = currentData.slice(0, 32)
+    currentData = currentData.slice(32)
 
-//   /**
-//    * Create audit announcement message
-//    */
-//   createAuditAnnouncement(
-//     headerHash: Uint8Array,
-//     tranche: bigint,
-//     announcement: {
-//       workReports: Array<{ coreIndex: bigint; workReportHash: Uint8Array }>
-//       signature: Uint8Array
-//     },
-//     evidence: Uint8Array,
-//   ): AuditAnnouncement {
-//     return {
-//       headerHash,
-//       tranche,
-//       announcement,
-//       evidence,
-//     }
-//   }
+    // 2. Read tranche (4 bytes, little-endian)
+    const [trancheError, trancheResult] = decodeFixedLength(currentData, 4n)
+    if (trancheError) {
+      return safeError(trancheError)
+    }
+    currentData = trancheResult.remaining
+    const tranche = trancheResult.value
 
-//   /**
-//    * Serialize audit announcement message
-//    */
-//   serializeAuditAnnouncement(announcement: AuditAnnouncement): Uint8Array {
-//     // Calculate total size
-//     let totalSize = 32 + 4 + 4 // headerHash + tranche + number of work reports
+    // 3. Read number of work reports (4 bytes, little-endian)
+    const [countError, countResult] = decodeFixedLength(currentData, 4n)
+    if (countError) {
+      return safeError(countError)
+    }
+    currentData = countResult.remaining
+    const numWorkReports = Number(countResult.value)
 
-//     // Size for work reports
-//     for (const _workReport of announcement.announcement.workReports) {
-//       totalSize += 4 + 32 // coreIndex + workReportHash
-//     }
+    // 4. Read work reports
+    const workReports: Array<{
+      coreIndex: bigint
+      workReportHash: Hex
+    }> = []
+    for (let i = 0; i < numWorkReports; i++) {
+      // Read core index (4 bytes, little-endian)
+      const [coreIndexError, coreIndexResult] = decodeFixedLength(
+        currentData,
+        4n,
+      )
+      if (coreIndexError) {
+        return safeError(coreIndexError)
+      }
+      currentData = coreIndexResult.remaining
+      const coreIndex = coreIndexResult.value
 
-//     // Size for signature and evidence
-//     totalSize += 64 + 4 + announcement.evidence.length // signature + evidence length + evidence
+      // Read work report hash (32 bytes)
+      if (currentData.length < 32) {
+        return safeError(new Error('Insufficient data for work report hash'))
+      }
+      const workReportHash = currentData.slice(0, 32)
+      currentData = currentData.slice(32)
 
-//     const buffer = new ArrayBuffer(totalSize)
-//     const view = new DataView(buffer)
-//     let offset = 0
+      workReports.push({
+        coreIndex,
+        workReportHash: bytesToHex(workReportHash),
+      })
+    }
 
-//     // Write header hash (32 bytes)
-//     new Uint8Array(buffer).set(announcement.headerHash, offset)
-//     offset += 32
+    // 5. Read signature (64 bytes for Ed25519)
+    if (currentData.length < 64) {
+      return safeError(new Error('Insufficient data for signature'))
+    }
+    const signature = currentData.slice(0, 64)
+    currentData = currentData.slice(64)
 
-//     // Write tranche (4 bytes, little-endian)
-//     view.setUint32(offset, Number(announcement.tranche), true)
-//     offset += 4
+    // 6. Read evidence length (4 bytes, little-endian)
+    const [evidenceLengthError, evidenceLengthResult] = decodeFixedLength(
+      currentData,
+      4n,
+    )
+    if (evidenceLengthError) {
+      return safeError(evidenceLengthError)
+    }
+    currentData = evidenceLengthResult.remaining
+    const evidenceLength = Number(evidenceLengthResult.value)
 
-//     // Write number of work reports (4 bytes, little-endian)
-//     view.setUint32(offset, announcement.announcement.workReports.length, true)
-//     offset += 4
+    // 7. Read evidence data
+    if (currentData.length < evidenceLength) {
+      return safeError(new Error('Insufficient data for evidence'))
+    }
+    const evidence = currentData.slice(0, evidenceLength)
 
-//     // Write work reports
-//     for (const workReport of announcement.announcement.workReports) {
-//       // Write core index (4 bytes, little-endian)
-//       view.setUint32(offset, Number(workReport.coreIndex), true)
-//       offset += 4
+    return safeResult({
+      headerHash: bytesToHex(headerHash),
+      tranche,
+      announcement: {
+        workReports: workReports.map((wr) => ({
+          coreIndex: wr.coreIndex,
+          workReportHash: wr.workReportHash,
+        })),
+        signature: bytesToHex(signature),
+      },
+      evidence,
+    })
+  }
 
-//       // Write work report hash (32 bytes)
-//       new Uint8Array(buffer).set(workReport.workReportHash, offset)
-//       offset += 32
-//     }
+  serializeResponse(_response: undefined): Safe<Uint8Array> {
+    return safeResult(new Uint8Array())
+  }
 
-//     // Write signature (64 bytes for Ed25519)
-//     new Uint8Array(buffer).set(announcement.announcement.signature, offset)
-//     offset += 64
+  deserializeResponse(_data: Uint8Array): Safe<void> {
+    return safeResult(undefined)
+  }
 
-//     // Write evidence length (4 bytes, little-endian)
-//     view.setUint32(offset, announcement.evidence.length, true)
-//     offset += 4
-
-//     // Write evidence data
-//     new Uint8Array(buffer).set(announcement.evidence, offset)
-
-//     return new Uint8Array(buffer)
-//   }
-
-//   /**
-//    * Deserialize audit announcement message
-//    */
-//   deserializeAuditAnnouncement(data: Uint8Array): AuditAnnouncement {
-//     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-//     let offset = 0
-
-//     // Read header hash (32 bytes)
-//     const headerHash = data.slice(offset, offset + 32)
-//     offset += 32
-
-//     // Read tranche (4 bytes, little-endian)
-//     const tranche = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read number of work reports (4 bytes, little-endian)
-//     const numWorkReports = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read work reports
-//     const workReports: Array<{
-//       coreIndex: bigint
-//       workReportHash: Uint8Array
-//     }> = []
-//     for (let i = 0; i < numWorkReports; i++) {
-//       // Read core index (4 bytes, little-endian)
-//       const coreIndex = BigInt(view.getUint32(offset, true))
-//       offset += 4
-
-//       // Read work report hash (32 bytes)
-//       const workReportHash = data.slice(offset, offset + 32)
-//       offset += 32
-
-//       workReports.push({ coreIndex: BigInt(coreIndex), workReportHash })
-//     }
-
-//     // Read signature (64 bytes for Ed25519)
-//     const signature = data.slice(offset, offset + 64)
-//     offset += 64
-
-//     // Read evidence length (4 bytes, little-endian)
-//     const evidenceLength = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read evidence data
-//     const evidence = data.slice(offset, offset + evidenceLength)
-
-//     return {
-//       headerHash,
-//       tranche: BigInt(tranche),
-//       announcement: {
-//         workReports,
-//         signature,
-//       },
-//       evidence,
-//     }
-//   }
-
-//   /**
-//    * Handle incoming stream data
-//    */
-//   async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
-//     try {
-//       const announcement = this.deserializeAuditAnnouncement(data)
-//       await this.processAuditAnnouncement(announcement)
-//     } catch (error) {
-//       console.error('Failed to handle audit announcement stream data:', error)
-//     }
-//   }
-// }
+  async processResponse(_response: undefined): SafePromise<void> {
+    return safeResult(undefined)
+  }
+}

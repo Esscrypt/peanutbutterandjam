@@ -4,13 +4,15 @@
  * Implements Ring VRF proving with anonymity
  */
 
+import { BandersnatchCurve } from '@pbnj/bandersnatch'
 import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
 import type {
+  CurvePoint,
   RingVRFInput,
   RingVRFProofWithOutput,
   RingVRFRing,
 } from '@pbnj/types'
-import { BandersnatchCurve, type CurvePoint } from '../curve'
+import { elligator2HashToCurve } from '../crypto/elligator2'
 import { DEFAULT_PROVER_CONFIG, RING_VRF_CONFIG } from './config'
 import { IETFVRFProver } from './ietf'
 import type { ProverConfig } from './types'
@@ -358,7 +360,7 @@ export class RingVRFProver {
    * Hash to curve point
    */
   private static hashToCurvePoint(data: Uint8Array): CurvePoint {
-    return BandersnatchCurve.hashToCurve(data)
+    return elligator2HashToCurve(data)
   }
 
   /**

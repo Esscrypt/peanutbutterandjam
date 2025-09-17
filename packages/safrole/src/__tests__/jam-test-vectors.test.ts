@@ -30,9 +30,9 @@ interface SafroleInput {
 interface SafroleState {
   tau: bigint // slot
   eta: string[] // entropy array
-  lambda: ValidatorKey[] // pending set
-  kappa: ValidatorKey[] // active set 
-  iota: ValidatorKey[] // previous set
+  lambda: ValidatorPublicKeys[] // pending set
+  kappa: ValidatorPublicKeys[] // active set 
+  iota: ValidatorPublicKeys[] // previous set
   gamma_a: Ticket[] // ticket accumulator
   gamma_s: { keys: string[] } // seal tickets
   gamma_z: string // epoch root
@@ -47,7 +47,7 @@ interface SafroleOutput {
   err?: string
 }
 
-interface ValidatorKey {
+interface ValidatorPublicKeys {
   bandersnatch: string
   ed25519: string
   bls: string
@@ -183,12 +183,12 @@ function shouldTriggerEpochChange(state: SafroleState, input: SafroleInput): boo
   return inputEpoch > currentEpoch
 }
 
-function generateNewValidatorSet(currentSet: ValidatorKey[]): ValidatorKey[] {
+function generateNewValidatorSet(currentSet: ValidatorPublicKeys[]): ValidatorPublicKeys[] {
   // Simplified validator set rotation
   return [...currentSet] // For test vectors, often just copy
 }
 
-function generateEpochRoot(validatorSet: ValidatorKey[]): string {
+function generateEpochRoot(validatorSet: ValidatorPublicKeys[]): string {
   // Simplified epoch root generation
   // In real implementation, this would use Bandersnatch VRF
   const combined = validatorSet.map(v => v.bandersnatch).join('')

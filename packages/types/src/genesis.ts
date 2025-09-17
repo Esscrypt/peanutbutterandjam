@@ -10,7 +10,7 @@
  */
 
 import type { Hex } from '@pbnj/core'
-import type { ValidatorKey } from './consensus'
+import type { ValidatorPublicKeys } from './consensus'
 
 import type { GlobalState } from './global-state'
 
@@ -142,7 +142,7 @@ export interface ChainGenesisConfig {
  */
 export interface GenesisValidatorSpec {
   /** Complete validator key (all 4 components) */
-  readonly validatorKey: ValidatorKey
+  readonly validatorKey: ValidatorPublicKeys
   /** Network peer ID */
   readonly peerId: string
   /** Network address */

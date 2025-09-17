@@ -36,9 +36,9 @@ export {
   DEFAULT_CODEC_CONFIG,
   EncodingFormat,
 } from './codec'
-// Consensus types - export ValidatorKey from consensus to avoid conflict
+// Consensus types - export ValidatorPublicKeys from consensus to avoid conflict
 export * from './consensus'
-// Core types - export ValidatorKey from core as CoreValidatorKey
+// Core types - export ValidatorPublicKeys from core as CoreValidatorKey
 export * from './core'
 export * from './erasure-coding'
 // Genesis and Global State types - comprehensive Gray Paper compliant state

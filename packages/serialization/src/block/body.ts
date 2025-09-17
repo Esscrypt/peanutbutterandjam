@@ -43,10 +43,7 @@ import type { Block, BlockBody, DecodingResult } from '@pbnj/types'
 import { decodeAssurances, encodeAssurances } from './assurance'
 import { decodeDisputes, encodeDisputes } from './dispute'
 import { decodeGuarantees, encodeGuarantees } from './guarantee'
-import {
-  decodeJamHeader as decodeHeader,
-  encodeJamHeader as encodeHeader,
-} from './header'
+import { decodeHeader, encodeHeader } from './header'
 import { decodePreimages, encodePreimages } from './preimage'
 import { decodeSafroleTickets, encodeSafroleTickets } from './ticket'
 

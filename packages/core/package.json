@@ -11,19 +11,17 @@
     "test:coverage": "vitest --coverage",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf .turbo && rm -rf node_modules"
   },
   "dependencies": {
+    "@noble/ed25519": "3.0.0",
+    "@noble/hashes": "^2.0.0",
     "@pbnj/types": "workspace:*",
-    "@stablelib/blake2b": "2.0.1",
-    "@stablelib/ed25519": "2.0.1",
-    "@stablelib/sha256": "2.0.1",
     "@types/hapi": "^18.0.14",
-    "blakejs": "1.2.1",
     "dotenv": "17.2.0",
     "fast-shuffle": "^6.1.1",
-    "viem": "2.32.0",
     "radash": "12.1.1",
+    "viem": "2.32.0",
     "zod": "3.25.76"
   },
   "devDependencies": {

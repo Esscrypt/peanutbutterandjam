@@ -5,6 +5,12 @@
  * Reference: Gray Paper VRF specifications
  */
 
+export interface CurvePoint {
+  x: bigint
+  y: bigint
+  isInfinity: boolean
+}
+
 /**
  * VRF output
  */

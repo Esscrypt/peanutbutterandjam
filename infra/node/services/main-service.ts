@@ -26,6 +26,7 @@ import { NetworkingService } from './networking-service'
 import { ServiceRegistry } from './registry'
 import { StateManager } from './state-manager'
 import { TelemetryService } from './telemetry-service'
+import { ValidatorKeyService } from './validator-key-service'
 import { WorkPackageProcessor } from './work-package-processor'
 /**
  * Main service configuration
@@ -69,6 +70,7 @@ export class MainService extends BaseService {
   private stateManagerService: StateManager | null = null
   private workPackageProcessorService: WorkPackageProcessor | null = null
   private telemetryService: TelemetryService | null = null
+  private validatorKeyService: ValidatorKeyService | null = null
 
   constructor(config: MainServiceConfig) {
     super('main-service')
@@ -96,6 +98,11 @@ export class MainService extends BaseService {
     this.workPackageProcessorService = new WorkPackageProcessor(
       'work-package-processor',
     )
+
+    this.validatorKeyService = new ValidatorKeyService({
+      seed: process.env['VALIDATOR_SEED'] || 'default-validator-seed',
+      validatorCount: 10,
+    })
 
     this.blockAuthoringService = new BlockAuthoringService(
       this.telemetryService,
@@ -135,6 +142,7 @@ export class MainService extends BaseService {
     this.registry.register(this.blockAuthoringService)
     this.registry.register(this.networkingService)
     this.registry.register(this.telemetryService)
+    this.registry.register(this.validatorKeyService)
 
     // Register this service as the main service
     this.registry.registerMain(this)
@@ -296,5 +304,12 @@ export class MainService extends BaseService {
    */
   getService<T extends Service>(name: string): T | undefined {
     return this.registry.get(name) as T | undefined
+  }
+
+  /**
+   * Get the validator key service
+   */
+  getValidatorKeyService(): ValidatorKeyService | null {
+    return this.validatorKeyService
   }
 }

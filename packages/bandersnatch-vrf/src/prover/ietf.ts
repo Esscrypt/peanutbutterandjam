@@ -4,9 +4,9 @@
  * Implements RFC-9381 VRF proof generation
  */
 
+import { BandersnatchCurve, elligator2HashToCurve } from '@pbnj/bandersnatch'
 import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
 import type { VRFProofWithOutput } from '@pbnj/types'
-import { BandersnatchCurve } from '../curve'
 import { DEFAULT_PROVER_CONFIG } from './config'
 import type { ProverConfig } from './types'
 
@@ -76,7 +76,8 @@ export class IETFVRFProver {
       return config.hashToCurve(message)
     }
 
-    const point = BandersnatchCurve.hashToCurve(message)
+    // Use Elligator2 for hash-to-curve as specified in the Bandersnatch VRF spec
+    const point = elligator2HashToCurve(message)
     return BandersnatchCurve.pointToBytes(point)
   }
 

@@ -130,13 +130,13 @@ describe('JAMNP-S Networking Implementation', () => {
       const protocol = generateALPNProtocol(chainHash)
       const builderProtocol = generateALPNProtocol(chainHash, true)
       
-      expect(protocol).toBe('jamnp-s/0.0.1/12345678')
-      expect(builderProtocol).toBe('jamnp-s/0.0.1/12345678/builder')
+      expect(protocol).toBe('jamnp-s/0/12345678')
+      expect(builderProtocol).toBe('jamnp-s/0/12345678/builder')
     })
 
     it('should parse ALPN protocol identifiers', () => {
-      const validProtocol = 'jamnp-s/0.0.1/12345678'
-      const validBuilderProtocol = 'jamnp-s/0.0.1/12345678/builder'
+      const validProtocol = 'jamnp-s/0/12345678'
+      const validBuilderProtocol = 'jamnp-s/0/12345678/builder'
       const invalidProtocol = 'invalid/protocol'
       
       const parsed1 = parseALPNProtocol(validProtocol)
@@ -145,14 +145,14 @@ describe('JAMNP-S Networking Implementation', () => {
       
       expect(parsed1).toEqual({
         name: 'jamnp-s',
-        version: '0.0.1',
+        version: '0',
         chainHash: '12345678',
         isBuilder: false,
       })
       
       expect(parsed2).toEqual({
         name: 'jamnp-s',
-        version: '0.0.1',
+        version: '0',
         chainHash: '12345678',
         isBuilder: true,
       })

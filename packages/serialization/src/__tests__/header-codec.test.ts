@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { decodeJamHeader, encodeJamHeader } from '../block/header'
+import { decodeHeader, encodeHeader } from '../block/header'
 import type { BlockHeader } from '@pbnj/types'
 import { zeroHash } from '@pbnj/core'
 
@@ -18,7 +18,7 @@ describe('JAM Header Codec Tests', () => {
     const jsonData = JSON.parse(readFileSync(jsonPath, 'utf8'))
     
     // Decode the binary data
-    const [error, decodedHeader] = decodeJamHeader(binaryData)
+    const [error, decodedHeader] = decodeHeader(binaryData)
     if (error) {
       throw error
     }
@@ -52,7 +52,7 @@ describe('JAM Header Codec Tests', () => {
     expect(decodedHeader.value.offendersMark).toEqual([])
     
     // Encode the decoded header back to binary
-    const encodedData = encodeJamHeader(decodedHeader.value)
+    const encodedData = encodeHeader(decodedHeader.value)
     
     // Verify the encoded data matches the original binary
     expect(encodedData).toEqual(binaryData)
@@ -74,13 +74,13 @@ describe('JAM Header Codec Tests', () => {
     }
     
     // Encode the header
-    const [error, encoded] = encodeJamHeader(testHeader)
+    const [error, encoded] = encodeHeader(testHeader)
     if (error) {
       throw error
     }
     
     // Decode the encoded data
-    const [error2, decodedHeader] = decodeJamHeader(encoded)
+    const [error2, decodedHeader] = decodeHeader(encoded)
     if (error2) {
       throw error2
     }
@@ -127,13 +127,13 @@ describe('JAM Header Codec Tests', () => {
     }
     
     // Encode the header
-    const [error, encoded] = encodeJamHeader(testHeader)
+    const [error, encoded] = encodeHeader(testHeader)
     if (error) {
       throw error
     }
     
     // Decode the encoded data
-    const [error2, decodedHeader] = decodeJamHeader(encoded)
+    const [error2, decodedHeader] = decodeHeader(encoded)
     if (error2) {
       throw error2
     }
@@ -181,13 +181,13 @@ describe('JAM Header Codec Tests', () => {
     }
     
     // Encode the header
-    const [error, encoded] = encodeJamHeader(testHeader)
+    const [error, encoded] = encodeHeader(testHeader)
     if (error) {
       throw error
     }
     
     // Decode the encoded data
-    const [error2, decodedHeader] = decodeJamHeader(encoded)
+    const [error2, decodedHeader] = decodeHeader(encoded)
     if (error2) {
       throw error2
     }

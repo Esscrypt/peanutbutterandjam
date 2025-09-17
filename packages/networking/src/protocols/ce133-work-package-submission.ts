@@ -6,7 +6,7 @@
  */
 
 import {
-  blake2b,
+  blake2bHash,
   concatBytes,
   type Hex,
   hexToBytes,
@@ -279,7 +279,7 @@ export class WorkPackageSubmissionProtocol extends NetworkingProtocol<
     // extrinsic is until the end of the data
     const extrinsicData = currentData
 
-    const [error3, extrincisHash] = blake2b(extrinsicData)
+    const [error3, extrincisHash] = blake2bHash(extrinsicData)
     if (error3) {
       return safeError(error3)
     }

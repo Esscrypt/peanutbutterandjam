@@ -19,3 +19,6 @@
 [submodule "submodules/jam-docs"]
 	path = submodules/jam-docs
 	url = https://github.com/JamBrains/jam-docs.git
+[submodule "submodules/jam-types-py"]
+	path = submodules/jam-types-py
+	url = https://github.com/davxy/jam-types-py.git

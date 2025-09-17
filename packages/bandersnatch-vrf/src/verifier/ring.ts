@@ -4,6 +4,7 @@
  * Implements verification for Ring VRF scheme with anonymity
  */
 
+import { BandersnatchCurve } from '@pbnj/bandersnatch'
 import { logger } from '@pbnj/core'
 import type {
   RingVRFInput,
@@ -11,7 +12,6 @@ import type {
   RingVRFProof,
   RingVRFRing,
 } from '@pbnj/types'
-import { BandersnatchCurve } from '../curve'
 import { IETFVRFProver } from '../prover/ietf'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'

@@ -4,9 +4,9 @@
  * Implements verification for IETF VRF scheme
  */
 
+import { BandersnatchCurve, type CurvePoint } from '@pbnj/bandersnatch'
 import { bytesToBigInt, logger } from '@pbnj/core'
 import type { VRFOutput } from '@pbnj/types'
-import { BandersnatchCurve, type CurvePoint } from '../curve'
 import { DEFAULT_VERIFIER_CONFIG } from './config'
 import type { VerificationResult, VerifierConfig } from './types'
 

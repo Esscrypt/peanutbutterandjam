@@ -85,7 +85,7 @@ import type {
   ServiceAccount,
   StateTrie,
   Ticket,
-  ValidatorKey,
+  ValidatorPublicKeys,
 } from '@pbnj/types'
 import { encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
@@ -270,7 +270,7 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
  * }
  *
  * Field order per Gray Paper (Section 12.2.1):
- * 1. pendingset - validator keys for next epoch (encoded as ValidatorKey sequence)
+ * 1. pendingset - validator keys for next epoch (encoded as ValidatorPublicKeys sequence)
  * 2. epochroot - Bandersnatch ring root (32-byte hash)
  * 3. discriminator - 0 for tickets, 1 for Bandersnatch keys (natural encoding)
  * 4. sealtickets - current epoch's slot-sealer sequence (C_epochlen items)
@@ -287,7 +287,7 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
  * - Sorted by ticket identifier (st_id)
  * - Used for next epoch's sealing lottery
  *
- * ✅ CORRECT: Now properly encodes pendingset as ValidatorKey sequence
+ * ✅ CORRECT: Now properly encodes pendingset as ValidatorPublicKeys sequence
  * ✅ CORRECT: Discriminator logic for sealtickets type
  * ✅ CORRECT: Fixed-length sealtickets sequence (C_epochlen)
  * ✅ CORRECT: Variable-length ticketaccumulator with proper encoding
@@ -295,7 +295,7 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
 export function encodeSafrole(safrole: SafroleState): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
-  // 1. pendingset - encode as ValidatorKey sequence (not tickets)
+  // 1. pendingset - encode as ValidatorPublicKeys sequence (not tickets)
   const [pendingError, pendingEncoded] = encodePreviousSet(safrole.pendingSet)
   if (pendingError) {
     return safeError(pendingError)
@@ -338,8 +338,8 @@ export function encodeSafrole(safrole: SafroleState): Safe<Uint8Array> {
     // Encode as Bandersnatch keys (fallback mode)
     const keyParts: Uint8Array[] = []
     for (const item of safrole.sealTickets) {
-      const validatorKey = item as ValidatorKey
-      // In fallback mode, use the Bandersnatch key from ValidatorKey
+      const validatorKey = item as ValidatorPublicKeys
+      // In fallback mode, use the Bandersnatch key from ValidatorPublicKeys
       if (validatorKey.bandersnatch) {
         keyParts.push(hexToBytes(validatorKey.bandersnatch))
       } else {
@@ -474,7 +474,9 @@ export function encodeEntropy(entropy: Hex): Safe<Uint8Array> {
  * - k_bls: BLS key (144 bytes)
  * - k_metadata: metadata (128 bytes)
  */
-export function encodeStagingSet(stagingSet: ValidatorKey[]): Safe<Uint8Array> {
+export function encodeStagingSet(
+  stagingSet: ValidatorPublicKeys[],
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   for (const validator of stagingSet) {
@@ -519,7 +521,9 @@ export function encodeStagingSet(stagingSet: ValidatorKey[]): Safe<Uint8Array> {
  * - k_bls: BLS key (144 bytes)
  * - k_metadata: metadata (128 bytes)
  */
-export function encodeActiveSet(activeSet: ValidatorKey[]): Safe<Uint8Array> {
+export function encodeActiveSet(
+  activeSet: ValidatorPublicKeys[],
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   for (const validator of activeSet) {
@@ -565,7 +569,7 @@ export function encodeActiveSet(activeSet: ValidatorKey[]): Safe<Uint8Array> {
  * - k_metadata: metadata (128 bytes)
  */
 export function encodePreviousSet(
-  previousSet: ValidatorKey[],
+  previousSet: ValidatorPublicKeys[],
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 

@@ -5,9 +5,8 @@
  * Reference: submodules/bandersnatch-vrf-spec/
  */
 
-export * from './config'
-export * from './curve'
-export { BandersnatchCurve } from './curve'
+// Re-export from bandersnatch package
+export { BANDERSNATCH_PARAMS, BandersnatchCurve } from '@pbnj/bandersnatch'
 
 // Prover exports
 export * from './prover'

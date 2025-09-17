@@ -138,7 +138,7 @@ describe('JIP-5 Secret Key Derivation', () => {
       if (secret0Error) {
         throw secret0Error
       }
-      const { publicKey: publicKey0 } = generateKeyPairFromSeed(secret0.ed25519_secret_seed)
+      const { publicKey: publicKey0 } = generateKeyPairFromSeed(secret0.ed25519SecretSeed)
       const expectedPublicKey0 = new Uint8Array(Buffer.from('4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace', 'hex'))
       expect(publicKey0).toEqual(expectedPublicKey0)
 
@@ -151,7 +151,7 @@ describe('JIP-5 Secret Key Derivation', () => {
       if (secret1Error) {
         throw secret1Error
       }
-      const { publicKey: publicKey1 } = generateKeyPairFromSeed(secret1.ed25519_secret_seed)
+      const { publicKey: publicKey1 } = generateKeyPairFromSeed(secret1.ed25519SecretSeed)
       const expectedPublicKey1 = new Uint8Array(Buffer.from('ad93247bd01307550ec7acd757ce6fb805fcf73db364063265b30a949e90d933', 'hex'))
       expect(publicKey1).toEqual(expectedPublicKey1)
 
@@ -164,7 +164,7 @@ describe('JIP-5 Secret Key Derivation', () => {
       if (secret2Error) {
         throw secret2Error
       }
-      const { publicKey: publicKey2 } = generateKeyPairFromSeed(secret2.ed25519_secret_seed)
+      const { publicKey: publicKey2 } = generateKeyPairFromSeed(secret2.ed25519SecretSeed)
       const expectedPublicKey2 = new Uint8Array(Buffer.from('cab2b9ff25c2410fbe9b8a717abb298c716a03983c98ceb4def2087500b8e341', 'hex'))
       expect(publicKey2).toEqual(expectedPublicKey2)
     })
@@ -262,7 +262,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         expect(bandersnatch_secret_seed).toEqual(new Uint8Array(Buffer.from(vector.bandersnatch_secret_seed, 'hex')))
 
         // Generate Ed25519 public key from secret seed
-        const { publicKey: ed25519_public } = generateKeyPairFromSeed(ed25519_secret_seed.ed25519_secret_seed)
+        const { publicKey: ed25519_public } = generateKeyPairFromSeed(ed25519_secret_seed.ed25519SecretSeed)
         expect(ed25519_public).toEqual(new Uint8Array(Buffer.from(vector.ed25519_public, 'hex')))
 
         // TODO: Add Bandersnatch public key generation when available

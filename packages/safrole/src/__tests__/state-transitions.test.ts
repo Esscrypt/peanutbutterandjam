@@ -11,7 +11,7 @@ import { executeSafroleSTF } from '../state-transitions'
 import type { 
   SafroleInput, 
   SafroleState,
-  ValidatorKey
+  ValidatorPublicKeys
 } from '@pbnj/types'
 
 // Initialize logger for tests
@@ -20,7 +20,7 @@ beforeAll(() => {
 })
 
 describe('Safrole State Transitions', () => {
-  const mockValidatorKey: ValidatorKey = {
+  const mockValidatorKey: ValidatorPublicKeys = {
     bandersnatch:
       '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
     ed25519:
@@ -45,8 +45,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     const result = await executeSafroleSTF(mockState, input, 0, stagingSet, activeSet, offenders)
@@ -64,8 +64,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     const result = await executeSafroleSTF(mockState, input, 599, stagingSet, activeSet, offenders)
@@ -83,8 +83,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     await expect(executeSafroleSTF(mockState, input, 0, stagingSet, activeSet, offenders)).rejects.toThrow(
@@ -103,8 +103,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     await expect(executeSafroleSTF(mockState, input, 0, stagingSet, activeSet, offenders)).rejects.toThrow(
@@ -131,8 +131,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     const result = await executeSafroleSTF(mockState, input, 0, stagingSet, activeSet, offenders)
@@ -152,8 +152,8 @@ describe('Safrole State Transitions', () => {
     }
 
     // Mock additional parameters required by the function
-    const stagingSet: ValidatorKey[] = [mockValidatorKey]
-    const activeSet: ValidatorKey[] = [mockValidatorKey]
+    const stagingSet: ValidatorPublicKeys[] = [mockValidatorKey]
+    const activeSet: ValidatorPublicKeys[] = [mockValidatorKey]
     const offenders = new Set<string>()
 
     await expect(executeSafroleSTF(mockState, input, 0, stagingSet, activeSet, offenders)).rejects.toThrow(

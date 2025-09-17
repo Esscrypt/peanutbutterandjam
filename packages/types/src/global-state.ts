@@ -12,7 +12,7 @@
 
 import type { Hex } from '@pbnj/core'
 import type { BlockBody } from './block-authoring'
-import type { SafroleState, Ticket, ValidatorKey } from './consensus'
+import type { SafroleState, Ticket, ValidatorPublicKeys } from './consensus'
 import type { ServiceAccountCore, WorkReport } from './serialization'
 
 // ============================================================================
@@ -319,13 +319,13 @@ export interface GlobalState {
   entropy: Entropy
 
   /** Staging validator set (ι) - Validators queued for next epoch */
-  stagingset: ValidatorKey[]
+  stagingset: ValidatorPublicKeys[]
 
   /** Active validator set (κ) - Currently active validators */
-  activeset: ValidatorKey[]
+  activeset: ValidatorPublicKeys[]
 
   /** Previous validator set (λ) - Previous epoch validators */
-  previousset: ValidatorKey[]
+  previousset: ValidatorPublicKeys[]
 
   /** Pending reports (ρ) - Work reports awaiting availability assurance */
   reports: Reports

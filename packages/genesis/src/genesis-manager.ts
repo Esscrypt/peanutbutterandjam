@@ -22,7 +22,7 @@ import type {
   GenesisResult,
   GenesisState,
   GenesisStateInitializers,
-  ValidatorKey,
+  ValidatorPublicKeys,
 } from '@pbnj/types'
 
 // Helper methods merged into main class
@@ -294,13 +294,13 @@ export class GenesisManagerImpl {
    */
   private parseValidatorKeyFromConfig(validator: {
     bandersnatch: string
-  }): ValidatorKey {
+  }): ValidatorPublicKeys {
     return {
       bandersnatch: `0x${validator.bandersnatch}` as Hex,
       ed25519: `0x${'00'.repeat(32)}` as Hex,
       bls: `0x${'00'.repeat(144)}` as Hex,
       metadata: `0x${'00'.repeat(128)}` as Hex,
-    } as ValidatorKey
+    } as ValidatorPublicKeys
   }
 
   /**
@@ -431,19 +431,19 @@ export class GenesisManagerImpl {
     ed25519?: string
     bls?: string
     metadata?: string
-  }): ValidatorKey {
+  }): ValidatorPublicKeys {
     return {
       bandersnatch: validator.publicKey || (`0x${'00'.repeat(32)}` as Hex),
       ed25519: validator.ed25519 || (`0x${'00'.repeat(32)}` as Hex),
       bls: validator.bls || (`0x${'00'.repeat(144)}` as Hex),
       metadata: validator.metadata || (`0x${'00'.repeat(128)}` as Hex),
-    } as ValidatorKey
+    } as ValidatorPublicKeys
   }
 
   /**
    * Compute epoch root from validators
    */
-  private computeEpochRoot(validators: ValidatorKey[]): Hex {
+  private computeEpochRoot(validators: ValidatorPublicKeys[]): Hex {
     // Simplified epoch root computation
     // In a full implementation, this would use the proper Bandersnatch ring root calculation
     const combined = validators.map((v) => v.bandersnatch).join('')

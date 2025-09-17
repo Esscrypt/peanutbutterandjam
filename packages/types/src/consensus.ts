@@ -12,9 +12,9 @@ import type { SafroleTicketCore } from './serialization'
 export interface ConsensusState {
   slot: number
   entropy: string[]
-  pendingSet: ValidatorKey[]
-  activeSet: ValidatorKey[]
-  previousSet: ValidatorKey[]
+  pendingSet: ValidatorPublicKeys[]
+  activeSet: ValidatorPublicKeys[]
+  previousSet: ValidatorPublicKeys[]
   epochRoot: Hex
   sealTickets: string[]
   ticketAccumulator: Ticket[]
@@ -46,7 +46,7 @@ export interface TicketProof {
  * can author blocks in each timeslot.
  *
  * Fields (Gray Paper terminology):
- * - pendingset: validator keys for the next epoch (ValidatorKey sequence)
+ * - pendingset: validator keys for the next epoch (ValidatorPublicKeys sequence)
  * - epochroot: Bandersnatch ring root composed from pendingset keys
  * - sealtickets: current epoch's slot-sealer sequence (union type)
  * - ticketaccumulator: highest-scoring tickets for next epoch
@@ -83,15 +83,15 @@ export interface TicketProof {
  * - ticketAccumulator uses proper ticket structure
  *
  * Usage: Core consensus state for Safrole protocol
- * Related: ValidatorKey, Ticket interfaces; entropy accumulation
+ * Related: ValidatorPublicKeys, Ticket interfaces; entropy accumulation
  */
 export interface SafroleState {
   /** Pending validator set (next epoch) - Gray Paper: pendingSet */
-  pendingSet: ValidatorKey[]
+  pendingSet: ValidatorPublicKeys[]
   /** Epoch root (Bandersnatch ring root) - Gray Paper: epochRoot */
   epochRoot: Hex
   /** Current epoch's seal tickets - Gray Paper: sealTickets */
-  sealTickets: Ticket[] | ValidatorKey[]
+  sealTickets: Ticket[] | ValidatorPublicKeys[]
   /** Ticket accumulator for next epoch - Gray Paper: ticketAccumulator */
   ticketAccumulator: Ticket[]
 
@@ -247,8 +247,12 @@ export interface ConsensusError {
 
 /**
  * Validator key structure
+ * @param bandersnatch - Bandersnatch public key (32 bytes)
+ * @param ed25519 - Ed25519 public key (32 bytes)
+ * @param bls - BLS public key (144 bytes)
+ * @param metadata - Metadata (128 bytes)
  */
-export interface ValidatorKey {
+export interface ValidatorPublicKeys {
   /** Bandersnatch key (first 32 Uint8Array) */
   bandersnatch: Hex
   /** Ed25519 key (next 32 Uint8Array) */
@@ -266,7 +270,7 @@ export interface WinnerMarker {
   /** Slot number */
   slot: number
   /** Winner validator */
-  winner: ValidatorKey
+  winner: ValidatorPublicKeys
   /** Winner ticket */
   ticket: ConsensusTicket
 }

@@ -6,7 +6,7 @@
  */
 
 import type { Hex } from 'viem'
-import type { ValidatorKey } from './consensus'
+import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
 import type { BlockHeader } from './global-state'
 import type {
@@ -50,7 +50,7 @@ export interface State {
   blockNumber: bigint
   stateRoot: Hex
   timestamp: bigint
-  validators: ValidatorKey[]
+  validators: ValidatorPublicKeys[]
 }
 
 // Note: ValidatorSet removed - Gray Paper uses separate stagingset, activeset, previousset
@@ -115,7 +115,7 @@ export interface BlockAuthoringContext {
   currentTimeslot: bigint
 
   // Validator information
-  validatorSet: ValidatorKey[]
+  validatorSet: ValidatorPublicKeys[]
   authorIndex: bigint
 
   // Available extrinsics and work packages
@@ -284,7 +284,7 @@ export interface HeaderConstructionContext {
   extrinsics: Extrinsic[]
   workReports: WorkReport[]
   currentTimeslot: bigint
-  validatorSet: ValidatorKey[]
+  validatorSet: ValidatorPublicKeys[]
   authorIndex: bigint
 }
 
@@ -315,7 +315,7 @@ export interface ExtrinsicValidationContext {
   extrinsics: Extrinsic[]
   state: State
   blockHeader: BlockHeader
-  validatorSet: ValidatorKey[]
+  validatorSet: ValidatorPublicKeys[]
 }
 
 /**

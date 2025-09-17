@@ -372,12 +372,8 @@ export function decodeWorkContext(
       new Error('[decodeWorkContext] Insufficient data for anchor hash'),
     )
   }
-  const [error, anchorResult] = decodeFixedLength(data, 32n)
-  if (error) {
-    return safeError(error)
-  }
-  const anchor = anchorResult.value
-  data = anchorResult.remaining
+  const anchor = bytesToHex(data.slice(0, 32))
+  data = data.slice(32)
 
   // 2. WC_anchorpoststate (32 bytes) - Gray Paper compliant
   if (data.length < 32) {
@@ -385,12 +381,8 @@ export function decodeWorkContext(
       new Error('[decodeWorkContext] Insufficient data for anchor post state'),
     )
   }
-  const [error2, stateRootResult] = decodeFixedLength(data, 32n)
-  if (error2) {
-    return safeError(error2)
-  }
-  const stateRoot = stateRootResult.value
-  data = stateRootResult.remaining
+  const stateRoot = bytesToHex(data.slice(0, 32))
+  data = data.slice(32)
 
   // 3. WC_anchoraccoutlog (32 bytes) - Gray Paper compliant
   if (data.length < 32) {
@@ -398,12 +390,8 @@ export function decodeWorkContext(
       new Error('[decodeWorkContext] Insufficient data for anchor accout log'),
     )
   }
-  const [error3, beefyRootResult] = decodeFixedLength(data, 32n)
-  if (error3) {
-    return safeError(error3)
-  }
-  const beefyRoot = beefyRootResult.value
-  data = beefyRootResult.remaining
+  const beefyRoot = bytesToHex(data.slice(0, 32))
+  data = data.slice(32)
 
   // 4. WC_lookupanchorhash (32 bytes) - Gray Paper compliant
   if (data.length < 32) {
@@ -411,12 +399,8 @@ export function decodeWorkContext(
       new Error('[decodeWorkContext] Insufficient data for lookup anchor hash'),
     )
   }
-  const [error4, lookupAnchorResult] = decodeFixedLength(data, 32n)
-  if (error4) {
-    return safeError(error4)
-  }
-  const lookupAnchor = lookupAnchorResult.value
-  data = lookupAnchorResult.remaining
+  const lookupAnchor = bytesToHex(data.slice(0, 32))
+  data = data.slice(32)
 
   // 5. decode[4]{WC_lookupanchortime} (4 bytes fixed-length) - Gray Paper compliant
   if (data.length < 4) {
@@ -472,10 +456,10 @@ export function decodeWorkContext(
 
   return safeResult({
     value: {
-      anchorHash: bytesToHex(numberToBytes(anchor)),
-      anchorPostState: bytesToHex(numberToBytes(stateRoot)),
-      anchorAccoutLog: bytesToHex(numberToBytes(beefyRoot)),
-      lookupAnchorHash: bytesToHex(numberToBytes(lookupAnchor)),
+      anchorHash: anchor,
+      anchorPostState: stateRoot,
+      anchorAccoutLog: beefyRoot,
+      lookupAnchorHash: lookupAnchor,
       lookupAnchorTime: lookupAnchorSlot,
       prerequisites,
     },

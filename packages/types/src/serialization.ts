@@ -139,11 +139,42 @@ export interface Judgment {
 
 /**
  * Assurance structure for data availability
+ *
+ * An assurance is a signed statement issued by validators when they are in possession
+ * of all their corresponding erasure-coded chunks for a given work-report which is
+ * currently pending availability. This is part of the JAM protocol's data availability
+ * mechanism as specified in the Gray Paper section 4.2.
  */
 export interface Assurance {
-  anchor: Hex
+  /**
+   * The parent block hash that this assurance is anchored to.
+   * Must equal the parent block hash H_parent for all assurances in a block.
+   * This ensures assurances are tied to a specific block and cannot be replayed.
+   */
+  anchor: Hex // hash
+
+  /**
+   * A bitstring of length C_corecount (341 bits) where each bit represents
+   * whether the validator assures availability for the corresponding core.
+   * A value of 1 (true) at index i means the validator assures they are
+   * contributing to the availability of the work-report on core i.
+   * This is a "soft" implication with no on-chain consequences if dishonestly reported.
+   */
   availabilities: Hex
-  assurer: bigint
+
+  /**
+   * The validator index (0 to C_valcount-1, where C_valcount = 1023)
+   * of the validator who is issuing this assurance.
+   * Must be unique within the assurances extrinsic and ordered by validator index.
+   */
+  assurer: bigint // validator index
+
+  /**
+   * Ed25519 signature proving the authenticity of this assurance.
+   * The signature is over the message: "$jam_available" || blake2b(encode(anchor, availabilities))
+   * where the public key corresponds to the assurer's Ed25519 verification key.
+   * This ensures only the assigned validator can issue valid assurances.
+   */
   signature: Hex
 }
 
@@ -151,10 +182,10 @@ export interface Assurance {
  * Operand tuple structure for work item results
  */
 export interface OperandTuple {
-  packageHash: Hex
-  segmentRoot: Hex
+  packageHash: Hex // hash
+  segmentRoot: Hex // hash
   authorizer: Hex
-  payloadHash: Hex
+  payloadHash: Hex // hash
   gasLimit: bigint
   result: WorkResult
   authTrace: Uint8Array
@@ -312,7 +343,14 @@ export interface WorkItem {
  *
  * ✅ CORRECT: All 6 required fields present according to Gray Paper
  * ✅ CORRECT: Field types match Gray Paper specification exactly
- */
+  
+@param anchorHash - Anchor block header hash - Gray Paper: wc_anchorhash ∈ hash 
+@param anchorPostState - Anchor block posterior state-root - Gray Paper: wc_anchorpoststate ∈ hash 
+@param anchorAccoutLog - Anchor block accumulation output log super-peak - Gray Paper: wc_anchoraccoutlog ∈ hash 
+@param lookupAnchorHash - Lookup-anchor block header hash - Gray Paper: wc_lookupanchorhash ∈ hash 
+@param lookupAnchorTime - Lookup-anchor block timeslot - Gray Paper: wc_lookupanchortime ∈ timeslot
+@param prerequisites - Hash of any prerequisite work-packages - Gray Paper: wc_prerequisites ∈ protoset{hash} 
+*/
 export interface WorkContext {
   /** Anchor block header hash - Gray Paper: wc_anchorhash ∈ hash */
   anchorHash: Hex

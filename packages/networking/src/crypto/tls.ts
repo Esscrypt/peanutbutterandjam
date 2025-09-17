@@ -12,7 +12,6 @@ import {
 } from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
 import type { JAMNPCertificate } from '@pbnj/types'
-import packageJson from '../../package.json'
 
 /**
  * TLS 1.3 configuration for JAMNP-S
@@ -124,7 +123,7 @@ export function parseALPNProtocol(protocol: string): {
 
     const [name, version, chainHash, builder] = parts
 
-    if (name !== 'jamnp-s' || version !== packageJson.version) {
+    if (name !== 'jamnp-s' || version !== '0') {
       return null
     }
 
