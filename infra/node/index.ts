@@ -14,31 +14,13 @@ import { MainService } from './services/main-service'
  * Default configuration for the JAM node
  */
 const defaultConfig: MainServiceConfig = {
-  blockAuthoring: {
-    networkId: 'jam-network',
-    validatorKey:
-      process.env['VALIDATOR_KEY'] ||
-      '0x0000000000000000000000000000000000000000000000000000000000000000',
-    slotDuration: 6000n, // 6 seconds
-    epochLength: 600n, // 600 slots
-    maxExtrinsicsPerBlock: 1000n,
-    maxWorkPackagesPerBlock: 100n,
-    enableStrictValidation: true,
-    enableAuditMode: false,
-    enableSafroleValidation: true,
-    enableGrandpaFinalization: true,
-  },
   genesis: {
     chainSpecPath: process.env['CHAIN_SPEC_PATH'] || './chain-spec.json',
   },
   networking: {
-    validatorIndex: BigInt(process.env['VALIDATOR_INDEX'] || '0'),
     nodeType: (process.env['NODE_TYPE'] as NodeType) || 'validator',
     listenAddress: process.env['LISTEN_ADDRESS'] || '0.0.0.0',
     listenPort: BigInt(process.env['LISTEN_PORT'] || '30333'),
-    chainHash:
-      process.env['CHAIN_HASH'] ||
-      '0x0000000000000000000000000000000000000000000000000000000000000000',
     isBuilder: process.env['IS_BUILDER'] === 'true',
   },
   nodeId: process.env['NODE_ID'] || 'jam-node-1',
@@ -63,7 +45,6 @@ async function main(): Promise<void> {
   try {
     logger.info('Starting JAM node...', {
       nodeId: defaultConfig.nodeId,
-      validatorIndex: defaultConfig.networking.validatorIndex,
       nodeType: defaultConfig.networking.nodeType,
       listenAddress: defaultConfig.networking.listenAddress,
       listenPort: defaultConfig.networking.listenPort,

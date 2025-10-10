@@ -5,10 +5,21 @@
  * used across the JAM ecosystem.
  */
 
+import {
+  Field,
+  FpIsSquare,
+  FpSqrt,
+  type IField,
+} from '@noble/curves/abstract/modular'
 import * as ed from '@noble/ed25519'
+import { sha512 } from '@noble/hashes/sha2'
+import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
 import type { AlternativeName, FixedLengthSize, KeyPair } from '@pbnj/types'
 import { type Safe, safeError, safeResult } from './safe'
 import { blake2bHash, hexToBytes } from './utils/crypto'
+
+// Configure Ed25519 with SHA-512
+ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
 
 /**
  * JIP-5: Secret key derivation
@@ -122,7 +133,7 @@ function encodeBase32(n: bigint, l: number): string {
   const digit = Number(n % 32n)
   const remaining = n / 32n
 
-  return encodeBase32(remaining, l - 1) + base32Alphabet[digit]
+  return base32Alphabet[digit] + encodeBase32(remaining, l - 1)
 }
 
 /**
@@ -134,7 +145,7 @@ function encodeBase32(n: bigint, l: number): string {
  */
 function generateAlternativeNameFromKey(k: bigint): AlternativeName {
   const base32Encoded = encodeBase32(k, 52)
-  return `e${base32Encoded}` as AlternativeName
+  return `e${base32Encoded}`
 }
 
 /**
@@ -178,6 +189,102 @@ export function generateEd25519KeyPairFromSeed(
   const keyPair = ed.keygen(seed)
   return safeResult({
     publicKey: keyPair.publicKey,
-    privateKey: keyPair.secretKey,
+    privateKey: keyPair.secretKey, // This is 64 bytes (32-byte seed + 32-byte public key)
   })
+}
+
+/**
+ * Proper modular arithmetic that handles negative numbers correctly
+ * JavaScript's % operator can return negative results, but we need non-negative results
+ *
+ * @param a - Value
+ * @param m - Modulus
+ * @returns Non-negative result of a mod m
+ */
+export function mod(a: bigint, m: bigint): bigint {
+  const result = a % m
+  return result < 0n ? result + m : result
+}
+
+// Helper function for modular exponentiation
+export function modPow(
+  base: bigint,
+  exponent: bigint,
+  modulus: bigint,
+): bigint {
+  if (modulus === 1n) return 0n
+
+  let result = 1n
+  base = mod(base, modulus)
+
+  while (exponent > 0n) {
+    if (exponent % 2n === 1n) {
+      result = mod(result * base, modulus)
+    }
+    exponent = exponent >> 1n
+    base = mod(base * base, modulus)
+  }
+
+  return result
+}
+
+// Create Bandersnatch field for noble package functions
+export const BANDERSNATCH_FIELD = Field(BANDERSNATCH_PARAMS.FIELD_MODULUS)
+
+/**
+ * Modular square root using noble package FpSqrt
+ *
+ * @param value - Value to find square root of
+ * @param p - Prime modulus
+ * @returns Square root if it exists
+ */
+export function modSqrt(
+  value: bigint,
+  p: bigint,
+  field: IField<bigint>,
+): bigint {
+  if (value === 0n) return 0n
+  if (value === 1n) return 1n
+
+  // Check if value is a quadratic residue using noble package
+  if (!FpIsSquare(field, value)) {
+    throw new Error('Value is not a quadratic residue')
+  }
+
+  // Use noble package FpSqrt for modular square root
+  const sqrtFn = FpSqrt(p)
+  return sqrtFn(field, value)
+}
+
+/**
+ * Modular inverse using extended Euclidean algorithm
+ *
+ * @param a - Value
+ * @param m - Modulus
+ * @returns Modular inverse
+ */
+export function modInverse(a: bigint, m: bigint): bigint {
+  let [oldR, r] = [a, m]
+  let [oldS, s] = [1n, 0n]
+
+  while (r !== 0n) {
+    const quotient = oldR / r
+    ;[oldR, r] = [r, oldR - quotient * r]
+    ;[oldS, s] = [s, oldS - quotient * s]
+  }
+
+  if (oldR > 1n) {
+    throw new Error('Modular inverse does not exist')
+  }
+
+  return oldS < 0n ? oldS + m : oldS
+}
+
+export function numberToBytesLittleEndian(value: bigint): Uint8Array {
+  const bytes = new Uint8Array(32)
+  const hex = value.toString(16).padStart(64, '0')
+  for (let i = 0; i < 32; i++) {
+    bytes[i] = Number.parseInt(hex.slice(62 - i * 2, 64 - i * 2), 16)
+  }
+  return bytes
 }

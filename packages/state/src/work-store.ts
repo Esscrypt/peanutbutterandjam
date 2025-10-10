@@ -21,20 +21,20 @@ import {
   encodeWorkPackage,
   encodeWorkReport,
 } from '@pbnj/serialization'
-import type { WorkPackage, WorkReport, WorkResult } from '@pbnj/types'
+import type { WorkExecResultValue, WorkPackage, WorkReport } from '@pbnj/types'
 import { and, count, desc, eq, sum } from 'drizzle-orm'
 import type { CoreDb } from './index'
 import {
-  type DbNewWorkDigest,
   type DbNewWorkItem,
   type DbNewWorkPackage,
   type DbNewWorkReport,
+  type DbNewWorkResult,
   type DbWorkPackage,
   type DbWorkReport,
-  workDigests,
   workItems,
   workPackages,
   workReports,
+  workResults,
 } from './schema/core-schema'
 
 /**
@@ -113,7 +113,7 @@ export interface WorkStats {
  * Work Store for JAM work packages, reports, and digests
  */
 export class WorkStore {
-  constructor(private db: CoreDb) {}
+  constructor(private readonly db: CoreDb) {}
 
   /**
    * Store a work package with its work items
@@ -142,10 +142,10 @@ export class WorkStore {
           authCodeHost: workPackage.authCodeHost,
           authCodeHash: workPackage.authCodeHash,
           authConfig: workPackage.authConfig,
-          contextAnchor: workPackage.context.anchorHash,
-          contextState: workPackage.context.anchorPostState,
-          contextBelief: workPackage.context.anchorAccoutLog,
-          contextEpochMark: workPackage.context.lookupAnchorHash,
+          contextAnchor: workPackage.context.anchor,
+          contextState: workPackage.context.state_root,
+          contextBelief: workPackage.context.beefy_root,
+          contextEpochMark: workPackage.context.lookup_anchor,
           workItemCount: workPackage.workItems.length,
           data: bytesToHex(encoded),
           status,
@@ -237,47 +237,51 @@ export class WorkStore {
         const reportData: DbNewWorkReport = {
           reportHash,
           workPackageHash: workPackageHash || null,
-          coreIndex: workReport.coreIndex,
-          authorizer: workReport.authorizer,
-          authTrace: bytesToHex(workReport.authTrace),
-          authGasUsed: workReport.authGasUsed,
-          packageHash: workReport.availabilitySpec.packageHash,
-          erasureRoot: workReport.availabilitySpec.erasureRoot,
-          exportsRoot: workReport.availabilitySpec.segmentRoot,
-          exportsCount: Number(workReport.availabilitySpec.segmentCount),
-          contextAnchor: workReport.context.anchorHash,
-          contextState: workReport.context.anchorPostState,
-          contextBelief: workReport.context.anchorAccoutLog,
-          contextEpochMark: workReport.context.lookupAnchorHash,
-          digestCount: workReport.digests.length,
-          srLookup: JSON.stringify(Object.fromEntries(workReport.srLookup)),
+          coreIndex: workReport.core_index,
+          authorizer: workReport.authorizer_hash,
+          authTrace: workReport.auth_output,
+          authGasUsed: workReport.auth_gas_used,
+          packageHash: workReport.package_spec.hash,
+          erasureRoot: workReport.package_spec.erasure_root,
+          exportsRoot: workReport.package_spec.exports_root,
+          exportsCount: Number(workReport.package_spec.exports_count),
+          contextAnchor: workReport.context.anchor,
+          contextState: workReport.context.state_root,
+          contextBelief: workReport.context.beefy_root,
+          contextEpochMark: workReport.context.anchor,
+          digestCount: workReport.results.length,
+          srLookup: JSON.stringify(
+            workReport.segment_root_lookup.map((item) => [
+              item.work_package_hash,
+              item.segment_tree_root,
+            ]),
+          ),
           data: bytesToHex(encoded),
           status,
         }
 
         await tx.insert(workReports).values(reportData).onConflictDoNothing()
 
-        // Store work digests
-        if (workReport.digests.length > 0) {
-          const digestsData: DbNewWorkDigest[] = workReport.digests.map(
-            (digest, index) => ({
+        // Store work results
+        if (workReport.results.length > 0) {
+          const resultsData: DbNewWorkResult[] = workReport.results.map(
+            (result, index) => ({
               workReportHash: reportHash,
-              serviceIndex: digest.serviceIndex,
-              codeHash: digest.codeHash,
-              payloadHash: digest.payloadHash,
-              gasLimit: digest.gasLimit,
-              gasUsed: digest.gasUsed,
-              result: this.serializeWorkResult(digest.result),
-              isError: this.isWorkResultError(digest.result),
-              importCount: digest.importCount,
-              extrinsicCount: digest.extrinsicCount,
-              extrinsicSize: digest.extrinsicSize,
-              exportCount: digest.exportCount,
+              serviceId: result.service_id,
+              codeHash: result.code_hash,
+              payloadHash: result.payload_hash,
+              accumulateGas: result.accumulate_gas,
+              result: this.mapWorkResultToDbEnum(result.result),
+              gasUsed: result.refine_load.gas_used,
+              imports: result.refine_load.imports,
+              extrinsicCount: result.refine_load.extrinsic_count,
+              extrinsicSize: result.refine_load.extrinsic_size,
+              exports: result.refine_load.exports,
               sequenceIndex: index,
             }),
           )
 
-          await tx.insert(workDigests).values(digestsData)
+          await tx.insert(workResults).values(resultsData)
         }
 
         return { reportHash }
@@ -494,9 +498,9 @@ export class WorkStore {
         this.db
           .select({
             total: count(),
-            avgGasUsed: sum(workDigests.gasUsed),
+            avgGasUsed: sum(workResults.gasUsed),
           })
-          .from(workDigests),
+          .from(workResults),
       ])
 
       const packageStat = packageStats[0]
@@ -556,6 +560,31 @@ export class WorkStore {
   }
 
   /**
+   * Map WorkExecResultValue to database enum
+   */
+  private mapWorkResultToDbEnum(result: WorkExecResultValue): number {
+    if (typeof result === 'string' && result.startsWith('0x')) {
+      return 0 // ok
+    }
+    if (result === 'out_of_gas') {
+      return 1
+    }
+    if (typeof result === 'object' && 'panic' in result) {
+      return 2
+    }
+    if (result === 'bad_exports') {
+      return 3
+    }
+    if (result === 'bad_code') {
+      return 4
+    }
+    if (result === 'code_oversize') {
+      return 5
+    }
+    return 6 // unknown/other
+  }
+
+  /**
    * Check if work report exists
    */
   async hasWorkReport(reportHash: Hex): Promise<boolean> {
@@ -570,25 +599,5 @@ export class WorkStore {
       console.error('Failed to check work report existence:', error)
       return false
     }
-  }
-
-  /**
-   * Serialize work result for database storage
-   */
-  private serializeWorkResult(result: WorkResult): Hex {
-    if (typeof result === 'string') {
-      // Error case
-      return bytesToHex(new TextEncoder().encode(result))
-    } else {
-      // Success case (Uint8Array)
-      return bytesToHex(result)
-    }
-  }
-
-  /**
-   * Check if work result is an error
-   */
-  private isWorkResultError(result: WorkResult): boolean {
-    return typeof result === 'string'
   }
 }

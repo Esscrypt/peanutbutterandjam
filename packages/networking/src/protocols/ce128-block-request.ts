@@ -23,7 +23,12 @@ import {
   encodeNatural,
 } from '@pbnj/serialization'
 import type { BlockStore } from '@pbnj/state'
-import type { Block, BlockRequest, BlockResponse } from '@pbnj/types'
+import type {
+  Block,
+  BlockRequest,
+  BlockResponse,
+  IConfigService,
+} from '@pbnj/types'
 import { BlockRequestDirection } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
@@ -36,10 +41,11 @@ export class BlockRequestProtocol extends NetworkingProtocol<
 > {
   private blockCache: Map<Hex, Block> = new Map()
   private blockStore: BlockStore
-
-  constructor(blockStore: BlockStore) {
+  private configService: IConfigService
+  constructor(blockStore: BlockStore, configService: IConfigService) {
     super()
     this.blockStore = blockStore
+    this.configService = configService
   }
 
   /**
@@ -99,7 +105,10 @@ export class BlockRequestProtocol extends NetworkingProtocol<
   /**
    * Process block request and generate response
    */
-  async processRequest(request: BlockRequest): SafePromise<BlockResponse> {
+  async processRequest(
+    request: BlockRequest,
+    _peerPublicKey: Hex,
+  ): SafePromise<BlockResponse> {
     const rawBlocks: Block[] = []
     let currentHash = request.headerHash
     let blocksFound = 0
@@ -115,8 +124,10 @@ export class BlockRequestProtocol extends NetworkingProtocol<
 
         if (!childBlock) break
 
-        const [childBlockHashError, childBlockHash] =
-          calculateBlockHash(childBlock)
+        const [childBlockHashError, childBlockHash] = calculateBlockHash(
+          childBlock,
+          this.configService,
+        )
         if (childBlockHashError) {
           return safeError(childBlockHashError)
         }
@@ -140,8 +151,10 @@ export class BlockRequestProtocol extends NetworkingProtocol<
 
         if (!parentBlock) break
 
-        const [parentBlockHashError, parentBlockHash] =
-          calculateBlockHash(parentBlock)
+        const [parentBlockHashError, parentBlockHash] = calculateBlockHash(
+          parentBlock,
+          this.configService,
+        )
         if (parentBlockHashError) {
           return safeError(parentBlockHashError)
         }
@@ -249,7 +262,7 @@ export class BlockRequestProtocol extends NetworkingProtocol<
     // Read each block
     const blocks: Block[] = []
     for (let i = 0; i < numBlocks; i++) {
-      const [error, block] = decodeBlock(currentData)
+      const [error, block] = decodeBlock(currentData, this.configService)
       if (error) {
         return safeError(error)
       }
@@ -287,7 +300,7 @@ export class BlockRequestProtocol extends NetworkingProtocol<
 
     // Write each serialized block (already Gray Paper encoded)
     for (const block of response.blocks) {
-      const [error, encodedBlock] = encodeBlock(block)
+      const [error, encodedBlock] = encodeBlock(block, this.configService)
       if (error) {
         return safeError(error)
       }
@@ -297,9 +310,12 @@ export class BlockRequestProtocol extends NetworkingProtocol<
     return safeResult(concatBytes(parts))
   }
 
-  async processResponse(response: BlockResponse): SafePromise<void> {
+  async processResponse(
+    response: BlockResponse,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     for (const block of response.blocks) {
-      const [error, blockHash] = calculateBlockHash(block)
+      const [error, blockHash] = calculateBlockHash(block, this.configService)
       if (error) {
         return safeError(error)
       }

@@ -55,7 +55,7 @@ export class IsAuthorizedInvocationSystem {
     })
 
     // Extract authcode from work package
-    const authcode = workPackage.context.lookupAnchorTime // Simplified - in real implementation this would be extracted from work package
+    const authcode = workPackage.context.lookup_anchor_slot // Simplified - in real implementation this would be extracted from work package
 
     // Check if authcode is null (BAD error)
     if (!authcode) {

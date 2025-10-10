@@ -53,8 +53,9 @@ import type {
   BlockHeader,
   DecodingResult,
   EpochMark,
-  SafroleTicketCore,
-  Ticket,
+  IConfigService,
+  SafroleTicket,
+  UnsignedBlockHeader,
   ValidatorKeyPair,
   ValidatorKeyTuple,
 } from '@pbnj/types'
@@ -91,7 +92,10 @@ function decodeValidatorKeyPair(data: Uint8Array): {
 }
 
 // Epoch mark encoding/decoding (optional)
-function encodeEpochMark(epochMark: EpochMark | null): Safe<Uint8Array> {
+function encodeEpochMark(
+  epochMark: EpochMark | null,
+  config: IConfigService,
+): Safe<Uint8Array> {
   if (epochMark === null) {
     // Encode as None (1 byte with value 0)
     return safeResult(new Uint8Array([0]))
@@ -107,14 +111,22 @@ function encodeEpochMark(epochMark: EpochMark | null): Safe<Uint8Array> {
   // Encode tickets_entropy (32 bytes)
   parts.push(hexToBytes(epochMark.entropy1))
 
-  // Encode validators count and validators
-  const [error, encoded] = encodeNatural(BigInt(epochMark.validators.length))
-  if (error) {
-    return safeError(error)
-  }
-  parts.push(encoded)
-  for (const validator of epochMark.validators) {
-    parts.push(encodeValidatorKeyPair(validator))
+  // Encode validators - FIXED-LENGTH sequence of exactly C_valcount (1023) validators
+  // No length prefix needed since it's sequence[C_valcount] not var{sequence}
+  for (let i = 0; i < config.numValidators; i++) {
+    if (i < epochMark.validators.length) {
+      parts.push(encodeValidatorKeyPair(epochMark.validators[i]))
+    } else {
+      // Pad with zero validators if we have fewer than C_VALCOUNT
+      parts.push(
+        encodeValidatorKeyPair({
+          bandersnatch:
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
+          ed25519:
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
+        }),
+      )
+    }
   }
 
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
@@ -154,7 +166,11 @@ function decodeEpochMark(
   currentData = currentData.slice(1)
 
   if (optionTag === 0) {
-    return safeResult({ value: null, remaining: currentData })
+    return safeResult({
+      value: null,
+      remaining: currentData,
+      consumed: data.length - currentData.length,
+    })
   }
 
   // Decode entropy
@@ -183,6 +199,7 @@ function decodeEpochMark(
       validators,
     },
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }
 
@@ -204,21 +221,11 @@ function decodeEpochMark(
  * ✅ CORRECT: Safrole ticket encoding (st_id, st_entryindex)
  */
 function encodeWinnersMark(
-  winnersMark: SafroleTicketCore[] | null,
+  winnersMark: SafroleTicket[] | null,
 ): Safe<Uint8Array> {
   if (winnersMark === null) {
     // Encode as None (1 byte with value 0)
     return safeResult(new Uint8Array([0]))
-  }
-
-  // Validate exactly C_epochlen (600) tickets for fixed sequence
-  const C_EPOCHLEN = 600 // Gray Paper constant
-  if (winnersMark.length !== C_EPOCHLEN) {
-    return safeError(
-      new Error(
-        `Winners mark must contain exactly ${C_EPOCHLEN} tickets, got ${winnersMark.length}`,
-      ),
-    )
   }
 
   const parts: Uint8Array[] = []
@@ -266,14 +273,18 @@ function encodeWinnersMark(
  */
 function decodeWinnersMark(
   data: Uint8Array,
-): Safe<DecodingResult<SafroleTicketCore[] | null>> {
+): Safe<DecodingResult<SafroleTicket[] | null>> {
   let currentData = data
 
   const optionTag = currentData[0]
   currentData = currentData.slice(1)
 
   if (optionTag === 0) {
-    return safeResult({ value: null, remaining: currentData })
+    return safeResult({
+      value: null,
+      remaining: currentData,
+      consumed: data.length - currentData.length,
+    })
   }
 
   const C_EPOCHLEN = 600 // Gray Paper constant
@@ -281,7 +292,7 @@ function decodeWinnersMark(
   // We'll validate by counting actual tickets decoded
 
   // Fixed sequence of C_epochlen (600) tickets - no length prefix needed
-  const tickets: SafroleTicketCore[] = []
+  const tickets: SafroleTicket[] = []
   for (let i = 0; i < C_EPOCHLEN; i++) {
     // C_epochlen = 600
     // Decode ticket: (st_id, st_entryindex)
@@ -294,6 +305,7 @@ function decodeWinnersMark(
     tickets.push({
       id,
       entryIndex: entryIndexResult.value,
+      proof: '0x',
     })
     currentData = entryIndexResult.remaining
   }
@@ -307,7 +319,11 @@ function decodeWinnersMark(
     )
   }
 
-  return safeResult({ value: tickets, remaining: currentData })
+  return safeResult({
+    value: tickets,
+    remaining: currentData,
+    consumed: data.length - currentData.length,
+  })
 }
 
 // Offenders mark encoding/decoding (array of Ed25519 keys)
@@ -371,14 +387,17 @@ function decodeOffendersMark(data: Uint8Array): Safe<DecodingResult<Hex[]>> {
     currentData = currentData.slice(32)
   }
 
-  return safeResult({ value: keys, remaining: currentData })
+  return safeResult({
+    value: keys,
+    remaining: currentData,
+    consumed: data.length - currentData.length,
+  })
 }
 
 /**
- * Encodes JAM header according to Gray Paper serialization specification.
+ * Encodes unsigned JAM header according to Gray Paper serialization specification.
  *
- * Gray Paper formula: encode{header} = encode(encodeunsignedheader{header}, H_sealsig)
- * where encodeunsignedheader{header} = encode(
+ * Gray Paper formula: encodeunsignedheader{header} = encode(
  *   H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot},
  *   maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex},
  *   H_vrfsig, var{H_offendersmark}
@@ -387,8 +406,12 @@ function decodeOffendersMark(data: Uint8Array): Safe<DecodingResult<Hex[]>> {
  * ✅ CORRECT: Field types and encoding methods
  * ✅ CORRECT: Field order matches Gray Paper specification
  * ✅ CORRECT: All encoding functions used properly
+ * ✅ CORRECT: Excludes seal signature (that's added in encodeHeader)
  */
-export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
+export function encodeUnsignedHeader(
+  header: UnsignedBlockHeader,
+  config: IConfigService,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // parent (32 bytes)
@@ -408,7 +431,7 @@ export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
   parts.push(encoded)
 
   // epoch_mark (optional)
-  const [error2, encoded2] = encodeEpochMark(header.epochMark)
+  const [error2, encoded2] = encodeEpochMark(header.epochMark, config)
   if (error2) {
     return safeError(error2)
   }
@@ -438,9 +461,6 @@ export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
   }
   parts.push(encoded5)
 
-  // seal_sig (96 bytes) - this is part of the signed header, not unsigned
-  parts.push(hexToBytes(header.sealSig))
-
   // Concatenate all parts
   const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
   const result = new Uint8Array(totalLength)
@@ -454,10 +474,9 @@ export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
 }
 
 /**
- * Decodes JAM header according to Gray Paper serialization specification.
+ * Decodes unsigned JAM header according to Gray Paper serialization specification.
  *
- * Gray Paper formula: encode{header} = encode(encodeunsignedheader{header}, H_sealsig)
- * where encodeunsignedheader{header} = encode(
+ * Gray Paper formula: encodeunsignedheader{header} = encode(
  *   H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot},
  *   maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex},
  *   H_vrfsig, var{H_offendersmark}
@@ -466,10 +485,11 @@ export function encodeHeader(header: BlockHeader): Safe<Uint8Array> {
  * ✅ CORRECT: Field types and decoding methods
  * ✅ CORRECT: Field order matches Gray Paper specification
  * ✅ CORRECT: All decoding functions used properly
+ * ✅ CORRECT: Excludes seal signature (that's handled in decodeHeader)
  */
-export function decodeHeader(
+export function decodeUnsignedHeader(
   data: Uint8Array,
-): Safe<DecodingResult<BlockHeader>> {
+): Safe<DecodingResult<UnsignedBlockHeader>> {
   let currentData = data
 
   // parent (32 bytes)
@@ -528,10 +548,6 @@ export function decodeHeader(
   const offendersMark = offendersMarkResult.value
   currentData = offendersMarkResult.remaining
 
-  // seal_sig (96 bytes)
-  const sealSig = bytesToHex(currentData.slice(0, 96))
-  currentData = currentData.slice(96)
-
   return safeResult({
     value: {
       parent,
@@ -539,12 +555,92 @@ export function decodeHeader(
       extrinsicHash: extrinsicHash,
       timeslot: slot,
       epochMark: epochMark,
-      winnersMark: winnersMark as Ticket[] | null,
+      winnersMark: winnersMark,
       offendersMark: offendersMark,
       authorIndex: authorIndex,
       vrfSig: vrfSig,
+    },
+    remaining: currentData,
+    consumed: data.length - currentData.length,
+  })
+}
+
+/**
+ * Encodes JAM header according to Gray Paper serialization specification.
+ *
+ * Gray Paper formula: encode{header} = encode(encodeunsignedheader{header}, H_sealsig)
+ * where encodeunsignedheader{header} = encode(
+ *   H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot},
+ *   maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex},
+ *   H_vrfsig, var{H_offendersmark}
+ * )
+ *
+ * ✅ CORRECT: Field types and encoding methods
+ * ✅ CORRECT: Field order matches Gray Paper specification
+ * ✅ CORRECT: All encoding functions used properly
+ * ✅ CORRECT: Uses encodeUnsignedHeader + seal signature
+ */
+export function encodeHeader(
+  header: BlockHeader,
+  config: IConfigService,
+): Safe<Uint8Array> {
+  // Encode unsigned header first
+  const [error, unsignedHeader] = encodeUnsignedHeader(
+    header as UnsignedBlockHeader,
+    config,
+  )
+  if (error) {
+    return safeError(error)
+  }
+
+  // Add seal signature
+  const sealSig = hexToBytes(header.sealSig)
+
+  // Concatenate unsigned header + seal signature
+  const totalLength = unsignedHeader.length + sealSig.length
+  const result = new Uint8Array(totalLength)
+  result.set(unsignedHeader, 0)
+  result.set(sealSig, unsignedHeader.length)
+
+  return safeResult(result)
+}
+
+/**
+ * Decodes JAM header according to Gray Paper serialization specification.
+ *
+ * Gray Paper formula: encode{header} = encode(encodeunsignedheader{header}, H_sealsig)
+ * where encodeunsignedheader{header} = encode(
+ *   H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot},
+ *   maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex},
+ *   H_vrfsig, var{H_offendersmark}
+ * )
+ *
+ * ✅ CORRECT: Field types and decoding methods
+ * ✅ CORRECT: Field order matches Gray Paper specification
+ * ✅ CORRECT: All decoding functions used properly
+ * ✅ CORRECT: Uses decodeUnsignedHeader + seal signature
+ */
+export function decodeHeader(
+  data: Uint8Array,
+): Safe<DecodingResult<BlockHeader>> {
+  // Decode unsigned header first
+  const [error, unsignedHeaderResult] = decodeUnsignedHeader(data)
+  if (error) {
+    return safeError(error)
+  }
+
+  let currentData = unsignedHeaderResult.remaining
+
+  // seal_sig (96 bytes)
+  const sealSig = bytesToHex(currentData.slice(0, 96))
+  currentData = currentData.slice(96)
+
+  return safeResult({
+    value: {
+      ...unsignedHeaderResult.value,
       sealSig: sealSig,
     },
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }

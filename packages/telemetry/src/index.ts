@@ -9,35 +9,9 @@
  */
 
 import type { TelemetryConfig } from '@pbnj/types'
-import { TelemetryClient } from './client'
-import { TelemetryEventEmitter } from './events'
 
 export * from './client'
 export * from './encoder'
-export * from './events'
-
-/**
- * Create a telemetry system with client and event emitter
- */
-export function createTelemetrySystem(config: TelemetryConfig) {
-  const client = new TelemetryClient(config)
-  const events = new TelemetryEventEmitter(client)
-
-  return {
-    client,
-    events,
-    async start() {
-      await client.init()
-      return await client.start()
-    },
-    async stop() {
-      await client.stop()
-    },
-    getStats() {
-      return client.getStats()
-    },
-  }
-}
 
 /**
  * Default telemetry configuration

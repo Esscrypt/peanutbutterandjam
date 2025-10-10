@@ -54,19 +54,15 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type {
-  DecodingResult,
-  WorkPackageContext,
-  WorkReport,
-} from '@pbnj/types'
+import type { DecodingResult, WorkReport } from '@pbnj/types'
 import { decodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
-  decodeAvailabilitySpecification,
-  encodeAvailabilitySpecification,
+  decodeWorkPackageSpec,
+  encodeWorkPackageSpec,
 } from './availability-specification'
-import { encodeWorkContext } from './context'
-import { decodeWorkDigest, encodeWorkDigest } from './work-digest'
+import { decodeRefineContext, encodeRefineContext } from './context'
+import { decodeWorkResult, encodeWorkResult } from './work-result'
 
 /**
  * Encode work report according to Gray Paper specification.
@@ -93,66 +89,65 @@ export function encodeWorkReport(report: WorkReport): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // 1. Availability specification
-  const [error0, encoded0] = encodeAvailabilitySpecification(
-    report.availabilitySpec,
-  )
+  const [error0, encoded0] = encodeWorkPackageSpec(report.package_spec)
   if (error0) {
     return safeError(error0)
   }
   parts.push(encoded0)
 
   // 2. Context
-  const [error1, encoded1] = encodeWorkContext(report.context)
+  const [error1, encoded1] = encodeRefineContext(report.context)
   if (error1) {
     return safeError(error1)
   }
   parts.push(encoded1)
 
   // 3. Core index (natural encoding)
-  const [error2, encoded2] = encodeNatural(report.coreIndex)
+  const [error2, encoded2] = encodeNatural(report.core_index)
   if (error2) {
     return safeError(error2)
   }
   parts.push(encoded2)
 
-  // 4. Authorizer (hash, 32 bytes)
-  parts.push(hexToBytes(report.authorizer))
+  // 4. Authorizer hash (hash, 32 bytes)
+  parts.push(hexToBytes(report.authorizer_hash))
 
   // 5. Auth gas used (natural encoding)
-  const [error3, encoded3] = encodeNatural(report.authGasUsed)
+  const [error3, encoded3] = encodeNatural(report.auth_gas_used)
   if (error3) {
     return safeError(error3)
   }
   parts.push(encoded3)
 
-  // 6. var{authtrace} (variable-length blob)
-  const [error4, encoded4] = encodeNatural(BigInt(report.authTrace.length))
+  // 6. var{auth_output} (variable-length blob)
+  const authOutputBytes = hexToBytes(report.auth_output)
+  const [error4, encoded4] = encodeNatural(BigInt(authOutputBytes.length))
   if (error4) {
     return safeError(error4)
   }
   parts.push(encoded4)
-  parts.push(report.authTrace)
+  parts.push(authOutputBytes)
 
-  // 7. var{srlookup} (variable-length dictionary)
-  const srLookupEntries = Array.from(report.srLookup.entries())
+  // 7. var{segment_root_lookup} (variable-length array)
+  const srLookupEntries = report.segment_root_lookup
   const [error5, encoded5] = encodeNatural(BigInt(srLookupEntries.length))
   if (error5) {
     return safeError(error5)
   }
   parts.push(encoded5)
-  for (const [key, value] of srLookupEntries) {
-    parts.push(hexToBytes(key))
-    parts.push(hexToBytes(value))
+  for (const entry of srLookupEntries) {
+    parts.push(hexToBytes(entry.work_package_hash))
+    parts.push(hexToBytes(entry.segment_tree_root))
   }
 
-  // 8. var{digests} (variable-length sequence)
-  const [error6, encoded6] = encodeNatural(BigInt(report.digests.length))
+  // 8. var{results} (variable-length sequence)
+  const [error6, encoded6] = encodeNatural(BigInt(report.results.length))
   if (error6) {
     return safeError(error6)
   }
   parts.push(encoded6)
-  for (const digest of report.digests) {
-    const [error7, encoded7] = encodeWorkDigest(digest)
+  for (const result of report.results) {
+    const [error7, encoded7] = encodeWorkResult(result)
     if (error7) {
       return safeError(error7)
     }
@@ -173,17 +168,16 @@ export function decodeWorkReport(
 ): Safe<DecodingResult<WorkReport>> {
   let currentData = data
 
-  // Availability specification (fixed size)
-  const [error0, availabilitySpecResult] =
-    decodeAvailabilitySpecification(currentData)
+  // Work package specification (fixed size)
+  const [error0, packageSpecResult] = decodeWorkPackageSpec(currentData)
   if (error0) {
     return safeError(error0)
   }
-  const availabilitySpec = availabilitySpecResult.value
-  currentData = availabilitySpecResult.remaining
+  const packageSpec = packageSpecResult.value
+  currentData = packageSpecResult.remaining
 
   // Context (fixed size)
-  const [error1, result1] = decodeWorkContext(currentData)
+  const [error1, result1] = decodeRefineContext(currentData)
   if (error1) {
     return safeError(error1)
   }
@@ -195,274 +189,100 @@ export function decodeWorkReport(
   if (error2) {
     return safeError(error2)
   }
-  const coreIndex = result2.value
+  const core_index = result2.value
   currentData = result2.remaining
 
-  // Authorizer (32 Uint8Array)
-  const [error3, authorizerResult] = decodeFixedLength(currentData, 32n)
-  if (error3) {
-    return safeError(error3)
+  // Authorizer hash (32 bytes)
+  if (currentData.length < 32) {
+    return safeError(new Error('Insufficient data for authorizer hash'))
   }
-  const authorizer = bytesToHex(numberToBytes(authorizerResult.value))
-  currentData = authorizerResult.remaining
+  const authorizer_hash = bytesToHex(currentData.slice(0, 32))
+  currentData = currentData.slice(32)
 
   // Auth gas used (convert bigint to number)
   const [error4, gasUsedResult] = decodeNatural(currentData)
   if (error4) {
     return safeError(error4)
   }
-  const authGasUsed = gasUsedResult.value
+  const auth_gas_used = gasUsedResult.value
   currentData = gasUsedResult.remaining
 
-  // Auth trace (variable length)
-  const [error5, authTraceLengthResult] = decodeNatural(currentData)
+  // Auth output (variable length)
+  const [error5, authOutputLengthResult] = decodeNatural(currentData)
   if (error5) {
     return safeError(error5)
   }
-  const authTraceLength = authTraceLengthResult.value
-  currentData = authTraceLengthResult.remaining
-  const authTrace = currentData.slice(0, Number(authTraceLength))
-  currentData = currentData.slice(Number(authTraceLength))
+  const authOutputLength = authOutputLengthResult.value
+  currentData = authOutputLengthResult.remaining
+  const auth_output = bytesToHex(currentData.slice(0, Number(authOutputLength)))
+  currentData = currentData.slice(Number(authOutputLength))
 
-  // State root lookup (Map<string, string>)
+  // Segment root lookup (array of SegmentRootLookupItem)
   const [error6, srLookupEntryCountResult] = decodeNatural(currentData)
   if (error6) {
     return safeError(error6)
   }
   const srLookupEntryCount = srLookupEntryCountResult.value
   currentData = srLookupEntryCountResult.remaining
-  const srLookup = new Map<Hex, Hex>()
+  const segment_root_lookup: Array<{
+    work_package_hash: Hex
+    segment_tree_root: Hex
+  }> = []
   for (let i = 0; i < Number(srLookupEntryCount); i++) {
     const [error7, keyResult] = decodeFixedLength(currentData, 32n)
     if (error7) {
       return safeError(error7)
     }
-    const key = bytesToHex(numberToBytes(keyResult.value))
+    const work_package_hash = bytesToHex(numberToBytes(keyResult.value))
     currentData = keyResult.remaining
     const [error8, valueResult] = decodeFixedLength(currentData, 32n)
     if (error8) {
       return safeError(error8)
     }
-    const value = bytesToHex(numberToBytes(valueResult.value))
+    const segment_tree_root = bytesToHex(numberToBytes(valueResult.value))
     currentData = valueResult.remaining
-    srLookup.set(key, value)
+    segment_root_lookup.push({ work_package_hash, segment_tree_root })
   }
 
-  // Digests (array of work digests)
-  const digests = []
-  while (currentData.length > 0) {
-    const [error6, result6] = decodeWorkDigest(currentData)
-    if (error6) {
-      return safeError(error6)
-    }
-    const digest = result6.value
-    currentData = result6.remaining
-    digests.push(digest)
+  // Results (array of work results) - length-prefixed sequence
+  const [error9, resultsCountResult] = decodeNatural(currentData)
+  if (error9) {
+    return safeError(error9)
   }
+  const resultsCount = Number(resultsCountResult.value)
+  currentData = resultsCountResult.remaining
+
+  const results = []
+  for (let i = 0; i < resultsCount; i++) {
+    const [error10, result10] = decodeWorkResult(currentData)
+    if (error10) {
+      return safeError(error10)
+    }
+    const result = result10.value
+    currentData = result10.remaining
+    results.push(result)
+  }
+
+  const consumed = data.length - currentData.length
 
   return safeResult({
     value: {
-      availabilitySpec: {
-        packageHash: availabilitySpec.packageHash,
-        bundleLength: availabilitySpec.bundleLength,
-        erasureRoot: availabilitySpec.erasureRoot,
-        segmentRoot: availabilitySpec.segmentRoot,
-        segmentCount: availabilitySpec.segmentCount,
+      package_spec: {
+        hash: packageSpec.hash,
+        length: packageSpec.length,
+        erasure_root: packageSpec.erasure_root,
+        exports_root: packageSpec.exports_root,
+        exports_count: packageSpec.exports_count,
       },
       context,
-      coreIndex,
-      authorizer,
-      authTrace,
-      srLookup,
-      digests: digests.map((digest) => ({
-        serviceIndex: digest.serviceIndex,
-        codeHash: digest.codeHash,
-        payloadHash: digest.payloadHash,
-        gasLimit: digest.gasLimit,
-        result: new Uint8Array(), // TODO: properly decode result
-        gasUsed: digest.gasUsed,
-        importCount: digest.importCount,
-        exportCount: digest.exportCount,
-        extrinsicCount: digest.extrinsicCount,
-        extrinsicSize: digest.extrinsicSize,
-      })),
-      authGasUsed: authGasUsed,
-      author: authorizer,
-      timestamp: BigInt(Date.now()), // TODO: extract from context or data
+      core_index,
+      authorizer_hash,
+      auth_gas_used,
+      auth_output,
+      segment_root_lookup,
+      results,
     },
     remaining: currentData,
-  })
-}
-
-// Helper functions for decoding (simplified versions)
-
-/**
- * Decode work context according to Gray Paper specification.
- *
- * *** DO NOT REMOVE - GRAY PAPER FORMULA ***
- * Gray Paper Section: Appendix D.1 - Block Serialization
- * Formula (Equation 199-206):
- *
- * decode{WC ∈ workcontext} ≡ decode{
- *   WC_anchorhash,
- *   WC_anchorpoststate,
- *   WC_anchoraccoutlog,
- *   WC_lookupanchorhash,
- *   decode[4]{WC_lookupanchortime},
- *   var{WC_prerequisites}
- * }
- *
- * Work context provides the execution environment and dependencies
- * for work package processing.
- *
- * *** IMPLEMENTER EXPLANATION ***
- * Work context defines the execution environment for work packages.
- * It provides all the blockchain state and dependency information
- * needed for deterministic computation.
- *
- * Work Context structure:
- * 1. **Anchor hash**: Hash of the anchor block (recent finalized block)
- * 2. **Anchor post-state**: State root after anchor block execution
- * 3. **Anchor account log**: Hash of account changes at anchor
- * 4. **Lookup anchor hash**: Hash of block used for state lookups
- * 5. **Lookup anchor time** (4 bytes): When lookup anchor was created
- * 6. **Prerequisites** (variable): List of work package dependencies
- *
- * Key concepts:
- * - Anchor blocks: Recent finalized blocks providing stable state
- * - State separation: Execution state vs lookup state for efficiency
- * - Dependencies: Prerequisites ensure proper execution ordering
- * - Deterministic time: Fixed time reference prevents non-determinism
- *
- * This context ensures that work package execution is:
- * - Deterministic: Same context → same results
- * - Consistent: All validators use same state references
- * - Efficient: State lookups reference specific known blocks
- *
- * Field decoding per Gray Paper:
- * 1. WC_anchorhash: 32-byte hash (fixed-size, no length prefix)
- * 2. WC_anchorpoststate: 32-byte hash (fixed-size, no length prefix)
- * 3. WC_anchoraccoutlog: 32-byte hash (fixed-size, no length prefix)
- * 4. WC_lookupanchorhash: 32-byte hash (fixed-size, no length prefix)
- * 5. decode[4]{WC_lookupanchortime}: 4-byte fixed-length timeslot
- * 6. var{WC_prerequisites}: variable-length sequence of 32-byte hashes
- *
- * ✅ CORRECT: All 6 fields decoded in correct Gray Paper order
- * ✅ CORRECT: Uses 4-byte decoding for lookupanchortime
- * ✅ CORRECT: Uses variable-length decoding for prerequisites
- * ✅ CORRECT: Properly decodes prerequisite hashes
- *
- * @param data - Octet sequence to decode
- * @returns Decoded work context and remaining data
- */
-export function decodeWorkContext(
-  data: Uint8Array,
-): Safe<DecodingResult<WorkPackageContext>> {
-  // According to Gray Paper and test vectors, WorkPackageContext has these fields:
-  // - anchor: HashValue (32 bytes)
-  // - state_root: HashValue (32 bytes)
-  // - beefy_root: HashValue (32 bytes)
-  // - lookup_anchor: HashValue (32 bytes)
-  // - lookup_anchor_slot: number (4 bytes)
-  // - prerequisites: Uint8Array (variable length)
-
-  // 1. WC_anchorhash (32 bytes) - Gray Paper compliant
-  if (data.length < 32) {
-    return safeError(
-      new Error('[decodeWorkContext] Insufficient data for anchor hash'),
-    )
-  }
-  const anchor = bytesToHex(data.slice(0, 32))
-  data = data.slice(32)
-
-  // 2. WC_anchorpoststate (32 bytes) - Gray Paper compliant
-  if (data.length < 32) {
-    return safeError(
-      new Error('[decodeWorkContext] Insufficient data for anchor post state'),
-    )
-  }
-  const stateRoot = bytesToHex(data.slice(0, 32))
-  data = data.slice(32)
-
-  // 3. WC_anchoraccoutlog (32 bytes) - Gray Paper compliant
-  if (data.length < 32) {
-    return safeError(
-      new Error('[decodeWorkContext] Insufficient data for anchor accout log'),
-    )
-  }
-  const beefyRoot = bytesToHex(data.slice(0, 32))
-  data = data.slice(32)
-
-  // 4. WC_lookupanchorhash (32 bytes) - Gray Paper compliant
-  if (data.length < 32) {
-    return safeError(
-      new Error('[decodeWorkContext] Insufficient data for lookup anchor hash'),
-    )
-  }
-  const lookupAnchor = bytesToHex(data.slice(0, 32))
-  data = data.slice(32)
-
-  // 5. decode[4]{WC_lookupanchortime} (4 bytes fixed-length) - Gray Paper compliant
-  if (data.length < 4) {
-    return safeError(
-      new Error('[decodeWorkContext] Insufficient data for lookup anchor time'),
-    )
-  }
-  const [error5, lookupAnchorSlotResult] = decodeFixedLength(data, 4n)
-  if (error5) {
-    return safeError(error5)
-  }
-  const lookupAnchorSlot = lookupAnchorSlotResult.value
-  data = lookupAnchorSlotResult.remaining
-
-  // 6. var{WC_prerequisites} (variable-length sequence) - Gray Paper compliant
-  if (data.length < 1) {
-    return safeError(
-      new Error(
-        '[decodeWorkContext] Insufficient data for prerequisites length',
-      ),
-    )
-  }
-  const [error6, prerequisitesCountResult] = decodeNatural(data)
-  if (error6) {
-    return safeError(error6)
-  }
-  const prerequisitesCount = prerequisitesCountResult.value
-  data = prerequisitesCountResult.remaining
-
-  // Validate prerequisites count is reasonable
-  if (prerequisitesCount > 1000n) {
-    return safeError(
-      new Error('[decodeWorkContext] Too many prerequisites (max 1000)'),
-    )
-  }
-
-  const prerequisites: Hex[] = []
-  for (let i = 0; i < Number(prerequisitesCount); i++) {
-    if (data.length < 32) {
-      return safeError(
-        new Error(
-          `[decodeWorkContext] Insufficient data for prerequisite ${i}`,
-        ),
-      )
-    }
-    const [error7, prerequisiteResult] = decodeFixedLength(data, 32n)
-    if (error7) {
-      return safeError(error7)
-    }
-    prerequisites.push(bytesToHex(numberToBytes(prerequisiteResult.value)))
-    data = prerequisiteResult.remaining
-  }
-
-  return safeResult({
-    value: {
-      anchorHash: anchor,
-      anchorPostState: stateRoot,
-      anchorAccoutLog: beefyRoot,
-      lookupAnchorHash: lookupAnchor,
-      lookupAnchorTime: lookupAnchorSlot,
-      prerequisites,
-    },
-    remaining: data,
+    consumed,
   })
 }

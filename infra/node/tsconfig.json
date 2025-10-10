@@ -14,7 +14,7 @@
     "config.ts",
     "interfaces/**/*",
     "index.ts"
-  ],
+, "watchers/slot-clock.ts"  ],
   "exclude": [
     "node_modules",
     "dist",

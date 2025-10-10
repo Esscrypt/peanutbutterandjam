@@ -229,5 +229,6 @@ export function decodeDeferredTransfer(
   return safeResult({
     value: deferredTransfer,
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }

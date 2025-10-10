@@ -24,10 +24,45 @@
  * https://datatracker.ietf.org/doc/rfc9380/
  */
 
+import type { EdwardsPoint } from '@noble/curves/abstract/edwards.js'
+import { edwards } from '@noble/curves/abstract/edwards.js'
+// Removed hash_to_field import - using custom arkworks-compatible implementation
+import { pow } from '@noble/curves/abstract/modular'
 import { sha512 } from '@noble/hashes/sha2'
-import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
-import { bytesToBigInt, logger } from '@pbnj/core'
+import { BANDERSNATCH_PARAMS, BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import { bytesToHex, logger, mod, modInverse, modSqrt } from '@pbnj/core'
 import type { CurvePoint } from '@pbnj/types'
+
+/**
+ * Convert bytes to BigInt using little-endian interpretation (arkworks-compatible)
+ * This matches Rust's Fr::from_le_bytes_mod_order behavior exactly
+ *
+ * @param bytes - Input bytes to convert
+ * @returns BigInt in little-endian interpretation
+ */
+export function bytesToBigIntLittleEndian(bytes: Uint8Array): bigint {
+  let result = 0n
+  for (let i = 0; i < bytes.length; i++) {
+    result += BigInt(bytes[i]) << (8n * BigInt(i))
+  }
+  return result
+}
+
+/**
+ * Noble Edwards curve instance for Bandersnatch
+ * Used for native Noble operations with arkworks compatibility
+ */
+const BandersnatchNoble = edwards({
+  p: BANDERSNATCH_PARAMS.FIELD_MODULUS,
+  n: BANDERSNATCH_PARAMS.CURVE_ORDER,
+  h: BANDERSNATCH_PARAMS.COFACTOR,
+  a:
+    BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.a +
+    BANDERSNATCH_PARAMS.FIELD_MODULUS,
+  d: BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.d,
+  Gx: BANDERSNATCH_PARAMS.GENERATOR.x,
+  Gy: BANDERSNATCH_PARAMS.GENERATOR.y,
+})
 
 /**
  * Elligator2 hash-to-curve for Bandersnatch
@@ -51,32 +86,25 @@ import type { CurvePoint } from '@pbnj/types'
  */
 export function elligator2HashToCurve(message: Uint8Array): CurvePoint {
   try {
-    logger.debug('Elligator2 hash-to-curve', {
-      messageLength: message.length,
-    })
-
-    // Step 1: Hash message to two field elements (like arkworks DefaultFieldHasher)
+    // Step 1: Hash message to two field elements (RFC 9380 hash_to_field)
     const [u1, u2] = hashToField(message)
 
-    // Step 2: Apply Elligator2 mapping to both elements and add them (like arkworks)
+    // Step 2: Map each field element to curve (RFC 9380 map_to_curve)
     const point1 = elligator2Map(u1)
     const point2 = elligator2Map(u2)
-    const point = addPoints(point1, point2)
 
-    // Step 3: Clear cofactor (multiply by cofactor = 4)
-    const clearedPoint = clearCofactor(point)
+    // Step 3: Add the points (RFC 9380 point addition)
+    const sum = addPoints(point1, point2)
 
-    logger.debug('Elligator2 mapping completed', {
-      fieldElement1: u1.toString(16),
-      fieldElement2: u2.toString(16),
-      pointX: point.x.toString(16),
-      pointY: point.y.toString(16),
-    })
+    // Step 4: Clear cofactor (RFC 9380 clear_cofactor) - THIS WAS THE MISSING STEP!
+    // Arkworks DOES clear cofactor as per RFC 9380 specification
+    const cleared = clearCofactor(sum)
 
-    return clearedPoint
+    return cleared
   } catch (error) {
     logger.error('Elligator2 hash-to-curve failed', {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     })
     throw new Error(
       `Elligator2 hash-to-curve failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -85,182 +113,169 @@ export function elligator2HashToCurve(message: Uint8Array): CurvePoint {
 }
 
 /**
- * Hash message to field element using expand_message_xmd
- * Implements RFC 9380, Section 5.3.1 like arkworks DefaultFieldHasher
+ * Compress a point using the same format as arkworks
+ * This follows the standard compressed point encoding for Edwards curves
+ */
+/**
+ * Convert CurvePoint to Noble EdwardsPoint
+ * @param point - CurvePoint to convert
+ * @returns Noble EdwardsPoint
+ */
+export function curvePointToNoble(point: CurvePoint): EdwardsPoint {
+  return BandersnatchNoble.fromAffine({
+    x: point.x,
+    y: point.y,
+  })
+}
+
+export function compressPoint(point: CurvePoint): string {
+  // Convert our CurvePoint to Noble EdwardsPoint
+  const noblePoint = curvePointToNoble(point)
+
+  // Compress with arkworks compatibility
+  const arkworksBytes = BandersnatchCurveNoble.pointToBytes(noblePoint)
+
+  // Return as hex string (without 0x prefix)
+  return bytesToHex(arkworksBytes).slice(2)
+}
+
+/**
+ * Hash message to field element using noble package hash_to_field
+ * Implements RFC 9380, Section 5.2 like arkworks DefaultFieldHasher
  *
  * @param message - Input message
  * @returns Two field elements (for uniform mapping like arkworks)
  */
-function hashToField(message: Uint8Array): [bigint, bigint] {
-  // Use expand_message_xmd with SHA-512 as specified in RFC 9380
-  // DST = "ECVRF_" || h2c_suite_ID_string || suite_string
-  // h2c_suite_ID_string = "Bandersnatch_XMD:SHA-512_ELL2_RO_"
-  // suite_string = "Bandersnatch_SHA-512_ELL2"
-  const h2cSuiteId = 'Bandersnatch_XMD:SHA-512_ELL2_RO_'
-  const suiteString = 'Bandersnatch_SHA-512_ELL2'
-  const DST = new TextEncoder().encode(`ECVRF_${h2cSuiteId}${suiteString}`)
+// Helper functions for arkworks-compatible expand_message_xmd
+function i2osp(value: number, length: number): Uint8Array {
+  if (value < 0 || value >= 1 << (8 * length))
+    throw new Error(`invalid I2OSP input: ${value}`)
+  const res = Array.from({ length }).fill(0) as number[]
+  for (let i = length - 1; i >= 0; i--) {
+    res[i] = value & 0xff
+    value >>>= 8
+  }
+  return new Uint8Array(res)
+}
 
-  // Arkworks DefaultFieldHasher uses 128 bytes for field expansion (2 field elements)
-  const hashBytes = expandMessageXmd(message, DST, 128) // 128 bytes like arkworks
+function strxor(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const arr = new Uint8Array(a.length)
+  for (let i = 0; i < a.length; i++) {
+    arr[i] = a[i] ^ b[i]
+  }
+  return arr
+}
 
-  // Convert to two field elements like arkworks DefaultFieldHasher
-  const hashValue1 = bytesToBigInt(hashBytes.slice(0, 64))
-  const hashValue2 = bytesToBigInt(hashBytes.slice(64, 128))
+function concatBytes(...arrays: Uint8Array[]): Uint8Array {
+  const totalLength = arrays.reduce((sum, arr) => sum + arr.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const arr of arrays) {
+    result.set(arr, offset)
+    offset += arr.length
+  }
+  return result
+}
 
-  const field1 = hashValue1 % BANDERSNATCH_PARAMS.FIELD_MODULUS
-  const field2 = hashValue2 % BANDERSNATCH_PARAMS.FIELD_MODULUS
-
-  return [field1, field2]
+function normDST(DST: string | Uint8Array): Uint8Array {
+  return typeof DST === 'string' ? new TextEncoder().encode(DST) : DST
 }
 
 /**
- * Expand message using expand_message_xmd
- * Implements RFC 9380, Section 5.3.1
- *
- * @param msg - Input message
- * @param DST - Domain separation tag
- * @param lenInBytes - Desired output length in bytes
- * @returns Expanded message
+ * Arkworks-compatible expand_message_xmd implementation
+ * Key difference: Uses arkworks block_size (48 bytes) instead of SHA-512 block size (128 bytes)
  */
-function expandMessageXmd(
+function arkworksExpandMessageXmd(
   msg: Uint8Array,
-  DST: Uint8Array,
+  DST: string | Uint8Array,
   lenInBytes: number,
 ): Uint8Array {
-  // const b_in_bytes = 64 // SHA-512 block size
-  const r_in_bytes = 128 // SHA-512 rate (block size - output size)
+  DST = normDST(DST)
 
-  const ell = Math.ceil(lenInBytes / 64) // Number of blocks needed
-
-  if (ell > 255) {
-    throw new Error('expand_message_xmd: ell too large')
+  // Handle long DST (same as Noble)
+  if (DST.length > 255) {
+    const longDstPrefix = new TextEncoder().encode('H2C-OVERSIZE-DST-')
+    DST = sha512(concatBytes(longDstPrefix, DST))
   }
 
-  // Step 1: Z_pad = I2OSP(0, r_in_bytes)
-  const Z_pad = new Uint8Array(r_in_bytes).fill(0)
+  const b_in_bytes = 64 // SHA-512 output size
+  const ell = Math.ceil(lenInBytes / b_in_bytes)
+  if (lenInBytes > 65535 || ell > 255)
+    throw new Error('expand_message_xmd: invalid lenInBytes')
 
-  // Step 2: l_i_b_str = I2OSP(len_in_bytes, 2)
-  const l_i_b_str = new Uint8Array(2)
-  l_i_b_str[0] = (lenInBytes >> 8) & 0xff
-  l_i_b_str[1] = lenInBytes & 0xff
+  const DST_prime = concatBytes(DST, i2osp(DST.length, 1))
 
-  // Step 3: msg_prime = Z_pad || msg || l_i_b_str || I2OSP(0, 1)
-  const msg_prime = new Uint8Array(r_in_bytes + msg.length + 2 + 1)
-  let offset = 0
-  msg_prime.set(Z_pad, offset)
-  offset += Z_pad.length
-  msg_prime.set(msg, offset)
-  offset += msg.length
-  msg_prime.set(l_i_b_str, offset)
-  offset += l_i_b_str.length
-  msg_prime[offset] = 0
+  // KEY DIFFERENCE: Use arkworks block_size (48 bytes) instead of SHA-512 block size (128 bytes)
+  const ARKWORKS_BLOCK_SIZE = 48 // len_per_base_elem for Bandersnatch with SEC_PARAM=128
+  const Z_pad = new Uint8Array(ARKWORKS_BLOCK_SIZE) // All zeros
 
-  // Step 4: b_0 = Hash(msg_prime)
-  const b_0 = sha512(msg_prime)
+  const l_i_b_str = i2osp(lenInBytes, 2)
 
-  // Step 5: b_1 = Hash(b_0 || I2OSP(1, 1) || DST_prime)
-  const DST_prime = new Uint8Array(DST.length + 1)
-  DST_prime.set(DST, 0)
-  DST_prime[DST.length] = DST.length
+  // Calculate b_0
+  const b_0 = sha512(concatBytes(Z_pad, msg, l_i_b_str, i2osp(0, 1), DST_prime))
 
-  const b_1_input = new Uint8Array(b_0.length + 1 + DST_prime.length)
-  b_1_input.set(b_0, 0)
-  b_1_input[b_0.length] = 1
-  b_1_input.set(DST_prime, b_0.length + 1)
+  // Calculate b_1
+  const b = new Array<Uint8Array>(ell)
+  b[0] = sha512(concatBytes(b_0, i2osp(1, 1), DST_prime))
 
-  const b_1 = sha512(b_1_input)
-
-  // Step 6: For i in (2, ..., ell):
-  const uniform_bytes = new Uint8Array(ell * 64)
-  uniform_bytes.set(b_1, 0)
-
-  for (let i = 2; i <= ell; i++) {
-    const b_i_input = new Uint8Array(64 + 1 + DST_prime.length)
-    b_i_input.set(b_0, 0)
-    b_i_input[64] = i
-    b_i_input.set(DST_prime, 65)
-
-    const b_i = sha512(b_i_input)
-    uniform_bytes.set(b_i, (i - 1) * 64)
+  // Calculate b_2, b_3, ... b_ell
+  for (let i = 1; i < ell; i++) {
+    const args = [strxor(b_0, b[i - 1]), i2osp(i + 1, 1), DST_prime]
+    b[i] = sha512(concatBytes(...args))
   }
 
-  // Step 7: Return the first len_in_bytes bytes
-  return uniform_bytes.slice(0, lenInBytes)
+  const pseudo_random_bytes = concatBytes(...b)
+  return pseudo_random_bytes.slice(0, lenInBytes)
 }
 
 /**
- * Proper modular arithmetic that handles negative numbers correctly
- * JavaScript's % operator can return negative results, but we need non-negative results
+ * Hash to field using arkworks-compatible implementation
+ * This matches arkworks' DefaultFieldHasher exactly by using the correct Z_pad size
+ * Implements RFC 9380, Section 5.2 like arkworks DefaultFieldHasher
  *
- * @param a - Value
- * @param m - Modulus
- * @returns Non-negative result of a mod m
+ * @param message - Input message
+ * @returns Two field elements (for uniform mapping like arkworks)
  */
-function mod(a: bigint, m: bigint): bigint {
-  const result = a % m
-  return result < 0n ? result + m : result
-}
+export function hashToField(message: Uint8Array): [bigint, bigint] {
+  // DST construction matching arkworks exactly
+  const h2cSuiteId = 'Bandersnatch_XMD:SHA-512_ELL2_RO_'
+  const suiteString = 'Bandersnatch_SHA-512_ELL2'
+  const DST = `ECVRF_${h2cSuiteId}${suiteString}`
 
-/**
- * Modular square root using Tonelli-Shanks algorithm
- *
- * @param value - Value to find square root of
- * @param p - Prime modulus
- * @returns Square root if it exists
- */
-function modSqrt(value: bigint, p: bigint): bigint {
-  if (value === 0n) return 0n
-  if (value === 1n) return 1n
+  // Calculate parameters like arkworks
+  const MODULUS_BIT_SIZE = 255 // Bandersnatch field modulus bit size
+  const SEC_PARAM = 128
+  const base_field_size_with_security_padding_in_bits =
+    MODULUS_BIT_SIZE + SEC_PARAM
+  const len_per_base_elem = Math.ceil(
+    base_field_size_with_security_padding_in_bits / 8,
+  )
 
-  // Check if value is a quadratic residue
-  if (!isSquare(value, p)) {
-    throw new Error('Value is not a quadratic residue')
+  const N = 2 // Number of field elements
+  const m = 1 // Extension degree
+  const len_in_bytes = N * m * len_per_base_elem
+
+  // Use our arkworks-compatible expand_message_xmd
+  const uniform_bytes = arkworksExpandMessageXmd(message, DST, len_in_bytes)
+
+  // Extract field elements like arkworks (big-endian interpretation with modular reduction)
+  const u1_bytes = uniform_bytes.slice(0, len_per_base_elem)
+  const u2_bytes = uniform_bytes.slice(len_per_base_elem, 2 * len_per_base_elem)
+
+  // Convert to field elements (big-endian)
+  let u1 = 0n
+  for (let i = 0; i < u1_bytes.length; i++) {
+    u1 = (u1 << 8n) + BigInt(u1_bytes[i])
   }
+  u1 = mod(u1, BANDERSNATCH_PARAMS.FIELD_MODULUS)
 
-  // Handle special cases
-  if (p === 2n) return value
-  if (p % 4n === 3n) {
-    // For p ≡ 3 (mod 4), x = value^((p+1)/4) mod p
-    const exponent = (p + 1n) / 4n
-    return modPow(value, exponent, p)
+  let u2 = 0n
+  for (let i = 0; i < u2_bytes.length; i++) {
+    u2 = (u2 << 8n) + BigInt(u2_bytes[i])
   }
+  u2 = mod(u2, BANDERSNATCH_PARAMS.FIELD_MODULUS)
 
-  // Tonelli-Shanks algorithm for p ≡ 1 (mod 4)
-  // Find Q and S such that p-1 = Q * 2^S
-  let Q = p - 1n
-  let S = 0n
-  while (Q % 2n === 0n) {
-    Q = Q / 2n
-    S = S + 1n
-  }
-
-  // Find a quadratic non-residue z
-  let z = 2n
-  while (isSquare(z, p)) {
-    z = z + 1n
-  }
-
-  let c = modPow(z, Q, p)
-  let x = modPow(value, (Q + 1n) / 2n, p)
-  let t = modPow(value, Q, p)
-  let m = S
-
-  while (t !== 1n) {
-    let tt = t
-    let i = 0n
-    while (i < m && tt !== 1n) {
-      tt = mod(tt * tt, p)
-      i = i + 1n
-    }
-
-    const b = modPow(c, modPow(2n, m - i - 1n, p - 1n), p)
-    x = mod(x * b, p)
-    c = mod(b * b, p)
-    t = mod(t * c, p)
-    m = i
-  }
-
-  return x
+  return [u1, u2]
 }
 
 /**
@@ -273,33 +288,26 @@ function modSqrt(value: bigint, p: bigint): bigint {
  * @param u - Field element (typically from hashToField)
  * @returns Valid curve point on the Bandersnatch Twisted Edwards curve
  */
-function elligator2Map(u: bigint): CurvePoint {
+export function elligator2Map(u: bigint): CurvePoint {
   const p = BANDERSNATCH_PARAMS.FIELD_MODULUS
 
-  // Montgomery curve parameters for Bandersnatch
-  // These are derived from the Twisted Edwards parameters
+  // Use exact arkworks Montgomery curve parameters directly
   // Montgomery form: By^2 = x^3 + Ax^2 + x
-  // For Bandersnatch: a = -5, d = 0x6389c12633c267cbc66e3bf86be3b6d8cb66677177e54f92b369f2f5188d58e7
-  const a = BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.a // -5
-  const d = BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.d
+  // From arkworks BandersnatchConfig MontCurveConfig
+  const A = BigInt(
+    '29978822694968839326280996386011761570173833766074948509196803838190355340952',
+  ) // COEFF_A
+  const B = BigInt(
+    '25465760566081946422412445027709227188579564747101592991722834452325077642517',
+  ) // COEFF_B
 
-  // Convert to Montgomery form: By^2 = x^3 + Ax^2 + x
-  // A = 2(a + d)/(a - d), B = 4/(a - d)
-  const aMinusD = mod(a - d, p)
-  const aPlusD = mod(a + d, p)
+  // Use exact arkworks Elligator2Config Z parameter
+  const Z = BANDERSNATCH_PARAMS.ELLIGATOR2_CONFIG.Z
 
-  const A = mod(2n * aPlusD * modInverse(aMinusD, p), p)
-  const B = mod(4n * modInverse(aMinusD, p), p)
-
-  // Z is a non-square element (lowest absolute value)
-  // For p = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
-  // Z = 2 is a non-square
-  const Z = 2n
-
-  // Constants from arkworks Elligator2Config
+  // Use exact arkworks Elligator2Config constants
   const k = B // COEFF_B
-  const jOnK = mod(A * modInverse(B, p), p) // COEFF_A_OVER_COEFF_B = A/B
-  const kSqInv = mod(modInverse(mod(k * k, p), p), p) // ONE_OVER_COEFF_B_SQUARE = 1/B^2
+  const jOnK = BANDERSNATCH_PARAMS.ELLIGATOR2_CONFIG.COEFF_A_OVER_COEFF_B
+  const kSqInv = BANDERSNATCH_PARAMS.ELLIGATOR2_CONFIG.ONE_OVER_COEFF_B_SQUARE
 
   // Step 1: x1 = -(J / K) * inv0(1 + Z * u^2)
   const uSq = mod(u * u, p)
@@ -324,13 +332,34 @@ function elligator2Map(u: bigint): CurvePoint {
   let x
   let y
   let sgn0
-  if (isSquare(gx1, p)) {
+
+  const gx1IsSquare = isSquare(gx1, p)
+  const gx2IsSquare = isSquare(gx2, p)
+
+  // According to Elligator2 specification, at least one should be a square
+  // If neither is a square, this indicates an implementation error
+  if (!gx1IsSquare && !gx2IsSquare) {
+    logger.error('Elligator2 mapping error: neither gx1 nor gx2 is a square', {
+      u: u.toString(16),
+      x1: x1.toString(16),
+      x2: x2.toString(16),
+      gx1: gx1.toString(16),
+      gx2: gx2.toString(16),
+      gx1IsSquare,
+      gx2IsSquare,
+    })
+    throw new Error(
+      'Elligator2 mapping failed: neither gx1 nor gx2 is a square',
+    )
+  }
+
+  if (gx1IsSquare) {
     x = x1
-    y = modSqrt(gx1, p)
+    y = modSqrt(gx1, p, BandersnatchNoble.Fp)
     sgn0 = true
   } else {
     x = x2
-    y = modSqrt(gx2, p)
+    y = modSqrt(gx2, p, BandersnatchNoble.Fp)
     sgn0 = false
   }
 
@@ -361,31 +390,17 @@ function elligator2Map(u: bigint): CurvePoint {
 
   const point = { x: v, y: w, isInfinity: false }
 
-  // Debug logging
-  logger.debug('Elligator2 mapping debug', {
-    u: u.toString(16),
-    x1: x1.toString(16),
-    x2: x2.toString(16),
-    gx1: gx1.toString(16),
-    gx2: gx2.toString(16),
-    isGx1Square: isSquare(gx1, p),
-    isGx2Square: isSquare(gx2, p),
-    chosenX: x.toString(16),
-    chosenY: y.toString(16),
-    s: s.toString(16),
-    t: t.toString(16),
-    v: v.toString(16),
-    w: w.toString(16),
-  })
-
   // Verify the point is on the curve
   if (!isOnCurve(point)) {
     const x2 = mod(v * v, p)
     const y2 = mod(w * w, p)
     const x2y2 = mod(x2 * y2, p)
-    const ax2 = mod(a * x2, p)
+    const ax2 = mod(A * x2, p)
     const leftSide = mod(ax2 + y2, p)
-    const rightSide = mod(1n + mod(d * x2y2, p), p)
+    const rightSide = mod(
+      1n + mod(BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.d * x2y2, p),
+      p,
+    )
 
     logger.error('Elligator2 mapping produced invalid point', {
       v: v.toString(16),
@@ -396,8 +411,8 @@ function elligator2Map(u: bigint): CurvePoint {
       ax2: ax2.toString(16),
       leftSide: leftSide.toString(16),
       rightSide: rightSide.toString(16),
-      a: a.toString(16),
-      d: d.toString(16),
+      a: A.toString(16),
+      d: BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS.d.toString(16),
     })
     throw new Error('Elligator2 mapping produced invalid point')
   }
@@ -408,8 +423,8 @@ function elligator2Map(u: bigint): CurvePoint {
 /**
  * Calculate parity of field element (least significant bit)
  */
-function parity(value: bigint): boolean {
-  return value % 2n === 1n
+export function parity(value: bigint): boolean {
+  return mod(value, 2n) === 1n
 }
 
 /**
@@ -419,31 +434,35 @@ function parity(value: bigint): boolean {
  * @param p - Prime modulus
  * @returns True if value is a quadratic residue
  */
-function isSquare(value: bigint, p: bigint): boolean {
+export function isSquare(value: bigint, p: bigint): boolean {
   if (value === 0n) return true
   if (value === 1n) return true
 
   // Use Legendre symbol: (a/p) = a^((p-1)/2) mod p
   // If result is 1, then a is a quadratic residue
   // If result is p-1, then a is a quadratic non-residue
-  const legendre = modPow(value, (p - 1n) / 2n, p)
+  const legendre = pow(value, (p - 1n) / 2n, p)
   return legendre === 1n
 }
 
 /**
- * Clear cofactor by multiplying by cofactor
+ * Clear cofactor from a curve point to ensure it's in the prime-order subgroup
+ *
+ * For Bandersnatch, the cofactor is 4. This function multiplies the point by the
+ * cofactor to clear the cofactor and ensure the result is in the correct subgroup.
+ * This matches arkworks' default clear_cofactor implementation.
  * Uses efficient scalar multiplication instead of repeated addition
  *
  * @param point - Input point
  * @returns Point with cleared cofactor
  */
-function clearCofactor(point: CurvePoint): CurvePoint {
+export function clearCofactor(point: CurvePoint): CurvePoint {
   if (point.isInfinity) return point
 
-  // Cofactor is 4, so we multiply by 4
+  // Cofactor for Bandersnatch is 4 (matches arkworks default implementation)
   const cofactor = BANDERSNATCH_PARAMS.COFACTOR
 
-  // Efficient scalar multiplication by cofactor
+  // Multiply by cofactor to clear cofactor (arkworks default behavior)
   return scalarMultiply(point, cofactor)
 }
 
@@ -453,7 +472,7 @@ function clearCofactor(point: CurvePoint): CurvePoint {
  * @param point - Point to check
  * @returns True if point is on curve
  */
-function isOnCurve(point: CurvePoint): boolean {
+export function isOnCurve(point: CurvePoint): boolean {
   if (point.isInfinity) return true
 
   const p = BANDERSNATCH_PARAMS.FIELD_MODULUS
@@ -480,7 +499,7 @@ function isOnCurve(point: CurvePoint): boolean {
  * @param scalar - Scalar multiplier
  * @returns Result point
  */
-function scalarMultiply(point: CurvePoint, scalar: bigint): CurvePoint {
+export function scalarMultiply(point: CurvePoint, scalar: bigint): CurvePoint {
   if (point.isInfinity || scalar === 0n) {
     return { x: 0n, y: 0n, isInfinity: true }
   }
@@ -508,7 +527,7 @@ function scalarMultiply(point: CurvePoint, scalar: bigint): CurvePoint {
  * @param p2 - Second point
  * @returns Sum of points
  */
-function addPoints(p1: CurvePoint, p2: CurvePoint): CurvePoint {
+export function addPoints(p1: CurvePoint, p2: CurvePoint): CurvePoint {
   if (p1.isInfinity) return p2
   if (p2.isInfinity) return p1
 
@@ -601,51 +620,4 @@ function addPoints(p1: CurvePoint, p2: CurvePoint): CurvePoint {
     y: y3,
     isInfinity: false,
   }
-}
-
-/**
- * Modular exponentiation
- *
- * @param base - Base
- * @param exponent - Exponent
- * @param modulus - Modulus
- * @returns Result
- */
-function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
-  let result = 1n
-  base = base % modulus
-
-  while (exponent > 0n) {
-    if (exponent % 2n === 1n) {
-      result = (result * base) % modulus
-    }
-    exponent = exponent >> 1n
-    base = (base * base) % modulus
-  }
-
-  return result
-}
-
-/**
- * Modular inverse using extended Euclidean algorithm
- *
- * @param a - Value
- * @param m - Modulus
- * @returns Modular inverse
- */
-function modInverse(a: bigint, m: bigint): bigint {
-  let [oldR, r] = [a, m]
-  let [oldS, s] = [1n, 0n]
-
-  while (r !== 0n) {
-    const quotient = oldR / r
-    ;[oldR, r] = [r, oldR - quotient * r]
-    ;[oldS, s] = [s, oldS - quotient * s]
-  }
-
-  if (oldR > 1n) {
-    throw new Error('Modular inverse does not exist')
-  }
-
-  return oldS < 0n ? oldS + m : oldS
 }

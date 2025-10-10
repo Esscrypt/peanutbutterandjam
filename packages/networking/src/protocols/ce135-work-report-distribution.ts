@@ -53,7 +53,10 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
   /**
    * Process work report distribution
    */
-  async processRequest(request: GuaranteedWorkReport): SafePromise<void> {
+  async processRequest(
+    request: GuaranteedWorkReport,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     const { workReport } = request
     const [error, workReportHash] = calculateWorkReportHash(workReport)
     if (error) {
@@ -161,7 +164,10 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
     return safeResult(undefined)
   }
 
-  async processResponse(_response: undefined): SafePromise<void> {
+  async processResponse(
+    _response: undefined,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     return safeResult(undefined)
   }
 }

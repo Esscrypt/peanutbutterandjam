@@ -43,18 +43,20 @@
  */
 
 import {
+  bytesToHex,
   concatBytes,
+  type Hex,
   hexToBytes,
   type Safe,
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { WorkContext } from '@pbnj/types'
-import { encodeFixedLength } from '../core/fixed-length'
-import { encodeNatural } from '../core/natural-number'
+import type { DecodingResult, RefineContext } from '@pbnj/types'
+import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
+import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**
- * Encode work context according to Gray Paper specification.
+ * Encode refine context according to Gray Paper specification.
  *
  * Gray Paper Equation 199-206 (label: encode{WC ∈ workcontext}):
  * encode{WC ∈ workcontext} ≡ encode{
@@ -66,7 +68,7 @@ import { encodeNatural } from '../core/natural-number'
  *   var{WC_prerequisites}
  * }
  *
- * Work context describes the context of the chain at the point that the
+ * Refine context describes the context of the chain at the point that the
  * report's corresponding work-package was evaluated. It identifies two
  * historical blocks (anchor and lookup-anchor) and any prerequisite work-packages.
  *
@@ -84,26 +86,23 @@ import { encodeNatural } from '../core/natural-number'
  * ✅ CORRECT: Uses var{} for prerequisites (variable-length with prefix)
  * ❌ INCOMPLETE: Prerequisites encoding needs full implementation
  */
-export function encodeWorkContext(context: WorkContext): Safe<Uint8Array> {
+export function encodeRefineContext(context: RefineContext): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Anchor (32 bytes)
-  parts.push(hexToBytes(context.anchorHash))
+  parts.push(hexToBytes(context.anchor))
 
   // State root (32 bytes)
-  parts.push(hexToBytes(context.anchorPostState))
+  parts.push(hexToBytes(context.state_root))
 
   // Beefy root (32 bytes)
-  parts.push(hexToBytes(context.anchorAccoutLog))
+  parts.push(hexToBytes(context.beefy_root))
 
   // Lookup anchor (32 bytes)
-  parts.push(hexToBytes(context.lookupAnchorHash))
+  parts.push(hexToBytes(context.lookup_anchor))
 
   // Lookup anchor slot - encode[4]{lookupanchortime} (Gray Paper compliant)
-  const [error, encoded] = encodeFixedLength(
-    BigInt(context.lookupAnchorTime),
-    4n,
-  )
+  const [error, encoded] = encodeFixedLength(context.lookup_anchor_slot, 4n)
   if (error) {
     return safeError(error)
   }
@@ -124,4 +123,109 @@ export function encodeWorkContext(context: WorkContext): Safe<Uint8Array> {
   }
 
   return safeResult(concatBytes(parts))
+}
+
+/**
+ * Decode refine context according to Gray Paper specification.
+ *
+ * Gray Paper Equation 199-206 (label: decode{WC ∈ workcontext}):
+ * Inverse of encode{WC ∈ workcontext} ≡ decode{
+ *   WC_anchorhash,
+ *   WC_anchorpoststate,
+ *   WC_anchoraccoutlog,
+ *   WC_lookupanchorhash,
+ *   decode[4]{WC_lookupanchortime},
+ *   var{WC_prerequisites}
+ * }
+ *
+ * Decodes refine context from octet sequence back to structured data.
+ * Must exactly reverse the encoding process to maintain round-trip compatibility.
+ *
+ * Field decoding per Gray Paper:
+ * 1. WC_anchorhash: 32-byte hash - anchor block header hash
+ * 2. WC_anchorpoststate: 32-byte hash - anchor block posterior state-root
+ * 3. WC_anchoraccoutlog: 32-byte hash - anchor block accumulation output log super-peak
+ * 4. WC_lookupanchorhash: 32-byte hash - lookup-anchor block header hash
+ * 5. decode[4]{WC_lookupanchortime}: 4-byte fixed-length - lookup-anchor block timeslot
+ * 6. var{WC_prerequisites}: variable-length sequence - hash of prerequisite work-packages
+ *
+ * ✅ CORRECT: All 6 fields decoded in correct Gray Paper order
+ * ✅ CORRECT: Hash fields use raw 32-byte decoding
+ * ✅ CORRECT: Uses decode[4] for lookupanchortime (4-byte fixed-length)
+ * ✅ CORRECT: Uses var{} for prerequisites (variable-length with prefix)
+ */
+export function decodeRefineContext(
+  data: Uint8Array,
+): Safe<DecodingResult<RefineContext>> {
+  let currentData = data
+
+  // Anchor hash (32 bytes)
+  if (currentData.length < 32) {
+    return safeError(new Error('Insufficient data for anchor hash'))
+  }
+  const anchor = bytesToHex(currentData.slice(0, 32))
+  currentData = currentData.slice(32)
+
+  // State root (32 bytes)
+  if (currentData.length < 32) {
+    return safeError(new Error('Insufficient data for state root'))
+  }
+  const state_root = bytesToHex(currentData.slice(0, 32))
+  currentData = currentData.slice(32)
+
+  // Beefy root (32 bytes)
+  if (currentData.length < 32) {
+    return safeError(new Error('Insufficient data for beefy root'))
+  }
+  const beefy_root = bytesToHex(currentData.slice(0, 32))
+  currentData = currentData.slice(32)
+
+  // Lookup anchor hash (32 bytes)
+  if (currentData.length < 32) {
+    return safeError(new Error('Insufficient data for lookup anchor hash'))
+  }
+  const lookup_anchor = bytesToHex(currentData.slice(0, 32))
+  currentData = currentData.slice(32)
+
+  // Lookup anchor slot - decode[4]{lookupanchortime} (4-byte fixed-length)
+  if (currentData.length < 4) {
+    return safeError(new Error('Insufficient data for lookup anchor slot'))
+  }
+  const [error, slotResult] = decodeFixedLength(currentData, 4n)
+  if (error) {
+    return safeError(error)
+  }
+  const lookup_anchor_slot = slotResult.value
+  currentData = slotResult.remaining
+
+  // Prerequisites (variable length) - var{WC_prerequisites}
+  const [error2, prerequisitesLengthResult] = decodeNatural(currentData)
+  if (error2) {
+    return safeError(error2)
+  }
+  const prerequisitesLength = prerequisitesLengthResult.value
+  currentData = prerequisitesLengthResult.remaining
+
+  const prerequisites: Hex[] = []
+  for (let i = 0; i < Number(prerequisitesLength); i++) {
+    if (currentData.length < 32) {
+      return safeError(new Error(`Insufficient data for prerequisite ${i}`))
+    }
+    const prerequisite = bytesToHex(currentData.slice(0, 32))
+    currentData = currentData.slice(32)
+    prerequisites.push(prerequisite)
+  }
+
+  return safeResult({
+    value: {
+      anchor,
+      state_root,
+      beefy_root,
+      lookup_anchor,
+      lookup_anchor_slot,
+      prerequisites,
+    },
+    remaining: currentData,
+    consumed: data.length - currentData.length,
+  })
 }

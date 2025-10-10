@@ -6,19 +6,8 @@
  */
 
 // Re-export from bandersnatch package
-export { BANDERSNATCH_PARAMS, BandersnatchCurve } from '@pbnj/bandersnatch'
-
+export * from './crypto'
 // Prover exports
 export * from './prover'
-// Main exports for easy importing
-export {
-  IETFVRFProver,
-  RingVRFProver,
-} from './prover'
-// Verifier exports
+export * from './utils'
 export * from './verifier'
-export {
-  IETFVRFVerifier,
-  PedersenVRFVerifier,
-  RingVRFVerifier,
-} from './verifier'

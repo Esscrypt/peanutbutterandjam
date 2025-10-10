@@ -9,10 +9,16 @@ import { bls12_381 } from '@noble/curves/bls12-381'
 import * as ed from '@noble/ed25519'
 // Import blakejs for cryptographic operations
 import { blake2b } from '@noble/hashes/blake2.js'
+import { sha512 } from '@noble/hashes/sha2'
+
+// Configure Ed25519 with SHA-512
+ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
+
 import {
   bytesToBigInt,
   bytesToHex,
   type Hex,
+  hexToBigInt,
   hexToBytes,
   numberToBytes,
   stringToBytes,
@@ -26,10 +32,12 @@ export {
   bytesToHex,
   hexToBytes,
   bytesToBigInt,
+  hexToBigInt,
   numberToBytes,
   zeroHash,
   zeroAddress,
   stringToBytes,
+  type Hex,
 }
 
 /**
@@ -51,7 +59,7 @@ export function isValidHexLength(value: string, length: number): boolean {
  */
 export function blake2bHash(data: Uint8Array): Safe<Hex> {
   try {
-    const hash = blake2b(data)
+    const hash = blake2b(data, { dkLen: 32 })
     return safeResult(bytesToHex(hash))
   } catch (error) {
     return safeError(error as Error)
@@ -65,12 +73,12 @@ export function signEd25519(
   data: Uint8Array,
   privateKey: Uint8Array,
 ): Safe<Uint8Array> {
-  // The @stablelib/ed25519 library expects the secret key to be exactly 64 Uint8Array
-  // The secretKey from generateKeyPair() should already be in the correct format
-  if (privateKey.length !== 64) {
+  // The @noble/ed25519 library expects the secret key to be exactly 32 Uint8Array
+  // The secretKey from generateKeyPair() is a 32-byte seed
+  if (privateKey.length !== 32) {
     return safeError(
       new Error(
-        `Ed25519 private key must be 64 Uint8Array, got ${privateKey.length}`,
+        `Ed25519 private key must be 32 Uint8Array, got ${privateKey.length}`,
       ),
     )
   }

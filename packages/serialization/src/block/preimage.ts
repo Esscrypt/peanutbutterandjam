@@ -47,7 +47,7 @@ import {
 import type { DecodingResult, Preimage } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
-import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
+import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
 
 /**
  * Encode single preimage according to Gray Paper specification.
@@ -91,7 +91,7 @@ export function encodePreimage(preimage: Preimage): Safe<Uint8Array> {
 
   // encode[4]{xp_serviceindex}: 4-byte fixed-length service index
   const [error1, serviceIndexEncoded] = encodeFixedLength(
-    preimage.serviceIndex,
+    preimage.requester,
     4n,
   )
   if (error1) {
@@ -100,14 +100,13 @@ export function encodePreimage(preimage: Preimage): Safe<Uint8Array> {
   parts.push(serviceIndexEncoded)
 
   // var{xp_data}: Variable-length data blob with natural length prefix
-  const [error2, dataLengthEncoded] = encodeNatural(
-    BigInt(preimage.data.length),
-  )
+  const dataBytes = hexToBytes(preimage.blob)
+  const [error2, dataLengthEncoded] = encodeNatural(BigInt(dataBytes.length))
   if (error2) {
     return safeError(error2)
   }
   parts.push(dataLengthEncoded)
-  parts.push(hexToBytes(preimage.data))
+  parts.push(dataBytes)
 
   return safeResult(concatBytes(parts))
 }
@@ -159,7 +158,7 @@ export function decodePreimage(
   if (error1) {
     return safeError(error1)
   }
-  const serviceIndex = serviceIndexResult.value
+  const requester = serviceIndexResult.value
   currentData = serviceIndexResult.remaining
 
   // var{xp_data}: Variable-length data blob with natural length prefix
@@ -183,12 +182,15 @@ export function decodePreimage(
   const preimageData = currentData.slice(0, dataLengthNum)
   currentData = currentData.slice(dataLengthNum)
 
+  const consumed = data.length - currentData.length
+
   return safeResult({
     value: {
-      serviceIndex,
-      data: bytesToHex(preimageData),
+      requester,
+      blob: bytesToHex(preimageData),
     },
     remaining: currentData,
+    consumed,
   })
 }
 
@@ -230,12 +232,12 @@ export function decodePreimage(
 export function encodePreimages(preimages: Preimage[]): Safe<Uint8Array> {
   // Sort preimages by service index as required by Gray Paper for deterministic encoding
   const sortedPreimages = [...preimages].sort((a, b) => {
-    if (a.serviceIndex < b.serviceIndex) return -1
-    if (a.serviceIndex > b.serviceIndex) return 1
+    if (a.requester < b.requester) return -1
+    if (a.requester > b.requester) return 1
     return 0
   })
 
-  return encodeSequenceGeneric(sortedPreimages, encodePreimage)
+  return encodeVariableSequence(sortedPreimages, encodePreimage)
 }
 
 /**
@@ -262,5 +264,33 @@ export function encodePreimages(preimages: Preimage[]): Safe<Uint8Array> {
 export function decodePreimages(
   data: Uint8Array,
 ): Safe<DecodingResult<Preimage[]>> {
-  return decodeSequenceGeneric(data, decodePreimage)
+  // First decode the length using natural number encoding
+  const [lengthError, lengthResult] = decodeNatural(data)
+  if (lengthError) {
+    return safeError(lengthError)
+  }
+
+  const count = Number(lengthResult.value)
+  if (count < 0 || count > Number.MAX_SAFE_INTEGER) {
+    return safeError(new Error(`Invalid preimage count: ${lengthResult.value}`))
+  }
+
+  // Then decode the sequence with the known count
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+    lengthResult.remaining,
+    decodePreimage,
+    count,
+  )
+  if (sequenceError) {
+    return safeError(sequenceError)
+  }
+
+  // Calculate total consumed bytes
+  const consumed = data.length - sequenceResult.remaining.length
+
+  return safeResult({
+    value: sequenceResult.value,
+    remaining: sequenceResult.remaining,
+    consumed,
+  })
 }

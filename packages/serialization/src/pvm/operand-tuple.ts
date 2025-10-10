@@ -58,7 +58,7 @@ import type {
   DecodingResult,
   OperandTuple,
   WorkError,
-  WorkResult,
+  WorkExecutionResult,
 } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
@@ -79,7 +79,7 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * @param result - Work result (success data or error string)
  * @returns Encoded result with proper Gray Paper encoding
  */
-function encodeWorkResult(result: WorkResult): Safe<Uint8Array> {
+function encodeWorkResult(result: WorkExecutionResult): Safe<Uint8Array> {
   if (typeof result === 'string') {
     // Error result: encode as UTF-8 string with length prefix
     const errorBytes = new TextEncoder().encode(result)
@@ -105,7 +105,9 @@ function encodeWorkResult(result: WorkResult): Safe<Uint8Array> {
  * @param data - Octet sequence to decode
  * @returns Decoded work result and remaining data
  */
-function decodeWorkResult(data: Uint8Array): Safe<DecodingResult<WorkResult>> {
+function decodeWorkResult(
+  data: Uint8Array,
+): Safe<DecodingResult<WorkExecutionResult>> {
   // Decode length prefix
   const [error1, lengthResult] = decodeNatural(data)
   if (error1) {
@@ -135,6 +137,7 @@ function decodeWorkResult(data: Uint8Array): Safe<DecodingResult<WorkResult>> {
       return safeResult({
         value: resultString as WorkError,
         remaining: currentData,
+        consumed: data.length - currentData.length,
       })
     }
   } catch {
@@ -145,6 +148,7 @@ function decodeWorkResult(data: Uint8Array): Safe<DecodingResult<WorkResult>> {
   return safeResult({
     value: resultBytes,
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }
 
@@ -340,6 +344,8 @@ export function decodeOperandTuple(
   const authTrace = currentData.slice(0, authTraceLength)
   currentData = currentData.slice(authTraceLength)
 
+  const consumed = data.length - currentData.length
+
   return safeResult({
     value: {
       packageHash,
@@ -351,5 +357,6 @@ export function decodeOperandTuple(
       authTrace,
     },
     remaining: currentData,
+    consumed,
   })
 }

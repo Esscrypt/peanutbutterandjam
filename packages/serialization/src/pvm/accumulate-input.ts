@@ -167,9 +167,11 @@ export function decodeAccumulateInput(
     }
     const operandTuple = operandTupleResult.value
     const remaining = operandTupleResult.remaining
+    const consumed = data.length - remaining.length
     return safeResult({
       value: { type: 0n, value: operandTuple },
       remaining,
+      consumed,
     })
   } else if (discriminator === 1) {
     // Deferred transfer: decode{1, decode[X]{o}}
@@ -180,9 +182,11 @@ export function decodeAccumulateInput(
     }
     const deferredTransfer = deferredTransferResult.value
     const remaining = deferredTransferResult.remaining
+    const consumed = data.length - remaining.length
     return safeResult({
       value: { type: 1n, value: deferredTransfer },
       remaining,
+      consumed,
     })
   } else {
     return safeError(

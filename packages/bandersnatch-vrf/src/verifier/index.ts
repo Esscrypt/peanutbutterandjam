@@ -8,5 +8,3 @@ export * from './config'
 export { IETFVRFVerifier } from './ietf'
 export { PedersenVRFVerifier } from './pedersen'
 export { RingVRFVerifier } from './ring'
-// Types
-export * from './types'

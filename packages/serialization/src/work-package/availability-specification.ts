@@ -51,11 +51,11 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { AvailabilitySpecification, DecodingResult } from '@pbnj/types'
+import type { DecodingResult, WorkPackageSpec } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 
 /**
- * Encode availability specification according to Gray Paper specification.
+ * Encode work package specification according to Gray Paper specification.
  *
  * Gray Paper Equation 208-214 (label: encode{AS ∈ avspec}):
  * encode{AS ∈ avspec} ≡ encode{
@@ -66,7 +66,7 @@ import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
  *   encode[2]{AS_segcount}
  * }
  *
- * Availability specifications define data availability parameters for work package
+ * Work package specifications define data availability parameters for work package
  * erasure coding and reconstruction. They ensure work package data can be
  * reconstructed from distributed segments stored across validators.
  *
@@ -82,30 +82,28 @@ import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
  * ✅ CORRECT: Uses encode[2] for segcount (2-byte fixed-length)
  * ✅ CORRECT: Uses raw hash encoding for 32-byte hash fields
  *
- * @param spec - Availability specification to encode
+ * @param spec - Work package specification to encode
  * @returns Encoded octet sequence
  */
-export function encodeAvailabilitySpecification(
-  spec: AvailabilitySpecification,
-): Safe<Uint8Array> {
+export function encodeWorkPackageSpec(spec: WorkPackageSpec): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // 1. AS_packagehash (32 bytes)
-  parts.push(hexToBytes(spec.packageHash))
+  parts.push(hexToBytes(spec.hash))
 
   // 2. encode[4]{AS_bundlelen} (4 bytes fixed-length)
-  const [error1, bundleLenEncoded] = encodeFixedLength(spec.bundleLength, 4n)
+  const [error1, bundleLenEncoded] = encodeFixedLength(spec.length, 4n)
   if (error1) return safeError(error1)
   parts.push(bundleLenEncoded)
 
   // 3. AS_erasureroot (32 bytes)
-  parts.push(hexToBytes(spec.erasureRoot))
+  parts.push(hexToBytes(spec.erasure_root))
 
   // 4. AS_segroot (32 bytes)
-  parts.push(hexToBytes(spec.segmentRoot))
+  parts.push(hexToBytes(spec.exports_root))
 
   // 5. encode[2]{AS_segcount} (2 bytes fixed-length)
-  const [error2, segCountEncoded] = encodeFixedLength(spec.segmentCount, 2n)
+  const [error2, segCountEncoded] = encodeFixedLength(spec.exports_count, 2n)
   if (error2) return safeError(error2)
   parts.push(segCountEncoded)
 
@@ -113,7 +111,7 @@ export function encodeAvailabilitySpecification(
 }
 
 /**
- * Decode availability specification according to Gray Paper specification.
+ * Decode work package specification according to Gray Paper specification.
  *
  * Gray Paper Equation 208-214 (label: decode{AS ∈ avspec}):
  * Inverse of encode{AS ∈ avspec} ≡ decode{
@@ -124,7 +122,7 @@ export function encodeAvailabilitySpecification(
  *   decode[2]{AS_segcount}
  * }
  *
- * Decodes availability specification from octet sequence back to structured data.
+ * Decodes work package specification from octet sequence back to structured data.
  * Must exactly reverse the encoding process to maintain round-trip compatibility.
  *
  * Field decoding per Gray Paper:
@@ -140,15 +138,15 @@ export function encodeAvailabilitySpecification(
  * ✅ CORRECT: Uses raw hash decoding for 32-byte hash fields
  *
  * @param data - Octet sequence to decode
- * @returns Decoded availability specification with remaining data
+ * @returns Decoded work package specification with remaining data
  */
-export function decodeAvailabilitySpecification(
+export function decodeWorkPackageSpec(
   data: Uint8Array,
-): Safe<DecodingResult<AvailabilitySpecification>> {
+): Safe<DecodingResult<WorkPackageSpec>> {
   if (data.length < 32) {
     return safeError(new Error('Insufficient data for package hash'))
   }
-  const packageHash = bytesToHex(data.slice(0, 32))
+  const hash = bytesToHex(data.slice(0, 32))
   data = data.slice(32)
   if (data.length < 8) {
     return safeError(new Error('Insufficient data for bundle length'))
@@ -157,18 +155,18 @@ export function decodeAvailabilitySpecification(
   if (error2) {
     return safeError(error2)
   }
-  const bundleLength = bundleLengthResult.value
+  const length = bundleLengthResult.value
   data = bundleLengthResult.remaining
   if (data.length < 32) {
     return safeError(new Error('Insufficient data for erasure root'))
   }
 
-  const erasureRoot = bytesToHex(data.slice(0, 32))
+  const erasure_root = bytesToHex(data.slice(0, 32))
   data = data.slice(32)
   if (data.length < 32) {
     return safeError(new Error('Insufficient data for segment root'))
   }
-  const segmentRoot = bytesToHex(data.slice(0, 32))
+  const exports_root = bytesToHex(data.slice(0, 32))
   data = data.slice(32)
   if (data.length < 8) {
     return safeError(new Error('Insufficient data for segment count'))
@@ -177,17 +175,18 @@ export function decodeAvailabilitySpecification(
   if (error5) {
     return safeError(error5)
   }
-  const segmentCount = segmentCountResult.value
+  const exports_count = segmentCountResult.value
   data = segmentCountResult.remaining
 
   return safeResult({
     value: {
-      packageHash: packageHash,
-      bundleLength: bundleLength,
-      erasureRoot: erasureRoot,
-      segmentRoot: segmentRoot,
-      segmentCount: segmentCount,
+      hash: hash,
+      length: length,
+      erasure_root: erasure_root,
+      exports_root: exports_root,
+      exports_count: exports_count,
     },
     remaining: data,
+    consumed: data.length - data.length,
   })
 }

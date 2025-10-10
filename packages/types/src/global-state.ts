@@ -12,8 +12,12 @@
 
 import type { Hex } from '@pbnj/core'
 import type { BlockBody } from './block-authoring'
-import type { SafroleState, Ticket, ValidatorPublicKeys } from './consensus'
-import type { ServiceAccountCore, WorkReport } from './serialization'
+import type { SafroleState, ValidatorPublicKeys } from './consensus'
+import type {
+  SafroleTicket,
+  ServiceAccountCore,
+  WorkReport,
+} from './serialization'
 
 // ============================================================================
 // State Component Types
@@ -79,13 +83,18 @@ export interface ServiceAccounts {
 }
 
 /**
- * Entropy accumulator and epochal randomness (ε)
+ * Gray Paper entropy structure: sequence[4]{hash}
+ * Contains: [entropyaccumulator, entropy_1, entropy_2, entropy_3]
  */
-export interface Entropy {
-  /** Current entropy accumulator */
-  current: Hex
-  /** Previous epoch randomness */
-  previous: Hex
+export interface EntropyState {
+  /** Current entropy accumulator - Gray Paper: entropyaccumulator */
+  accumulator: Hex
+  /** First previous epoch randomness - Gray Paper: entropy_1 */
+  entropy1: Hex
+  /** Second previous epoch randomness - Gray Paper: entropy_2 */
+  entropy2: Hex
+  /** Third previous epoch randomness - Gray Paper: entropy_3 */
+  entropy3: Hex
 }
 
 /**
@@ -187,17 +196,17 @@ export interface Activity {
  */
 export interface ValidatorStats {
   /** Blocks authored */
-  blocks: bigint
+  blocks: number
   /** Tickets submitted */
-  tickets: bigint
+  tickets: number
   /** Preimages provided count */
-  preimageCount: bigint
+  preimageCount: number
   /** Preimages provided size */
-  preimageSize: bigint
+  preimageSize: number
   /** Guarantees made */
-  guarantees: bigint
+  guarantees: number
   /** Assurances provided */
-  assurances: bigint
+  assurances: number
 }
 
 /**
@@ -205,21 +214,21 @@ export interface ValidatorStats {
  */
 export interface CoreStats {
   /** Data availability load */
-  daLoad: bigint
+  daLoad: number
   /** Core popularity */
-  popularity: bigint
+  popularity: number
   /** Import count */
-  importCount: bigint
+  importCount: number
   /** Extrinsic count */
-  extrinsicCount: bigint
+  extrinsicCount: number
   /** Extrinsic size */
-  extrinsicSize: bigint
+  extrinsicSize: number
   /** Export count */
-  exportCount: bigint
+  exportCount: number
   /** Bundle length */
-  bundleLength: bigint
+  bundleLength: number
   /** Gas used */
-  gasUsed: bigint
+  gasUsed: number
 }
 
 /**
@@ -227,32 +236,57 @@ export interface CoreStats {
  */
 export interface ServiceStats {
   /** Provision count */
-  provision: bigint
+  provision: number
   /** Refinement operations */
-  refinement: bigint
+  refinement: number
   /** Accumulation operations */
-  accumulation: bigint
+  accumulation: number
   /** Transfer operations */
-  transfer: bigint
+  transfer: number
   /** Import count */
-  importCount: bigint
+  importCount: number
   /** Extrinsic count */
-  extrinsicCount: bigint
+  extrinsicCount: number
   /** Extrinsic size */
-  extrinsicSize: bigint
+  extrinsicSize: number
   /** Export count */
-  exportCount: bigint
+  exportCount: number
 }
 
 /**
  * Ready work-reports (ω)
  * Work-reports ready for accumulation
  */
+/**
+ * Ready work-reports (ω) - Gray Paper compliant
+ *
+ * Gray Paper specification (Equation 34):
+ * ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
+ *
+ * Ready work-reports are reports that are ready for accumulation processing.
+ * Each ready item contains a work report and its unaccumulated dependencies.
+ * The structure is a sequence of epoch slots, each containing a sequence of ready items.
+ *
+ * Structure per Gray Paper:
+ * - Outer sequence: epoch slots (fixed length C_epochlen)
+ * - Inner sequence: ready items per slot (variable length)
+ * - Each ready item: ⟨workreport, protoset{hash}⟩ tuple
+ *   - workreport: the work report data
+ *   - protoset{hash}: set of work-package hashes (dependencies)
+ */
+export interface ReadyItem {
+  /** Work report ready for processing */
+  workReport: WorkReport
+  /** Set of work-package hashes this report depends on */
+  dependencies: Set<Hex>
+}
+
 export interface Ready {
-  /** Reports ready for processing */
-  reports: WorkReport[]
-  /** Processing queue state */
-  queueState: Map<bigint, bigint>
+  /**
+   * Sequence of epoch slots, each containing ready items
+   * Length should be C_epochlen (typically 600)
+   */
+  epochSlots: Map<bigint, ReadyItem[]>
 }
 
 /**
@@ -316,7 +350,7 @@ export interface GlobalState {
   accounts: ServiceAccounts
 
   /** Entropy (ε) - On-chain randomness accumulator */
-  entropy: Entropy
+  entropy: EntropyState
 
   /** Staging validator set (ι) - Validators queued for next epoch */
   stagingset: ValidatorPublicKeys[]
@@ -366,18 +400,33 @@ export type StateTransition = (
   extrinsics: BlockBody,
 ) => GlobalState
 
+/**
+ * Block header
+ * @param parent - H_parent
+ * @param priorStateRoot - H_priorstateroot
+ * @param extrinsicHash - H_extrinsichash
+ * @param timeslot - H_timeslot
+ * @param epochMark - H_epochmark
+ * @param winnersMark - H_winnersmark
+ * @param offendersMark - H_offendersmark
+ * @param authorIndex - H_authorindex
+ * @param vrfSig - H_vrfsig -> same as "entropy_source" in documentation
+ * @param sealSig - H_sealsig
+ */
 export interface BlockHeader {
   parent: Hex // ✅ H_parent
   priorStateRoot: Hex // ✅ H_priorstateroot
   extrinsicHash: Hex // ✅ H_extrinsichash
   timeslot: bigint // ✅ H_timeslot
   epochMark: EpochMark | null // ✅ H_epochmark
-  winnersMark: Ticket[] | null // ✅ H_winnersmark
+  winnersMark: SafroleTicket[] | null // ✅ H_winnersmark
   offendersMark: Hex[] // ✅ H_offendersmark
   authorIndex: bigint // ✅ H_authorindex
   vrfSig: Hex // ✅ H_vrfsig
   sealSig: Hex // ✅ H_sealsig
 }
+
+export type UnsignedBlockHeader = Omit<BlockHeader, 'sealSig'>
 
 /**
  * Epoch mark (when present)

@@ -5,9 +5,9 @@
  * This is a Common Ephemeral (CE) stream for announcing possession of preimages.
  */
 
-import type { Hex, Safe, SafePromise } from '@pbnj/core'
-import { bytesToHex, hexToBytes, safeResult } from '@pbnj/core'
-import type { PreimageAnnouncement } from '@pbnj/types'
+import type { Safe, SafePromise } from '@pbnj/core'
+import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
+import type { IPreimageHolderService, PreimageAnnouncement } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -17,74 +17,28 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
   PreimageAnnouncement,
   void
 > {
-  private preimageAnnouncements: Map<
-    Hex,
-    {
-      serviceIndex: bigint
-      hash: Hex
-      preimageLength: bigint
-      timestamp: bigint
-    }
-  > = new Map()
-
-  /**
-   * Store preimage announcement in local store and persist to database
-   */
-  async storePreimageAnnouncement(
-    serviceId: bigint,
-    hash: Hex,
-    preimageLength: bigint,
-  ): Promise<void> {
-    this.preimageAnnouncements.set(hash, {
-      serviceIndex: serviceId,
-      hash,
-      preimageLength,
-      timestamp: BigInt(Date.now()),
-    })
-  }
-
-  /**
-   * Get preimage announcement from local store
-   */
-  getPreimageAnnouncement(hash: Hex):
-    | {
-        serviceIndex: bigint
-        hash: Hex
-        preimageLength: bigint
-        timestamp: bigint
-      }
-    | undefined {
-    return this.preimageAnnouncements.get(hash)
+  constructor(private preimageHolderService: IPreimageHolderService) {
+    super()
   }
 
   /**
    * Process preimage announcement
    */
   async processRequest(announcement: PreimageAnnouncement): SafePromise<void> {
-    // Store the preimage
-    await this.storePreimageAnnouncement(
-      announcement.serviceId,
+    const [error, preimage] = await this.preimageHolderService.getPreimage(
       announcement.hash,
-      announcement.preimageLength,
     )
+    // if we do not have the announcement, we need to request it
+    if (error) {
+      return safeError(error)
+    }
+    if (preimage) {
+      return safeError(new Error('Preimage already exists'))
+    }
+    this.preimageHolderService.storePreimageToRequest(announcement)
 
     return safeResult(undefined)
   }
-
-  /**
-   * Create preimage announcement message
-   */
-  // createPreimageAnnouncement(
-  //   serviceId: bigint,
-  //   hash: Uint8Array,
-  //   preimageLength: bigint,
-  // ): PreimageAnnouncement {
-  //   return {
-  //     serviceId,
-  //     hash,
-  //     preimageLength,
-  //   }
-  // }
 
   /**
    * Serialize preimage announcement message

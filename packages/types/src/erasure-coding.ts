@@ -51,9 +51,7 @@ export interface ErasureCoder {
   /** Encode data into erasure coded shards */
   encode(data: Uint8Array, k?: number, n?: number): EncodedData
   /** Decode data from erasure coded shards */
-  decode(encodedData: EncodedData, k?: number): Uint8Array
-  /** Validate encoded data */
-  validate(encodedData: EncodedData): ErasureCodingValidationResult
+  decode(shards: Uint8Array[], originalLength: number): Uint8Array
 }
 
 /**

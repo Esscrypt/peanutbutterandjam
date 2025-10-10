@@ -14,12 +14,12 @@ import type {
   Dispute,
   Guarantee,
   Preimage,
+  RefineContext,
   SafroleTicket,
-  WorkDigest,
   WorkItem,
   WorkPackage,
-  WorkPackageContext,
   WorkReport,
+  WorkResult,
 } from './serialization'
 
 // ============================================================================
@@ -27,13 +27,7 @@ import type {
 // ============================================================================
 
 // Re-export unified types from serialization
-export type {
-  WorkReport,
-  WorkPackageContext,
-  WorkDigest,
-  WorkPackage,
-  WorkItem,
-}
+export type { WorkReport, RefineContext, WorkResult, WorkPackage, WorkItem }
 
 /**
  * Availability specification
@@ -79,69 +73,25 @@ export interface BlockBody {
 }
 
 /**
- * Block authoring service configuration
- */
-export interface BlockAuthoringConfig {
-  // Network settings
-  networkId: string
-  validatorKey: string
-
-  // Timing settings
-  slotDuration: bigint // 6 seconds
-  epochLength: bigint // 600 slots
-
-  // Performance settings
-  maxExtrinsicsPerBlock: bigint
-  maxWorkPackagesPerBlock: bigint
-
-  // Validation settings
-  enableStrictValidation: boolean
-  enableAuditMode: boolean
-
-  // Consensus settings
-  enableSafroleValidation: boolean
-  enableGrandpaFinalization: boolean
-}
-
-/**
  * Context for block authoring operations
  */
-export interface BlockAuthoringContext {
-  // Parent block information
-  parentHeader: BlockHeader
-  parentState: State
+// export interface BlockAuthoringContext {
+//   // Parent block information
+//   parentHeader: BlockHeader
+//   parentState: State
 
-  // Current timeslot
-  currentTimeslot: bigint
+//   // Current timeslot
+//   currentTimeslot: bigint
 
-  // Validator information
-  validatorSet: ValidatorPublicKeys[]
-  authorIndex: bigint
+//   // Validator information
+//   authorIndex: bigint
 
-  // Available extrinsics and work packages
-  extrinsics: Extrinsic[]
-  workPackages: WorkPackage[]
-
-  // Network state
-  networkState: NetworkState
-}
+//   // Available extrinsics and work packages
+//   extrinsics: Extrinsic[]
+//   workPackages: WorkPackage[]
+// }
 
 /**
- * Network state information
- */
-export interface NetworkState {
-  // Connected peers
-  connectedPeers: bigint
-
-  // Network latency
-  averageLatency: bigint
-
-  // Block propagation status
-  propagationStatus: PropagationStatus
-
-  // Finalization status
-  finalizationStatus: FinalizationStatus
-}
 
 /**
  * Block propagation status
@@ -316,16 +266,6 @@ export interface ExtrinsicValidationContext {
   state: State
   blockHeader: BlockHeader
   validatorSet: ValidatorPublicKeys[]
-}
-
-/**
- * Block submission context
- */
-export interface BlockSubmissionContext {
-  block: Block
-  networkState: NetworkState
-  retryCount: bigint
-  timeout: bigint // milliseconds
 }
 
 /**

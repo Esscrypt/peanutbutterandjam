@@ -5,8 +5,9 @@
  * Reference: JAM Protocol chain specification format
  */
 
-import type { Hex } from '@pbnj/core'
+import type { Hex } from 'viem'
 import { z } from 'zod'
+import { type Safe, safeError, safeResult } from '../safe'
 
 // ============================================================================
 // Base Validators
@@ -217,8 +218,10 @@ export const chainSpecConfigSchema = z.object({
   id: z.string().min(1, 'Chain ID is required'),
   /** Chain name */
   name: z.string().optional(),
-  /** Genesis validators (input format) */
-  genesis_validators: z.array(genesisValidatorSchema).optional(),
+  /** Bootstrap nodes */
+  bootnodes: z.array(z.string()).optional(),
+  /** Genesis validators (input format) - required to distinguish from JSON format */
+  genesis_validators: z.array(genesisValidatorSchema),
   /** Accounts (input format) */
   accounts: z.array(genesisAccountSchema).optional(),
 })
@@ -243,14 +246,6 @@ export const chainSpecJsonSchema = z.object({
   network: chainSpecNetworkSchema.optional(),
 })
 
-/**
- * Union schema that handles both formats
- */
-export const chainSpecSchema = z.union([
-  chainSpecConfigSchema,
-  chainSpecJsonSchema,
-])
-
 // ============================================================================
 // Type Exports
 // ============================================================================
@@ -265,7 +260,6 @@ export type GenesisState = z.infer<typeof genesisStateSchema>
 export type ChainSpecNetwork = z.infer<typeof chainSpecNetworkSchema>
 export type ChainSpecConfig = z.infer<typeof chainSpecConfigSchema>
 export type ChainSpecJson = z.infer<typeof chainSpecJsonSchema>
-export type ChainSpec = z.infer<typeof chainSpecSchema>
 
 // ============================================================================
 // Validation Functions
@@ -274,35 +268,29 @@ export type ChainSpec = z.infer<typeof chainSpecSchema>
 /**
  * Validate chain spec data
  */
-export function validateChainSpec(
-  data: unknown,
-): { success: true; data: ChainSpec } | { success: false; error: string } {
-  const result = chainSpecSchema.safeParse(data)
+export function validateChainSpec(data: unknown): Safe<ChainSpecJson> {
+  const result = chainSpecJsonSchema.safeParse(data)
 
   if (result.success) {
-    return { success: true, data: result.data }
+    return safeResult(result.data)
   }
 
-  return {
-    success: false,
-    error: `Chain spec validation failed: ${result.error.message}`,
-  }
+  return safeError(new Error(result.error.message))
 }
 
 /**
  * Parse and validate chain spec from JSON string
  */
-export function parseChainSpec(
-  jsonString: string,
-): { success: true; data: ChainSpec } | { success: false; error: string } {
+export function parseChainSpec(jsonString: string): Safe<ChainSpecJson> {
   try {
     const parsed = JSON.parse(jsonString)
     return validateChainSpec(parsed)
   } catch (error) {
-    return {
-      success: false,
-      error: `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    }
+    return safeError(
+      new Error(
+        `Failed to parse JSON: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      ),
+    )
   }
 }
 
@@ -310,7 +298,7 @@ export function parseChainSpec(
  * Check if chain spec is in config format (has genesis_validators)
  */
 export function isChainSpecConfig(
-  chainSpec: ChainSpec,
+  chainSpec: any,
 ): chainSpec is ChainSpecConfig {
   return 'genesis_validators' in chainSpec
 }
@@ -318,8 +306,6 @@ export function isChainSpecConfig(
 /**
  * Check if chain spec is in full JSON format (has genesis_state)
  */
-export function isChainSpecJson(
-  chainSpec: ChainSpec,
-): chainSpec is ChainSpecJson {
+export function isChainSpecJson(chainSpec: any): chainSpec is ChainSpecJson {
   return 'genesis_state' in chainSpec
 }

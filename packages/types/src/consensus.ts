@@ -6,7 +6,7 @@
  */
 
 import type { Hex } from 'viem'
-import type { SafroleTicketCore } from './serialization'
+import type { SafroleTicket, SafroleTicketWithoutProof } from './serialization'
 
 // Define ConsensusState interface
 export interface ConsensusState {
@@ -17,14 +17,7 @@ export interface ConsensusState {
   previousSet: ValidatorPublicKeys[]
   epochRoot: Hex
   sealTickets: string[]
-  ticketAccumulator: Ticket[]
-}
-
-export interface Ticket extends SafroleTicketCore {
-  /** Ticket signature */
-  signature: Hex
-  /** Timestamp */
-  timestamp: bigint
+  ticketAccumulator: SafroleTicket[]
 }
 
 export interface TicketProof {
@@ -90,10 +83,13 @@ export interface SafroleState {
   pendingSet: ValidatorPublicKeys[]
   /** Epoch root (Bandersnatch ring root) - Gray Paper: epochRoot */
   epochRoot: Hex
-  /** Current epoch's seal tickets - Gray Paper: sealTickets */
-  sealTickets: Ticket[] | ValidatorPublicKeys[]
-  /** Ticket accumulator for next epoch - Gray Paper: ticketAccumulator */
-  ticketAccumulator: Ticket[]
+  // /** Current epoch's seal tickets - Gray Paper: sealTickets */
+  // // this could be a list of tickets of a list of bandersnatch keys in fallback mode
+  sealTickets: (SafroleTicketWithoutProof | Uint8Array)[]
+  // /** Ticket accumulator for next epoch - Gray Paper: ticketAccumulator */
+  ticketAccumulator: SafroleTicketWithoutProof[]
+  // /** Entropy accumulator for epoch transitions - Gray Paper: entropyaccumulator */
+  // entropyAccumulator?: Hex
 
   // Note: activeSet, previousSet, and stagingSet are part of global state,
   // not internal Safrole state according to Gray Paper equation (50)
@@ -105,16 +101,16 @@ export interface SafroleInput {
   /** Current entropy */
   entropy: Hex
   /** Ticket proofs in extrinsic */
-  extrinsic: TicketProof[]
+  extrinsic: SafroleTicket[]
 }
 
 export interface SafroleOutput {
   /** Updated Safrole state */
   state: SafroleState
   /** Generated tickets */
-  tickets: Ticket[]
+  tickets: SafroleTicket[]
   /** Processing errors */
-  errors: string[]
+  errors: SafroleErrorCode[]
 }
 
 export interface SafroleError {
@@ -122,36 +118,211 @@ export interface SafroleError {
   message: string
 }
 
-/**
- * Constants from Gray Paper
- */
-export const SAFROLE_CONSTANTS = {
+type IChainSpecConstants = {
+  NUM_VALIDATORS: number
+  NUM_CORES: number
+  SLOT_DURATION: number
+  EPOCH_LENGTH: number
+  CONTEST_DURATION: number
+  TICKETS_PER_VALIDATOR: number
+  PREIMAGE_EXPUNGE_PERIOD: number
+  MAX_TICKETS_PER_EXTRINSIC: number
+  ROTATION_PERIOD: number
+  NUM_EC_PIECES_PER_SEGMENT: number
+  MAX_BLOCK_GAS: number
+  MAX_REFINE_GAS: number
+}
+
+export const TINY_SAFROLE_CONSTANTS: IChainSpecConstants = {
+  /** Number of validators */
+  NUM_VALIDATORS: 6,
+  /** Number of cores */
+  NUM_CORES: 2,
+  /** Slot duration in milliseconds */
+  SLOT_DURATION: 6000,
   /** Epoch length in slots */
-  EPOCH_LENGTH: 600,
-  /** Epoch tail start (when ticket submission closes) */
-  EPOCH_TAIL_START: 540,
-  /** Maximum extrinsics per slot */
-  MAX_EXTRINSICS_PER_SLOT: 10,
-  /** Maximum ticket entries */
-  MAX_TICKET_ENTRIES: 1000,
-  /** Entropy size */
-  ENTROPY_SIZE: 1,
-  /** Maximum seal tickets */
-  MAX_SEAL_TICKETS: 10,
+  EPOCH_LENGTH: 12,
+  /** Contest duration in slots */
+  CONTEST_DURATION: 10, // same as epoch tail start
+  /** Tickets per validator */
+  TICKETS_PER_VALIDATOR: 3,
+  /** Maximum tickets per extrinsic */
+  MAX_TICKETS_PER_EXTRINSIC: 3,
+  /** Rotation period in slots */
+  ROTATION_PERIOD: 4,
+  /** Number of erasure coding pieces per segment */
+  NUM_EC_PIECES_PER_SEGMENT: 1026,
+  /** Maximum block gas */
+  MAX_BLOCK_GAS: 20000000,
+  /** Maximum refine gas */
+  MAX_REFINE_GAS: 1000000000,
+  /** Preimage expunge period in slots */
+  PREIMAGE_EXPUNGE_PERIOD: 32,
 } as const
 
 /**
- * Error codes as defined in Gray Paper Section 4.1
- * Reference: graypaper/text/safrole.tex
+ * Constants from Gray Paper
  */
-export enum SafroleErrorCode {
-  BAD_SLOT = 0, // Section 4.1.1
-  UNEXPECTED_TICKET = 1, // Section 4.1.2
-  BAD_TICKET_ORDER = 2, // Section 4.1.3
-  BAD_TICKET_PROOF = 3, // Section 4.1.4
-  BAD_TICKET_ATTEMPT = 4, // Section 4.1.5
-  DUPLICATE_TICKET = 6, // Section 4.1.6
-}
+export const FULL_SAFROLE_CONSTANTS: IChainSpecConstants = {
+  NUM_VALIDATORS: 1023,
+  NUM_CORES: 341,
+  /** Slot duration in milliseconds */
+  SLOT_DURATION: 6000,
+  /** Epoch length in slots */
+  EPOCH_LENGTH: 600,
+  /** Contest duration in slots */
+  CONTEST_DURATION: 500, // 5/6 of epoch length
+  /** Tickets per validator */
+  TICKETS_PER_VALIDATOR: 2,
+  /** Maximum tickets per extrinsic */
+  MAX_TICKETS_PER_EXTRINSIC: 16,
+  /** Preimage expunge period in slots */
+  PREIMAGE_EXPUNGE_PERIOD: 19200,
+  /** Rotation period in slots */
+  ROTATION_PERIOD: 10,
+  /** Number of erasure coding pieces per segment */
+  NUM_EC_PIECES_PER_SEGMENT: 6,
+  /** Maximum block gas */
+  MAX_BLOCK_GAS: 3500000000,
+  /** Maximum refine gas */
+  MAX_REFINE_GAS: 5000000000,
+} as const
+
+export const SMALL_SAFROLE_CONSTANTS: IChainSpecConstants = {
+  NUM_VALIDATORS: 12,
+
+  NUM_CORES: 4,
+  /** Slot duration in milliseconds */
+  SLOT_DURATION: 6000,
+  /** Epoch length in slots */
+  EPOCH_LENGTH: 36,
+  /** Contest duration in slots */
+  CONTEST_DURATION: 30,
+  /** Tickets per validator */
+  TICKETS_PER_VALIDATOR: 2,
+  /** Maximum tickets per extrinsic */
+  MAX_TICKETS_PER_EXTRINSIC: 3,
+
+  NUM_EC_PIECES_PER_SEGMENT: 513,
+
+  ROTATION_PERIOD: 4,
+  /** Preimage expunge period in slots */
+  PREIMAGE_EXPUNGE_PERIOD: 32,
+  /** Maximum block gas */
+  MAX_BLOCK_GAS: 20000000,
+  /** Maximum refine gas */
+  MAX_REFINE_GAS: 1000000000,
+} as const
+
+// export const MEDIUM_SAFROLE_CONSTANTS: IChainSpecConstants = {
+//   /** Slot duration in milliseconds */
+//   SLOT_DURATION: 6000,
+//   /** Epoch length in slots */
+//   EPOCH_LENGTH: 60,
+//   /** Contest duration in slots */
+//   CONTEST_DURATION: 50,
+//   /** Tickets per validator */
+//   TICKETS_PER_VALIDATOR: 2,
+//   /** Maximum tickets per extrinsic */
+//   MAX_TICKETS_PER_EXTRINSIC: 3,
+
+//   NUM_EC_PIECES_PER_SEGMENT: 342,
+
+//   /** Maximum block gas */
+//   MAX_BLOCK_GAS: 20000000,
+//   /** Maximum refine gas */
+//   MAX_REFINE_GAS: 1000000000,
+// }
+
+// Formally, we define the time in terms of seconds passed
+// since the beginning of the Jam Common Era, 1200 utc on
+// January 1, 2025.8 Midday utc is selected to ensure that
+// all major timezones are on the same date at any exact
+// 24-hour multiple from the beginning of the common era.
+// Formally, this value is denoted T .
+// export const JAM_COMMON_ERA_START_TIME = new Date('2025-01-01T12:00:00Z').getTime()
+export const JAM_COMMON_ERA_START_TIME = 1735732800000
+/**
+ * Safrole Error Code Type
+ *
+ * Comprehensive error code system for Safrole State Transition Function
+ * Based on Gray Paper specifications and test vector error codes
+ *
+ * Reference:
+ * - graypaper/text/safrole.tex
+ * - submodules/jamtestvectors/stf/safrole/safrole.asn
+ */
+export type SafroleErrorCode =
+  // Slot progression errors
+  | 'bad_slot'
+  | 'invalid_slot_progression'
+  | 'slot_too_old'
+  | 'slot_too_far_ahead'
+
+  // Ticket validation errors
+  | 'bad_ticket_attempt'
+  | 'bad_ticket_order'
+  | 'bad_ticket_proof'
+  | 'duplicate_ticket'
+  | 'unexpected_ticket'
+  | 'invalid_ticket_entry_index'
+  | 'invalid_ticket_signature'
+  | 'ticket_signature_too_short'
+  | 'ticket_signature_too_long'
+  | 'ticket_signature_invalid_format'
+  | 'ticket_signature_all_zeros'
+
+  // Entropy validation errors
+  | 'invalid_entropy_format'
+  | 'invalid_entropy_size'
+  | 'invalid_entropy_all_zeros'
+
+  // Extrinsic validation errors
+  | 'too_many_extrinsics'
+  | 'invalid_extrinsic_count'
+  | 'extrinsic_empty_when_required'
+
+  // State validation errors
+  | 'invalid_pending_set'
+  | 'invalid_epoch_root'
+  | 'invalid_seal_tickets'
+  | 'invalid_ticket_accumulator'
+
+  // Epoch transition errors
+  | 'invalid_epoch_transition'
+  | 'missing_epoch_mark'
+  | 'invalid_epoch_mark'
+
+  // Ticket accumulation errors
+  | 'ticket_accumulator_overflow'
+  | 'ticket_accumulator_underflow'
+  | 'invalid_ticket_accumulator_size'
+
+  // VRF and cryptographic errors
+  | 'vrf_proof_invalid'
+  | 'vrf_proof_generation_failed'
+  | 'ring_proof_invalid'
+  | 'bandersnatch_signature_invalid'
+
+  // Validator set errors
+  | 'invalid_validator_set'
+  | 'validator_set_empty'
+  | 'validator_key_invalid'
+  | 'validator_metadata_invalid'
+
+  // Timing and epoch errors
+  | 'epoch_tail_violation'
+  | 'invalid_epoch_length'
+  | 'invalid_slot_phase'
+
+  // Memory and resource errors
+  | 'memory_allocation_failed'
+  | 'resource_exhausted'
+  | 'buffer_overflow'
+
+  // Internal implementation errors
+  | 'internal_error' // Unexpected internal error
+  | 'validation_failed' // General validation failure
 
 /**
  * Consensus input
@@ -207,14 +378,12 @@ export interface ConsensusTicket {
  * Consensus constants
  */
 export const CONSENSUS_CONSTANTS = {
-  /** Epoch length in slots */
-  EPOCH_LENGTH: 600n,
-  /** Epoch tail start */
-  EPOCH_TAIL_START: 540n,
   /** Maximum extrinsics per slot */
   MAX_EXTRINSICS_PER_SLOT: 10n,
-  /** Maximum ticket entries */
-  MAX_TICKET_ENTRIES: 1000n,
+  /** Maximum ticket entries per validator (Gray Paper: Cticketentries = 2) */
+  MAX_TICKET_ENTRIES: 2n,
+  /** Maximum tickets per block/extrinsic (Gray Paper: Cmaxblocktickets = 16) */
+  MAX_BLOCK_TICKETS: 16n,
   /** Entropy size */
   ENTROPY_SIZE: 1n,
   /** Maximum seal tickets */
@@ -251,6 +420,10 @@ export interface ConsensusError {
  * @param ed25519 - Ed25519 public key (32 bytes)
  * @param bls - BLS public key (144 bytes)
  * @param metadata - Metadata (128 bytes)
+ *   The validators' IP-layer endpoints are given as IPv6/port combinations,
+ *   to be found in the first 18 bytes of validator metadata,
+ *   with the first 16 bytes being the IPv6 address
+ *   and the latter 2 being a little endian representation of the port.
  */
 export interface ValidatorPublicKeys {
   /** Bandersnatch key (first 32 Uint8Array) */

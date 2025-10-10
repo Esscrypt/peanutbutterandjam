@@ -32,6 +32,7 @@
  */
 
 import { bytesToHex, type Safe, safeError, safeResult } from '@pbnj/core'
+import type { DecodingResult } from '@pbnj/types'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 
 /**
@@ -100,7 +101,7 @@ export function decodeDictionary(
   data: Uint8Array,
   keyLength: number,
   valueLength = -1,
-): Safe<{ value: DictionaryEntry[]; remaining: Uint8Array }> {
+): Safe<DecodingResult<DictionaryEntry[]>> {
   // Decode variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
   const [error, concatenatedPairsResult] = decodeVariableLength(data)
   if (error) {
@@ -111,7 +112,11 @@ export function decodeDictionary(
 
   // If no data, return empty dictionary
   if (concatenatedPairs.length === 0) {
-    return safeResult({ value: [], remaining })
+    return safeResult({
+      value: [],
+      remaining,
+      consumed: data.length - remaining.length,
+    })
   }
 
   const result: DictionaryEntry[] = []
@@ -146,5 +151,9 @@ export function decodeDictionary(
     }
   }
 
-  return safeResult({ value: result, remaining })
+  return safeResult({
+    value: result,
+    remaining,
+    consumed: data.length - remaining.length,
+  })
 }

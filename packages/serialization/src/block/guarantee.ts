@@ -45,10 +45,10 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { Credential, DecodingResult, Guarantee } from '@pbnj/types'
+import type { DecodingResult, Guarantee, GuaranteeSignature } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
-import { decodeNatural, encodeNatural } from '../core/natural-number'
-import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
+import { decodeNatural } from '../core/natural-number'
+import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
 
 /**
@@ -75,23 +75,22 @@ import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
  * @param credential - Credential to encode
  * @returns Encoded octet sequence
  */
-function encodeCredential(credential: Credential): Safe<Uint8Array> {
+function encodeCredential(credential: GuaranteeSignature): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Value: encode[2](v)
-  const [error, encoded] = encodeFixedLength(BigInt(credential.value), 2n)
+  const [error, encoded] = encodeFixedLength(
+    BigInt(credential.validator_index),
+    2n,
+  )
   if (error) {
     return safeError(error)
   }
   parts.push(encoded)
 
-  // Signature: s (variable-length octet sequence)
-  const [error2, encoded2] = encodeNatural(BigInt(credential.signature.length))
-  if (error2) {
-    return safeError(error2)
-  }
-  parts.push(encoded2)
-  parts.push(hexToBytes(credential.signature))
+  // Signature: s (raw bytes, no length prefix according to Gray Paper)
+  const signatureBytes = hexToBytes(credential.signature)
+  parts.push(signatureBytes)
 
   return safeResult(concatBytes(parts))
 }
@@ -120,7 +119,9 @@ function encodeCredential(credential: Credential): Safe<Uint8Array> {
  * @param data - Octet sequence to decode
  * @returns Decoded credential and remaining data
  */
-function decodeCredential(data: Uint8Array): Safe<DecodingResult<Credential>> {
+function decodeCredential(
+  data: Uint8Array,
+): Safe<DecodingResult<GuaranteeSignature>> {
   let currentData = data
 
   // Value: encode[2](v)
@@ -130,32 +131,27 @@ function decodeCredential(data: Uint8Array): Safe<DecodingResult<Credential>> {
   }
   currentData = result.remaining
 
-  // Signature: s (variable-length octet sequence)
-  const [error2, result2] = decodeNatural(currentData)
-  if (error2) {
-    return safeError(error2)
-  }
-  const signatureLength = result2.value
-  const signatureLengthRemaining = result2.remaining
-  const signatureLengthNum = Number(signatureLength)
-  if (signatureLengthRemaining.length < signatureLengthNum) {
+  // Signature: s (raw bytes, no length prefix according to Gray Paper)
+  // Ed25519 signatures are always 64 bytes
+  if (currentData.length < 64) {
     return safeError(
       new Error(
         '[decodeCredential] Insufficient data for credential signature decoding',
       ),
     )
   }
-  const signature = signatureLengthRemaining.slice(0, signatureLengthNum)
-  currentData = signatureLengthRemaining.slice(signatureLengthNum)
+  const signature = currentData.slice(0, 64)
+  currentData = currentData.slice(64)
 
-  const credential: Credential = {
-    value: result.value,
+  const credential: GuaranteeSignature = {
+    validator_index: Number(result.value),
     signature: bytesToHex(signature),
   }
 
   return safeResult({
     value: credential,
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }
 
@@ -194,22 +190,22 @@ function encodeGuarantee(guarantee: Guarantee): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Work report: xg_workreport
-  const [error1, encoded1] = encodeWorkReport(guarantee.workReport)
+  const [error1, encoded1] = encodeWorkReport(guarantee.report)
   if (error1) {
     return safeError(error1)
   }
   parts.push(encoded1)
 
   // Timeslot: encode[4](xg_timeslot)
-  const [error2, encoded2] = encodeFixedLength(BigInt(guarantee.timeslot), 4n)
+  const [error2, encoded2] = encodeFixedLength(BigInt(guarantee.slot), 4n)
   if (error2) {
     return safeError(error2)
   }
   parts.push(encoded2)
 
   // Credentials: var{sq{build{tuple{encode[2](v), s}}{tuple{v, s} orderedin xg_credential}}}
-  const [error3, encoded3] = encodeSequenceGeneric(
-    guarantee.credential,
+  const [error3, encoded3] = encodeVariableSequence(
+    guarantee.signatures,
     encodeCredential,
   )
   if (error3) {
@@ -246,7 +242,9 @@ function encodeGuarantee(guarantee: Guarantee): Safe<Uint8Array> {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantee and remaining data
  */
-function decodeGuarantee(data: Uint8Array): Safe<DecodingResult<Guarantee>> {
+export function decodeGuarantee(
+  data: Uint8Array,
+): Safe<DecodingResult<Guarantee>> {
   let currentData = data
 
   // Work report: xg_workreport
@@ -268,23 +266,39 @@ function decodeGuarantee(data: Uint8Array): Safe<DecodingResult<Guarantee>> {
   currentData = timeslotRemaining
 
   // Credentials: var{sq{build{tuple{encode[2](v), s}}{tuple{v, s} orderedin xg_credential}}}
-  const [error3, result3] = decodeSequenceGeneric(currentData, decodeCredential)
+  // First decode the length
+  const [error3, result3] = decodeNatural(currentData)
   if (error3) {
     return safeError(error3)
   }
-  const credential = result3.value
-  const credentialRemaining = result3.remaining
+  const credentialsCount = Number(result3.value)
+  currentData = result3.remaining
+
+  // Then decode the sequence with the known count
+  const [error4, result4] = decodeSequenceGeneric(
+    currentData,
+    decodeCredential,
+    credentialsCount,
+  )
+  if (error4) {
+    return safeError(error4)
+  }
+  const credentials = result4.value
+  const credentialRemaining = result4.remaining
   currentData = credentialRemaining
 
   const guarantee: Guarantee = {
-    workReport,
-    timeslot,
-    credential,
+    report: workReport,
+    slot: timeslot,
+    signatures: credentials,
   }
+
+  const consumed = data.length - currentData.length
 
   return safeResult({
     value: guarantee,
     remaining: currentData,
+    consumed,
   })
 }
 
@@ -317,10 +331,10 @@ export function encodeGuarantees(guarantees: Guarantee[]): Safe<Uint8Array> {
   // Sort guarantees by work report as required by Gray Paper
   // Sort by the authorizer hash which should be unique
   const sortedGuarantees = [...guarantees].sort((a, b) => {
-    return a.workReport.authorizer.localeCompare(b.workReport.authorizer)
+    return a.report.authorizer_hash.localeCompare(b.report.authorizer_hash)
   })
 
-  return encodeSequenceGeneric(sortedGuarantees, encodeGuarantee)
+  return encodeVariableSequence(sortedGuarantees, encodeGuarantee)
 }
 
 /**
@@ -336,9 +350,38 @@ export function encodeGuarantees(guarantees: Guarantee[]): Safe<Uint8Array> {
  * @param data - Octet sequence to decode
  * @returns Decoded guarantees and remaining data
  */
-export function decodeGuarantees(data: Uint8Array): Safe<{
-  value: Guarantee[]
-  remaining: Uint8Array
-}> {
-  return decodeSequenceGeneric(data, decodeGuarantee)
+export function decodeGuarantees(
+  data: Uint8Array,
+): Safe<DecodingResult<Guarantee[]>> {
+  // First decode the length using natural number encoding
+  const [lengthError, lengthResult] = decodeNatural(data)
+  if (lengthError) {
+    return safeError(lengthError)
+  }
+
+  const count = Number(lengthResult.value)
+  if (count < 0 || count > Number.MAX_SAFE_INTEGER) {
+    return safeError(
+      new Error(`Invalid guarantee count: ${lengthResult.value}`),
+    )
+  }
+
+  // Then decode the sequence with the known count
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+    lengthResult.remaining,
+    decodeGuarantee,
+    count,
+  )
+  if (sequenceError) {
+    return safeError(sequenceError)
+  }
+
+  // Calculate total consumed bytes
+  const consumed = data.length - sequenceResult.remaining.length
+
+  return safeResult({
+    value: sequenceResult.value,
+    remaining: sequenceResult.remaining,
+    consumed,
+  })
 }

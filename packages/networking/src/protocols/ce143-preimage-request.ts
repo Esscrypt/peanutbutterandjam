@@ -5,11 +5,15 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import type { Safe, SafePromise } from '@pbnj/core'
 import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
 import { decodePreimage, encodePreimage } from '@pbnj/serialization'
-import type { PreimageStore } from '@pbnj/state'
-import type { Preimage, PreimageRequest } from '@pbnj/types'
+import type {
+  IClockService,
+  IPreimageHolderService,
+  Preimage,
+  PreimageRequest,
+} from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -19,62 +23,41 @@ export class PreimageRequestProtocol extends NetworkingProtocol<
   PreimageRequest,
   Preimage
 > {
-  private preimages: Map<Hex, Preimage> = new Map()
-  private preimageStore: PreimageStore
-
-  constructor(preimageStore: PreimageStore) {
+  private readonly preimageHolderService: IPreimageHolderService
+  private readonly clockService: IClockService
+  constructor(
+    preimageHolderService: IPreimageHolderService,
+    clockService: IClockService,
+  ) {
     super()
-    this.preimageStore = preimageStore
-  }
-
-  /**
-   * Store preimage in local store and persist to database
-   */
-  async storePreimage(
-    hash: Hex,
-    serviceIndex: bigint,
-    preimage: Preimage,
-  ): Promise<void> {
-    this.preimages.set(hash, preimage)
-
-    await this.preimageStore.storePreimage(preimage, hash, serviceIndex)
-  }
-
-  /**
-   * Get preimage from local store
-   */
-  getPreimage(hash: Hex): Preimage | undefined {
-    return this.preimages.get(hash)
+    this.preimageHolderService = preimageHolderService
+    this.clockService = clockService
   }
 
   /**
    * Process preimage request and generate response
    */
   async processRequest(request: PreimageRequest): SafePromise<Preimage> {
-    if (this.preimages.has(request.hash)) {
-      return safeResult(this.preimages.get(request.hash)!)
-    }
-
-    const [error, preimageFromDatabase] = await this.preimageStore.getPreimage(
+    const [error, preimage] = await this.preimageHolderService.getPreimage(
       request.hash,
     )
     if (error) {
       return safeError(error)
+    }
+    if (preimage) {
+      return safeResult(preimage)
+    }
+
+    const [error2, preimageFromDatabase] =
+      await this.preimageHolderService.getPreimage(request.hash)
+    if (error2) {
+      return safeError(error2)
     }
     if (preimageFromDatabase) {
       return safeResult(preimageFromDatabase)
     }
     return safeError(new Error('Preimage not found'))
   }
-
-  /**
-   * Create preimage request message
-   */
-  // createPreimageRequest(hash: Hex): PreimageRequest {
-  //   return {
-  //     hash,
-  //   }
-  // }
 
   /**
    * Serialize preimage request message
@@ -112,7 +95,11 @@ export class PreimageRequestProtocol extends NetworkingProtocol<
     return safeResult(preimage.value)
   }
 
-  async processResponse(_response: Preimage): SafePromise<void> {
+  async processResponse(response: Preimage): SafePromise<void> {
+    this.preimageHolderService.storePreimage(
+      response,
+      this.clockService.getCurrentSlot(),
+    )
     return safeResult(undefined)
   }
 }

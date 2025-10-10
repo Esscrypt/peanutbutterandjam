@@ -12,22 +12,6 @@ export interface CurvePoint {
 }
 
 /**
- * VRF output
- */
-export interface VRFOutput {
-  gamma: Uint8Array
-  hash: Uint8Array
-}
-
-/**
- * VRF proof with output
- */
-export interface VRFProofWithOutput {
-  output: VRFOutput
-  proof: Uint8Array
-}
-
-/**
  * VRF schemes
  */
 export enum VRFScheme {
@@ -48,76 +32,38 @@ export enum VRFError {
   HASH_ERROR = 'HASH_ERROR',
 }
 
-/**
- * Ring VRF specific types
- */
-
-/**
- * Ring VRF ring structure
- */
-export interface RingVRFRing {
-  /** Public keys in the ring */
-  publicKeys: Uint8Array[]
-  /** Ring size */
-  size: number
-  /** Ring commitment */
-  commitment: Uint8Array
-}
-
-/**
- * Ring VRF proof structure
- */
-export interface RingVRFProof {
-  /** Zero-knowledge proof of ring membership */
-  zkProof: Uint8Array
-  /** Commitment to the prover's position */
-  positionCommitment: Uint8Array
-  /** Ring signature */
-  ringSignature: Uint8Array
-  /** Auxiliary proof data */
-  auxData?: Uint8Array
-}
-
-/**
- * Ring VRF parameters
- */
-export interface RingVRFParams {
-  /** Ring size */
-  ringSize: number
-  /** Security parameter */
-  securityParam: number
-  /** Hash function identifier */
-  hashFunction: string
-}
-
-/**
- * Ring VRF input with ring context
- */
 export interface RingVRFInput {
+  /** VRF input data */
+  input: Uint8Array
+  /** Additional data (not affecting VRF output) */
+  auxData?: Uint8Array
   /** Ring of public keys */
-  ring: RingVRFRing
-  /** Prover's position in the ring (0-indexed) */
+  ringKeys: Uint8Array[]
+  /** Prover's key index in the ring */
   proverIndex: number
-  /** Ring parameters */
-  params: RingVRFParams
 }
 
-/**
- * Ring VRF output with anonymity guarantees
- */
-export interface RingVRFOutput extends VRFOutput {
-  /** Ring commitment */
+export interface RingVRFOutput {
+  /** VRF output hash */
+  hash: Uint8Array
+  /** VRF output point (gamma) */
+  point: Uint8Array
+}
+
+export interface RingVRFProof {
+  /** Pedersen VRF proof components */
+  pedersenProof: Uint8Array
+  /** Ring commitment (KZG commitment to ring polynomial) */
   ringCommitment: Uint8Array
-  /** Position commitment */
-  positionCommitment: Uint8Array
-  /** Anonymity set size */
-  anonymitySetSize: number
+  /** Ring membership proof (KZG proof) */
+  ringProof: Uint8Array
+  /** Prover index (for verification, not revealed in anonymous version) */
+  proverIndex?: number
 }
 
-/**
- * Ring VRF proof with output
- */
-export interface RingVRFProofWithOutput {
+export interface RingVRFResult {
+  /** VRF output */
   output: RingVRFOutput
+  /** Ring VRF proof */
   proof: RingVRFProof
 }

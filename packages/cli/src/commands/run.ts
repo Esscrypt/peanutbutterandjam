@@ -108,20 +108,6 @@ async function executeRunCommand(
     // Initialize the actual block authoring service
     logger.info('Initializing PeanutButterAndJam node...')
 
-    // Create configuration for the block authoring service
-    const config = {
-      networkId: 'dev',
-      validatorKey: options['bandersnatch'] || '',
-      slotDuration: 6000n,
-      epochLength: 600n,
-      maxExtrinsicsPerBlock: 1000n,
-      maxWorkPackagesPerBlock: 100n,
-      enableStrictValidation: true,
-      enableAuditMode: false,
-      enableSafroleValidation: true,
-      enableGrandpaFinalization: true,
-    }
-
     // Log configuration
     logger.info('Configuration:')
     logger.info(`  Chain: ${options['chain'] || 'chainspec.json'}`)
@@ -260,16 +246,13 @@ async function executeRunCommand(
 
     // Initialize and start the main service
     const mainService = new MainService({
-      blockAuthoring: config,
       genesis: {
         chainSpecPath: options['genesis'] || 'chainspec.json',
       },
       networking: {
-        validatorIndex: BigInt(options['validatorIndex'] || '0'),
         nodeType: 'validator',
         listenAddress: options['listenAddress'] || '0.0.0.0',
         listenPort: BigInt(options['listenPort'] || '30333'),
-        chainHash: options['chain'] || 'dev',
         isBuilder: false,
       },
       nodeId: 'jam-node-cli',

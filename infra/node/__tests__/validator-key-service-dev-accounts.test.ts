@@ -25,16 +25,16 @@ describe('ValidatorKeyService Dev Accounts', () => {
   describe('Dev Account Key Generation', () => {
     it('should generate keys for all dev accounts', () => {
       // Check that we have keys for all 6 dev accounts
-      expect(service.getValidatorKey(0n)).toBeDefined()
-      expect(service.getValidatorKey(1n)).toBeDefined()
-      expect(service.getValidatorKey(2n)).toBeDefined()
-      expect(service.getValidatorKey(3n)).toBeDefined()
-      expect(service.getValidatorKey(4n)).toBeDefined()
-      expect(service.getValidatorKey(5n)).toBeDefined()
+      expect(service.getValidatorAtIndex(0n)).toBeDefined()
+      expect(service.getValidatorAtIndex(1n)).toBeDefined()
+      expect(service.getValidatorAtIndex(2n)).toBeDefined()
+      expect(service.getValidatorAtIndex(3n)).toBeDefined()
+      expect(service.getValidatorAtIndex(4n)).toBeDefined()
+      expect(service.getValidatorAtIndex(5n)).toBeDefined()
     })
 
     it('should generate keys for Alice (index 0)', () => {
-      const [aliceKeyError, aliceKey] = service.getValidatorKey(0n)
+      const [aliceKeyError, aliceKey] = service.getValidatorAtIndex(0n)
       expect(aliceKeyError).toBeUndefined()
       expect(aliceKey).toBeDefined()
         expect(aliceKey?.ed25519.length).toBe(32)
@@ -47,7 +47,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should generate keys for Bob (index 1)', () => {
-      const [bobKeyError, bobKey] = service.getValidatorKey(1n)
+      const [bobKeyError, bobKey] = service.getValidatorAtIndex(1n)
       expect(bobKeyError).toBeUndefined()
       expect(bobKey).toBeDefined()
       expect(bobKey?.ed25519.length).toBe(32)
@@ -60,7 +60,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should generate keys for Carol (index 2)', () => {
-      const [carolKeyError, carolKey] = service.getValidatorKey(2n)
+      const [carolKeyError, carolKey] = service.getValidatorAtIndex(2n)
       expect(carolKeyError).toBeUndefined()
       expect(carolKey).toBeDefined()
       expect(carolKey?.ed25519.length).toBe(32)
@@ -73,7 +73,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should generate keys for David (index 3)', () => {
-        const [davidKeyError, davidKey] = service.getValidatorKey(3n)
+        const [davidKeyError, davidKey] = service.getValidatorAtIndex(3n)
       expect(davidKeyError).toBeUndefined()
       expect(davidKey).toBeDefined()
         expect(davidKey?.ed25519.length).toBe(32)
@@ -86,7 +86,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should generate keys for Eve (index 4)', () => {
-      const [eveKeyError, eveKey] = service.getValidatorKey(4n)
+      const [eveKeyError, eveKey] = service.getValidatorAtIndex(4n)
       expect(eveKeyError).toBeUndefined()
       expect(eveKey).toBeDefined()
       expect(eveKey?.ed25519.length).toBe(32)
@@ -99,7 +99,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should generate keys for Fergie (index 5)', () => {
-      const [fergieKeyError, fergieKey] = service.getValidatorKey(5n)
+      const [fergieKeyError, fergieKey] = service.getValidatorAtIndex(5n)
       expect(fergieKeyError).toBeUndefined()
       expect(fergieKey).toBeDefined()
       expect(fergieKey?.ed25519.length).toBe(32)
@@ -114,7 +114,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
 
   describe('Dev Account Signing', () => {
     it('should sign messages with Alice\'s Ed25519 key', () => {
-      const [aliceKeyError, aliceKey] = service.getValidatorKey(0n)
+      const [aliceKeyError, aliceKey] = service.getValidatorAtIndex(0n)
       expect(aliceKeyError).toBeUndefined()
       expect(aliceKey).toBeDefined()
 
@@ -127,7 +127,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should verify signatures with Alice\'s Ed25519 key', () => {
-      const [aliceKeyError, aliceKey] = service.getValidatorKey(0n)
+      const [aliceKeyError, aliceKey] = service.getValidatorAtIndex(0n)
       expect(aliceKeyError).toBeUndefined()
       expect(aliceKey).toBeDefined()
 
@@ -143,7 +143,7 @@ describe('ValidatorKeyService Dev Accounts', () => {
     })
 
     it('should sign messages with Bob\'s Ed25519 key', () => {
-      const [bobKeyError, bobKey] = service.getValidatorKey(1n)
+      const [bobKeyError, bobKey] = service.getValidatorAtIndex(1n)
       expect(bobKeyError).toBeUndefined()
       expect(bobKey).toBeDefined()
 
@@ -191,9 +191,9 @@ describe('ValidatorKeyService Dev Accounts', () => {
       
       // Initialize the service
       limitedService.init().then(() => {
-        expect(limitedService.getValidatorKey(0n)).toBeDefined()
-        expect(limitedService.getValidatorKey(1n)).toBeDefined()
-        expect(limitedService.getValidatorKey(2n)).toBeDefined()
+        expect(limitedService.getValidatorAtIndex(0n)).toBeDefined()
+        expect(limitedService.getValidatorAtIndex(1n)).toBeDefined()
+        expect(limitedService.getValidatorAtIndex(2n)).toBeDefined()
       })
     })
 
@@ -205,11 +205,11 @@ describe('ValidatorKeyService Dev Accounts', () => {
       
       // Initialize the service
       regularService.init().then(() => {
-        expect(regularService.getValidatorKey(0n)).toBeDefined()
-        expect(regularService.getValidatorKey(1n)).toBeDefined()
-        expect(regularService.getValidatorKey(2n)).toBeDefined()
-        expect(regularService.getValidatorKey(3n)).toBeDefined()
-        expect(regularService.getValidatorKey(4n)).toBeDefined()
+        expect(regularService.getValidatorAtIndex(0n)).toBeDefined()
+        expect(regularService.getValidatorAtIndex(1n)).toBeDefined()
+        expect(regularService.getValidatorAtIndex(2n)).toBeDefined()
+        expect(regularService.getValidatorAtIndex(3n)).toBeDefined()
+        expect(regularService.getValidatorAtIndex(4n)).toBeDefined()
       })
     })
   })

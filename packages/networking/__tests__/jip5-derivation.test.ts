@@ -21,7 +21,10 @@ describe('JIP-5 Secret Key Derivation', () => {
       expect(seed0).toEqual(expectedSeed0)
 
       // Test vector 1
-      const seed1 = generateTrivialSeed(1)
+      const [seed1Error, seed1] = generateTrivialSeed(1)
+      if (seed1Error) {
+        throw seed1Error
+      }
       const expectedSeed1 = new Uint8Array(Buffer.from('0100000001000000010000000100000001000000010000000100000001000000', 'hex'))
       expect(seed1).toEqual(expectedSeed1)
 
@@ -35,8 +38,13 @@ describe('JIP-5 Secret Key Derivation', () => {
     })
 
     it('should reject invalid indices', () => {
-      expect(() => generateTrivialSeed(-1)).toThrow('Index must be a 32-bit unsigned integer')
-      expect(() => generateTrivialSeed(0x100000000)).toThrow('Index must be a 32-bit unsigned integer')
+      const [error1] = generateTrivialSeed(-1)
+      expect(error1).toBeDefined()
+      expect(error1?.message).toBe('Index must be a 32-bit unsigned integer')
+      
+      const [error2] = generateTrivialSeed(0x100000000)
+      expect(error2).toBeDefined()
+      expect(error2?.message).toBe('Index must be a 32-bit unsigned integer')
     })
   })
 
@@ -52,7 +60,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret0Error
       }
       const expectedSecret0 = new Uint8Array(Buffer.from('996542becdf1e78278dc795679c825faca2e9ed2bf101bf3c4a236d3ed79cf59', 'hex'))
-      expect(secret0).toEqual(expectedSecret0)
+      expect(secret0.ed25519SecretSeed).toEqual(expectedSecret0)
 
       // Test vector 1
       const [seed1Error, seed1] = generateTrivialSeed(1)
@@ -64,7 +72,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret1Error
       }
       const expectedSecret1 = new Uint8Array(Buffer.from('b81e308145d97464d2bc92d35d227a9e62241a16451af6da5053e309be4f91d7', 'hex'))
-      expect(secret1).toEqual(expectedSecret1)
+      expect(secret1.ed25519SecretSeed).toEqual(expectedSecret1)
 
       // Test vector 2
       const [seed2Error, seed2] = generateTrivialSeed(2)
@@ -76,7 +84,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret2Error
       }
       const expectedSecret2 = new Uint8Array(Buffer.from('0093c8c10a88ebbc99b35b72897a26d259313ee9bad97436a437d2e43aaafa0f', 'hex'))
-      expect(secret2).toEqual(expectedSecret2)
+      expect(secret2.ed25519SecretSeed).toEqual(expectedSecret2)
     })
 
     it('should derive correct Bandersnatch secret seeds from test vectors', () => {
@@ -90,7 +98,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret0Error
       }
       const expectedSecret0 = new Uint8Array(Buffer.from('007596986419e027e65499cc87027a236bf4a78b5e8bd7f675759d73e7a9c799', 'hex'))
-      expect(secret0).toEqual(expectedSecret0)
+      expect(secret0.bandersnatchSecretSeed).toEqual(expectedSecret0)
 
       // Test vector 1
       const [seed1Error, seed1] = generateTrivialSeed(1)
@@ -102,7 +110,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret1Error
       }
       const expectedSecret1 = new Uint8Array(Buffer.from('12ca375c9242101c99ad5fafe8997411f112ae10e0e5b7c4589e107c433700ac', 'hex'))
-      expect(secret1).toEqual(expectedSecret1)
+      expect(secret1.bandersnatchSecretSeed).toEqual(expectedSecret1)
 
       // Test vector 2
       const [seed2Error, seed2] = generateTrivialSeed(2)
@@ -114,15 +122,19 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret2Error
       }
       const expectedSecret2 = new Uint8Array(Buffer.from('3d71dc0ffd02d90524fda3e4a220e7ec514a258c59457d3077ce4d4f003fd98a', 'hex'))
-      expect(secret2).toEqual(expectedSecret2)
+      expect(secret2.bandersnatchSecretSeed).toEqual(expectedSecret2)
     })
 
     it('should reject invalid seed lengths', () => {
       const shortSeed = new Uint8Array(16)
-      expect(() => deriveSecretSeeds(shortSeed)).toThrow('Seed must be exactly 32 Uint8Array')
+      const [error1] = deriveSecretSeeds(shortSeed)
+      expect(error1).toBeDefined()
+      expect(error1?.message).toBe('Seed must be exactly 32 bytes')
 
       const longSeed = new Uint8Array(64)
-      expect(() => deriveSecretSeeds(longSeed)).toThrow('Seed must be exactly 32 Uint8Array')
+      const [error2] = deriveSecretSeeds(longSeed)
+      expect(error2).toBeDefined()
+      expect(error2?.message).toBe('Seed must be exactly 32 bytes')
     })
   })
 
@@ -184,7 +196,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret0Error
       }
       const expectedSecret0 = new Uint8Array(Buffer.from('007596986419e027e65499cc87027a236bf4a78b5e8bd7f675759d73e7a9c799', 'hex'))
-      expect(secret0).toEqual(expectedSecret0)
+      expect(secret0.bandersnatchSecretSeed).toEqual(expectedSecret0)
 
       // Test vector 1
       const [seed1Error, seed1] = generateTrivialSeed(1)
@@ -196,7 +208,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret1Error
       }
       const expectedSecret1 = new Uint8Array(Buffer.from('12ca375c9242101c99ad5fafe8997411f112ae10e0e5b7c4589e107c433700ac', 'hex'))
-      expect(secret1).toEqual(expectedSecret1)
+      expect(secret1.bandersnatchSecretSeed).toEqual(expectedSecret1)
 
       // Test vector 2
       const [seed2Error, seed2] = generateTrivialSeed(2)
@@ -208,7 +220,7 @@ describe('JIP-5 Secret Key Derivation', () => {
         throw secret2Error
       }
       const expectedSecret2 = new Uint8Array(Buffer.from('3d71dc0ffd02d90524fda3e4a220e7ec514a258c59457d3077ce4d4f003fd98a', 'hex'))
-      expect(secret2).toEqual(expectedSecret2)
+      expect(secret2.bandersnatchSecretSeed).toEqual(expectedSecret2)
     })
   })
 
@@ -258,8 +270,8 @@ describe('JIP-5 Secret Key Derivation', () => {
         if (bandersnatch_secret_seedError) {
           throw bandersnatch_secret_seedError
         }
-        expect(ed25519_secret_seed).toEqual(new Uint8Array(Buffer.from(vector.ed25519_secret_seed, 'hex')))
-        expect(bandersnatch_secret_seed).toEqual(new Uint8Array(Buffer.from(vector.bandersnatch_secret_seed, 'hex')))
+        expect(ed25519_secret_seed.ed25519SecretSeed).toEqual(new Uint8Array(Buffer.from(vector.ed25519_secret_seed, 'hex')))
+        expect(bandersnatch_secret_seed.bandersnatchSecretSeed).toEqual(new Uint8Array(Buffer.from(vector.bandersnatch_secret_seed, 'hex')))
 
         // Generate Ed25519 public key from secret seed
         const { publicKey: ed25519_public } = generateKeyPairFromSeed(ed25519_secret_seed.ed25519SecretSeed)
@@ -271,4 +283,4 @@ describe('JIP-5 Secret Key Derivation', () => {
       }
     })
   })
-}) 
+})

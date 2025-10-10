@@ -223,7 +223,10 @@ export class StateRequestProtocol extends NetworkingProtocol<
   /**
    * Process state request and generate response
    */
-  async processRequest(request: StateRequest): SafePromise<StateResponse> {
+  async processRequest(
+    request: StateRequest,
+    _peerPublicKey: Hex,
+  ): SafePromise<StateResponse> {
     try {
       // Validate that the requested block exists
       if (this.blockStore) {

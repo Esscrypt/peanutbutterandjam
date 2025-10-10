@@ -1,5 +1,11 @@
 import { blake2bHash, type Hex, type Safe, safeError } from '@pbnj/core'
-import type { Block, WorkPackage, WorkReport } from '@pbnj/types'
+import type {
+  Block,
+  BlockHeader,
+  IConfigService,
+  WorkPackage,
+  WorkReport,
+} from '@pbnj/types'
 import { encodeHeader } from './block/header'
 import { encodeWorkPackage } from './work-package/package'
 import { encodeWorkReport } from './work-package/work-report'
@@ -7,8 +13,22 @@ import { encodeWorkReport } from './work-package/work-report'
 /**
  * Calculate block hash
  */
-export function calculateBlockHash(block: Block): Safe<Hex> {
-  const [headerBytesError, headerBytes] = encodeHeader(block.header)
+export function calculateBlockHash(
+  block: Block,
+  config: IConfigService,
+): Safe<Hex> {
+  const [headerBytesError, headerBytes] = encodeHeader(block.header, config)
+  if (headerBytesError) {
+    return safeError(headerBytesError)
+  }
+  return blake2bHash(headerBytes)
+}
+
+export function calculateBlockHashFromHeader(
+  header: BlockHeader,
+  config: IConfigService,
+): Safe<Hex> {
+  const [headerBytesError, headerBytes] = encodeHeader(header, config)
   if (headerBytesError) {
     return safeError(headerBytesError)
   }

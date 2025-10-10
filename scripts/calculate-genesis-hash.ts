@@ -7,12 +7,8 @@
 
 import { readFileSync } from 'node:fs'
 import { blake2bHash, type GenesisHeader, parseGenesisHeader } from '@pbnj/core'
-import type {
-  BlockHeader,
-  EpochMark,
-  ValidatorKeyTuple,
-} from '@pbnj/serialization'
-import { encodeBlockHeader } from '@pbnj/serialization'
+import { encodeHeader } from '@pbnj/serialization'
+import type { BlockHeader, EpochMark, ValidatorKeyTuple } from '@pbnj/types'
 
 // Expected hash from JAM documentation
 const EXPECTED_HASH =
@@ -26,27 +22,27 @@ function convertGenesisHeaderToSerializationFormat(
 ): BlockHeader {
   // Convert epoch mark structure
   const epochMark: EpochMark = {
-    entropyAccumulator: genesisHeader.epoch_mark.entropy as `0x${string}`,
-    entropy1: genesisHeader.epoch_mark.tickets_entropy as `0x${string}`,
+    entropyAccumulator: genesisHeader.epoch_mark.entropy,
+    entropy1: genesisHeader.epoch_mark.tickets_entropy,
     validators: genesisHeader.epoch_mark.validators.map(
       (validator): ValidatorKeyTuple => ({
-        bandersnatchKey: validator.bandersnatch as `0x${string}`,
-        ed25519Key: validator.ed25519 as `0x${string}`,
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
       }),
     ),
   }
 
   return {
-    parentHash: genesisHeader.parent as `0x${string}`,
-    priorStateRoot: genesisHeader.parent_state_root as `0x${string}`,
-    extrinsicHash: genesisHeader.extrinsic_hash as `0x${string}`,
+    parent: genesisHeader.parent,
+    priorStateRoot: genesisHeader.parent_state_root,
+    extrinsicHash: genesisHeader.extrinsic_hash,
     timeslot: BigInt(genesisHeader.slot),
     epochMark,
-    winnersMark: genesisHeader.tickets_mark ? [] : undefined, // TODO: Convert tickets_mark to SafroleTicket[]
+    winnersMark: genesisHeader.tickets_mark ? [] : null, // TODO: Convert tickets_mark to SafroleTicket[]
     authorIndex: BigInt(genesisHeader.author_index),
-    vrfSignature: genesisHeader.entropy_source as `0x${string}`,
-    offendersMark: new Uint8Array(genesisHeader.offenders_mark),
-    sealSignature: genesisHeader.seal as `0x${string}`,
+    vrfSig: genesisHeader.entropy_source,
+    offendersMark: genesisHeader.offenders_mark,
+    sealSig: genesisHeader.seal,
   }
 }
 
@@ -77,12 +73,18 @@ function main() {
 
     // Encode the genesis header
     console.log('🔧 Encoding genesis header...')
-    const encodedHeader = encodeBlockHeader(blockHeader)
+    const [encodedHeaderError, encodedHeader] = encodeHeader(blockHeader)
+    if (encodedHeaderError) {
+      throw new Error(`Failed to encode genesis header: ${encodedHeaderError}`)
+    }
     console.log(`✅ Header encoded (${encodedHeader.length} bytes)\n`)
 
     // Hash the encoded header
     console.log('🔐 Calculating header hash...')
-    const headerHash = blake2bHash(encodedHeader)
+    const [headerHashError, headerHash] = blake2bHash(encodedHeader)
+    if (headerHashError) {
+      throw new Error(`Failed to calculate header hash: ${headerHashError}`)
+    }
     console.log(`✅ Header hash calculated: ${headerHash}\n`)
 
     // Compare with expected hash
@@ -96,14 +98,14 @@ function main() {
     if (headerHash === EXPECTED_HASH) {
       console.log('🎉 SUCCESS: Genesis header hash matches expected value!')
       console.log(
-        'The encodeBlockHeader function is correctly implementing the Gray Paper specification.',
+        'The encodeHeader function is correctly implementing the Gray Paper specification.',
       )
     } else {
       console.log(
         '❌ FAILURE: Genesis header hash does not match expected value.',
       )
       console.log(
-        'The encodeBlockHeader function may not be correctly implementing the Gray Paper specification.',
+        'The encodeHeader function may not be correctly implementing the Gray Paper specification.',
       )
 
       // Debug information

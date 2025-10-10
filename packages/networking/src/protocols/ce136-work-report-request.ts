@@ -7,6 +7,7 @@
 
 import {
   bytesToHex,
+  type Hex,
   hexToBytes,
   type Safe,
   type SafePromise,
@@ -59,6 +60,7 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
    */
   async processRequest(
     request: WorkReportRequest,
+    _peerPublicKey: Hex,
   ): SafePromise<WorkReportResponse> {
     // Get work report from local store or database
     const workReportFromCache = this.workReports.get(request.workReportHash)
@@ -121,7 +123,10 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
     })
   }
 
-  async processResponse(_response: WorkReportResponse): SafePromise<void> {
+  async processResponse(
+    _response: WorkReportResponse,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     return safeResult(undefined)
   }
 }

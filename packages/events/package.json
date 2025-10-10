@@ -1,0 +1,27 @@
+{
+  "name": "@pbnj/events",
+  "version": "0.1.0",
+  "description": "Event system for JAM node services",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --pretty --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest run --watch",
+    "clean": "rm -rf .turbo && rm -rf node_modules"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@pbnj/typescript-config": "workspace:*",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

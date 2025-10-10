@@ -110,4 +110,6 @@ target/
 # NAPI-RS
 native/
 **native/
-*.node
+*.nodesubmodules/jamtestvectors/
+
+remark-wallet.json

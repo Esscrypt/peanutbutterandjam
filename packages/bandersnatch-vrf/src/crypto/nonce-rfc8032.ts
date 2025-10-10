@@ -7,7 +7,8 @@
 
 import { sha512 } from '@noble/hashes/sha2'
 import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
-import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
+import { logger, mod, numberToBytesLittleEndian } from '@pbnj/core'
+import { bytesToBigIntLittleEndian } from './elligator2'
 
 /**
  * Generate nonce according to RFC-8032 (matches Rust implementation)
@@ -34,11 +35,11 @@ export function generateNonceRfc8032(
     // Step 3: Hash the combination
     const h = sha512(combined)
 
-    // Step 4: Convert to scalar modulo curve order
-    const hashValue = bytesToBigInt(h)
-    const scalar = hashValue % BANDERSNATCH_PARAMS.CURVE_ORDER
+    // Step 4: Convert to scalar modulo curve order (little-endian like arkworks)
+    const hashValue = bytesToBigIntLittleEndian(h)
+    const scalar = mod(hashValue, BANDERSNATCH_PARAMS.CURVE_ORDER)
 
-    const nonce = numberToBytes(scalar)
+    const nonce = numberToBytesLittleEndian(scalar)
 
     logger.debug('Generated nonce (RFC-8032)', {
       secretKeyLength: secretKey.length,

@@ -25,12 +25,10 @@ export {
 } from '@pbnj/types'
 // Export Rust implementation
 export {
-  createRustReedSolomonCoder,
   isRustModuleAvailable,
   RustReedSolomonCoder,
-  testRustAgainstJAM,
 } from './rust-wrapper'
 
 // Default export - create Rust Reed-Solomon coder
-import { createRustReedSolomonCoder } from './rust-wrapper'
-export default createRustReedSolomonCoder
+import { RustReedSolomonCoder } from './rust-wrapper'
+export default RustReedSolomonCoder

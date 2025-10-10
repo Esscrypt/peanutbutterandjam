@@ -428,7 +428,7 @@ export interface PVMGuest {
 }
 
 // Refine context type as per Gray Paper
-export type RefineContext = [Map<bigint, PVMGuest>, Segment[]]
+export type RefineContextPVM = [Map<bigint, PVMGuest>, Segment[]]
 
 // Refine result type
 export type RefineResult = Uint8Array | WorkError
@@ -439,14 +439,14 @@ export type RefineContextMutator = (
   gasCounter: bigint,
   registers: RegisterState,
   ram: RAM,
-  context: RefineContext,
+  context: RefineContextPVM,
 ) =>
   | {
       resultCode: 'continue' | 'halt' | 'panic' | 'oog'
       gasCounter: bigint
       registers: RegisterState
       ram: RAM
-      context: RefineContext
+      context: RefineContextPVM
     }
   | {
       resultCode: 'fault'
@@ -489,6 +489,11 @@ export interface Implications {
 
 export type ImplicationsPair = [Implications, Implications]
 
+/**
+ * Accumulate input structure
+ * @param type - Type of the input
+ * @param value - Value of the input
+ */
 export interface AccumulateInput {
   type: bigint // 0 for operand tuple, 1 for deferred transfer
   value: OperandTuple | DeferredTransfer
@@ -520,11 +525,21 @@ export type AccumulateContextMutator = (
     }
   | { resultCode: 'fault'; address: bigint }
 
+/**
+ * Export segment structure
+ * @param data - Data of the segment
+ * @param size - Size of the segment in bytes
+ */
 export interface ExportSegment {
   data: Hex
   size: bigint
 }
 
+/**
+ * Extrinsic reference structure
+ * @param hash - Hash of the extrinsic
+ * @param length - Length of the extrinsic in bytes
+ */
 export interface ExtrinsicReference {
   hash: Hex
   length: bigint

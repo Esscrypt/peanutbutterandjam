@@ -7,7 +7,9 @@
 
 import type { Hex } from '@pbnj/core'
 import type { Block } from './block-authoring'
-import type { AlternativeName, Extrinsic } from './core'
+import type { ValidatorPublicKeys } from './consensus'
+import type { Extrinsic } from './core'
+import type { BlockHeader } from './global-state'
 import type { WorkPackage, WorkReport } from './serialization'
 
 /**
@@ -16,25 +18,6 @@ import type { WorkPackage, WorkReport } from './serialization'
 export interface GridPosition {
   row: bigint
   column: bigint
-}
-
-/**
- * Stream information interface
- */
-// export interface StreamInfo {
-//   streamId: string
-//   streamKind: StreamKind
-//   isOpen: boolean
-//   isBidirectional: boolean
-// }
-
-/**
- * TLS configuration interface
- */
-export interface TLSConfig {
-  certificate: JAMNPCertificate
-  privateKey: Uint8Array
-  alpnProtocols: string[]
 }
 
 /**
@@ -52,27 +35,13 @@ export interface ALPNProtocol {
 }
 
 /**
- * X.509 Certificate for JAMNP-S
- */
-export interface JAMNPCertificate {
-  /** Certificate data */
-  certificate: Uint8Array
-  /** Ed25519 public key */
-  publicKey: Uint8Array
-  /** Alternative name derived from public key */
-  alternativeName: AlternativeName
-  /** Certificate signature */
-  signature: Uint8Array
-}
-
-/**
  * Validator metadata
  */
 export interface ValidatorMetadata {
   /** Validator index */
-  index: bigint
-  /** Ed25519 public key */
-  publicKey: Uint8Array
+  index: number
+  /** Validator public keys */
+  keys: ValidatorPublicKeys
   /** Connection endpoint */
   endpoint: ConnectionEndpoint
   /** Additional metadata */
@@ -80,37 +49,28 @@ export interface ValidatorMetadata {
 }
 
 /**
- * Validator set for an epoch
- */
-export interface ValidatorSet {
-  /** Epoch index */
-  epochIndex: bigint
-  /** Validators in the set */
-  validators: ValidatorMetadata[]
-  /** Total number of validators */
-  totalValidators: bigint
-}
-
-/**
  * Grid structure for validators
  */
 export interface ValidatorGrid {
   /** Grid rows */
-  rows: bigint
+  rows: number
   /** Grid columns */
-  columns: bigint
+  columns: number
   /** Validator positions */
-  positions: Map<bigint, GridPosition>
+  positions: Map<number, GridPosition>
 }
 
 /**
  * Connection endpoint
+ * @param host - The host of the connection endpoint
+ * @param port - The port of the connection endpoint
+ * @param publicKey - The public key of the connection endpoint
  */
 export interface ConnectionEndpoint {
   /** IPv6 address */
   host: string
   /** Port number */
-  port: bigint
+  port: number
   /** Ed25519 public key */
   publicKey: Uint8Array
 }
@@ -125,7 +85,10 @@ export enum PreferredInitiator {
 }
 
 /**
- * UP 0: Block Announcement Protocol Types
+ * Block announcement handshake
+ * @param finalBlockHash - The hash of the latest finalized block
+ * @param finalBlockSlot - The slot of the latest finalized block
+ * @param leaves - The leaves (descendants of the latest finalized block with no children)
  */
 export interface BlockAnnouncementHandshake {
   /** Latest finalized block hash */
@@ -139,11 +102,17 @@ export interface BlockAnnouncementHandshake {
   }>
 }
 
+/**
+ * Block announcement
+ * @param header - The block header
+ * @param finalBlockHash - The hash of the latest finalized block
+ * @param finalBlockSlot - The slot of the latest finalized block
+ */
 export interface BlockAnnouncement {
   /** Block header */
-  header: Uint8Array
+  header: BlockHeader
   /** Latest finalized block hash */
-  finalBlockHash: Uint8Array
+  finalBlockHash: Hex
   /** Latest finalized block slot */
   finalBlockSlot: bigint
 }
@@ -196,14 +165,19 @@ export interface StateResponse {
 
 /**
  * CE 131/132: Ticket Distribution Protocol Types
+ * @dev: to convert to a safrole ticket with an id, you need to hash the proof with banderout see getTicketIdFromProof in safrole/src/ticket-generation.ts
+ * @param epochIndex - The epoch index for ticket usage
+ * @param ticket - The ticket data
+ * @param entryIndex - The entry index of the ticket
+ * @param proof - The Bandersnatch RingVRF proof
  */
 export interface TicketDistributionRequest {
   /** Epoch index for ticket usage */
   epochIndex: bigint
   /** Ticket data */
   ticket: {
-    /** Attempt (0 or 1) */
-    attempt: bigint
+    /** Entry index */
+    entryIndex: bigint
     /** Bandersnatch RingVRF proof */
     proof: Uint8Array
   }

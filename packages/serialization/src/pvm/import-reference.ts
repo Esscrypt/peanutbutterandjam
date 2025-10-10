@@ -232,6 +232,7 @@ export function decodeImportReference(
       isRefined: isRefinedHash,
     },
     remaining: remainingData,
+    consumed: data.length - remainingData.length,
   })
 }
 

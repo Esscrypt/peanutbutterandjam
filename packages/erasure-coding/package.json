@@ -2,8 +2,10 @@
   "name": "@pbnj/erasure-coding",
   "version": "0.1.0",
   "description": "Erasure coding implementation for JAM protocol data availability",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
     "build": "bun run build:native && tsc",
     "build:native": "cd rust-reed-solomon && bun run build",

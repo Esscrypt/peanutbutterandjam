@@ -11,6 +11,7 @@ import { createStateKey, createStateTrie } from '@pbnj/serialization'
 import type {
   Account,
   GenesisState,
+  IConfigService,
   ServiceAccount,
   Validator,
 } from '@pbnj/types'
@@ -83,6 +84,7 @@ export interface ChainSpec {
 
 export function generateChainSpec(
   inputConfig: ChainSpecConfig,
+  configService: IConfigService,
 ): Safe<ChainSpec> {
   logger.info('Generating chain spec', {
     id: inputConfig.id,
@@ -188,8 +190,10 @@ export function generateChainSpec(
     },
     lastaccout: zeroHash,
     entropy: {
-      current: zeroHash,
-      previous: zeroHash,
+      accumulator: zeroHash,
+      entropy1: zeroHash,
+      entropy2: zeroHash,
+      entropy3: zeroHash,
     },
     safrole: {
       pendingSet: [],
@@ -228,8 +232,7 @@ export function generateChainSpec(
       serviceStats: new Map(),
     },
     ready: {
-      reports: [],
-      queueState: new Map(),
+      epochSlots: new Map(),
     },
     accumulated: {
       packages: [],
@@ -264,7 +267,10 @@ export function generateChainSpec(
 
   // Generate genesis state trie according to Gray Paper specification
   // This includes chapters 1-16 and 255 (service accounts)
-  const [genesisError, genesisStateTrie] = createStateTrie(genesisState)
+  const [genesisError, genesisStateTrie] = createStateTrie(
+    genesisState,
+    configService,
+  )
 
   if (genesisError) {
     return safeError(genesisError)

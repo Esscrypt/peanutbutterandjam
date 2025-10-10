@@ -1,200 +1,224 @@
-// /**
-//  * CE 131: Ticket Distribution Protocol (Generator to Proxy Validator)
-//  *
-//  * Implements the first step of Safrole ticket distribution for JAMNP-S
-//  * Generator validator sends ticket to deterministically-selected proxy validator
-//  */
+/**
+ * CE 131: Ticket Distribution Protocol (Generator to Proxy Validator)
+ *
+ * Implements the first step of Safrole ticket distribution for JAMNP-S
+ * Generator validator sends ticket to deterministically-selected proxy validator
+ */
 
-// import {
-//   blake2bHash,
-//   type Hex,
-//   type SafePromise,
-//   safeError,
-//   safeResult,
-//   type Safe,
-//   concatBytes,
-//   numberToBytes,
-//   bytesToNumber,
-// } from '@pbnj/core'
-// import type { TicketStore } from '@pbnj/state'
-// import type { TicketDistributionRequest } from '@pbnj/types'
-// import { NetworkingProtocol } from './protocol'
+import {
+  bytesToHex,
+  concatBytes,
+  type Hex,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import {
+  determineProxyValidator,
+  getTicketIdFromProof,
+  verifyTicket,
+} from '@pbnj/safrole'
+import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
+import type { TicketStore } from '@pbnj/state'
+import type {
+  IEntropyService,
+  IKeyPairService,
+  ITicketHolderService,
+  IValidatorSetManager,
+  SafroleTicket,
+  TicketDistributionRequest,
+} from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
-// /**
-//  * CE 131: Generator to Proxy Validator Ticket Distribution
-//  */
-// // Attempt = 0 OR 1 (Single byte)
-// // Bandersnatch RingVRF Proof = [u8; 784]
-// // Ticket = Attempt ++ Bandersnatch RingVRF Proof (As in GP)
+/**
+ * CE 131: Generator to Proxy Validator Ticket Distribution
+ */
+// Attempt = 0 OR 1 (Single byte) -> entryIndex
+// Bandersnatch RingVRF Proof = [u8; 784]
+// Ticket = Attempt ++ Bandersnatch RingVRF Proof (As in GP)
 
-// // Validator -> Validator
+// Validator -> Validator
 
-// // --> Epoch Index ++ Ticket (Epoch index should identify the epoch that the ticket will be used in)
-// // --> FIN
-// // <-- FIN
-// export class CE131TicketDistributionProtocol extends NetworkingProtocol<
-// TicketDistributionRequest,
-//   void
-// > {
-//   private tickets: Map<string, Uint8Array> = new Map()
-//   private ticketStore: TicketStore
+// --> Epoch Index ++ Ticket (Epoch index should identify the epoch that the ticket will be used in)
+// --> FIN
+// <-- FIN
+export class CE131TicketDistributionProtocol extends NetworkingProtocol<
+  TicketDistributionRequest,
+  void
+> {
+  private readonly ticketStore: TicketStore
+  private readonly ticketHolderService: ITicketHolderService
+  private readonly keyPairService: IKeyPairService
+  private readonly entropyService: IEntropyService
+  private readonly validatorSetManager: IValidatorSetManager
+  constructor(
+    ticketStore: TicketStore,
+    ticketHolderService: ITicketHolderService,
+    keyPairService: IKeyPairService,
+    entropyService: IEntropyService,
+    validatorSetManager: IValidatorSetManager,
+  ) {
+    super()
+    this.ticketStore = ticketStore
+    this.ticketHolderService = ticketHolderService
+    this.keyPairService = keyPairService
+    this.entropyService = entropyService
+    this.validatorSetManager = validatorSetManager
+  }
 
-//   constructor(ticketStore: TicketStore) {
-//     super()
-//     this.ticketStore = ticketStore
-//   }
+  /**
+   * Store ticket in local cache and persist to database
+   */
+  async storeTicket(ticket: SafroleTicket): Promise<void> {
+    if (!this.ticketStore.hasTicket(ticket.id)) {
+      await this.ticketStore.storeTicket({
+        ticketId: ticket.id,
+        entryIndex: ticket.entryIndex,
+        proof: ticket.proof,
+        createdAt: new Date(),
+      })
 
-//   /**
-//    * Create ticket distribution message
-//    */
-//   createTicketDistribution(
-//     epochIndex: bigint,
-//     ticket: { attempt: bigint; proof: Uint8Array },
-//   ): TicketDistributionRequest {
-//     return {
-//       epochIndex,
-//       ticket,
-//     }
-//   }
+      this.ticketHolderService.addProxyValidatorTicket({
+        id: ticket.id,
+        entryIndex: ticket.entryIndex,
+        proof: ticket.proof,
+      })
+    }
+  }
 
-//   /**
-//    * Store ticket in local cache and persist to database
-//    */
-//   async storeTicket(
-//     epochIndex: bigint,
-//     ticket: { attempt: bigint; proof: Uint8Array },
-//   ): Promise<void> {
-//     const hashString = `${epochIndex}_${ticket.attempt}`
+  /**
+   * Serialize ticket distribution message
+   */
+  serializeRequest(distribution: TicketDistributionRequest): Safe<Uint8Array> {
+    // Serialize according to JAMNP-S specification
+    const parts: Uint8Array[] = []
 
-//     // Store in local cache
-//     this.tickets.set(hashString, ticket.proof)
+    // Encode epoch index (4 bytes)
+    const [epochError, encodedEpochIndex] = encodeFixedLength(
+      distribution.epochIndex,
+      4n,
+    )
+    if (epochError) {
+      return safeError(epochError)
+    }
+    parts.push(encodedEpochIndex)
 
-//     // Persist to database if available
-//     if (this.ticketStore) {
-//       try {
-//         // Calculate ticket hash from proof
-//         const [hashError, ticketHash] = blake2bHash(ticket.proof)
-//         if (hashError || !ticketHash) {
-//           console.error('Failed to calculate ticket hash:', hashError)
-//           return
-//         }
+    // Encode entry index (single byte: 0 or 1)
+    const entryIndexByte = new Uint8Array(1)
+    entryIndexByte[0] = Number(distribution.ticket.entryIndex)
+    parts.push(entryIndexByte)
 
-//         await this.ticketStore.storeTicket({
-//           id: 0, // Will be set by database
-//           blockHash:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000', // Placeholder
-//           ticketId: ticketHash,
-//           entryIndex: ticket.attempt,
-//           signature:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000', // Placeholder
-//           timestamp: BigInt(Date.now()),
-//           createdAt: new Date(),
-//         })
-//       } catch (error) {
-//         console.error('Failed to persist ticket to database:', error)
-//       }
-//     }
-//   }
+    // Add proof (784 bytes)
+    parts.push(distribution.ticket.proof)
 
-//   /**
-//    * Get ticket from local cache
-//    */
-//   getTicket(epochIndex: bigint, attempt: bigint): Uint8Array | undefined {
-//     const hashString = `${epochIndex}_${attempt}`
-//     return this.tickets.get(hashString)
-//   }
+    return safeResult(concatBytes(parts))
+  }
 
-//   /**
-//    * Get ticket from database if not in local cache
-//    */
-//   async getTicketFromDatabase(
-//     epochIndex: bigint,
-//     attempt: bigint,
-//   ): Promise<Uint8Array | null> {
-//     if (this.getTicket(epochIndex, attempt)) {
-//       return this.getTicket(epochIndex, attempt) || null
-//     }
+  /**
+   * Deserialize ticket distribution message
+   */
+  deserializeRequest(data: Uint8Array): Safe<TicketDistributionRequest> {
+    let currentData = data
 
-//     if (!this.ticketStore) return null
+    // Decode epoch index (4 bytes)
+    const [epochError, epochResult] = decodeFixedLength(currentData, 4n)
+    if (epochError) {
+      return safeError(epochError)
+    }
+    currentData = epochResult.remaining
+    const epochIndex = epochResult.value
 
-//     try {
-//       const hashString = `${epochIndex}_${attempt}`
-//       const [error, ticketData] = await this.ticketStore.getTicket(
-//         hashString as Hex,
-//       )
+    // Decode attempt (single byte: 0 or 1)
+    if (currentData.length < 1) {
+      return safeError(new Error('Insufficient data for attempt byte'))
+    }
+    const attemptByte = currentData[0]
+    if (attemptByte !== 0 && attemptByte !== 1) {
+      return safeError(new Error('Invalid attempt value: must be 0 or 1'))
+    }
+    currentData = currentData.slice(1)
 
-//       if (error || !ticketData) {
-//         return null
-//       }
+    // Decode proof (784 bytes)
+    if (currentData.length < 784) {
+      return safeError(
+        new Error('Insufficient data for Bandersnatch RingVRF proof'),
+      )
+    }
+    const proof = currentData.slice(0, 784)
 
-//       // Cache in local store - convert hex string to Uint8Array
-//       const signatureBytes = new Uint8Array(
-//         Buffer.from(ticketData.signature.slice(2), 'hex'),
-//       )
-//       this.tickets.set(hashString, signatureBytes)
-//       return signatureBytes
-//     } catch (error) {
-//       console.error('Failed to get ticket from database:', error)
-//       return null
-//     }
-//   }
+    return safeResult({
+      epochIndex,
+      ticket: {
+        entryIndex: BigInt(attemptByte),
+        proof,
+      },
+    })
+  }
 
-//   /**
-//    * Serialize ticket distribution message
-//    */
-//   serializeRequest(distribution: TicketDistributionRequest): Safe<Uint8Array> {
-//     // Serialize according to JAMNP-S specification
-//     const parts: Uint8Array[] = []
-//     parts.push(numberToBytes(distribution.epochIndex))
-//     parts.push(numberToBytes(distribution.ticket.attempt))
-//     parts.push(distribution.ticket.proof)
-//     return safeResult(concatBytes(parts))
-//   }
+  /**
+   * Serialize response (same as request for this protocol)
+   */
+  serializeResponse(_distribution: undefined): Safe<Uint8Array> {
+    return safeResult(new Uint8Array(0))
+  }
 
-//   /**
-//    * Deserialize ticket distribution message
-//    */
-//   deserializeRequest(data: Uint8Array): Safe<TicketDistributionRequest> {
-//     const epochIndex = bytesToNumber(data.slice(0, 4))
-//     const attempt = bytesToNumber(data.slice(4, 8))
-//     const proof = data.slice(8)
-//     return safeResult({
-//       epochIndex,
-//       ticket: { attempt, proof },
-//     })
-//   }
+  /**
+   * Deserialize response (same as request for this protocol)
+   */
+  deserializeResponse(_data: Uint8Array): Safe<undefined> {
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Serialize response (same as request for this protocol)
-//    */
-//   serializeResponse(_distribution: void): Safe<Uint8Array> {
-//     return safeResult(new Uint8Array())
-//   }
+  /**
+   * Process ticket distribution request
+   */
+  async processRequest(
+    data: TicketDistributionRequest,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
+    const safroleTicket: SafroleTicket = {
+      id: getTicketIdFromProof(data.ticket.proof),
+      entryIndex: data.ticket.entryIndex,
+      proof: bytesToHex(data.ticket.proof),
+    }
 
-//   /**
-//    * Deserialize response (same as request for this protocol)
-//    */
-//   deserializeResponse(_data: Uint8Array): Safe<void> {
-//     return safeResult(undefined)
-//   }
+    // check if the ticket is valid against the proof
+    const isValid = verifyTicket(
+      safroleTicket,
+      this.keyPairService,
+      this.entropyService,
+      this.validatorSetManager,
+    )
+    if (!isValid) {
+      return safeError(new Error('Invalid ticket'))
+    }
 
-//   /**
-//    * Process ticket distribution request
-//    */
-//   async processRequest(data: TicketDistributionRequest): SafePromise<TicketDistributionResponse> {
-//       // Store the received ticket
-//       await this.storeTicket(data.epochIndex, data.ticket)
+    //check if we are the proxy validator for this epoch
+    const intendedProxyValidatorIndex = determineProxyValidator(
+      safroleTicket,
+      this.validatorSetManager,
+    )
 
-//       // For CE 131, we just acknowledge receipt
-//       // The actual forwarding happens in CE 132
-//       return safeResult({
-//         epochIndex: data.epochIndex,
-//         ticket: data.ticket,
-//       })
+    // compare against our index
+    const ourPublicKey = bytesToHex(
+      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
+    )
+    const ourIndex = this.validatorSetManager.getValidatorIndex(ourPublicKey)
 
-//   }
+    if (intendedProxyValidatorIndex !== Number(ourIndex)) {
+      return safeError(new Error('Not the intended proxy validator'))
+    }
 
-//   async processResponse(data: TicketDistributionResponse): SafePromise<void> {
-//     return safeResult(undefined)
-//   }
-// }
+    // Store the received ticket
+    await this.storeTicket(safroleTicket)
+
+    // For CE 131, we just acknowledge receipt
+    // The actual forwarding happens in CE 132
+    return safeResult(undefined)
+  }
+
+  async processResponse(_response: undefined): SafePromise<void> {
+    return safeResult(undefined)
+  }
+}

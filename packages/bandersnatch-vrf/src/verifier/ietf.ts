@@ -4,11 +4,10 @@
  * Implements verification for IETF VRF scheme
  */
 
-import { BandersnatchCurve, type CurvePoint } from '@pbnj/bandersnatch'
+import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
 import { bytesToBigInt, logger } from '@pbnj/core'
-import type { VRFOutput } from '@pbnj/types'
-import { DEFAULT_VERIFIER_CONFIG } from './config'
-import type { VerificationResult, VerifierConfig } from './types'
+import { compressPoint, elligator2HashToCurve } from '../crypto/elligator2'
+import { generateChallengeRfc9381 } from '../crypto/rfc9381'
 
 /**
  * IETF VRF Verifier
@@ -19,103 +18,33 @@ export class IETFVRFVerifier {
    * Verify VRF proof
    */
   static verify(
-    _publicKey: Uint8Array,
-    _input: Uint8Array,
-    _output: VRFOutput,
-    _proof: Uint8Array,
-    _auxData?: Uint8Array,
-    config?: VerifierConfig,
+    publicKey: Uint8Array,
+    input: Uint8Array,
+    proof: Uint8Array,
+    auxData?: Uint8Array,
   ): boolean {
-    const startTime = Date.now()
-    const mergedConfig = { ...DEFAULT_VERIFIER_CONFIG, ...config }
-
-    logger.debug('Verifying IETF VRF proof', {
-      inputLength: _input.length,
-      hasAuxData: !!_auxData,
-      config: mergedConfig,
-    })
-
     try {
       // 1. Hash input to curve point (H1)
-      const alphaPoint = BandersnatchCurve.hashToCurve(_input)
-      const alphaBytes = BandersnatchCurve.pointToBytes(alphaPoint)
-
-      // 2. Verify proof
-      const isValid = this.verifyProof(
-        _publicKey,
-        alphaBytes,
-        _output.gamma,
-        _proof,
-        _auxData,
+      const alphaPoint = elligator2HashToCurve(input)
+      const alphaBytes = new Uint8Array(
+        Buffer.from(compressPoint(alphaPoint), 'hex'),
       )
 
-      const verificationTime = Date.now() - startTime
+      // 2. Verify proof
+      const isValid = this.verifyProof(publicKey, alphaBytes, proof, auxData)
 
       if (!isValid) {
-        logger.error('IETF VRF proof verification failed', { verificationTime })
+        logger.error('IETF VRF proof verification failed')
       } else {
-        logger.debug('IETF VRF proof verified successfully', {
-          verificationTime,
-        })
+        logger.debug('IETF VRF proof verified successfully', {})
       }
 
       return isValid
     } catch (error) {
-      const verificationTime = Date.now() - startTime
       logger.error('IETF VRF proof verification failed', {
         error: error instanceof Error ? error.message : String(error),
-        verificationTime,
       })
       return false
-    }
-  }
-
-  /**
-   * Verify VRF proof with detailed result
-   */
-  static verifyWithResult(
-    publicKey: Uint8Array,
-    input: Uint8Array,
-    output: VRFOutput,
-    proof: Uint8Array,
-    auxData?: Uint8Array,
-    config?: VerifierConfig,
-  ): VerificationResult {
-    const startTime = Date.now()
-    const mergedConfig = { ...DEFAULT_VERIFIER_CONFIG, ...config }
-
-    try {
-      const isValid = this.verify(
-        publicKey,
-        input,
-        output,
-        proof,
-        auxData,
-        mergedConfig,
-      )
-      const verificationTime = Date.now() - startTime
-
-      return {
-        isValid,
-        verificationTime,
-        metadata: {
-          scheme: 'IETF',
-          usedAuxData: !!auxData,
-          config: mergedConfig,
-        },
-      }
-    } catch (error) {
-      const verificationTime = Date.now() - startTime
-      return {
-        isValid: false,
-        verificationTime,
-        error: error instanceof Error ? error.message : String(error),
-        metadata: {
-          scheme: 'IETF',
-          usedAuxData: !!auxData,
-          config: mergedConfig,
-        },
-      }
     }
   }
 
@@ -125,84 +54,71 @@ export class IETFVRFVerifier {
   private static verifyProof(
     publicKey: Uint8Array,
     alpha: Uint8Array,
-    gamma: Uint8Array,
     proof: Uint8Array,
     auxData?: Uint8Array,
   ): boolean {
     // IETF VRF proof verification (RFC-9381)
-    // Verify that: g^s = u * y^c and h^s = v * gamma^c
+    // Verify that: g^s = u + y^c and h^s = v + gamma^c
 
-    // Parse proof as (c, s)
-    if (proof.length !== 64) {
+    // Parse proof as (gamma, c, s) - Gray Paper: blob[96] = 32 + 32 + 32 bytes
+    if (proof.length !== 96) {
       return false
     }
 
-    const cUint8Array = proof.slice(0, 32)
-    const sUint8Array = proof.slice(32, 64)
+    const gammaFromProof = proof.slice(0, 32) // VRF output point
+    const cUint8Array = proof.slice(32, 64) // Challenge scalar
+    const sUint8Array = proof.slice(64, 96) // Response scalar
 
     const c = bytesToBigInt(cUint8Array)
     const s = bytesToBigInt(sUint8Array)
 
     // Convert inputs to curve points
-    const alphaPoint = BandersnatchCurve.bytesToPoint(alpha)
-    const gammaPoint = BandersnatchCurve.bytesToPoint(gamma)
-    const publicKeyPoint = BandersnatchCurve.bytesToPoint(publicKey)
+    const alphaPoint = BandersnatchCurveNoble.bytesToPoint(alpha)
+    const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gammaFromProof) // Use gamma from proof
+    const publicKeyPoint = BandersnatchCurveNoble.bytesToPoint(publicKey)
 
-    // Calculate u = g^s
-    const u = BandersnatchCurve.scalarMultiply(BandersnatchCurve.GENERATOR, s)
-
-    // Calculate v = h^s
-    const v = BandersnatchCurve.scalarMultiply(alphaPoint, s)
-
-    // Calculate y^c
-    const yToC = BandersnatchCurve.scalarMultiply(publicKeyPoint, c)
-
-    // Calculate gamma^c
-    const gammaToC = BandersnatchCurve.scalarMultiply(gammaPoint, c)
-
-    // Verify g^s = u * y^c
-    const leftSide1 = u
-    const rightSide1 = BandersnatchCurve.add(u, yToC)
-
-    // Verify h^s = v * gamma^c
-    const leftSide2 = v
-    const rightSide2 = BandersnatchCurve.add(v, gammaToC)
-
-    // Verify challenge c matches
-    const challengeInput = new Uint8Array([
-      ...BandersnatchCurve.pointToBytes(gammaPoint),
-      ...BandersnatchCurve.pointToBytes(u),
-      ...BandersnatchCurve.pointToBytes(v),
-    ])
-
-    if (auxData) {
-      challengeInput.set(auxData, challengeInput.length - auxData.length)
-    }
-
-    const expectedC = this.hashToScalar(challengeInput)
-
-    return (
-      c === expectedC &&
-      this.pointsEqual(leftSide1, rightSide1) &&
-      this.pointsEqual(leftSide2, rightSide2)
+    // Calculate u and v (reconstructed R points from proof)
+    // Based on IETF VRF: u = g^s - y^c, v = h^s - gamma^c
+    const gToS = BandersnatchCurveNoble.scalarMultiply(
+      BandersnatchCurveNoble.GENERATOR,
+      s,
     )
+    const yToC = BandersnatchCurveNoble.scalarMultiply(publicKeyPoint, c)
+    const u = BandersnatchCurveNoble.add(
+      gToS,
+      BandersnatchCurveNoble.negate(yToC),
+    )
+
+    const hToS = BandersnatchCurveNoble.scalarMultiply(alphaPoint, s)
+    const gammaToC = BandersnatchCurveNoble.scalarMultiply(gammaPoint, c)
+    const v = BandersnatchCurveNoble.add(
+      hToS,
+      BandersnatchCurveNoble.negate(gammaToC),
+    )
+
+    // Recreate challenge c from u, v, and other components
+    const challengePoints = [
+      BandersnatchCurveNoble.pointToBytes(gammaPoint),
+      BandersnatchCurveNoble.pointToBytes(u),
+      BandersnatchCurveNoble.pointToBytes(v),
+    ]
+
+    const expectedC = this.hashToScalar(
+      challengePoints,
+      auxData || new Uint8Array(0),
+    )
+    return c === expectedC
   }
 
   /**
    * Hash to scalar for challenge verification
+   * Implements the challenge generation per IETF RFC-9381
    */
-  private static hashToScalar(_data: Uint8Array): bigint {
-    const hash = BandersnatchCurve.hashPoint({ x: 0n, y: 0n, isInfinity: true })
-    const hashValue = bytesToBigInt(hash)
-    return hashValue % BandersnatchCurve.CURVE_ORDER
-  }
-
-  /**
-   * Check if two curve points are equal
-   */
-  private static pointsEqual(p1: CurvePoint, p2: CurvePoint): boolean {
-    if (p1.isInfinity && p2.isInfinity) return true
-    if (p1.isInfinity || p2.isInfinity) return false
-    return p1.x === p2.x && p1.y === p2.y
+  private static hashToScalar(
+    points: Uint8Array[],
+    auxData: Uint8Array = new Uint8Array(0),
+  ): bigint {
+    // Use RFC-9381 challenge generation which implements proper hash-to-scalar
+    return generateChallengeRfc9381(points, auxData)
   }
 }

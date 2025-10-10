@@ -5,7 +5,6 @@
  * Reference: Gray Paper network specifications
  */
 
-import type { QUICStream } from '@infisical/quic'
 import type {
   ConnectionEndpoint,
   PreferredInitiator,
@@ -44,73 +43,34 @@ export enum MessageType {
   PING = 0x0f,
   PONG = 0x10,
 }
-
 /**
- * Stream kinds for JAMNP-S protocols
- * UP (Unique Persistent) streams: 0-127
- * CE (Common Ephemeral) streams: 128+
+ * Stream kind
+ * @param UP0 - block announcement
+ * @param CE128 - block request
+ * @param CE129 - state request
+ * @param CE131 - ticket distribution to proxy validator
+ * @param CE132 - ticket distribution from proxy validator to all current validators
+ * @param CE133 - work package submission
+ * @param CE134 - work package sharing
+ * @param CE135 - work report distribution
+ * @param CE136 - work report request
+ * @param CE137 - shard distribution
+ * @param CE138 - audit shard request
+ * @param CE139 - segment shard request
+ * @param CE140 - segment shard response
+ * @param CE141 - assurance distribution
+ * @param CE142 - preimage announcement
+ * @param CE143 - preimage request
+ * @param CE144 - audit announcement
+ * @param CE145 - judgment publication
  */
-// export enum StreamKind {
-//   // UP 0: Block announcement
-//   UP_BLOCK_ANNOUNCEMENT = 0,
-
-//   // CE 128: Block request
-//   CE_BLOCK_REQUEST = 128,
-
-//   // CE 129: State request
-//   CE_STATE_REQUEST = 129,
-
-//   // CE 131: Ticket distribution (generator to proxy)
-//   CE_TICKET_DISTRIBUTION_GENERATOR = 131,
-
-//   // CE 132: Ticket distribution (proxy to validators)
-//   CE_TICKET_DISTRIBUTION_PROXY = 132,
-
-//   // CE 133: Work package submission
-//   CE_WORK_PACKAGE_SUBMISSION = 133,
-
-//   // CE 134: Work package sharing
-//   CE_WORK_PACKAGE_SHARING = 134,
-
-//   // CE 135: Work report distribution
-//   CE_WORK_REPORT_DISTRIBUTION = 135,
-
-//   // CE 136: Work report request
-//   CE_WORK_REPORT_REQUEST = 136,
-
-//   // CE 137: Shard distribution
-//   CE_SHARD_DISTRIBUTION = 137,
-
-//   // CE 138: Audit shard request
-//   CE_AUDIT_SHARD_REQUEST = 138,
-
-//   // CE 139: Segment shard request (no justification)
-//   CE_SEGMENT_SHARD_REQUEST_NO_JUSTIFICATION = 139,
-
-//   // CE 140: Segment shard request (with justification)
-//   CE_SEGMENT_SHARD_REQUEST_WITH_JUSTIFICATION = 140,
-
-//   // CE 141: Assurance distribution
-//   CE_ASSURANCE_DISTRIBUTION = 141,
-
-//   // CE 142: Preimage announcement
-//   CE_PREIMAGE_ANNOUNCEMENT = 142,
-
-//   // CE 143: Preimage request
-//   CE_PREIMAGE_REQUEST = 143,
-
-//   // CE 144: Audit announcement
-//   CE_AUDIT_ANNOUNCEMENT = 144,
-
-//   // CE 145: Judgment publication
-//   CE_JUDGMENT_PUBLICATION = 145,
-// }
-
 export type StreamKind =
-  | 0
-  | 128
-  | 129
-  | 133
+  | 0 // UP0 - block announcement
+  | 128 // CE128 - block request
+  | 129 // CE129 - state request
+  | 131 // CE131 - ticket distribution to proxy validator
+  | 132 // CE132 - ticket distribution from proxy validator to all current validators
+  | 133 // CE133 - work package submission
   | 134
   | 135
   | 136
@@ -123,35 +83,6 @@ export type StreamKind =
   | 143
   | 144
   | 145
-
-/**
- * Stream information
- * JAMNP-S specification requires all streams to be bidirectional
- */
-export interface StreamInfo {
-  /** Stream ID */
-  id: string
-  /** Stream kind */
-  kind: StreamKind
-  /** Stream state */
-  state: StreamState
-  /** Connection ID */
-  connectionId: string
-  /** Is initiator */
-  isInitiator: boolean
-  /** Creation time */
-  createdAt: number
-  /** Last activity time */
-  lastActivity: number
-  /** Error message (if any) */
-  error?: string
-  /** QUIC stream reference (for active streams) */
-  quicStream?: QUICStream
-  /** Stream is bidirectional (always true for JAMNP-S) */
-  isBidirectional: true
-}
-
-export type StreamHandler = (stream: StreamInfo, data: Uint8Array) => void
 
 /**
  * Base network message interface

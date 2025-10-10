@@ -20,6 +20,7 @@
     "@types/hapi": "^18.0.14",
     "dotenv": "17.2.0",
     "fast-shuffle": "^6.1.1",
+    "merkletreejs": "^0.6.0",
     "radash": "12.1.1",
     "viem": "2.32.0",
     "zod": "3.25.76"
@@ -31,7 +32,7 @@
     "@pbnj/typescript-config": "workspace:*"
   },
   "exports": {
-    ".": "./index.ts",
+    ".": "./src/index.ts",
     "./safe": "./src/safe.ts"
   }
 }

@@ -8,7 +8,6 @@
 import type { Hex } from '@pbnj/core'
 import type { ValidatorPublicKeys } from './consensus'
 import type { GenesisResult, GenesisState } from './genesis'
-import type { GlobalState } from './global-state'
 
 // ============================================================================
 // Chain Spec JSON Format (as stored in chain-spec.json files)
@@ -166,25 +165,6 @@ export interface ChainSpecNetwork {
 // ============================================================================
 
 /**
- * Normalized genesis configuration
- * Internal representation after parsing chain-spec.json
- */
-export interface GenesisConfig {
-  /** Chain metadata */
-  readonly chain: ChainMetadata
-  /** Genesis time configuration */
-  readonly time: GenesisTimeConfig
-  /** Validator configuration */
-  readonly validators: GenesisValidatorConfig
-  /** Service accounts configuration */
-  readonly accounts: GenesisAccountsConfig
-  /** Safrole configuration */
-  readonly safrole: GenesisSafroleConfig
-  /** System configuration */
-  readonly system: GenesisSystemConfig
-}
-
-/**
  * Chain metadata
  */
 export interface ChainMetadata {
@@ -317,7 +297,7 @@ export interface GenesisError {
 /**
  * Genesis manager interface
  */
-export interface GenesisManager {
+export interface IGenesisManager {
   /**
    * Load and parse chain-spec.json file
    */
@@ -326,12 +306,12 @@ export interface GenesisManager {
   /**
    * Normalize chain spec to internal config format
    */
-  normalizeChainSpec(chainSpec: ChainSpecJson): GenesisConfig
+  // normalizeChainSpec(chainSpec: ChainSpecJson): ChainGenesisConfig
 
   /**
    * Build Gray Paper compliant genesis state from config
    */
-  buildGenesisState(config: GenesisConfig): GenesisState
+  // buildGenesisState(config: ChainGenesisConfig): GenesisState
 
   /**
    * Complete genesis construction from chain-spec.json
@@ -347,57 +327,3 @@ export interface GenesisManager {
 // ============================================================================
 // Utility Types
 // ============================================================================
-
-/**
- * Chain spec parser options
- */
-export interface ChainSpecParserOptions {
-  /** Validate validator keys */
-  readonly validateValidatorKeys: boolean
-  /** Validate account addresses */
-  readonly validateAddresses: boolean
-  /** Require minimum validators */
-  readonly minValidators: number
-  /** Allow empty accounts */
-  readonly allowEmptyAccounts: boolean
-}
-
-/**
- * Genesis builder options
- */
-export interface GenesisBuilderOptions {
-  /** Initialize empty state components */
-  readonly initializeEmpty: boolean
-  /** Validate state consistency */
-  readonly validateConsistency: boolean
-  /** Strict Gray Paper compliance */
-  readonly strictCompliance: boolean
-}
-
-/**
- * State component initializer function type
- */
-export type StateComponentInitializer<T> = (config: GenesisConfig) => T
-
-/**
- * Genesis state component initializers
- */
-export interface GenesisStateInitializers {
-  readonly authpool: StateComponentInitializer<GlobalState['authpool']>
-  readonly recent: StateComponentInitializer<GlobalState['recent']>
-  readonly lastaccout: StateComponentInitializer<GlobalState['lastaccout']>
-  readonly safrole: StateComponentInitializer<GlobalState['safrole']>
-  readonly accounts: StateComponentInitializer<GlobalState['accounts']>
-  readonly entropy: StateComponentInitializer<GlobalState['entropy']>
-  readonly stagingset: StateComponentInitializer<GlobalState['stagingset']>
-  readonly activeset: StateComponentInitializer<GlobalState['activeset']>
-  readonly previousset: StateComponentInitializer<GlobalState['previousset']>
-  readonly reports: StateComponentInitializer<GlobalState['reports']>
-  readonly thetime: StateComponentInitializer<GlobalState['thetime']>
-  readonly authqueue: StateComponentInitializer<GlobalState['authqueue']>
-  readonly privileges: StateComponentInitializer<GlobalState['privileges']>
-  readonly disputes: StateComponentInitializer<GlobalState['disputes']>
-  readonly activity: StateComponentInitializer<GlobalState['activity']>
-  readonly ready: StateComponentInitializer<GlobalState['ready']>
-  readonly accumulated: StateComponentInitializer<GlobalState['accumulated']>
-}

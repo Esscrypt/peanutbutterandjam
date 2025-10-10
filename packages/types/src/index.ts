@@ -6,6 +6,8 @@
  * types, and enums used throughout the codebase.
  */
 
+// Audit types
+export * from './audit'
 // Block authoring types - export specific types to avoid conflicts
 export * from './block-authoring'
 // CLI types
@@ -38,15 +40,18 @@ export {
 } from './codec'
 // Consensus types - export ValidatorPublicKeys from consensus to avoid conflict
 export * from './consensus'
+// Gray Paper constants
+export * from './constants'
 // Core types - export ValidatorPublicKeys from core as CoreValidatorKey
 export * from './core'
 export * from './erasure-coding'
 // Genesis and Global State types - comprehensive Gray Paper compliant state
 export * from './genesis'
-export * from './genesis-config'
 export * from './global-state'
 // JAMNP-S types
 export * from './jamnp'
+// Keys types
+export * from './keys'
 // Network types
 export * from './network'
 // Export PVM work types for compatibility
@@ -54,6 +59,10 @@ export * from './network'
 export * from './pvm'
 // Serialization types - export specific types to avoid conflicts
 export * from './serialization'
+// Service types
+export * from './service'
+// Services types
+export * from './services'
 // State types
 export * from './state'
 // Telemetry types

@@ -30,7 +30,7 @@
  * so deserialization can parse elements sequentially.
  */
 
-import { type Safe, safeError, safeResult } from '@pbnj/core'
+import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
 import type { Decoder, DecodingResult, Encoder, Sequence } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
@@ -52,6 +52,7 @@ export function encodeSequence(sequence: Sequence<bigint>): Safe<Uint8Array> {
  *
  * Formula from Gray Paper:
  * encode([i₀, i₁, ...]) ≡ encode(i₀) ∥ encode(i₁) ∥ ...
+ *
  *
  * @param sequence - Sequence of elements to encode
  * @param encoder - Function to encode individual elements
@@ -87,6 +88,44 @@ export function encodeSequenceGeneric<T>(
 }
 
 /**
+ * Encode variable-length sequence with length prefix
+ *
+ * Formula from Gray Paper:
+ * \var{sequence} = encode(length) ∥ encode(element₀) ∥ encode(element₁) ∥ ...
+ *
+ * This is used for variable-length sequences that need a length prefix.
+ * The length prefix tells the decoder how many elements to expect.
+ *
+ * @param sequence - Sequence of elements to encode
+ * @param encoder - Function to encode individual elements
+ * @returns Encoded octet sequence with length prefix
+ */
+export function encodeVariableSequence<T>(
+  sequence: T[],
+  encoder: Encoder<T>,
+): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
+  // Add length prefix
+  const [lengthError, lengthEncoded] = encodeNatural(BigInt(sequence.length))
+  if (lengthError) {
+    return safeError(lengthError)
+  }
+  parts.push(lengthEncoded)
+
+  // Encode each element
+  for (const element of sequence) {
+    const [error, encoded] = encoder(element)
+    if (error) {
+      return safeError(error)
+    }
+    parts.push(encoded)
+  }
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
  * Decode sequence of natural numbers
  *
  * @param data - Octet sequence to decode
@@ -95,13 +134,15 @@ export function encodeSequenceGeneric<T>(
  */
 export function decodeSequence(
   data: Uint8Array,
-  count?: number,
+  count: number,
 ): Safe<DecodingResult<bigint[]>> {
   return decodeSequenceGeneric(data, decodeNatural, count)
 }
 
 /**
  * Decode sequence of unknown type with custom decoder
+ *
+ * @deprecated THIS CONSUMES BYTES UNTIL THE END< DO NOT USE IT UNLESS YOU SPECIFY COUNT
  *
  * @param data - Octet sequence to decode
  * @param decoder - Function to decode individual elements
@@ -111,52 +152,36 @@ export function decodeSequence(
 export function decodeSequenceGeneric<T>(
   data: Uint8Array,
   decoder: Decoder<T>,
-  count?: number,
+  count: number,
 ): Safe<DecodingResult<T[]>> {
   const result: T[] = []
   let remaining = data
 
-  if (count !== undefined) {
-    // Decode known number of elements
-    for (let i = 0; i < count; i++) {
-      if (remaining.length === 0) {
-        return safeError(
-          new Error(
-            `Insufficient data for sequence decoding (expected ${count} elements, got ${i})`,
-          ),
-        )
-      }
-      const [error, result2] = decoder(remaining)
-      if (error) {
-        return safeError(error)
-      }
-      const value = result2.value
-      const nextRemaining = result2.remaining
-      result.push(value)
-      remaining = nextRemaining
+  // Decode known number of elements
+  for (let i = 0; i < count; i++) {
+    if (remaining.length === 0) {
+      return safeError(
+        new Error(
+          `Insufficient data for sequence decoding (expected ${count} elements, got ${i})`,
+        ),
+      )
     }
-  } else {
-    // Decode until no more data
-    while (remaining.length > 0) {
-      try {
-        const [error, result2] = decoder(remaining)
-        if (error) {
-          return safeError(error)
-        }
-        const value = result2.value
-        const nextRemaining = result2.remaining
-        result.push(value)
-        remaining = nextRemaining
-      } catch {
-        // Stop decoding if we can't decode more elements
-        break
-      }
+    const [error, result2] = decoder(remaining)
+    if (error) {
+      return safeError(error)
     }
+    const value = result2.value
+    const nextRemaining = result2.remaining
+    result.push(value)
+    remaining = nextRemaining
   }
+
+  const consumed = data.length - remaining.length
 
   return safeResult({
     value: result,
     remaining,
+    consumed,
   })
 }
 
@@ -219,7 +244,58 @@ export function decodeSequenceWithLength(
   const value = result2.value
   const remaining = result2.remaining
 
-  return safeResult({ value, remaining })
+  // Calculate total consumed bytes
+  const consumed = data.length - remaining.length
+
+  return safeResult({ value, remaining, consumed })
+}
+
+/**
+ * Decode variable-length sequence with length prefix and custom decoder
+ *
+ * Formula from Gray Paper:
+ * \var{sequence} = decode(length) ∥ decode(element₀) ∥ decode(element₁) ∥ ...
+ *
+ * This is used for variable-length sequences that need a length prefix.
+ * The length prefix tells the decoder how many elements to expect.
+ *
+ * @param data - Octet sequence to decode
+ * @param decoder - Function to decode individual elements
+ * @returns Decoded sequence and remaining data
+ */
+export function decodeVariableSequence<T>(
+  data: Uint8Array,
+  decoder: Decoder<T>,
+): Safe<DecodingResult<T[]>> {
+  // First decode the length
+  const [error, result] = decodeNatural(data)
+  if (error) {
+    return safeError(error)
+  }
+  const length = result.value
+  const lengthRemaining = result.remaining
+  const count = Number(length)
+
+  if (count < 0 || count > Number.MAX_SAFE_INTEGER) {
+    return safeError(new Error(`Invalid sequence length: ${length}`))
+  }
+
+  // Then decode the sequence using the custom decoder
+  const [error2, result2] = decodeSequenceGeneric(
+    lengthRemaining,
+    decoder,
+    count,
+  )
+  if (error2) {
+    return safeError(error2)
+  }
+  const value = result2.value
+  const remaining = result2.remaining
+
+  // Calculate total consumed bytes
+  const consumed = data.length - remaining.length
+
+  return safeResult({ value, remaining, consumed })
 }
 
 /**
@@ -279,5 +355,6 @@ export function decodeUint8Array(
   return safeResult({
     value: result,
     remaining: data.slice(totalLength),
+    consumed: totalLength,
   })
 }

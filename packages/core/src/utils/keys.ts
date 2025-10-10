@@ -7,15 +7,20 @@
 
 import { bls12_381 } from '@noble/curves/bls12-381'
 import * as ed from '@noble/ed25519'
-import { BandersnatchCurve } from '@pbnj/bandersnatch'
-import type { KeyPair, ValidatorPublicKeys } from '@pbnj/types'
+import { sha512 } from '@noble/hashes/sha2'
+import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import type {
+  ConnectionEndpoint,
+  KeyPair,
+  ValidatorCredentials,
+} from '@pbnj/types'
 import {
   deriveSecretSeeds,
   generateEd25519KeyPairFromSeed,
   generateTrivialSeed,
+  mod,
 } from '../crypto'
 import { type Safe, safeError, safeResult } from '../safe'
-import { bytesToBigInt, bytesToHex } from './crypto'
 
 /**
  * Generate BLS key pair from seed (deterministic)
@@ -39,28 +44,55 @@ export function generateBLSKeyPairFromSeed(
 
 /**
  * Generate Bandersnatch key pair from seed (deterministic)
- * Uses BLAKE2b hashing similar to JIP-5 principles
+ * Follows JIP-5 specification: SHA512 hash + little-endian interpretation + modulo reduction
  */
 export function generateBandersnatchKeyPairFromSeed(
   bandersnatchSecretSeed: Uint8Array,
 ): Safe<KeyPair> {
-  // Convert private key to bigint for scalar multiplication
-  const privateKeyBigInt = bytesToBigInt(bandersnatchSecretSeed)
+  try {
+    // Step 1: SHA512 hash the seed
+    const hashBytes = sha512(bandersnatchSecretSeed)
 
-  // Generate public key by scalar multiplication: publicKey = privateKey * G
-  const generator = BandersnatchCurve.GENERATOR
-  const publicKeyPoint = BandersnatchCurve.scalarMultiply(
-    generator,
-    privateKeyBigInt,
-  )
+    // Step 2: Interpret the hash as little-endian to get "v"
+    let v = 0n
+    for (let i = 0; i < hashBytes.length; i++) {
+      v += BigInt(hashBytes[i]) << (8n * BigInt(i))
+    }
 
-  // Convert public key point to bytes (32 bytes as per Gray Paper)
-  const publicKey = BandersnatchCurve.pointToBytes(publicKeyPoint)
+    // Step 3: Reduce "v" modulo the prime order of the field to get the secret
+    const privateKeyScalar = mod(v, BandersnatchCurveNoble.CURVE_ORDER)
 
-  return safeResult({
-    publicKey,
-    privateKey: bandersnatchSecretSeed,
-  })
+    // Ensure the scalar is not zero (invalid for bandersnatch)
+    if (privateKeyScalar === 0n) {
+      return safeError(
+        new Error(
+          'Generated scalar is zero, which is invalid for bandersnatch',
+        ),
+      )
+    }
+
+    // Generate public key using BandersnatchCurveNoble
+    const publicKeyPoint = BandersnatchCurveNoble.scalarMultiply(
+      BandersnatchCurveNoble.GENERATOR,
+      privateKeyScalar,
+    )
+
+    // Convert public key point to bytes (32 bytes as per Gray Paper)
+    const publicKey = BandersnatchCurveNoble.pointToBytes(publicKeyPoint)
+
+    return safeResult({
+      publicKey,
+      privateKey: bandersnatchSecretSeed,
+    })
+  } catch (error) {
+    return safeError(
+      new Error(
+        `Failed to generate Bandersnatch key pair: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
+    )
+  }
 }
 
 /**
@@ -166,7 +198,8 @@ export function generateDevAccountSeed(
  */
 export function generateValidatorKeyPairFromSeed(
   seed: Uint8Array,
-): Safe<ValidatorPublicKeys> {
+  connectionEndpoint?: ConnectionEndpoint,
+): Safe<ValidatorCredentials> {
   const [error, secretSeeds] = deriveSecretSeeds(seed)
   if (error) {
     return safeError(error)
@@ -194,17 +227,23 @@ export function generateValidatorKeyPairFromSeed(
     return safeError(bandersnatchError)
   }
 
-  // Generate deterministic metadata from seed
+  // Generate metadata
   const metadata = new Uint8Array(128)
-  for (let i = 0; i < 128; i++) {
-    metadata[i] = seed[i % seed.length] ^ (i & 0xff)
+  if (connectionEndpoint) {
+    const hostBytes = new TextEncoder().encode(connectionEndpoint.host)
+    const portBytes = new TextEncoder().encode(
+      connectionEndpoint.port.toString().padStart(4, '0'),
+    )
+    metadata.set(hostBytes.slice(0, 16), 0)
+    metadata.set(portBytes.slice(0, 4), 16)
   }
 
   return safeResult({
-    bandersnatch: bytesToHex(bandersnatchKeyPair.publicKey),
-    ed25519: bytesToHex(ed25519KeyPair.publicKey),
-    bls: bytesToHex(blsKeyPair.publicKey),
-    metadata: bytesToHex(metadata),
+    bandersnatchKeyPair: bandersnatchKeyPair,
+    ed25519KeyPair: ed25519KeyPair,
+    blsKeyPair: blsKeyPair,
+    seed: seed,
+    metadata: metadata,
   })
 }
 
@@ -213,7 +252,7 @@ export function generateValidatorKeyPairFromSeed(
  */
 export function generateDevAccountValidatorKeyPair(
   validatorIndex: number,
-): Safe<ValidatorPublicKeys> {
+): Safe<ValidatorCredentials> {
   // Generate dev account seed according to JIP-5
   const [seedError, seed] = generateDevAccountSeed(validatorIndex)
   if (seedError) {

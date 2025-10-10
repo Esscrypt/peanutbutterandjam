@@ -8,6 +8,7 @@
 import type { Hex, Safe } from '@pbnj/core'
 import {
   blake2bHash,
+  bytesToHex,
   concatBytes,
   hexToBytes,
   logger,
@@ -15,42 +16,75 @@ import {
   safeResult,
   zeroHash,
 } from '@pbnj/core'
-import type { BlockAuthoringConfig, BlockHeader, Extrinsic } from '@pbnj/types'
-import { BaseService } from '../interfaces/service'
-
+import { encodeHeader, encodeUnsignedHeader } from '@pbnj/serialization'
+import type {
+  BlockHeader,
+  Extrinsic,
+  IConfigService,
+  UnsignedBlockHeader,
+} from '@pbnj/types'
+import { BaseService } from '@pbnj/types'
+import type { NodeGenesisManager } from './genesis-manager'
+import type { KeyPairService } from './keypair-service'
+import type { ValidatorSetManager } from './validator-set'
 /**
  * Header Constructor
  */
 export class HeaderConstructor extends BaseService {
+  private keyPairService: KeyPairService
+  private validatorSetManagerService: ValidatorSetManager
+  private genesisManagerService: NodeGenesisManager
+  constructor(options: {
+    keyPairService: KeyPairService
+    validatorSetManagerService: ValidatorSetManager
+    genesisManagerService: NodeGenesisManager
+  }) {
+    super('header-constructor')
+    this.keyPairService = options.keyPairService
+    this.validatorSetManagerService = options.validatorSetManagerService
+    this.genesisManagerService = options.genesisManagerService
+  }
+
   /**
    * Construct a new block header
    */
   construct(
     parent: BlockHeader | null,
     extrinsics: Extrinsic[],
-    config: BlockAuthoringConfig,
-  ): Safe<BlockHeader> {
+    config: IConfigService,
+  ): Safe<UnsignedBlockHeader> {
     // If no parent header, create genesis header
-    const effectiveParent = parent || this.createGenesisHeader(config)
+
+    if (!parent) {
+      const [genesisHeaderError, genesisHeader] =
+        this.genesisManagerService.getGenesisHeader()
+      if (genesisHeaderError) {
+        return safeError(genesisHeaderError)
+      }
+      parent = genesisHeader
+    }
 
     logger.debug('Constructing block header', {
-      parentSlot: effectiveParent.timeslot,
       extrinsicsCount: extrinsics.length,
       isGenesis: !parent,
     })
 
+    const [encodeError, encodedHeader] = encodeHeader(parent, config)
+    if (encodeError) {
+      return safeError(encodeError)
+    }
+
     // Calculate parent hash or use genesis parent hash
-    const [parentHashError, parentHash] =
-      this.calculateParentHash(effectiveParent)
+    const [parentHashError, parentHash] = blake2bHash(encodedHeader)
     if (parentHashError) {
       return safeError(parentHashError)
     }
 
     // Calculate state root (placeholder for now)
-    const [stateRootError, stateRoot] = this.calculateStateRoot(effectiveParent)
-    if (stateRootError) {
-      return safeError(stateRootError)
-    }
+    // const [stateRootError, stateRoot] = this.calculateStateRoot(effectiveParent)
+    // if (stateRootError) {
+    //   return safeError(stateRootError)
+    // }
 
     // Calculate extrinsics root
     const [extrinsicsRootError, extrinsicsRoot] =
@@ -61,30 +95,37 @@ export class HeaderConstructor extends BaseService {
 
     // Calculate next slot
     const timestamp = this.calculateTimestamp(
-      effectiveParent.timeslot,
-      config.slotDuration,
+      parent.timeslot,
+      BigInt(config.slotDuration),
     )
 
+    const [authorIndexError, authorIndex] =
+      this.validatorSetManagerService.getValidatorIndex(
+        bytesToHex(
+          this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
+        ),
+      )
+    if (authorIndexError) {
+      return safeError(authorIndexError)
+    }
     // Create new header
-    const header: BlockHeader = {
+    const header: UnsignedBlockHeader = {
       parent: parentHash,
-      priorStateRoot: stateRoot,
+      priorStateRoot: zeroHash, // TODO: Calculate state root
       extrinsicHash: extrinsicsRoot,
       timeslot: timestamp, // JAM uses time slot instead of sequential block numbers
       epochMark: null,
       winnersMark: null,
       offendersMark: [],
-      authorIndex: 0n, // TODO: Map validatorKey to author_index
+      authorIndex: BigInt(authorIndex),
       vrfSig: zeroHash,
-      sealSig: zeroHash,
     }
 
     // Generate signature for the header
-    const [sealError, seal] = this.generateSignature(header, config)
+    const [sealError, _seal] = this.signHeader(header, config)
     if (sealError) {
       return safeError(sealError)
     }
-    header.sealSig = seal
 
     logger.debug('Header constructed', {
       blockSlot: header.timeslot,
@@ -93,24 +134,6 @@ export class HeaderConstructor extends BaseService {
     })
 
     return safeResult(header)
-  }
-
-  /**
-   * Calculate parent hash
-   */
-  private calculateParentHash(parent: BlockHeader): Safe<Hex> {
-    // TODO: Implement proper hash calculation using serialization
-    return safeResult(
-      `0x${parent.timeslot.toString(16).padStart(64, '0')}` as `0x${string}`,
-    )
-  }
-
-  /**
-   * Calculate state root
-   */
-  private calculateStateRoot(parent: BlockHeader): Safe<Hex> {
-    // TODO: Implement proper state root calculation
-    return safeResult(parent.priorStateRoot)
   }
 
   /**
@@ -130,7 +153,7 @@ export class HeaderConstructor extends BaseService {
     const extrinsicHashes: Hex[] = []
     for (const [error, hash] of extrinsicHashResults) {
       if (error) {
-        throw error
+        return safeError(error)
       }
       extrinsicHashes.push(hash)
     }
@@ -177,58 +200,30 @@ export class HeaderConstructor extends BaseService {
   }
 
   /**
-   * Create genesis header
-   */
-  private createGenesisHeader(_config: BlockAuthoringConfig): BlockHeader {
-    const genesisHeader: BlockHeader = {
-      parent: zeroHash,
-      priorStateRoot: zeroHash,
-      extrinsicHash: zeroHash,
-      timeslot: 0n, // Genesis block starts at slot 0
-      epochMark: null,
-      winnersMark: null,
-      offendersMark: [],
-      authorIndex: 0n, // TODO: Map validatorKey to author_index
-      vrfSig: zeroHash,
-      sealSig: zeroHash,
-    }
-
-    logger.debug('Created genesis header', {
-      slot: genesisHeader.timeslot,
-      timestamp: genesisHeader.timeslot,
-    })
-
-    return genesisHeader
-  }
-
-  /**
    * Generate signature for block header
    */
-  private generateSignature(
-    header: BlockHeader,
-    _config: BlockAuthoringConfig,
+  private signHeader(
+    header: UnsignedBlockHeader,
+    config: IConfigService,
   ): Safe<Hex> {
-    // TODO: Implement proper signature generation
-    // This should use the validator's private key to sign the header
-    // For now, return a placeholder signature
-
-    // Create a hash of the header for signing
-    const headerData = {
-      slot: header.timeslot,
-      parentHash: header.parent,
-      stateRoot: header.priorStateRoot,
-      extrinsicsRoot: header.extrinsicHash,
-      authorIndex: header.authorIndex,
+    const [headerBytesError, headerBytes] = encodeUnsignedHeader(header, config)
+    if (headerBytesError) {
+      return safeError(headerBytesError)
     }
-
-    const headerBytes = new TextEncoder().encode(JSON.stringify(headerData))
     const [headerHashError, headerHash] = blake2bHash(headerBytes)
-
-    // TODO: Use actual cryptographic signing
-    // For now, return a placeholder signature
     if (headerHashError) {
       return safeError(headerHashError)
     }
-    return safeResult(headerHash)
+
+    const [signError, signature] = this.keyPairService.signMessage(
+      hexToBytes(headerHash),
+    )
+    if (signError) {
+      return safeError(signError)
+    }
+    if (!signature) {
+      return safeError(new Error('Signature is undefined'))
+    }
+    return safeResult(bytesToHex(signature))
   }
 }

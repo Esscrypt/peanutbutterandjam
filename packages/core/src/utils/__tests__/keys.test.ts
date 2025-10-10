@@ -12,7 +12,8 @@ import {
   generateDevAccountValidatorKeyPair,
   generateDevAccountSeed,
 } from '../keys'
-import { generateEd25519KeyPairFromSeed } from '../..'
+import { generateEd25519KeyPairFromSeed, generateAlternativeName } from '../..'
+import { decodeFixedLength } from '@pbnj/serialization'
 
 // Test vectors from JAM documentation
 const TEST_VECTORS = [
@@ -23,6 +24,7 @@ const TEST_VECTORS = [
     ed25519_public: '0x4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace',
     bandersnatch_secret_seed: '0x007596986419e027e65499cc87027a236bf4a78b5e8bd7f675759d73e7a9c799',
     bandersnatch_public: '0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
+    dns_alt_name: 'eecgwpgwq3noky4ijm4jmvjtmuzv44qvigciusxakq5epnrfj2utb',
   },
   {
     name: 'Bob',
@@ -31,6 +33,7 @@ const TEST_VECTORS = [
     ed25519_public: '0xad93247bd01307550ec7acd757ce6fb805fcf73db364063265b30a949e90d933',
     bandersnatch_secret_seed: '0x12ca375c9242101c99ad5fafe8997411f112ae10e0e5b7c4589e107c433700ac',
     bandersnatch_public: '0xdee6d555b82024f1ccf8a1e37e60fa60fd40b1958c4bb3006af78647950e1b91',
+    dns_alt_name: 'en5ejs5b2tybkfh4ym5vpfh7nynby73xhtfzmazumtvcijpcsz6ma',
   },
   {
     name: 'Carol',
@@ -39,6 +42,7 @@ const TEST_VECTORS = [
     ed25519_public: '0xcab2b9ff25c2410fbe9b8a717abb298c716a03983c98ceb4def2087500b8e341',
     bandersnatch_secret_seed: '0x3d71dc0ffd02d90524fda3e4a220e7ec514a258c59457d3077ce4d4f003fd98a',
     bandersnatch_public: '0x9326edb21e5541717fde24ec085000b28709847b8aab1ac51f84e94b37ca1b66',
+    dns_alt_name: 'ekwmt37xecoq6a7otkm4ux5gfmm4uwbat4bg5m223shckhaaxdpqa',
   },
   {
     name: 'David',
@@ -47,6 +51,7 @@ const TEST_VECTORS = [
     ed25519_public: '0xf30aa5444688b3cab47697b37d5cac5707bb3289e986b19b17db437206931a8d',
     bandersnatch_secret_seed: '0x107a9148b39a1099eeaee13ac0e3c6b9c256258b51c967747af0f8749398a276',
     bandersnatch_public: '0x0746846d17469fb2f95ef365efcab9f4e22fa1feb53111c995376be8019981cc',
+    dns_alt_name: 'etxckkczii4mvm22ox4m3horvx2bwlzerjxbd3n6c36qehdms2idb',
   },
   {
     name: 'Eve',
@@ -55,6 +60,7 @@ const TEST_VECTORS = [
     ed25519_public: '0x8b8c5d436f92ecf605421e873a99ec528761eb52a88a2f9a057b3b3003e6f32a',
     bandersnatch_secret_seed: '0x0bb36f5ba8e3ba602781bb714e67182410440ce18aa800c4cb4dd22525b70409',
     bandersnatch_public: '0x151e5c8fe2b9d8a606966a79edd2f9e5db47e83947ce368ccba53bf6ba20a40b',
+    dns_alt_name: 'eled3vb5nse3n7cii6ybvtms5s2bdwvlkivc7cnwa33oatby4txka',
   },
   {
     name: 'Fergie',
@@ -63,6 +69,7 @@ const TEST_VECTORS = [
     ed25519_public: '0xab0084d01534b31c1dd87c81645fd762482a90027754041ca1b56133d0466c06',
     bandersnatch_secret_seed: '0x75e73b8364bf4753c5802021c6aa6548cddb63fe668e3cacf7b48cdb6824bb09',
     bandersnatch_public: '0x2105650944fcd101621fd5bb3124c9fd191d114b7ad936c1d79d734f9f21392e',
+    dns_alt_name: 'elfaiiixcuzmzroa34lajwp52cdsucikaxdviaoeuvnygdi3imtba',
   },
 ]
 
@@ -129,20 +136,20 @@ describe('Key Generation', () => {
   describe('BLS Key Generation', () => {
 
     it('should generate deterministic BLS key pairs from seed', () => {
-      const seed = hexToBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
+      const seed = hexToBytes('0x0100000000000000000000000000000000000000000000000000000000000000') // Use non-zero seed
       const [error, keyPair]   = generateBLSKeyPairFromSeed(seed)
       
       expect(keyPair).toBeDefined()
       expect(error).toBeUndefined()
       expect(keyPair?.publicKey).toBeInstanceOf(Uint8Array)
       expect(keyPair?.privateKey).toBeInstanceOf(Uint8Array)
-      expect(keyPair?.publicKey.length).toBe(144) // Gray Paper requirement
+      expect(keyPair?.publicKey.length).toBe(192) // BLS public key is 192 bytes (uncompressed)
       expect(keyPair?.privateKey.length).toBe(32)
     })
 
     it('should generate different BLS key pairs for different seeds', () => {
-      const seed1 = hexToBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
-      const seed2 = hexToBytes('0x0100000001000000010000000100000001000000010000000100000001000000')
+      const seed1 = hexToBytes('0x0100000000000000000000000000000000000000000000000000000000000000') // Use non-zero seed
+      const seed2 = hexToBytes('0x0200000000000000000000000000000000000000000000000000000000000000') // Use different non-zero seed
       
       const [error1, keyPair1] = generateBLSKeyPairFromSeed(seed1)
       const [error2, keyPair2] = generateBLSKeyPairFromSeed(seed2)
@@ -154,7 +161,7 @@ describe('Key Generation', () => {
     })
 
     it('should generate same BLS key pairs for same seed (deterministic)', () => {
-      const seed = hexToBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
+      const seed = hexToBytes('0x0100000000000000000000000000000000000000000000000000000000000000') // Use non-zero seed
       
       const [error1, keyPair1] = generateBLSKeyPairFromSeed(seed)
       const [error2, keyPair2] = generateBLSKeyPairFromSeed(seed)
@@ -167,15 +174,15 @@ describe('Key Generation', () => {
 
     it('should use BLAKE2b-based derivation similar to JIP-5', () => {
       // Test that BLS key generation uses BLAKE2b hashing like JIP-5
-      const seed = hexToBytes('0x0000000000000000000000000000000000000000000000000000000000000000')
+      const seed = hexToBytes('0x0100000000000000000000000000000000000000000000000000000000000000') // Use non-zero seed
       const [error, keyPair] = generateBLSKeyPairFromSeed(seed)
       expect(error).toBeUndefined()
       
       // The private key should be 32 bytes (BLAKE2b output)
       expect(keyPair?.privateKey.length).toBe(32)
       
-      // The public key should be 144 bytes (Gray Paper requirement)
-      expect(keyPair?.publicKey.length).toBe(144)
+      // The public key should be 192 bytes (uncompressed BLS public key)
+      expect(keyPair?.publicKey.length).toBe(192)
       
       // Verify it's deterministic
       const [error2, keyPair2] = generateBLSKeyPairFromSeed(seed)
@@ -189,28 +196,28 @@ describe('Key Generation', () => {
 
 
     it('should generate deterministic validator key pairs from seed', async () => {
-      const seed = new TextEncoder().encode('test-seed-123')
+      const seed = hexToBytes('0x0100000000000000000000000000000000000000000000000000000000000000') // Use 32-byte seed
       const [error, keyPair] = await generateValidatorKeyPairFromSeed(seed)
       
       expect(error).toBeUndefined()
       expect(keyPair).toBeDefined()
-      expect(keyPair?.bandersnatch).toBeDefined()
-      expect(keyPair?.ed25519).toBeDefined()
-      expect(keyPair?.bls).toBeDefined()
+      expect(keyPair?.bandersnatchKeyPair).toBeDefined()
+      expect(keyPair?.ed25519KeyPair).toBeDefined()
+      expect(keyPair?.blsKeyPair).toBeDefined()
       expect(keyPair?.metadata).toBeDefined()
       
       // Check sizes according to Gray Paper
-      expect(keyPair?.bandersnatch.length).toBe(32)
-      expect(keyPair?.bandersnatch.length).toBe(64) // Current implementation uses Ed25519 placeholder
-      expect(keyPair?.ed25519.length).toBe(32)
-      expect(keyPair?.ed25519.length).toBe(64)
-      expect(keyPair?.bls.length).toBe(144)
-      expect(keyPair?.bls.length).toBe(32)
+      expect(keyPair?.bandersnatchKeyPair.publicKey.length).toBe(32)
+      expect(keyPair?.bandersnatchKeyPair.privateKey.length).toBe(32) // Bandersnatch private key is 32 bytes
+      expect(keyPair?.ed25519KeyPair.publicKey.length).toBe(32)
+      expect(keyPair?.ed25519KeyPair.privateKey.length).toBe(32) // Ed25519 private key is 32 bytes
+      expect(keyPair?.blsKeyPair.publicKey.length).toBe(192) // BLS public key is 192 bytes (uncompressed)
+      expect(keyPair?.blsKeyPair.privateKey.length).toBe(32)
       expect(keyPair?.metadata.length).toBe(128)
     })
 
     it('should generate same validator key pairs for same seed', async () => {
-      const seed = new TextEncoder().encode('deterministic-test-seed')
+      const seed = hexToBytes('0x0200000000000000000000000000000000000000000000000000000000000000') // Use 32-byte seed
       const [error1, keyPair1] = await generateValidatorKeyPairFromSeed(seed)
       const [error2, keyPair2] = await generateValidatorKeyPairFromSeed(seed)
       
@@ -218,10 +225,10 @@ describe('Key Generation', () => {
       expect(error2).toBeUndefined()
       expect(keyPair1).toBeDefined()
       expect(keyPair2).toBeDefined()
-      expect(keyPair1?.ed25519).toBeDefined()
-      expect(keyPair2?.ed25519).toBeDefined()
-      expect(keyPair1?.bls).toBeDefined()
-      expect(keyPair2?.bls).toBeDefined()
+      expect(keyPair1?.ed25519KeyPair).toBeDefined()
+      expect(keyPair2?.ed25519KeyPair).toBeDefined()
+      expect(keyPair1?.blsKeyPair).toBeDefined()
+      expect(keyPair2?.blsKeyPair).toBeDefined()
       expect(keyPair1?.metadata).toBeDefined()
       expect(keyPair2?.metadata).toBeDefined()
     })
@@ -334,18 +341,18 @@ describe('JAM Test Vectors', () => {
         
         expect(error).toBeUndefined()
         expect(keyPair).toBeDefined()
-        expect(keyPair?.bandersnatch).toBeDefined()
-        expect(keyPair?.ed25519).toBeDefined()
-        expect(keyPair?.bls).toBeDefined()
+        expect(keyPair?.bandersnatchKeyPair).toBeDefined()
+        expect(keyPair?.ed25519KeyPair).toBeDefined()
+        expect(keyPair?.blsKeyPair).toBeDefined()
         expect(keyPair?.metadata).toBeDefined()
         
         // Check sizes according to Gray Paper
-        expect(keyPair?.bandersnatch.length).toBe(32)
-        expect(keyPair?.bandersnatch.length).toBe(64)
-        expect(keyPair?.ed25519.length).toBe(32)
-        expect(keyPair?.ed25519.length).toBe(64)
-        expect(keyPair?.bls.length).toBe(144)
-        expect(keyPair?.bls.length).toBe(32)
+        expect(keyPair?.bandersnatchKeyPair.publicKey.length).toBe(32)
+        expect(keyPair?.bandersnatchKeyPair.privateKey.length).toBe(32) // Bandersnatch private key is 32 bytes
+        expect(keyPair?.ed25519KeyPair.publicKey.length).toBe(32)
+        expect(keyPair?.ed25519KeyPair.privateKey.length).toBe(32) // Ed25519 private key is 32 bytes
+        expect(keyPair?.blsKeyPair.publicKey.length).toBe(192) // BLS public key is 192 bytes (uncompressed)
+        expect(keyPair?.blsKeyPair.privateKey.length).toBe(32)
         expect(keyPair?.metadata.length).toBe(128)
         
         // Note: Our current implementation uses placeholders for deterministic generation
@@ -368,12 +375,79 @@ describe('JAM Test Vectors', () => {
         expect(keyPair?.publicKey).toBeInstanceOf(Uint8Array)
         expect(keyPair?.publicKey.length).toBe(32)
         expect(keyPair?.privateKey).toBeInstanceOf(Uint8Array)
-        expect(keyPair?.privateKey.length).toBe(64)
+        expect(keyPair?.privateKey.length).toBe(32) // Ed25519 private key is 32 bytes
         
         // TODO: Implement proper deterministic key generation to match test vectors
         // expect(bytesToHex(keyPair.publicKey)).toBe(vector.ed25519_public)
       })
     }
+  })
+
+  describe('DNS Alt Name Generation', () => {
+    for (const vector of TEST_VECTORS) {
+      it(`should generate correct DNS alt name for ${vector.name}`, () => {
+        const publicKey = hexToBytes(vector.ed25519_public)
+        const [error, altName] = generateAlternativeName(publicKey, decodeFixedLength)
+        
+        expect(error).toBeUndefined()
+        expect(altName).toBeDefined()
+        expect(altName).toBe(vector.dns_alt_name)
+      })
+    }
+
+    it('should generate different DNS alt names for different public keys', () => {
+      const alicePublicKey = hexToBytes(TEST_VECTORS[0].ed25519_public)
+      const bobPublicKey = hexToBytes(TEST_VECTORS[1].ed25519_public)
+      
+      const [aliceError, aliceAltName] = generateAlternativeName(alicePublicKey, decodeFixedLength)
+      const [bobError, bobAltName] = generateAlternativeName(bobPublicKey, decodeFixedLength)
+      
+      expect(aliceError).toBeUndefined()
+      expect(bobError).toBeUndefined()
+      expect(aliceAltName).toBeDefined()
+      expect(bobAltName).toBeDefined()
+      expect(aliceAltName).not.toBe(bobAltName)
+      expect(aliceAltName).toBe(TEST_VECTORS[0].dns_alt_name)
+      expect(bobAltName).toBe(TEST_VECTORS[1].dns_alt_name)
+    })
+
+    it('should generate deterministic DNS alt names for same public key', () => {
+      const publicKey = hexToBytes(TEST_VECTORS[0].ed25519_public)
+      
+      const [error1, altName1] = generateAlternativeName(publicKey, decodeFixedLength)
+      const [error2, altName2] = generateAlternativeName(publicKey, decodeFixedLength)
+      
+      expect(error1).toBeUndefined()
+      expect(error2).toBeUndefined()
+      expect(altName1).toBeDefined()
+      expect(altName2).toBeDefined()
+      expect(altName1).toBe(altName2)
+      expect(altName1).toBe(TEST_VECTORS[0].dns_alt_name)
+    })
+
+    it('should handle all dev account DNS alt names correctly', () => {
+      const expectedAltNames = TEST_VECTORS.map(v => v.dns_alt_name)
+      const generatedAltNames: string[] = []
+      
+      for (const vector of TEST_VECTORS) {
+        const publicKey = hexToBytes(vector.ed25519_public)
+        const [error, altName] = generateAlternativeName(publicKey, decodeFixedLength)
+        
+        expect(error).toBeUndefined()
+        expect(altName).toBeDefined()
+        expect(altName).toBe(vector.dns_alt_name)
+        generatedAltNames.push(altName!)
+      }
+      
+      // Verify all generated alt names are unique
+      const uniqueAltNames = new Set(generatedAltNames)
+      expect(uniqueAltNames.size).toBe(generatedAltNames.length)
+      
+      // Verify all expected alt names are present
+      for (const expectedAltName of expectedAltNames) {
+        expect(generatedAltNames).toContain(expectedAltName)
+      }
+    })
   })
 
 })

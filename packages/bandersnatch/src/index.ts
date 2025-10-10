@@ -9,10 +9,12 @@
 export type { CurvePoint } from '@pbnj/types'
 // Export curve parameters
 export { BANDERSNATCH_PARAMS } from './config'
-// Export Elligator2 hash-to-curve
-export { elligator2HashToCurve } from './crypto/elligator2'
+// Elligator2 hash-to-curve is now available in bandersnatch-vrf package
 // Export curve implementations
-export { BandersnatchCurve } from './curve'
-export { BandersnatchCurveNoble, BandersnatchNoble } from './curve-noble'
-export type { BandersnatchVRFOutput, BandersnatchVRFProof } from './sign'
-export { signMessage, verifySignature, vrfOutputToHash } from './sign'
+// Temporary alias for legacy compatibility
+export {
+  BandersnatchCurveNoble,
+  BandersnatchCurveNoble as BandersnatchCurve,
+  BandersnatchNoble,
+} from './curve-noble'
+// VRF functionality moved to bandersnatch-vrf package

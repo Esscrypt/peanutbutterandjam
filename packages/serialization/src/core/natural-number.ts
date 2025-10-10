@@ -32,6 +32,7 @@
  */
 
 import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { DecodingResult } from '@pbnj/types'
 
 /**
  * Encode natural number according to Gray Paper specification.
@@ -97,6 +98,13 @@ export function encodeNatural(value: bigint): Safe<Uint8Array> {
 
   // Gray Paper Case 2: Find l such that 2^(7l) ≤ x < 2^(7(l+1))
   // Then encode as ⟨2^8-2^(8-l) + ⌊x/2^(8l)⌋⟩ ∥ encode[l]{x mod 2^(8l)}
+  // Note: The Gray Paper formula has a gap for values 1-127. We infer the missing case.
+
+  // Special case for small values (1-127): single-byte encoding
+  if (value >= 1n && value <= 127n) {
+    return safeResult(new Uint8Array([Number(value)]))
+  }
+
   let l = 1
   while (l <= 8 && value >= 1n << BigInt(7 * (l + 1))) {
     l++
@@ -169,10 +177,7 @@ export function encodeNatural(value: bigint): Safe<Uint8Array> {
  * @param data - Octet sequence to decode
  * @returns Decoded natural number and remaining data
  */
-export function decodeNatural(data: Uint8Array): Safe<{
-  value: bigint
-  remaining: Uint8Array
-}> {
+export function decodeNatural(data: Uint8Array): Safe<DecodingResult<bigint>> {
   if (data.length === 0) {
     return safeError(new Error('Cannot decode natural number from empty data'))
   }
@@ -181,7 +186,7 @@ export function decodeNatural(data: Uint8Array): Safe<{
 
   // Gray Paper Case 1: prefix = 0 → x = 0
   if (first === 0) {
-    return safeResult({ value: 0n, remaining: data.slice(1) })
+    return safeResult({ value: 0n, remaining: data.slice(1), consumed: 1 })
   }
 
   // Gray Paper Case 3: prefix = 255 → large number encoding
@@ -196,16 +201,28 @@ export function decodeNatural(data: Uint8Array): Safe<{
       value |= BigInt(data[1 + i]) << BigInt(8 * i)
     }
 
-    return safeResult({ value, remaining: data.slice(9) })
+    return safeResult({ value, remaining: data.slice(9), consumed: 9 })
+  }
+
+  // Special case for single-byte values (1-127): direct decoding
+  if (first >= 1 && first <= 127) {
+    return safeResult({
+      value: BigInt(first),
+      remaining: data.slice(1),
+      consumed: 1,
+    })
   }
 
   // Gray Paper Case 2: Variable-length encoding
   // Determine l by finding which range the prefix falls into
+  // The prefix is: 2^8-2^(8-l) + floor(x/2^(8l))
+  // The condition is: 2^(7l) ≤ x < 2^(7(l+1))
+  // So the prefix range is: [2^8-2^(8-l), 2^8-2^(8-l) + floor((2^(7(l+1))-1)/2^(8l))]
   let l = 0
   for (let testL = 1; testL <= 8; testL++) {
     const minPrefix = (1n << 8n) - (1n << BigInt(8 - testL)) // 2^8-2^(8-l)
     const maxPrefix =
-      minPrefix + ((1n << BigInt(7 * testL)) >> BigInt(8 * testL)) - 1n
+      minPrefix + (((1n << BigInt(7 * (testL + 1))) - 1n) >> BigInt(8 * testL))
 
     if (BigInt(first) >= minPrefix && BigInt(first) <= maxPrefix) {
       l = testL
@@ -236,7 +253,7 @@ export function decodeNatural(data: Uint8Array): Safe<{
   }
 
   const value = highBits | lowBits
-  return safeResult({ value, remaining: data.slice(1 + l) })
+  return safeResult({ value, remaining: data.slice(1 + l), consumed: 1 + l })
 }
 
 /**

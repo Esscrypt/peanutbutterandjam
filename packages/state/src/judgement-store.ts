@@ -63,15 +63,15 @@ export class JudgmentStore {
         .values({
           signature: judgment.signature,
           validityDisputeId,
-          validity: judgment.validity,
-          judgeIndex: judgment.judgeIndex,
+          validity: judgment.vote,
+          judgeIndex: judgment.index,
         })
         .onConflictDoUpdate({
           target: judgments.signature,
           set: {
             validityDisputeId,
-            validity: judgment.validity,
-            judgeIndex: judgment.judgeIndex,
+            validity: judgment.vote,
+            judgeIndex: judgment.index,
           },
         })
         .returning(),

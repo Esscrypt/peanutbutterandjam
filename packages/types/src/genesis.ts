@@ -9,10 +9,11 @@
  * Reference: graypaper/text/header.tex - "genesis header genesisheader"
  */
 
-import type { Hex } from '@pbnj/core'
+import type { ChainSpecValidator, Hex } from '@pbnj/core'
 import type { ValidatorPublicKeys } from './consensus'
 
-import type { GlobalState } from './global-state'
+import type { BlockHeader, GlobalState } from './global-state'
+import type { SafroleTicket } from './serialization'
 
 // ============================================================================
 // Gray Paper Compliant Genesis State
@@ -28,35 +29,6 @@ import type { GlobalState } from './global-state'
  * This is NOT a separate structure - it IS the GlobalState at block 0.
  */
 export type GenesisState = GlobalState
-
-/**
- * Genesis Header (genesisheader)
- *
- * The initial block header that starts the chain.
- * All subsequent blocks reference this as the ultimate parent.
- */
-export interface GenesisHeader {
-  /** Always null for genesis - no parent */
-  readonly parent: null
-  /** Genesis state root */
-  readonly priorStateRoot: Hex
-  /** Empty extrinsics hash for genesis */
-  readonly extrinsicHash: Hex
-  /** Genesis timeslot (typically 0) */
-  readonly timeslot: bigint
-  /** Genesis epoch mark (if any) */
-  readonly epochMark: GenesisEpochMark | null
-  /** No winners mark in genesis */
-  readonly winnersMark: null
-  /** Genesis offenders (typically empty) */
-  readonly offendersMark: readonly Hex[]
-  /** Genesis author index */
-  readonly authorIndex: bigint
-  /** Genesis VRF signature */
-  readonly vrfSig: Hex
-  /** Genesis seal signature */
-  readonly sealSig: Hex
-}
 
 /**
  * Genesis epoch mark (if present)
@@ -92,19 +64,33 @@ export interface GenesisValidatorKeyPair {
 export interface ChainSpec {
   /** Chain identifier */
   readonly id: string
-  /** Chain name */
-  readonly name: string
-  /** Protocol version */
-  readonly protocolVersion: string
 
   /** Genesis configuration */
-  readonly genesis: ChainGenesisConfig
-
-  /** Network configuration */
-  readonly network: ChainNetworkConfig
+  readonly genesis_state: ChainGenesisState
 
   /** Bootstrap nodes */
   readonly bootnodes: readonly string[]
+}
+
+export interface ChainGenesisState {
+  readonly accounts: Record<Hex, ChainSpecAccount>
+  readonly validators: readonly ChainSpecValidator[]
+  readonly safrole: GenesisSafroleFields
+}
+
+export interface GenesisSafroleFields {
+  readonly epoch: bigint
+  readonly timeslot: bigint
+  readonly entropy: Hex
+  readonly tickets: readonly SafroleTicket[]
+}
+
+export interface ChainSpecAccount {
+  readonly balance: string | bigint
+  readonly nonce: number | bigint
+  readonly isValidator: boolean
+  readonly validatorKey: Hex
+  readonly stake: string | bigint
 }
 
 /**
@@ -194,7 +180,7 @@ export interface GenesisResult {
   /** The canonical Gray Paper compliant genesis state */
   readonly genesisState: GenesisState
   /** The genesis header */
-  readonly genesisHeader: GenesisHeader
+  readonly genesisHeader: BlockHeader
   /** Hash of the genesis header */
   readonly genesisHash: Hex
   /** Chain specification used */
@@ -221,42 +207,15 @@ export type GenesisBuilder = (chainSpec: ChainSpec) => GenesisResult
  */
 export type GenesisValidator = (
   genesisState: GenesisState,
-  genesisHeader: GenesisHeader,
+  genesisHeader: BlockHeader,
 ) => GenesisValidationResult
 
-// ============================================================================
-// Utility Types
-// ============================================================================
-
 /**
- * Genesis state component initializer
+ * Parsed bootnode information
  */
-export interface GenesisInitializers {
-  readonly authpool: (config: ChainGenesisConfig) => GenesisState['authpool']
-  readonly recent: (config: ChainGenesisConfig) => GenesisState['recent']
-  readonly lastaccout: (
-    config: ChainGenesisConfig,
-  ) => GenesisState['lastaccout']
-  readonly safrole: (config: ChainGenesisConfig) => GenesisState['safrole']
-  readonly accounts: (config: ChainGenesisConfig) => GenesisState['accounts']
-  readonly entropy: (config: ChainGenesisConfig) => GenesisState['entropy']
-  readonly stagingset: (
-    config: ChainGenesisConfig,
-  ) => GenesisState['stagingset']
-  readonly activeset: (config: ChainGenesisConfig) => GenesisState['activeset']
-  readonly previousset: (
-    config: ChainGenesisConfig,
-  ) => GenesisState['previousset']
-  readonly reports: (config: ChainGenesisConfig) => GenesisState['reports']
-  readonly thetime: (config: ChainGenesisConfig) => GenesisState['thetime']
-  readonly authqueue: (config: ChainGenesisConfig) => GenesisState['authqueue']
-  readonly privileges: (
-    config: ChainGenesisConfig,
-  ) => GenesisState['privileges']
-  readonly disputes: (config: ChainGenesisConfig) => GenesisState['disputes']
-  readonly activity: (config: ChainGenesisConfig) => GenesisState['activity']
-  readonly ready: (config: ChainGenesisConfig) => GenesisState['ready']
-  readonly accumulated: (
-    config: ChainGenesisConfig,
-  ) => GenesisState['accumulated']
+export interface ParsedBootnode {
+  altname: string
+  host: string
+  port: number
+  peerId: string
 }

@@ -5,7 +5,7 @@
  * Reference: Gray Paper serialization specifications
  */
 
-import type { Address, Hex } from 'viem'
+import type { Hex } from 'viem'
 import type { ExtrinsicReference, WorkError } from './pvm'
 /**
  * Gray Paper Compliant Preimage Structure (XT_preimages)
@@ -17,6 +17,8 @@ import type { ExtrinsicReference, WorkError } from './pvm'
  * into the system alongside work-packages and exposed to the Refine logic as arguments.
  * Preimages are committed to by including their hashes in work-packages.
  *
+ * Matches Python types.py Preimage structure.
+ *
  * Gray Paper Context:
  * - Part of block extrinsics (XT_preimages)
  * - Referenced by work-packages through hash commitments
@@ -24,14 +26,32 @@ import type { ExtrinsicReference, WorkError } from './pvm'
  * - Subject to expunge period of Cexpungeperiod = 19,200 timeslots
  *
  * Structure Compliance:
- * ✅ serviceIndex: Service identifier that owns/requested this preimage
- * ✅ data: The actual preimage data as octet sequence (Uint8Array)
+ * ✅ requester: Service identifier that owns/requested this preimage
+ * ✅ blob: The actual preimage data as octet sequence (Uint8Array)
  *
  * Note: Hash is calculated externally using Blake2b(data)
  */
 export interface Preimage {
-  serviceIndex: bigint
-  data: Hex
+  requester: bigint
+  blob: Hex
+}
+
+/**
+ * Gray Paper Compliant GuaranteeSignature Structure (Part of ReportGuarantee)
+ *
+ * Represents a single validator signature within a guarantee.
+ * Matches Python types.py GuaranteeSignature structure.
+ *
+ * Gray Paper Context: Part of ReportGuarantee signatures sequence
+ * Structure: (validator_index, signature)
+ *
+ * Usage: Individual validator signature in guarantee attestation
+ */
+export interface GuaranteeSignature {
+  /** Index of the validator providing the signature */
+  validator_index: number
+  /** Ed25519 signature from the validator */
+  signature: Hex
 }
 
 /**
@@ -45,6 +65,8 @@ export interface Preimage {
  * guarantor validators who evaluate work-packages and commit to their correctness.
  * With sufficient guarantor signatures, work-reports may be included in blocks.
  *
+ * Matches Python types.py ReportGuarantee structure.
+ *
  * Gray Paper Context:
  * - Part of block extrinsics (XT_guarantees)
  * - Created by guarantor validators assigned to cores
@@ -53,97 +75,114 @@ export interface Preimage {
  * - Includes cryptographic commitment to work-report correctness
  *
  * Structure Compliance:
- * ✅ workReport: The work-report being guaranteed (result of computereport)
- * ✅ timeslot: Timeslot when guarantee was created
- * ✅ credential: Sequence of validator signatures/attestations
+ * ✅ report: The work-report being guaranteed (result of computereport)
+ * ✅ slot: Timeslot when guarantee was created
+ * ✅ signatures: Sequence of validator signatures/attestations
  *
  * Gray Paper Encoding:
- * Header extrinsic hash includes: tuple(blake(workReport), encode[4](timeslot), var(credential))
+ * Header extrinsic hash includes: tuple(blake(workReport), encode[4](slot), var(signatures))
  */
 export interface Guarantee {
-  workReport: WorkReport
-  timeslot: bigint
-  credential: Credential[]
+  report: WorkReport
+  slot: bigint
+  signatures: GuaranteeSignature[]
 }
 
 /**
- * Gray Paper Compliant Credential Structure (Part of Guarantee)
+
+/**
+ * Verdict Structure (Gray Paper - Dispute Resolution)
  *
- * Gray Paper Reference: Section "Guaranteeing" - Guarantor Signatures
- * Location: text/guaranteeing.tex (equation 23-24 for signature creation)
- * Context: Part of guarantee credential sequence in XT_guarantees
+ * Represents a resolved dispute verdict with validator votes.
+ * Matches Python types.py Verdict structure.
  *
- * Credentials represent individual validator signatures/attestations within a guarantee.
- * Each credential is a cryptographic commitment by a validator to the correctness of
- * a work-report. The signature is created using the validator's registered Ed25519 key.
+ * Gray Paper Context: Part of block extrinsic disputes (XT_disputes)
+ * Structure: (target, age, votes)
  *
- * Gray Paper Context:
- * - Part of guarantee structure (credential: Credential[])
- * - Created by guarantor validators assigned to specific cores
- * - Signature payload: l = blake(encode(workReport))
- * - Uses validator's registered Ed25519 key for signing
- * - Multiple credentials required for work-report inclusion (minimum 2)
- *
- * Structure Compliance:
- * ✅ value: Validator index or value associated with this credential
- * ✅ signature: Ed25519 signature over blake(encode(workReport))
- *
- * Gray Paper Equation Reference:
- * - Section guaranteeing.tex: "s" signature using Ed25519 key on payload "l"
- * - l = blake(encode(r)) where r is the work-report
+ * Usage: Final verdict on work-report validity with validator consensus
  */
-export interface Credential {
-  value: bigint
-  signature: Hex
+export interface Verdict {
+  /** Hash of the work-report being judged */
+  target: Hex
+  /** Epoch age when verdict was reached */
+  age: bigint
+  /** Individual validator judgments/votes */
+  votes: Judgment[]
 }
 
 /**
- * Validity Dispute Structure (Gray Paper - part of verdicts)
- *
- * Represents a single validity dispute within the verdicts component of dispute extrinsics.
- * Contains judgments from validators about whether a specific work-report is valid.
- *
- * Gray Paper Context: Part of XT_disputes verdicts component
- * Structure: (report_hash, epoch_index, sequence[judgments])
- *
- * Usage: Collected from validators and included in dispute extrinsics
- */
-export interface ValidityDispute {
-  /** Hash of the work-report being disputed */
-  reportHash: Hex
-  /** Epoch index when the dispute was raised */
-  epochIndex: bigint
-  /** Individual validator judgments on this report */
-  judgments: Judgment[]
-}
-
-/**
- * Individual Validator Judgment (Gray Paper - part of validity dispute)
+ * Individual Validator Judgment (Gray Paper - part of verdict)
  *
  * Represents a single validator's judgment on work-report validity.
- * Must be signed by the validator's Ed25519 key and requires 2/3+1 consensus.
+ * Matches Python types.py Judgement structure.
  *
- * Gray Paper Context: Part of validity dispute judgments sequence
- * Structure: (validity, judge_index, signature)
+ * Gray Paper Context: Part of verdict votes sequence
+ * Structure: (vote, index, signature)
  *
- * Usage: Aggregated to determine final verdict (good/bad/wonky)
+ * Usage: Individual validator vote in dispute resolution
  */
 export interface Judgment {
-  /** Validator's judgment: true = valid, false = invalid */
-  validity: boolean
+  /** Validator's vote: true = valid, false = invalid */
+  vote: boolean
   /** Index of the judging validator */
-  judgeIndex: bigint
+  index: bigint
   /** Ed25519 signature from the validator */
   signature: Hex
 }
 
 /**
- * Assurance structure for data availability
+ * Culprit Structure (Gray Paper - Challenge Disputes)
+ *
+ * Represents a validator accused of misbehavior.
+ * Matches Python types.py Culprit structure.
+ *
+ * Gray Paper Context: Part of block extrinsic disputes (XT_disputes)
+ * Structure: (target, key, signature)
+ *
+ * Usage: Evidence of validator misbehavior requiring punishment
+ */
+export interface Culprit {
+  /** Hash of the work-report being challenged */
+  target: Hex
+  /** Public key of the accused validator */
+  key: Hex
+  /** Signature proving the accusation */
+  signature: Hex
+}
+
+/**
+ * Fault Structure (Gray Paper - Finality Disputes)
+ *
+ * Represents a validator fault with contradictory evidence.
+ * Matches Python types.py Fault structure.
+ *
+ * Gray Paper Context: Part of block extrinsic disputes (XT_disputes)
+ * Structure: (target, vote, key, signature)
+ *
+ * Usage: Evidence of validator contradiction requiring punishment
+ */
+export interface Fault {
+  /** Hash of the work-report with contradictory evidence */
+  target: Hex
+  /** The contradictory vote/statement */
+  vote: boolean
+  /** Public key of the validator at fault */
+  key: Hex
+  /** Signature proving the fault */
+  signature: Hex
+}
+
+/**
+ * Assurance structure for data availability (Gray Paper - AvailAssurance)
  *
  * An assurance is a signed statement issued by validators when they are in possession
  * of all their corresponding erasure-coded chunks for a given work-report which is
- * currently pending availability. This is part of the JAM protocol's data availability
- * mechanism as specified in the Gray Paper section 4.2.
+ * currently pending availability. Matches Python types.py AvailAssurance structure.
+ *
+ * Gray Paper Context: Part of block extrinsic assurances (XT_assurances)
+ * Structure: (anchor, bitfield, validator_index, signature)
+ *
+ * Usage: Validators attest to data availability for specific cores
  */
 export interface Assurance {
   /**
@@ -151,28 +190,27 @@ export interface Assurance {
    * Must equal the parent block hash H_parent for all assurances in a block.
    * This ensures assurances are tied to a specific block and cannot be replayed.
    */
-  anchor: Hex // hash
+  anchor: Hex
 
   /**
-   * A bitstring of length C_corecount (341 bits) where each bit represents
-   * whether the validator assures availability for the corresponding core.
+   * A bitfield representing which cores this validator assures availability for.
+   * Each bit represents whether the validator assures availability for the corresponding core.
    * A value of 1 (true) at index i means the validator assures they are
    * contributing to the availability of the work-report on core i.
-   * This is a "soft" implication with no on-chain consequences if dishonestly reported.
    */
-  availabilities: Hex
+  bitfield: Hex
 
   /**
    * The validator index (0 to C_valcount-1, where C_valcount = 1023)
    * of the validator who is issuing this assurance.
    * Must be unique within the assurances extrinsic and ordered by validator index.
    */
-  assurer: bigint // validator index
+  validator_index: number
 
   /**
    * Ed25519 signature proving the authenticity of this assurance.
-   * The signature is over the message: "$jam_available" || blake2b(encode(anchor, availabilities))
-   * where the public key corresponds to the assurer's Ed25519 verification key.
+   * The signature is over the message: "$jam_available" || blake2b(encode(anchor, bitfield))
+   * where the public key corresponds to the validator's Ed25519 verification key.
    * This ensures only the assigned validator can issue valid assurances.
    */
   signature: Hex
@@ -187,50 +225,8 @@ export interface OperandTuple {
   authorizer: Hex
   payloadHash: Hex // hash
   gasLimit: bigint
-  result: WorkResult
+  result: WorkExecutionResult
   authTrace: Uint8Array
-}
-
-/**
- * Gray Paper Compliant Availability Specification Structure
- *
- * Gray Paper Equation 71 (label: eq:avspec): avspec ≡ (
- *   as_packagehash, as_bundlelen, as_erasureroot, as_segroot, as_segcount
- * )
- *
- * This represents the CANONICAL availability specification structure as defined
- * in the Gray Paper. It specifies the data availability requirements for a work-package,
- * including package identification, bundle size, and erasure coding roots.
- *
- * Fields (Gray Paper terminology):
- * - as_packagehash: hash - work-package hash identifier
- * - as_bundlelen: bloblength - auditable work bundle length
- * - as_erasureroot: hash - erasure-coding commitment root
- * - as_segroot: hash - segment-root (exported segments Merkle tree root)
- * - as_segcount: N - number of exported segments
- *
- * Field Order per Gray Paper:
- * 1. packagehash - 32-byte hash
- * 2. bundlelen - natural number (blob length)
- * 3. erasureroot - 32-byte hash
- * 4. segroot - 32-byte hash
- * 5. segcount - natural number
- *
- * ✅ GRAY PAPER COMPLIANT:
- * - Contains all 5 required fields
- * - Correct field names match Gray Paper terminology
- * - Correct field types (Hex for hashes, bigint for numbers)
- * - Correct field order matches serialization specification
- *
- * Usage: Part of WorkReport structure for guaranteeing and availability assurance
- * Related: Used in WorkReport.availabilitySpec field
- */
-export interface AvailabilitySpecification {
-  packageHash: Hex
-  bundleLength: bigint
-  erasureRoot: Hex
-  segmentRoot: Hex
-  segmentCount: bigint
 }
 
 /**
@@ -247,6 +243,8 @@ export interface Authorizer {
 
 /**
  * Validator structure (matches test vectors)
+ * @param bandersnatch - Bandersnatch public key (32 bytes)
+ * @param ed25519 - Ed25519 public key (32 bytes)
  */
 export interface ValidatorKeyTuple {
   bandersnatch: Hex
@@ -254,37 +252,33 @@ export interface ValidatorKeyTuple {
 }
 
 /**
- * Ticket structure (single object format - matches test vectors)
+ * Core Safrole ticket structure according to Gray Paper
+ *
+ * Gray Paper safrole.tex equations 289-292:
+ * xt_tickets ∈ sequence{⟨xt_entryindex, xt_proof⟩}
+ * where:
+ *   xt_entryindex ∈ N_max{C_ticketentries}
+ *   xt_proof ∈ bsringproof{epochroot'}{Xticket ∥ entropy'_2 ∥ xt_entryindex}{[]}
+ *
+ * Gray Paper safrole.tex equation 303:
+ * st_id = banderout(xt_proof)  (ticket ID from VRF output)
  */
-export interface SafroleTicketSingle {
+export interface SafroleTicket {
+  /** Ticket ID (VRF output hash - banderout) */
   id: Hex
-  entry_index: bigint
-}
-
-/**
- * Ticket structure (array format - matches test vectors)
- */
-export interface SafroleTicketArray {
-  id: Hex
-  attempt: bigint
-}
-
-/**
- * JAM Safrole ticket for winning tickets marker
- */
-export interface SafroleTicketHeader {
-  attempt: bigint
-  signature: Hex
-}
-
-export interface SafroleTicketCore {
-  id: Hex
+  /** Entry index (0 to C_ticketentries-1) */
   entryIndex: bigint
+  /** Ring VRF proof (bsringproof) */
+  proof: Hex
 }
 
+export type SafroleTicketWithoutProof = Omit<SafroleTicket, 'proof'>
+
+export type SealKey = SafroleTicket | SafroleTicketWithoutProof | Uint8Array
 export interface DecodingResult<T> {
   value: T
   remaining: Uint8Array
+  consumed: number
 }
 
 /**
@@ -294,8 +288,8 @@ export interface DecodingResult<T> {
  * ASN.1: ImportSpec ::= SEQUENCE { tree-root OpaqueHash, index U16 }
  *
  * Test vectors confirm:
- * - tree_root: 32-byte hash (0x-prefixed hex string)
- * - index: U16 integer (0-65535)
+ * @param tree_root - 32-byte hash (0x-prefixed hex string)
+ * @param index - U16 integer (0-65535)
  */
 export interface ImportSegment {
   /** Root hash of the segment tree - Gray Paper: tree-root ∈ hash */
@@ -306,6 +300,14 @@ export interface ImportSegment {
 
 /**
  * Work item structure according to Gray Paper equation \ref{eq:workitem}
+ * @param serviceindex - Service index identifier
+ * @param codehash - Code hash of the service
+ * @param payload - Payload blob
+ * @param refgaslimit - Gas limit for Refinement (64-bit)
+ * @param accgaslimit - Gas limit for Accumulation (64-bit)
+ * @param exportcount - Number of data segments exported
+ * @param importsegments - Imported data segments
+ * @param extrinsics - Extrinsic references
  */
 export interface WorkItem {
   /** Service index identifier */
@@ -324,116 +326,6 @@ export interface WorkItem {
   importsegments: ImportSegment[]
   /** Extrinsic references */
   extrinsics: ExtrinsicReference[]
-}
-
-/**
- * Gray Paper Compliant Work Context Structure
- *
- * Gray Paper Equation 57 (label: eq:workcontext): workcontext ≡ (
- *   wc_anchorhash, wc_anchorpoststate, wc_anchoraccoutlog,
- *   wc_lookupanchorhash, wc_lookupanchortime, wc_prerequisites
- * )
- *
- * A refinement context describes the context of the chain at the point
- * that the report's corresponding work-package was evaluated.
- *
- * It identifies two historical blocks:
- * 1. The ANCHOR: provides state context for work evaluation
- * 2. The LOOKUP-ANCHOR: provides import/lookup context
- *
- * ✅ CORRECT: All 6 required fields present according to Gray Paper
- * ✅ CORRECT: Field types match Gray Paper specification exactly
-  
-@param anchorHash - Anchor block header hash - Gray Paper: wc_anchorhash ∈ hash 
-@param anchorPostState - Anchor block posterior state-root - Gray Paper: wc_anchorpoststate ∈ hash 
-@param anchorAccoutLog - Anchor block accumulation output log super-peak - Gray Paper: wc_anchoraccoutlog ∈ hash 
-@param lookupAnchorHash - Lookup-anchor block header hash - Gray Paper: wc_lookupanchorhash ∈ hash 
-@param lookupAnchorTime - Lookup-anchor block timeslot - Gray Paper: wc_lookupanchortime ∈ timeslot
-@param prerequisites - Hash of any prerequisite work-packages - Gray Paper: wc_prerequisites ∈ protoset{hash} 
-*/
-export interface WorkContext {
-  /** Anchor block header hash - Gray Paper: wc_anchorhash ∈ hash */
-  anchorHash: Hex
-
-  /** Anchor block posterior state-root - Gray Paper: wc_anchorpoststate ∈ hash */
-  anchorPostState: Hex
-
-  /** Anchor block accumulation output log super-peak - Gray Paper: wc_anchoraccoutlog ∈ hash */
-  anchorAccoutLog: Hex
-
-  /** Lookup-anchor block header hash - Gray Paper: wc_lookupanchorhash ∈ hash */
-  lookupAnchorHash: Hex
-
-  /** Lookup-anchor block timeslot - Gray Paper: wc_lookupanchortime ∈ timeslot */
-  lookupAnchorTime: bigint
-
-  /** Hash of any prerequisite work-packages - Gray Paper: wc_prerequisites ∈ protoset{hash} */
-  prerequisites: Hex[] // Array of 32-byte hashes
-}
-
-/**
- * Work package context structure - alias for WorkContext to maintain compatibility
- */
-export interface WorkPackageContext extends WorkContext {}
-
-/**
- * Gray Paper Compliant Work Digest Structure
- *
- * Gray Paper Equation 88 (label: eq:workdigest): workdigest ≡ (
- *   wd_serviceindex, wd_codehash, wd_payloadhash, wd_gaslimit, wd_result,
- *   wd_gasused, wd_importcount, wd_xtcount, wd_xtsize, wd_exportcount
- * )
- *
- * A work-digest is the data conduit by which services' states may be altered
- * through the computation done within a work-package. It represents the results
- * of evaluating a single work-item.
- *
- * Field mapping (Gray Paper → TypeScript):
- * - wd_serviceindex → serviceIndex: service whose state is to be altered
- * - wd_codehash → codeHash: hash of service code at time of reporting
- * - wd_payloadhash → payloadHash: hash of work-item payload
- * - wd_gaslimit → gasLimit: gas limit for accumulation (was wd_accgaslimit)
- * - wd_result → result: computation result (blob or error)
- * - wd_gasused → gasUsed: actual gas consumed
- * - wd_importcount → importCount: number of imported segments
- * - wd_xtcount → extrinsicCount: number of extrinsics
- * - wd_xtsize → extrinsicSize: total size of extrinsics
- * - wd_exportcount → exportCount: number of exported segments
- *
- * ✅ CORRECT: All 10 required fields present according to Gray Paper
- * ✅ CORRECT: Field types match Gray Paper specification
- * ✅ CORRECT: Current interface already Gray Paper compliant!
- */
-export interface WorkDigest {
-  /** Service index whose state is altered - Gray Paper: wd_serviceindex ∈ serviceid */
-  serviceIndex: bigint
-
-  /** Hash of service code at time of reporting - Gray Paper: wd_codehash ∈ hash */
-  codeHash: Hex
-
-  /** Hash of work-item payload - Gray Paper: wd_payloadhash ∈ hash */
-  payloadHash: Hex
-
-  /** Gas limit for accumulation - Gray Paper: wd_gaslimit ∈ gas */
-  gasLimit: bigint
-
-  /** Computation result - Gray Paper: wd_result ∈ blob ∪ workerror */
-  result: WorkResult
-
-  /** Actual gas consumed - Gray Paper: wd_gasused ∈ gas */
-  gasUsed: bigint
-
-  /** Number of imported segments - Gray Paper: wd_importcount ∈ ℕ */
-  importCount: bigint
-
-  /** Number of extrinsics - Gray Paper: wd_xtcount ∈ ℕ */
-  extrinsicCount: bigint
-
-  /** Total size of extrinsics - Gray Paper: wd_xtsize ∈ ℕ */
-  extrinsicSize: bigint
-
-  /** Number of exported segments - Gray Paper: wd_exportcount ∈ ℕ */
-  exportCount: bigint
 }
 
 /**
@@ -548,7 +440,7 @@ export interface WorkPackage {
   /** Authorization configuration (Gray Paper: authconfig) */
   authConfig: Hex
   /** Work context (Gray Paper: context) */
-  context: WorkContext
+  context: RefineContext
   /** Work items sequence (Gray Paper: workitems) */
   workItems: WorkItem[]
 }
@@ -568,15 +460,21 @@ export interface RuntimeWorkPackage extends WorkPackage {
 // ============================================================================
 
 /**
- * Safrole ticket structure
+ * Extended Safrole ticket structure with additional metadata
+ *
+ * This extends the core ticket structure with additional fields
+ * for application-specific use cases.
  */
-export interface SafroleTicket extends SafroleTicketCore {
-  /** Additional ticket metadata for extended use cases */
-  hash?: Hex
-  owner?: Address // 20-byte address
-  stake?: string
-  timestamp?: bigint
-}
+// export interface SafroleTicket extends SafroleTicket {
+//   /** Optional hash for additional verification */
+//   hash?: Hex
+//   /** Optional owner address (20-byte) */
+//   owner?: Address
+//   /** Optional stake amount */
+//   stake?: string
+//   /** Optional timestamp */
+//   timestamp?: bigint
+// }
 
 // ============================================================================
 // Other Types
@@ -592,9 +490,9 @@ export interface SafroleTicket extends SafroleTicketCore {
  * processed to update the persistent Disputes state.
  *
  * Components:
- * - verdicts (validityDisputes): New judgments on work-report validity
- * - culprits (challengeDisputes): Proofs of guarantor misbehavior
- * - faults (finalityDisputes): Proofs of judgment contradictions
+ * - verdicts: Resolved verdicts on work-report validity with validator votes
+ * - culprits: Validators accused of misbehavior requiring punishment
+ * - faults: Validators with contradictory evidence requiring punishment
  *
  * Usage: Part of block extrinsics - processed by state transition function
  *
@@ -603,12 +501,12 @@ export interface SafroleTicket extends SafroleTicketCore {
  * - Disputes: Persistent state outcomes (permanent)
  */
 export interface Dispute {
-  /** Validity disputes (V) - verdicts on work-report validity */
-  validityDisputes: ValidityDispute[]
-  /** Challenge disputes (C) - proofs of guarantor misbehavior */
-  challengeDisputes: Hex
-  /** Finality disputes (F) - proofs of judgment contradictions */
-  finalityDisputes: Hex
+  /** Verdicts on work-report validity (matches test vector structure) */
+  verdicts: Verdict[]
+  /** Culprits accused of misbehavior (matches test vector structure) */
+  culprits: Culprit[]
+  /** Faults with contradictory evidence (matches test vector structure) */
+  faults: Fault[]
 }
 
 /**
@@ -623,9 +521,10 @@ export interface PackageSpec {
 }
 
 /**
- * Work result type - either success data or error
+ * Work execution result type - either success data or error
+ * Used in WorkDigest and OperandTuple interfaces
  */
-export type WorkResult = Uint8Array | WorkError
+export type WorkExecutionResult = Uint8Array | WorkError
 
 /**
  * Refine load structure
@@ -646,53 +545,253 @@ export interface WorkReportResult {
   code_hash: Hex
   payload_hash: Hex
   accumulate_gas: bigint
-  result: WorkResult
+  result: WorkExecutionResult
   refine_load: RefineLoad
 }
 
 /**
- * Gray Paper Compliant Work Report Structure
+ * Gray Paper Compliant WorkPackageSpec Structure
  *
- * Gray Paper Equation 32 (label: eq:workreport): work-report ≡ (
- *   WR_avspec, WR_context, WR_core, WR_authorizer, WR_authtrace,
- *   WR_srlookup, WR_digests, WR_authgasused
- * )
+ * Matches Python types.py WorkPackageSpec structure exactly.
  *
- * This represents the CANONICAL work report structure as defined in the Gray Paper.
- * A work report contains the results of evaluating a work package on a specific core,
- * including availability specification, context, authorizer information, and work digests.
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
  *
- * Fields (Gray Paper terminology):
- * - avspec: availability specification (as_packagehash, as_bundlelen, as_erasureroot, as_segroot, as_segcount)
- * - context: refinement context (anchor, lookup, prerequisites)
- * - core: core index where work was performed
- * - authorizer: hash of the authorizer
- * - authtrace: authorization trace blob
- * - srlookup: segment root lookup dictionary (hash → hash)
- * - digests: sequence of work digests (results of work item evaluation)
- * - authgasused: gas consumed during Is-Authorized invocation
+ * Same as AvailabilitySpecification
  *
- * Field Order per Gray Paper:
- * 1. avspec - availability specification
- * 2. context - work context (refinement context)
- * 3. core - core index (natural encoding)
- * 4. authorizer - hash (32 bytes)
- * 5. authtrace - variable-length blob
- * 6. srlookup - variable-length dictionary
- * 7. digests - variable-length sequence of work digests
- * 8. authgasused - gas amount (natural encoding)
- * Usage: For work report processing and guaranteeing protocol
- * Related: See AvailabilitySpecification, WorkContext, WorkDigest interfaces
+ * Work package specification contains metadata about a work package:
+ * 1. hash: Hash of the work package
+ * 2. length: Length of the work package in bytes
+ * 3. erasure_root: Root of the erasure coding tree
+ * 4. exports_root: Root of the exports tree (segment tree root)
+ * 5. exports_count: Number of exports (segment count)
+ *
+ * Structure Compliance:
+ * ✅ hash: WorkPackageHash - work package identifier
+ * ✅ length: U32 - package length in bytes
+ * ✅ erasure_root: OpaqueHash - erasure coding root
+ * ✅ exports_root: OpaqueHash - exports tree root
+ * ✅ exports_count: U16 - number of exports
+ */
+export interface WorkPackageSpec {
+  hash: Hex
+  length: bigint
+  erasure_root: Hex
+  exports_root: Hex
+  exports_count: bigint
+}
+
+/**
+ * Gray Paper Compliant RefineContext Structure
+ *
+ * Matches Python types.py RefineContext structure exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Refinement context contains execution environment information:
+ * 1. anchor: block header hash denoting the block when the work package was evaluated
+ * 2. state_root: State root hash of the posterior state after the anchor block was executed
+ * 3. beefy_root: Beefy root hash
+ * 4. lookup_anchor: Lookup anchor block header hash
+ * 5. lookup_anchor_slot: Lookup anchor block timeslot
+ * 6. prerequisites: Prerequisite work package hashes
+ *
+ * Structure Compliance:
+ * ✅ anchor: HeaderHash - anchor block identifier
+ * ✅ state_root: OpaqueHash - state root hash
+ * ✅ beefy_root: OpaqueHash - beefy root hash
+ * ✅ lookup_anchor: HeaderHash - lookup anchor identifier
+ * ✅ lookup_anchor_slot: TimeSlot - lookup anchor timeslot
+ * ✅ prerequisites: Vec<OpaqueHash> - prerequisite hashes
+ */
+export interface RefineContext {
+  anchor: Hex
+  state_root: Hex
+  beefy_root: Hex
+  lookup_anchor: Hex
+  lookup_anchor_slot: bigint
+  prerequisites: Hex[]
+}
+
+/**
+ * Gray Paper Compliant SegmentRootLookupItem Structure
+ *
+ * Matches Python types.py SegmentRootLookupItem structure exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Segment root lookup item maps work package hash to segment tree root:
+ * 1. work_package_hash: Hash of the work package
+ * 2. segment_tree_root: Root of the segment tree
+ *
+ * Structure Compliance:
+ * ✅ work_package_hash: WorkReportHash - work package identifier
+ * ✅ segment_tree_root: SegmentTreeRoot - segment tree root
+ */
+export interface SegmentRootLookupItem {
+  work_package_hash: Hex
+  segment_tree_root: Hex
+}
+
+/**
+ * Gray Paper Compliant WorkExecResult Enum
+ *
+ * Matches Python types.py WorkExecResult enum exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Work execution result represents the outcome of work execution:
+ * 0: ok - successful execution with output
+ * 1: out_of_gas - execution failed due to gas limit
+ * 2: panic - execution panicked
+ * 3: bad_exports - invalid exports
+ * 4: output_oversize - output too large
+ * 5: bad_code - invalid code
+ * 6: code_oversize - code too large
+ */
+export enum WorkExecResult {
+  Ok = 0,
+  OutOfGas = 1,
+  Panic = 2,
+  BadExports = 3,
+  OutputOversize = 4,
+  BadCode = 5,
+  CodeOversize = 6,
+}
+
+/**
+ * Work execution result union type for encoding/decoding
+ *
+ * Matches Gray Paper specification from text/serialization.tex:
+ * \encoderesult{o \in \workerror \cup \blob} \equiv \begin{cases}
+ *   \tup{0, \var{o}} &\when o \in \blob \\
+ *   1 &\when o = \infty \\
+ *   2 &\when o = \panic \\
+ *   3 &\when o = \badexports \\
+ *   4 &\when o = \oversize \\
+ *   5 &\when o = \token{BAD} \\
+ *   6 &\when o = \token{BIG}
+ * \end{cases}
+ *
+ * Can be:
+ * - Hex string: Direct success result (e.g., "0xaabbcc")
+ * - Object with ok: Success result with explicit ok field (e.g., {"ok": "0xaabbcc"})
+ * - Object with panic: Panic result (e.g., {"panic": null})
+ * - Error strings: Various error conditions
+ */
+export type WorkExecResultValue =
+  | Hex // Success case with hex data
+  | { ok: Hex } // Success case with explicit ok field
+  | { panic: null } // Panic case
+  | 'out_of_gas' // Out of gas error
+  | 'bad_exports' // Bad exports error
+  | 'oversize' // Output oversize error
+  | 'bad_code' // Bad code error
+  | 'code_oversize' // Code oversize error
+
+/**
+ * Gray Paper Compliant RefineLoad Structure
+ *
+ * Matches Python types.py RefineLoad structure exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Refinement load contains execution statistics:
+ * 1. gas_used: Gas consumed during execution
+ * 2. imports: Number of imports
+ * 3. extrinsic_count: Number of extrinsics
+ * 4. extrinsic_size: Size of extrinsics
+ * 5. exports: Number of exports
+ *
+ * Structure Compliance:
+ * ✅ gas_used: Compact<U64> - gas consumed
+ * ✅ imports: Compact<U16> - import count
+ * ✅ extrinsic_count: Compact<U16> - extrinsic count
+ * ✅ extrinsic_size: Compact<U32> - extrinsic size
+ * ✅ exports: Compact<U16> - export count
+ */
+export interface RefineLoad {
+  gas_used: bigint
+  imports: bigint
+  extrinsic_count: bigint
+  extrinsic_size: bigint
+  exports: bigint
+}
+
+/**
+ * Gray Paper Compliant WorkResult Structure
+ *
+ * Matches Python types.py WorkResult structure exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Work result contains the outcome of work item execution:
+ * 1. service_id: Service identifier
+ * 2. code_hash: Hash of service code
+ * 3. payload_hash: Hash of work item payload
+ * 4. accumulate_gas: Gas for accumulation
+ * 5. result: Execution result (ok, error, etc.)
+ * 6. refine_load: Refinement load statistics
+ *
+ * Structure Compliance:
+ * ✅ service_id: ServiceId - service identifier
+ * ✅ code_hash: OpaqueHash - service code hash
+ * ✅ payload_hash: OpaqueHash - payload hash
+ * ✅ accumulate_gas: Gas - accumulation gas limit
+ * ✅ result: WorkExecResult - execution result
+ * ✅ refine_load: RefineLoad - refinement statistics
+ */
+export interface WorkResult {
+  service_id: bigint
+  code_hash: Hex
+  payload_hash: Hex
+  accumulate_gas: bigint
+  result: WorkExecResultValue
+  refine_load: RefineLoad
+}
+
+/**
+ * Gray Paper Compliant WorkReport Structure
+ *
+ * Matches Python types.py WorkReport structure exactly.
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports"
+ * Location: text/work_packages_and_reports.tex
+ *
+ * Work reports are the output of work package execution and contain:
+ * 1. package_spec: Work package specification with hash, length, erasure root, etc.
+ * 2. context: Refinement context with anchor, state root, beefy root, etc.
+ * 3. core_index: Index of the core that executed the work
+ * 4. authorizer_hash: Hash of the authorizer that authorized the work
+ * 5. auth_gas_used: Gas consumed during authorization
+ * 6. auth_output: Output from the authorizer execution
+ * 7. segment_root_lookup: Lookup table for segment roots
+ * 8. results: Results from work execution (service results)
+ *
+ * Structure Compliance:
+ * ✅ package_spec: WorkPackageSpec - work package details
+ * ✅ context: RefineContext - execution context
+ * ✅ core_index: CoreIndex - core that executed the work
+ * ✅ authorizer_hash: OpaqueHash - authorizer identifier
+ * ✅ auth_gas_used: U64 - gas consumed during authorization
+ * ✅ auth_output: AuthorizerOutput - authorizer execution output
+ * ✅ segment_root_lookup: SegmentRootLookupItem[] - segment root mapping
+ * ✅ results: WorkResult[] - work execution results
  */
 export interface WorkReport {
-  availabilitySpec: AvailabilitySpecification
-  context: WorkContext
-  coreIndex: bigint
-  authorizer: Hex
-  authTrace: Uint8Array
-  srLookup: Map<Hex, Hex> // segment root lookup
-  digests: WorkDigest[]
-  authGasUsed: bigint
+  package_spec: WorkPackageSpec
+  context: RefineContext
+  core_index: bigint
+  authorizer_hash: Hex
+  auth_gas_used: bigint
+  auth_output: Hex
+  segment_root_lookup: SegmentRootLookupItem[]
+  results: WorkResult[]
 }
 
 export interface RuntimeWorkReport extends WorkReport {
@@ -717,9 +816,9 @@ export interface ActivityStats {
 }
 
 /**
- * Ready item structure
+ * Ready item structure for serialization
  */
-export interface ReadyItem {
+export interface SerializationReadyItem {
   /** Request hash */
   request: Hex
   /** Request data */

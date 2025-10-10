@@ -75,3 +75,18 @@ export const hex = customType<{
     return value as Hex
   },
 })
+
+export const ringProof = customType<{
+  data: Hex
+  driverData: string
+}>({
+  dataType() {
+    return 'varchar(1570)' // 0x + (784 bytes * 2 hex chars) = 1570 chars
+  },
+  toDriver(value: Hex): string {
+    return value as string
+  },
+  fromDriver(value: string): Hex {
+    return value as Hex
+  },
+})

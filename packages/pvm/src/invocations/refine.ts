@@ -13,8 +13,8 @@ import { logger } from '@pbnj/core'
 import type {
   Accounts,
   RAM,
-  RefineContext,
   RefineContextMutator,
+  RefineContextPVM,
   RefineResult,
   RegisterState,
   Segment,
@@ -41,7 +41,7 @@ import { REFINE_CONFIG } from '../config'
  * @returns Tuple of [result, export_sequence, gas_used]
  */
 export class RefineInvocationSystem {
-  private readonly argumentInvocationSystem: ArgumentInvocationSystem<RefineContext>
+  private readonly argumentInvocationSystem: ArgumentInvocationSystem<RefineContextPVM>
 
   constructor() {
     // Create argument invocation system with Refine context mutator
@@ -102,7 +102,7 @@ export class RefineInvocationSystem {
     // Historical lookup for service code
     const historicalCode = this.historicalLookup(
       serviceAccount,
-      workPackage.context.lookupAnchorTime,
+      workPackage.context.lookup_anchor_slot,
       workItem.codehash,
     )
 
@@ -172,7 +172,7 @@ export class RefineInvocationSystem {
       gasCounter: bigint,
       registers: RegisterState,
       ram: RAM,
-      context: RefineContext,
+      context: RefineContextPVM,
     ) => {
       logger.debug('Refine context mutator called', { hostCallId })
 
@@ -237,13 +237,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling gas call')
 
@@ -266,13 +266,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling fetch call')
 
@@ -296,13 +296,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling historical lookup call')
 
@@ -326,13 +326,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling export call')
 
@@ -356,13 +356,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling machine call')
 
@@ -386,13 +386,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling peek call')
 
@@ -416,13 +416,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling poke call')
 
@@ -446,13 +446,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling pages call')
 
@@ -476,13 +476,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling invoke call')
 
@@ -506,13 +506,13 @@ export class RefineInvocationSystem {
     gasCounter: bigint,
     registers: RegisterState,
     ram: RAM,
-    context: RefineContext,
+    context: RefineContextPVM,
   ): {
     resultCode: 'continue' | 'halt' | 'panic' | 'oog'
     gasCounter: bigint
     registers: RegisterState
     ram: RAM
-    context: RefineContext
+    context: RefineContextPVM
   } {
     logger.debug('Refine: handling expunge call')
 

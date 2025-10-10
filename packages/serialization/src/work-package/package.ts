@@ -73,8 +73,7 @@ import {
   decodeImportReference,
   encodeImportReference,
 } from '../pvm/import-reference'
-import { encodeWorkContext } from './context'
-import { decodeWorkContext } from './work-report'
+import { decodeRefineContext, encodeRefineContext } from './context'
 /**
  * Encode work item according to Gray Paper specification.
  *
@@ -254,7 +253,7 @@ export function encodeWorkPackage(workPackage: WorkPackage): Safe<Uint8Array> {
   parts.push(hexToBytes(workPackage.authCodeHash))
 
   // 3. context - work context structure
-  const [error2, encoded2] = encodeWorkContext(workPackage.context)
+  const [error2, encoded2] = encodeRefineContext(workPackage.context)
   if (error2) {
     return safeError(error2)
   }
@@ -338,7 +337,7 @@ export function decodeWorkPackage(
   currentData = currentData.slice(32)
 
   // 3. context - work context structure
-  const [error2, contextResult] = decodeWorkContext(currentData)
+  const [error2, contextResult] = decodeRefineContext(currentData)
   if (error2) {
     return safeError(error2)
   }
@@ -392,6 +391,7 @@ export function decodeWorkPackage(
       workItems,
     },
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }
 
@@ -520,6 +520,7 @@ export function decodeWorkItem(
       extrinsics: extrinsics,
     },
     remaining: currentData,
+    consumed: data.length - currentData.length,
   })
 }
 
@@ -560,5 +561,6 @@ export function decodeExtrinsicReference(
       length: lengthResult.value,
     },
     remaining: lengthResult.remaining,
+    consumed: data.length - currentData.length,
   })
 }

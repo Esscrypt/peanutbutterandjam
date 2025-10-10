@@ -1,6 +1,3 @@
-[submodule "submodules/jamtestvectors"]
-	path = submodules/jamtestvectors
-	url = https://github.com/w3f/jamtestvectors.git
 [submodule "submodules/graypaper"]
 	path = submodules/graypaper
 	url = https://github.com/gavofyork/graypaper.git
@@ -22,3 +19,9 @@
 [submodule "submodules/jam-types-py"]
 	path = submodules/jam-types-py
 	url = https://github.com/davxy/jam-types-py.git
+[submodule "submodules/arkworks-algebra"]
+	path = submodules/arkworks-algebra
+	url = https://github.com/arkworks-rs/algebra.git
+[submodule "submodules/jam-testvectors"]
+	path = submodules/jam-testvectors
+	url = https://github.com/davxy/jam-test-vectors.git

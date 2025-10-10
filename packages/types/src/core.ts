@@ -57,6 +57,4 @@ export interface Result<T, E = Error> {
 export const GRAY_PAPER_CONSTANTS = {
   MAX_BLOCK_SIZE: 5 * 1024 * 1024, // 5MB
   MAX_EXTRINSICS_PER_BLOCK: 1000,
-  SLOT_DURATION: 6000, // 6 seconds in milliseconds
-  EPOCH_LENGTH: 600, // 600 slots
 } as const

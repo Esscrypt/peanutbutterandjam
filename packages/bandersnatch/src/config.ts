@@ -36,7 +36,7 @@ export const BANDERSNATCH_PARAMS = {
   },
 
   /** Cofactor */
-  COFACTOR: BigInt('0x04'),
+  COFACTOR: BigInt(4),
 
   /** Blinding base point for Pedersen VRF (from official specification) */
   BLINDING_BASE: {
@@ -75,5 +75,37 @@ export const BANDERSNATCH_PARAMS = {
   CHARACTERISTICS: {
     j_invariant: BigInt(0x1f40),
     discriminant: BigInt(-8),
+  },
+
+  /** Elligator2 hash-to-curve configuration (from arkworks) */
+  ELLIGATOR2_CONFIG: {
+    /** Non-square element Z = 5 */
+    Z: BigInt(5),
+    /** Precomputed 1/(COEFF_B)^2 */
+    ONE_OVER_COEFF_B_SQUARE: BigInt(
+      '35484827650731063748396669747216844996598387089274032563585525486049249153249',
+    ),
+    /** Precomputed COEFF_A/COEFF_B */
+    COEFF_A_OVER_COEFF_B: BigInt(
+      '22511181562295907836254750456843438087744031914659733450388350895537307167857',
+    ),
+  },
+
+  /** KZG Polynomial Commitment Scheme parameters (from bandersnatch-vrf-spec) */
+  KZG_CONFIG: {
+    /** Polynomial domain generator ω */
+    DOMAIN_GENERATOR: BigInt(
+      '49307615728544765012166121802278658070711169839041683575071795236746050763237',
+    ),
+    /** Domain size |𝔻| = 2048 (2^11) */
+    DOMAIN_SIZE: 2048,
+    /** Maximum ring size (domain_size / 2 - 1) */
+    MAX_RING_SIZE: 1023,
+    /** SRS source identifier */
+    SRS_SOURCE: 'zcash-powers-of-tau-ceremony',
+    /** Required SRS degree (for domain size 2048) */
+    SRS_DEGREE: 11, // 2^11 = 2048
+    /** BLS12-381 curve identifier for c-kzg compatibility */
+    CURVE_ID: 'BLS12-381',
   },
 } as const

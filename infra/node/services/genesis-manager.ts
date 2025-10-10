@@ -6,132 +6,65 @@
  */
 
 import { existsSync } from 'node:fs'
-import { logger, type SafePromise, safeError, safeResult } from '@pbnj/core'
-import { createGenesisManager, type GenesisManagerImpl } from '@pbnj/genesis'
 import type {
-  ChainSpecParserOptions,
-  GenesisBuilderOptions,
-  GenesisError,
-  GenesisResult,
-  GenesisState,
+  ChainSpecJson,
+  ChainSpecValidator,
+  GenesisHeaderState,
+  GenesisJson,
+  Hex,
+} from '@pbnj/core'
+import { type Safe, type SafePromise, safeError, safeResult } from '@pbnj/core'
+import {
+  loadChainSpec,
+  loadGenesisHeaderAndComputeHash,
+  loadGenesisJson,
+  parseBootnode,
+} from '@pbnj/genesis'
+import type {
+  BlockHeader,
+  IConfigService,
+  ParsedBootnode,
+  ValidatorKeyPair,
 } from '@pbnj/types'
-import { BaseService } from '../interfaces/service'
-
-/**
- * Genesis validation result for node service
- */
-export interface NodeGenesisValidationResult {
-  valid: boolean
-  errors: string[]
-  warnings: string[]
-  genesisResult?: GenesisResult
-}
-
-/**
- * Node Genesis Configuration
- * Configuration specific to the node service
- */
-export interface NodeGenesisConfig {
-  /** Path to chain-spec.json file */
-  chainSpecPath: string
-
-  /** Parser options */
-  parser: ChainSpecParserOptions
-
-  /** Builder options */
-  builder: GenesisBuilderOptions
-
-  /** Node-specific validation options */
-  nodeValidation: {
-    /** Validate genesis before using */
-    validateGenesis: boolean
-    /** Allow genesis with no validators */
-    allowEmptyValidators: boolean
-    /** Allow genesis with no service accounts */
-    allowEmptyAccounts: boolean
-    /** Require minimum validators */
-    minValidators: number
-    /** Strict Gray Paper compliance */
-    strictCompliance: boolean
-  }
-
-  /** Node import options */
-  import: {
-    /** Initialize empty state components if missing */
-    initializeEmpty: boolean
-    /** Reset existing state on import */
-    resetExistingState: boolean
-    /** Create backup before import */
-    backupExistingState: boolean
-  }
-}
-
-/**
- * Default node genesis configuration
- */
-const DEFAULT_NODE_GENESIS_CONFIG: Partial<NodeGenesisConfig> = {
-  parser: {
-    validateValidatorKeys: true,
-    validateAddresses: true,
-    minValidators: 1,
-    allowEmptyAccounts: false,
-  },
-  builder: {
-    initializeEmpty: true,
-    validateConsistency: true,
-    strictCompliance: true,
-  },
-  nodeValidation: {
-    validateGenesis: true,
-    allowEmptyValidators: false,
-    allowEmptyAccounts: false,
-    minValidators: 1,
-    strictCompliance: true,
-  },
-  import: {
-    initializeEmpty: true,
-    resetExistingState: false,
-    backupExistingState: true,
-  },
-}
+import { BaseService } from '@pbnj/types'
 
 /**
  * Node Genesis Manager Service
  *
  * Gray Paper compliant genesis manager for the JAM node.
  * Loads chain-spec.json and produces proper GlobalState for genesis.
+ * Also supports loading genesis.json and genesis-header.json files.
  * Implements BaseService for integration with the main service.
  */
 export class NodeGenesisManager extends BaseService {
-  private config: NodeGenesisConfig
-  private genesisManager: GenesisManagerImpl
-  // private cachedGenesis?: GenesisResult
+  private readonly chainSpecPath: string
+  private readonly genesisJsonPath?: string
+  private readonly genesisHeaderPath?: string
+  private readonly config: IConfigService
+  private genesisBlockHeader: BlockHeader | null = null
+  private parsedBootnodes: ParsedBootnode[] = []
 
-  constructor(config: Partial<NodeGenesisConfig>) {
+  private chainSpecJson: ChainSpecJson | null = null
+  private genesisJson: GenesisJson | null = null
+  private genesisBlockHeaderHash: Hex | null = null
+  constructor(
+    config: IConfigService,
+    chainSpecPath: string,
+    options?: {
+      genesisJsonPath?: string
+      genesisHeaderPath?: string
+    },
+  ) {
     super('genesis-manager')
-    this.config = {
-      ...DEFAULT_NODE_GENESIS_CONFIG,
-      ...config,
-    } as NodeGenesisConfig
-    this.genesisManager = createGenesisManager(
-      this.config.parser,
-      this.config.builder,
-    )
-  }
-
-  /**
-   * Initialize the genesis manager service
-   */
-  async init(): SafePromise<boolean> {
-    super.init()
-    // Validate that chain spec file exists
-    if (!existsSync(this.config.chainSpecPath)) {
-      return safeError(
-        new Error(`Chain spec file not found: ${this.config.chainSpecPath}`),
-      )
-    }
-
-    return safeResult(true)
+    this.config = config
+    this.chainSpecPath = chainSpecPath
+    this.genesisJsonPath = options?.genesisJsonPath
+    this.genesisHeaderPath = options?.genesisHeaderPath
+    this.genesisBlockHeader = null
+    this.chainSpecJson = null
+    this.genesisJson = null
+    this.parsedBootnodes = []
+    this.genesisBlockHeaderHash = null
   }
 
   /**
@@ -139,169 +72,81 @@ export class NodeGenesisManager extends BaseService {
    */
   async start(): SafePromise<boolean> {
     super.start()
-    // Load genesis on startup
-    await this.loadGenesisResult()
+
+    // Load chain spec (required)
+    if (!existsSync(this.chainSpecPath)) {
+      return safeError(
+        new Error(`Chain spec file not found: ${this.chainSpecPath}`),
+      )
+    }
+
+    const [chainSpecError, chainSpecResult] = await loadChainSpec(
+      this.chainSpecPath,
+    )
+    if (chainSpecError) {
+      return safeError(chainSpecError)
+    }
+    this.chainSpecJson = chainSpecResult
+
+    // Optionally load genesis.json
+    if (this.genesisJsonPath && existsSync(this.genesisJsonPath)) {
+      const [genesisJsonError, genesisJsonResult] = await loadGenesisJson(
+        this.genesisJsonPath,
+      )
+      if (genesisJsonError) {
+        return safeError(genesisJsonError)
+      }
+      this.genesisJson = genesisJsonResult
+
+      console.log(`📁 Loading genesis.json from ${this.genesisJsonPath}`)
+      console.log('✅ Genesis JSON loaded successfully')
+    }
+
+    // Optionally load genesis-header.json
+    if (this.genesisHeaderPath && existsSync(this.genesisHeaderPath)) {
+      console.log(
+        `📁 Loading genesis-header.json from ${this.genesisHeaderPath}`,
+      )
+      const [headerError, headerResult] = await loadGenesisHeaderAndComputeHash(
+        this.genesisHeaderPath,
+        this.config,
+      )
+      if (headerError) {
+        return safeError(headerError)
+      }
+      this.genesisBlockHeader = headerResult.genesisHeader
+      this.genesisBlockHeaderHash = headerResult.genesisHash
+      console.log('✅ Genesis Header loaded successfully')
+    }
+
+    // Extract bootnodes from chain spec
+    if (this.chainSpecJson) {
+      // Parse bootnodes into structured format
+      this.parsedBootnodes =
+        this.chainSpecJson.bootnodes?.map((bootnode) =>
+          parseBootnode(bootnode),
+        ) || []
+      console.log(`📡 Parsed bootnodes: ${this.parsedBootnodes.length}`)
+    }
 
     return safeResult(true)
   }
 
-  /**
-   * Stop the genesis manager service
-   */
-  async stop(): SafePromise<boolean> {
-    super.stop()
-
-    return safeResult(true)
-  }
-
-  /**
-   * Load Gray Paper compliant genesis state from chain-spec.json
-   */
-  async loadGenesis(): Promise<GenesisState> {
-    const genesisResult = await this.loadGenesisResult()
-    return genesisResult.genesisState
-  }
-
-  /**
-   * Get complete genesis result (state + metadata)
-   */
-  async loadGenesisResult(): Promise<GenesisResult> {
-    if (!existsSync(this.config.chainSpecPath)) {
-      throw new Error(`Chain spec file not found: ${this.config.chainSpecPath}`)
+  getState(): Safe<GenesisHeaderState> {
+    if (!this.genesisJson) {
+      return safeError(new Error('Genesis result not found'))
     }
-
-    logger.info('Loading genesis from chain spec', {
-      path: this.config.chainSpecPath,
-    })
-
-    try {
-      // Use the consolidated genesis manager from the package
-      const result = await this.genesisManager.constructGenesis(
-        this.config.chainSpecPath,
-      )
-
-      // Node-specific validation
-      const validation = this.validateForNode(result)
-      if (!validation.valid && this.config.nodeValidation.validateGenesis) {
-        throw new Error(
-          `Genesis validation failed for node: ${validation.errors.join(', ')}`,
-        )
-      }
-
-      // Log warnings
-      if (validation.warnings.length > 0) {
-        logger.warn('Genesis validation warnings', {
-          warnings: validation.warnings,
-        })
-      }
-
-      logger.info('Genesis loaded successfully', {
-        chainId: result.chainSpec.id,
-        validatorCount: result.genesisState.activeset.length,
-        serviceCount: result.genesisState.accounts.serviceCount,
-        genesisTime: result.genesisState.thetime,
-      })
-
-      return result
-    } catch (error) {
-      logger.error('Failed to load genesis', { error })
-      throw error
-    }
-  }
-
-  /**
-   * Validate genesis for node usage
-   */
-  validateForNode(genesisResult: GenesisResult): NodeGenesisValidationResult {
-    const errors: string[] = []
-    const warnings: string[] = []
-    const { genesisState } = genesisResult
-
-    // Node-specific validations beyond Gray Paper compliance
-
-    // Validate active validator set
-    if (genesisState.activeset.length === 0) {
-      if (this.config.nodeValidation.allowEmptyValidators) {
-        warnings.push('No validators in genesis state')
-      } else {
-        errors.push('Genesis must contain at least one validator')
-      }
-    }
-
-    if (
-      genesisState.activeset.length < this.config.nodeValidation.minValidators
-    ) {
-      errors.push(
-        `Genesis must contain at least ${this.config.nodeValidation.minValidators} validators, found ${genesisState.activeset.length}`,
-      )
-    }
-
-    // Validate service accounts
-    if (genesisState.accounts.serviceCount === 0n) {
-      if (this.config.nodeValidation.allowEmptyAccounts) {
-        warnings.push('No service accounts in genesis state')
-      } else {
-        errors.push('Genesis must contain at least one service account')
-      }
-    }
-
-    // Validate state consistency
-    if (genesisState.activeset.length !== genesisState.stagingset.length) {
-      errors.push(
-        'Active and staging validator sets must have same size at genesis',
-      )
-    }
-
-    if (genesisState.previousset.length !== 0) {
-      warnings.push('Previous validator set should be empty at genesis')
-    }
-
-    // Validate time
-    if (genesisState.thetime < 0n) {
-      errors.push('Genesis time cannot be negative')
-    }
-
-    // Validate Safrole state
-    if (!genesisState.safrole) {
-      errors.push('Safrole state is required')
-    } else {
-      if (
-        genesisState.safrole.pendingSet.length !== genesisState.activeset.length
-      ) {
-        errors.push(
-          'Safrole pending set must match active validator set at genesis',
-        )
-      }
-    }
-
-    // Validate entropy
-    if (!genesisState.entropy || !genesisState.entropy.current) {
-      errors.push('Genesis entropy is required')
-    }
-
-    // Additional node-specific validations can be added here as needed
-
-    return {
-      valid: errors.length === 0,
-      errors,
-      warnings,
-      genesisResult,
-    }
+    return safeResult(this.genesisJson.state)
   }
 
   /**
    * Get genesis header hash
    */
-  async getGenesisHeaderHash(): Promise<string> {
-    const result = await this.loadGenesisResult()
-    return result.genesisHash
-  }
-
-  /**
-   * Export current configuration
-   */
-  getConfig(): NodeGenesisConfig {
-    return { ...this.config }
+  getGenesisHeaderHash(): Safe<Hex> {
+    if (!this.genesisBlockHeaderHash) {
+      return safeError(new Error('Genesis header hash not found'))
+    }
+    return safeResult(this.genesisBlockHeaderHash)
   }
 
   /**
@@ -311,47 +156,138 @@ export class NodeGenesisManager extends BaseService {
   /**
    * Get chain specification (delegates to core genesis manager)
    */
-  async getChainSpec() {
-    const result = await this.loadGenesisResult()
-    return result.chainSpec
+  getChainSpec(): Safe<ChainSpecJson> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Genesis result not found'))
+    }
+    const result = this.chainSpecJson
+    return safeResult(result)
+  }
+
+  // ============================================================================
+  // Getters for Initial Validators and Genesis Data
+  // ============================================================================
+
+  /**
+   * Get initial validators from the loaded genesis data
+   */
+  getInitialValidatorsFromChainSpec(): Safe<ChainSpecValidator[]> {
+    if (!this.genesisJson) {
+      return safeError(new Error('Genesis result not found'))
+    }
+    const validators = this.chainSpecJson?.genesis_state?.validators || []
+    return safeResult(validators)
+  }
+
+  getInitialValidatorsFromBlockHeader(): Safe<ValidatorKeyPair[]> {
+    if (!this.genesisBlockHeader) {
+      return safeError(new Error('Genesis result not found'))
+    }
+    const validators = this.genesisBlockHeader.epochMark?.validators || []
+    return safeResult(validators)
   }
 
   /**
-   * Validate genesis state using core genesis manager
+   * Get genesis entropy
    */
-  async validateGenesisState(): Promise<readonly GenesisError[]> {
-    const result = await this.loadGenesisResult()
-    return this.genesisManager.validateGenesis(result.genesisState)
+  getGenesisEntropy(): Safe<Hex> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Chain spec not found'))
+    }
+    if (!this.chainSpecJson.genesis_state) {
+      return safeError(new Error('Genesis state not found'))
+    }
+    if (!this.chainSpecJson.genesis_state.entropy) {
+      return safeError(new Error('Entropy not found'))
+    }
+    return safeResult(this.chainSpecJson.genesis_state.entropy)
+  }
+
+  getGenesisHeader(): Safe<BlockHeader> {
+    if (!this.genesisBlockHeader) {
+      return safeError(new Error('Genesis block header not found'))
+    }
+    return safeResult(this.genesisBlockHeader)
   }
 
   /**
-   * Access the underlying genesis manager (for advanced usage)
+   * Get genesis time
    */
-  getGenesisManager(): GenesisManagerImpl {
-    return this.genesisManager
+  getGenesisTime(): Safe<bigint> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Chain spec not found'))
+    }
+    if (!this.chainSpecJson.genesis_state) {
+      return safeError(new Error('Genesis state not found'))
+    }
+    if (!this.chainSpecJson.genesis_state.genesis_time) {
+      return safeError(new Error('Genesis time not found'))
+    }
+    return safeResult(BigInt(this.chainSpecJson.genesis_state.genesis_time))
+  }
+
+  /**
+   * Get slot duration
+   */
+  getSlotDuration(): Safe<bigint> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Chain spec not found'))
+    }
+    if (!this.chainSpecJson.network) {
+      return safeError(new Error('Network not found'))
+    }
+    if (!this.chainSpecJson.network.slot_duration) {
+      return safeError(new Error('Slot duration not found'))
+    }
+    return safeResult(BigInt(this.chainSpecJson.network.slot_duration))
+  }
+
+  /**
+   * Get epoch length
+   */
+  getEpochLength(): Safe<bigint> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Chain spec not found'))
+    }
+    if (!this.chainSpecJson.network) {
+      return safeError(new Error('Network not found'))
+    }
+    if (!this.chainSpecJson.network.epoch_length) {
+      return safeError(new Error('Epoch length not found'))
+    }
+    return safeResult(BigInt(this.chainSpecJson.network.epoch_length))
+  }
+
+  /**
+   * Get core count
+   */
+  getCoreCount(): Safe<bigint> {
+    if (!this.chainSpecJson) {
+      return safeError(new Error('Chain spec not found'))
+    }
+    if (!this.chainSpecJson.network) {
+      return safeError(new Error('Network not found'))
+    }
+    if (!this.chainSpecJson.network.core_count) {
+      return safeError(new Error('Core count not found'))
+    }
+    return safeResult(BigInt(this.chainSpecJson.network.core_count))
+  }
+
+  /**
+   * Get genesis block header from genesis-header.json (if loaded)
+   */
+  getGenesisBlockHeader(): Safe<BlockHeader> {
+    if (!this.genesisBlockHeader) {
+      return safeError(new Error('Genesis block header not found'))
+    }
+    return safeResult(this.genesisBlockHeader)
+  }
+
+  /**
+   * Get parsed bootnodes with structured information
+   */
+  getParsedBootnodes(): Safe<ParsedBootnode[]> {
+    return safeResult(this.parsedBootnodes)
   }
 }
-
-/**
- * Create a node genesis manager with default configuration
-//  */
-// export function createNodeGenesisManager(
-//   chainSpecPath: string,
-//   options?: Partial<NodeGenesisConfig>,
-// ): NodeGenesisManager {
-//   return new NodeGenesisManager({
-//     chainSpecPath,
-//     ...options,
-//   })
-// }
-
-// /**
-//  * Convenience function to load genesis state for node
-//  */
-// export async function loadNodeGenesis(
-//   chainSpecPath: string,
-//   options?: Partial<NodeGenesisConfig>,
-// ): Promise<GenesisState> {
-//   const manager = createNodeGenesisManager(chainSpecPath, options)
-//   return manager.loadGenesis()
-// }

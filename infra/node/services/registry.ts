@@ -5,14 +5,13 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { Service, ServiceStatus } from '../interfaces/service'
-
+import type { Service } from '@pbnj/types'
 /**
  * Service registry for managing all services
  */
 export class ServiceRegistry {
   private services: Map<string, Service> = new Map()
-  private mainService?: Service
+  private mainService: Service | null = null
 
   /**
    * Register a service with the registry
@@ -25,7 +24,6 @@ export class ServiceRegistry {
     }
 
     this.services.set(service.name, service)
-    logger.info('Service registered', { name: service.name })
     return safeResult(undefined)
   }
 
@@ -34,7 +32,6 @@ export class ServiceRegistry {
    */
   registerMain(service: Service): Safe<void> {
     this.mainService = service
-    this.register(service)
     return safeResult(undefined)
   }
 
@@ -55,7 +52,7 @@ export class ServiceRegistry {
   /**
    * Get the main service
    */
-  getMain(): Service | undefined {
+  getMain(): Service | null {
     return this.mainService
   }
 
@@ -69,17 +66,6 @@ export class ServiceRegistry {
       if (initError) {
         errors.push(initError)
       }
-      // try {
-      //   logger.info('Initializing service', { name: service.name })
-      //   await service.init()
-      //   logger.info('Service initialized successfully', { name: service.name })
-      // } catch (error) {
-      //   logger.error('Failed to initialize service', {
-      //     name: service.name,
-      //     error: error instanceof Error ? error.message : String(error),
-      //   })
-      //   throw error
-      // }
     }
 
     for (const error of errors) {
@@ -112,6 +98,8 @@ export class ServiceRegistry {
       })
     }
 
+    this.mainService?.start()
+
     return safeResult(true)
   }
 
@@ -135,25 +123,8 @@ export class ServiceRegistry {
       })
     }
 
+    await this.mainService?.stop()
+
     return safeResult(true)
-  }
-
-  /**
-   * Get status of all services
-   */
-  getAllStatus(): ServiceStatus[] {
-    return Array.from(this.services.values()).map((service) =>
-      service.getStatus(),
-    )
-  }
-
-  /**
-   * Check if all services are running
-   */
-  areAllRunning(): boolean {
-    return Array.from(this.services.values()).every((service) => {
-      const status = service.getStatus()
-      return status.running
-    })
   }
 }

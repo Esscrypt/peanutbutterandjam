@@ -38,29 +38,6 @@ export class TelemetryClient {
 
   constructor(private config: TelemetryConfig) {}
 
-  async init(): Promise<void> {
-    try {
-      logger.info('Initializing telemetry client...', {
-        enabled: this.config.enabled,
-        endpoint: this.config.endpoint,
-      })
-
-      if (!this.config.enabled) {
-        logger.info('Telemetry is disabled')
-        return
-      }
-
-      if (!this.config.endpoint) {
-        throw new Error('Telemetry endpoint is required when enabled')
-      }
-
-      logger.info('Telemetry client initialized successfully')
-    } catch (error) {
-      logger.error('Failed to initialize telemetry client', { error })
-      throw error
-    }
-  }
-
   async start(): Promise<boolean> {
     try {
       if (!this.config.enabled) {

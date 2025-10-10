@@ -7,9 +7,10 @@
 
 import { type EdwardsPoint, edwards } from '@noble/curves/abstract/edwards.js'
 import { Field } from '@noble/curves/abstract/modular'
-// import { sha512 } from '@noble/hashes/sha2.js'
+import { mod, modInverse, modSqrt } from '@pbnj/core'
 import { BANDERSNATCH_PARAMS } from './config'
-import { elligator2HashToCurve } from './crypto/elligator2'
+
+// Elligator2 hash-to-curve moved to bandersnatch-vrf package
 
 /**
  * Bandersnatch curve parameters for @noble/curves
@@ -47,48 +48,97 @@ export class BandersnatchCurveNoble {
   static Fp = Field(BANDERSNATCH_PARAMS.FIELD_MODULUS)
 
   /**
-   * Hash input to curve point using Elligator2
+   * Convert Noble EdwardsPoint to arkworks-compatible compressed bytes
+   *
+   * This implements the exact arkworks Twisted Edwards point compression algorithm:
+   * 1. Extract affine coordinates (x, y) from the point
+   * 2. Determine x-coordinate sign using TEFlags::from_x_coordinate logic
+   * 3. Serialize y-coordinate in little-endian format
+   * 4. Encode x-coordinate sign in the MSB (bit 7) of the last byte
+   *
+   * Reference: arkworks-algebra/ec/src/models/twisted_edwards/serialization_flags.rs
+   * Reference: arkworks-algebra/ec/src/models/twisted_edwards/mod.rs (serialize_with_mode)
+   *
+   * @param noblePoint - Noble EdwardsPoint to compress
+   * @returns Compressed point bytes (arkworks-compatible)
    */
-  static hashToCurve(message: Uint8Array): Uint8Array {
-    // Use our existing Elligator2 implementation for now
-    // TODO: Implement proper Elligator2 using @noble/curves
-    const customPoint = elligator2HashToCurve(message)
-
-    // Convert our custom CurvePoint to EdwardsPoint
-    // Create a 32-byte representation of the point
-    const xBytes = new Uint8Array(32)
-    const yBytes = new Uint8Array(32)
-
-    // Convert bigint to bytes (little-endian)
-    let x = customPoint.x
-    let y = customPoint.y
-    for (let i = 0; i < 32; i++) {
-      xBytes[i] = Number(x & 0xffn)
-      yBytes[i] = Number(y & 0xffn)
-      x >>= 8n
-      y >>= 8n
-    }
-
-    // Combine x and y coordinates
-    const pointBytes = new Uint8Array(64)
-    pointBytes.set(xBytes, 0)
-    pointBytes.set(yBytes, 32)
-
-    return pointBytes
+  static pointToBytes(noblePoint: EdwardsPoint): Uint8Array {
+    const { x, y } = noblePoint.toAffine()
+    // Fp.toBytes() allows non-canonical encoding of y (>= p).
+    const bytes = BandersnatchNoble.Fp.toBytes(y)
+    // Each y has 2 valid points: (x, y), (x,-y).
+    // When compressing, it's enough to store y and use the last byte to encode sign of x
+    // Use arkworks TEFlags logic: x > -x determines sign bit
+    const negX = mod(
+      BANDERSNATCH_PARAMS.FIELD_MODULUS - x,
+      BANDERSNATCH_PARAMS.FIELD_MODULUS,
+    )
+    const xIsNegative = x > negX // TEFlags::XIsNegative if x > -x
+    bytes[bytes.length - 1] |= xIsNegative ? 0x80 : 0
+    return bytes
   }
 
   /**
-   * Convert point bytes to curve point
+   * Decompress arkworks-compatible point bytes to Noble EdwardsPoint
+   * This is the inverse of compressNoblePoint - it handles arkworks sign bit logic
+   *
+   * @param bytes - Compressed point bytes (arkworks format)
+   * @returns Noble EdwardsPoint
    */
   static bytesToPoint(bytes: Uint8Array): EdwardsPoint {
-    return BandersnatchNoble.fromBytes(bytes)
-  }
+    if (bytes.length !== 32) {
+      throw new Error(
+        `Invalid compressed point length: ${bytes.length}, expected 32`,
+      )
+    }
 
-  /**
-   * Convert curve point to bytes
-   */
-  static pointToBytes(point: EdwardsPoint): Uint8Array {
-    return point.toBytes()
+    // Extract sign bit (bit 7 of last byte) - arkworks TEFlags format
+    const lastByte = bytes[31]
+    const signBit = (lastByte & 0x80) !== 0
+
+    // Clear sign bit to get pure y-coordinate
+    const yBytes = new Uint8Array(bytes)
+    yBytes[31] = lastByte & 0x7f
+
+    // Convert little-endian y-coordinate to bigint
+    let y = 0n
+    for (let i = 0; i < 32; i++) {
+      y += BigInt(yBytes[i]) << (8n * BigInt(i))
+    }
+
+    // Validate y is in field
+    if (y >= BANDERSNATCH_PARAMS.FIELD_MODULUS) {
+      throw new Error('Invalid y-coordinate: exceeds field modulus')
+    }
+
+    // Calculate x from y using curve equation: a*x^2 + y^2 = 1 + d*x^2*y^2
+    // Rearranged: x^2 = (y^2 - 1) / (d*y^2 - a)
+    const { a, d } = BANDERSNATCH_PARAMS.CURVE_COEFFICIENTS
+    const p = BANDERSNATCH_PARAMS.FIELD_MODULUS
+
+    const y2 = mod(y * y, p)
+    const numerator = mod(y2 - 1n, p)
+    const denominator = mod(d * y2 - a, p)
+
+    // Calculate modular inverse of denominator
+    const denominatorInv = modInverse(denominator, p)
+    const x2 = mod(numerator * denominatorInv, p)
+
+    // Calculate square root
+    const x = modSqrt(x2, p, BandersnatchNoble.Fp)
+    if (x === null) {
+      throw new Error('Point is not on curve: no square root exists')
+    }
+
+    // Apply arkworks sign bit logic: signBit = (x > -x)
+    const negX = mod(p - x, p)
+    const xIsNegative = x > negX
+
+    // Choose correct x based on sign bit
+    const finalX = signBit === xIsNegative ? x : negX
+
+    // Create Noble point from affine coordinates
+    return BandersnatchNoble.fromAffine({ x: finalX, y })
   }
 
   /**
@@ -145,5 +195,12 @@ export class BandersnatchCurveNoble {
    */
   static hashPoint(point: EdwardsPoint): Uint8Array {
     return point.toBytes()
+  }
+
+  /**
+   * Get curve order
+   */
+  static get CURVE_ORDER() {
+    return BANDERSNATCH_PARAMS.CURVE_ORDER
   }
 }

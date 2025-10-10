@@ -10,7 +10,7 @@ import {
   timestamp,
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
-import { hash, hex, publicKey, signature } from './core-db-types'
+import { hash, hex, publicKey, ringProof, signature } from './core-db-types'
 
 /**
  * Service accounts table - stores JAM service accounts (analogous to smart contracts)
@@ -345,21 +345,11 @@ export const blockHeaders = pgTable(
 
     // Gray Paper BlockHeader fields
     parent: hash('parent').notNull().unique(),
-    priorStateRoot: hash('prior_state_root').notNull(), // H_priorstateroot
-    extrinsicHash: hash('extrinsic_hash').notNull(), // H_extrinsichash - merkle root of extrinsics
-    timeslot: bigint('timeslot', { mode: 'bigint' }).notNull(), // H_timeslot
-    authorIndex: bigint('author_index', { mode: 'bigint' }).notNull(), // H_authorindex
-    vrfSig: signature('vrf_sig').notNull(), // H_vrfsig (96 bytes hex)
-    sealSig: signature('seal_sig').notNull(), // H_sealsig (64 bytes hex)
 
-    // Optional fields (can be null) - now normalized in separate tables
-    hasEpochMark: boolean('has_epoch_mark').notNull().default(false), // Whether epoch mark is present
-    hasWinnersMark: boolean('has_winners_mark').notNull().default(false), // Whether winners mark is present
+    timeslot: bigint('timeslot', { mode: 'bigint' }).notNull(),
+    authorIndex: bigint('author_index', { mode: 'bigint' }).notNull(),
 
-    // Derived/computed fields for easier querying
-    blockNumber: bigint('block_number', { mode: 'bigint' }), // Derived from parent chain
-    isGenesis: boolean('is_genesis').notNull().default(false),
-
+    encodedHeader: text('encoded_header').notNull(),
     // Metadata
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
@@ -368,12 +358,9 @@ export const blockHeaders = pgTable(
   },
   (table) => ({
     parentIdx: index('idx_block_headers_parent').on(table.parent),
-    timeslotIdx: index('idx_block_headers_timeslot').on(table.timeslot),
-    authorIdx: index('idx_block_headers_author').on(table.authorIndex),
-    blockNumberIdx: index('idx_block_headers_block_number').on(
-      table.blockNumber,
+    encodedHeaderIdx: index('idx_block_headers_encoded_header').on(
+      table.encodedHeader,
     ),
-    isGenesisIdx: index('idx_block_headers_is_genesis').on(table.isGenesis),
   }),
 )
 
@@ -469,10 +456,9 @@ export const winnersMarks = pgTable(
     sequenceIndex: integer('sequence_index').notNull(), // Order within winners mark array
     ticketId: integer('ticket_id')
       .notNull()
-      .references(() => safroleTickets.id, { onDelete: 'cascade' }), // Ticket identifier hash
+      .references(() => safroleTickets.ticketId, { onDelete: 'cascade' }), // Ticket identifier hash
     entryIndex: bigint('entry_index', { mode: 'bigint' }).notNull(), // Entry index
-    signature: signature('signature').notNull(), // Ticket signature (hex)
-    timestamp: bigint('timestamp', { mode: 'bigint' }).notNull(), // Ticket timestamp
+    proof: ringProof('proof').notNull(), // VRF proof (hex)
 
     // Metadata
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -531,16 +517,10 @@ export const offendersMarks = pgTable(
 export const safroleTickets = pgTable(
   'safrole_tickets',
   {
-    id: serial('id').primaryKey(), // Composite: blockHash + ticket_id
-    blockHash: hash('block_hash')
-      .notNull()
-      .references(() => blockHeaders.blockHash, { onDelete: 'cascade' }),
-
+    ticketId: hash('ticket_id').notNull().primaryKey(), // st_id - ticket identifier hash
     // SafroleTicket fields (Gray Paper)
-    ticketId: hash('ticket_id').notNull(), // st_id - ticket identifier hash
     entryIndex: bigint('entry_index', { mode: 'bigint' }).notNull(), // st_entryindex
-    signature: signature('signature').notNull(), // VRF signature (hex)
-    timestamp: bigint('timestamp', { mode: 'bigint' }).notNull(), // Block timestamp
+    proof: ringProof('proof').notNull(), // VRF proof (hex)
 
     // Metadata
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -548,11 +528,9 @@ export const safroleTickets = pgTable(
       .notNull(),
   },
   (table) => ({
-    blockHashIdx: index('idx_safrole_tickets_block_hash').on(table.blockHash),
     entryIndexIdx: index('idx_safrole_tickets_entry_index').on(
       table.entryIndex,
     ),
-    timestampIdx: index('idx_safrole_tickets_timestamp').on(table.timestamp),
   }),
 )
 
@@ -563,23 +541,23 @@ export const safroleTickets = pgTable(
 export const preimages = pgTable(
   'preimages',
   {
-    id: serial('id').primaryKey(), // Composite: blockHash + hash
-    blockHash: hash('block_hash')
-      .notNull()
-      .references(() => blockHeaders.blockHash, { onDelete: 'cascade' }),
+    // id: serial('id').primaryKey(), // Composite: blockHash + hash
+    // blockHash: hash('block_hash')
+    //   .notNull()
+    //   .references(() => blockHeaders.blockHash, { onDelete: 'cascade' }),
 
     // Preimage fields (Gray Paper)
-    hash: hash('hash').notNull(), // Blake2b hash of the data
-    serviceIndex: bigint('service_index', { mode: 'bigint' }).notNull(), // Service ID
+    hash: hash('hash').notNull().primaryKey(), // Blake2b hash of the data
+    serviceIndex: bigint('service_index', { mode: 'bigint' })
+      .notNull()
+      .references(() => serviceAccounts.serviceId, { onDelete: 'cascade' }),
     data: hex('data').notNull(), // Preimage data (hex encoded)
 
     // Metadata
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .defaultNow()
-      .notNull(),
+    creationSlot: bigint('creation_slot', { mode: 'bigint' }).notNull(),
   },
   (table) => ({
-    blockHashIdx: index('idx_preimages_block_hash').on(table.blockHash),
+    // blockHashIdx: index('idx_preimages_block_hash').on(table.blockHash),
     hashIdx: index('idx_preimages_hash').on(table.hash),
     serviceIndexIdx: index('idx_preimages_service_index').on(
       table.serviceIndex,
@@ -873,19 +851,14 @@ export const blocks = pgTable(
       .primaryKey()
       .references(() => blockHeaders.blockHash, { onDelete: 'cascade' }),
 
+    parent: hash('parent').notNull().unique(),
+
     // Key fields extracted for indexing and quick access
     timeslot: bigint('timeslot', { mode: 'bigint' }).notNull(),
     blockNumber: bigint('block_number', { mode: 'bigint' }),
     authorIndex: bigint('author_index', { mode: 'bigint' }).notNull(),
 
-    // Extrinsic counts (computed from normalized tables)
-    ticketCount: integer('ticket_count').notNull().default(0),
-    preimageCount: integer('preimage_count').notNull().default(0),
-    guaranteeCount: integer('guarantee_count').notNull().default(0),
-    assuranceCount: integer('assurance_count').notNull().default(0),
-    disputeCount: integer('dispute_count').notNull().default(0),
-    totalExtrinsics: integer('total_extrinsics').notNull().default(0),
-
+    encodedBlock: text('encoded_block').notNull(),
     // Status tracking
     status: text('status', {
       enum: ['pending', 'validated', 'finalized', 'orphaned'],
@@ -904,13 +877,6 @@ export const blocks = pgTable(
     blockNumberIdx: index('idx_blocks_block_number').on(table.blockNumber),
     authorIdx: index('idx_blocks_author').on(table.authorIndex),
     statusIdx: index('idx_blocks_status').on(table.status),
-    totalExtrinsicsIdx: index('idx_blocks_total_extrinsics').on(
-      table.totalExtrinsics,
-    ),
-    ticketCountIdx: index('idx_blocks_ticket_count').on(table.ticketCount),
-    guaranteeCountIdx: index('idx_blocks_guarantee_count').on(
-      table.guaranteeCount,
-    ),
   }),
 )
 
@@ -1143,37 +1109,36 @@ export const workReports = pgTable(
 )
 
 /**
- * Work digests table - stores individual work digests within work reports
- * Based on Gray Paper WorkDigest interface (serialization.ts)
+ * Work results table - stores individual work results within work reports
+ * Based on Gray Paper WorkResult interface (serialization.ts)
  */
-export const workDigests = pgTable(
-  'work_digests',
+export const workResults = pgTable(
+  'work_results',
   {
     id: serial('id').primaryKey(),
     workReportHash: hash('work_report_hash')
       .notNull()
       .references(() => workReports.reportHash, { onDelete: 'cascade' }),
 
-    // WorkDigest fields (Gray Paper)
-    serviceIndex: bigint('service_index', { mode: 'bigint' })
+    // WorkResult fields (Gray Paper)
+    serviceId: bigint('service_id', { mode: 'bigint' })
       .notNull()
       .references(() => workItems.serviceIndex, { onDelete: 'cascade' }), // Service whose state is altered
     codeHash: hash('code_hash')
       .notNull()
       .references(() => serviceAccounts.codeHash, { onDelete: 'cascade' }), // Service code hash at time of reporting
     payloadHash: hash('payload_hash').notNull(), // Hash of work-item payload
-    gasLimit: bigint('gas_limit', { mode: 'bigint' }).notNull(), // Gas limit for accumulation
+    accumulateGas: bigint('accumulate_gas', { mode: 'bigint' }).notNull(), // Gas limit for accumulation
+
+    // Work execution result (enum)
+    result: integer('result').notNull(), // WorkExecResult enum (0=Ok, 1=OutOfGas, 2=Panic, etc.)
+
+    // RefineLoad fields (nested structure)
     gasUsed: bigint('gas_used', { mode: 'bigint' }).notNull(), // Actual gas consumed
-
-    // Computation result (stored as hex-encoded result or error)
-    result: hex('result').notNull(), // Work result (blob or error)
-    isError: boolean('is_error').notNull().default(false), // Whether result is an error
-
-    // Counts and sizes
-    importCount: bigint('import_count', { mode: 'bigint' }).notNull(), // Number of imported segments
+    imports: bigint('imports', { mode: 'bigint' }).notNull(), // Number of imported segments
     extrinsicCount: bigint('extrinsic_count', { mode: 'bigint' }).notNull(), // Number of extrinsics
     extrinsicSize: bigint('extrinsic_size', { mode: 'bigint' }).notNull(), // Total size of extrinsics
-    exportCount: bigint('export_count', { mode: 'bigint' }).notNull(), // Number of exported segments
+    exports: bigint('exports', { mode: 'bigint' }).notNull(), // Number of exported segments
 
     // Sequence within work report
     sequenceIndex: integer('sequence_index').notNull(),
@@ -1184,20 +1149,18 @@ export const workDigests = pgTable(
       .notNull(),
   },
   (table) => ({
-    workReportHashIdx: index('idx_work_digests_work_report_hash').on(
+    workReportHashIdx: index('idx_work_results_work_report_hash').on(
       table.workReportHash,
     ),
-    serviceIndexIdx: index('idx_work_digests_service_index').on(
-      table.serviceIndex,
-    ),
-    codeHashIdx: index('idx_work_digests_code_hash').on(table.codeHash),
-    payloadHashIdx: index('idx_work_digests_payload_hash').on(
+    serviceIdIdx: index('idx_work_results_service_id').on(table.serviceId),
+    codeHashIdx: index('idx_work_results_code_hash').on(table.codeHash),
+    payloadHashIdx: index('idx_work_results_payload_hash').on(
       table.payloadHash,
     ),
-    sequenceIndexIdx: index('idx_work_digests_sequence_index').on(
+    sequenceIndexIdx: index('idx_work_results_sequence_index').on(
       table.sequenceIndex,
     ),
-    gasUsedIdx: index('idx_work_digests_gas_used').on(table.gasUsed),
+    gasUsedIdx: index('idx_work_results_gas_used').on(table.gasUsed),
   }),
 )
 
@@ -1265,7 +1228,7 @@ export type DbWorkItem = typeof workItems.$inferSelect
 export type DbNewWorkItem = typeof workItems.$inferInsert
 export type DbWorkReport = typeof workReports.$inferSelect
 export type DbNewWorkReport = typeof workReports.$inferInsert
-export type DbWorkDigest = typeof workDigests.$inferSelect
-export type DbNewWorkDigest = typeof workDigests.$inferInsert
+export type DbWorkResult = typeof workResults.$inferSelect
+export type DbNewWorkResult = typeof workResults.$inferInsert
 export type DbImportSegment = typeof importSegments.$inferSelect
 export type DbNewImportSegment = typeof importSegments.$inferInsert

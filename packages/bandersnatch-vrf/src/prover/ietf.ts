@@ -4,11 +4,25 @@
  * Implements RFC-9381 VRF proof generation
  */
 
-import { BandersnatchCurve, elligator2HashToCurve } from '@pbnj/bandersnatch'
-import { bytesToBigInt, logger, numberToBytes } from '@pbnj/core'
-import type { VRFProofWithOutput } from '@pbnj/types'
-import { DEFAULT_PROVER_CONFIG } from './config'
-import type { ProverConfig } from './types'
+import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import { logger, mod, numberToBytes } from '@pbnj/core'
+import {
+  bytesToBigIntLittleEndian,
+  curvePointToNoble,
+  elligator2HashToCurve,
+} from '../crypto/elligator2'
+import { generateNonceRfc8032 } from '../crypto/nonce-rfc8032'
+import { generateChallengeRfc9381 } from '../crypto/rfc9381'
+
+/**
+ * IETF VRF result
+ */
+export interface IETFVRFResult {
+  /** VRF output gamma point */
+  gamma: Uint8Array
+  /** Serialized proof */
+  proof: Uint8Array
+}
 
 /**
  * IETF VRF Prover
@@ -19,43 +33,28 @@ export class IETFVRFProver {
    * Generate VRF proof and output
    */
   static prove(
-    _secretKey: Uint8Array,
-    _input: Uint8Array,
-    _auxData?: Uint8Array,
-    config?: ProverConfig,
-  ): VRFProofWithOutput {
-    const startTime = Date.now()
-    const mergedConfig = { ...DEFAULT_PROVER_CONFIG, ...config }
-
-    logger.debug('Generating IETF VRF proof', {
-      inputLength: _input.length,
-      hasAuxData: !!_auxData,
-      config: mergedConfig,
-    })
-
+    secretKey: Uint8Array,
+    input: Uint8Array,
+    auxData?: Uint8Array,
+  ): IETFVRFResult {
     try {
       // 1. Hash input to curve point (H1)
-      const alpha = this.hashToCurve(_input, mergedConfig)
+      // According to ark-vrf implementation: h2c_data = salt || alpha
+      const salt = new Uint8Array(0) // Empty salt as per test vectors
+      const h2cData = new Uint8Array(salt.length + input.length)
+      h2cData.set(salt, 0)
+      h2cData.set(input, salt.length)
+
+      const alpha = this.hashToCurve(h2cData)
 
       // 2. Scalar multiplication: gamma = alpha * secretKey
-      const gamma = this.scalarMultiply(alpha, _secretKey)
+      const gamma = this.scalarMultiply(alpha, secretKey)
 
       // 3. Generate proof
-      const proof = this.generateProof(_secretKey, alpha, gamma, _auxData)
-
-      // 4. Hash output (H2)
-      const hash = this.hashOutput(gamma, mergedConfig)
-
-      const generationTime = Date.now() - startTime
-
-      logger.debug('IETF VRF proof generated successfully', {
-        generationTime,
-        proofSize: proof.length,
-        outputSize: hash.length,
-      })
+      const proof = this.generateProof(secretKey, alpha, gamma, auxData)
 
       return {
-        output: { gamma, hash },
+        gamma,
         proof,
       }
     } catch (error) {
@@ -71,14 +70,11 @@ export class IETFVRFProver {
   /**
    * Hash input to curve point (H1 function)
    */
-  static hashToCurve(message: Uint8Array, config?: ProverConfig): Uint8Array {
-    if (config?.hashToCurve) {
-      return config.hashToCurve(message)
-    }
-
+  static hashToCurve(message: Uint8Array): Uint8Array {
     // Use Elligator2 for hash-to-curve as specified in the Bandersnatch VRF spec
     const point = elligator2HashToCurve(message)
-    return BandersnatchCurve.pointToBytes(point)
+    // Convert CurvePoint to bytes using the compression function from elligator2
+    return BandersnatchCurveNoble.pointToBytes(curvePointToNoble(point))
   }
 
   /**
@@ -88,14 +84,18 @@ export class IETFVRFProver {
     pointUint8Array: Uint8Array,
     scalarUint8Array: Uint8Array,
   ): Uint8Array {
-    const point = BandersnatchCurve.bytesToPoint(pointUint8Array)
-    const scalar = bytesToBigInt(scalarUint8Array)
-    const result = BandersnatchCurve.scalarMultiply(point, scalar)
-    return BandersnatchCurve.pointToBytes(result)
+    const point = BandersnatchCurveNoble.bytesToPoint(pointUint8Array)
+    const scalar = mod(
+      bytesToBigIntLittleEndian(scalarUint8Array),
+      BandersnatchCurveNoble.CURVE_ORDER,
+    )
+    const result = BandersnatchCurveNoble.scalarMultiply(point, scalar)
+    // Use our arkworks-compatible compression instead of Noble's native compression
+    return BandersnatchCurveNoble.pointToBytes(result)
   }
 
   /**
-   * Generate VRF proof
+   * Generate VRF proof using RFC-9381 compliant procedures
    */
   private static generateProof(
     secretKey: Uint8Array,
@@ -105,87 +105,65 @@ export class IETFVRFProver {
   ): Uint8Array {
     // IETF VRF proof generation (RFC-9381)
     // Proof = (c, s) where:
-    // c = H2(g || h || g^s * h^c)
+    // c = challenge_rfc_9381(gamma, g^s, h^c, auxData)
     // s = k + c * x (mod q)
 
     // Convert alpha and gamma to curve points
-    const alphaPoint = BandersnatchCurve.bytesToPoint(alpha)
-    const gammaPoint = BandersnatchCurve.bytesToPoint(gamma)
+    const alphaPoint = BandersnatchCurveNoble.bytesToPoint(alpha)
+    const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gamma)
 
-    // Generate random nonce k
-    const k = this.generateRandomScalar()
+    // Generate nonce k using RFC-8032
+    const kBytes = generateNonceRfc8032(secretKey, alpha)
+    const k = mod(
+      bytesToBigIntLittleEndian(kBytes),
+      BandersnatchCurveNoble.CURVE_ORDER,
+    )
 
     // Calculate g^s (where g is the generator)
-    const gToS = BandersnatchCurve.scalarMultiply(
-      BandersnatchCurve.GENERATOR,
+    const gToS = BandersnatchCurveNoble.scalarMultiply(
+      BandersnatchCurveNoble.GENERATOR,
       k,
     )
 
     // Calculate h^c (where h is alpha)
-    const hToC = BandersnatchCurve.scalarMultiply(alphaPoint, k)
+    const hToC = BandersnatchCurveNoble.scalarMultiply(alphaPoint, k)
 
-    // Calculate challenge c = H2(gamma || g^s || h^c)
-    const challengeInput = new Uint8Array([
-      ...BandersnatchCurve.pointToBytes(gammaPoint),
-      ...BandersnatchCurve.pointToBytes(gToS),
-      ...BandersnatchCurve.pointToBytes(hToC),
-    ])
+    // Calculate challenge c using RFC-9381
+    // Use arkworks-compatible compression for all challenge points
+    const challengePoints = [
+      BandersnatchCurveNoble.pointToBytes(gammaPoint),
+      BandersnatchCurveNoble.pointToBytes(gToS),
+      BandersnatchCurveNoble.pointToBytes(hToC),
+    ]
 
-    if (auxData) {
-      challengeInput.set(auxData, challengeInput.length - auxData.length)
-    }
-
-    const c = this.hashToScalar(challengeInput)
+    const c = generateChallengeRfc9381(challengePoints, auxData)
 
     // Calculate s = k + c * x (mod q)
-    const x = bytesToBigInt(secretKey)
-    const s = (k + c * x) % BandersnatchCurve.CURVE_ORDER
+    const x = mod(
+      bytesToBigIntLittleEndian(secretKey),
+      BandersnatchCurveNoble.CURVE_ORDER,
+    )
+    const s = mod(k + c * x, BandersnatchCurveNoble.CURVE_ORDER)
 
-    // Serialize proof as (c, s)
+    // Serialize proof as (gamma, c, s) - each field element must be exactly 32 bytes
+    // Gray Paper: bssignature{k}{c}{m} ⊂ blob[96] = 32 + 32 + 32 bytes
+    const padTo32Bytes = (bytes: Uint8Array): Uint8Array => {
+      if (bytes.length >= 32) return bytes.slice(-32) // Take last 32 bytes if longer
+      const padded = new Uint8Array(32)
+      padded.set(bytes, 32 - bytes.length) // Right-pad with zeros
+      return padded
+    }
+
+    const gammaBytes = padTo32Bytes(gamma) // VRF output point (32 bytes)
+    const cBytes = padTo32Bytes(numberToBytes(c)) // Challenge scalar (32 bytes)
+    const sBytes = padTo32Bytes(numberToBytes(s)) // Response scalar (32 bytes)
+
     const proofUint8Array = new Uint8Array([
-      ...numberToBytes(c),
-      ...numberToBytes(s),
+      ...gammaBytes,
+      ...cBytes,
+      ...sBytes,
     ])
 
     return proofUint8Array
-  }
-
-  /**
-   * Generate random scalar for proof generation
-   */
-  private static generateRandomScalar(): bigint {
-    // In production, use cryptographically secure random number generation
-    // For now, use a simple deterministic method for testing
-    const randomUint8Array = new Uint8Array(32)
-    for (let i = 0; i < 32; i++) {
-      randomUint8Array[i] = Math.floor(Math.random() * 256)
-    }
-
-    const randomValue = bytesToBigInt(randomUint8Array)
-    return randomValue % BandersnatchCurve.CURVE_ORDER
-  }
-
-  /**
-   * Hash to scalar for challenge generation
-   */
-  private static hashToScalar(_data: Uint8Array): bigint {
-    const hash = BandersnatchCurve.hashPoint({ x: 0n, y: 0n, isInfinity: true })
-    const hashValue = bytesToBigInt(hash)
-    return hashValue % BandersnatchCurve.CURVE_ORDER
-  }
-
-  /**
-   * Hash VRF output point (H2 function)
-   */
-  private static hashOutput(
-    gamma: Uint8Array,
-    config?: ProverConfig,
-  ): Uint8Array {
-    if (config?.hashOutput) {
-      return config.hashOutput(gamma)
-    }
-
-    const point = BandersnatchCurve.bytesToPoint(gamma)
-    return BandersnatchCurve.hashPoint(point)
   }
 }

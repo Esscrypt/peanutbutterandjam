@@ -100,7 +100,11 @@ export function decodeVariableLength(data: Uint8Array): Safe<{
   const value = lengthRemaining.slice(0, lengthNum)
   const remaining = lengthRemaining.slice(lengthNum)
 
-  return safeResult({ value, remaining })
+  return safeResult({
+    value,
+    remaining,
+    consumed: data.length - remaining.length,
+  })
 }
 
 /**

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { logger } from '@pbnj/core'
+import { ConfigService } from '../../../../infra/node/services/config-service.js'
 import { generateChainSpec } from '../utils/chain-spec.js'
 
 export function createGenSpecCommand(args: string[]): void {
@@ -16,9 +17,10 @@ export function createGenSpecCommand(args: string[]): void {
       logger.error(`Input file not found: ${inputFile}`)
       process.exit(1)
     }
-
+    // TODO: make this configurable
+    const configService = new ConfigService('tiny')
     const inputConfig = JSON.parse(readFileSync(inputFile, 'utf-8'))
-    const chainSpec = generateChainSpec(inputConfig)
+    const chainSpec = generateChainSpec(inputConfig, configService)
 
     writeFileSync(outputFile, JSON.stringify(chainSpec, null, 2))
     logger.info(`Chain spec generated successfully: ${outputFile}`)

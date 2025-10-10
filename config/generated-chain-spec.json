@@ -36,14 +36,16 @@
     "validators": [
       {
         "address": "0x000102030405060708090a0b0c0d0e0f10111213",
-        "publicKey": "0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "publicKey": "0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3",
+        "ed25519": "0x4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace",
         "stake": "1000000000000000000",
         "isActive": true,
         "altname": "validator-0"
       },
       {
         "address": "0x0102030405060708090a0b0c0d0e0f1011121314",
-        "publicKey": "0x02030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2021",
+        "publicKey": "0xdee6d555b82024f1ccf8a1e37e60fa60fd40b1958c4bb3006af78647950e1b91",
+        "ed25519": "0xad93247bd01307550ec7acd757ce6fb805fcf73db364063265b30a949e90d933",
         "stake": "1000000000000000000",
         "isActive": true,
         "altname": "validator-1"

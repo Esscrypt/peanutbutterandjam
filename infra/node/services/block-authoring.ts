@@ -5,145 +5,185 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import type { Safe } from '@pbnj/core'
 import {
+  generateVRFSignature,
+  getTicketsForExtrinsic,
+} from '@pbnj/block-authoring'
+import type { Safe, SafePromise } from '@pbnj/core'
+import {
+  bytesToHex,
+  type EventBusService,
   logger,
-  numberToBytes,
-  type SafePromise,
+  type SlotChangeEvent,
   safeError,
   safeResult,
 } from '@pbnj/core'
+import {
+  generateFallbackSealSignature,
+  generateTicketBasedSealSignature,
+  isSafroleTicket,
+} from '@pbnj/safrole'
 import type {
-  AuthorValidationResult,
   Block,
-  BlockAuthoringConfig,
-  BlockAuthoringContext,
-  BlockAuthoringMetrics,
-  BlockAuthoringResult,
   BlockHeader,
   Extrinsic,
-  State,
-  SubmissionResult,
-  WorkPackage,
-  WorkReport,
+  UnsignedBlockHeader,
 } from '@pbnj/types'
-import { BaseService } from '../interfaces/service'
-import type { BlockSubmitter } from './block-submitter'
-import type { ExtrinsicValidator } from './extrinsic-validator'
+import { BaseService } from '@pbnj/types'
+// import type { WorkPackageProcessor } from './work-package-processor'
+import type { BlockHeaderService } from './block-header-service'
+import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
+import type { EntropyService } from './entropy'
+// import type { ExtrinsicValidatorService } from './extrinsic-validator'
 import type { HeaderConstructor } from './header-constructor'
-import type { MetricsCollector } from './metrics-collector'
-import type { StateManager } from './state-manager'
-import type { TelemetryService } from './telemetry-service'
-import type { WorkPackageProcessor } from './work-package-processor'
+import type { KeyPairService } from './keypair-service'
+import type { SealKeyService } from './seal-key'
+import type { TicketHolderService } from './ticket-holder-service'
+import type { ValidatorSetManager } from './validator-set'
 
 /**
  * Block Authoring Service Implementation
  */
 export class BlockAuthoringService extends BaseService {
-  private config!: BlockAuthoringConfig
-  private headerConstructor: HeaderConstructor
-  private workPackageProcessor: WorkPackageProcessor
-  private extrinsicValidator: ExtrinsicValidator
-  private stateManager: StateManager
-  private blockSubmitter: BlockSubmitter
-  private metricsCollector: MetricsCollector
-  private telemetryService: TelemetryService
+  private readonly headerConstructor: HeaderConstructor
+  // private workPackageProcessor: WorkPackageProcessor
+  // private extrinsicValidator: ExtrinsicValidatorService
+  private readonly blockHeaderService: BlockHeaderService
+  private readonly eventBusService: EventBusService
+  private readonly entropyService: EntropyService
+  private readonly keyPairService: KeyPairService
+  private readonly sealKeyService: SealKeyService
+  private readonly clockService: ClockService
+  private readonly configService: ConfigService
+  private readonly ticketHolderService: TicketHolderService
+  private readonly validatorSetManagerService: ValidatorSetManager
 
-  constructor(
-    telemetryService: TelemetryService,
-    headerConstructor: HeaderConstructor,
-    workPackageProcessor: WorkPackageProcessor,
-    extrinsicValidator: ExtrinsicValidator,
-    stateManager: StateManager,
-    blockSubmitter: BlockSubmitter,
-    metricsCollector: MetricsCollector,
-  ) {
+  constructor(options: {
+    eventBusService: EventBusService
+    headerConstructor: HeaderConstructor
+    // workPackageProcessor: WorkPackageProcessor
+    blockHeaderService: BlockHeaderService
+    entropyService: EntropyService
+    keyPairService: KeyPairService
+    sealKeyService: SealKeyService
+    clockService: ClockService
+    configService: ConfigService
+    ticketHolderService: TicketHolderService
+    validatorSetManagerService: ValidatorSetManager
+  }) {
     super('block-authoring-service')
-    this.headerConstructor = headerConstructor
-    this.workPackageProcessor = workPackageProcessor
-    this.extrinsicValidator = extrinsicValidator
-    this.stateManager = stateManager
-    this.blockSubmitter = blockSubmitter
-    this.metricsCollector = metricsCollector
-    this.telemetryService = telemetryService
+    this.headerConstructor = options.headerConstructor
+    this.blockHeaderService = options.blockHeaderService
+    // this.workPackageProcessor = options.workPackageProcessor
+    this.eventBusService = options.eventBusService
+    this.entropyService = options.entropyService
+    this.keyPairService = options.keyPairService
+    this.sealKeyService = options.sealKeyService
+    this.clockService = options.clockService
+    this.configService = options.configService
+    this.ticketHolderService = options.ticketHolderService
+    this.validatorSetManagerService = options.validatorSetManagerService
+
+    // Register slot change handler to check if current validator is elected to author blocks
+    this.eventBusService.onSlotChange(this.handleSlotChange)
   }
 
   /**
-   * Configure the block authoring service
+   * Create a new block according to Gray Paper specifications
+   *
+   * Gray Paper Block Authoring Process:
+   * 1. Validate extrinsics and process work packages
+   * 2. Construct unsigned block header
+   * 3. Generate seal signature (H_sealsig)
+   * 4. Generate VRF signature (H_vrfsig) using seal output
+   * 5. Complete block header with both signatures
+   * 6. Update state and emit block
    */
-  configure(config: BlockAuthoringConfig): void {
-    this.config = config
-    logger.info('Block authoring service configured', { config })
-  }
-
-  /**
-   * Create a new block
-   */
-  async createBlock(
-    context: BlockAuthoringContext,
-  ): SafePromise<BlockAuthoringResult> {
+  async createBlock(slot: bigint): SafePromise<Block> {
     const startTime = Date.now()
 
-    // Emit telemetry event for block authoring start
-    const parentHeaderHash = numberToBytes(context.parentHeader.timeslot)
-    const fullParentHash = new Uint8Array(32)
-    fullParentHash.set(parentHeaderHash)
-    const [authoringEventIdError, authoringEventId] =
-      await this.telemetryService.emitAuthoring(
-        BigInt(context.parentHeader.timeslot) + 1n,
-        fullParentHash,
-      )
-    if (authoringEventIdError) return safeError(authoringEventIdError)
     try {
-      logger.info('Starting block creation', {
-        parentBlock: context.parentHeader.timeslot,
-        extrinsicsCount: context.extrinsics.length,
-        workPackagesCount: context.workPackages.length,
-        telemetryEventId: authoringEventId,
-      })
+      // logger.info('Starting Gray Paper compliant block creation', {
+      //   parentBlock: context.parentHeader.timeslot,
+      //   extrinsicsCount: context.extrinsics.length,
+      //   workPackagesCount: context.workPackages.length,
+      // })
 
-      // Validate extrinsics
-      const validationStart = Date.now()
-      const [validationResultError, validationResult] =
-        await this.validateExtrinsics(context.extrinsics)
-      if (validationResultError) {
-        return safeError(validationResultError)
+      // Step 1: Validate extrinsics
+      // const [validationResultError, validationResult] =
+      //   await this.validateExtrinsics(context.extrinsics)
+      // if (validationResultError) {
+      //   return safeError(validationResultError)
+      // }
+
+      // Step 2: Process work packages
+      // const [workPackagesError, _workPackages] = await this.processWorkPackages(
+      //   context.workPackages,
+      // )
+      // if (workPackagesError) {
+      //   return safeError(workPackagesError)
+      // }
+
+      const [parentHeaderError, parentHeader] =
+        await this.blockHeaderService.getBlockHeaderByTimeslot(slot - 1n)
+      if (parentHeaderError) {
+        return safeError(parentHeaderError)
       }
-      const validationTime = Date.now() - validationStart
-
-      if (!validationResult.valid) {
-        // Emit telemetry event for authoring failure
-        if (authoringEventId) {
-          await this.telemetryService.emitAuthoringFailed(
-            authoringEventId,
-            'Extrinsic validation failed',
-          )
-        }
-        return safeError(new Error('Extrinsic validation failed'))
+      if (!parentHeader) {
+        return safeError(new Error('Parent header not found'))
       }
 
-      // Process work packages
-      const [workPackagesError, _workPackages] = await this.processWorkPackages(
-        context.workPackages,
+      // Step 3: Construct unsigned block header (without signatures)
+      const [headerError, unsignedHeader] = this.constructUnsignedHeader(
+        parentHeader,
+        [],
       )
-      if (workPackagesError) {
-        return safeError(workPackagesError)
+      if (headerError) {
+        return safeError(headerError)
       }
 
-      // Construct block header
-      const [error, header] = this.constructHeader(
-        context.parentHeader,
-        context.extrinsics,
+      // Step 4: Generate seal signature (H_sealsig) first
+      const [sealSigError, sealSignature] = await this.generateSealSignature(
+        unsignedHeader,
+        slot,
       )
-      if (error) {
-        return safeError(error)
+      if (sealSigError) {
+        return safeError(sealSigError)
       }
 
-      // Create block
+      // Step 5: Generate VRF signature (H_vrfsig) using seal output
+      const [vrfSigError, vrfSignature] = await generateVRFSignature(
+        sealSignature,
+        this.keyPairService,
+      )
+      if (vrfSigError) {
+        return safeError(vrfSigError)
+      }
+
+      // Step 6: Complete block header with both signatures
+      const completeHeader: BlockHeader = {
+        ...unsignedHeader,
+        vrfSig: bytesToHex(vrfSignature),
+        sealSig: bytesToHex(sealSignature),
+      }
+
+      const [ticketError, ticketsToInclude] = await getTicketsForExtrinsic(
+        this.clockService,
+        this.configService,
+        this.ticketHolderService,
+      )
+      if (ticketError) {
+        logger.warn('Failed to get tickets for extrinsic', {
+          error: ticketError,
+        })
+      }
+
+      // Step 7: Create complete block
       const block: Block = {
-        header,
+        header: completeHeader,
         body: {
-          tickets: [],
+          tickets: ticketsToInclude ?? [],
           preimages: [],
           guarantees: [],
           assurances: [],
@@ -151,87 +191,20 @@ export class BlockAuthoringService extends BaseService {
         },
       }
 
-      // Update state
-      const [stateError, _state] = await this.updateState(block)
-      if (stateError) {
-        return safeError(stateError)
-      }
-
-      // Submit block
-      const submissionStart = Date.now()
-      const [submissionError, submissionResult] = await this.submitBlock(block)
-      const submissionTime = Date.now() - submissionStart
-
-      if (submissionError || !submissionResult) {
-        // Emit telemetry event for authoring failure
-        if (authoringEventId) {
-          await this.telemetryService.emitAuthoringFailed(
-            authoringEventId,
-            'Block submission failed',
-          )
-        }
-        return safeError(new Error('Block submission failed'))
-      }
-
-      const totalTime = Date.now() - startTime
-
-      // Update metrics
-      this.metricsCollector.updateMetrics({
-        creationTime: BigInt(totalTime),
-        validationTime: BigInt(validationTime),
-        submissionTime: BigInt(submissionTime),
-        memoryUsage: BigInt(process.memoryUsage().heapUsed),
-        cpuUsage: 0n, // TODO: Implement CPU usage tracking
-        extrinsicCount: BigInt(context.extrinsics.length),
-        workPackageCount: BigInt(context.workPackages.length),
-        blockSize: BigInt(JSON.stringify(block).length),
-      })
-
-      // Emit telemetry event for successful block authoring
-      if (authoringEventId) {
-        const headerHash = new TextEncoder()
-          .encode(
-            submissionResult.blockHash?.toString() ||
-              header.timeslot.toString(),
-          )
-          .slice(0, 32)
-        const fullHeaderHash = new Uint8Array(32)
-        fullHeaderHash.set(headerHash)
-
-        const blockOutline = {
-          sizeInBytes: BigInt(JSON.stringify(block).length),
-          headerHash: fullHeaderHash,
-          ticketCount: 0n,
-          preimageCount: 0n,
-          preimagesSizeInBytes: 0n,
-          guaranteeCount: 0n,
-          assuranceCount: 0n,
-          disputeVerdictCount: 0n,
-        }
-
-        await this.telemetryService.emitAuthored(authoringEventId, blockOutline)
-      }
-
       logger.info('Block created successfully', {
-        blockSlot: header.timeslot,
-        blockHash: submissionResult.blockHash,
-        totalTime,
-        telemetryEventId: authoringEventId,
+        slot: completeHeader.timeslot,
+        authorIndex: completeHeader.authorIndex,
+        vrfSig: completeHeader.vrfSig,
+        sealSig: completeHeader.sealSig,
+        duration: Date.now() - startTime,
       })
 
-      return safeResult({
-        success: true,
-        block,
-        metrics: this.metricsCollector.getMetrics(),
-      })
+      return safeResult(block)
     } catch (error) {
-      // Emit telemetry event for authoring failure
-      if (authoringEventId) {
-        await this.telemetryService.emitAuthoringFailed(
-          authoringEventId,
-          `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        )
-      }
+      logger.error('Block creation failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
+
       return safeError(
         new Error(
           `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -241,84 +214,151 @@ export class BlockAuthoringService extends BaseService {
   }
 
   /**
-   * Construct block header
+   * Construct unsigned block header (without signatures)
+   * This creates the header structure before adding H_sealsig and H_vrfsig
    */
-  constructHeader(
+  constructUnsignedHeader(
     parent: BlockHeader,
     extrinsics: Extrinsic[],
-  ): Safe<BlockHeader> {
-    return this.headerConstructor.construct(parent, extrinsics, this.config)
+  ): Safe<UnsignedBlockHeader> {
+    // Use header constructor but without signatures
+    const [error, header] = this.headerConstructor.construct(
+      parent,
+      extrinsics,
+      this.configService,
+    )
+    if (error) {
+      return safeError(error)
+    }
+
+    // Return header without signatures (they'll be added later)
+    const unsignedHeader: UnsignedBlockHeader = {
+      ...header,
+      vrfSig:
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+    }
+
+    return safeResult(unsignedHeader)
   }
 
   /**
-   * Process work packages
+   * Generate seal signature for block header
+   *
+   * Implements Gray Paper safrole.tex equations 144-156:
+   *
+   * Two modes based on sealtickets type:
+   * 1. Ticket-based sealing (Eq. 148): sealtickets' ∈ sequence{SafroleTicket}
+   *    - Uses Ring VRF with ticket context: Xticket ∥ entropy'_3 ∥ i_st_entryindex
+   *    - Validates: i_st_id = banderout{H_sealsig}
+   *    - Sets: isticketed = 1
+   *
+   * 2. Fallback sealing (Eq. 154): sealtickets' ∈ sequence{bskey}
+   *    - Uses direct VRF with fallback context: Xfallback ∥ entropy'_3
+   *    - Sets: isticketed = 0
+   *
+   * Gray Paper Eq. 144: i = cyclic{sealtickets'[H_timeslot]}
+   * Gray Paper Eq. 147-148: Ticket-based sealing
+   * Gray Paper Eq. 152-154: Fallback sealing
    */
-  async processWorkPackages(
-    packages: WorkPackage[],
-  ): SafePromise<WorkReport[]> {
-    return this.workPackageProcessor.process(packages, this.config)
+  async generateSealSignature(
+    unsignedHeader: UnsignedBlockHeader,
+    slot: bigint,
+  ): SafePromise<Uint8Array> {
+    try {
+      // Get author's Bandersnatch key
+      const authorPrivateKey =
+        this.keyPairService.getLocalKeyPair().bandersnatchKeyPair.privateKey
+
+      // Get entropy_3 for seal generation (Gray Paper line 166)
+      const entropy3 = this.entropyService.getEntropy3()
+
+      // Gray Paper Eq. 144: i = cyclic{sealtickets'[H_timeslot]}
+      // Get the seal key for this specific slot from the seal key sequence
+      const [sealKeyError, sealKey] =
+        this.sealKeyService.getSealKeyForSlot(slot)
+      if (sealKeyError) {
+        return safeError(sealKeyError)
+      }
+
+      // Determine sealing mode based on seal key type
+      if (isSafroleTicket(sealKey)) {
+        // Gray Paper Eq. 147-148: Ticket-based sealing
+        // sealtickets' ∈ sequence{SafroleTicket} ⟹ ticket-based sealing
+        return generateTicketBasedSealSignature(
+          authorPrivateKey,
+          entropy3,
+          unsignedHeader,
+          sealKey,
+          slot,
+          this.configService,
+        )
+      } else {
+        // Gray Paper Eq. 152-154: Fallback sealing
+        // sealtickets' ∈ sequence{bskey} ⟹ fallback sealing
+        const [sealError, sealResult] = generateFallbackSealSignature(
+          authorPrivateKey,
+          entropy3,
+          unsignedHeader,
+          this.configService,
+        )
+        if (sealError) {
+          return safeError(sealError)
+        }
+        return safeResult(sealResult.signature)
+      }
+    } catch (error) {
+      logger.error('Failed to generate seal signature', { error, slot })
+      return safeError(error as Error)
+    }
   }
 
   /**
-   * Validate extrinsics
+   * Handle slot change events to check if current validator is elected to author blocks
+   *
+   * Gray Paper Logic:
+   * - Get seal key for current slot from seal key sequence
+   * - Compare with current validator's Bandersnatch public key
+   * - If match: Current validator is elected to author block for this slot
+   * - If no match: Current validator is not elected for this slot
+   *
+   * @param event - Slot change event containing slot, epoch, and phase information
    */
-  async validateExtrinsics(
-    extrinsics: Extrinsic[],
-  ): SafePromise<AuthorValidationResult> {
-    return this.extrinsicValidator.validate(extrinsics, this.config)
-  }
+  private readonly handleSlotChange = async (
+    event: SlotChangeEvent,
+  ): SafePromise<void> => {
+    try {
+      // Get current validator's Bandersnatch public key
+      const localKeyPair = this.keyPairService.getLocalKeyPair()
+      const currentValidatorBandersnatchKey =
+        localKeyPair.bandersnatchKeyPair.publicKey
 
-  /**
-   * Update state
-   */
-  updateState(block: Block): Safe<State> {
-    return this.stateManager.update(block, this.config)
-  }
+      // Check if current validator is elected to author this block
+      const isElected =
+        this.validatorSetManagerService.isValidatorElectedForSlot(
+          bytesToHex(currentValidatorBandersnatchKey),
+          BigInt(event.slot),
+        )
 
-  /**
-   * Submit block
-   */
-  async submitBlock(block: Block): SafePromise<SubmissionResult> {
-    return this.blockSubmitter.submit(block, this.config)
-  }
+      if (!isElected) {
+        return safeResult(undefined)
+      }
 
-  /**
-   * Get metrics
-   */
-  getMetrics(): BlockAuthoringMetrics {
-    return this.metricsCollector.getMetrics()
-  }
+      const [blockError, block] = await this.createBlock(event.slot)
+      if (blockError) {
+        logger.error('Failed to create block', { error: blockError })
+        return safeError(blockError)
+      }
 
-  /**
-   * Start all sub-services
-   */
-  async start(): SafePromise<boolean> {
-    super.start()
-    await this.workPackageProcessor.start()
-    await this.extrinsicValidator.start()
-    await this.stateManager.start()
-    await this.blockSubmitter.start()
-    await this.metricsCollector.start()
-    return safeResult(true)
-  }
+      // Step 9: Emit block authored event
+      this.eventBusService.emitAuthored(block)
 
-  /**
-   * Stop all sub-services
-   */
-  async stop(): SafePromise<boolean> {
-    super.stop()
-    await this.workPackageProcessor.stop()
-    await this.extrinsicValidator.stop()
-    await this.stateManager.stop()
-    await this.blockSubmitter.stop()
-    await this.metricsCollector.stop()
-    return safeResult(true)
-  }
-
-  /**
-   * Reset metrics
-   */
-  resetMetrics(): void {
-    this.metricsCollector.reset()
+      return safeResult(undefined)
+    } catch (error) {
+      logger.error('Error handling slot change event', {
+        slot: event.slot.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return safeError(error as Error)
+    }
   }
 }

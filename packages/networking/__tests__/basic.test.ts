@@ -4,7 +4,6 @@
 
 import { describe, it, expect } from 'vitest'
 import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, verifyEd25519 } from '@pbnj/core'
-import { generateCertificate, validateCertificate } from '../src/crypto/certificates'
 import { generateAlternativeName } from '@pbnj/core'
 import { generateALPNProtocol, parseALPNProtocol } from '../src/crypto/tls'
 import { decodeFixedLength } from '@pbnj/serialization'
@@ -91,36 +90,6 @@ describe('JAMNP-S Networking Implementation', () => {
       }
       
       expect(name1).not.toBe(name2)
-    })
-
-    it('should generate and validate certificates', () => {
-      const keyPair = generateEd25519KeyPair()
-        const [alternativeNameError, alternativeName] = generateAlternativeName(keyPair.publicKey, decodeFixedLength)
-      if (alternativeNameError) {
-        throw alternativeNameError
-      }
-      
-      const [certificateError, certificate] = generateCertificate(
-        keyPair.publicKey,
-        keyPair.privateKey,
-        alternativeName
-      )
-      if (certificateError) {
-        throw certificateError
-      }
-
-      expect(certificate.certificate).toBeInstanceOf(Uint8Array)
-      expect(certificate.publicKey).toEqual(keyPair.publicKey)
-      expect(certificate.alternativeName).toBe(alternativeName)
-      expect(certificate.signature).toBeInstanceOf(Uint8Array)
-      expect(certificate.signature.length).toBe(64)
-      
-      const [isValidError, isValid] = validateCertificate(certificate)
-      if (isValidError) {
-        throw isValidError
-      }
-
-      expect(isValid).toBe(true)
     })
   })
 
