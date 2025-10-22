@@ -1,0 +1,18 @@
+// General host functions (GENERAL_FUNCTIONS)
+
+export { BaseHostFunction } from './base'
+export { ExportHostFunction } from './export'
+export { ExpungeHostFunction } from './expunge'
+export { FetchHostFunction } from './fetch'
+export { GasHostFunction } from './gas'
+export { HistoricalLookupHostFunction } from './historical-lookup'
+export { InfoHostFunction } from './info'
+export { InvokeHostFunction } from './invoke'
+export { LookupHostFunction } from './lookup'
+export { MachineHostFunction } from './machine'
+export { PagesHostFunction } from './pages'
+export { PeekHostFunction } from './peek'
+export { PokeHostFunction } from './poke'
+export { ReadHostFunction } from './read'
+export { HostFunctionRegistry } from './registry'
+export { WriteHostFunction } from './write'

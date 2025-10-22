@@ -14,16 +14,14 @@
     "clean": "rm -rf .turbo && rm -rf node_modules"
   },
   "dependencies": {
+    "@noble/curves": "catalog:",
     "@noble/ed25519": "3.0.0",
-    "@noble/hashes": "^2.0.0",
+    "@noble/hashes": "catalog:",
     "@pbnj/types": "workspace:*",
-    "@types/hapi": "^18.0.14",
-    "dotenv": "17.2.0",
-    "fast-shuffle": "^6.1.1",
-    "merkletreejs": "^0.6.0",
+    "@types/hapi": "18.0.14",
     "radash": "12.1.1",
-    "viem": "2.32.0",
-    "zod": "3.25.76"
+    "viem": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "vitest": "2.1.9",

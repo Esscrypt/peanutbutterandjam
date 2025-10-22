@@ -1,53 +1,44 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class CMOV_IZ_IMMInstruction extends BaseInstruction {
   readonly opcode = OPCODES.CMOV_IZ_IMM
   readonly name = 'CMOV_IZ_IMM'
   readonly description = 'Conditional move if zero with immediate'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
+    const registerB = this.getRegisterB(context.instruction.operands)
+    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    const registerBValue = this.getRegisterValue(context.registers, registerB)
 
-    // If registerA is zero, move immediate to registerD, otherwise keep registerD unchanged
+    // Gray Paper: reg'_A = { immed_X when reg_B = 0, reg_A otherwise }
     const result =
-      registerValue === 0n
+      registerBValue === 0n
         ? immediate
-        : this.getRegisterValue(context.registers, registerD)
+        : this.getRegisterValue(context.registers, registerA)
 
     logger.debug('Executing CMOV_IZ_IMM instruction', {
-      registerD,
       registerA,
+      registerB,
       immediate,
-      registerValue,
+      registerBValue,
       result,
     })
+    this.setRegisterValue(context.registers, registerA, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
+    const registerB = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
+    return `${this.name} r${registerA} r${registerB} ${immediate}`
   }
 }
 
@@ -55,46 +46,37 @@ export class CMOV_NZ_IMMInstruction extends BaseInstruction {
   readonly opcode = OPCODES.CMOV_NZ_IMM
   readonly name = 'CMOV_NZ_IMM'
   readonly description = 'Conditional move if not zero with immediate'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
+    const registerB = this.getRegisterB(context.instruction.operands)
+    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    const registerBValue = this.getRegisterValue(context.registers, registerB)
 
-    // If registerA is not zero, move immediate to registerD, otherwise keep registerD unchanged
+    // Gray Paper: reg'_A = { immed_X when reg_B ≠ 0, reg_A otherwise }
     const result =
-      registerValue !== 0n
+      registerBValue !== 0n
         ? immediate
-        : this.getRegisterValue(context.registers, registerD)
+        : this.getRegisterValue(context.registers, registerA)
 
     logger.debug('Executing CMOV_NZ_IMM instruction', {
-      registerD,
       registerA,
+      registerB,
       immediate,
-      registerValue,
+      registerBValue,
       result,
     })
+    this.setRegisterValue(context.registers, registerA, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerD = this.getRegisterD(operands)
     const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }

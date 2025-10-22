@@ -13,35 +13,6 @@ import { encodeBase64Url } from 'u8a-utils'
 
 type BufferSource = ArrayBuffer | ArrayBufferView
 
-// /**
-//  * Helper function to convert a base64 string to URL-safe base64
-//  */
-// function base64ToUrlBase64(base64: string): string {
-//   return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-// }
-
-// /**
-//  * Helper function to convert a URL-safe base64 string to standard base64
-//  */
-// function urlBase64ToBase64(urlBase64: string): string {
-//   let base64 = urlBase64.replace(/-/g, '+').replace(/_/g, '/')
-//   while (base64.length % 4) {
-//     base64 += '='
-//   }
-//   return base64
-// }
-
-interface Connection {
-  timeout(): number | null
-  onTimeout(): void
-  isEstablished(): boolean
-  isDraining(): boolean
-  isClosed(): boolean
-  isResumed(): boolean
-  isInEarlyData(): boolean
-  peerCertChain(): any
-}
-
 /**
  * WebCrypto polyfill from @peculiar/webcrypto
  * This behaves differently with respect to Ed25519 keys
@@ -331,7 +302,7 @@ async function generateCertificate({
     // Filter out conflicting CN attributes
     ...issuerAttrsExtra.filter((attr) => !('CN' in attr)),
   ]
-  const signingAlgorithm: any = issuerPrivateCryptoKey.algorithm
+  const signingAlgorithm = issuerPrivateCryptoKey.algorithm
   if (signingAlgorithm.name === 'ECDSA') {
     // In ECDSA, the signature should match the curve strength
     switch (signingAlgorithm.namedCurve) {
@@ -590,37 +561,6 @@ const handleStreamProm = async (stream: QUICStream, streamData: StreamData) => {
   }
 }
 
-/**
- * When the `conn.timeout()` returns `0`, it is still a valid timeout.
- * Only when it returns `null`, is the timeout fully exhausted.
- * This should only be called after `conn.onTimeout()` is triggered.
- * This is useful for tests that need to exhaust the timeout.
- */
-async function waitForTimeoutNull(conn: Connection): Promise<void> {
-  while (true) {
-    const timeout = conn.timeout()
-    if (timeout == null) return
-    await sleep(timeout + 1)
-    conn.onTimeout()
-  }
-}
-
-/**
- * Creates a formatted string listing the connection state.
- */
-function connStats(conn: Connection, label: string) {
-  return `
-----${label}----
-established: ${conn.isEstablished()},
-draining: ${conn.isDraining()},
-closed: ${conn.isClosed()},
-resumed: ${conn.isResumed()},
-earlyData: ${conn.isInEarlyData()},
-peerCerts: ${conn.peerCertChain() !== null ? 'Avaliable' : 'Missing'},
-timeout: ${conn.timeout()},
-`
-}
-
 type KeyTypes = 'RSA' | 'ECDSA' | 'Ed25519'
 type TLSConfigs = {
   leafKeyPair: { publicKey: JsonWebKey; privateKey: JsonWebKey }
@@ -668,27 +608,6 @@ async function generateTLSConfig(type: KeyTypes): Promise<TLSConfigs> {
   }
 }
 
-// Function to create reason converters
-function createReasonConverters() {
-  const reasonMap = new Map<number, any>()
-  let code = 0
-
-  const reasonToCode = (_type: any, reason: any) => {
-    code++
-    reasonMap.set(code, reason)
-    return code
-  }
-
-  const codeToReason = (_type: any, code: any) => {
-    return reasonMap.get(code) ?? new Error('Reason not found')
-  }
-
-  return {
-    reasonToCode,
-    codeToReason,
-  }
-}
-
 export {
   sleep,
   randomBytes,
@@ -706,10 +625,7 @@ export {
   bufferWrap,
   socketCleanupFactory,
   handleStreamProm,
-  waitForTimeoutNull,
-  connStats,
   generateTLSConfig,
-  createReasonConverters,
 }
 
 export type { Messages, StreamData, KeyTypes, TLSConfigs }

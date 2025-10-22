@@ -6,29 +6,17 @@
  */
 
 import {
-  bytesToHex,
   concatBytes,
+  type EventBusService,
   type Hex,
   type Safe,
   type SafePromise,
   safeError,
   safeResult,
 } from '@pbnj/core'
-import {
-  determineProxyValidator,
-  getTicketIdFromProof,
-  verifyTicket,
-} from '@pbnj/safrole'
+
 import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
-import type { TicketStore } from '@pbnj/state'
-import type {
-  IEntropyService,
-  IKeyPairService,
-  ITicketHolderService,
-  IValidatorSetManager,
-  SafroleTicket,
-  TicketDistributionRequest,
-} from '@pbnj/types'
+import type { TicketDistributionRequest } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -43,48 +31,20 @@ import { NetworkingProtocol } from './protocol'
 // --> Epoch Index ++ Ticket (Epoch index should identify the epoch that the ticket will be used in)
 // --> FIN
 // <-- FIN
+/**
+ * Event-driven handler for CE131 Ticket Distribution Protocol
+ */
 export class CE131TicketDistributionProtocol extends NetworkingProtocol<
   TicketDistributionRequest,
   void
 > {
-  private readonly ticketStore: TicketStore
-  private readonly ticketHolderService: ITicketHolderService
-  private readonly keyPairService: IKeyPairService
-  private readonly entropyService: IEntropyService
-  private readonly validatorSetManager: IValidatorSetManager
-  constructor(
-    ticketStore: TicketStore,
-    ticketHolderService: ITicketHolderService,
-    keyPairService: IKeyPairService,
-    entropyService: IEntropyService,
-    validatorSetManager: IValidatorSetManager,
-  ) {
+  private readonly eventBusService: EventBusService
+  constructor(eventBusService: EventBusService) {
     super()
-    this.ticketStore = ticketStore
-    this.ticketHolderService = ticketHolderService
-    this.keyPairService = keyPairService
-    this.entropyService = entropyService
-    this.validatorSetManager = validatorSetManager
-  }
 
-  /**
-   * Store ticket in local cache and persist to database
-   */
-  async storeTicket(ticket: SafroleTicket): Promise<void> {
-    if (!this.ticketStore.hasTicket(ticket.id)) {
-      await this.ticketStore.storeTicket({
-        ticketId: ticket.id,
-        entryIndex: ticket.entryIndex,
-        proof: ticket.proof,
-        createdAt: new Date(),
-      })
+    this.eventBusService = eventBusService
 
-      this.ticketHolderService.addProxyValidatorTicket({
-        id: ticket.id,
-        entryIndex: ticket.entryIndex,
-        proof: ticket.proof,
-      })
-    }
+    this.initializeEventHandlers()
   }
 
   /**
@@ -175,43 +135,9 @@ export class CE131TicketDistributionProtocol extends NetworkingProtocol<
    */
   async processRequest(
     data: TicketDistributionRequest,
-    _peerPublicKey: Hex,
+    peerPublicKey: Hex,
   ): SafePromise<void> {
-    const safroleTicket: SafroleTicket = {
-      id: getTicketIdFromProof(data.ticket.proof),
-      entryIndex: data.ticket.entryIndex,
-      proof: bytesToHex(data.ticket.proof),
-    }
-
-    // check if the ticket is valid against the proof
-    const isValid = verifyTicket(
-      safroleTicket,
-      this.keyPairService,
-      this.entropyService,
-      this.validatorSetManager,
-    )
-    if (!isValid) {
-      return safeError(new Error('Invalid ticket'))
-    }
-
-    //check if we are the proxy validator for this epoch
-    const intendedProxyValidatorIndex = determineProxyValidator(
-      safroleTicket,
-      this.validatorSetManager,
-    )
-
-    // compare against our index
-    const ourPublicKey = bytesToHex(
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
-    )
-    const ourIndex = this.validatorSetManager.getValidatorIndex(ourPublicKey)
-
-    if (intendedProxyValidatorIndex !== Number(ourIndex)) {
-      return safeError(new Error('Not the intended proxy validator'))
-    }
-
-    // Store the received ticket
-    await this.storeTicket(safroleTicket)
+    this.eventBusService.emitTicketDistributionRequest(data, peerPublicKey)
 
     // For CE 131, we just acknowledge receipt
     // The actual forwarding happens in CE 132

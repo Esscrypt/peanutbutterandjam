@@ -1,48 +1,37 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class CMOV_IZInstruction extends BaseInstruction {
   readonly opcode = OPCODES.CMOV_IZ
   readonly name = 'CMOV_IZ'
   readonly description = 'Conditional move if zero'
-
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
     const valueB = this.getRegisterValue(context.registers, registerB)
 
-    // If registerA is zero, move registerB to registerD, otherwise keep registerD unchanged
+    // Gray Paper: reg'_D = { reg_A when reg_B = 0, reg_D otherwise }
     const result =
-      valueA === 0n
-        ? valueB
+      valueB === 0n
+        ? this.getRegisterValue(context.registers, registerA)
         : this.getRegisterValue(context.registers, registerD)
 
     logger.debug('Executing CMOV_IZ instruction', {
       registerD,
       registerA,
       registerB,
-      valueA,
       valueB,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -57,42 +46,31 @@ export class CMOV_NZInstruction extends BaseInstruction {
   readonly opcode = OPCODES.CMOV_NZ
   readonly name = 'CMOV_NZ'
   readonly description = 'Conditional move if not zero'
-
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
     const valueB = this.getRegisterValue(context.registers, registerB)
 
-    // If registerA is not zero, move registerB to registerD, otherwise keep registerD unchanged
+    // Gray Paper: reg'_D = { reg_A when reg_B ≠ 0, reg_D otherwise }
     const result =
-      valueA !== 0n
-        ? valueB
+      valueB !== 0n
+        ? this.getRegisterValue(context.registers, registerA)
         : this.getRegisterValue(context.registers, registerD)
 
     logger.debug('Executing CMOV_NZ instruction', {
       registerD,
       registerA,
       registerB,
-      valueA,
       valueB,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

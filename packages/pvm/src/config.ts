@@ -42,6 +42,14 @@ export const INSTRUCTION_CONFIG = {
 } as const
 
 // Result codes as specified in Gray Paper
+/**
+ * Result codes as specified in Gray Paper
+ * 0: HALT - The invocation completed and halted normally
+ * 1: PANIC - The invocation completed with a panic
+ * 2: FAULT - The invocation completed with a page fault
+ * 3: HOST - The invocation completed with a host-call fault
+ * 4: OOG - The invocation completed by running out of gas
+ */
 export const RESULT_CODES = {
   HALT: 0, // The invocation completed and halted normally
   PANIC: 1, // The invocation completed with a panic
@@ -476,6 +484,19 @@ export const ACCUMULATE_FUNCTIONS = {
 } as const
 
 // Error codes returned by Accumulate functions (from Gray Paper)
+/**
+ * Accumulate error codes as specified in Gray Paper section 31.2
+ * @param NONE - The return value indicating an item does not exist
+ * @param WHAT - Name unknown
+ * @param OOB - The inner PVM memory index provided for reading/writing is not accessible
+ * @param WHO - Index unknown
+ * @param FULL - Storage full or resource already allocated
+ * @param CORE - Core index unknown
+ * @param CASH - Insufficient funds
+ * @param LOW - Gas limit too low
+ * @param HUH - The item is already solicited, cannot be forgotten or the operation is invalid due to privilege level
+ * @param OK - The return value indicating general success
+ */
 export const ACCUMULATE_ERROR_CODES = {
   NONE: 2n ** 64n - 1n, // The return value indicating an item does not exist
   WHAT: 2n ** 64n - 2n, // Name unknown

@@ -6,22 +6,16 @@
  */
 
 import {
-  bytesToHex,
   concatBytes,
+  type EventBusService,
   type Hex,
   type Safe,
   type SafePromise,
   safeError,
   safeResult,
 } from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
 import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
-import type { TicketStore } from '@pbnj/state'
-import type {
-  ITicketHolderService,
-  SafroleTicket,
-  TicketDistributionRequest,
-} from '@pbnj/types'
+import type { TicketDistributionRequest } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -40,38 +34,13 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
   TicketDistributionRequest,
   void
 > {
-  private readonly ticketStore: TicketStore
-  private readonly ticketHolderService: ITicketHolderService
-  constructor(
-    ticketStore: TicketStore,
-    ticketHolderService: ITicketHolderService,
-  ) {
+  private readonly eventBusService: EventBusService
+  constructor(eventBusService: EventBusService) {
     super()
-    this.ticketStore = ticketStore
-    this.ticketHolderService = ticketHolderService
-  }
+    this.eventBusService = eventBusService
 
-  /**
-   * Store ticket in local cache and persist to database
-   */
-  async storeTicket(ticket: SafroleTicket, peerPublicKey: Hex): Promise<void> {
-    if (!this.ticketStore.hasTicket(ticket.id)) {
-      await this.ticketStore.storeTicket({
-        ticketId: ticket.id,
-        entryIndex: ticket.entryIndex,
-        proof: ticket.proof,
-        createdAt: new Date(),
-      })
-
-      this.ticketHolderService.addReceivedTicket(
-        {
-          id: ticket.id,
-          entryIndex: ticket.entryIndex,
-          proof: ticket.proof,
-        },
-        peerPublicKey,
-      )
-    }
+    // Set up event handlers directly in the constructor
+    this.initializeEventHandlers()
   }
 
   /**
@@ -164,16 +133,11 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
     data: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    const safroleTicket: SafroleTicket = {
-      id: getTicketIdFromProof(data.ticket.proof),
-      entryIndex: data.ticket.entryIndex,
-      proof: bytesToHex(data.ticket.proof),
-    }
-
-    //get validator epoch
-
     // Store the received ticket
-    await this.storeTicket(safroleTicket, peerPublicKey)
+    await this.eventBusService.emitTicketDistributionRequest(
+      data,
+      peerPublicKey,
+    )
 
     // For CE 131, we just acknowledge receipt
     // The actual forwarding happens in CE 132

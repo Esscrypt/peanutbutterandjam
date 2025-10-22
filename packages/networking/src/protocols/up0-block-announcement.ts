@@ -11,9 +11,12 @@
 import {
   bytesToHex,
   concatBytes,
+  type Hex,
   hexToBytes,
+  logger,
   numberToBytes,
   type Safe,
+  type SafePromise,
   safeError,
   safeResult,
 } from '@pbnj/core'
@@ -29,24 +32,124 @@ import type {
   BlockHeader,
   IConfigService,
 } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
 /**
  * Block announcement protocol handler
  */
-export class BlockAnnouncementProtocol {
-  private knownLeaves: Map<string, { hash: Uint8Array; slot: bigint }> =
-    new Map()
+export class BlockAnnouncementProtocol extends NetworkingProtocol<
+  BlockAnnouncement | BlockAnnouncementHandshake,
+  void
+> {
+  private readonly knownLeaves: Map<
+    string,
+    { hash: Uint8Array; slot: bigint }
+  > = new Map()
 
-  private blockStore: BlockStore
-  private finalizedBlock: { hash: Uint8Array; slot: bigint } = {
+  private readonly blockStore: BlockStore
+  private readonly finalizedBlock: { hash: Uint8Array; slot: bigint } = {
     hash: new Uint8Array(32),
     slot: 0n,
   }
   private readonly configService: IConfigService
 
   constructor(blockStore: BlockStore, configService: IConfigService) {
+    super()
     this.blockStore = blockStore
     this.configService = configService
+
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
+  }
+
+  /**
+   * Serialize request (either handshake or announcement)
+   */
+  serializeRequest(
+    data: BlockAnnouncement | BlockAnnouncementHandshake,
+  ): Safe<Uint8Array> {
+    try {
+      if ('finalizedBlockHash' in data) {
+        // It's a handshake
+        return this.serializeHandshake(data as BlockAnnouncementHandshake)
+      } else {
+        // It's a block announcement
+        return this.serializeBlockAnnouncement(data as BlockAnnouncement)
+      }
+    } catch (error) {
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
+    }
+  }
+
+  /**
+   * Deserialize request (either handshake or announcement)
+   */
+  deserializeRequest(
+    data: Uint8Array,
+  ): Safe<BlockAnnouncement | BlockAnnouncementHandshake> {
+    try {
+      // Check the first byte to determine the message type
+      // 0 = handshake, 1 = announcement
+      const messageType = data[0]
+
+      if (messageType === 0) {
+        return safeResult(this.deserializeHandshake(data.slice(1)))
+      } else if (messageType === 1) {
+        return safeResult(this.deserializeBlockAnnouncement(data.slice(1)))
+      } else {
+        return safeError(new Error(`Unknown message type: ${messageType}`))
+      }
+    } catch (error) {
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
+    }
+  }
+
+  /**
+   * Serialize response (void)
+   */
+  serializeResponse(_data: void): Safe<Uint8Array> {
+    return safeResult(new Uint8Array())
+  }
+
+  /**
+   * Deserialize response (void)
+   */
+  deserializeResponse(_data: Uint8Array): Safe<void> {
+    return safeResult(undefined)
+  }
+
+  /**
+   * Process request (either handshake or announcement)
+   */
+  async processRequest(
+    data: BlockAnnouncement | BlockAnnouncementHandshake,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
+    try {
+      if ('finalizedBlockHash' in data) {
+        // It's a handshake
+        await this.processHandshake(data as BlockAnnouncementHandshake)
+      } else {
+        // It's a block announcement
+        await this.processBlockAnnouncement(data as BlockAnnouncement)
+      }
+      return safeResult(undefined)
+    } catch (error) {
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
+    }
+  }
+
+  /**
+   * Process response (void)
+   */
+  async processResponse(_data: void, _peerPublicKey: Hex): SafePromise<void> {
+    return safeResult(undefined)
   }
 
   /**
@@ -58,7 +161,10 @@ export class BlockAnnouncementProtocol {
       try {
         await this.blockStore.updateBlockStatus(bytesToHex(hash), 'finalized')
       } catch (error) {
-        console.error('Failed to persist finalized block:', error)
+        logger.error('Failed to persist finalized block:', {
+          hash: bytesToHex(hash).slice(0, 20) + '...',
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
     }
   }
@@ -173,11 +279,14 @@ export class BlockAnnouncementProtocol {
       // Add as known leaf
       //   await this.addKnownLeaf(blockHash, slot)
 
-      console.log(
-        `Processed block header: hash=${header.parent}..., slot=${slot}`,
-      )
+      logger.info('Processed block header', {
+        parentHash: header.parent.slice(0, 20) + '...',
+        slot: slot.toString(),
+      })
     } catch (error) {
-      console.error('Failed to process block header:', error)
+      logger.error('Failed to process block header:', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 
@@ -197,7 +306,7 @@ export class BlockAnnouncementProtocol {
   /**
    * Serialize handshake message
    */
-  serializeHandshake(handshake: BlockAnnouncementHandshake): Uint8Array {
+  serializeHandshake(handshake: BlockAnnouncementHandshake): Safe<Uint8Array> {
     // Serialize according to JAMNP-S specification
     const buffer = new ArrayBuffer(
       4 + 32 + 4 + handshake.leaves.length * (32 + 4),
@@ -228,7 +337,7 @@ export class BlockAnnouncementProtocol {
       offset += 4
     }
 
-    return new Uint8Array(buffer)
+    return safeResult(new Uint8Array(buffer))
   }
 
   /**

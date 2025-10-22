@@ -87,15 +87,19 @@ export function encodeAuthqueue(
       )
     }
 
-    // Populate cores with authorizations from the queue map
-    for (const [coreId, auths] of authqueue.queue) {
-      const coreIdx = Number(coreId)
-      if (coreIdx >= 0 && coreIdx < coreCount) {
-        // Copy up to C_authqueuesize authorizations
-        const authsToCopy = auths.slice(0, AUTH_QUEUE_SIZE)
-        for (let i = 0; i < authsToCopy.length; i++) {
-          coreQueues[coreIdx][i] = authsToCopy[i]
+    // Populate cores with authorizations from the 2D array
+    for (
+      let coreIndex = 0;
+      coreIndex < Math.min(authqueue.length, coreCount);
+      coreIndex++
+    ) {
+      const coreQueue = authqueue[coreIndex] || []
+      // Copy up to AUTH_QUEUE_SIZE authorizations, pad with zeros if needed
+      for (let authIndex = 0; authIndex < AUTH_QUEUE_SIZE; authIndex++) {
+        if (authIndex < coreQueue.length) {
+          coreQueues[coreIndex][authIndex] = coreQueue[authIndex]
         }
+        // Else: already initialized with zero hash
       }
     }
 
@@ -130,7 +134,10 @@ export function decodeAuthqueue(
     const HASH_SIZE = 32 // 32 bytes per hash
 
     let currentData = data
-    const queue = new Map<bigint, Hex[]>()
+    const ZERO_HASH =
+      '0x0000000000000000000000000000000000000000000000000000000000000000'
+
+    const authqueue: AuthQueue = []
 
     // Decode each core's authorization queue
     for (let coreIdx = 0; coreIdx < coreCount; coreIdx++) {
@@ -151,27 +158,19 @@ export function decodeAuthqueue(
         currentData = currentData.slice(HASH_SIZE)
 
         // Only add non-zero hashes to the queue
-        if (
-          hash !==
-          '0x0000000000000000000000000000000000000000000000000000000000000000'
-        ) {
+        if (hash !== ZERO_HASH) {
           coreAuths.push(hash)
         }
       }
 
-      // Store the core's authorization queue (only if it has non-zero hashes)
-      if (coreAuths.length > 0) {
-        queue.set(BigInt(coreIdx), coreAuths)
-      }
+      // Store the core's authorization queue (filter out zero hashes)
+      authqueue.push(coreAuths)
     }
 
     const consumed = data.length - currentData.length
 
     return safeResult({
-      value: {
-        queue,
-        processingIndex: 0n, // Default processing index
-      },
+      value: authqueue,
       remaining: currentData,
       consumed,
     })

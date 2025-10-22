@@ -1,0 +1,15 @@
+// Accumulation host functions (ACCUMULATE_FUNCTIONS)
+
+export { AssignHostFunction } from './assign'
+export { BlessHostFunction } from './bless'
+export { CheckpointHostFunction } from './checkpoint'
+export { DesignateHostFunction } from './designate'
+export { EjectHostFunction } from './eject'
+export { ForgetHostFunction } from './forget'
+export { NewHostFunction } from './new'
+export { ProvideHostFunction } from './provide'
+export { QueryHostFunction } from './query'
+export { SolicitHostFunction } from './solicit'
+export { TransferHostFunction } from './transfer'
+export { UpgradeHostFunction } from './upgrade'
+export { YieldHostFunction } from './yield'

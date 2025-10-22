@@ -32,8 +32,8 @@ import type { ExtrinsicReference, WorkError } from './pvm'
  * Note: Hash is calculated externally using Blake2b(data)
  */
 export interface Preimage {
-  requester: bigint
-  blob: Hex
+  requester: bigint // serviceId of the requester
+  blob: Hex // actual preimage data as hex string
 }
 
 /**
@@ -315,7 +315,7 @@ export interface WorkItem {
   /** Code hash of the service */
   codehash: Hex
   /** Payload blob */
-  payload: Hex
+  payload: Uint8Array
   /** Gas limit for Refinement (64-bit) */
   refgaslimit: bigint
   /** Gas limit for Accumulation (64-bit) */

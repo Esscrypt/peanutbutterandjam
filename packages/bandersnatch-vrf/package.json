@@ -14,7 +14,8 @@
   "dependencies": {
     "@pbnj/bandersnatch": "workspace:*",
     "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*"
+    "@pbnj/types": "workspace:*",
+    "@noble/hashes": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

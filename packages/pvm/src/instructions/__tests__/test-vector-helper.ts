@@ -1,0 +1,238 @@
+/**
+ * Helper utilities for PVM test vector loading and execution
+ */
+
+import { readFileSync, readdirSync } from 'fs'
+import { join } from 'path'
+import { PVM } from '../../pvm'
+import { logger } from '@pbnj/core'
+import { PVMParser } from '../../parser'
+import { InstructionRegistry } from '../registry'
+import type { PVMOptions } from '@pbnj/types'
+import { PVMRAM } from '../../ram'
+
+/**
+ * Parse JSON with all numbers as strings to avoid precision loss
+ * Wraps all numeric values in quotes before parsing
+ */
+function parseJsonSafe(jsonString: string): unknown {
+  // Wrap all numbers in quotes: matches numbers after [, : or at start, followed by , } or ]
+  const quoted = jsonString.replace(/(\[|:)?(\d+)([,}\]])/g, '$1"$2"$3')
+  return JSON.parse(quoted)
+}
+
+export interface PVMTestVector {
+  name: string
+  program: (number | string)[] // all numbers as strings to preserve precision
+  'initial-regs': (number | string)[]
+  'initial-pc': number | string
+  'initial-gas': number | string
+  'initial-page-map'?: Array<{
+    address: number | string
+    length: number | string
+    'is-writable': boolean
+  }>
+  'initial-memory'?: Array<{
+    address: number | string
+    contents: (number | string)[]
+  }>
+  'expected-regs': (number | string)[]
+  'expected-pc': number | string
+  'expected-gas': number | string
+  'expected-status': string
+  'expected-memory'?: Array<{
+    address: number | string
+    contents: (number | string)[]
+  }>
+}
+
+/**
+ * Get the test vectors directory path
+ */
+export function getTestVectorsDir(): string {
+  const projectRoot = process.cwd().includes('/packages/pvm')
+    ? process.cwd().split('/packages/pvm')[0]
+    : process.cwd()
+  return join(projectRoot, 'pvm-test-vectors', 'pvm', 'programs')
+}
+
+/**
+ * Load test vectors matching a set of patterns
+ */
+export function loadTestVectors(patterns: string[]): PVMTestVector[] {
+  const testVectorsDir = getTestVectorsDir()
+  const testVectors: PVMTestVector[] = []
+
+  for (const pattern of patterns) {
+    try {
+      const filePath = join(testVectorsDir, `${pattern}.json`)
+      const fileContents = readFileSync(filePath, 'utf-8')
+      const testVector = parseJsonSafe(fileContents) as PVMTestVector
+      testVectors.push(testVector)
+      // biome-ignore lint/suspicious/noCatchAllowedError: File might not exist, intentionally skip
+    } catch {
+      // File might not exist, that's okay - skip it
+      continue
+    }
+  }
+
+  return testVectors
+}
+
+/**
+ * Load all test vectors matching a prefix
+ */
+export function loadTestVectorsByPrefix(prefix: string): PVMTestVector[] {
+  const testVectorsDir = getTestVectorsDir()
+  const allFiles = readdirSync(testVectorsDir)
+  const matchingFiles = allFiles.filter((f) => f.startsWith(prefix) && f.endsWith('.json'))
+  
+  const testVectors: PVMTestVector[] = []
+  for (const file of matchingFiles) {
+    try {
+      const filePath = join(testVectorsDir, file)
+      const fileContents = readFileSync(filePath, 'utf-8')
+      const testVector = parseJsonSafe(fileContents) as PVMTestVector
+      testVectors.push(testVector)
+      // biome-ignore lint/suspicious/noCatchAllowedError: Failed to parse file, intentionally skip
+    } catch {
+      // Failed to parse file - skip it
+      continue
+    }
+  }
+
+  return testVectors
+}
+
+/**
+ * Execute a test vector and return the resulting state
+ */
+export async function executeTestVector(testVector: PVMTestVector): Promise<{
+  registers: bigint[]
+  pc: number
+  gas: number
+  status: string
+  memory: Map<bigint, number>
+}> {
+    // Create PVM instance
+  const registry = new InstructionRegistry()
+  const parser = new PVMParser(registry)
+
+  // Parse the program using PVM's parser (which has the instruction registry)
+  const programBytes = testVector.program.map(v => Number(v))
+  const programBlob = new Uint8Array(programBytes)
+    const parseResult = parser.parseProgram(new Uint8Array(programBytes))
+
+    logger.info('instructions:', { instructions: parseResult.instructions.map(i => `${registry.getHandler(i.opcode)?.name} (${i.opcode}) operands: ${i.operands.join(', ')}`) })
+    logger.info('jumpTable:', { jumpTable: parseResult.jumpTable })
+    logger.info('bitmask:', { bitmask: parseResult.bitmask })
+
+  
+  if (!parseResult.success) {
+    throw new Error(`Failed to parse program: ${parseResult.errors.join(', ')}`)
+  }
+
+  const ram = new PVMRAM()
+
+  // Set initial page map (memory pages)
+  if (testVector['initial-page-map']) {
+    for (const page of testVector['initial-page-map']) {
+      const address = BigInt(page.address)
+      const length = Number(page.length)
+      const isWritable = page['is-writable']
+      
+      // Convert boolean to MemoryAccessType
+      // Test vectors only use read vs read+write, but we support the full Gray Paper model
+      const accessType = isWritable ? 'read+write' : 'read'
+      
+      // Initialize page in RAM
+      ram.initializePage(address, length, accessType)
+    }
+  }
+
+  // Set initial memory
+  if (testVector['initial-memory']) {
+    for (const memBlock of testVector['initial-memory']) {
+      const address = BigInt(memBlock.address)
+      const contents = memBlock.contents.map(v => Number(v))
+      ram.writeOctets(address, new Uint8Array(contents))
+    }
+  }
+
+
+  const options: PVMOptions = {
+    pc: BigInt(testVector['initial-pc']),
+    gasCounter: BigInt(testVector['initial-gas']),
+    registerState: testVector['initial-regs'].map(v => BigInt(v)),
+    ram: ram,
+  }
+  const pvm = new PVM(options);
+  // Load parsed instructions (RISC-V test vectors don't have jump tables)
+
+  // Run program
+  const resultCode = await pvm.run(programBlob)
+
+  logger.info('Final state after execution', {
+    pc: pvm.getState().instructionPointer.toString(),
+    gas: pvm.getState().gasCounter.toString(),
+    resultCode,
+    r7: pvm.getState().registerState[7].toString(),
+    r8: pvm.getState().registerState[8].toString(),
+    r9: pvm.getState().registerState[9].toString(),
+  })
+
+  // Extract final registers as bigint array for comparison
+  const finalRegisters: bigint[] = new Array(13)
+  for (let i = 0; i < 13; i++) {
+    finalRegisters[i] = pvm.getState().registerState[i]
+  }
+
+  logger.debug(`Final state after execution`, {
+    pc: pvm.getState().instructionPointer.toString(),
+    gas: pvm.getState().gasCounter.toString(),
+    resultCode,
+    r7: finalRegisters[7].toString(),
+    r8: finalRegisters[8].toString(),
+    r9: finalRegisters[9].toString(),
+  })
+
+  // Map result code to status string
+  const statusMap: Record<number, string> = {
+    0: 'halt',
+    1: 'panic',
+    2: 'page-fault',
+    3: 'host',
+    4: 'out-of-gas',
+  }
+  const status = statusMap[resultCode] || 'panic'
+
+  // Extract final memory state
+  // Access the private cells map through the PVMRAM instance
+  const finalMemory = new Map<bigint, number>()
+  if (testVector['expected-memory']) {
+    // Only extract memory that's expected to be checked
+    for (const memBlock of testVector['expected-memory']) {
+      const address = BigInt(memBlock.address)
+      const length = memBlock.contents.length
+      for (let i = 0; i < length; i++) {
+        const addr = address + BigInt(i)
+        const [error, value] = pvm.getState().ram.readOctets(addr, 1n)
+        if (error) {
+          throw new Error(`Failed to read memory at address ${addr.toString()}: ${error}`)
+        }
+        finalMemory.set(addr, Number(value[0]))
+      }
+    }
+  }
+
+  // Test vectors expect PC as code-relative (byte offset within code section)
+  // Our PVM tracks PC as code-relative as well, so return it directly
+  return {
+    registers: finalRegisters,
+    pc: Number(pvm.getState().instructionPointer),
+    gas: Number(pvm.getState().gasCounter),
+    status,
+    memory: finalMemory,
+  }
+}
+

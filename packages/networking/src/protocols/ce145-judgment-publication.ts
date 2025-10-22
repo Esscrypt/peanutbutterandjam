@@ -8,6 +8,7 @@
 import {
   bytesToHex,
   concatBytes,
+  type Hex,
   hexToBytes,
   type Safe,
   type SafePromise,
@@ -32,10 +33,13 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
   JudgmentPublicationRequest,
   void
 > {
-  private judgmentHolderService: IJudgmentHolderService
+  private readonly judgmentHolderService: IJudgmentHolderService
   constructor(judgmentHolderService: IJudgmentHolderService) {
     super()
     this.judgmentHolderService = judgmentHolderService
+
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
   }
 
   /**
@@ -43,6 +47,7 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
    */
   async processRequest(
     judgmentPublication: JudgmentPublicationRequest,
+    _peerPublicKey: Hex,
   ): SafePromise<void> {
     const [error, _result] = await this.judgmentHolderService.addJudgement(
       {
@@ -122,7 +127,6 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
     const workReportHash = bytesToHex(currentData.slice(0, 32))
     currentData = currentData.slice(32)
     const signature = bytesToHex(currentData.slice(0, 32))
-    currentData = currentData.slice(32)
     return safeResult({
       epochIndex: epochIndex,
       validatorIndex: validatorIndex,

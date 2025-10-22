@@ -6,7 +6,7 @@
 
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
@@ -17,37 +17,23 @@ export class MOVE_REGInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MOVE_REG
   readonly name = 'MOVE_REG'
   readonly description = 'Move register value'
-
   execute(context: InstructionContext): InstructionResult {
     // For MOVE_REG: operands[0] = destination, operands[1] = source
-    const registerD = this.getRegisterIndex(context.instruction.operands[0])
-    const registerA = this.getRegisterIndex(context.instruction.operands[1])
+    const registerD = this.getRegisterA(context.instruction.operands)
+    const registerA = this.getRegisterB(context.instruction.operands)
     const value = this.getRegisterValue(context.registers, registerA)
 
-    logger.debug('Executing MOVE_REG instruction', {
-      registerD,
-      registerA,
-      value,
-    })
+    this.setRegisterValue(context.registers, registerD, value)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, value)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterIndex(operands[0])
-    const registerA = this.getRegisterIndex(operands[1])
+    const registerD = this.getRegisterD(operands)
+    const registerA = this.getRegisterA(operands)
     return `${this.name} r${registerD} r${registerA}`
   }
 }
@@ -60,37 +46,28 @@ export class SBRKInstruction extends BaseInstruction {
   readonly opcode = OPCODES.SBRK
   readonly name = 'SBRK'
   readonly description = 'Allocate memory'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
-    const size = this.getRegisterValue(context.registers, registerA)
+    const registerB = this.getRegisterB(context.instruction.operands)
+    const size = this.getRegisterValue(context.registers, registerB)
 
-    logger.debug('Executing SBRK instruction', { registerD, registerA, size })
+    logger.debug('Executing SBRK instruction', { registerB, registerA, size })
 
     // TODO: Implement memory allocation
     // This is a placeholder - actual implementation would need memory management
     const allocatedAddress = 0n // Placeholder
+    this.setRegisterValue(context.registers, registerA, allocatedAddress)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, allocatedAddress)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -102,9 +79,8 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_64
   readonly name = 'COUNT_SET_BITS_64'
   readonly description = 'Count set bits in 64-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value = this.getRegisterValue(context.registers, registerA)
 
@@ -117,25 +93,17 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing COUNT_SET_BITS_64 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -153,9 +121,8 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_32
   readonly name = 'COUNT_SET_BITS_32'
   readonly description = 'Count set bits in 32-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
@@ -169,31 +136,23 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing COUNT_SET_BITS_32 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -205,9 +164,8 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_64
   readonly name = 'LEADING_ZERO_BITS_64'
   readonly description = 'Count leading zero bits in 64-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value = this.getRegisterValue(context.registers, registerA)
 
@@ -223,31 +181,23 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing LEADING_ZERO_BITS_64 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -259,9 +209,8 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_32
   readonly name = 'LEADING_ZERO_BITS_32'
   readonly description = 'Count leading zero bits in 32-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
@@ -278,31 +227,23 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing LEADING_ZERO_BITS_32 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -314,9 +255,8 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAILING_ZERO_BITS_64
   readonly name = 'TRAILING_ZERO_BITS_64'
   readonly description = 'Count trailing zero bits in 64-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value = this.getRegisterValue(context.registers, registerA)
 
@@ -332,31 +272,23 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing TRAILING_ZERO_BITS_64 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -368,9 +300,8 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAILING_ZERO_BITS_32
   readonly name = 'TRAILING_ZERO_BITS_32'
   readonly description = 'Count trailing zero bits in 32-bit register'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
@@ -387,31 +318,23 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
     }
 
     logger.debug('Executing TRAILING_ZERO_BITS_32 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       count,
     })
+    this.setRegisterValue(context.registers, registerB, count)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, count)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -423,9 +346,8 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SIGN_EXTEND_8
   readonly name = 'SIGN_EXTEND_8'
   readonly description = 'Sign extend 8-bit value'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value = this.getRegisterValue(context.registers, registerA) % 2n ** 8n
 
@@ -434,31 +356,23 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
     const extendedValue = signBit ? value | ~((1n << 8n) - 1n) : value
 
     logger.debug('Executing SIGN_EXTEND_8 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       extendedValue,
     })
+    this.setRegisterValue(context.registers, registerB, extendedValue)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, extendedValue)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -470,9 +384,8 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SIGN_EXTEND_16
   readonly name = 'SIGN_EXTEND_16'
   readonly description = 'Sign extend 16-bit value'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
@@ -482,31 +395,23 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
     const extendedValue = signBit ? value | ~((1n << 16n) - 1n) : value
 
     logger.debug('Executing SIGN_EXTEND_16 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
       extendedValue,
     })
+    this.setRegisterValue(context.registers, registerB, extendedValue)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, extendedValue)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
+    const registerB = this.getRegisterB(operands)
     const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
+    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -518,9 +423,8 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ZERO_EXTEND_16
   readonly name = 'ZERO_EXTEND_16'
   readonly description = 'Zero extend 16-bit value'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
+    const registerB = this.getRegisterB(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
@@ -528,24 +432,16 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
     // Zero extend 16-bit to 64-bit (no change needed since we're already using BigInt)
 
     logger.debug('Executing ZERO_EXTEND_16 instruction', {
-      registerD,
+      registerB,
       registerA,
       value,
     })
+    this.setRegisterValue(context.registers, registerB, value)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, value)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -563,7 +459,6 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
   readonly opcode = OPCODES.REVERSE_Uint8Array
   readonly name = 'REVERSE_BYTES'
   readonly description = 'Reverse byte order'
-
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -582,20 +477,12 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
       value,
       reversed,
     })
+    this.setRegisterValue(context.registers, registerD, reversed)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, reversed)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 2 // Need two registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

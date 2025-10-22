@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class SET_LT_UInstruction extends BaseInstruction {
@@ -12,8 +12,8 @@ export class SET_LT_UInstruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const valueB = this.getRegisterValue(context.registers, registerB)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA < valueB ? 1n : 0n
 
     logger.debug('Executing SET_LT_U instruction', {
@@ -24,20 +24,12 @@ export class SET_LT_UInstruction extends BaseInstruction {
       valueB,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -57,37 +49,26 @@ export class SET_LT_SInstruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const valueB = this.getRegisterValue(context.registers, registerB)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
 
-    // Convert to signed values
-    const signedA = valueA > 2n ** 63n - 1n ? valueA - 2n ** 64n : valueA
-    const signedB = valueB > 2n ** 63n - 1n ? valueB - 2n ** 64n : valueB
-
-    const result = signedA < signedB ? 1n : 0n
+    // Use signedCompare helper for proper signed comparison
+    const result = this.signedCompare(valueA, valueB) < 0 ? 1n : 0n
 
     logger.debug('Executing SET_LT_S instruction', {
       registerD,
       registerA,
       registerB,
-      signedA,
-      signedB,
+      valueA,
+      valueB,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

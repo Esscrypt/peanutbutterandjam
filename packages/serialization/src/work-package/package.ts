@@ -143,7 +143,7 @@ export function encodeWorkItem(workItem: WorkItem): Safe<Uint8Array> {
   parts.push(encoded4)
 
   // 6. var{payload} - variable-length blob with length prefix
-  const payloadBytes = hexToBytes(workItem.payload)
+  const payloadBytes = workItem.payload
   const [error5, encoded5] = encodeNatural(BigInt(payloadBytes.length))
   if (error5) {
     return safeError(error5)
@@ -471,7 +471,7 @@ export function decodeWorkItem(
   }
   const payloadLength = Number(payloadLengthResult.value)
   currentData = payloadLengthResult.remaining
-  const payload = bytesToHex(currentData.slice(0, payloadLength))
+  const payload = currentData.slice(0, payloadLength)
   currentData = currentData.slice(payloadLength)
 
   // 7. var{importsegments} - variable-length sequence with length prefix

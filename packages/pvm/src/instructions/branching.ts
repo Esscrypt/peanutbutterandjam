@@ -4,9 +4,8 @@
  * BRANCH_*_IMM variants - Branch if condition with immediate
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
@@ -19,38 +18,29 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register equals immediate'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue === immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_EQ_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register equals immediate
+    if (registerValue === immediateX) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const immediateX = this.getImmediateValue(operands, 1)
+    const offset = this.getImmediateValue(operands, 2, 2)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -65,38 +55,29 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register not equals immediate'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue !== immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_NE_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register not equals immediate
+    if (registerValue !== immediateX) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const immediateX = this.getImmediateValue(operands, 1)
+    const offset = this.getImmediateValue(operands, 2, 2)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -111,38 +92,28 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue < immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LT_U_IMM instruction', {
+    const { registerA, immediateX, targetAddress } =
+      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register less than immediate (unsigned)
+    if (registerValue < immediateX) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const { registerA, immediateX, offset } = this.parseBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -157,38 +128,26 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less or equal immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue <= immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LE_U_IMM instruction', {
+    const { registerA, immediateX, targetAddress } =
+      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register less or equal immediate (unsigned)
+    if (registerValue <= immediateX) {
+      context.pc = targetAddress
     }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const immediateX = this.getImmediateValue(operands, 1)
+    const offset = this.getImmediateValue(operands, 2, 2)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -204,38 +163,28 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
     'Branch if register greater or equal immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue >= immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GE_U_IMM instruction', {
+    const { registerA, immediateX, targetAddress } =
+      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register greater or equal immediate (unsigned)
+    if (registerValue >= immediateX) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const { registerA, immediateX, offset } = this.parseBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -250,38 +199,28 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register greater than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const shouldBranch = registerValue > immediateX
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GT_U_IMM instruction', {
+    const { registerA, immediateX, targetAddress } =
+      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register greater than immediate (unsigned)
+    if (registerValue > immediateX) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const { registerA, immediateX, offset } = this.parseBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -296,43 +235,28 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less than immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    // Convert to signed comparison
-    const signedRegister =
-      registerValue > 2n ** 63n - 1n ? registerValue - 2n ** 64n : registerValue
-    const signedImmediate =
-      immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
-    const shouldBranch = signedRegister < signedImmediate
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LT_S_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register less than immediate (signed)
+    if (this.signedCompare(registerValue, immediateX) < 0) {
+      context.pc = targetAddress
     }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
+    return { resultCode: null }
   }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
-  }
-
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const { registerA, immediateX, offset } = this.parseBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -347,43 +271,29 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less or equal immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    // Convert to signed comparison
-    const signedRegister =
-      registerValue > 2n ** 63n - 1n ? registerValue - 2n ** 64n : registerValue
-    const signedImmediate =
-      immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
-    const shouldBranch = signedRegister <= signedImmediate
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LE_S_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register less or equal immediate (signed)
+    if (this.signedCompare(registerValue, immediateX) <= 0) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const immediateX = this.getImmediateValue(operands, 1)
+    const offset = this.getImmediateValue(operands, 0)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -399,43 +309,30 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
     'Branch if register greater or equal immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    // Convert to signed comparison
-    const signedRegister =
-      registerValue > 2n ** 63n - 1n ? registerValue - 2n ** 64n : registerValue
-    const signedImmediate =
-      immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
-    const shouldBranch = signedRegister >= signedImmediate
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GE_S_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register greater or equal immediate (signed)
+    if (this.signedCompare(registerValue, immediateX) >= 0) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const { registerA, immediateX, offset } = this.parseBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -450,43 +347,29 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register greater than immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediateX = this.getImmediateValue(context.instruction.operands, 1n)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    // Convert to signed comparison
-    const signedRegister =
-      registerValue > 2n ** 63n - 1n ? registerValue - 2n ** 64n : registerValue
-    const signedImmediate =
-      immediateX > 2n ** 63n - 1n ? immediateX - 2n ** 64n : immediateX
-    const shouldBranch = signedRegister > signedImmediate
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GT_S_IMM instruction', {
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediateX,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if register greater than immediate (signed)
+    if (this.signedCompare(registerValue, immediateX) > 0) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 4n // Need register, immediate, and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
     const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1n)
-    const offset = this.getImmediateValue(operands, 2n, 2n)
+    const immediateX = this.getImmediateValue(operands, 0)
+    const offset = this.getImmediateValue(operands, 0)
     return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
@@ -507,39 +390,32 @@ export class BRANCH_EQInstruction extends BaseInstruction {
   readonly description = 'Branch if two registers are equal'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    const shouldBranch = registerValueA === registerValueB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_EQ instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
+    )
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    // Branch if two registers are equal
+    if (registerValueA === registerValueB) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    context.gas -= 1n
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -554,39 +430,31 @@ export class BRANCH_NEInstruction extends BaseInstruction {
   readonly description = 'Branch if two registers are not equal'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    const shouldBranch = registerValueA !== registerValueB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_NE instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    )
+    // Branch if two registers are not equal
+    if (registerValueA !== registerValueB) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -601,39 +469,31 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
   readonly description = 'Branch if register A less than register B (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    const shouldBranch = registerValueA < registerValueB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LT_U instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    )
+    // Branch if register A less than register B (unsigned)
+    if (registerValueA < registerValueB) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -648,48 +508,31 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
   readonly description = 'Branch if register A less than register B (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    // Convert to signed comparison
-    const signedA =
-      registerValueA > 2n ** 63n - 1n
-        ? registerValueA - 2n ** 64n
-        : registerValueA
-    const signedB =
-      registerValueB > 2n ** 63n - 1n
-        ? registerValueB - 2n ** 64n
-        : registerValueB
-    const shouldBranch = signedA < signedB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_LT_S instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    )
+    // Branch if register A less than register B (signed)
+    if (this.signedCompare(registerValueA, registerValueB) < 0) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -705,39 +548,31 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
     'Branch if register A greater or equal register B (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    const shouldBranch = registerValueA >= registerValueB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GE_U instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    )
+    // Branch if register A greater or equal register B (unsigned)
+    if (registerValueA >= registerValueB) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }
@@ -753,48 +588,31 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
     'Branch if register A greater or equal register B (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const offset = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValueA = this.getRegisterValue(context.registers, registerA)
-    const registerValueB = this.getRegisterValue(context.registers, registerB)
-    // Convert to signed comparison
-    const signedA =
-      registerValueA > 2n ** 63n - 1n
-        ? registerValueA - 2n ** 64n
-        : registerValueA
-    const signedB =
-      registerValueB > 2n ** 63n - 1n
-        ? registerValueB - 2n ** 64n
-        : registerValueB
-    const shouldBranch = signedA >= signedB
-    const targetAddress = shouldBranch
-      ? context.instructionPointer + offset
-      : context.instructionPointer + 1n
-
-    logger.debug('Executing BRANCH_GE_S instruction', {
+    const { registerA, registerB, targetAddress } =
+      this.parseRegisterBranchOperands(context.instruction.operands, context.pc)
+    const registerValueA = this.getRegisterValueAs64(
+      context.registers,
       registerA,
+    )
+    const registerValueB = this.getRegisterValueAs64(
+      context.registers,
       registerB,
-      offset,
-      shouldBranch,
-      targetAddress,
-    })
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: targetAddress,
-      newGasCounter: context.gasCounter - 1n,
+    )
+    // Branch if register A greater or equal register B (signed)
+    if (this.signedCompare(registerValueA, registerValueB) >= 0) {
+      context.pc = targetAddress
     }
-  }
+    // else: not branching - PVM will advance PC normally
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and offset
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const offset = this.getImmediateValue(operands, 2n)
+    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
+      operands,
+      0n,
+    )
     return `${this.name} r${registerA} r${registerB} ${offset}`
   }
 }

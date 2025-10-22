@@ -1,26 +1,47 @@
 /**
- * Event Bus Service
+ * Generalized Event Bus Service
  *
- * Centralized event system for JAM node services
- * Manages event registration and emission
+ * Type-safe centralized event system with minimal code repetition
  */
 
 import {
   type AccumulateCost,
+  type AssuranceDistributionRequest,
   type AuditAnnouncement,
+  type AuditShardRequest,
+  type AuditShardResponse,
   BaseService,
   type Block,
   type BlockBody,
   type BlockHeader,
+  type BlockRequest,
   type GuaranteeDiscardReason,
+  type GuaranteedWorkReport,
   type GuaranteeOutline,
   type IsAuthorizedCost,
   type Judgment,
+  type Preimage,
+  type PreimageAnnouncement,
+  type PreimageRequest,
   type RefineCost,
+  type SegmentShardRequest,
+  type SegmentShardResponse,
+  type ShardDistributionRequest,
+  type ShardDistributionResponse,
+  type StateRequest,
+  type StateResponse,
+  type TicketDistributionEvent,
+  type TicketDistributionRequest,
+  type TicketDistributionResponse,
   type ValidatorKeyTuple,
   type WorkPackageOutline,
+  type WorkPackageSharing,
+  type WorkPackageSharingResponse,
+  type WorkPackageSubmissionRequest,
   type WorkReport,
   type WorkReportOutline,
+  type WorkReportRequest,
+  type WorkReportResponse,
 } from '@pbnj/types'
 import type { Hex } from 'viem'
 import { logger } from './logger'
@@ -34,18 +55,8 @@ export interface ConectivityChangeEvent {
   phase: bigint
   previousEpoch: bigint
   newEpoch: bigint
-  previousSlotPhase: bigint // Gray Paper: m - previous slot's phase within epoch
+  previousSlotPhase: bigint
   validatorSetChanged: boolean
-}
-
-export interface TicketDistributionEvent {
-  timestamp: number
-  slot: bigint
-  epoch: bigint
-  phase: 'first-step' | 'second-step'
-  delaySlots: bigint
-  totalValidators: number
-  proxyValidatorIndex?: bigint
 }
 
 export interface SlotChangeEvent {
@@ -64,7 +75,7 @@ export interface EpochTransitionEvent {
   phase: bigint
   previousEpoch: bigint
   newEpoch: bigint
-  previousSlotPhase: bigint // Gray Paper: m - previous slot's phase within epoch
+  previousSlotPhase: bigint
   validatorSetChanged: boolean
 }
 
@@ -74,7 +85,6 @@ export interface ValidatorSetChangeEvent {
   validators: Map<number, ValidatorKeyTuple>
 }
 
-// Statistics events
 export interface BlockProcessedEvent {
   timestamp: number
   slot: bigint
@@ -102,127 +112,7 @@ export interface WorkReportJudgmentEvent {
   reason?: string
 }
 
-// Callback types
-export type ConectivityChangeCallback = (
-  event: ConectivityChangeEvent,
-) => Safe<void> | SafePromise<void>
-export type TicketDistributionCallback = (
-  event: TicketDistributionEvent,
-) => Safe<void> | SafePromise<void>
-export type SlotChangeCallback = (
-  event: SlotChangeEvent,
-) => Safe<void> | SafePromise<void>
-export type EpochTransitionCallback = (
-  event: EpochTransitionEvent,
-) => Safe<void> | SafePromise<void>
-export type ValidatorSetChangeCallback = (
-  event: ValidatorSetChangeEvent,
-) => Safe<void> | SafePromise<void>
-
-// Statistics callback types
-export type BlockProcessedCallback = (
-  event: BlockProcessedEvent,
-) => Safe<void> | SafePromise<void>
-
-export type WorkReportProcessedCallback = (
-  event: WorkReportProcessedEvent,
-) => Safe<void> | SafePromise<void>
-
-export type WorkReportJudgmentCallback = (
-  event: WorkReportJudgmentEvent,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectionRefusedCallback = (
-  peerAddress: string,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectingInCallback = (
-  peerAddress: string,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectedInCallback = (
-  eventId: bigint,
-  peerId: Uint8Array,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectInFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectingOutCallback = (
-  peerId: Uint8Array,
-  peerAddress: string,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectedOutCallback = (
-  eventId: bigint,
-) => Safe<void> | SafePromise<void>
-
-export type ConnectOutFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-
-export type DisconnectedCallback = (
-  peerId: Uint8Array,
-  reason: string,
-  terminator?: 'local' | 'remote',
-) => void | Promise<void> | SafePromise<void>
-
-export type PeerMisbehavedCallback = (
-  peerId: Uint8Array,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-
-export type AuthoringCallback = (
-  slot: bigint,
-  parentHeaderHash: Hex,
-) => void | Promise<void> | SafePromise<void>
-
-export type AuthoringFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-export type AuthoredCallback = (block: Block) => Safe<void> | SafePromise<void>
-
-export type ImportingCallback = (
-  slot: bigint,
-  parentHeaderHash: Hex,
-) => Safe<void> | SafePromise<void>
-
-export type BlockVerificationFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-
-export type BlockVerifiedCallback = (
-  eventId: bigint,
-) => Safe<void> | SafePromise<void>
-
-export type BlockExecutionFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => Safe<void> | SafePromise<void>
-
-export type BlockExecutedCallback = (
-  eventId: bigint,
-  accumulatedServices: Array<{ serviceId: bigint; cost: AccumulateCost }>,
-) => Safe<void> | SafePromise<void>
-
-export type BestBlockChangedCallback = (
-  blockHeader: BlockHeader,
-) => Safe<void> | SafePromise<void>
-
-export type FinalizedBlockChangedCallback = (
-  blockHeader: BlockHeader,
-) => Safe<void> | SafePromise<void>
-
-export type SyncStatusChangedCallback = (
-  isSynced: boolean,
-) => Safe<void> | SafePromise<void>
-
-export type StatusCallback = (status: {
+export interface StatusEvent {
   totalPeerCount: bigint
   validatorPeerCount: bigint
   blockAnnouncementStreamPeerCount: bigint
@@ -231,1810 +121,1593 @@ export type StatusCallback = (status: {
   shardTotalSizeBytes: bigint
   readyPreimageCount: bigint
   readyPreimageTotalSizeBytes: bigint
-}) => void | Promise<void> | SafePromise<void>
+}
 
-export type GeneratingTicketsCallback = (
-  epochIndex: bigint,
-) => void | Promise<void> | SafePromise<void>
+export interface AssuranceDistributionEvent {
+  timestamp: number
+  slot: bigint
+  epoch: bigint
+  phase: bigint
+}
 
-export type TicketGenerationFailedCallback = (
-  eventId: bigint,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
+export interface AuditTrancheEvent {
+  timestamp: number
+  slot: bigint
+  epoch: bigint
+  phase: bigint
+  trancheNumber: number
+  wallclock: number
+}
 
-export type TicketsGeneratedCallback = (
-  eventId: bigint,
-  ticketVrfOutputs: Uint8Array[],
-) => void | Promise<void> | SafePromise<void>
+// Define the complete event map
+export interface EventMap {
+  slotChange: [SlotChangeEvent]
+  epochTransition: [EpochTransitionEvent]
+  validatorSetChange: [ValidatorSetChangeEvent]
+  conectivityChange: [ConectivityChangeEvent]
+  assuranceReceived: [AssuranceDistributionRequest, Hex]
 
-export type TicketTransferFailedCallback = (
-  peerId: Uint8Array,
-  connectionSide: 'local' | 'remote',
-  wasCe132Used: boolean,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
+  // Connection events
+  connectionRefused: [string]
+  connectingIn: [string]
+  connectedIn: [bigint, Uint8Array]
+  connectInFailed: [bigint, string]
+  connectingOut: [Uint8Array, string]
+  connectedOut: [bigint]
+  connectOutFailed: [bigint, string]
+  disconnected: [Uint8Array, string, ('local' | 'remote')?]
+  peerMisbehaved: [Uint8Array, string]
 
-export type TicketTransferredCallback = (
-  peerId: Uint8Array,
-  connectionSide: 'local' | 'remote',
-  wasCe132Used: boolean,
-  epochIndex: bigint,
-  attemptNumber: 0n | 1n,
-  vrfOutput: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Authoring events
+  authoring: [bigint, Hex]
+  authoringFailed: [bigint, string]
+  authored: [Block]
 
-export type WorkPackageSubmissionCallback = (
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Import events
+  importing: [bigint, Hex]
+  blockVerificationFailed: [bigint, string]
+  blockVerified: [bigint]
+  blockExecutionFailed: [bigint, string]
+  blockExecuted: [bigint, Array<{ serviceId: bigint; cost: AccumulateCost }>]
+  bestBlockChanged: [BlockHeader]
+  finalizedBlockChanged: [BlockHeader]
+  syncStatusChanged: [boolean]
+  status: [StatusEvent]
 
-export type WorkPackageBeingSharedCallback = (
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Ticket events
+  generatingTickets: [bigint]
+  ticketGenerationFailed: [bigint, string]
+  ticketsGenerated: [bigint, Uint8Array[]]
+  ticketTransferFailed: [Uint8Array, 'local' | 'remote', boolean, string]
+  ticketTransferred: [
+    Uint8Array,
+    'local' | 'remote',
+    boolean,
+    bigint,
+    0n | 1n,
+    Uint8Array,
+  ]
 
-export type WorkPackageFailedCallback = (
-  workPackageEventId: bigint,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
+  // Work package events
+  workPackageSubmissionReceived: [WorkPackageSubmissionRequest, Hex]
+  workPackageBeingShared: [Uint8Array]
+  workPackageFailed: [bigint, string]
+  duplicateWorkPackage: [bigint, bigint, Uint8Array]
+  workPackageReceived: [bigint, bigint, WorkPackageOutline]
+  authorized: [bigint, IsAuthorizedCost]
+  extrinsicDataReceived: [bigint]
+  importsReceived: [bigint]
+  sharingWorkPackage: [bigint, Uint8Array]
+  workPackageSharingFailed: [bigint, Uint8Array, string]
+  bundleSent: [bigint, Uint8Array]
+  refined: [bigint, RefineCost[]]
+  workReportBuilt: [bigint, WorkReportOutline]
+  workReportSignatureSent: [bigint]
+  workReportSignatureReceived: [bigint, Uint8Array]
 
-export type DuplicateWorkPackageCallback = (
-  workPackageEventId: bigint,
-  coreIndex: bigint,
-  workPackageHash: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Guarantee events
+  guaranteeBuilt: [bigint, GuaranteeOutline]
+  sendingGuarantee: [bigint, Uint8Array]
+  guaranteeSendFailed: [bigint, string]
+  guaranteeSent: [bigint]
+  guaranteesDistributed: [bigint]
+  receivingGuarantee: [Uint8Array]
+  guaranteeReceiveFailed: [bigint, string]
+  guaranteeReceived: [bigint, GuaranteeOutline]
+  guaranteeDiscarded: [GuaranteeOutline, GuaranteeDiscardReason]
 
-export type WorkPackageReceivedCallback = (
-  workPackageEventId: bigint,
-  coreIndex: bigint,
-  workPackageOutline: WorkPackageOutline,
-) => void | Promise<void> | SafePromise<void>
+  // Audit events
+  workReportAvailable: [WorkReport, bigint, Hex]
+  negativeJudgmentReceived: [Judgment, Hex, bigint]
+  auditAnnouncementReceived: [AuditAnnouncement, Hex]
+  judgmentPublished: [Judgment, Hex, bigint]
 
-export type AuthorizedCallback = (
-  workPackageEventId: bigint,
-  isAuthorizedCost: IsAuthorizedCost,
-) => void | Promise<void> | SafePromise<void>
+  // Statistics events
+  blockProcessed: [BlockProcessedEvent]
+  workReportProcessed: [WorkReportProcessedEvent]
+  workReportJudgment: [WorkReportJudgmentEvent]
 
-export type ExtrinsicDataReceivedCallback = (
-  workPackageEventId: bigint,
-) => void | Promise<void> | SafePromise<void>
+  // Work package sharing events
+  workPackageSharing: [WorkPackageSharing, Hex]
+  workPackageSharingResponse: [WorkPackageSharingResponse, Hex]
 
-export type ImportsReceivedCallback = (
-  workPackageEventId: bigint,
-) => void | Promise<void> | SafePromise<void>
+  // Preimage announcement events
+  preimageAnnouncementReceived: [PreimageAnnouncement, Hex]
+  preimageRequested: [PreimageRequest, Hex]
+  preimageReceived: [Preimage, Hex]
 
-export type SharingWorkPackageCallback = (
-  workPackageSubmissionEventId: bigint,
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Audit shard request events
+  auditShardRequest: [AuditShardRequest, Hex]
+  auditShardResponse: [AuditShardResponse, Hex]
 
-export type WorkPackageSharingFailedCallback = (
-  workPackageSubmissionEventId: bigint,
-  peerId: Uint8Array,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
+  // Segment shard request events
+  segmentShardRequest: [SegmentShardRequest, Hex]
+  segmentShardResponse: [SegmentShardResponse, Hex]
 
-export type BundleSentCallback = (
-  workPackageSubmissionEventId: bigint,
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // Shard distribution request events
+  shardDistributionRequest: [ShardDistributionRequest, Hex]
+  shardDistributionResponse: [ShardDistributionResponse, Hex]
 
-export type RefinedCallback = (
-  workPackageEventId: bigint,
-  refineCosts: RefineCost[],
-) => void | Promise<void> | SafePromise<void>
+  // Work report request events
+  workReportRequest: [WorkReportRequest, Hex]
+  workReportResponse: [WorkReportResponse, Hex]
 
-export type WorkReportBuiltCallback = (
-  workPackageEventId: bigint,
-  workReportOutline: WorkReportOutline,
-) => void | Promise<void> | SafePromise<void>
+  // Work report distribution request events
+  workReportDistributionRequest: [GuaranteedWorkReport, Hex]
 
-export type WorkReportSignatureSentCallback = (
-  workPackageBeingSharedEventId: bigint,
-) => void | Promise<void> | SafePromise<void>
+  // Blocks received events
+  blocksReceived: [Block[], Hex]
+  blocksRequested: [BlockRequest, Hex]
 
-export type WorkReportSignatureReceivedCallback = (
-  workPackageSubmissionEventId: bigint,
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  // State request events
+  stateRequested: [StateRequest, Hex]
+  stateResponse: [StateResponse, Hex]
 
-export type GuaranteeBuiltCallback = (
-  workPackageSubmissionEventId: bigint,
-  guaranteeOutline: GuaranteeOutline,
-) => void | Promise<void> | SafePromise<void>
+  // Ticket distribution events
+  ticketDistributionRequest: [TicketDistributionRequest, Hex]
+  ticketDistributionResponse: [TicketDistributionResponse, Hex]
 
-export type SendingGuaranteeCallback = (
-  guaranteeBuiltEventId: bigint,
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
+  firstPhaseTicketDistribution: [TicketDistributionEvent]
+  secondPhaseTicketDistribution: [TicketDistributionEvent]
 
-export type GuaranteeSendFailedCallback = (
-  sendingGuaranteeEventId: bigint,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
+  // Assurance distribution events
+  assuranceDistribution: [AssuranceDistributionEvent]
 
-export type GuaranteeSentCallback = (
-  sendingGuaranteeEventId: bigint,
-) => void | Promise<void> | SafePromise<void>
+  // Audit tranche events
+  auditTranche: [AuditTrancheEvent]
+}
 
-export type GuaranteesDistributedCallback = (
-  workPackageSubmissionEventId: bigint,
-) => void | Promise<void> | SafePromise<void>
+// Helper type to get callback signature from event args
+type EventCallback<T extends unknown[]> = (
+  ...args: T
+) => Safe<void> | SafePromise<void> | void | Promise<void>
 
-export type ReceivingGuaranteeCallback = (
-  peerId: Uint8Array,
-) => void | Promise<void> | SafePromise<void>
-
-export type GuaranteeReceiveFailedCallback = (
-  receivingGuaranteeEventId: bigint,
-  reason: string,
-) => void | Promise<void> | SafePromise<void>
-
-export type GuaranteeReceivedCallback = (
-  receivingGuaranteeEventId: bigint,
-  guaranteeOutline: GuaranteeOutline,
-) => void | Promise<void> | SafePromise<void>
-
-export type GuaranteeDiscardedCallback = (
-  guaranteeOutline: GuaranteeOutline,
-  discardReason: GuaranteeDiscardReason,
-) => void | Promise<void> | SafePromise<void>
-
-// Audit-related callback types
-export type WorkReportAvailableCallback = (
-  workReport: WorkReport,
-  coreIndex: bigint,
-  blockHeaderHash: Hex,
-) => Safe<void> | SafePromise<void>
-
-export type NegativeJudgmentReceivedCallback = (
-  judgment: Judgment,
-  workReportHash: Hex,
-  validatorIndex: bigint,
-) => Safe<void> | SafePromise<void>
-
-export type AuditAnnouncementReceivedCallback = (
-  announcement: AuditAnnouncement,
-  validatorIndex: bigint,
-) => Safe<void> | SafePromise<void>
-
-export type JudgmentPublishedCallback = (
-  judgment: Judgment,
-  workReportHash: Hex,
-  validatorIndex: bigint,
-) => Safe<void> | SafePromise<void>
-
+// Type-safe event bus
 export class EventBusService extends BaseService {
-  private slotChangeCallbacks: SlotChangeCallback[] = []
-  private epochTransitionCallbacks: EpochTransitionCallback[] = []
-  private validatorSetChangeCallbacks: ValidatorSetChangeCallback[] = []
-  private connectionRefusedCallbacks: ConnectionRefusedCallback[] = []
-  private connectingInCallbacks: ConnectingInCallback[] = []
-  private connectedInCallbacks: ConnectedInCallback[] = []
-  private connectInFailedCallbacks: ConnectInFailedCallback[] = []
-  private connectingOutCallbacks: ConnectingOutCallback[] = []
-  private connectedOutCallbacks: ConnectedOutCallback[] = []
-  private connectOutFailedCallbacks: ConnectOutFailedCallback[] = []
-  private disconnectedCallbacks: DisconnectedCallback[] = []
-  private peerMisbehavedCallbacks: PeerMisbehavedCallback[] = []
-  private authoringCallbacks: AuthoringCallback[] = []
-  private authoringFailedCallbacks: AuthoringFailedCallback[] = []
-  private authoredCallbacks: AuthoredCallback[] = []
-  private importingCallbacks: ImportingCallback[] = []
-  private blockVerificationFailedCallbacks: BlockVerificationFailedCallback[] =
-    []
-  private blockVerifiedCallbacks: BlockVerifiedCallback[] = []
-  private blockExecutionFailedCallbacks: BlockExecutionFailedCallback[] = []
-  private blockExecutedCallbacks: BlockExecutedCallback[] = []
-  private bestBlockChangedCallbacks: BestBlockChangedCallback[] = []
-  private finalizedBlockChangedCallbacks: FinalizedBlockChangedCallback[] = []
-  private syncStatusChangedCallbacks: SyncStatusChangedCallback[] = []
-  private statusCallbacks: StatusCallback[] = []
-  private generatingTicketsCallbacks: GeneratingTicketsCallback[] = []
-  private ticketGenerationFailedCallbacks: TicketGenerationFailedCallback[] = []
-  private ticketsGeneratedCallbacks: TicketsGeneratedCallback[] = []
-  private ticketTransferFailedCallbacks: TicketTransferFailedCallback[] = []
-  private ticketTransferredCallbacks: TicketTransferredCallback[] = []
-  private workPackageSubmissionCallbacks: WorkPackageSubmissionCallback[] = []
-  private workPackageBeingSharedCallbacks: WorkPackageBeingSharedCallback[] = []
-  private workPackageFailedCallbacks: WorkPackageFailedCallback[] = []
-  private duplicateWorkPackageCallbacks: DuplicateWorkPackageCallback[] = []
-  private workPackageReceivedCallbacks: WorkPackageReceivedCallback[] = []
-  private authorizedCallbacks: AuthorizedCallback[] = []
-  private extrinsicDataReceivedCallbacks: ExtrinsicDataReceivedCallback[] = []
-  private importsReceivedCallbacks: ImportsReceivedCallback[] = []
-  private sharingWorkPackageCallbacks: SharingWorkPackageCallback[] = []
-  private workPackageSharingFailedCallbacks: WorkPackageSharingFailedCallback[] =
-    []
-  private bundleSentCallbacks: BundleSentCallback[] = []
-  private refinedCallbacks: RefinedCallback[] = []
-  private workReportBuiltCallbacks: WorkReportBuiltCallback[] = []
-  private workReportSignatureSentCallbacks: WorkReportSignatureSentCallback[] =
-    []
-  private workReportSignatureReceivedCallbacks: WorkReportSignatureReceivedCallback[] =
-    []
-  private guaranteeBuiltCallbacks: GuaranteeBuiltCallback[] = []
-  private sendingGuaranteeCallbacks: SendingGuaranteeCallback[] = []
-  private guaranteeSendFailedCallbacks: GuaranteeSendFailedCallback[] = []
-  private guaranteeSentCallbacks: GuaranteeSentCallback[] = []
-  private guaranteesDistributedCallbacks: GuaranteesDistributedCallback[] = []
-  private receivingGuaranteeCallbacks: ReceivingGuaranteeCallback[] = []
-  private guaranteeReceiveFailedCallbacks: GuaranteeReceiveFailedCallback[] = []
-  private guaranteeReceivedCallbacks: GuaranteeReceivedCallback[] = []
-  private guaranteeDiscardedCallbacks: GuaranteeDiscardedCallback[] = []
-  private conectivityChangeCallbacks: ConectivityChangeCallback[] = []
-  private readonly ticketDistributionCallbacks: TicketDistributionCallback[] =
-    []
-
-  // Audit-related callback arrays
-  private workReportAvailableCallbacks: WorkReportAvailableCallback[] = []
-  private negativeJudgmentReceivedCallbacks: NegativeJudgmentReceivedCallback[] =
-    []
-  private auditAnnouncementReceivedCallbacks: AuditAnnouncementReceivedCallback[] =
-    []
-  private judgmentPublishedCallbacks: JudgmentPublishedCallback[] = []
-
-  // Statistics callback arrays
-  private blockProcessedCallbacks: BlockProcessedCallback[] = []
-  private workReportProcessedCallbacks: WorkReportProcessedCallback[] = []
-  private workReportJudgmentCallbacks: WorkReportJudgmentCallback[] = []
+  private callbacks: {
+    [K in keyof EventMap]?: EventCallback<EventMap[K]>[]
+  } = {}
 
   constructor() {
     super('event-bus')
   }
 
   override stop(): Safe<boolean> {
-    this.slotChangeCallbacks = []
-    this.epochTransitionCallbacks = []
-    this.validatorSetChangeCallbacks = []
-    this.connectionRefusedCallbacks = []
-    this.connectingInCallbacks = []
-    this.connectedInCallbacks = []
-    this.connectInFailedCallbacks = []
-    this.connectingOutCallbacks = []
-    this.connectedOutCallbacks = []
-    this.connectOutFailedCallbacks = []
-    this.disconnectedCallbacks = []
-    this.peerMisbehavedCallbacks = []
-    this.authoringCallbacks = []
-    this.authoringFailedCallbacks = []
-    this.authoredCallbacks = []
-    this.importingCallbacks = []
-    this.blockVerificationFailedCallbacks = []
-    this.blockVerifiedCallbacks = []
-    this.blockExecutionFailedCallbacks = []
-    this.blockExecutedCallbacks = []
-    this.bestBlockChangedCallbacks = []
-    this.finalizedBlockChangedCallbacks = []
-    this.syncStatusChangedCallbacks = []
-    this.statusCallbacks = []
-    this.generatingTicketsCallbacks = []
-    this.ticketGenerationFailedCallbacks = []
-    this.ticketsGeneratedCallbacks = []
-    this.ticketTransferFailedCallbacks = []
-    this.ticketTransferredCallbacks = []
-    this.workPackageSubmissionCallbacks = []
-    this.workPackageBeingSharedCallbacks = []
-    this.workPackageFailedCallbacks = []
-    this.duplicateWorkPackageCallbacks = []
-    this.workPackageReceivedCallbacks = []
-    this.authorizedCallbacks = []
-    this.extrinsicDataReceivedCallbacks = []
-    this.importsReceivedCallbacks = []
-    this.sharingWorkPackageCallbacks = []
-    this.workPackageSharingFailedCallbacks = []
-    this.bundleSentCallbacks = []
-    this.refinedCallbacks = []
-    this.workReportBuiltCallbacks = []
-    this.workReportSignatureSentCallbacks = []
-    this.workReportSignatureReceivedCallbacks = []
-    this.guaranteeBuiltCallbacks = []
-    this.sendingGuaranteeCallbacks = []
-    this.guaranteeSendFailedCallbacks = []
-    this.guaranteeSentCallbacks = []
-    this.guaranteesDistributedCallbacks = []
-    this.receivingGuaranteeCallbacks = []
-    this.guaranteeReceiveFailedCallbacks = []
-    this.guaranteeReceivedCallbacks = []
-    this.guaranteeDiscardedCallbacks = []
-    this.conectivityChangeCallbacks = []
-    this.blockProcessedCallbacks = []
-    this.workReportProcessedCallbacks = []
-    this.ticketDistributionCallbacks.length = 0
-
-    // Clear audit-related callbacks
-    this.workReportAvailableCallbacks = []
-    this.negativeJudgmentReceivedCallbacks = []
-    this.auditAnnouncementReceivedCallbacks = []
-    this.judgmentPublishedCallbacks = []
-    this.workReportJudgmentCallbacks = []
-
+    this.callbacks = {}
     return safeResult(true)
   }
 
   /**
-   * Register a slot change callback
+   * Register a callback for an event
    */
-  onSlotChange(callback: SlotChangeCallback): void {
-    this.slotChangeCallbacks.push(callback)
+  on<K extends keyof EventMap>(
+    eventName: K,
+    callback: EventCallback<EventMap[K]>,
+  ): void {
+    if (!this.callbacks[eventName]) {
+      this.callbacks[eventName] = []
+    }
+    this.callbacks[eventName]!.push(callback)
   }
 
   /**
-   * Register an epoch transition callback
+   * Remove a callback for an event
    */
-  onEpochTransition(callback: EpochTransitionCallback): void {
-    this.epochTransitionCallbacks.push(callback)
+  off<K extends keyof EventMap>(
+    eventName: K,
+    callback: EventCallback<EventMap[K]>,
+  ): void {
+    const callbacks = this.callbacks[eventName]
+    if (!callbacks) return
+
+    const index = callbacks.indexOf(callback)
+    if (index > -1) {
+      callbacks.splice(index, 1)
+    }
   }
 
   /**
-   * Register a validator set change callback
+   * Emit an event with type-safe arguments
    */
-  onValidatorSetChange(callback: ValidatorSetChangeCallback): void {
-    this.validatorSetChangeCallbacks.push(callback)
+  async emit<K extends keyof EventMap>(
+    eventName: K,
+    ...args: EventMap[K]
+  ): Promise<void> {
+    const callbacks = this.callbacks[eventName]
+    if (!callbacks) return
+
+    for (const callback of callbacks) {
+      try {
+        const result = await callback(...args)
+        // Handle Safe/SafePromise results
+        if (result && Array.isArray(result) && result.length > 0 && result[0]) {
+          logger.error(`Error in ${String(eventName)} callback`, {
+            error: result[0],
+            args,
+          })
+        }
+      } catch (error) {
+        logger.error(`Error in ${String(eventName)} callback`, {
+          error: error instanceof Error ? error.message : String(error),
+          args,
+        })
+      }
+    }
   }
 
-  /**
-   * Register a conectivity change callback
-   */
-  onConectivityChange(callback: ConectivityChangeCallback): void {
-    this.conectivityChangeCallbacks.push(callback)
+  addBlocksReceivedCallback(
+    callback: EventCallback<EventMap['blocksReceived']>,
+  ): void {
+    this.on('blocksReceived', callback)
   }
 
-  onTicketDistribution(callback: TicketDistributionCallback): void {
-    this.ticketDistributionCallbacks.push(callback)
+  addBlocksRequestedCallback(
+    callback: EventCallback<EventMap['blocksRequested']>,
+  ): void {
+    this.on('blocksRequested', callback)
   }
 
-  onAuthoring(callback: AuthoringCallback): void {
-    this.authoringCallbacks.push(callback)
+  addSlotChangeCallback(callback: EventCallback<EventMap['slotChange']>): void {
+    this.on('slotChange', callback)
   }
 
-  onAuthoringFailed(callback: AuthoringFailedCallback): void {
-    this.authoringFailedCallbacks.push(callback)
+  addEpochTransitionCallback(
+    callback: EventCallback<EventMap['epochTransition']>,
+  ): void {
+    this.on('epochTransition', callback)
   }
 
-  onAuthored(callback: AuthoredCallback): void {
-    this.authoredCallbacks.push(callback)
+  // Aliases for compatibility (addXxxCallback methods)
+  addConnectionRefusedCallback(
+    callback: EventCallback<EventMap['connectionRefused']>,
+  ): void {
+    this.on('connectionRefused', callback)
   }
 
-  onImporting(callback: ImportingCallback): void {
-    this.importingCallbacks.push(callback)
+  addConnectingInCallback(
+    callback: EventCallback<EventMap['connectingIn']>,
+  ): void {
+    this.on('connectingIn', callback)
   }
 
-  onBlockVerificationFailed(callback: BlockVerificationFailedCallback): void {
-    this.blockVerificationFailedCallbacks.push(callback)
+  addConnectedInCallback(
+    callback: EventCallback<EventMap['connectedIn']>,
+  ): void {
+    this.on('connectedIn', callback)
   }
 
-  onBlockVerified(callback: BlockVerifiedCallback): void {
-    this.blockVerifiedCallbacks.push(callback)
+  addConnectInFailedCallback(
+    callback: EventCallback<EventMap['connectInFailed']>,
+  ): void {
+    this.on('connectInFailed', callback)
   }
 
-  onBlockExecutionFailed(callback: BlockExecutionFailedCallback): void {
-    this.blockExecutionFailedCallbacks.push(callback)
+  addConnectingOutCallback(
+    callback: EventCallback<EventMap['connectingOut']>,
+  ): void {
+    this.on('connectingOut', callback)
   }
 
-  onBlockExecuted(callback: BlockExecutedCallback): void {
-    this.blockExecutedCallbacks.push(callback)
+  addConnectedOutCallback(
+    callback: EventCallback<EventMap['connectedOut']>,
+  ): void {
+    this.on('connectedOut', callback)
   }
 
-  onBestBlockChanged(callback: BestBlockChangedCallback): void {
-    this.bestBlockChangedCallbacks.push(callback)
+  addConnectOutFailedCallback(
+    callback: EventCallback<EventMap['connectOutFailed']>,
+  ): void {
+    this.on('connectOutFailed', callback)
   }
 
-  onFinalizedBlockChanged(callback: FinalizedBlockChangedCallback): void {
-    this.finalizedBlockChangedCallbacks.push(callback)
+  addDisconnectedCallback(
+    callback: EventCallback<EventMap['disconnected']>,
+  ): void {
+    this.on('disconnected', callback)
   }
 
-  onSyncStatusChanged(callback: SyncStatusChangedCallback): void {
-    this.syncStatusChangedCallbacks.push(callback)
+  addPeerMisbehavedCallback(
+    callback: EventCallback<EventMap['peerMisbehaved']>,
+  ): void {
+    this.on('peerMisbehaved', callback)
   }
 
-  onStatus(callback: StatusCallback): void {
-    this.statusCallbacks.push(callback)
+  addAuthoringCallback(callback: EventCallback<EventMap['authoring']>): void {
+    this.on('authoring', callback)
   }
 
-  onGeneratingTickets(callback: GeneratingTicketsCallback): void {
-    this.generatingTicketsCallbacks.push(callback)
+  addAuthoringFailedCallback(
+    callback: EventCallback<EventMap['authoringFailed']>,
+  ): void {
+    this.on('authoringFailed', callback)
   }
 
-  onTicketGenerationFailed(callback: TicketGenerationFailedCallback): void {
-    this.ticketGenerationFailedCallbacks.push(callback)
+  addAuthoredCallback(callback: EventCallback<EventMap['authored']>): void {
+    this.on('authored', callback)
   }
 
-  onTicketsGenerated(callback: TicketsGeneratedCallback): void {
-    this.ticketsGeneratedCallbacks.push(callback)
-  }
-
-  onBlockProcessed(callback: BlockProcessedCallback): void {
-    this.blockProcessedCallbacks.push(callback)
-  }
-
-  onWorkReportProcessed(callback: WorkReportProcessedCallback): void {
-    this.workReportProcessedCallbacks.push(callback)
-  }
-
-  // Add callback methods (aliases for compatibility with telemetry service)
-  addConnectionRefusedCallback(callback: ConnectionRefusedCallback): void {
-    this.connectionRefusedCallbacks.push(callback)
-  }
-
-  addConnectingInCallback(callback: ConnectingInCallback): void {
-    this.connectingInCallbacks.push(callback)
-  }
-
-  addConnectedInCallback(callback: ConnectedInCallback): void {
-    this.connectedInCallbacks.push(callback)
-  }
-
-  addConnectInFailedCallback(callback: ConnectInFailedCallback): void {
-    this.connectInFailedCallbacks.push(callback)
-  }
-
-  addConnectingOutCallback(callback: ConnectingOutCallback): void {
-    this.connectingOutCallbacks.push(callback)
-  }
-
-  addConnectedOutCallback(callback: ConnectedOutCallback): void {
-    this.connectedOutCallbacks.push(callback)
-  }
-
-  addConnectOutFailedCallback(callback: ConnectOutFailedCallback): void {
-    this.connectOutFailedCallbacks.push(callback)
-  }
-
-  addDisconnectedCallback(callback: DisconnectedCallback): void {
-    this.disconnectedCallbacks.push(callback)
-  }
-
-  addPeerMisbehavedCallback(callback: PeerMisbehavedCallback): void {
-    this.peerMisbehavedCallbacks.push(callback)
-  }
-
-  addAuthoringCallback(callback: AuthoringCallback): void {
-    this.authoringCallbacks.push(callback)
-  }
-
-  addAuthoringFailedCallback(callback: AuthoringFailedCallback): void {
-    this.authoringFailedCallbacks.push(callback)
-  }
-
-  addAuthoredCallback(callback: AuthoredCallback): void {
-    this.authoredCallbacks.push(callback)
-  }
-
-  addImportingCallback(callback: ImportingCallback): void {
-    this.importingCallbacks.push(callback)
+  addImportingCallback(callback: EventCallback<EventMap['importing']>): void {
+    this.on('importing', callback)
   }
 
   addBlockVerificationFailedCallback(
-    callback: BlockVerificationFailedCallback,
+    callback: EventCallback<EventMap['blockVerificationFailed']>,
   ): void {
-    this.blockVerificationFailedCallbacks.push(callback)
+    this.on('blockVerificationFailed', callback)
   }
 
-  addBlockVerifiedCallback(callback: BlockVerifiedCallback): void {
-    this.blockVerifiedCallbacks.push(callback)
+  addBlockVerifiedCallback(
+    callback: EventCallback<EventMap['blockVerified']>,
+  ): void {
+    this.on('blockVerified', callback)
   }
 
   addBlockExecutionFailedCallback(
-    callback: BlockExecutionFailedCallback,
+    callback: EventCallback<EventMap['blockExecutionFailed']>,
   ): void {
-    this.blockExecutionFailedCallbacks.push(callback)
+    this.on('blockExecutionFailed', callback)
   }
 
-  addBlockExecutedCallback(callback: BlockExecutedCallback): void {
-    this.blockExecutedCallbacks.push(callback)
+  addBlockExecutedCallback(
+    callback: EventCallback<EventMap['blockExecuted']>,
+  ): void {
+    this.on('blockExecuted', callback)
   }
 
-  addBestBlockChangedCallback(callback: BestBlockChangedCallback): void {
-    this.bestBlockChangedCallbacks.push(callback)
+  addBestBlockChangedCallback(
+    callback: EventCallback<EventMap['bestBlockChanged']>,
+  ): void {
+    this.on('bestBlockChanged', callback)
   }
 
   addFinalizedBlockChangedCallback(
-    callback: FinalizedBlockChangedCallback,
+    callback: EventCallback<EventMap['finalizedBlockChanged']>,
   ): void {
-    this.finalizedBlockChangedCallbacks.push(callback)
+    this.on('finalizedBlockChanged', callback)
   }
 
-  addSyncStatusChangedCallback(callback: SyncStatusChangedCallback): void {
-    this.syncStatusChangedCallbacks.push(callback)
+  addSyncStatusChangedCallback(
+    callback: EventCallback<EventMap['syncStatusChanged']>,
+  ): void {
+    this.on('syncStatusChanged', callback)
   }
 
-  addStatusCallback(callback: StatusCallback): void {
-    this.statusCallbacks.push(callback)
+  addStatusCallback(callback: EventCallback<EventMap['status']>): void {
+    this.on('status', callback)
   }
 
-  addGeneratingTicketsCallback(callback: GeneratingTicketsCallback): void {
-    this.generatingTicketsCallbacks.push(callback)
+  addGeneratingTicketsCallback(
+    callback: EventCallback<EventMap['generatingTickets']>,
+  ): void {
+    this.on('generatingTickets', callback)
   }
 
   addTicketGenerationFailedCallback(
-    callback: TicketGenerationFailedCallback,
+    callback: EventCallback<EventMap['ticketGenerationFailed']>,
   ): void {
-    this.ticketGenerationFailedCallbacks.push(callback)
+    this.on('ticketGenerationFailed', callback)
   }
 
-  addTicketsGeneratedCallback(callback: TicketsGeneratedCallback): void {
-    this.ticketsGeneratedCallbacks.push(callback)
+  addTicketsGeneratedCallback(
+    callback: EventCallback<EventMap['ticketsGenerated']>,
+  ): void {
+    this.on('ticketsGenerated', callback)
   }
 
   addTicketTransferFailedCallback(
-    callback: TicketTransferFailedCallback,
+    callback: EventCallback<EventMap['ticketTransferFailed']>,
   ): void {
-    this.ticketTransferFailedCallbacks.push(callback)
+    this.on('ticketTransferFailed', callback)
   }
 
-  addTicketTransferredCallback(callback: TicketTransferredCallback): void {
-    this.ticketTransferredCallbacks.push(callback)
-  }
-
-  addWorkPackageSubmissionCallback(
-    callback: WorkPackageSubmissionCallback,
+  addTicketTransferredCallback(
+    callback: EventCallback<EventMap['ticketTransferred']>,
   ): void {
-    this.workPackageSubmissionCallbacks.push(callback)
+    this.on('ticketTransferred', callback)
   }
 
   addWorkPackageBeingSharedCallback(
-    callback: WorkPackageBeingSharedCallback,
+    callback: EventCallback<EventMap['workPackageBeingShared']>,
   ): void {
-    this.workPackageBeingSharedCallbacks.push(callback)
+    this.on('workPackageBeingShared', callback)
   }
 
-  addWorkPackageFailedCallback(callback: WorkPackageFailedCallback): void {
-    this.workPackageFailedCallbacks.push(callback)
+  addWorkPackageFailedCallback(
+    callback: EventCallback<EventMap['workPackageFailed']>,
+  ): void {
+    this.on('workPackageFailed', callback)
   }
 
   addDuplicateWorkPackageCallback(
-    callback: DuplicateWorkPackageCallback,
+    callback: EventCallback<EventMap['duplicateWorkPackage']>,
   ): void {
-    this.duplicateWorkPackageCallbacks.push(callback)
+    this.on('duplicateWorkPackage', callback)
   }
 
-  addWorkPackageReceivedCallback(callback: WorkPackageReceivedCallback): void {
-    this.workPackageReceivedCallbacks.push(callback)
+  addWorkPackageSubmissionReceivedCallback(
+    callback: EventCallback<EventMap['workPackageSubmissionReceived']>,
+  ): void {
+    this.on('workPackageSubmissionReceived', callback)
   }
 
-  addAuthorizedCallback(callback: AuthorizedCallback): void {
-    this.authorizedCallbacks.push(callback)
+  addAuthorizedCallback(callback: EventCallback<EventMap['authorized']>): void {
+    this.on('authorized', callback)
   }
 
   addExtrinsicDataReceivedCallback(
-    callback: ExtrinsicDataReceivedCallback,
+    callback: EventCallback<EventMap['extrinsicDataReceived']>,
   ): void {
-    this.extrinsicDataReceivedCallbacks.push(callback)
+    this.on('extrinsicDataReceived', callback)
   }
 
-  addImportsReceivedCallback(callback: ImportsReceivedCallback): void {
-    this.importsReceivedCallbacks.push(callback)
+  addImportsReceivedCallback(
+    callback: EventCallback<EventMap['importsReceived']>,
+  ): void {
+    this.on('importsReceived', callback)
   }
 
-  addSharingWorkPackageCallback(callback: SharingWorkPackageCallback): void {
-    this.sharingWorkPackageCallbacks.push(callback)
+  addSharingWorkPackageCallback(
+    callback: EventCallback<EventMap['sharingWorkPackage']>,
+  ): void {
+    this.on('sharingWorkPackage', callback)
   }
 
   addWorkPackageSharingFailedCallback(
-    callback: WorkPackageSharingFailedCallback,
+    callback: EventCallback<EventMap['workPackageSharingFailed']>,
   ): void {
-    this.workPackageSharingFailedCallbacks.push(callback)
+    this.on('workPackageSharingFailed', callback)
   }
 
-  addBundleSentCallback(callback: BundleSentCallback): void {
-    this.bundleSentCallbacks.push(callback)
+  addBundleSentCallback(callback: EventCallback<EventMap['bundleSent']>): void {
+    this.on('bundleSent', callback)
   }
 
-  addRefinedCallback(callback: RefinedCallback): void {
-    this.refinedCallbacks.push(callback)
+  addRefinedCallback(callback: EventCallback<EventMap['refined']>): void {
+    this.on('refined', callback)
   }
 
-  addWorkReportBuiltCallback(callback: WorkReportBuiltCallback): void {
-    this.workReportBuiltCallbacks.push(callback)
+  addWorkReportBuiltCallback(
+    callback: EventCallback<EventMap['workReportBuilt']>,
+  ): void {
+    this.on('workReportBuilt', callback)
   }
 
   addWorkReportSignatureSentCallback(
-    callback: WorkReportSignatureSentCallback,
+    callback: EventCallback<EventMap['workReportSignatureSent']>,
   ): void {
-    this.workReportSignatureSentCallbacks.push(callback)
+    this.on('workReportSignatureSent', callback)
   }
 
   addWorkReportSignatureReceivedCallback(
-    callback: WorkReportSignatureReceivedCallback,
+    callback: EventCallback<EventMap['workReportSignatureReceived']>,
   ): void {
-    this.workReportSignatureReceivedCallbacks.push(callback)
+    this.on('workReportSignatureReceived', callback)
   }
 
-  addGuaranteeBuiltCallback(callback: GuaranteeBuiltCallback): void {
-    this.guaranteeBuiltCallbacks.push(callback)
+  addGuaranteeBuiltCallback(
+    callback: EventCallback<EventMap['guaranteeBuilt']>,
+  ): void {
+    this.on('guaranteeBuilt', callback)
   }
 
-  addSendingGuaranteeCallback(callback: SendingGuaranteeCallback): void {
-    this.sendingGuaranteeCallbacks.push(callback)
+  addSendingGuaranteeCallback(
+    callback: EventCallback<EventMap['sendingGuarantee']>,
+  ): void {
+    this.on('sendingGuarantee', callback)
   }
 
-  addGuaranteeSendFailedCallback(callback: GuaranteeSendFailedCallback): void {
-    this.guaranteeSendFailedCallbacks.push(callback)
+  addGuaranteeSendFailedCallback(
+    callback: EventCallback<EventMap['guaranteeSendFailed']>,
+  ): void {
+    this.on('guaranteeSendFailed', callback)
   }
 
-  addGuaranteeSentCallback(callback: GuaranteeSentCallback): void {
-    this.guaranteeSentCallbacks.push(callback)
+  addGuaranteeSentCallback(
+    callback: EventCallback<EventMap['guaranteeSent']>,
+  ): void {
+    this.on('guaranteeSent', callback)
   }
 
   addGuaranteesDistributedCallback(
-    callback: GuaranteesDistributedCallback,
+    callback: EventCallback<EventMap['guaranteesDistributed']>,
   ): void {
-    this.guaranteesDistributedCallbacks.push(callback)
+    this.on('guaranteesDistributed', callback)
   }
 
-  addReceivingGuaranteeCallback(callback: ReceivingGuaranteeCallback): void {
-    this.receivingGuaranteeCallbacks.push(callback)
+  addReceivingGuaranteeCallback(
+    callback: EventCallback<EventMap['receivingGuarantee']>,
+  ): void {
+    this.on('receivingGuarantee', callback)
   }
 
   addGuaranteeReceiveFailedCallback(
-    callback: GuaranteeReceiveFailedCallback,
+    callback: EventCallback<EventMap['guaranteeReceiveFailed']>,
   ): void {
-    this.guaranteeReceiveFailedCallbacks.push(callback)
+    this.on('guaranteeReceiveFailed', callback)
   }
 
-  addGuaranteeReceivedCallback(callback: GuaranteeReceivedCallback): void {
-    this.guaranteeReceivedCallbacks.push(callback)
+  addGuaranteeReceivedCallback(
+    callback: EventCallback<EventMap['guaranteeReceived']>,
+  ): void {
+    this.on('guaranteeReceived', callback)
   }
 
-  addGuaranteeDiscardedCallback(callback: GuaranteeDiscardedCallback): void {
-    this.guaranteeDiscardedCallbacks.push(callback)
+  addGuaranteeDiscardedCallback(
+    callback: EventCallback<EventMap['guaranteeDiscarded']>,
+  ): void {
+    this.on('guaranteeDiscarded', callback)
   }
 
-  // Audit-related callback registration methods
-  addWorkReportAvailableCallback(callback: WorkReportAvailableCallback): void {
-    this.workReportAvailableCallbacks.push(callback)
+  addWorkReportAvailableCallback(
+    callback: EventCallback<EventMap['workReportAvailable']>,
+  ): void {
+    this.on('workReportAvailable', callback)
   }
 
   addNegativeJudgmentReceivedCallback(
-    callback: NegativeJudgmentReceivedCallback,
+    callback: EventCallback<EventMap['negativeJudgmentReceived']>,
   ): void {
-    this.negativeJudgmentReceivedCallbacks.push(callback)
+    this.on('negativeJudgmentReceived', callback)
   }
 
   addAuditAnnouncementReceivedCallback(
-    callback: AuditAnnouncementReceivedCallback,
+    callback: EventCallback<EventMap['auditAnnouncementReceived']>,
   ): void {
-    this.auditAnnouncementReceivedCallbacks.push(callback)
+    this.on('auditAnnouncementReceived', callback)
   }
 
-  addJudgmentPublishedCallback(callback: JudgmentPublishedCallback): void {
-    this.judgmentPublishedCallbacks.push(callback)
+  addJudgmentPublishedCallback(
+    callback: EventCallback<EventMap['judgmentPublished']>,
+  ): void {
+    this.on('judgmentPublished', callback)
   }
 
-  // Statistics callback registration methods
-  addBlockProcessedCallback(callback: BlockProcessedCallback): void {
-    this.blockProcessedCallbacks.push(callback)
+  addBlockProcessedCallback(
+    callback: EventCallback<EventMap['blockProcessed']>,
+  ): void {
+    this.on('blockProcessed', callback)
   }
 
-  addWorkReportProcessedCallback(callback: WorkReportProcessedCallback): void {
-    this.workReportProcessedCallbacks.push(callback)
+  addWorkReportProcessedCallback(
+    callback: EventCallback<EventMap['workReportProcessed']>,
+  ): void {
+    this.on('workReportProcessed', callback)
   }
 
-  addWorkReportJudgmentCallback(callback: WorkReportJudgmentCallback): void {
-    this.workReportJudgmentCallbacks.push(callback)
+  addWorkReportJudgmentCallback(
+    callback: EventCallback<EventMap['workReportJudgment']>,
+  ): void {
+    this.on('workReportJudgment', callback)
   }
 
-  /**
-   * Remove a slot change callback
-   */
-  removeSlotChangeCallback(callback: SlotChangeCallback): void {
-    const index = this.slotChangeCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.slotChangeCallbacks.splice(index, 1)
-    }
+  addWorkPackageSharingCallback(
+    callback: EventCallback<EventMap['workPackageSharing']>,
+  ): void {
+    this.on('workPackageSharing', callback)
   }
 
-  /**
-   * Remove an epoch transition callback
-   */
-  removeEpochTransitionCallback(callback: EpochTransitionCallback): void {
-    const index = this.epochTransitionCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.epochTransitionCallbacks.splice(index, 1)
-    }
+  addWorkPackageSharingResponseCallback(
+    callback: EventCallback<EventMap['workPackageSharingResponse']>,
+  ): void {
+    this.on('workPackageSharingResponse', callback)
   }
 
-  /**
-   * Remove a validator set change callback
-   */
-  removeValidatorSetChangeCallback(callback: ValidatorSetChangeCallback): void {
-    const index = this.validatorSetChangeCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.validatorSetChangeCallbacks.splice(index, 1)
-    }
+  addPreimageAnnouncementCallback(
+    callback: EventCallback<EventMap['preimageAnnouncementReceived']>,
+  ): void {
+    this.on('preimageAnnouncementReceived', callback)
   }
 
-  removeAuthoringCallback(callback: AuthoringCallback): void {
-    const index = this.authoringCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.authoringCallbacks.splice(index, 1)
-    }
+  addPreimageRequestedCallback(
+    callback: EventCallback<EventMap['preimageRequested']>,
+  ): void {
+    this.on('preimageRequested', callback)
   }
 
-  removeAuthoringFailedCallback(callback: AuthoringFailedCallback): void {
-    const index = this.authoringFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.authoringFailedCallbacks.splice(index, 1)
-    }
+  addPreimageReceivedCallback(
+    callback: EventCallback<EventMap['preimageReceived']>,
+  ): void {
+    this.on('preimageReceived', callback)
   }
 
-  removeAuthoredCallback(callback: AuthoredCallback): void {
-    const index = this.authoredCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.authoredCallbacks.splice(index, 1)
-    }
+  addAssuranceReceivedCallback(
+    callback: EventCallback<EventMap['assuranceReceived']>,
+  ): void {
+    this.on('assuranceReceived', callback)
   }
 
-  removeImportingCallback(callback: ImportingCallback): void {
-    const index = this.importingCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.importingCallbacks.splice(index, 1)
-    }
+  addAuditShardRequestCallback(
+    callback: EventCallback<EventMap['auditShardRequest']>,
+  ): void {
+    this.on('auditShardRequest', callback)
+  }
+
+  addAuditShardResponseCallback(
+    callback: EventCallback<EventMap['auditShardResponse']>,
+  ): void {
+    this.on('auditShardResponse', callback)
+  }
+
+  addSegmentShardRequestCallback(
+    callback: EventCallback<EventMap['segmentShardRequest']>,
+  ): void {
+    this.on('segmentShardRequest', callback)
+  }
+
+  addSegmentShardResponseCallback(
+    callback: EventCallback<EventMap['segmentShardResponse']>,
+  ): void {
+    this.on('segmentShardResponse', callback)
+  }
+
+  addShardDistributionRequestCallback(
+    callback: EventCallback<EventMap['shardDistributionRequest']>,
+  ): void {
+    this.on('shardDistributionRequest', callback)
+  }
+
+  addShardDistributionResponseCallback(
+    callback: EventCallback<EventMap['shardDistributionResponse']>,
+  ): void {
+    this.on('shardDistributionResponse', callback)
+  }
+
+  addWorkReportRequestCallback(
+    callback: EventCallback<EventMap['workReportRequest']>,
+  ): void {
+    this.on('workReportRequest', callback)
+  }
+
+  addWorkReportResponseCallback(
+    callback: EventCallback<EventMap['workReportResponse']>,
+  ): void {
+    this.on('workReportResponse', callback)
+  }
+
+  addWorkReportDistributionRequestCallback(
+    callback: EventCallback<EventMap['workReportDistributionRequest']>,
+  ): void {
+    this.on('workReportDistributionRequest', callback)
+  }
+
+  addStateRequestedCallback(
+    callback: EventCallback<EventMap['stateRequested']>,
+  ): void {
+    this.on('stateRequested', callback)
+  }
+
+  addStateResponseCallback(
+    callback: EventCallback<EventMap['stateResponse']>,
+  ): void {
+    this.on('stateResponse', callback)
+  }
+
+  addTicketDistributionRequestCallback(
+    callback: EventCallback<EventMap['ticketDistributionRequest']>,
+  ): void {
+    this.on('ticketDistributionRequest', callback)
+  }
+
+  addTicketDistributionResponseCallback(
+    callback: EventCallback<EventMap['ticketDistributionResponse']>,
+  ): void {
+    this.on('ticketDistributionResponse', callback)
+  }
+
+  addFirstPhaseTicketDistributionCallback(
+    callback: EventCallback<EventMap['firstPhaseTicketDistribution']>,
+  ): void {
+    this.on('firstPhaseTicketDistribution', callback)
+  }
+
+  addSecondPhaseTicketDistributionCallback(
+    callback: EventCallback<EventMap['secondPhaseTicketDistribution']>,
+  ): void {
+    this.on('secondPhaseTicketDistribution', callback)
+  }
+
+  addAssuranceDistributionCallback(
+    callback: EventCallback<EventMap['assuranceDistribution']>,
+  ): void {
+    this.on('assuranceDistribution', callback)
+  }
+
+  addAuditTrancheCallback(
+    callback: EventCallback<EventMap['auditTranche']>,
+  ): void {
+    this.on('auditTranche', callback)
+  }
+
+  // Remove methods (aliases)
+  removeSlotChangeCallback(
+    callback: EventCallback<EventMap['slotChange']>,
+  ): void {
+    this.off('slotChange', callback)
+  }
+
+  removeEpochTransitionCallback(
+    callback: EventCallback<EventMap['epochTransition']>,
+  ): void {
+    this.off('epochTransition', callback)
+  }
+
+  removeValidatorSetChangeCallback(
+    callback: EventCallback<EventMap['validatorSetChange']>,
+  ): void {
+    this.off('validatorSetChange', callback)
+  }
+
+  removeConectivityChangeCallback(
+    callback: EventCallback<EventMap['conectivityChange']>,
+  ): void {
+    this.off('conectivityChange', callback)
+  }
+
+  removeFirstPhaseTicketDistributionCallback(
+    callback: EventCallback<EventMap['firstPhaseTicketDistribution']>,
+  ): void {
+    this.off('firstPhaseTicketDistribution', callback)
+  }
+
+  removeSecondPhaseTicketDistributionCallback(
+    callback: EventCallback<EventMap['secondPhaseTicketDistribution']>,
+  ): void {
+    this.off('secondPhaseTicketDistribution', callback)
+  }
+
+  removeAssuranceDistributionCallback(
+    callback: EventCallback<EventMap['assuranceDistribution']>,
+  ): void {
+    this.off('assuranceDistribution', callback)
+  }
+
+  removeAuditTrancheCallback(
+    callback: EventCallback<EventMap['auditTranche']>,
+  ): void {
+    this.off('auditTranche', callback)
+  }
+
+  removeAssuranseReceivedCallback(
+    callback: EventCallback<EventMap['assuranceReceived']>,
+  ): void {
+    this.off('assuranceReceived', callback)
+  }
+
+  removeAuthoringCallback(
+    callback: EventCallback<EventMap['authoring']>,
+  ): void {
+    this.off('authoring', callback)
+  }
+
+  removeAuthoringFailedCallback(
+    callback: EventCallback<EventMap['authoringFailed']>,
+  ): void {
+    this.off('authoringFailed', callback)
+  }
+
+  removeAuthoredCallback(callback: EventCallback<EventMap['authored']>): void {
+    this.off('authored', callback)
+  }
+
+  removeImportingCallback(
+    callback: EventCallback<EventMap['importing']>,
+  ): void {
+    this.off('importing', callback)
   }
 
   removeBlockVerificationFailedCallback(
-    callback: BlockVerificationFailedCallback,
+    callback: EventCallback<EventMap['blockVerificationFailed']>,
   ): void {
-    const index = this.blockVerificationFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.blockVerificationFailedCallbacks.splice(index, 1)
-    }
+    this.off('blockVerificationFailed', callback)
   }
 
-  removeBlockVerifiedCallback(callback: BlockVerifiedCallback): void {
-    const index = this.blockVerifiedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.blockVerifiedCallbacks.splice(index, 1)
-    }
+  removeBlockVerifiedCallback(
+    callback: EventCallback<EventMap['blockVerified']>,
+  ): void {
+    this.off('blockVerified', callback)
   }
 
   removeBlockExecutionFailedCallback(
-    callback: BlockExecutionFailedCallback,
+    callback: EventCallback<EventMap['blockExecutionFailed']>,
   ): void {
-    const index = this.blockExecutionFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.blockExecutionFailedCallbacks.splice(index, 1)
-    }
+    this.off('blockExecutionFailed', callback)
   }
 
-  removeBlockExecutedCallback(callback: BlockExecutedCallback): void {
-    const index = this.blockExecutedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.blockExecutedCallbacks.splice(index, 1)
-    }
+  removeBlockExecutedCallback(
+    callback: EventCallback<EventMap['blockExecuted']>,
+  ): void {
+    this.off('blockExecuted', callback)
   }
 
-  removeBestBlockChangedCallback(callback: BestBlockChangedCallback): void {
-    const index = this.bestBlockChangedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.bestBlockChangedCallbacks.splice(index, 1)
-    }
+  removeBestBlockChangedCallback(
+    callback: EventCallback<EventMap['bestBlockChanged']>,
+  ): void {
+    this.off('bestBlockChanged', callback)
   }
 
   removeFinalizedBlockChangedCallback(
-    callback: FinalizedBlockChangedCallback,
+    callback: EventCallback<EventMap['finalizedBlockChanged']>,
   ): void {
-    const index = this.finalizedBlockChangedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.finalizedBlockChangedCallbacks.splice(index, 1)
-    }
+    this.off('finalizedBlockChanged', callback)
   }
 
-  removeSyncStatusChangedCallback(callback: SyncStatusChangedCallback): void {
-    const index = this.syncStatusChangedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.syncStatusChangedCallbacks.splice(index, 1)
-    }
+  removeSyncStatusChangedCallback(
+    callback: EventCallback<EventMap['syncStatusChanged']>,
+  ): void {
+    this.off('syncStatusChanged', callback)
   }
 
-  removeStatusCallback(callback: StatusCallback): void {
-    const index = this.statusCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.statusCallbacks.splice(index, 1)
-    }
+  removeStatusCallback(callback: EventCallback<EventMap['status']>): void {
+    this.off('status', callback)
   }
 
-  removeGeneratingTicketsCallback(callback: GeneratingTicketsCallback): void {
-    const index = this.generatingTicketsCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.generatingTicketsCallbacks.splice(index, 1)
-    }
+  removeGeneratingTicketsCallback(
+    callback: EventCallback<EventMap['generatingTickets']>,
+  ): void {
+    this.off('generatingTickets', callback)
   }
 
   removeTicketGenerationFailedCallback(
-    callback: TicketGenerationFailedCallback,
+    callback: EventCallback<EventMap['ticketGenerationFailed']>,
   ): void {
-    const index = this.ticketGenerationFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.ticketGenerationFailedCallbacks.splice(index, 1)
-    }
+    this.off('ticketGenerationFailed', callback)
   }
 
-  removeTicketsGeneratedCallback(callback: TicketsGeneratedCallback): void {
-    const index = this.ticketsGeneratedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.ticketsGeneratedCallbacks.splice(index, 1)
-    }
+  removeTicketsGeneratedCallback(
+    callback: EventCallback<EventMap['ticketsGenerated']>,
+  ): void {
+    this.off('ticketsGenerated', callback)
   }
 
-  removeConnectionRefusedCallback(callback: ConnectionRefusedCallback): void {
-    const index = this.connectionRefusedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectionRefusedCallbacks.splice(index, 1)
-    }
+  removeConnectionRefusedCallback(
+    callback: EventCallback<EventMap['connectionRefused']>,
+  ): void {
+    this.off('connectionRefused', callback)
   }
 
-  removeConnectingInCallback(callback: ConnectingInCallback): void {
-    const index = this.connectingInCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectingInCallbacks.splice(index, 1)
-    }
+  removeConnectingInCallback(
+    callback: EventCallback<EventMap['connectingIn']>,
+  ): void {
+    this.off('connectingIn', callback)
   }
 
-  removeConnectedInCallback(callback: ConnectedInCallback): void {
-    const index = this.connectedInCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectedInCallbacks.splice(index, 1)
-    }
+  removeConnectedInCallback(
+    callback: EventCallback<EventMap['connectedIn']>,
+  ): void {
+    this.off('connectedIn', callback)
   }
 
-  removeConnectInFailedCallback(callback: ConnectInFailedCallback): void {
-    const index = this.connectInFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectInFailedCallbacks.splice(index, 1)
-    }
+  removeConnectInFailedCallback(
+    callback: EventCallback<EventMap['connectInFailed']>,
+  ): void {
+    this.off('connectInFailed', callback)
   }
 
-  removeConnectingOutCallback(callback: ConnectingOutCallback): void {
-    const index = this.connectingOutCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectingOutCallbacks.splice(index, 1)
-    }
+  removeConnectingOutCallback(
+    callback: EventCallback<EventMap['connectingOut']>,
+  ): void {
+    this.off('connectingOut', callback)
   }
 
-  removeConnectedOutCallback(callback: ConnectedOutCallback): void {
-    const index = this.connectedOutCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectedOutCallbacks.splice(index, 1)
-    }
+  removeConnectedOutCallback(
+    callback: EventCallback<EventMap['connectedOut']>,
+  ): void {
+    this.off('connectedOut', callback)
   }
 
-  removeConnectOutFailedCallback(callback: ConnectOutFailedCallback): void {
-    const index = this.connectOutFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.connectOutFailedCallbacks.splice(index, 1)
-    }
+  removeConnectOutFailedCallback(
+    callback: EventCallback<EventMap['connectOutFailed']>,
+  ): void {
+    this.off('connectOutFailed', callback)
   }
 
-  removeDisconnectedCallback(callback: DisconnectedCallback): void {
-    const index = this.disconnectedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.disconnectedCallbacks.splice(index, 1)
-    }
+  removeDisconnectedCallback(
+    callback: EventCallback<EventMap['disconnected']>,
+  ): void {
+    this.off('disconnected', callback)
   }
 
-  removePeerMisbehavedCallback(callback: PeerMisbehavedCallback): void {
-    const index = this.peerMisbehavedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.peerMisbehavedCallbacks.splice(index, 1)
-    }
+  removePeerMisbehavedCallback(
+    callback: EventCallback<EventMap['peerMisbehaved']>,
+  ): void {
+    this.off('peerMisbehaved', callback)
   }
 
   removeTicketTransferFailedCallback(
-    callback: TicketTransferFailedCallback,
+    callback: EventCallback<EventMap['ticketTransferFailed']>,
   ): void {
-    const index = this.ticketTransferFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.ticketTransferFailedCallbacks.splice(index, 1)
-    }
+    this.off('ticketTransferFailed', callback)
   }
 
-  removeTicketTransferredCallback(callback: TicketTransferredCallback): void {
-    const index = this.ticketTransferredCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.ticketTransferredCallbacks.splice(index, 1)
-    }
-  }
-
-  removeWorkPackageSubmissionCallback(
-    callback: WorkPackageSubmissionCallback,
+  removeTicketTransferredCallback(
+    callback: EventCallback<EventMap['ticketTransferred']>,
   ): void {
-    const index = this.workPackageSubmissionCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workPackageSubmissionCallbacks.splice(index, 1)
-    }
+    this.off('ticketTransferred', callback)
   }
 
   removeWorkPackageBeingSharedCallback(
-    callback: WorkPackageBeingSharedCallback,
+    callback: EventCallback<EventMap['workPackageBeingShared']>,
   ): void {
-    const index = this.workPackageBeingSharedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workPackageBeingSharedCallbacks.splice(index, 1)
-    }
+    this.off('workPackageBeingShared', callback)
   }
 
-  removeWorkPackageFailedCallback(callback: WorkPackageFailedCallback): void {
-    const index = this.workPackageFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workPackageFailedCallbacks.splice(index, 1)
-    }
+  removeWorkPackageFailedCallback(
+    callback: EventCallback<EventMap['workPackageFailed']>,
+  ): void {
+    this.off('workPackageFailed', callback)
   }
 
   removeDuplicateWorkPackageCallback(
-    callback: DuplicateWorkPackageCallback,
+    callback: EventCallback<EventMap['duplicateWorkPackage']>,
   ): void {
-    const index = this.duplicateWorkPackageCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.duplicateWorkPackageCallbacks.splice(index, 1)
-    }
+    this.off('duplicateWorkPackage', callback)
   }
 
-  removeWorkPackageReceivedCallback(
-    callback: WorkPackageReceivedCallback,
+  removeWorkPackageSubmissionReceivedCallback(
+    callback: EventCallback<EventMap['workPackageSubmissionReceived']>,
   ): void {
-    const index = this.workPackageReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workPackageReceivedCallbacks.splice(index, 1)
-    }
+    this.off('workPackageSubmissionReceived', callback)
   }
 
-  removeAuthorizedCallback(callback: AuthorizedCallback): void {
-    const index = this.authorizedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.authorizedCallbacks.splice(index, 1)
-    }
+  removeAuthorizedCallback(
+    callback: EventCallback<EventMap['authorized']>,
+  ): void {
+    this.off('authorized', callback)
   }
 
   removeExtrinsicDataReceivedCallback(
-    callback: ExtrinsicDataReceivedCallback,
+    callback: EventCallback<EventMap['extrinsicDataReceived']>,
   ): void {
-    const index = this.extrinsicDataReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.extrinsicDataReceivedCallbacks.splice(index, 1)
-    }
+    this.off('extrinsicDataReceived', callback)
   }
 
-  removeImportsReceivedCallback(callback: ImportsReceivedCallback): void {
-    const index = this.importsReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.importsReceivedCallbacks.splice(index, 1)
-    }
+  removeImportsReceivedCallback(
+    callback: EventCallback<EventMap['importsReceived']>,
+  ): void {
+    this.off('importsReceived', callback)
   }
 
-  removeSharingWorkPackageCallback(callback: SharingWorkPackageCallback): void {
-    const index = this.sharingWorkPackageCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.sharingWorkPackageCallbacks.splice(index, 1)
-    }
+  removeSharingWorkPackageCallback(
+    callback: EventCallback<EventMap['sharingWorkPackage']>,
+  ): void {
+    this.off('sharingWorkPackage', callback)
   }
 
   removeWorkPackageSharingFailedCallback(
-    callback: WorkPackageSharingFailedCallback,
+    callback: EventCallback<EventMap['workPackageSharingFailed']>,
   ): void {
-    const index = this.workPackageSharingFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workPackageSharingFailedCallbacks.splice(index, 1)
-    }
+    this.off('workPackageSharingFailed', callback)
   }
 
-  removeBundleSentCallback(callback: BundleSentCallback): void {
-    const index = this.bundleSentCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.bundleSentCallbacks.splice(index, 1)
-    }
+  removeBundleSentCallback(
+    callback: EventCallback<EventMap['bundleSent']>,
+  ): void {
+    this.off('bundleSent', callback)
   }
 
-  removeRefinedCallback(callback: RefinedCallback): void {
-    const index = this.refinedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.refinedCallbacks.splice(index, 1)
-    }
+  removeRefinedCallback(callback: EventCallback<EventMap['refined']>): void {
+    this.off('refined', callback)
   }
 
-  removeWorkReportBuiltCallback(callback: WorkReportBuiltCallback): void {
-    const index = this.workReportBuiltCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportBuiltCallbacks.splice(index, 1)
-    }
+  removeWorkReportBuiltCallback(
+    callback: EventCallback<EventMap['workReportBuilt']>,
+  ): void {
+    this.off('workReportBuilt', callback)
   }
 
   removeWorkReportSignatureSentCallback(
-    callback: WorkReportSignatureSentCallback,
+    callback: EventCallback<EventMap['workReportSignatureSent']>,
   ): void {
-    const index = this.workReportSignatureSentCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportSignatureSentCallbacks.splice(index, 1)
-    }
+    this.off('workReportSignatureSent', callback)
   }
 
   removeWorkReportSignatureReceivedCallback(
-    callback: WorkReportSignatureReceivedCallback,
+    callback: EventCallback<EventMap['workReportSignatureReceived']>,
   ): void {
-    const index = this.workReportSignatureReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportSignatureReceivedCallbacks.splice(index, 1)
-    }
+    this.off('workReportSignatureReceived', callback)
   }
 
-  removeGuaranteeBuiltCallback(callback: GuaranteeBuiltCallback): void {
-    const index = this.guaranteeBuiltCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeBuiltCallbacks.splice(index, 1)
-    }
+  removeGuaranteeBuiltCallback(
+    callback: EventCallback<EventMap['guaranteeBuilt']>,
+  ): void {
+    this.off('guaranteeBuilt', callback)
   }
 
-  removeSendingGuaranteeCallback(callback: SendingGuaranteeCallback): void {
-    const index = this.sendingGuaranteeCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.sendingGuaranteeCallbacks.splice(index, 1)
-    }
+  removeSendingGuaranteeCallback(
+    callback: EventCallback<EventMap['sendingGuarantee']>,
+  ): void {
+    this.off('sendingGuarantee', callback)
   }
 
   removeGuaranteeSendFailedCallback(
-    callback: GuaranteeSendFailedCallback,
+    callback: EventCallback<EventMap['guaranteeSendFailed']>,
   ): void {
-    const index = this.guaranteeSendFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeSendFailedCallbacks.splice(index, 1)
-    }
+    this.off('guaranteeSendFailed', callback)
   }
 
-  removeGuaranteeSentCallback(callback: GuaranteeSentCallback): void {
-    const index = this.guaranteeSentCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeSentCallbacks.splice(index, 1)
-    }
+  removeGuaranteeSentCallback(
+    callback: EventCallback<EventMap['guaranteeSent']>,
+  ): void {
+    this.off('guaranteeSent', callback)
   }
 
   removeGuaranteesDistributedCallback(
-    callback: GuaranteesDistributedCallback,
+    callback: EventCallback<EventMap['guaranteesDistributed']>,
   ): void {
-    const index = this.guaranteesDistributedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteesDistributedCallbacks.splice(index, 1)
-    }
+    this.off('guaranteesDistributed', callback)
   }
 
-  removeReceivingGuaranteeCallback(callback: ReceivingGuaranteeCallback): void {
-    const index = this.receivingGuaranteeCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.receivingGuaranteeCallbacks.splice(index, 1)
-    }
+  removeReceivingGuaranteeCallback(
+    callback: EventCallback<EventMap['receivingGuarantee']>,
+  ): void {
+    this.off('receivingGuarantee', callback)
   }
 
   removeGuaranteeReceiveFailedCallback(
-    callback: GuaranteeReceiveFailedCallback,
+    callback: EventCallback<EventMap['guaranteeReceiveFailed']>,
   ): void {
-    const index = this.guaranteeReceiveFailedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeReceiveFailedCallbacks.splice(index, 1)
-    }
+    this.off('guaranteeReceiveFailed', callback)
   }
 
-  removeGuaranteeReceivedCallback(callback: GuaranteeReceivedCallback): void {
-    const index = this.guaranteeReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeReceivedCallbacks.splice(index, 1)
-    }
+  removeGuaranteeReceivedCallback(
+    callback: EventCallback<EventMap['guaranteeReceived']>,
+  ): void {
+    this.off('guaranteeReceived', callback)
   }
 
-  removeGuaranteeDiscardedCallback(callback: GuaranteeDiscardedCallback): void {
-    const index = this.guaranteeDiscardedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.guaranteeDiscardedCallbacks.splice(index, 1)
-    }
+  removeGuaranteeDiscardedCallback(
+    callback: EventCallback<EventMap['guaranteeDiscarded']>,
+  ): void {
+    this.off('guaranteeDiscarded', callback)
   }
 
-  // Audit-related callback removal methods
   removeWorkReportAvailableCallback(
-    callback: WorkReportAvailableCallback,
+    callback: EventCallback<EventMap['workReportAvailable']>,
   ): void {
-    const index = this.workReportAvailableCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportAvailableCallbacks.splice(index, 1)
-    }
+    this.off('workReportAvailable', callback)
   }
 
   removeNegativeJudgmentReceivedCallback(
-    callback: NegativeJudgmentReceivedCallback,
+    callback: EventCallback<EventMap['negativeJudgmentReceived']>,
   ): void {
-    const index = this.negativeJudgmentReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.negativeJudgmentReceivedCallbacks.splice(index, 1)
-    }
+    this.off('negativeJudgmentReceived', callback)
   }
 
   removeAuditAnnouncementReceivedCallback(
-    callback: AuditAnnouncementReceivedCallback,
+    callback: EventCallback<EventMap['auditAnnouncementReceived']>,
   ): void {
-    const index = this.auditAnnouncementReceivedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.auditAnnouncementReceivedCallbacks.splice(index, 1)
-    }
+    this.off('auditAnnouncementReceived', callback)
   }
 
-  removeJudgmentPublishedCallback(callback: JudgmentPublishedCallback): void {
-    const index = this.judgmentPublishedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.judgmentPublishedCallbacks.splice(index, 1)
-    }
+  removeJudgmentPublishedCallback(
+    callback: EventCallback<EventMap['judgmentPublished']>,
+  ): void {
+    this.off('judgmentPublished', callback)
   }
 
-  removeConectivityChangeCallback(callback: ConectivityChangeCallback): void {
-    const index = this.conectivityChangeCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.conectivityChangeCallbacks.splice(index, 1)
-    }
-  }
-
-  removeTicketDistributionCallback(callback: TicketDistributionCallback): void {
-    const index = this.ticketDistributionCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.ticketDistributionCallbacks.splice(index, 1)
-    }
-  }
-
-  removeBlockProcessedCallback(callback: BlockProcessedCallback): void {
-    const index = this.blockProcessedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.blockProcessedCallbacks.splice(index, 1)
-    }
+  removeBlockProcessedCallback(
+    callback: EventCallback<EventMap['blockProcessed']>,
+  ): void {
+    this.off('blockProcessed', callback)
   }
 
   removeWorkReportProcessedCallback(
-    callback: WorkReportProcessedCallback,
+    callback: EventCallback<EventMap['workReportProcessed']>,
   ): void {
-    const index = this.workReportProcessedCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportProcessedCallbacks.splice(index, 1)
-    }
+    this.off('workReportProcessed', callback)
   }
 
-  removeWorkReportJudgmentCallback(callback: WorkReportJudgmentCallback): void {
-    const index = this.workReportJudgmentCallbacks.indexOf(callback)
-    if (index > -1) {
-      this.workReportJudgmentCallbacks.splice(index, 1)
-    }
+  removeWorkReportJudgmentCallback(
+    callback: EventCallback<EventMap['workReportJudgment']>,
+  ): void {
+    this.off('workReportJudgment', callback)
   }
 
-  /**
-   * Emit slot change event
-   */
+  removeWorkPackageSharingCallback(
+    callback: EventCallback<EventMap['workPackageSharing']>,
+  ): void {
+    this.off('workPackageSharing', callback)
+  }
+
+  removeWorkPackageSharingResponseCallback(
+    callback: EventCallback<EventMap['workPackageSharingResponse']>,
+  ): void {
+    this.off('workPackageSharingResponse', callback)
+  }
+
+  removePreimageAnnouncementCallback(
+    callback: EventCallback<EventMap['preimageAnnouncementReceived']>,
+  ): void {
+    this.off('preimageAnnouncementReceived', callback)
+  }
+
+  removePreimageRequestedCallback(
+    callback: EventCallback<EventMap['preimageRequested']>,
+  ): void {
+    this.off('preimageRequested', callback)
+  }
+
+  removePreimageReceivedCallback(
+    callback: EventCallback<EventMap['preimageReceived']>,
+  ): void {
+    this.off('preimageReceived', callback)
+  }
+
+  removeAuditShardRequestCallback(
+    callback: EventCallback<EventMap['auditShardRequest']>,
+  ): void {
+    this.off('auditShardRequest', callback)
+  }
+
+  removeAuditShardResponseCallback(
+    callback: EventCallback<EventMap['auditShardResponse']>,
+  ): void {
+    this.off('auditShardResponse', callback)
+  }
+
+  removeSegmentShardRequestCallback(
+    callback: EventCallback<EventMap['segmentShardRequest']>,
+  ): void {
+    this.off('segmentShardRequest', callback)
+  }
+
+  removeSegmentShardResponseCallback(
+    callback: EventCallback<EventMap['segmentShardResponse']>,
+  ): void {
+    this.off('segmentShardResponse', callback)
+  }
+
+  removeShardDistributionRequestCallback(
+    callback: EventCallback<EventMap['shardDistributionRequest']>,
+  ): void {
+    this.off('shardDistributionRequest', callback)
+  }
+
+  removeShardDistributionResponseCallback(
+    callback: EventCallback<EventMap['shardDistributionResponse']>,
+  ): void {
+    this.off('shardDistributionResponse', callback)
+  }
+
+  removeWorkReportRequestCallback(
+    callback: EventCallback<EventMap['workReportRequest']>,
+  ): void {
+    this.off('workReportRequest', callback)
+  }
+
+  removeWorkReportResponseCallback(
+    callback: EventCallback<EventMap['workReportResponse']>,
+  ): void {
+    this.off('workReportResponse', callback)
+  }
+
+  removeWorkReportDistributionRequestCallback(
+    callback: EventCallback<EventMap['workReportDistributionRequest']>,
+  ): void {
+    this.off('workReportDistributionRequest', callback)
+  }
+
+  removeBlocksReceivedCallback(
+    callback: EventCallback<EventMap['blocksReceived']>,
+  ): void {
+    this.off('blocksReceived', callback)
+  }
+
+  removeBlocksRequestedCallback(
+    callback: EventCallback<EventMap['blocksRequested']>,
+  ): void {
+    this.off('blocksRequested', callback)
+  }
+
+  removeStateRequestedCallback(
+    callback: EventCallback<EventMap['stateRequested']>,
+  ): void {
+    this.off('stateRequested', callback)
+  }
+
+  removeStateResponseCallback(
+    callback: EventCallback<EventMap['stateResponse']>,
+  ): void {
+    this.off('stateResponse', callback)
+  }
+
+  removeTicketDistributionRequestCallback(
+    callback: EventCallback<EventMap['ticketDistributionRequest']>,
+  ): void {
+    this.off('ticketDistributionRequest', callback)
+  }
+
+  removeTicketDistributionResponseCallback(
+    callback: EventCallback<EventMap['ticketDistributionResponse']>,
+  ): void {
+    this.off('ticketDistributionResponse', callback)
+  }
+
+  // Emit methods with better naming (aliases)
   async emitSlotChange(event: SlotChangeEvent): Promise<void> {
-    for (const callback of this.slotChangeCallbacks) {
-      try {
-        await callback(event)
-      } catch (error) {
-        logger.error('Error in slot change callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: event.slot.toString(),
-        })
-      }
-    }
+    await this.emit('slotChange', event)
   }
 
-  /**
-   * Emit epoch transition event
-   */
   async emitEpochTransition(event: EpochTransitionEvent): Promise<void> {
-    for (const callback of this.epochTransitionCallbacks) {
-      try {
-        await callback(event)
-      } catch (error) {
-        logger.error('Error in epoch transition callback', {
-          error: error instanceof Error ? error.message : String(error),
-          previousEpoch: event.previousEpoch.toString(),
-          newEpoch: event.newEpoch.toString(),
-        })
-      }
-    }
+    await this.emit('epochTransition', event)
   }
 
-  /**
-   * Emit validator set change event
-   */
   async emitValidatorSetChange(event: ValidatorSetChangeEvent): Promise<void> {
-    for (const callback of this.validatorSetChangeCallbacks) {
-      try {
-        await callback(event)
-      } catch (error) {
-        logger.error('Error in validator set change callback', {
-          error: error instanceof Error ? error.message : String(error),
-          epoch: event.epoch.toString(),
-        })
-      }
-    }
+    await this.emit('validatorSetChange', event)
   }
 
-  public async emitConnectionRefused(peerAddress: string): Promise<void> {
-    for (const callback of this.connectionRefusedCallbacks) {
-      try {
-        await callback(peerAddress)
-      } catch (error) {
-        logger.error('Error in connection refused callback', {
-          error: error instanceof Error ? error.message : String(error),
-          peerAddress,
-        })
-      }
-    }
+  async emitConectivityChange(event: ConectivityChangeEvent): Promise<void> {
+    await this.emit('conectivityChange', event)
   }
 
-  public async emitConnectingIn(peerAddress: string): Promise<void> {
-    for (const callback of this.connectingInCallbacks) {
-      try {
-        await callback(peerAddress)
-      } catch (error) {
-        logger.error('Error in connecting in callback', {
-          error: error instanceof Error ? error.message : String(error),
-          peerAddress,
-        })
-      }
-    }
-  }
-
-  public async emitConnectedIn(
-    eventId: bigint,
-    peerId: Uint8Array,
+  async emitFirstPhaseTicketDistribution(
+    event: TicketDistributionEvent,
   ): Promise<void> {
-    for (const callback of this.connectedInCallbacks) {
-      try {
-        await callback(eventId, peerId)
-      } catch (error) {
-        logger.error('Error in connected in callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          peerId,
-        })
-      }
-    }
+    await this.emit('firstPhaseTicketDistribution', event)
   }
 
-  public async emitConnectInFailed(
-    eventId: bigint,
-    reason: string,
+  async emitSecondPhaseTicketDistribution(
+    event: TicketDistributionEvent,
   ): Promise<void> {
-    for (const callback of this.connectInFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in connect in failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
+    await this.emit('secondPhaseTicketDistribution', event)
   }
 
-  public async emitConnectingOut(
+  async emitAssuranceReceived(
+    assurance: AssuranceDistributionRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('assuranceReceived', assurance, peerPublicKey)
+  }
+
+  async emitConnectionRefused(peerAddress: string): Promise<void> {
+    await this.emit('connectionRefused', peerAddress)
+  }
+
+  async emitConnectingIn(peerAddress: string): Promise<void> {
+    await this.emit('connectingIn', peerAddress)
+  }
+
+  async emitConnectedIn(eventId: bigint, peerId: Uint8Array): Promise<void> {
+    await this.emit('connectedIn', eventId, peerId)
+  }
+
+  async emitConnectInFailed(eventId: bigint, reason: string): Promise<void> {
+    await this.emit('connectInFailed', eventId, reason)
+  }
+
+  async emitConnectingOut(
     peerId: Uint8Array,
     peerAddress: string,
   ): Promise<void> {
-    for (const callback of this.connectingOutCallbacks) {
-      try {
-        await callback(peerId, peerAddress)
-      } catch (error) {
-        logger.error('Error in connecting out callback', {
-          error: error instanceof Error ? error.message : String(error),
-          peerId,
-          peerAddress,
-        })
-      }
-    }
+    await this.emit('connectingOut', peerId, peerAddress)
   }
 
-  public async emitConnectedOut(eventId: bigint): Promise<void> {
-    for (const callback of this.connectedOutCallbacks) {
-      try {
-        await callback(eventId)
-      } catch (error) {
-        logger.error('Error in connected out callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-        })
-      }
-    }
+  async emitConnectedOut(eventId: bigint): Promise<void> {
+    await this.emit('connectedOut', eventId)
   }
 
-  public async emitConnectOutFailed(
-    eventId: bigint,
-    reason: string,
-  ): Promise<void> {
-    for (const callback of this.connectOutFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in connect out failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
+  async emitConnectOutFailed(eventId: bigint, reason: string): Promise<void> {
+    await this.emit('connectOutFailed', eventId, reason)
   }
 
-  public async emitDisconnected(
+  async emitDisconnected(
     peerId: Uint8Array,
     reason: string,
     terminator?: 'local' | 'remote',
   ): Promise<void> {
-    for (const callback of this.disconnectedCallbacks) {
-      try {
-        await callback(peerId, reason, terminator)
-      } catch (error) {
-        logger.error('Error in disconnected callback', {
-          error: error instanceof Error ? error.message : String(error),
-          peerId,
-          reason,
-          terminator,
-        })
-      }
-    }
+    await this.emit('disconnected', peerId, reason, terminator)
   }
 
-  public async emitPeerMisbehaved(
-    peerId: Uint8Array,
-    reason: string,
-  ): Promise<void> {
-    for (const callback of this.peerMisbehavedCallbacks) {
-      try {
-        await callback(peerId, reason)
-      } catch (error) {
-        logger.error('Error in peer misbehaved callback', {
-          error: error instanceof Error ? error.message : String(error),
-          peerId,
-          reason,
-        })
-      }
-    }
+  async emitPeerMisbehaved(peerId: Uint8Array, reason: string): Promise<void> {
+    await this.emit('peerMisbehaved', peerId, reason)
   }
 
-  public async emitAuthoring(
-    slot: bigint,
-    parentHeaderHash: Hex,
-  ): Promise<void> {
-    for (const callback of this.authoringCallbacks) {
-      try {
-        await callback(slot, parentHeaderHash)
-      } catch (error) {
-        logger.error('Error in authoring callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot,
-          parentHeaderHash,
-        })
-      }
-    }
+  async emitAuthoring(slot: bigint, parentHeaderHash: Hex): Promise<void> {
+    await this.emit('authoring', slot, parentHeaderHash)
   }
 
-  public async emitAuthoringFailed(
+  async emitAuthoringFailed(eventId: bigint, reason: string): Promise<void> {
+    await this.emit('authoringFailed', eventId, reason)
+  }
+
+  async emitAuthored(block: Block): Promise<void> {
+    await this.emit('authored', block)
+  }
+
+  async emitImporting(slot: bigint, block: Block): Promise<void> {
+    await this.emit('importing', slot, block.header.parent)
+  }
+
+  async emitBlockVerificationFailed(
     eventId: bigint,
     reason: string,
   ): Promise<void> {
-    for (const callback of this.authoringFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in authoring failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
+    await this.emit('blockVerificationFailed', eventId, reason)
   }
 
-  public async emitAuthored(block: Block): Promise<void> {
-    const errors: Error[] = []
-    for (const callback of this.authoredCallbacks) {
-      const result = await callback(block)
-      if (result && result.length > 0 && result[0]) {
-        errors.push(result[0])
-      }
-    }
-    if (errors.length > 0) {
-      logger.error('Error in authored callback', {
-        errors,
-        block,
-      })
-    }
+  async emitBlockVerified(eventId: bigint): Promise<void> {
+    await this.emit('blockVerified', eventId)
   }
 
-  public async emitImporting(slot: bigint, block: Block): Promise<void> {
-    const errors: Error[] = []
-    for (const callback of this.importingCallbacks) {
-      const [error, _result] = await callback(slot, block.header.parent)
-      if (error) {
-        errors.push(error)
-      }
-    }
-    if (errors.length > 0) {
-      logger.error('Error in importing callback', {
-        errors,
-        slot,
-        block,
-      })
-    }
-  }
-
-  public async emitBlockVerificationFailed(
+  async emitBlockExecutionFailed(
     eventId: bigint,
     reason: string,
   ): Promise<void> {
-    for (const callback of this.blockVerificationFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in block verification failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
+    await this.emit('blockExecutionFailed', eventId, reason)
   }
 
-  public async emitBlockVerified(eventId: bigint): Promise<void> {
-    for (const callback of this.blockVerifiedCallbacks) {
-      try {
-        await callback(eventId)
-      } catch (error) {
-        logger.error('Error in block verified callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-        })
-      }
-    }
-  }
-
-  public async emitBlockExecutionFailed(
-    eventId: bigint,
-    reason: string,
-  ): Promise<void> {
-    for (const callback of this.blockExecutionFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in block execution failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
-  }
-
-  public async emitBlockExecuted(
+  async emitBlockExecuted(
     eventId: bigint,
     accumulatedServices: Array<{ serviceId: bigint; cost: AccumulateCost }>,
   ): Promise<void> {
-    for (const callback of this.blockExecutedCallbacks) {
-      try {
-        await callback(eventId, accumulatedServices)
-      } catch (error) {
-        logger.error('Error in block executed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          accumulatedServices,
-        })
-      }
-    }
+    await this.emit('blockExecuted', eventId, accumulatedServices)
   }
 
-  public async emitBestBlockChanged(blockHeader: BlockHeader): Promise<void> {
-    for (const callback of this.bestBlockChangedCallbacks) {
-      try {
-        await callback(blockHeader)
-      } catch (error) {
-        logger.error('Error in best block changed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: blockHeader.timeslot,
-          headerHash: blockHeader.parent, // Using parent as identifier
-        })
-      }
-    }
+  async emitBestBlockChanged(blockHeader: BlockHeader): Promise<void> {
+    await this.emit('bestBlockChanged', blockHeader)
   }
 
-  public async emitFinalizedBlockChanged(
-    blockHeader: BlockHeader,
-  ): Promise<void> {
-    for (const callback of this.finalizedBlockChangedCallbacks) {
-      try {
-        await callback(blockHeader)
-      } catch (error) {
-        logger.error('Error in finalized block changed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: blockHeader.timeslot,
-          headerHash: blockHeader.parent, // Using parent as identifier
-        })
-      }
-    }
+  async emitFinalizedBlockChanged(blockHeader: BlockHeader): Promise<void> {
+    await this.emit('finalizedBlockChanged', blockHeader)
   }
 
-  public async emitSyncStatusChanged(isSynced: boolean): Promise<void> {
-    for (const callback of this.syncStatusChangedCallbacks) {
-      try {
-        await callback(isSynced)
-      } catch (error) {
-        logger.error('Error in sync status changed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          isSynced,
-        })
-      }
-    }
+  async emitSyncStatusChanged(isSynced: boolean): Promise<void> {
+    await this.emit('syncStatusChanged', isSynced)
   }
 
-  public async emitStatus(status: {
-    totalPeerCount: bigint
-    validatorPeerCount: bigint
-    blockAnnouncementStreamPeerCount: bigint
-    guaranteesByCore: Uint8Array
-    shardCount: bigint
-    shardTotalSizeBytes: bigint
-    readyPreimageCount: bigint
-    readyPreimageTotalSizeBytes: bigint
-  }): Promise<void> {
-    for (const callback of this.statusCallbacks) {
-      try {
-        await callback(status)
-      } catch (error) {
-        logger.error('Error in status callback', {
-          error: error instanceof Error ? error.message : String(error),
-          status,
-        })
-      }
-    }
+  async emitStatus(status: StatusEvent): Promise<void> {
+    await this.emit('status', status)
   }
 
-  public async emitGeneratingTickets(epochIndex: bigint): Promise<void> {
-    for (const callback of this.generatingTicketsCallbacks) {
-      try {
-        await callback(epochIndex)
-      } catch (error) {
-        logger.error('Error in generating tickets callback', {
-          error: error instanceof Error ? error.message : String(error),
-          epochIndex,
-        })
-      }
-    }
+  async emitGeneratingTickets(epochIndex: bigint): Promise<void> {
+    await this.emit('generatingTickets', epochIndex)
   }
 
-  public async emitTicketGenerationFailed(
+  async emitTicketGenerationFailed(
     eventId: bigint,
     reason: string,
   ): Promise<void> {
-    for (const callback of this.ticketGenerationFailedCallbacks) {
-      try {
-        await callback(eventId, reason)
-      } catch (error) {
-        logger.error('Error in ticket generation failed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          reason,
-        })
-      }
-    }
+    await this.emit('ticketGenerationFailed', eventId, reason)
   }
 
-  public async emitTicketsGenerated(
+  async emitTicketsGenerated(
     eventId: bigint,
     ticketVrfOutputs: Uint8Array[],
   ): Promise<void> {
-    for (const callback of this.ticketsGeneratedCallbacks) {
-      try {
-        await callback(eventId, ticketVrfOutputs)
-      } catch (error) {
-        logger.error('Error in tickets generated callback', {
-          error: error instanceof Error ? error.message : String(error),
-          eventId,
-          ticketVrfOutputs,
-        })
-      }
-    }
+    await this.emit('ticketsGenerated', eventId, ticketVrfOutputs)
   }
 
-  public async emitConectivityChange(
-    event: ConectivityChangeEvent,
+  async emitPreimageAnnouncementReceived(
+    announcement: PreimageAnnouncement,
+    peerPublicKey: Hex,
   ): Promise<void> {
-    for (const callback of this.conectivityChangeCallbacks) {
-      try {
-        await callback(event)
-      } catch (error) {
-        logger.error('Error in conectivity change callback', {
-          error: error instanceof Error ? error.message : String(error),
-          event,
-        })
-      }
-    }
+    await this.emit('preimageAnnouncementReceived', announcement, peerPublicKey)
   }
 
-  public async emitTicketDistribution(
-    event: TicketDistributionEvent,
-  ): Promise<void> {
-    for (const callback of this.ticketDistributionCallbacks) {
-      try {
-        await callback(event)
-      } catch (error) {
-        logger.error('Error in ticket distribution callback', {
-          error: error instanceof Error ? error.message : String(error),
-          event,
-        })
-      }
-    }
-  }
-
-  // Audit-related event emission methods
-  public async emitWorkReportAvailable(
+  async emitWorkReportAvailable(
     workReport: WorkReport,
     coreIndex: bigint,
     blockHeaderHash: Hex,
   ): Promise<void> {
-    for (const callback of this.workReportAvailableCallbacks) {
-      try {
-        const result = await callback(workReport, coreIndex, blockHeaderHash)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in work report available callback', {
-            error: result[0],
-            coreIndex: coreIndex.toString(),
-            blockHeaderHash,
-          })
-        }
-      } catch (error) {
-        logger.error('Error in work report available callback', {
-          error: error instanceof Error ? error.message : String(error),
-          coreIndex: coreIndex.toString(),
-          blockHeaderHash,
-        })
-      }
-    }
+    await this.emit(
+      'workReportAvailable',
+      workReport,
+      coreIndex,
+      blockHeaderHash,
+    )
   }
 
-  public async emitNegativeJudgmentReceived(
+  async emitNegativeJudgmentReceived(
     judgment: Judgment,
     workReportHash: Hex,
     validatorIndex: bigint,
   ): Promise<void> {
-    for (const callback of this.negativeJudgmentReceivedCallbacks) {
-      try {
-        const result = await callback(judgment, workReportHash, validatorIndex)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in negative judgment received callback', {
-            error: result[0],
-            workReportHash,
-            validatorIndex: validatorIndex.toString(),
-          })
-        }
-      } catch (error) {
-        logger.error('Error in negative judgment received callback', {
-          error: error instanceof Error ? error.message : String(error),
-          workReportHash,
-          validatorIndex: validatorIndex.toString(),
-        })
-      }
-    }
+    await this.emit(
+      'negativeJudgmentReceived',
+      judgment,
+      workReportHash,
+      validatorIndex,
+    )
   }
 
-  public async emitAuditAnnouncementReceived(
+  async emitAuditAnnouncementReceived(
     announcement: AuditAnnouncement,
-    validatorIndex: bigint,
+    peerPublicKey: Hex,
   ): Promise<void> {
-    for (const callback of this.auditAnnouncementReceivedCallbacks) {
-      try {
-        const result = await callback(announcement, validatorIndex)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in audit announcement received callback', {
-            error: result[0],
-            headerHash: announcement.headerHash,
-            tranche: announcement.tranche.toString(),
-            validatorIndex: validatorIndex.toString(),
-          })
-        }
-      } catch (error) {
-        logger.error('Error in audit announcement received callback', {
-          error: error instanceof Error ? error.message : String(error),
-          headerHash: announcement.headerHash,
-          tranche: announcement.tranche.toString(),
-          validatorIndex: validatorIndex.toString(),
-        })
-      }
-    }
+    await this.emit('auditAnnouncementReceived', announcement, peerPublicKey)
   }
 
-  public async emitJudgmentPublished(
+  async emitJudgmentPublished(
     judgment: Judgment,
     workReportHash: Hex,
     validatorIndex: bigint,
   ): Promise<void> {
-    for (const callback of this.judgmentPublishedCallbacks) {
-      try {
-        const result = await callback(judgment, workReportHash, validatorIndex)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in judgment published callback', {
-            error: result[0],
-            workReportHash,
-            validatorIndex: validatorIndex.toString(),
-          })
-        }
-      } catch (error) {
-        logger.error('Error in judgment published callback', {
-          error: error instanceof Error ? error.message : String(error),
-          workReportHash,
-          validatorIndex: validatorIndex.toString(),
-        })
-      }
-    }
+    await this.emit(
+      'judgmentPublished',
+      judgment,
+      workReportHash,
+      validatorIndex,
+    )
   }
 
-  // Statistics event emission methods
-  public async emitBlockProcessed(event: BlockProcessedEvent): Promise<void> {
-    for (const callback of this.blockProcessedCallbacks) {
-      try {
-        const result = await callback(event)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in block processed callback', {
-            error: result[0],
-            slot: event.slot.toString(),
-            authorIndex: event.authorIndex,
-          })
-        }
-      } catch (error) {
-        logger.error('Error in block processed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: event.slot.toString(),
-          authorIndex: event.authorIndex,
-        })
-      }
-    }
+  async emitBlockProcessed(event: BlockProcessedEvent): Promise<void> {
+    await this.emit('blockProcessed', event)
   }
 
-  public async emitWorkReportProcessed(
+  async emitWorkReportProcessed(
     event: WorkReportProcessedEvent,
   ): Promise<void> {
-    for (const callback of this.workReportProcessedCallbacks) {
-      try {
-        const result = await callback(event)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in work report processed callback', {
-            error: result[0],
-            slot: event.slot.toString(),
-            availableCount: event.availableReports.length,
-            incomingCount: event.incomingReports.length,
-          })
-        }
-      } catch (error) {
-        logger.error('Error in work report processed callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: event.slot.toString(),
-          availableCount: event.availableReports.length,
-          incomingCount: event.incomingReports.length,
-        })
-      }
-    }
+    await this.emit('workReportProcessed', event)
   }
 
-  public async emitWorkReportJudgment(
-    event: WorkReportJudgmentEvent,
+  async emitWorkReportJudgment(event: WorkReportJudgmentEvent): Promise<void> {
+    await this.emit('workReportJudgment', event)
+  }
+
+  async emitWorkPackageReceived(
+    data: WorkPackageSubmissionRequest,
+    peerPublicKey: Hex,
   ): Promise<void> {
-    for (const callback of this.workReportJudgmentCallbacks) {
-      try {
-        const result = await callback(event)
-        if (result && result.length > 0 && result[0]) {
-          logger.error('Error in work report judgment callback', {
-            error: result[0],
-            slot: event.slot.toString(),
-            workReportHash: event.workReportHash,
-            judgment: event.judgment,
-            validatorHash: event.validatorHash,
-          })
-        }
-      } catch (error) {
-        logger.error('Error in work report judgment callback', {
-          error: error instanceof Error ? error.message : String(error),
-          slot: event.slot.toString(),
-          workReportHash: event.workReportHash,
-          judgment: event.judgment,
-          validatorHash: event.validatorHash,
-        })
-      }
-    }
+    await this.emit('workPackageSubmissionReceived', data, peerPublicKey)
+  }
+
+  async emitWorkPackageSharing(
+    sharing: WorkPackageSharing,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('workPackageSharing', sharing, peerPublicKey)
+  }
+
+  async emitWorkPackageSharingResponse(
+    response: WorkPackageSharingResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('workPackageSharingResponse', response, peerPublicKey)
+  }
+
+  async emitPreimageRequested(
+    request: PreimageRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('preimageRequested', request, peerPublicKey)
+  }
+
+  async emitPreimageReceived(
+    preimage: Preimage,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('preimageReceived', preimage, peerPublicKey)
+  }
+
+  async emitAuditShardRequest(
+    request: AuditShardRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('auditShardRequest', request, peerPublicKey)
+  }
+
+  async emitAuditShardResponse(
+    response: AuditShardResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('auditShardResponse', response, peerPublicKey)
+  }
+
+  async emitSegmentShardRequest(
+    request: SegmentShardRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('segmentShardRequest', request, peerPublicKey)
+  }
+
+  async emitSegmentShardResponse(
+    response: SegmentShardResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('segmentShardResponse', response, peerPublicKey)
+  }
+
+  async emitShardDistributionRequest(
+    request: ShardDistributionRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('shardDistributionRequest', request, peerPublicKey)
+  }
+
+  async emitShardDistributionResponse(
+    response: ShardDistributionResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('shardDistributionResponse', response, peerPublicKey)
+  }
+
+  async emitWorkReportRequest(
+    request: WorkReportRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('workReportRequest', request, peerPublicKey)
+  }
+
+  async emitWorkReportResponse(
+    response: WorkReportResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('workReportResponse', response, peerPublicKey)
+  }
+
+  async emitWorkReportDistributionRequest(
+    request: GuaranteedWorkReport,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('workReportDistributionRequest', request, peerPublicKey)
+  }
+
+  async emitTicketDistributionRequest(
+    request: TicketDistributionRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('ticketDistributionRequest', request, peerPublicKey)
+  }
+
+  async emitTicketDistributionResponse(
+    response: TicketDistributionResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('ticketDistributionResponse', response, peerPublicKey)
+  }
+
+  async emitBlocksReceived(blocks: Block[], peerPublicKey: Hex): Promise<void> {
+    await this.emit('blocksReceived', blocks, peerPublicKey)
+  }
+
+  async emitBlocksRequested(
+    request: BlockRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('blocksRequested', request, peerPublicKey)
+  }
+
+  async emitStateRequested(
+    request: StateRequest,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('stateRequested', request, peerPublicKey)
+  }
+
+  async emitStateResponse(
+    response: StateResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    await this.emit('stateResponse', response, peerPublicKey)
+  }
+
+  async emitAssuranceDistribution(
+    event: AssuranceDistributionEvent,
+  ): Promise<void> {
+    await this.emit('assuranceDistribution', event)
+  }
+
+  async emitAuditTranche(event: AuditTrancheEvent): Promise<void> {
+    await this.emit('auditTranche', event)
   }
 }

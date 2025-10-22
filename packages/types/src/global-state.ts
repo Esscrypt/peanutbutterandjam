@@ -13,11 +13,7 @@
 import type { Hex } from '@pbnj/core'
 import type { BlockBody } from './block-authoring'
 import type { SafroleState, ValidatorPublicKeys } from './consensus'
-import type {
-  SafroleTicket,
-  ServiceAccountCore,
-  WorkReport,
-} from './serialization'
+import type { SafroleTicket, ServiceAccount, WorkReport } from './serialization'
 
 // ============================================================================
 // State Component Types
@@ -27,12 +23,22 @@ import type {
  * Authorization pool (α)
  * Core authorizations pool - requirements for work done on each core
  */
-export interface AuthPool {
-  /** Authorization requirements per core */
-  authorizations: Hex[]
-  /** Core assignment metadata */
-  coreAssignments: Map<bigint, bigint>
-}
+/**
+ * Authorization Pool (φ)
+ *
+ * Gray Paper Reference: authorization.tex (Equation 18)
+ * authpool ∈ sequence[C_corecount]{sequence[C_authpoolsize]{hash}}
+ *
+ * Structure: 2D array where:
+ * - Outer array: C_corecount elements (one per core, typically 341 cores)
+ * - Inner arrays: Up to C_authpoolsize elements each (max 8 hashes per core)
+ *
+ * Each element is a 32-byte hash representing an authorization.
+ *
+ * State Transition: During block processing, the oldest authorization is removed
+ * from the pool and a new one from the queue is appended (cyclic rotation).
+ */
+export type AuthPool = Hex[][]
 
 /**
  * Recent activity log (β)
@@ -74,12 +80,54 @@ export interface AccoutBelt {
 /**
  * Service accounts (δ)
  * State of all services (smart contracts)
+ *
+ * Gray Paper Reference: accounts.tex (Equation 6-8)
+ * accounts ∈ dictionary{serviceid}{serviceaccount}
+ *
+ * Gray Paper Reference: accounts.tex (Equation 12-27)
+ * serviceaccount ≡ tuple{
+ *   sa_storage ∈ dictionary{blob}{blob},
+ *   sa_preimages ∈ dictionary{hash}{blob},
+ *   sa_requests ∈ dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}},
+ *   sa_gratis ∈ balance,
+ *   sa_codehash ∈ hash,
+ *   sa_balance ∈ balance,
+ *   sa_minaccgas ∈ gas,
+ *   sa_minmemogas ∈ gas,
+ *   sa_created ∈ timeslot,
+ *   sa_lastacc ∈ timeslot,
+ *   sa_parent ∈ serviceid
+ * }
+ *
+ * Implementation Notes:
+ * - The accounts map stores complete ServiceAccount objects (not just ServiceAccountCore)
+ * - Storage, preimages, and requests are included as per Gray Paper specification
+ * - Each service account contains all fields required by the Gray Paper
+ * - The map key is serviceid (32-bit integer) and value is the complete serviceaccount tuple
+ *
+ * State Storage Locations (per Gray Paper merklization.tex):
+ * - Core fields: Directly encoded in state trie at C(255, s)
+ * - Storage: Key-value pairs at C(s, storage_key)
+ * - Preimages: Hash-to-data mappings at C(s, preimage_hash)
+ * - Requests: Preimage request metadata at C(s, request_hash, length)
  */
 export interface ServiceAccounts {
-  /** Account storage per service */
-  accounts: Map<bigint, ServiceAccountCore>
-  /** Total service count */
-  serviceCount: bigint
+  /**
+   * Complete service accounts dictionary per Gray Paper specification
+   *
+   * Gray Paper: accounts ∈ dictionary{serviceid}{serviceaccount}
+   *
+   * Key: serviceid (32-bit service identifier)
+   * Value: Complete serviceaccount tuple including:
+   *   - Core fields: codehash, balance, minaccgas, minmemogas, octets, gratis, items, created, lastacc, parent
+   *   - Storage: sa_storage ∈ dictionary{blob}{blob}
+   *   - Preimages: sa_preimages ∈ dictionary{hash}{blob}
+   *   - Requests: sa_requests ∈ dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}
+   *
+   * This map contains ALL service accounts in the system, analogous to Ethereum's
+   * account state but with additional fields for JAM's refinement/accumulation model.
+   */
+  accounts: Map<bigint, ServiceAccount>
 }
 
 /**
@@ -100,32 +148,59 @@ export interface EntropyState {
 /**
  * Pending reports (ρ)
  * Work reports pending availability assurance
+ *
+ * Gray Paper Reference: reporting_assurance.tex (Equation 17)
+ * reports ∈ sequence[Ccorecount]{optional{tuple{workreport, timeslot}}}
+ *
+ * Structure: Array of length Ccorecount (341) where each element is either:
+ * - null (no work report pending on this core)
+ * - PendingReport (work report with timeslot when reported)
+ *
+ * Key Points:
+ * - Only one report per core at any given time
+ * - Timeslot is 32-bit unsigned integer (Nbits{32})
+ * - Represents 6-second slot intervals since JAM Common Era
  */
 export interface Reports {
-  /** Reports per core (optional - only one report per core at a time) */
-  coreReports: Map<bigint, PendingReport | null>
+  /**
+   * Reports per core index (0 to Ccorecount-1)
+   * Gray Paper: sequence[Ccorecount]{optional{tuple{workreport, timeslot}}}
+   *
+   * Array length: Ccorecount (341)
+   * Each element: null | PendingReport
+   */
+  coreReports: (PendingReport | null)[]
 }
 
 /**
  * Pending report entry
+ *
+ * Gray Paper Reference: reporting_assurance.tex (Equation 17)
+ * tuple{rs_workreport: workreport, rs_timestamp: timeslot}
  */
 export interface PendingReport {
-  /** The work report */
+  /** The work report (rs_workreport) */
   workReport: WorkReport
-  /** Timestamp when reported */
-  timestamp: bigint
+  /** Timeslot when reported (rs_timestamp) - 32-bit unsigned integer */
+  timeslot: number
 }
 
 /**
- * Authorization queue (φ)
- * Queue of pending authorizations
+ * Authorization Queue (χ)
+ *
+ * Gray Paper Reference: authorization.tex (Equation 19)
+ * authqueue ∈ sequence[C_corecount]{sequence[C_authqueuesize]{hash}}
+ *
+ * Structure: 2D array where:
+ * - Outer array: C_corecount elements (one per core, typically 341 cores)
+ * - Inner arrays: Up to C_authqueuesize elements each (max 80 hashes per core)
+ *
+ * Each element is a 32-byte hash representing a pending authorization.
+ *
+ * State Transition: New authorizations are added to the queue, and one element
+ * per block is moved from the queue to the pool (FIFO with cyclic indexing).
  */
-export interface AuthQueue {
-  /** Queued authorizations per core */
-  queue: Map<bigint, Hex[]>
-  /** Queue processing state */
-  processingIndex: bigint
-}
+export type AuthQueue = Hex[][]
 
 /**
  * Privileged service indices

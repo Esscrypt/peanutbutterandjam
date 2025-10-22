@@ -1,116 +1,82 @@
 /**
- * PVM Accumulate Invocation System
+ * Polkadot Virtual Machine (PVM) Implementation
  *
- * Implements the full Ψ_A (Accumulate Invocation) function from Gray Paper Section 31
- * This is the main orchestration system for Accumulate invocations
+ * Simplified Gray Paper compliant implementation
+ * Gray Paper Reference: pvm.tex
  */
 
-import { blake2bHash, hexToBigInt, logger } from '@pbnj/core'
+import { blake2bHash, logger } from '@pbnj/core'
+import { decodePreimage } from '@pbnj/serialization'
 import type {
-  AccumulateContextMutator,
   AccumulateInput,
   AccumulateInvocationResult,
   DeferredTransfer,
+  IConfigService,
   Implications,
   ImplicationsPair,
+  IPreimageHolderService,
   PartialState,
+  PVMOptions,
   RAM,
-  RegisterState,
+  ResultCode,
 } from '@pbnj/types'
-import { ArgumentInvocationSystem } from '../argument-invocation'
-import {
-  ACCUMULATE_ERROR_CODES,
-  ACCUMULATE_FUNCTIONS,
-  ACCUMULATE_INVOCATION_CONFIG,
-  GENERAL_FUNCTIONS,
-} from '../config'
+import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '../config'
+import { PVM } from '../pvm'
 
 /**
- * Accumulate Invocation System implementing Ψ_A from Gray Paper
+ * Simplified PVM implementation
  *
- * Handles the complete Accumulate invocation lifecycle including:
- * - Context initialization with regular and exceptional dimensions
- * - State transitions and deferred transfers
- * - Host call dispatching via context mutator F
- * - Result collapse based on termination type
+ * Gray Paper Ψ function: Executes instructions until a halting condition
  */
-export class AccumulateInvocationSystem {
-  private argumentInvocation: ArgumentInvocationSystem<ImplicationsPair>
-
-  constructor() {
-    this.argumentInvocation = new ArgumentInvocationSystem<ImplicationsPair>(
-      this.createContextMutator([
-        {
-          id: 0n,
-          state: {
-            accounts: new Map(),
-            authqueue: new Map(),
-            assigners: new Map(),
-            stagingset: [],
-            nextfreeid: 0n,
-            manager: 0n,
-            registrar: 0n,
-            delegator: 0n,
-            alwaysaccers: new Map(),
-            xfers: [],
-            provisions: new Map(),
-            yield: null,
-          },
-          nextfreeid: 0n,
-          xfers: [],
-          yield: null,
-          provisions: new Map(),
-        },
-        {
-          id: 0n,
-          state: {
-            accounts: new Map(),
-            authqueue: new Map(),
-            assigners: new Map(),
-            stagingset: [],
-            nextfreeid: 0n,
-            manager: 0n,
-            registrar: 0n,
-            delegator: 0n,
-            alwaysaccers: new Map(),
-            xfers: [],
-            provisions: new Map(),
-            yield: null,
-          },
-          nextfreeid: 0n,
-          xfers: [],
-          yield: null,
-          provisions: new Map(),
-        },
-      ]),
-    )
+export class AccumulatePVM extends PVM {
+  constructor(
+    preimageService: IPreimageHolderService,
+    configService: IConfigService,
+    options: PVMOptions = {},
+  ) {
+    super(options)
+    this.preimageService = preimageService
+    this.state.gasCounter =
+      options.gasCounter || BigInt(configService.maxBlockGas)
   }
 
   /**
-   * Main Accumulate Invocation function Ψ_A
+   * Execute accumulate invocation (Ψ_A)
    *
    * @param partialState - Current partial state
    * @param timeslot - Current block timeslot
    * @param serviceId - Service account ID
    * @param gas - Available gas
-   * @param inputs - Sequence of accumulate inputs
+   * @param inputs - Sequence of accumulation inputs
    * @returns AccumulateInvocationResult
    */
-  execute(
+  public executeAccumulate(
     partialState: PartialState,
     timeslot: bigint,
     serviceId: bigint,
     gas: bigint,
-    inputs: AccumulateInput,
+    inputs: AccumulateInput[],
   ): AccumulateInvocationResult {
     try {
       // Check if service exists and get its code
       const serviceAccount = partialState.accounts.get(serviceId)
       if (!serviceAccount) {
-        return 'BAD'
+        return { ok: false, err: 'BAD' }
       }
 
-      const serviceCode = Buffer.from(serviceAccount.codehash, 'hex')
+      const preimageData = serviceAccount.preimages.get(serviceAccount.codehash)
+      if (!preimageData) {
+        return { ok: false, err: 'BAD' }
+      }
+
+      // Decode the preimage to extract metadata + code
+      const [error, preimageResult] = decodePreimage(preimageData)
+      if (error) {
+        return { ok: false, err: 'BAD' }
+      }
+      const { blob: codeHex } = preimageResult.value
+      // Convert hex string to Uint8Array
+      const serviceCode = new Uint8Array(Buffer.from(codeHex.slice(2), 'hex'))
 
       // Check for null code or oversized code (Gray Paper eq:accinvocation)
       if (
@@ -119,11 +85,14 @@ export class AccumulateInvocationSystem {
         serviceCode.length > ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE
       ) {
         return {
-          poststate: partialState,
-          defxfers: [],
-          yield: null,
-          gasused: 0n,
-          provisions: new Map(),
+          ok: true,
+          value: {
+            poststate: partialState,
+            defxfers: [],
+            yield: null,
+            gasused: 0n,
+            provisions: new Map(),
+          },
         }
       }
 
@@ -134,843 +103,238 @@ export class AccumulateInvocationSystem {
         inputs,
       )
 
-      // Initialize context with both regular and exceptional dimensions
-      const initialContext = this.initializeContext(
+      // Initialize Implications context
+      const initialContext = this.initializeImplicationsContext(
         postTransferState,
         serviceId,
         timeslot,
       )
 
       // Encode arguments: timeslot, serviceId, input length
-      const encodedArgs = this.encodeArguments(
+      const encodedArgs = this.encodeAccumulateArguments(
         timeslot,
         serviceId,
-        0n, // TODO: Fix input length calculation based on actual AccumulateInput structure
+        BigInt(inputs.length),
       )
 
-      // Execute the service code using Argument Invocation System
-      const executionResult = this.argumentInvocation.execute(
+      // Create accumulate context mutator F
+      const accumulateContextMutator = this.createAccumulateContextMutator(
+        postTransferState,
+        serviceId,
+        timeslot,
+      )
+
+      // Execute Ψ_M(c, 5, g, encode(t, s, len(i)), F, I(postxferstate, s)^2)
+      const marshallingResult = this.executeMarshallingInvocation(
         serviceCode,
-        0n, // instruction pointer starts at 0
+        5n, // Initial PC = 5 (Gray Paper)
         gas,
-        { data: encodedArgs, size: BigInt(encodedArgs.length) },
+        encodedArgs,
+        accumulateContextMutator,
         initialContext,
       )
 
       // Collapse result based on termination type
-      return this.collapseResult(
+      return this.collapseAccumulateResult(
         {
-          gasUsed: executionResult.gasConsumed,
-          result: executionResult.result,
+          resultCode: marshallingResult.result as ResultCode,
+          gasUsed: marshallingResult.gasUsed,
         },
-        initialContext,
+        marshallingResult.finalContext,
       )
     } catch (error) {
       logger.error('Accumulate invocation failed', { error, serviceId })
-      return 'BAD'
+      return { ok: false, err: 'BAD' }
     }
   }
 
   /**
-   * Initialize context function I from Gray Paper
-   * Creates initial implications context with deterministic ID generation
+   * Create accumulate context mutator F
+   * Gray Paper equation 187: F ∈ contextmutator{implicationspair}
+   * Maps host call IDs to accumulate host functions
    */
-  private initializeContext(
+  private createAccumulateContextMutator(
+    _partialState: PartialState,
+    _serviceId: bigint,
+    timeslot: bigint,
+  ): (
+    hostCallId: bigint,
+    gasCounter: bigint,
+    registers: bigint[],
+    memory: RAM,
+    context: ImplicationsPair,
+  ) => {
+    resultCode: ResultCode
+    gasCounter: bigint
+    registers: bigint[]
+    memory: RAM
+    context: ImplicationsPair
+  } {
+    return (
+      hostCallId: bigint,
+      gasCounter: bigint,
+      registers: bigint[],
+      memory: RAM,
+      context: ImplicationsPair,
+    ) => {
+      // Create refine context for host functions
+
+      try {
+        // Get accumulate host function by ID
+        const hostFunction = this.accumulateHostFunctionRegistry.get(hostCallId)
+
+        if (!hostFunction) {
+          logger.error('Unknown accumulate host function', { hostCallId })
+          return {
+            resultCode: RESULT_CODES.PANIC,
+            gasCounter,
+            registers,
+            memory,
+            context,
+          }
+        }
+
+        // Execute host function
+        const result = hostFunction.execute(
+          gasCounter,
+          registers,
+          memory,
+          context,
+          timeslot,
+        )
+
+        return {
+          resultCode: result.resultCode || RESULT_CODES.PANIC,
+          gasCounter,
+          registers,
+          memory,
+          context,
+        }
+      } catch (error) {
+        logger.error('Accumulate host function execution failed', {
+          error,
+          hostCallId,
+        })
+        return {
+          resultCode: RESULT_CODES.PANIC,
+          gasCounter,
+          registers,
+          memory,
+          context,
+        }
+      } finally {
+        // Clear refine context
+        this.currentRefineContext = undefined
+      }
+    }
+  }
+
+  /**
+   * Calculate post-transfer state
+   */
+  private calculatePostTransferState(
     partialState: PartialState,
     serviceId: bigint,
-    timeslot: bigint,
+    inputs: AccumulateInput[],
+  ): PartialState {
+    // Extract deferred transfers
+    const deferredTransfers = inputs
+      .filter((input) => input.type === 1n)
+      .map((input) => input.value as DeferredTransfer)
+
+    // Calculate total transfer amount to service
+    const totalTransferAmount = deferredTransfers
+      .filter((transfer) => transfer.dest === serviceId)
+      .reduce((sum, transfer) => sum + transfer.amount, 0n)
+
+    // Update service balance
+    const updatedAccounts = new Map(partialState.accounts)
+    const serviceAccount = updatedAccounts.get(serviceId)
+    if (serviceAccount) {
+      updatedAccounts.set(serviceId, {
+        ...serviceAccount,
+        balance: serviceAccount.balance + totalTransferAmount,
+      })
+    }
+
+    return {
+      ...partialState,
+      accounts: updatedAccounts,
+    }
+  }
+
+  /**
+   * Initialize Implications context
+   */
+  private initializeImplicationsContext(
+    partialState: PartialState,
+    serviceId: bigint,
+    _timeslot: bigint,
   ): ImplicationsPair {
-    // Generate deterministic next free ID using entropy accumulator and timeslot
-    const nextFreeId = this.generateNextFreeId(
-      serviceId,
-      timeslot,
-      partialState,
+    // Calculate nextfreeid using Gray Paper formula
+    const entropy = new Uint8Array(32) // Simplified - would use actual entropy
+    const entropyAccumulator = blake2bHash(entropy)
+    // Convert hex string to number for calculation
+    const entropyNum = BigInt(`0x${entropyAccumulator.slice(0, 8)}`)
+    const nextfreeid = BigInt(
+      (entropyNum % (2n ** 32n - 1_000_000n - 2n ** 8n)) + 1_000_000n,
     )
 
     const implications: Implications = {
       id: serviceId,
       state: partialState,
-      nextfreeid: nextFreeId,
+      nextfreeid,
       xfers: [],
       yield: null,
       provisions: new Map(),
     }
 
-    // Return pair of identical implications (regular and exceptional dimensions)
-    return [implications, implications]
+    // Return both regular and exceptional dimensions
+    return [
+      implications, // Regular dimension (imX)
+      { ...implications, xfers: [], yield: null, provisions: new Map() }, // Exceptional dimension (imY)
+    ]
   }
 
   /**
-   * Generate next free service ID using Blake2 hash from Gray Paper
-   *
-   * Formula: check((decode[4]{blake{encode{im_id, entropyaccumulator', H_timeslot}}} mod (2^32-Cminpublicindex-2^8)) + Cminpublicindex)
+   * Encode accumulate arguments
    */
-  private generateNextFreeId(
-    serviceId: bigint,
-    timeslot: bigint,
-    partialState: PartialState,
-  ): bigint {
-    // Encode the inputs: serviceId, entropyaccumulator', timeslot
-    const entropyAccumulator = ACCUMULATE_INVOCATION_CONFIG.ENTROPY_ACCUMULATOR
-    const encodedData = this.encodeForBlake2(
-      serviceId,
-      entropyAccumulator,
-      timeslot,
-    )
-
-    // Generate Blake2 hash
-    const [error, hash] = blake2bHash(encodedData)
-    if (error) {
-      throw error
-    }
-
-    // Decode first 4 Uint8Array and convert to number
-    const decodedValue = hexToBigInt(hash) >> 32n
-
-    // Apply the formula: (decoded mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex
-    const modulus =
-      2n ** 32n - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX - 256n
-    const baseId =
-      (decodedValue % modulus) + ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX
-
-    return this.checkServiceId(baseId, partialState)
-  }
-
-  /**
-   * Encode data for Blake2 hashing
-   */
-  private encodeForBlake2(
-    serviceId: bigint,
-    entropyAccumulator: string,
-    timeslot: bigint,
-  ): Buffer {
-    // Create a buffer to hold the encoded data
-    const buffer = Buffer.alloc(4 + entropyAccumulator.length + 4) // serviceId (4) + entropy (var) + timeslot (4)
-
-    // Write serviceId as 4 Uint8Array (big-endian)
-    buffer.writeUInt32BE(Number(serviceId), 0)
-
-    // Write entropy accumulator as string
-    buffer.write(entropyAccumulator, 4, 'utf8')
-
-    // Write timeslot as 4 Uint8Array (big-endian)
-    buffer.writeUInt32BE(Number(timeslot), 4 + entropyAccumulator.length)
-
-    return buffer
-  }
-
-  /**
-   * Check function from Gray Paper eq:newserviceindex
-   * Finds first available service ID in sequence
-   */
-  private checkServiceId(id: bigint, partialState: PartialState): bigint {
-    if (!partialState.accounts.has(id)) {
-      return id
-    }
-
-    // Recursively check next ID in sequence
-    const nextId =
-      ((id - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX + 1n) %
-        (2n ** 32n - 256n - ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX)) +
-      ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX
-
-    return this.checkServiceId(nextId, partialState)
-  }
-
-  /**
-   * Calculate post-transfer state by applying deferred transfers to service balance
-   */
-  private calculatePostTransferState(
-    partialState: PartialState,
-    serviceId: bigint,
-    inputs: AccumulateInput,
-  ): PartialState {
-    const serviceAccount = partialState.accounts.get(serviceId)
-    if (!serviceAccount) return partialState
-
-    // Extract deferred transfers from inputs
-    const deferredTransfers = this.extractDeferredTransfers(inputs)
-
-    // Calculate total transfer amount
-    const totalTransferAmount = deferredTransfers.reduce(
-      (sum, transfer) => sum + transfer.amount,
-      0n,
-    )
-
-    // Create new state with updated balance
-    const newState = { ...partialState }
-    const newAccounts = new Map(newState.accounts)
-    const newServiceAccount = { ...serviceAccount }
-    newServiceAccount.balance = serviceAccount.balance + totalTransferAmount
-    newAccounts.set(serviceId, newServiceAccount)
-    newState.accounts = newAccounts
-
-    return newState
-  }
-
-  /**
-   * Extract deferred transfers from accumulate inputs
-   */
-  private extractDeferredTransfers(
-    _inputs: AccumulateInput,
-  ): DeferredTransfer[] {
-    // Simplified implementation - would parse actual deferred transfer format
-    return []
-  }
-
-  /**
-   * Encode arguments for PVM execution
-   */
-  private encodeArguments(
+  private encodeAccumulateArguments(
     timeslot: bigint,
     serviceId: bigint,
     inputLength: bigint,
   ): Uint8Array {
-    const result = new Uint8Array(12)
+    const buffer = new ArrayBuffer(24) // 8 + 8 + 8 bytes
+    const view = new DataView(buffer)
 
-    // Encode timeslot as 4 Uint8Array
-    result[0] = (Number(timeslot) >> 24) & 0xff
-    result[1] = (Number(timeslot) >> 16) & 0xff
-    result[2] = (Number(timeslot) >> 8) & 0xff
-    result[3] = Number(timeslot) & 0xff
+    view.setBigUint64(0, timeslot, true) // Little endian
+    view.setBigUint64(8, serviceId, true)
+    view.setBigUint64(16, inputLength, true)
 
-    // Encode service ID as 4 Uint8Array
-    result[4] = (Number(serviceId) >> 24) & 0xff
-    result[5] = (Number(serviceId) >> 16) & 0xff
-    result[6] = (Number(serviceId) >> 8) & 0xff
-    result[7] = Number(serviceId) & 0xff
-
-    // Encode input length as 4 Uint8Array
-    result[8] = (Number(inputLength) >> 24) & 0xff
-    result[9] = (Number(inputLength) >> 16) & 0xff
-    result[10] = (Number(inputLength) >> 8) & 0xff
-    result[11] = Number(inputLength) & 0xff
-
-    return result
+    return new Uint8Array(buffer)
   }
 
   /**
-   * Create context mutator F from Gray Paper
-   * Handles all host calls during Accumulate invocation
+   * Collapse accumulate result
    */
-  private createContextMutator(
-    _initialContext: ImplicationsPair,
-  ): AccumulateContextMutator {
-    return (
-      hostCallId: bigint,
-      gasCounter: bigint,
-      registers: RegisterState,
-      ram: RAM,
-      context: ImplicationsPair,
-    ) => {
-      const [_imX, _imY] = context
-
-      try {
-        switch (hostCallId) {
-          case GENERAL_FUNCTIONS.GAS:
-            return this.handleGasCall(gasCounter, registers, ram, context)
-
-          case GENERAL_FUNCTIONS.FETCH:
-            return this.handleFetchCall(gasCounter, registers, ram, context)
-
-          case GENERAL_FUNCTIONS.READ:
-            return this.handleReadCall(gasCounter, registers, ram, context)
-
-          case GENERAL_FUNCTIONS.WRITE:
-            return this.handleWriteCall(gasCounter, registers, ram, context)
-
-          case GENERAL_FUNCTIONS.LOOKUP:
-            return this.handleLookupCall(gasCounter, registers, ram, context)
-
-          case GENERAL_FUNCTIONS.INFO:
-            return this.handleInfoCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.BLESS:
-            return this.handleBlessCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.ASSIGN:
-            return this.handleAssignCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.DESIGNATE:
-            return this.handleDesignateCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.CHECKPOINT:
-            return this.handleCheckpointCall(
-              gasCounter,
-              registers,
-              ram,
-              context,
-            )
-
-          case ACCUMULATE_FUNCTIONS.NEW:
-            return this.handleNewCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.UPGRADE:
-            return this.handleUpgradeCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.TRANSFER:
-            return this.handleTransferCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.EJECT:
-            return this.handleEjectCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.QUERY:
-            return this.handleQueryCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.SOLICIT:
-            return this.handleSolicitCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.FORGET:
-            return this.handleForgetCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.YIELD:
-            return this.handleYieldCall(gasCounter, registers, ram, context)
-
-          case ACCUMULATE_FUNCTIONS.PROVIDE:
-            return this.handleProvideCall(gasCounter, registers, ram, context)
-
-          default: {
-            // Unknown host call - return WHAT error
-            const newRegisters = { ...registers }
-            newRegisters.r7 = ACCUMULATE_ERROR_CODES.WHAT
-            return {
-              resultCode: 'continue',
-              gasCounter: gasCounter - 10n,
-              registers: newRegisters,
-              ram,
-              context,
-            }
-          }
-        }
-      } catch (error) {
-        logger.error('Host call failed', { hostCallId, error })
-        return {
-          resultCode: 'panic',
-          gasCounter,
-          registers,
-          ram,
-          context,
-        }
-      }
-    }
-  }
-
-  // Host call handlers - simplified implementations
-  private handleGasCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r7 = gasCounter
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleFetchCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE // Stateless fetch returns NONE
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleReadCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const [imX] = context
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
-      const newRegisters = { ...registers }
-      newRegisters.r7 = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: 'continue',
-        gasCounter: gasCounter - 10n,
-        registers: newRegisters,
-        ram,
-        context,
-      }
-    }
-
-    // Simplified read implementation
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleWriteCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const [imX] = context
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
-      const newRegisters = { ...registers }
-      newRegisters.r7 = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: 'continue',
-        gasCounter: gasCounter - 10n,
-        registers: newRegisters,
-        ram,
-        context,
-      }
-    }
-
-    // Simplified write implementation
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleLookupCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.NONE
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleInfoCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  // Accumulate function handlers - simplified implementations
-  private handleBlessCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleAssignCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleDesignateCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleCheckpointCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    // Checkpoint affects the exceptional dimension (imY)
-    const [imX, imY] = context
-    const newImY = { ...imY }
-    // Simplified checkpoint implementation
-    const newContext: ImplicationsPair = [imX, newImY]
-
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context: newContext,
-    }
-  }
-
-  private handleNewCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleUpgradeCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleTransferCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleEjectCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleQueryCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleSolicitCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleForgetCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleYieldCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  private handleProvideCall(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): {
-    resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-    gasCounter: bigint
-    registers: RegisterState
-    ram: RAM
-    context: ImplicationsPair
-  } {
-    const newRegisters = { ...registers }
-    newRegisters.r0 = ACCUMULATE_ERROR_CODES.OK
-    return {
-      resultCode: 'continue',
-      gasCounter: gasCounter - 10n,
-      registers: newRegisters,
-      ram,
-      context,
-    }
-  }
-
-  /**
-   * Collapse function C from Gray Paper
-   * Selects between regular and exceptional dimensions based on termination type
-   */
-  private collapseResult(
-    executionResult: {
-      gasUsed: bigint
-      result: Uint8Array | 'oog' | 'panic'
-    },
-    context: ImplicationsPair,
+  private collapseAccumulateResult(
+    executionResult: { resultCode: ResultCode; gasUsed: bigint },
+    implicationsPair: ImplicationsPair,
   ): AccumulateInvocationResult {
-    const [imX, imY] = context
-    const { gasUsed, result } = executionResult
+    const [imX, imY] = implicationsPair
 
-    if (result === 'oog' || result === 'panic') {
-      // Exceptional termination - use exceptional dimension (imY)
-      return {
-        poststate: imY.state,
-        defxfers: imY.xfers,
-        yield: imY.yield,
-        gasused: gasUsed,
-        provisions: imY.provisions,
-      }
-    } else if (result.length > 0) {
-      // Regular termination with yield - use regular dimension with yield
-      return {
-        poststate: imX.state,
-        defxfers: imX.xfers,
-        yield: result,
-        gasused: gasUsed,
-        provisions: imX.provisions,
-      }
-    } else {
-      // Regular termination without yield - use regular dimension
-      return {
-        poststate: imX.state,
-        defxfers: imX.xfers,
-        yield: imX.yield,
-        gasused: gasUsed,
-        provisions: imX.provisions,
-      }
+    // Use regular dimension for normal termination, exceptional for panic/oog
+    const finalImplications =
+      executionResult.resultCode === RESULT_CODES.HALT ? imX : imY
+    return {
+      ok: true,
+      value: {
+        poststate: finalImplications.state,
+        defxfers: finalImplications.xfers,
+        yield: finalImplications.yield,
+        gasused: executionResult.gasUsed,
+        provisions: finalImplications.provisions,
+      },
     }
   }
 }

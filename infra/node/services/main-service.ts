@@ -22,6 +22,7 @@ import {
   type NetworkingProtocol,
   PreimageAnnouncementProtocol,
   PreimageRequestProtocol,
+  SegmentShardRequestProtocol,
   StateRequestProtocol,
   WorkPackageSubmissionProtocol,
   WorkReportDistributionProtocol,
@@ -39,6 +40,7 @@ import { ConfigService } from './config-service'
 import { DisputesService } from './disputes-service'
 // import { ConnectionManagerService } from './connection-manager'
 import { EntropyService } from './entropy'
+import { ErasureCodingService } from './erasure-coding-service'
 // import { ExtrinsicValidator } from './extrinsic-validator'
 import { NodeGenesisManager } from './genesis-manager'
 import { HeaderConstructor } from './header-constructor'
@@ -50,11 +52,9 @@ import { RecentHistoryService } from './recent-history-service'
 import { ServiceRegistry } from './registry'
 // import { SafroleConsensusService } from './safrole-consensus-service'
 import { SealKeyService } from './seal-key'
-import { ShardService } from './shard-service'
 import { StatisticsService } from './statistics-service'
-import { TelemetryEventEmitterService } from './telemetry'
-import { TicketDistributionService } from './ticket-distribution-service'
-import { TicketHolderService } from './ticket-holder-service'
+// import { TelemetryEventEmitterService } from './telemetry'
+import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 // import { WorkPackageProcessor } from './work-package-processor'
 /**
@@ -113,7 +113,7 @@ export class MainService extends BaseService {
   private preimageStore: PreimageStore | null = null
   private ticketStore: TicketStore | null = null
 
-  private readonly ticketHolderService: TicketHolderService
+  private readonly ticketHolderService: TicketService
   private readonly preimageHolderService: PreimageHolderService
 
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null =
@@ -129,7 +129,7 @@ export class MainService extends BaseService {
 
   private readonly ticketDistributionService: TicketDistributionService
   private readonly configService: ConfigService
-  private readonly shardService: ShardService
+  private readonly shardService: ErasureCodingService
 
   constructor(config: MainServiceConfig) {
     super('main-service')
@@ -147,7 +147,7 @@ export class MainService extends BaseService {
     // Initialize event bus service first
     this.eventBusService = new EventBusService()
 
-    this.ticketHolderService = new TicketHolderService({
+    this.ticketHolderService = new TicketService({
       configService: this.configService,
     })
     this.preimageHolderService = new PreimageHolderService(
@@ -312,7 +312,7 @@ export class MainService extends BaseService {
 
     // Initialize shard service with config service
     // Shard size is fixed at 2 octet pairs (4 octets) per Gray Paper
-    this.shardService = new ShardService(
+    this.shardService = new ErasureCodingService(
       this.configService,
       this.eventBusService,
     )
@@ -450,8 +450,14 @@ export class MainService extends BaseService {
     )
     // this.protocolRegistry.set(137, new ShardDistributionProtocol(options.workStore))
     // this.protocolRegistry.set(138, new AuditShardRequestProtocol(options.workStore))
-    // this.protocolRegistry.set(139, new SegmentShardRequestNoJustificationProtocol(workStore))
-    // this.protocolRegistry.set(140, new SegmentShardRequestWithJustificationProtocol(blockStore))
+    this.protocolRegistry.set(
+      139,
+      new SegmentShardRequestProtocol(this.eventBusService),
+    )
+    this.protocolRegistry.set(
+      140,
+      new SegmentShardRequestProtocol(this.eventBusService),
+    )
     // this.protocolRegistry.set(141, new AssuranceDistributionProtocol(blockStore))
     this.protocolRegistry.set(
       142,

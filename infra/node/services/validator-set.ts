@@ -19,16 +19,20 @@ import {
   type ValidatorSetChangeEvent,
   zeroHash,
 } from '@pbnj/core'
+import { getAssignedCore } from '@pbnj/guarantor'
 import { isSafroleTicket } from '@pbnj/safrole'
 import {
   BaseService,
+  type ConnectionEndpoint,
   type IValidatorSetManager,
-  type ValidatorKeyTuple,
+  type ValidatorPublicKeys,
 } from '@pbnj/types'
+import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
+import type { EntropyService } from './entropy'
 import type { KeyPairService } from './keypair-service'
 import type { SealKeyService } from './seal-key'
-import type { TicketHolderService } from './ticket-holder-service'
+import type { TicketService } from './ticket-service'
 
 /**
  * Validator set manager
@@ -40,17 +44,18 @@ export class ValidatorSetManager
   private readonly eventBusService: EventBusService
   private readonly sealKeyService: SealKeyService
   private readonly keyPairService: KeyPairService
-  private readonly ticketHolderService: TicketHolderService
+  private readonly ticketHolderService: TicketService
   private readonly ringProver: RingVRFProver
   private readonly configService: ConfigService
+  private readonly entropyService: EntropyService
+  private readonly clockService: ClockService
 
   // Gray Paper validator set definitions (preamble.tex lines 763-765)
-  private activeSet: Map<number, ValidatorKeyTuple> = new Map() // κ - currently active validators
-  private previousSet: Map<number, ValidatorKeyTuple> = new Map() // λ - previously active validators
-  private pendingSet: Map<number, ValidatorKeyTuple> = new Map() // γ_P - next epoch validators
-  private readonly stagingSet: Map<number, ValidatorKeyTuple> = new Map() // ι - validators to be drawn from next
-  private readonly allKnownValidators: Map<number, ValidatorKeyTuple> =
-    new Map()
+  private activeSet: Map<number, ValidatorPublicKeys> = new Map() // κ - currently active validators
+  private previousSet: Map<number, ValidatorPublicKeys> = new Map() // λ - previously active validators
+  private pendingSet: Map<number, ValidatorPublicKeys> = new Map() // γ_P - next epoch validators
+  private stagingSet: Map<number, ValidatorPublicKeys> = new Map() // ι - validators to be drawn from next
+
   private readonly offenders: Set<number> = new Set()
   // Map of public keys to validator indices
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
@@ -60,12 +65,10 @@ export class ValidatorSetManager
     sealKeyService: SealKeyService
     keyPairService: KeyPairService
     ringProver: RingVRFProver
-    ticketHolderService: TicketHolderService
+    ticketHolderService: TicketService
     configService: ConfigService
-    initialValidators?: Array<{
-      index: number
-      keys: ValidatorKeyTuple
-    }>
+    entropyService: EntropyService
+    clockService: ClockService
   }) {
     super('validator-set-manager')
     this.eventBusService = options.eventBusService
@@ -74,46 +77,10 @@ export class ValidatorSetManager
     this.ticketHolderService = options.ticketHolderService
     this.ringProver = options.ringProver
     this.configService = options.configService
+    this.entropyService = options.entropyService
+    this.clockService = options.clockService
 
-    this.eventBusService.onEpochTransition(this.handleEpochTransition)
-    if (options.initialValidators) {
-      for (const validator of options.initialValidators) {
-        this.activeSet.set(validator.index, {
-          bandersnatch: validator.keys.bandersnatch,
-          ed25519: validator.keys.ed25519,
-        })
-        this.allKnownValidators.set(validator.index, {
-          bandersnatch: validator.keys.bandersnatch,
-          ed25519: validator.keys.ed25519,
-        })
-        this.publicKeysToValidatorIndex.set(
-          validator.keys.ed25519,
-          validator.index,
-        )
-      }
-    } else {
-      const numValidators = this.configService.numValidators
-      for (let i = 0; i < numValidators; i++) {
-        const [keyPairError, keyPair] = this.keyPairService.getValidatorAtIndex(
-          BigInt(i),
-        )
-        if (keyPairError) {
-          logger.error('Failed to get validator at index', {
-            error: keyPairError,
-          })
-          continue
-        }
-        this.activeSet.set(i, {
-          bandersnatch: keyPair.bandersnatch,
-          ed25519: keyPair.ed25519,
-        })
-        this.allKnownValidators.set(i, {
-          bandersnatch: keyPair.bandersnatch,
-          ed25519: keyPair.ed25519,
-        })
-        this.publicKeysToValidatorIndex.set(keyPair.ed25519, i)
-      }
-    }
+    this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
   }
 
   override stop(): Safe<boolean> {
@@ -184,9 +151,9 @@ export class ValidatorSetManager
    * Replaces offender keys with null keys (all zeros)
    */
   private applyBlacklistFilter(
-    stagingSet: Map<number, ValidatorKeyTuple>,
-  ): Map<number, ValidatorKeyTuple> {
-    const filtered = new Map<number, ValidatorKeyTuple>()
+    stagingSet: Map<number, ValidatorPublicKeys>,
+  ): Map<number, ValidatorPublicKeys> {
+    const filtered = new Map<number, ValidatorPublicKeys>()
 
     for (const [validatorIndex, metadata] of stagingSet) {
       // Check if this validator is in the offenders set
@@ -194,9 +161,11 @@ export class ValidatorSetManager
 
       if (isOffender) {
         // Replace with null key (all zeros) - Gray Paper equation (122-123)
-        const nullMetadata: ValidatorKeyTuple = {
+        const nullMetadata: ValidatorPublicKeys = {
           bandersnatch: zeroHash,
           ed25519: zeroHash,
+          bls: zeroHash,
+          metadata: ('0x' + '00'.repeat(128)) as Hex,
         }
         filtered.set(validatorIndex, nullMetadata)
 
@@ -216,11 +185,11 @@ export class ValidatorSetManager
   /**
    * Get current validator set
    */
-  getActiveValidators(): Map<number, ValidatorKeyTuple> {
+  getActiveValidators(): Map<number, ValidatorPublicKeys> {
     return this.activeSet
   }
 
-  getPendingValidators(): Map<number, ValidatorKeyTuple> {
+  getPendingValidators(): Map<number, ValidatorPublicKeys> {
     return this.pendingSet
   }
 
@@ -250,8 +219,8 @@ export class ValidatorSetManager
   /**
    * Get all validators that should be connected (active + previous + pending)
    */
-  getAllConnectedValidators(): Map<number, ValidatorKeyTuple> {
-    const allValidators = new Map<number, ValidatorKeyTuple>()
+  getAllConnectedValidators(): Map<number, ValidatorPublicKeys> {
+    const allValidators = new Map<number, ValidatorPublicKeys>()
 
     // Add active validators
     for (const [index, metadata] of this.activeSet) {
@@ -278,23 +247,30 @@ export class ValidatorSetManager
   /**
    * Get staging validator set (validators to be drawn from next)
    */
-  getStagingValidators(): Map<number, ValidatorKeyTuple> {
+  getStagingValidators(): Map<number, ValidatorPublicKeys> {
     return new Map(this.stagingSet)
   }
 
-  /**
-   * Add validators to staging set
-   * These will become the pending set in the next epoch transition
-   */
-  addToStagingSet(validators: Map<number, ValidatorKeyTuple>): void {
-    for (const [index, metadata] of validators) {
-      this.stagingSet.set(index, metadata)
-    }
+  setStagingSet(validatorSet: ValidatorPublicKeys[]): void {
+    this.stagingSet = new Map(
+      validatorSet.map((validator, index) => [index, validator]),
+    )
+  }
 
-    logger.info('Added validators to staging set', {
-      count: validators.size,
-      totalStaging: this.stagingSet.size,
-    })
+  setActiveSet(validatorSet: ValidatorPublicKeys[]): void {
+    this.activeSet = new Map(
+      validatorSet.map((validator, index) => [index, validator]),
+    )
+  }
+
+  setPreviousSet(validatorSet: ValidatorPublicKeys[]): void {
+    this.previousSet = new Map(
+      validatorSet.map((validator, index) => [index, validator]),
+    )
+  }
+
+  getPreviousValidators(): Map<number, ValidatorPublicKeys> {
+    return new Map(this.previousSet)
   }
 
   /**
@@ -359,7 +335,7 @@ export class ValidatorSetManager
   /**
    * Update current validator set
    */
-  updateCurrentValidators(validators: Map<number, ValidatorKeyTuple>): void {
+  updateCurrentValidators(validators: Map<number, ValidatorPublicKeys>): void {
     this.activeSet = new Map(validators)
   }
 
@@ -508,7 +484,7 @@ export class ValidatorSetManager
   /**
    * Get validator key by index
    */
-  getValidatorAtIndex(validatorIndex: number): Safe<ValidatorKeyTuple> {
+  getValidatorAtIndex(validatorIndex: number): Safe<ValidatorPublicKeys> {
     const keyPair = this.getAllConnectedValidators().get(validatorIndex)
     if (!keyPair) {
       return safeError(
@@ -520,7 +496,7 @@ export class ValidatorSetManager
 
   getValidatorByEd25519PublicKey(
     ed25519PublicKey: Hex,
-  ): Safe<ValidatorKeyTuple> {
+  ): Safe<ValidatorPublicKeys> {
     const keyPair = this.getAllConnectedValidators()
       .values()
       .toArray()
@@ -597,5 +573,158 @@ export class ValidatorSetManager
    */
   getStagingValidatorCount(): number {
     return this.stagingSet.size
+  }
+
+  /**
+   * Get all neighbor validator indexes from the active set
+   * Implements JAMNP-S grid structure neighbor algorithm
+   *
+   * JAMNP-S Specification:
+   * - Grid size W = floor(sqrt(V)) where V is number of validators
+   * - Two validators are neighbors if they share the same row OR column
+   * - Row = index / W, Column = index % W
+   *
+   * @param validatorIndex - The validator index to find neighbors for
+   * @returns Array of neighbor validator indexes from the active set
+   */
+  getActiveSetNeighbors(validatorIndex: number): number[] {
+    const neighbors: number[] = []
+    const totalValidators = this.configService.numValidators
+    const W = Math.floor(Math.sqrt(totalValidators)) // Grid width
+
+    // Calculate grid coordinates for the given validator
+    const row = Math.floor(validatorIndex / W)
+    const col = validatorIndex % W
+
+    logger.debug('Calculating neighbors for validator', {
+      validatorIndex,
+      totalValidators,
+      gridWidth: W,
+      row,
+      col,
+    })
+
+    // Find all neighbors in the active set
+    for (const [index, _validator] of this.activeSet) {
+      // Skip self
+      if (index === validatorIndex) {
+        continue
+      }
+
+      // Calculate grid coordinates for this validator
+      const neighborRow = Math.floor(index / W)
+      const neighborCol = index % W
+
+      // Check if they are neighbors (same row OR same column)
+      const isRowNeighbor = neighborRow === row
+      const isColNeighbor = neighborCol === col
+
+      if (isRowNeighbor || isColNeighbor) {
+        neighbors.push(index)
+      }
+    }
+
+    return neighbors.sort((a, b) => a - b) // Return sorted array
+  }
+
+  /**
+   * Get all neighbor validator indexes across all connected validator sets
+   * (active, previous, pending) based on JAMNP-S grid structure
+   *
+   * @param validatorIndex - The validator index to find neighbors for
+   * @returns Array of neighbor validator indexes from all connected sets
+   */
+  getAllConnectedNeighbors(
+    validatorIndex: number,
+  ): { index: number; publicKey: Hex }[] {
+    const neighbors: { index: number; publicKey: Hex }[] = []
+    const totalValidators = this.configService.numValidators
+    const W = Math.floor(Math.sqrt(totalValidators)) // Grid width
+
+    // Calculate grid coordinates for the given validator
+    const row = Math.floor(validatorIndex / W)
+    const col = validatorIndex % W
+
+    // Get all connected validators (active + previous + pending)
+    const allConnectedValidators = this.getAllConnectedValidators()
+
+    // Find all neighbors across all connected sets
+    for (const [index, validator] of allConnectedValidators) {
+      // Skip self
+      if (index === validatorIndex) {
+        continue
+      }
+
+      // Calculate grid coordinates for this validator
+      const neighborRow = Math.floor(index / W)
+      const neighborCol = index % W
+
+      // Check if they are neighbors (same row OR same column)
+      const isRowNeighbor = neighborRow === row
+      const isColNeighbor = neighborCol === col
+
+      if (isRowNeighbor || isColNeighbor) {
+        neighbors.push({ index, publicKey: validator.ed25519 })
+      }
+    }
+
+    logger.info('Found all connected neighbors', {
+      validatorIndex,
+      neighborCount: neighbors.length,
+      neighbors: neighbors.sort((a, b) => a.index - b.index),
+    })
+
+    return neighbors.sort((a, b) => a.index - b.index) // Return sorted array
+  }
+
+  getConnectionEndpointFromMetadata(
+    validatorIndex: number,
+  ): Safe<ConnectionEndpoint> {
+    const validator = this.getAllConnectedValidators().get(validatorIndex)
+    if (!validator) {
+      return safeError(
+        new Error(`Validator not found for index ${validatorIndex}`),
+      )
+    }
+    // first 16 bytes of metadata are the ipv6 address
+    // last 2 bytes of metadata are the port
+    const ipv6Address = validator.metadata.slice(0, 16)
+    const port = validator.metadata.slice(16, 18)
+    return safeResult({
+      host: ipv6Address.toString(),
+      port: Number.parseInt(port.toString()),
+      publicKey: hexToBytes(validator.ed25519),
+    })
+  }
+
+  /**
+   * Get assigned core for this validator
+   *
+   * Gray Paper Reference: reporting_assurance.tex (Equations 210-218)
+   *
+   * Algorithm:
+   * 1. Create initial core assignments: [floor(C_corecount × i / C_valcount) for i in valindex]
+   * 2. Shuffle using Fisher-Yates with entropy_2: fyshuffle(assignments, entropy_2)
+   * 3. Calculate rotation: floor((thetime % C_epochlen) / C_rotationperiod)
+   * 4. Apply rotation: (core + rotation) % C_corecount
+   * 5. Return core for validatorIndex
+   */
+  getAssignedCore(validatorIndex: number): Safe<number> {
+    try {
+      // Get values from services
+      const entropy2 = this.entropyService.getEntropy2()
+      const currentSlot = this.clockService.getCurrentSlot()
+      const config = {
+        numValidators: this.configService.numValidators,
+        numCores: this.configService.numCores,
+        epochDuration: this.configService.epochDuration,
+        rotationPeriod: this.configService.rotationPeriod,
+      }
+
+      // Use the guarantor package helper function
+      return getAssignedCore(validatorIndex, entropy2, currentSlot, config)
+    } catch (error) {
+      return safeError(error as Error)
+    }
   }
 }

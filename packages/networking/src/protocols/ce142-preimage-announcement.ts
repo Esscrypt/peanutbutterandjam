@@ -3,11 +3,19 @@
  *
  * Implements the preimage announcement protocol for JAMNP-S
  * This is a Common Ephemeral (CE) stream for announcing possession of preimages.
+ * Service ID = u32
+  Preimage Length = u32
+
+  Node -> Validator
+
+  --> Service ID ++ Hash ++ Preimage Length
+  --> FIN
+  <-- FIN
  */
 
-import type { Safe, SafePromise } from '@pbnj/core'
-import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
-import type { IPreimageHolderService, PreimageAnnouncement } from '@pbnj/types'
+import type { EventBusService, Hex, Safe, SafePromise } from '@pbnj/core'
+import { bytesToHex, hexToBytes, safeResult } from '@pbnj/core'
+import type { PreimageAnnouncement } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -17,25 +25,24 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
   PreimageAnnouncement,
   void
 > {
-  constructor(private preimageHolderService: IPreimageHolderService) {
+  constructor(private readonly eventBusService: EventBusService) {
     super()
+
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
   }
 
   /**
    * Process preimage announcement
    */
-  async processRequest(announcement: PreimageAnnouncement): SafePromise<void> {
-    const [error, preimage] = await this.preimageHolderService.getPreimage(
-      announcement.hash,
+  async processRequest(
+    announcement: PreimageAnnouncement,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBusService.emitPreimageAnnouncementReceived(
+      announcement,
+      _peerPublicKey,
     )
-    // if we do not have the announcement, we need to request it
-    if (error) {
-      return safeError(error)
-    }
-    if (preimage) {
-      return safeError(new Error('Preimage already exists'))
-    }
-    this.preimageHolderService.storePreimageToRequest(announcement)
 
     return safeResult(undefined)
   }
@@ -98,7 +105,10 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
     return safeResult(undefined)
   }
 
-  async processResponse(_response: undefined): SafePromise<void> {
+  async processResponse(
+    _response: undefined,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     return safeResult(undefined)
   }
 }

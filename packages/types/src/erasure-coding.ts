@@ -16,32 +16,20 @@ export interface ErasureCodingParams {
   fieldSize: number
 }
 
+export interface ShardWithIndex {
+  shard: Uint8Array
+  index: number
+}
+
 /**
  * Encoded data structure
  */
 export interface EncodedData {
   /** Original data length */
   originalLength: number
-  /** Number of data words */
-  k: number
-  /** Total number of code words */
-  n: number
-  /** Encoded shards/chunks */
-  shards: Uint8Array[]
-  /** Indices of the shards */
-  indices: number[]
-}
 
-/**
- * Validation result for erasure coding operations
- */
-export interface ErasureCodingValidationResult {
-  /** Whether the validation passed */
-  isValid: boolean
-  /** Validation errors */
-  errors: string[]
-  /** Validation warnings */
-  warnings: string[]
+  /** Shards with indices */
+  shardsWithIndices: ShardWithIndex[]
 }
 
 /**
@@ -51,7 +39,7 @@ export interface ErasureCoder {
   /** Encode data into erasure coded shards */
   encode(data: Uint8Array, k?: number, n?: number): EncodedData
   /** Decode data from erasure coded shards */
-  decode(shards: Uint8Array[], originalLength: number): Uint8Array
+  decode(shards: ShardWithIndex[], originalLength: number): Uint8Array
 }
 
 /**

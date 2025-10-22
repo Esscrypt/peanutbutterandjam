@@ -7,12 +7,6 @@
 // Logger
 export { logger } from '@pbnj/core'
 // Re-export types from centralized types package
-export * from '@pbnj/types'
-// Argument invocation system
-export { ArgumentInvocationSystem } from './argument-invocation'
-// Basic block validation
-export { BasicBlockValidator } from './basic-block-validation'
-export { PVMCallStack } from './call-stack'
 // Configuration constants
 export {
   DEFAULTS,
@@ -29,8 +23,6 @@ export {
   RESULT_CODES,
 } from './config'
 
-// Host call system
-export { DefaultHostCallHandler, HostCallSystem } from './host-call'
 // Advanced bitwise instructions
 export {
   AND_INVInstruction,
@@ -250,13 +242,13 @@ export {
 // System instructions
 export { ECALLIInstruction } from './instructions/system'
 // Accumulate invocation system
-export { AccumulateInvocationSystem } from './invocations/accumulate'
-// Is-Authorized invocation system
-export { IsAuthorizedInvocationSystem } from './invocations/is-authorized'
-// Refine invocation system
-export { RefineInvocationSystem } from './invocations/refine'
+// export { AccumulateInvocationSystem } from './invocations/accumulate'
+// // Is-Authorized invocation system
+// export { IsAuthorizedInvocationSystem } from './invocations/is-authorized'
+// // Refine invocation system
+// export { RefineInvocationSystem } from './invocations/refine'
 // Program initialization
-export { ProgramInitializer } from './program-init'
+// export { ProgramInitializer } from './program-init'
 // Core PVM runtime
 export { PVM } from './pvm'
 // RAM and Call Stack implementations

@@ -5,7 +5,6 @@
  * Reference: Gray Paper specifications
  */
 
-import { bls12_381 } from '@noble/curves/bls12-381'
 import * as ed from '@noble/ed25519'
 // Import blakejs for cryptographic operations
 import { blake2b } from '@noble/hashes/blake2.js'
@@ -129,46 +128,4 @@ export function validatePrivateKey(privateKey: Uint8Array): boolean {
  */
 export function validateSignature(signature: Uint8Array): boolean {
   return signature.length === 64
-}
-
-/**
- * BLS signature using blakejs
- * @param message - Message to sign
- * @param secretKey - Secret key for signing
- * @returns BLS signature as hex string
- */
-export function blsSign(
-  message: Uint8Array,
-  secretKey: Uint8Array,
-): Safe<Uint8Array> {
-  const blss = bls12_381.shortSignatures
-  const digest = blss.hash(
-    message,
-    'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_',
-  )
-  const signature = blss.sign(digest, secretKey)
-  return safeResult(signature.toBytes())
-}
-
-/**
- * BLS signature verification using blakejs
- * @param message - Original message
- * @param signature - Signature to verify
- * @param publicKey - Public key for verification
- * @returns True if signature is valid
- */
-export function blsVerify(
-  message: Uint8Array,
-  signature: Uint8Array,
-  publicKey: Uint8Array,
-): Safe<boolean> {
-  const blss = bls12_381.shortSignatures
-  const publicKeyPoint = bls12_381.G1.encodeToCurve(publicKey).toBytes()
-  const digest = blss.hash(
-    message,
-    'BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_',
-  )
-
-  const isValid = blss.verify(signature, digest, publicKeyPoint)
-  return safeResult(isValid)
 }

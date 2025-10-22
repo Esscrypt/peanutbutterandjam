@@ -1,13 +1,12 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class MUL_UPPER_S_SInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_UPPER_S_S
   readonly name = 'MUL_UPPER_S_S'
   readonly description = 'Upper bits of signed multiplication'
-
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -36,23 +35,12 @@ export class MUL_UPPER_S_SInstruction extends BaseInstruction {
       upperBits,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -67,7 +55,6 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_UPPER_U_U
   readonly name = 'MUL_UPPER_U_U'
   readonly description = 'Upper bits of unsigned multiplication'
-
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -88,23 +75,12 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
       fullProduct,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -148,23 +124,12 @@ export class MUL_UPPER_S_UInstruction extends BaseInstruction {
       upperBits,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

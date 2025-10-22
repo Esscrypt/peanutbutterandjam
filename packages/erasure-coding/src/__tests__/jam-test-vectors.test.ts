@@ -5,7 +5,7 @@
  * Uses the reed-solomon-simd Rust library for high-performance erasure coding.
  */
 
-import { type Hex, logger, bytesToHex } from '@pbnj/core'
+import { type Hex, logger, bytesToHex, hexToBytes } from '@pbnj/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -16,22 +16,8 @@ beforeAll(() => {
 })
 
 interface JAMTestVector {
-  data: string
-  shards: string[]
-}
-
-function hexToUint8Array(hex: string | undefined): Uint8Array {
-  if (!hex) {
-    return new Uint8Array(0)
-  }
-  const cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex
-  const paddedHex = cleanHex.length % 2 === 0 ? cleanHex : '0' + cleanHex
-  
-  const bytes = new Uint8Array(paddedHex.length / 2)
-  for (let i = 0; i < paddedHex.length; i += 2) {
-    bytes[i / 2] = parseInt(paddedHex.slice(i, i + 2), 16)
-  }
-  return bytes
+  data: Hex
+  shards: Hex[]
 }
 
 
@@ -68,8 +54,8 @@ describe('JAM Test Vector Analysis', () => {
   describe('Real JAM Test Vectors', () => {
     it('should test against actual JAM test vectors from jamtestvectors', () => {
       const jamTestVectorPaths = [
-        '../../../../submodules/jamtestvectors/erasure/tiny',
-        '../../../../submodules/jamtestvectors/erasure/full'
+        '../../../../submodules/jam-test-vectors/erasure/tiny',
+        '../../../../submodules/jam-test-vectors/erasure/full'
       ]
 
       for (const [index, vectorPath] of jamTestVectorPaths.entries()) {
@@ -79,7 +65,7 @@ describe('JAM Test Vector Analysis', () => {
         logger.info(`Found ${testVectors.length} ${category} test vectors`)
         
         for (const { testVector } of testVectors) { // Test first 5 vectors
-          const inputData = hexToUint8Array(testVector.data)
+          const inputData = hexToBytes(testVector.data)
           // const expectedShards = testVector.shards.map(hex => hexToUint8Array(hex))
           
           // Use appropriate configuration for each category
@@ -91,16 +77,16 @@ describe('JAM Test Vector Analysis', () => {
             // Use our simplified Gray Paper-compliant encoding
             const encoded = coder.encode(inputData)
 
-            for (let i = 0; i < encoded.shards.length; i++) {
-              const shard = encoded.shards[i]
-              expect(bytesToHex(shard)).toEqual(testVector.shards[i] as Hex)
+            for (let i = 0; i < encoded.shardsWithIndices.length; i++) {
+              const shard = encoded.shardsWithIndices[i].shard
+              expect(bytesToHex(shard)).toEqual(testVector.shards[i])
             }
             
             logger.debug(`DEBUG: encoded.originalLength = ${encoded.originalLength}, inputData.length = ${inputData.length}`)
             
-            const decoded = coder.decode(encoded.shards, encoded.originalLength)
+            const decoded = coder.decode(encoded.shardsWithIndices, encoded.originalLength)
 
-            expect(bytesToHex(decoded)).toEqual(testVector.data as Hex)
+            expect(bytesToHex(decoded)).toEqual(testVector.data)
             expect(decoded.length).toEqual(inputData.length)
             
         }

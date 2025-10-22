@@ -25,3 +25,10 @@
 [submodule "submodules/jam-testvectors"]
 	path = submodules/jam-testvectors
 	url = https://github.com/davxy/jam-test-vectors.git
+[submodule "submodules/jam-conformance"]
+	path = submodules/jam-conformance
+	url = https://github.com/davxy/jam-conformance.git
+[submodule "pvm-test-vectors"]
+	path = pvm-test-vectors
+	url = https://github.com/koute/jamtestvectors.git
+	branch = master_pvm_initial

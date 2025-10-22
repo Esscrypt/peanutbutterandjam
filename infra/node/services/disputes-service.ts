@@ -32,6 +32,7 @@ import {
 } from '@pbnj/core'
 import {
   BaseService as BaseServiceClass,
+  type Disputes,
   type IValidatorSetManager,
   type Verdict,
 } from '@pbnj/types'
@@ -234,7 +235,6 @@ export class DisputesService extends BaseServiceClass {
   /**
    * Get all disputes as Gray Paper Disputes interface
    */
-
   public getDisputes(): {
     goodSet: Hex[]
     badSet: Hex[]
@@ -247,6 +247,45 @@ export class DisputesService extends BaseServiceClass {
       wonkySet: Array.from(this.wonkySet),
       offenders: Array.from(this.offenders),
     }
+  }
+
+  /**
+   * Get disputes state as Disputes interface
+   *
+   * Gray Paper: disputes ≡ (goodset, badset, wonkyset, offenders)
+   */
+  public getDisputesState(): Disputes {
+    return {
+      goodSet: this.goodSet,
+      badSet: this.badSet,
+      wonkySet: this.wonkySet,
+      offenders: this.offenders,
+    }
+  }
+
+  /**
+   * Set disputes state from Disputes interface
+   *
+   * Gray Paper: disputes ≡ (goodset, badset, wonkyset, offenders)
+   */
+  public setDisputesState(disputes: Disputes): void {
+    this.goodSet.clear()
+    this.badSet.clear()
+    this.wonkySet.clear()
+    this.offenders.clear()
+
+    // Copy all elements from the provided disputes
+    disputes.goodSet.forEach((hash) => this.goodSet.add(hash))
+    disputes.badSet.forEach((hash) => this.badSet.add(hash))
+    disputes.wonkySet.forEach((hash) => this.wonkySet.add(hash))
+    disputes.offenders.forEach((hash) => this.offenders.add(hash))
+
+    logger.debug('Disputes state updated', {
+      goodSetSize: this.goodSet.size,
+      badSetSize: this.badSet.size,
+      wonkySetSize: this.wonkySet.size,
+      offendersSize: this.offenders.size,
+    })
   }
 
   /**

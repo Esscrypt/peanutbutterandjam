@@ -5,7 +5,6 @@
  * Acts as a dispatcher for the PVM runtime.
  */
 
-import { logger } from '@pbnj/core'
 import {
   AND_INVInstruction,
   OR_INVInstruction,
@@ -196,23 +195,11 @@ import { ECALLIInstruction } from './system'
  * Maps opcodes to their corresponding instruction implementations.
  */
 export class InstructionRegistry {
-  private static instance: InstructionRegistry
   private handlers: Map<bigint, PVMInstructionHandler> = new Map()
 
-  private constructor() {
+  constructor() {
     this.registerInstructions()
   }
-
-  /**
-   * Get singleton instance
-   */
-  static getInstance(): InstructionRegistry {
-    if (!InstructionRegistry.instance) {
-      InstructionRegistry.instance = new InstructionRegistry()
-    }
-    return InstructionRegistry.instance
-  }
-
   /**
    * Register all instruction handlers
    */
@@ -409,13 +396,6 @@ export class InstructionRegistry {
     this.register(new SIGN_EXTEND_16Instruction())
     this.register(new ZERO_EXTEND_16Instruction())
     this.register(new REVERSE_BYTESInstruction())
-
-    logger.info('Instruction registry initialized', {
-      instructionCount: this.handlers.size,
-      opcodes: Array.from(this.handlers.keys()).map(
-        (op) => `0x${op.toString(16)}`,
-      ),
-    })
   }
 
   /**
@@ -423,10 +403,6 @@ export class InstructionRegistry {
    */
   register(handler: PVMInstructionHandler): void {
     this.handlers.set(handler.opcode, handler)
-    logger.debug('Registered instruction', {
-      opcode: `0x${handler.opcode.toString(16)}`,
-      name: handler.name,
-    })
   }
 
   /**

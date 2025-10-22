@@ -1,229 +1,141 @@
-// /**
-//  * CE 141: Assurance Distribution Protocol
-//  *
-//  * Implements the assurance distribution protocol for JAMNP-S
-//  * This is a Common Ephemeral (CE) stream for distributing availability assurances.
-//  */
+/**
+ * CE 141: Assurance Distribution Protocol
+ *
+ * Implements the assurance distribution protocol for JAMNP-S
+ * This is a Common Ephemeral (CE) stream for distributing availability assurances.
+ *
+ * 
+ *  Bitfield = [u8; ceil(C / 8)] (One bit per core; C is the total number of cores)
+Assurance = Header Hash (Anchor) ++ Bitfield ++ Ed25519 Signature
 
-// import type { AssuranceStore } from '@pbnj/state'
-// import type { AssuranceDistributionRequest, StreamInfo } from '@pbnj/types'
-// import { NetworkingProtocol } from './protocol'
+Assurer -> Validator
 
-// /**
-//  * Assurance distribution protocol handler
-//  */
-// export class AssuranceDistributionProtocol extends NetworkingProtocol<AssuranceDistribution, void> {
-//   private assurances: Map<
-//     Hex,
-//     AssuranceDistributionRequest
-//   > = new Map()
-//   private assuranceStore: AssuranceStore
+--> Assurance
+--> FIN
+<-- FIN
+ */
 
-//   constructor(assuranceStore: AssuranceStore) {
-//     super()
-//     this.assuranceStore = assuranceStore
-//   }
+import {
+  bytesToHex,
+  concatBytes,
+  type EventBusService,
+  type Hex,
+  hexToBytes,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import type { AssuranceDistributionRequest, IConfigService } from '@pbnj/types'
+import { NetworkingProtocol } from './protocol'
 
-//   /**
-//    * Store assurance in local store and persist to database
-//    */
-//   async storeAssurance(
-//     anchorHash: Uint8Array,
-//     bitfield: Uint8Array,
-//     signature: Uint8Array,
-//   ): Promise<void> {
-//     const hashString = anchorHash.toString()
-//     this.assurances.set(hashString, {
-//       anchorHash,
-//       bitfield,
-//       signature,
-//       timestamp: Date.now(),
-//     })
+/**
+ * Assurance distribution protocol handler
+ */
+export class AssuranceDistributionProtocol extends NetworkingProtocol<
+  AssuranceDistributionRequest,
+  void
+> {
+  constructor(
+    private readonly eventBusService: EventBusService,
+    private readonly configService: IConfigService,
+  ) {
+    super()
 
-//     // Persist to database if available
-//     if (this.dbIntegration) {
-//       try {
-//         // Store assurance data
-//         const assuranceData = {
-//           anchorHash: Buffer.from(anchorHash).toString('hex'),
-//           bitfield: Buffer.from(bitfield).toString('hex'),
-//           signature: Buffer.from(signature).toString('hex'),
-//           timestamp: Date.now(),
-//         }
+    this.configService = configService
+    this.eventBusService = eventBusService
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
+  }
 
-//         await this.dbIntegration.setServiceStorage(
-//           `assurance_${hashString}`,
-//           Buffer.from(JSON.stringify(assuranceData), 'utf8'),
-//         )
-//       } catch (error) {
-//         console.error('Failed to persist assurance to database:', error)
-//       }
-//     }
-//   }
+  /**
+   * Process assurance distribution
+   */
+  async processRequest(
+    assurance: AssuranceDistributionRequest,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBusService.emitAssuranceReceived(assurance, peerPublicKey)
 
-//   /**
-//    * Get assurance from local store
-//    */
-//   getAssurance(anchorHash: Uint8Array):
-//     | {
-//         anchorHash: Uint8Array
-//         bitfield: Uint8Array
-//         signature: Uint8Array
-//         timestamp: number
-//       }
-//     | undefined {
-//     return this.assurances.get(anchorHash.toString())
-//   }
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Get assurance from database if not in local store
-//    */
-//   async getAssuranceFromDatabase(anchorHash: Uint8Array): Promise<{
-//     anchorHash: Uint8Array
-//     bitfield: Uint8Array
-//     signature: Uint8Array
-//     timestamp: number
-//   } | null> {
-//     if (this.getAssurance(anchorHash)) {
-//       return this.getAssurance(anchorHash) || null
-//     }
+  /**
+   * Serialize assurance distribution message
+   */
+  serializeRequest(assurance: AssuranceDistributionRequest): Safe<Uint8Array> {
+    // Calculate total size
+    const parts: Uint8Array[] = []
 
-//     if (!this.dbIntegration) return null
+    // Add anchor hash (32 bytes)
+    parts.push(hexToBytes(assurance.anchorHash))
 
-//     try {
-//       const hashString = anchorHash.toString()
-//       const assuranceData = await this.dbIntegration.getServiceStorage(
-//         `assurance_${hashString}`,
-//       )
+    // 2. XA_bitfield (fixed-length bitfield, no length prefix)
+    // Note: jamtestvectors encode bitfield without length prefix despite variable sizes
+    // Bitfield size = ceil(numCores / 8) bytes
+    const bitfieldBytes = hexToBytes(assurance.bitfield)
 
-//       if (assuranceData) {
-//         const parsedData = JSON.parse(assuranceData.toString())
-//         const assurance = {
-//           anchorHash: Buffer.from(parsedData.anchorHash, 'hex'),
-//           bitfield: Buffer.from(parsedData.bitfield, 'hex'),
-//           signature: Buffer.from(parsedData.signature, 'hex'),
-//           timestamp: parsedData.timestamp,
-//         }
+    // Add bitfield data
+    parts.push(bitfieldBytes)
 
-//         // Cache in local store
-//         this.assurances.set(hashString, assurance)
-//         return assurance
-//       }
+    // Add signature (64 bytes for Ed25519)
+    parts.push(hexToBytes(assurance.signature))
 
-//       return null
-//     } catch (error) {
-//       console.error('Failed to get assurance from database:', error)
-//       return null
-//     }
-//   }
+    return safeResult(concatBytes(parts))
+  }
 
-//   /**
-//    * Process assurance distribution
-//    */
-//   async processAssuranceDistribution(
-//     assurance: AssuranceDistribution,
-//   ): Promise<void> {
-//     try {
-//       // Store the assurance
-//       await this.storeAssurance(
-//         assurance.anchorHash,
-//         assurance.bitfield,
-//         assurance.signature,
-//       )
+  /**
+   * Deserialize assurance distribution message
+   */
+  deserializeRequest(data: Uint8Array): Safe<AssuranceDistributionRequest> {
+    let offset = 0
 
-//       console.log(
-//         `Processed assurance distribution for anchor hash: ${assurance.anchorHash.toString().substring(0, 16)}...`,
-//       )
-//     } catch (error) {
-//       console.error('Failed to process assurance distribution:', error)
-//     }
-//   }
+    // Read anchor hash (32 bytes)
+    const anchorHash = data.slice(offset, offset + 32)
+    offset += 32
 
-//   /**
-//    * Create assurance distribution message
-//    */
-//   createAssuranceDistribution(
-//     anchorHash: Uint8Array,
-//     bitfield: Uint8Array,
-//     signature: Uint8Array,
-//   ): AssuranceDistribution {
-//     return {
-//       anchorHash,
-//       bitfield,
-//       signature,
-//     }
-//   }
+    // 2. XA_bitfield (fixed-length bitfield, no length prefix)
+    // Note: jamtestvectors encode bitfield without length prefix despite variable sizes
+    // Bitfield size = ceil(numCores / 8) bytes
+    const BITFIELD_SIZE = Math.ceil(this.configService.numCores / 8)
+    if (data.length < BITFIELD_SIZE) {
+      return safeError(new Error('Insufficient data for bitfield'))
+    }
+    const bitfield = data.slice(0, BITFIELD_SIZE)
+    data = data.slice(BITFIELD_SIZE)
+    offset += BITFIELD_SIZE
 
-//   /**
-//    * Serialize assurance distribution message
-//    */
-//   serializeAssuranceDistribution(assurance: AssuranceDistribution): Uint8Array {
-//     // Calculate total size
-//     const totalSize = 32 + 4 + assurance.bitfield.length + 64 // anchorHash + bitfield length + bitfield + signature (64 bytes for Ed25519)
+    // Read signature (64 bytes for Ed25519)
+    const signature = data.slice(offset, offset + 64)
 
-//     const buffer = new ArrayBuffer(totalSize)
-//     const view = new DataView(buffer)
-//     let offset = 0
+    return safeResult({
+      anchorHash: bytesToHex(anchorHash),
+      bitfield: bytesToHex(bitfield),
+      signature: bytesToHex(signature),
+    })
+  }
 
-//     // Write anchor hash (32 bytes)
-//     new Uint8Array(buffer).set(assurance.anchorHash, offset)
-//     offset += 32
+  /**
+   * Serialize response (void)
+   */
+  serializeResponse(_response: void): Safe<Uint8Array> {
+    return safeResult(new Uint8Array())
+  }
 
-//     // Write bitfield length (4 bytes, little-endian)
-//     view.setUint32(offset, assurance.bitfield.length, true)
-//     offset += 4
+  /**
+   * Deserialize response (void)
+   */
+  deserializeResponse(_data: Uint8Array): Safe<void> {
+    return safeResult(undefined)
+  }
 
-//     // Write bitfield data
-//     new Uint8Array(buffer).set(assurance.bitfield, offset)
-//     offset += assurance.bitfield.length
-
-//     // Write signature (64 bytes for Ed25519)
-//     new Uint8Array(buffer).set(assurance.signature, offset)
-
-//     return new Uint8Array(buffer)
-//   }
-
-//   /**
-//    * Deserialize assurance distribution message
-//    */
-//   deserializeAssuranceDistribution(data: Uint8Array): AssuranceDistribution {
-//     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-//     let offset = 0
-
-//     // Read anchor hash (32 bytes)
-//     const anchorHash = data.slice(offset, offset + 32)
-//     offset += 32
-
-//     // Read bitfield length (4 bytes, little-endian)
-//     const bitfieldLength = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read bitfield data
-//     const bitfield = data.slice(offset, offset + bitfieldLength)
-//     offset += bitfieldLength
-
-//     // Read signature (64 bytes for Ed25519)
-//     const signature = data.slice(offset, offset + 64)
-
-//     return {
-//       anchorHash,
-//       bitfield,
-//       signature,
-//     }
-//   }
-
-//   /**
-//    * Handle incoming stream data
-//    */
-//   async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
-//     try {
-//       const assurance = this.deserializeAssuranceDistribution(data)
-//       await this.processAssuranceDistribution(assurance)
-//     } catch (error) {
-//       console.error(
-//         'Failed to handle assurance distribution stream data:',
-//         error,
-//       )
-//     }
-//   }
-// }
+  /**
+   * Process response (void)
+   */
+  async processResponse(
+    _response: void,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
+    return safeResult(undefined)
+  }
+}

@@ -170,12 +170,8 @@ export function generateChainSpec(
           },
         ]),
       ),
-      serviceCount: BigInt(validators.length),
     },
-    authpool: {
-      authorizations: [],
-      coreAssignments: new Map(),
-    },
+    authpool: [],
     recent: {
       history: {
         headerHash: zeroHash,
@@ -202,7 +198,7 @@ export function generateChainSpec(
       ticketAccumulator: [],
     },
     reports: {
-      coreReports: new Map(),
+      coreReports: new Array(341).fill(null),
     },
     disputes: {
       goodSet: new Set(),
@@ -214,10 +210,7 @@ export function generateChainSpec(
     activeset: [],
     previousset: [],
     thetime: 0n,
-    authqueue: {
-      queue: new Map(),
-      processingIndex: 0n,
-    },
+    authqueue: [],
     privileges: {
       manager: 0n,
       delegator: 0n,

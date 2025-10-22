@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, test } from 'vitest'
-import { generateEntropyVRFSignature, verifyEntropyVRFSignature, extractSealOutput } from '@pbnj/bandersnatch-vrf'
+import { generateEntropyVRFSignature, verifyEntropyVRFSignature, banderout } from '@pbnj/bandersnatch-vrf'
 
 describe('Entropy VRF Functions', () => {
   test('generateEntropyVRFSignature should create valid 96-byte signature', () => {
@@ -45,14 +45,14 @@ describe('Entropy VRF Functions', () => {
     // Note: isValid will be false because we're using dummy keys that don't match
   })
 
-  test('extractSealOutput should extract banderout result from 96-byte signature', () => {
+  test('banderout should extract banderout result from 96-byte signature', () => {
     // Test data - 96-byte signature with known gamma
     const sealSignature = new Uint8Array(96)
     const gamma = new Uint8Array(32).fill(0x42) // 32 bytes of 0x42
     sealSignature.set(gamma, 0) // Set gamma in first 32 bytes
 
     // Extract seal output using banderout function
-    const [error, result] = extractSealOutput(sealSignature)
+    const [error, result] = banderout(sealSignature)
     
     expect(error).toBeUndefined()
     expect(result).toHaveLength(32)
@@ -85,7 +85,7 @@ describe('Entropy VRF Functions', () => {
     expect(error3!.message).toContain('96 bytes')
 
     // Test invalid seal signature size for extraction
-    const [error4] = extractSealOutput(new Uint8Array(64))
+    const [error4] = banderout(new Uint8Array(64))
     expect(error4).toBeDefined()
     expect(error4!.message).toContain('96 bytes')
   })

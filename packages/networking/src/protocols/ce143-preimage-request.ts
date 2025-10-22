@@ -5,15 +5,10 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type { Safe, SafePromise } from '@pbnj/core'
+import type { EventBusService, Hex, Safe, SafePromise } from '@pbnj/core'
 import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
 import { decodePreimage, encodePreimage } from '@pbnj/serialization'
-import type {
-  IClockService,
-  IPreimageHolderService,
-  Preimage,
-  PreimageRequest,
-} from '@pbnj/types'
+import type { Preimage, PreimageRequest } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -23,40 +18,25 @@ export class PreimageRequestProtocol extends NetworkingProtocol<
   PreimageRequest,
   Preimage
 > {
-  private readonly preimageHolderService: IPreimageHolderService
-  private readonly clockService: IClockService
-  constructor(
-    preimageHolderService: IPreimageHolderService,
-    clockService: IClockService,
-  ) {
+  private readonly eventBusService: EventBusService
+  constructor(eventBusService: EventBusService) {
     super()
-    this.preimageHolderService = preimageHolderService
-    this.clockService = clockService
+    this.eventBusService = eventBusService
+
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
   }
 
   /**
    * Process preimage request and generate response
    */
-  async processRequest(request: PreimageRequest): SafePromise<Preimage> {
-    const [error, preimage] = await this.preimageHolderService.getPreimage(
-      request.hash,
-    )
-    if (error) {
-      return safeError(error)
-    }
-    if (preimage) {
-      return safeResult(preimage)
-    }
+  async processRequest(
+    request: PreimageRequest,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBusService.emitPreimageRequested(request, peerPublicKey)
 
-    const [error2, preimageFromDatabase] =
-      await this.preimageHolderService.getPreimage(request.hash)
-    if (error2) {
-      return safeError(error2)
-    }
-    if (preimageFromDatabase) {
-      return safeResult(preimageFromDatabase)
-    }
-    return safeError(new Error('Preimage not found'))
+    return safeResult(undefined)
   }
 
   /**
@@ -95,11 +75,11 @@ export class PreimageRequestProtocol extends NetworkingProtocol<
     return safeResult(preimage.value)
   }
 
-  async processResponse(response: Preimage): SafePromise<void> {
-    this.preimageHolderService.storePreimage(
-      response,
-      this.clockService.getCurrentSlot(),
-    )
+  async processResponse(
+    response: Preimage,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBusService.emitPreimageReceived(response, peerPublicKey)
     return safeResult(undefined)
   }
 }

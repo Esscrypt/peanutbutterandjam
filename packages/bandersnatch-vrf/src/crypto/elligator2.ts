@@ -24,8 +24,8 @@
  * https://datatracker.ietf.org/doc/rfc9380/
  */
 
-import type { EdwardsPoint } from '@noble/curves/abstract/edwards.js'
-import { edwards } from '@noble/curves/abstract/edwards.js'
+import type { EdwardsPoint } from '@noble/curves/abstract/edwards'
+import { edwards } from '@noble/curves/abstract/edwards'
 // Removed hash_to_field import - using custom arkworks-compatible implementation
 import { pow } from '@noble/curves/abstract/modular'
 import { sha512 } from '@noble/hashes/sha2'

@@ -10,8 +10,10 @@
 
 export * from './block'
 export * from './core'
+// PVM serialization
+export * from './pvm'
 // State serialization
-export * from './state/state-serialization'
+export * from './state'
 export * from './utils'
 // Work package serialization
 export * from './work-package'

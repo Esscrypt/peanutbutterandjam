@@ -14,7 +14,7 @@
     "config.ts",
     "interfaces/**/*",
     "index.ts"
-, "watchers/slot-clock.ts"  ],
+, "watchers/slot-clock.ts", "__tests__/state-service.test.ts", "__tests__/auth-pool-queue.test.ts"  ],
   "exclude": [
     "node_modules",
     "dist",

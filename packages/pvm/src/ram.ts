@@ -1,127 +1,147 @@
-import { logger } from '@pbnj/core'
-import type { RAM } from '@pbnj/types'
-import { PVMError } from '@pbnj/types'
+import { logger, type Safe, safeError, safeResult } from '@pbnj/core'
+import type { MemoryAccessType, RAM } from '@pbnj/types'
 import { MEMORY_CONFIG } from './config'
 
 /**
  * PVM RAM Implementation
  *
- * Manages memory layout and access for the PVM runtime
+ * Implements Gray Paper RAM specification with dynamic allocation:
+ * - ram_value: sparse storage for actual memory data
+ * - ram_access: sparse storage for page access rights
+ * - Pages are allocated on-demand for efficiency
  */
 export class PVMRAM implements RAM {
-  public cells: Map<bigint, Uint8Array> = new Map()
-  private readonly stackStart: bigint = 0n
-  private readonly heapStart: bigint = BigInt(MEMORY_CONFIG.INITIAL_ZONE_SIZE)
-  private readonly totalSize: bigint = BigInt(MEMORY_CONFIG.MAX_MEMORY_ADDRESS)
+  // Gray Paper: ram_value - sparse storage for memory data
+  // Using Map for O(1) access and dynamic growth
+  private readonly memoryData: Map<bigint, number> = new Map()
+
+  // Gray Paper: ram_access - sparse storage for page access rights
+  // Using Map for O(1) access and dynamic growth
+  private readonly pageAccess: Map<bigint, MemoryAccessType> = new Map()
+
+  // Gray Paper constants
+  private readonly CPVM_PAGE_SIZE = 4096n // Cpvmpagesize = 2^12
+  private readonly MAX_ADDRESS = 2n ** 32n // 4GB address space
+  private readonly TOTAL_PAGES = this.MAX_ADDRESS / this.CPVM_PAGE_SIZE // 1,048,576 pages
 
   constructor() {
-    this.heapStart = MEMORY_CONFIG.INITIAL_ZONE_SIZE
-    this.totalSize = MEMORY_CONFIG.MAX_MEMORY_ADDRESS
-    logger.debug('PVMRAM initialized', {
-      heapStart: this.heapStart,
-      totalSize: this.totalSize,
-    })
+    // Initialize reserved memory (first 64KB) as readable
+    const reservedPages =
+      MEMORY_CONFIG.RESERVED_MEMORY_START / this.CPVM_PAGE_SIZE
+    for (let i = 0n; i < reservedPages; i++) {
+      this.pageAccess.set(i, 'read')
+    }
   }
 
-  readOctet(address: bigint): Uint8Array {
-    // Check if address is in reserved memory (first 64KB)
-    if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
-      throw new PVMError(
-        `Memory access to reserved address: ${address}`,
-        'RESERVED_MEMORY_ACCESS',
-        { address },
-      )
-    }
-
-    // Check if address is readable
-    if (!this.isReadable(address)) {
-      throw new PVMError(
-        `Memory read access violation at address: ${address}`,
-        'MEMORY_READ_FAULT',
-        { address },
-      )
-    }
-
-    return this.cells.get(address) || new Uint8Array([])
+  /**
+   * Get page index for an address
+   * Gray Paper: ⌊address / Cpvmpagesize⌋
+   */
+  private getPageIndex(address: bigint): bigint {
+    return address / this.CPVM_PAGE_SIZE
   }
 
-  writeOctet(address: bigint, value: Uint8Array): void {
-    // Check if address is in reserved memory (first 64KB)
-    if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
-      throw new PVMError(
-        `Memory access to reserved address: ${address}`,
-        'RESERVED_MEMORY_ACCESS',
-        { address },
-      )
-    }
-
-    // Check if address is writable
-    if (!this.isWritable(address)) {
-      throw new PVMError(
-        `Memory write access violation at address: ${address}`,
-        'MEMORY_WRITE_FAULT',
-        { address },
-      )
-    }
-
-    //check if value is 8-bit
-    if (value.length !== 1) {
-      throw new PVMError(
-        `Memory write access violation at address: ${address}`,
-        'MEMORY_WRITE_FAULT',
-        { address },
-      )
-    }
-
-    // Ensure value is 8-bit
-    this.cells.set(address, value)
+  /**
+   * Initialize a memory page (used for test vectors)
+   * @param address - Base address of the page
+   * @param length - Length of the page in bytes
+   * @param accessType - Access type: 'none', 'read', 'write', or 'read+write'
+   */
+  initializePage(
+    address: bigint,
+    length: number,
+    accessType: MemoryAccessType,
+  ): void {
+    this.setPageAccessRights(address, length, accessType)
   }
 
-  readOctets(address: bigint, count: bigint): Uint8Array {
+  /**
+   * Set memory page access rights (Gray Paper PAGES function)
+   * @param address - Base address of the page
+   * @param length - Length of the page in bytes
+   * @param accessType - Access type: 'none', 'read', 'write', or 'read+write'
+   */
+  setPageAccessRights(
+    address: bigint,
+    length: number,
+    accessType: MemoryAccessType,
+  ): void {
+    const startPage = this.getPageIndex(address)
+    const endPage = this.getPageIndex(address + BigInt(length))
+
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      if (pageIndex >= 0n && pageIndex < this.TOTAL_PAGES) {
+        this.pageAccess.set(pageIndex, accessType)
+      }
+    }
+  }
+
+  /**
+   * Get memory page access type
+   * @param address - Address to check
+   * @returns Access type for the page containing this address
+   */
+  getPageAccessType(address: bigint): MemoryAccessType {
+    const pageIndex = this.getPageIndex(address)
+
+    if (pageIndex < 0n || pageIndex >= this.TOTAL_PAGES) {
+      return 'none'
+    }
+
+    // Return stored access type or default to 'none'
+    return this.pageAccess.get(pageIndex) ?? 'none'
+  }
+
+  readOctets(address: bigint, count: bigint): Safe<Uint8Array> {
+    // Check if entire range is readable first
+    if (!this.isReadable(address, count)) {
+      return safeError(
+        new Error(
+          `Memory read fault: range ${address}-${address + count - 1n} not readable`,
+        ),
+      )
+    }
+
     const result = new Uint8Array(Number(count))
     for (let i = 0; i < Number(count); i++) {
-      result.set(this.readOctet(address + BigInt(i)), i)
+      result[i] = this.memoryData.get(address + BigInt(i)) ?? 0
     }
-    return result
+    return safeResult(result)
   }
 
-  writeOctets(address: bigint, values: Uint8Array): void {
-    values.forEach((value, index) => {
-      this.writeOctet(address + BigInt(index), new Uint8Array([value]))
-    })
-  }
-
-  read(address: bigint, size: bigint): Uint8Array {
-    if (!this.isReadable(address, size)) {
-      throw new Error(`Memory read access violation at address ${address}`)
+  writeOctets(address: bigint, values: Uint8Array): Safe<void> {
+    // Check if entire range is writable first
+    if (!this.isWritable(address, BigInt(values.length))) {
+      return safeError(
+        new Error(
+          `Memory write fault: range ${address}-${address + BigInt(values.length) - 1n} not writable`,
+        ),
+      )
     }
 
-    const result: Uint8Array = new Uint8Array(Number(size))
-    for (let i = 0; i < Number(size); i++) {
-      result.set(this.cells.get(address + BigInt(i)) || new Uint8Array([]), i)
+    // Write each byte individually (O(N) but necessary for sparse storage)
+    for (let i = 0; i < values.length; i++) {
+      this.memoryData.set(address + BigInt(i), values[i])
     }
-    return result
-  }
-
-  write(address: bigint, data: Uint8Array): void {
-    if (!this.isWritable(address, BigInt(data.length))) {
-      throw new Error(`Memory write access violation at address ${address}`)
-    }
-
-    for (let i = 0; i < data.length; i++) {
-      this.cells.set(address + BigInt(i), new Uint8Array([data[i]]))
-    }
+    return safeResult(undefined)
   }
 
   isReadable(address: bigint, size = 1n): boolean {
     // Check bounds
-    if (address < 0 || address + size > this.totalSize) {
+    if (address < 0n || address + size > this.MAX_ADDRESS) {
       return false
     }
 
-    // Reserved memory (first 64KB) is read-only
-    if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
-      return true // Readable but not writable
+    // Gray Paper: readable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] ≠ none}
+    // Check all pages that the address range spans
+    const startPage = this.getPageIndex(address)
+    const endPage = this.getPageIndex(address + size - 1n)
+
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      const accessType = this.pageAccess.get(pageIndex) ?? 'none'
+      if (accessType === 'none') {
+        return false
+      }
     }
 
     return true
@@ -129,27 +149,74 @@ export class PVMRAM implements RAM {
 
   isWritable(address: bigint, size = 1n): boolean {
     // Check bounds
-    if (address < 0 || address + size > this.totalSize) {
+    if (address < 0n || address + size > this.MAX_ADDRESS) {
       return false
     }
 
-    // Reserved memory (first 64KB) is not writable
-    if (address < MEMORY_CONFIG.RESERVED_MEMORY_START) {
-      return false
+    // Gray Paper: writable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] = W}
+    // Check all pages that the address range spans
+    const startPage = this.getPageIndex(address)
+    const endPage = this.getPageIndex(address + size - 1n)
+
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      const accessType = this.pageAccess.get(pageIndex) ?? 'none'
+      if (accessType !== 'write' && accessType !== 'read+write') {
+        return false
+      }
     }
 
     return true
   }
 
-  getMemoryLayout(): {
-    stackStart: bigint
-    heapStart: bigint
-    totalSize: bigint
+  /**
+   * Get memory statistics for debugging
+   */
+  getMemoryStats(): {
+    maxAddress: string
+    totalPages: number
+    pageSize: number
+    allocatedPages: number
+    allocatedBytes: number
+    accessiblePages: number
+    writablePages: number
   } {
-    return {
-      stackStart: this.stackStart,
-      heapStart: this.heapStart,
-      totalSize: this.totalSize,
+    let accessiblePages = 0
+    let writablePages = 0
+
+    for (const accessType of this.pageAccess.values()) {
+      if (accessType !== 'none') {
+        accessiblePages++
+      }
+      if (accessType === 'write' || accessType === 'read+write') {
+        writablePages++
+      }
     }
+
+    return {
+      maxAddress: '4GB',
+      totalPages: Number(this.TOTAL_PAGES),
+      pageSize: Number(this.CPVM_PAGE_SIZE),
+      allocatedPages: this.pageAccess.size,
+      allocatedBytes: this.memoryData.size,
+      accessiblePages,
+      writablePages,
+    }
+  }
+
+  /**
+   * Clear all memory (useful for testing)
+   */
+  clear(): void {
+    this.memoryData.clear()
+    this.pageAccess.clear()
+
+    // Re-initialize reserved memory
+    const reservedPages =
+      MEMORY_CONFIG.RESERVED_MEMORY_START / this.CPVM_PAGE_SIZE
+    for (let i = 0n; i < reservedPages; i++) {
+      this.pageAccess.set(i, 'read')
+    }
+
+    logger.debug('PVMRAM cleared')
   }
 }

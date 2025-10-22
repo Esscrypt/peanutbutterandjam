@@ -1,0 +1,22 @@
+{
+  "name": "@pbnj/guarantor",
+  "version": "0.0.1",
+  "description": "JAM Protocol Guarantor Implementation",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/types": "workspace:*",
+    "@pbnj/serialization": "workspace:*",
+    "@noble/ed25519": "^2.1.0",
+    "viem": "^2.21.54"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

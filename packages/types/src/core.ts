@@ -33,8 +33,19 @@ export type Encoder<T> = (data: T) => Safe<Uint8Array>
 export type Decoder<T> = (data: Uint8Array) => Safe<{
   value: T
   remaining: Uint8Array
+  consumed: number
 }>
 
+/**
+ * Generic extrinsic data structure
+ *
+ * Note: This is NOT the same as block extrinsics (Equation 17).
+ * This is a generic structure for external data with optional signature.
+ * Used in legacy code and work package manager.
+ *
+ * For work item extrinsic data (Equation 247), use raw Uint8Array.
+ * For block extrinsics (tickets, disputes, etc.), see BlockExtrinsic in block-authoring.ts.
+ */
 export interface Extrinsic {
   hash: Hex
   data: Uint8Array

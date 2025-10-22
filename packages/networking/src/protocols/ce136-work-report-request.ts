@@ -7,6 +7,7 @@
 
 import {
   bytesToHex,
+  type EventBusService,
   type Hex,
   hexToBytes,
   type Safe,
@@ -14,17 +15,8 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
-import {
-  calculateWorkReportHash,
-  decodeWorkReport,
-  encodeWorkReport,
-} from '@pbnj/serialization'
-import type { WorkStore } from '@pbnj/state'
-import type {
-  WorkReport,
-  WorkReportRequest,
-  WorkReportResponse,
-} from '@pbnj/types'
+import { decodeWorkReport, encodeWorkReport } from '@pbnj/serialization'
+import type { WorkReportRequest, WorkReportResponse } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -34,25 +26,13 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
   WorkReportRequest,
   WorkReportResponse
 > {
-  private workReports: Map<string, WorkReport> = new Map()
-  private workStore: WorkStore
-
-  constructor(workStore: WorkStore) {
+  private readonly eventBus: EventBusService
+  constructor(eventBus: EventBusService) {
     super()
-    this.workStore = workStore
-  }
+    this.eventBus = eventBus
 
-  /**
-   * Store work report in local store and persist to database
-   */
-  async storeWorkReport(workReport: WorkReport): Promise<void> {
-    const [error, workReportHash] = calculateWorkReportHash(workReport)
-    if (error) {
-      throw error
-    }
-    this.workReports.set(workReportHash, workReport)
-
-    await this.workStore.storeWorkReport(workReport)
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
   }
 
   /**
@@ -60,26 +40,18 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
    */
   async processRequest(
     request: WorkReportRequest,
-    _peerPublicKey: Hex,
-  ): SafePromise<WorkReportResponse> {
-    // Get work report from local store or database
-    const workReportFromCache = this.workReports.get(request.workReportHash)
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBus.emitWorkReportRequest(request, peerPublicKey)
+    return safeResult(undefined)
+  }
 
-    if (workReportFromCache) {
-      return safeResult({
-        workReport: workReportFromCache,
-      })
-    }
-
-    const workReportFromDatabase = await this.workStore.getWorkReport(
-      request.workReportHash,
-    )
-    if (workReportFromDatabase) {
-      return safeResult({
-        workReport: workReportFromDatabase,
-      })
-    }
-    return safeError(new Error('Work report not found'))
+  async processResponse(
+    response: WorkReportResponse,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBus.emitWorkReportResponse(response, peerPublicKey)
+    return safeResult(undefined)
   }
 
   /**
@@ -121,12 +93,5 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
     return safeResult({
       workReport: workReport.value,
     })
-  }
-
-  async processResponse(
-    _response: WorkReportResponse,
-    _peerPublicKey: Hex,
-  ): SafePromise<void> {
-    return safeResult(undefined)
   }
 }

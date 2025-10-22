@@ -8,6 +8,7 @@
 import {
   bytesToHex,
   concatBytes,
+  type EventBusService,
   type Hex,
   hexToBytes,
   type Safe,
@@ -15,8 +16,9 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/core'
+// import { validateGuaranteeSignatures } from '@pbnj/guarantor'
 import {
-  calculateWorkReportHash,
+  // calculateWorkReportHash,
   decodeFixedLength,
   decodeNatural,
   decodeWorkReport,
@@ -24,9 +26,20 @@ import {
   encodeNatural,
   encodeWorkReport,
 } from '@pbnj/serialization'
-import type { WorkStore } from '@pbnj/state'
-import type { GuaranteedWorkReport } from '@pbnj/types'
+import type {
+  GuaranteedWorkReport,
+  // ValidatorPublicKeys,
+  WorkReport,
+} from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
+
+// IWorkReportService interface for dependency injection
+export interface IWorkReportService {
+  storeGuaranteedWorkReport(
+    workReport: WorkReport,
+    state: string,
+  ): Promise<[Error | null, string | null]>
+}
 
 /**
  * Work report distribution protocol handler
@@ -42,33 +55,55 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
   GuaranteedWorkReport,
   void
 > {
-  private workReports: Map<string, GuaranteedWorkReport> = new Map()
-  private workStore: WorkStore
+  // private readonly workReports: Map<string, GuaranteedWorkReport> = new Map()
+  // private readonly workReportService: IWorkReportService
+  // private readonly validatorKeys: Map<number, ValidatorPublicKeys>
+  // private readonly coreAssignments: Map<number, number>
+  private readonly eventBusService: EventBusService
 
-  constructor(workStore: WorkStore) {
+  constructor(
+    eventBusService: EventBusService,
+    // workReportService: IWorkReportService,
+    // validatorKeys: Map<number, ValidatorPublicKeys>,
+    // coreAssignments: Map<number, number>,
+  ) {
     super()
-    this.workStore = workStore
+    this.eventBusService = eventBusService
+    // this.validatorKeys = validatorKeys
+    // this.coreAssignments = coreAssignments
+
+    // Initialize event handlers using the base class method
+    this.initializeEventHandlers()
   }
 
   /**
    * Process work report distribution
+   *
+   * Gray Paper: reporting_assurance.tex (Equations 260-268)
+   *
+   * Steps:
+   * 1. Calculate work report hash
+   * 2. Validate guarantee signatures (2-3 signatures, correct validators, valid crypto)
+   * 3. Store work report in both WorkStore and WorkReportHolderService
+   * 4. Associate work report with slot
    */
   async processRequest(
     request: GuaranteedWorkReport,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    // const { workReport, signatures, slot } = request
+    this.eventBusService.emitWorkReportDistributionRequest(
+      request,
+      peerPublicKey,
+    )
+
+    return safeResult(undefined)
+  }
+
+  async processResponse(
+    _response: undefined,
     _peerPublicKey: Hex,
   ): SafePromise<void> {
-    const { workReport } = request
-    const [error, workReportHash] = calculateWorkReportHash(workReport)
-    if (error) {
-      return safeError(error)
-    }
-    this.workReports.set(workReportHash, request)
-
-    // TODO: validate the signatures
-    // TODO: associate the work report with the slot
-    // Store the work report
-    await this.workStore.storeWorkReport(workReport)
-
     return safeResult(undefined)
   }
 
@@ -161,13 +196,6 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
    * Deserialize work report distribution response
    */
   deserializeResponse(_data: Uint8Array): Safe<void> {
-    return safeResult(undefined)
-  }
-
-  async processResponse(
-    _response: undefined,
-    _peerPublicKey: Hex,
-  ): SafePromise<void> {
     return safeResult(undefined)
   }
 }

@@ -58,13 +58,16 @@ fn lace_n(sequences: &[Vec<u8>]) -> Vec<u8> {
 }
 
 #[napi(object)]
+pub struct ShardWithIndex {
+    pub shard: Buffer,
+    pub index: u32,
+}
+
+#[napi(object)]
 pub struct EncodedResult {
-    pub shards: Vec<Buffer>,
-    pub k: u32,
-    pub n: u32,
+    pub shards_with_indices: Vec<ShardWithIndex>,
     #[napi(js_name = "originalLength")]
     pub original_length: u32,
-    pub indices: Vec<u32>,
 }
 
 #[napi]
@@ -134,20 +137,27 @@ impl ReedSolomonCoder {
         }
 
         // Combine original shards and recovery shards (original first, then recovery)
-        let mut all_shards = Vec::new();
-        for shard in original_shards {
-            all_shards.push(Buffer::from(shard));
+        let mut shards_with_indices = Vec::new();
+        
+        // Add original shards (indices 0 to C-1)
+        for (i, shard) in original_shards.into_iter().enumerate() {
+            shards_with_indices.push(ShardWithIndex {
+                shard: Buffer::from(shard),
+                index: i as u32,
+            });
         }
-        for shard in recovery_shards {
-            all_shards.push(Buffer::from(shard));
+        
+        // Add recovery shards (indices C to V-1)
+        for (i, shard) in recovery_shards.into_iter().enumerate() {
+            shards_with_indices.push(ShardWithIndex {
+                shard: Buffer::from(shard),
+                index: (C + i as u32),
+            });
         }
 
         Ok(EncodedResult {
-            shards: all_shards,
-            k: C,
-            n: V,
+            shards_with_indices,
             original_length,
-            indices: (0..V).collect(),
         })
     }
 
@@ -157,28 +167,37 @@ impl ReedSolomonCoder {
         let C = self.k; // C = 2 (number of original shards)
         let V = self.n; // V = 6 (total number of shards)
 
-        if encoded.shards.len() != V as usize {
-            return Err(Error::new(Status::InvalidArg, format!("Expected exactly {} shards, got {}", V, encoded.shards.len())));
+        if encoded.shards_with_indices.len() < C as usize {
+            return Err(Error::new(Status::InvalidArg, format!("Expected at least {} shards, got {}", C, encoded.shards_with_indices.len())));
         }
 
-        // Determine number of 4-byte pieces from shard size
-        let shard_size = encoded.shards[0].len();
-        let k = shard_size / 2; // number of 4-byte pieces (each piece has 2 octet pairs)
+        // Check if we have all original shards (indices 0 to C-1)
+        let mut has_all_original = true;
+        let mut original_shards: Vec<Option<&Buffer>> = vec![None; C as usize];
+        
+        for shard_with_index in &encoded.shards_with_indices {
+            if shard_with_index.index < C {
+                original_shards[shard_with_index.index as usize] = Some(&shard_with_index.shard);
+            }
+        }
+        
+        // Check if we have all original shards
+        for i in 0..C as usize {
+            if original_shards[i].is_none() {
+                has_all_original = false;
+                break;
+            }
+        }
 
-        // Gray Paper H.7: Recovery function
-        // R_k: {(Y_{2k}, ℕ_6)}_2 → Y_{4k}
-        // Check if we have the original 2 shards (indices 0 and 1)
-        let has_original_shards = encoded.shards.len() >= C as usize;
-
-        if has_original_shards {
-            // JAM Test Vectors approach: Reverse the encoding process exactly
-            // The encoding splits data into shards, so decoding just concatenates them back
-            
+        if has_all_original {
+            // We have all original shards - just concatenate them back
             let mut reconstructed_data = Vec::new();
             
             // Concatenate the original shards back together
             for c in 0..C as usize {
-                reconstructed_data.extend_from_slice(&encoded.shards[c as usize]);
+                if let Some(shard) = original_shards[c] {
+                    reconstructed_data.extend_from_slice(shard);
+                }
             }
 
             // Trim to original length
@@ -186,33 +205,31 @@ impl ReedSolomonCoder {
             return Ok(Buffer::from(reconstructed_data));
         }
 
-        // Gray Paper H.7: General recovery case
-        // "lace_k([R((split_2(x)_p, i) | (x, i) ∈ c) | p ∈ ℕ_k])"
-        // This requires Reed-Solomon decoding when we don't have the original shards
+        // We need to use Reed-Solomon decoding for recovery
+        // Determine number of 4-byte pieces from shard size
+        let shard_size = encoded.shards_with_indices[0].shard.len();
+        let k = shard_size / 2; // number of 4-byte pieces (each piece has 2 octet pairs)
 
         // Create decoder with same parameters as encoder
-        // ReedSolomonDecoder::new(original_shards, recovery_shards, shard_size)
         let mut decoder = ReedSolomonDecoder::new(C as usize, (V - C) as usize, 2)
             .map_err(|e| Error::new(Status::GenericFailure, format!("Decoder creation failed: C={}, V-C={}, shard_size=2, error={}", C, V - C, e)))?;
 
-        // Add shards based on their index position
-        // We need at least C shards to reconstruct
+        // Add shards based on their actual indices
         let mut shard_count = 0;
 
-        // Add original shards (first C shards)
-        for i in 0..C {
-            if i < encoded.shards.len() as u32 {
-                decoder.add_original_shard(i as usize, &encoded.shards[i as usize])
-                    .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to add original shard {}: {}", i, e)))?;
+        for shard_with_index in &encoded.shards_with_indices {
+            let shard_index = shard_with_index.index as usize;
+            
+            if shard_index < C as usize {
+                // This is an original shard
+                decoder.add_original_shard(shard_index, &shard_with_index.shard)
+                    .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to add original shard {}: {}", shard_index, e)))?;
                 shard_count += 1;
-            }
-        }
-
-        // Add recovery shards (remaining shards)
-        for i in C..V {
-            if i < encoded.shards.len() as u32 {
-                decoder.add_recovery_shard((i - C) as usize, &encoded.shards[i as usize])
-                    .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to add recovery shard {}: {}", i, e)))?;
+            } else {
+                // This is a recovery shard
+                let recovery_index = shard_index - C as usize;
+                decoder.add_recovery_shard(recovery_index, &shard_with_index.shard)
+                    .map_err(|e| Error::new(Status::GenericFailure, format!("Failed to add recovery shard {}: {}", recovery_index, e)))?;
                 shard_count += 1;
             }
         }
@@ -226,7 +243,6 @@ impl ReedSolomonCoder {
             .map_err(|e| Error::new(Status::GenericFailure, format!("Decoding failed: {}", e)))?;
 
         // Gray Paper H.4: lace_k function for reconstruction
-        // lace_k(c ∈ Y_n^k) ∈ Y_{k:n} ≡ d where ∀i ∈ ℕ_k, j ∈ ℕ_n: d_{j·k + i} = (c_i)_j
         let mut reconstructed_data = Vec::new();
 
         // Reconstruct by lacing the recovered shards

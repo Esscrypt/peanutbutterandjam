@@ -6,12 +6,20 @@
 
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
- * ADD_IMM_32 instruction (opcode 0x12B)
- * Add immediate to 32-bit register as specified in Gray Paper
+ * ADD_IMM_32 instruction (opcode 0x83 / 131)
+ * Add immediate to 32-bit register
+ *
+ * Gray Paper pvm.tex §7.4.9 line 490:
+ * reg'_A = sext_4((reg_B + immed_X) mod 2^32)
+ *
+ * Operand format (lines 462-469):
+ * - operands[0]: r_A (low 4 bits) + r_B (high 4 bits)
+ * - operands[1:1+l_X]: immed_X (sign-extended)
+ * Where: l_X = min(4, max(0, ℓ - 1))
  */
 export class ADD_IMM_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ADD_IMM_32
@@ -19,41 +27,35 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
   readonly description = 'Add immediate to 32-bit register'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue =
-      this.getRegisterValue(context.registers, registerA) % 2n ** 32n
-    const result = (registerValue + immediate) % 2n ** 32n
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+
+    const registerValue = this.getRegisterValueAs32(
+      context.registers,
+      registerB,
+    )
+
+    // Gray Paper: reg'_A = sext_4((reg_B + immed_X) mod 2^32)
+    const immediateValue = immediateX & 0xffffffffn
+    const result = this.signExtend(registerValue + immediateValue, 4)
 
     logger.debug('Executing ADD_IMM_32 instruction', {
-      registerD,
       registerA,
-      immediate,
+      registerB,
+      immediateX,
       registerValue,
       result,
     })
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
+    // Mutate context directly
+    context.gas -= 1n
 
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and immediate
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
+    return { resultCode: null }
   }
 }
 
@@ -67,12 +69,16 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
   readonly description = 'Multiply 32-bit register by immediate'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue =
-      this.getRegisterValue(context.registers, registerA) % 2n ** 32n
-    const result = (registerValue * immediate) % 2n ** 32n
+    // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
+    const registerD = this.getRegisterA(context.instruction.operands) // low nibble = destination
+    const registerA = this.getRegisterB(context.instruction.operands) // high nibble = source
+    const immediate = this.getImmediateValue(context.instruction.operands, 1) // immediate at index 1
+    const registerValue = this.getRegisterValueAs32(
+      context.registers,
+      registerA,
+    )
+    const immediate32 = immediate & 0xffffffffn // Convert to 32-bit number
+    const result = registerValue * immediate32
 
     logger.debug('Executing MUL_IMM_32 instruction', {
       registerD,
@@ -81,26 +87,22 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
       registerValue,
       result,
     })
+    this.setRegisterValueWith32BitResult(
+      context.registers,
+      registerD,
+      BigInt(result),
+    )
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need two registers and immediate
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -115,42 +117,37 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Add immediate to 64-bit register'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const result = registerValue + immediate
+    // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const result = (registerValue + immediateX) & 0xffffffffffffffffn // mod 2^64
 
     logger.debug('Executing ADD_IMM_64 instruction', {
-      registerD,
       registerA,
-      immediate,
+      registerB,
+      immediateX,
       registerValue,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (BigInt(operands.length) !== 3n) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -165,10 +162,14 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Multiply 64-bit register by immediate'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
+    // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
+    const registerD = this.getRegisterA(context.instruction.operands) // low nibble = destination
+    const registerA = this.getRegisterB(context.instruction.operands) // high nibble = source
+    const immediate = this.getImmediateValue(context.instruction.operands, 1) // immediate at index 1
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
+      registerA,
+    )
     const result = registerValue * immediate
 
     logger.debug('Executing MUL_IMM_64 instruction', {
@@ -178,33 +179,18 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
       registerValue,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (
-      BigInt(operands.length) !== 3n ||
-      this.getRegisterIndex(operands[0]) < 8n ||
-      this.getRegisterIndex(operands[0]) > 12n
-    ) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }

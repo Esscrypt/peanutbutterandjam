@@ -6,7 +6,6 @@
  */
 
 import {
-  blake2bHash,
   bytesToHex,
   type Hex,
   type SafePromise,
@@ -14,8 +13,6 @@ import {
   safeResult,
   safeTry,
 } from '@pbnj/core'
-import { encodePreimage } from '@pbnj/serialization'
-import type { Preimage } from '@pbnj/types'
 import { eq } from 'drizzle-orm'
 import type { CoreDb, DbPreimage } from './index'
 import { preimages } from './schema/core-schema'
@@ -33,32 +30,26 @@ export class PreimageStore {
     return safeResult(result[0])
   }
   async storePreimage(
-    preimage: Preimage,
+    encodedPreimage: Uint8Array,
+    requester: bigint,
+    hash: Hex,
     creationSlot: bigint,
   ): SafePromise<DbPreimage> {
-    const [encodeError, encodedData] = encodePreimage(preimage)
-    if (encodeError) {
-      return safeError(encodeError)
-    }
-    const [err, hash] = blake2bHash(encodedData)
-    if (err) {
-      return safeError(err)
-    }
     const [err2, result] = await safeTry(
       this.db
         .insert(preimages)
         .values({
           hash,
-          serviceIndex: preimage.requester,
-          data: bytesToHex(encodedData),
+          serviceIndex: requester,
+          data: bytesToHex(encodedPreimage),
           creationSlot,
         })
         .onConflictDoUpdate({
           target: preimages.hash,
           set: {
             hash,
-            data: bytesToHex(encodedData),
-            serviceIndex: preimage.requester,
+            data: bytesToHex(encodedPreimage),
+            serviceIndex: requester,
             creationSlot,
           },
         })

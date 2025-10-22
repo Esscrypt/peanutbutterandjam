@@ -5,22 +5,23 @@
  */
 
 import { logger } from '@pbnj/core'
-import type {
-  InstructionContext,
-  InstructionResult,
-  PartialState,
-} from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
-import { dispatchGeneralFunction, type GeneralContext } from '../general'
-import {
-  type AccumulateContext,
-  dispatchAccumulateFunction,
-} from '../invocations/accumulate-functions'
 import { BaseInstruction } from './base'
 
 /**
- * ECALLI instruction (opcode 0x10)
- * Host call with immediate value - dispatches to General functions (0-13) and Accumulate functions (14-26)
+ * ECALLI instruction (opcode 0x0A / 10)
+ * Host call with immediate value
+ * Dispatches to General functions (0-13) and Accumulate functions (14-26)
+ *
+ * Gray Paper pvm.tex §7.4.1 line 264:
+ * ε = host × immed_X
+ *
+ * Operand format (lines 251-255):
+ * - operands[0:l_X]: immed_X (variable-length immediate, sign-extended)
+ * Where: l_X = min(4, ℓ)
+ *
+ * Note: No encoding byte - just raw immediate bytes (0-4 bytes)
  */
 export class ECALLIInstruction extends BaseInstruction {
   readonly opcode = OPCODES.ECALLI
@@ -28,139 +29,31 @@ export class ECALLIInstruction extends BaseInstruction {
   readonly description = 'Host call with immediate value'
 
   execute(context: InstructionContext): InstructionResult {
-    const hostCallId = this.getImmediateValue(context.instruction.operands, 0n)
+    // Read variable-length immediate (0-4 bytes)
+    const length = Math.min(4, context.instruction.operands.length)
+    const hostCallId = this.getImmediateValue(
+      context.instruction.operands,
+      0,
+      length,
+    )
 
     logger.debug('Executing ECALLI instruction', { hostCallId })
 
-    // Check if this is a General function call (0-13)
-    if (hostCallId >= 0n && hostCallId <= 13n) {
-      return this.executeGeneralFunction(hostCallId, context)
+    // Consume gas
+    context.gas -= 1n
+
+    context.registers[0] = hostCallId
+
+    const result = {
+      resultCode: RESULT_CODES.HOST,
     }
 
-    // Check if this is an Accumulate function call (14-26)
-    if (hostCallId >= 14n && hostCallId <= 26n) {
-      return this.executeAccumulateFunction(hostCallId, context)
-    }
-
-    // Unknown function ID
-    logger.error('Unknown host call function ID', { hostCallId })
-    return {
-      resultCode: RESULT_CODES.PANIC,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-    }
-  }
-
-  private executeGeneralFunction(
-    functionId: bigint,
-    context: InstructionContext,
-  ): InstructionResult {
-    // Create General context
-    const generalContext: GeneralContext = {
-      gasCounter: context.gasCounter,
-      registers: context.registers,
-      memory: context.ram,
-      // Additional context can be added as needed
-      currentServiceId: 0, // Default service ID
-    }
-
-    // Dispatch to General function
-    const result = dispatchGeneralFunction(functionId, generalContext)
-
-    // Handle execution state
-    if (result.executionState === 'panic') {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        newInstructionPointer: context.instructionPointer + 1n,
-        newGasCounter: context.gasCounter - 1n,
-      }
-    }
-
-    if (result.executionState === 'oog') {
-      return {
-        resultCode: RESULT_CODES.OOG,
-        newInstructionPointer: context.instructionPointer + 1n,
-        newGasCounter: 0n,
-      }
-    }
-
-    // Success - update registers with result
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters: result.registers,
-    }
-  }
-
-  private executeAccumulateFunction(
-    functionId: bigint,
-    context: InstructionContext,
-  ): InstructionResult {
-    // Initialize system state if not present
-    const systemState: PartialState = {
-      accounts: new Map(),
-      authqueue: new Map(),
-      assigners: new Map(),
-      stagingset: [],
-      nextfreeid: 65536n, // Cminpublicindex
-      manager: 0n,
-      registrar: 0n,
-      delegator: 0n,
-      alwaysaccers: new Map(),
-      xfers: [],
-      provisions: new Map(),
-      yield: null,
-    }
-
-    // Create Accumulate context
-    const accumulateContext: AccumulateContext = {
-      gasCounter: context.gasCounter,
-      registers: context.registers,
-      memory: context.ram,
-      state: systemState,
-      currentTime: BigInt(Date.now()),
-      currentServiceId: 0n, // Default service ID
-    }
-
-    // Dispatch to Accumulate function
-    const result = dispatchAccumulateFunction(functionId, accumulateContext)
-
-    // Handle execution state
-    if (result.executionState === 'panic') {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        newInstructionPointer: context.instructionPointer + 1n,
-        newGasCounter: result.registers.r7,
-      }
-    }
-
-    if (result.executionState === 'oog') {
-      return {
-        resultCode: RESULT_CODES.OOG,
-        newInstructionPointer: context.instructionPointer + 1n,
-        newGasCounter: 0n,
-      }
-    }
-
-    // Success - update registers with result
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters: result.registers,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 1) {
-      return false
-    }
-    return true
+    console.log('ECALLI returning result:', result)
+    return result
   }
 
   disassemble(operands: Uint8Array): string {
-    const hostCallId = this.getImmediateValue(operands, 0n)
+    const hostCallId = this.getImmediateValue(operands, 0)
     return `${this.name} ${hostCallId}`
   }
 }

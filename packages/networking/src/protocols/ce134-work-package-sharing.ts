@@ -1,242 +1,249 @@
-// /**
-//  * CE 134: Work Package Sharing Protocol
-//  *
-//  * Implements the work package sharing protocol for JAMNP-S
-//  * This is a Common Ephemeral (CE) stream for guarantors to share work packages.
-//  */
+/**
+ * CE 134: Work Package Sharing Protocol
+ *
+ * Implements the work package sharing protocol for JAMNP-S (Gray Paper)
+ * This is a Common Ephemeral (CE) stream for guarantors to share work packages.
+ *
+ * Message Format (Guarantor -> Guarantor):
+ * --> Core Index (4 bytes) ++ Segments-Root Mappings (len++[32 + 32]) ++ Work-Package Bundle ++ FIN
+ * <-- Work-Report Hash (32 bytes) ++ Ed25519 Signature (64 bytes) ++ FIN
+ *
+ * Gray Paper Reference: guaranteeing.tex (line 31-33)
+ */
 
-// import type { WorkStore } from '@pbnj/state'
-// import type {
-//   StreamInfo,
-//   WorkPackage,
-//   WorkPackageSharing,
-//   WorkPackageSharingResponse,
-// } from '@pbnj/types'
-// import { NetworkingProtocol } from './protocol';
-// import type { Hex } from 'viem';
-// import type { SafePromise } from '@pbnj/core';
+import type { EventBusService, Safe, SafePromise } from '@pbnj/core'
+import { concatBytes, safeError, safeResult } from '@pbnj/core'
+import {
+  decodeVariableSequence,
+  decodeWorkPackage,
+  encodeVariableSequence,
+  encodeWorkPackage,
+} from '@pbnj/serialization'
+import type {
+  WorkPackageSharing,
+  WorkPackageSharingResponse,
+} from '@pbnj/types'
+import type { Hex } from 'viem'
+import { NetworkingProtocol } from './protocol'
 
-// /**
-//  * Work package sharing protocol handler
-//  */
-// export class WorkPackageSharingProtocol extends NetworkingProtocol<
-//   WorkPackageSharing,
-//   WorkPackageSharingResponse
-// > {
-//   private workPackageBundles: Map<
-//     Hex,
-//     { bundle: WorkPackage; coreIndex: bigint; timestamp: bigint }
-//   > = new Map()
-//   private segmentsRootMappings: Map<Hex, Hex> = new Map()
-//   private workStore: WorkStore
+/**
+ * Work package sharing protocol handler
+ */
+export class CE134WorkPackageSharingProtocol extends NetworkingProtocol<
+  WorkPackageSharing,
+  WorkPackageSharingResponse
+> {
+  private readonly eventBusService: EventBusService
 
-//   constructor(workStore: WorkStore) {
-//     super()
-//     this.workStore = workStore
-//   }
+  constructor(eventBusService: EventBusService) {
+    super()
+    this.eventBusService = eventBusService
 
-//   /**
-//    * Store work package bundle in local store and persist to database
-//    */
-//   async storeWorkPackageBundle(
-//     bundleHash: Hex,
-//     bundle: WorkPackage,
-//     coreIndex: bigint,
-//   ): Promise<void> {
-//     this.workPackageBundles.set(bundleHash, {
-//       bundle,
-//       coreIndex,
-//       timestamp: BigInt(Date.now()),
-//     })
+    this.initializeEventHandlers()
+  }
 
-//     // Persist to database if available
-//     await this.workStore.storeWorkPackage(bundle, 'pending', Number(coreIndex))
-//   }
+  /**
+   * Process work package sharing request
+   * Gray Paper: Guarantor receives work package bundle and segments root mappings from co-guarantor
+   */
+  async processRequest(
+    sharing: WorkPackageSharing,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    // Emit event for guarantor to act upon
+    await this.eventBusService.emitWorkPackageSharing(sharing, peerPublicKey)
 
-//   /**
-//    * Store segments root mapping in local store and persist to database
-//    */
-//   async storeSegmentsRootMapping(
-//     workPackageHash: Hex,
-//     segmentsRoot: Hex,
-//   ): Promise<void> {
-//     this.segmentsRootMappings.set(workPackageHash, segmentsRoot)
+    return safeResult(undefined)
+  }
 
-//     // Persist to database if available
-//     await this.workStore.storeSegmentsRootMapping(workPackageHash, segmentsRoot)
-//   }
+  /**
+   * Process work package sharing response
+   * Gray Paper: Guarantor receives work-report signature from co-guarantor
+   */
+  async processResponse(
+    response: WorkPackageSharingResponse,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    // Emit event for guarantor to act upon
+    await this.eventBusService.emitWorkPackageSharingResponse(
+      response,
+      peerPublicKey,
+    )
 
-//   /**
-//    * Get work package bundle from local store
-//    */
-//   getWorkPackageBundle(
-//     bundleHash: Hex,
-//   ): { bundle: WorkPackage; coreIndex: bigint; timestamp: bigint } | undefined {
-//     return this.workPackageBundles.get(bundleHash)
-//   }
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Get segments root mapping from local store
-//    */
-//   getSegmentsRootMapping(workPackageHash: Hex): Hex | undefined {
-//     return this.segmentsRootMappings.get(workPackageHash)
-//   }
+  /**
+   * Serialize work package sharing request
+   *
+   * Format:
+   * - Core Index (4 bytes, little-endian)
+   * - Segments-Root Mappings = len++[Work-Package Hash (32 bytes) ++ Segments-Root (32 bytes)]
+   * - Work-Package Bundle (encoded using Gray Paper serialization)
+   */
+  serializeRequest(sharing: WorkPackageSharing): Safe<Uint8Array> {
+    const parts: Uint8Array[] = []
 
-//   /**
-//    * Process work package sharing
-//    */
-//   async processRequest(
-//     sharing: WorkPackageSharing,
-//   ): SafePromise<WorkPackageSharingResponse> {
-//       // Store segments root mappings
-//       for (const mapping of sharing.segmentsRootMappings) {
-//         await this.storeSegmentsRootMapping(
-//           mapping.workPackageHash,
-//           mapping.segmentsRoot,
-//         )
-//       }
+    // 1. Core Index (4 bytes, little-endian)
+    const coreIndexBytes = new Uint8Array(4)
+    new DataView(coreIndexBytes.buffer).setUint32(
+      0,
+      Number(sharing.coreIndex),
+      true,
+    )
+    parts.push(coreIndexBytes)
 
-//       await this.storeWorkPackageBundle(
-//         sharing.workPackageBundle,
-//         sharing.coreIndex,
-//       )
+    // 2. Segments-Root Mappings (encoded as len++[hash++root])
+    const [mappingsError, encodedMappings] = encodeVariableSequence(
+      sharing.segmentsRootMappings,
+      (mapping) => {
+        // Validate lengths
+        if (mapping.workPackageHash.length !== 32) {
+          return safeError(
+            new Error(
+              `Invalid work package hash length: ${mapping.workPackageHash.length}, expected 32`,
+            ),
+          )
+        }
+        if (mapping.segmentsRoot.length !== 32) {
+          return safeError(
+            new Error(
+              `Invalid segments root length: ${mapping.segmentsRoot.length}, expected 32`,
+            ),
+          )
+        }
 
-//       console.log(
-//         `Processed work package sharing for core ${sharing.coreIndex}`,
-//       )
+        // Concatenate hash++root (64 bytes total)
+        const mappingBytes = new Uint8Array(64)
+        mappingBytes.set(mapping.workPackageHash, 0)
+        mappingBytes.set(mapping.segmentsRoot, 32)
+        return safeResult(mappingBytes)
+      },
+    )
 
-//       // Create response (placeholder)
-//       return {
-//         workReportHash: Buffer.from('placeholder_work_report_hash'),
-//         signature: Buffer.from('placeholder_signature'),
-//       }
-//   }
+    if (mappingsError) {
+      throw new Error(
+        `Failed to encode segments root mappings: ${mappingsError.message}`,
+      )
+    }
+    parts.push(encodedMappings)
 
-//   /**
-//    * Create work package sharing message
-//    */
-//   createWorkPackageSharing(
-//     coreIndex: bigint,
-//     segmentsRootMappings: Array<{
-//       workPackageHash: Uint8Array
-//       segmentsRoot: Uint8Array
-//     }>,
-//     workPackageBundle: Uint8Array,
-//   ): WorkPackageSharing {
-//     return {
-//       coreIndex,
-//       segmentsRootMappings,
-//       workPackageBundle,
-//     }
-//   }
+    // 3. Work-Package Bundle (use encodeWorkPackage from serialization package)
+    const [encodeError, encodedBundle] = encodeWorkPackage(
+      sharing.workPackageBundle,
+    )
+    if (encodeError) {
+      throw new Error(
+        `Failed to encode work package bundle: ${encodeError.message}`,
+      )
+    }
+    parts.push(encodedBundle)
 
-//   /**
-//    * Serialize work package sharing message
-//    */
-//   serializeWorkPackageSharing(sharing: WorkPackageSharing): Uint8Array {
-//     // Calculate total size
-//     let totalSize = 4 + 4 // coreIndex + number of mappings
+    return safeResult(concatBytes(parts))
+  }
 
-//     // Size for segments root mappings
-//     for (const _mapping of sharing.segmentsRootMappings) {
-//       totalSize += 32 + 32 // workPackageHash + segmentsRoot
-//     }
+  /**
+   * Deserialize work package sharing request
+   */
+  deserializeRequest(data: Uint8Array): Safe<WorkPackageSharing> {
+    let offset = 0
 
-//     // Size for work package bundle
-//     totalSize += 4 + sharing.workPackageBundle.length // bundle length + bundle data
+    // 1. Core Index (4 bytes, little-endian)
+    if (data.length < 4) {
+      throw new Error('Insufficient data for core index')
+    }
+    const coreIndex = BigInt(
+      new DataView(data.buffer, data.byteOffset + offset, 4).getUint32(0, true),
+    )
+    offset += 4
 
-//     const buffer = new ArrayBuffer(totalSize)
-//     const view = new DataView(buffer)
-//     let offset = 0
+    // 2. Segments-Root Mappings (len++[hash++root])
+    const [mappingsError, mappingsResult] = decodeVariableSequence(
+      data.slice(offset),
+      (itemData: Uint8Array) => {
+        if (itemData.length < 64) {
+          return safeError(
+            new Error(`Insufficient data for mapping: ${itemData.length}`),
+          )
+        }
+        return safeResult({
+          value: {
+            workPackageHash: itemData.slice(0, 32),
+            segmentsRoot: itemData.slice(32, 64),
+          },
+          remaining: itemData.slice(64),
+          consumed: 64,
+        })
+      },
+    )
 
-//     // Write core index (4 bytes, little-endian)
-//     view.setUint32(offset, Number(sharing.coreIndex), true)
-//     offset += 4
+    if (mappingsError || !mappingsResult) {
+      throw new Error(
+        `Failed to decode segments root mappings: ${mappingsError?.message}`,
+      )
+    }
 
-//     // Write number of segments root mappings (4 bytes, little-endian)
-//     view.setUint32(offset, sharing.segmentsRootMappings.length, true)
-//     offset += 4
+    const segmentsRootMappings = mappingsResult.value
+    offset += mappingsResult.consumed
 
-//     // Write segments root mappings
-//     for (const mapping of sharing.segmentsRootMappings) {
-//       // Write work package hash (32 bytes)
-//       new Uint8Array(buffer).set(mapping.workPackageHash, offset)
-//       offset += 32
+    // 3. Work-Package Bundle (use decodeWorkPackage from serialization package)
+    const [decodeError, workPackageResult] = decodeWorkPackage(
+      data.slice(offset),
+    )
+    if (decodeError || !workPackageResult) {
+      throw new Error(
+        `Failed to decode work package bundle: ${decodeError?.message}`,
+      )
+    }
 
-//       // Write segments root (32 bytes)
-//       new Uint8Array(buffer).set(mapping.segmentsRoot, offset)
-//       offset += 32
-//     }
+    const workPackageBundle = workPackageResult.value
 
-//     // Write work package bundle length (4 bytes, little-endian)
-//     view.setUint32(offset, sharing.workPackageBundle.length, true)
-//     offset += 4
+    return safeResult({
+      coreIndex,
+      segmentsRootMappings,
+      workPackageBundle,
+    })
+  }
 
-//     // Write work package bundle data
-//     new Uint8Array(buffer).set(sharing.workPackageBundle, offset)
+  /**
+   * Serialize work package sharing response
+   *
+   * Format:
+   * - Work-Report Hash (32 bytes)
+   * - Ed25519 Signature (64 bytes)
+   */
+  serializeResponse(response: WorkPackageSharingResponse): Safe<Uint8Array> {
+    // Validate lengths
+    if (response.workReportHash.length !== 32) {
+      throw new Error(
+        `Invalid work report hash length: ${response.workReportHash.length}, expected 32`,
+      )
+    }
+    if (response.signature.length !== 64) {
+      throw new Error(
+        `Invalid signature length: ${response.signature.length}, expected 64`,
+      )
+    }
 
-//     return new Uint8Array(buffer)
-//   }
+    // Concatenate hash++signature (96 bytes total)
+    const result = new Uint8Array(96)
+    result.set(response.workReportHash, 0)
+    result.set(response.signature, 32)
 
-//   /**
-//    * Deserialize work package sharing message
-//    */
-//   deserializeWorkPackageSharing(data: Uint8Array): WorkPackageSharing {
-//     const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-//     let offset = 0
+    return safeResult(result)
+  }
 
-//     // Read core index (4 bytes, little-endian)
-//     const coreIndex = view.getUint32(offset, true)
-//     offset += 4
+  /**
+   * Deserialize work package sharing response
+   */
+  deserializeResponse(data: Uint8Array): Safe<WorkPackageSharingResponse> {
+    if (data.length !== 96) {
+      throw new Error(`Invalid response length: ${data.length}, expected 96`)
+    }
 
-//     // Read number of segments root mappings (4 bytes, little-endian)
-//     const numMappings = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read segments root mappings
-//     const segmentsRootMappings: Array<{
-//       workPackageHash: Uint8Array
-//       segmentsRoot: Uint8Array
-//     }> = []
-//     for (let i = 0; i < numMappings; i++) {
-//       // Read work package hash (32 bytes)
-//       const workPackageHash = data.slice(offset, offset + 32)
-//       offset += 32
-
-//       // Read segments root (32 bytes)
-//       const segmentsRoot = data.slice(offset, offset + 32)
-//       offset += 32
-
-//       segmentsRootMappings.push({ workPackageHash, segmentsRoot })
-//     }
-
-//     // Read work package bundle length (4 bytes, little-endian)
-//     const bundleLength = view.getUint32(offset, true)
-//     offset += 4
-
-//     // Read work package bundle data
-//     const workPackageBundle = data.slice(offset, offset + bundleLength)
-
-//     return {
-//       coreIndex: BigInt(coreIndex),
-//       segmentsRootMappings,
-//       workPackageBundle,
-//     }
-//   }
-
-//   /**
-//    * Handle incoming stream data
-//    */
-//   async handleStreamData(
-//     _stream: StreamInfo,
-//     data: Uint8Array,
-//   ): Promise<WorkPackageSharingResponse | null> {
-//     try {
-//       const sharing = this.deserializeWorkPackageSharing(data)
-//       return await this.processWorkPackageSharing(sharing)
-//     } catch (error) {
-//       console.error('Failed to handle work package sharing stream data:', error)
-//       return null
-//     }
-//   }
-// }
+    return safeResult({
+      workReportHash: data.slice(0, 32),
+      signature: data.slice(32, 96),
+    })
+  }
+}

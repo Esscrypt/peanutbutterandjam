@@ -1,0 +1,14 @@
+{
+  "name": "@pbnj/assurance",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@pbnj/core": "workspace:*",
+    "@pbnj/types": "workspace:*",
+    "@noble/curves": "^1.7.0",
+    "viem": "^2.21.54"
+  }
+}

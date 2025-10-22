@@ -12,96 +12,127 @@ import { BaseInstruction } from './base'
 /**
  * STORE_IND_U8 instruction (opcode 0x120)
  * Store to register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * mem'[reg_B + immed_X] = reg_A mod 2^8
  */
 export class STORE_IND_U8Instruction extends BaseInstruction {
   readonly opcode = OPCODES.STORE_IND_U8
   readonly name = 'STORE_IND_U8'
   readonly description = 'Store to register + immediate address (8-bit)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const value = this.getRegisterValue(context.registers, registerD)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing STORE_IND_U8 instruction', {
-      registerD,
+    const registerAValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediate,
-      address,
-      value,
-    })
+    )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
 
-    // TODO: Implement memory write
-    // const byteValue = Number(value % (2n ** 8n))
-    // context.memory[Number(address)] = byteValue
+    // Consume gas first
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
     }
-  }
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Check if memory is writable - inaccessible memory causes FAULT
+    if (!context.ram.isWritable(address, 1n)) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    // Write 8-bit value to memory
+    const byteValue = registerAValue & 0xffn
+    const encodedByteValue = this.bigIntToBytesLE(byteValue, 1)
+
+    logger.debug('Writing 8-bit value to memory', {
+      registerB,
+      registerBValue,
+      immediateX,
+      registerAValue,
+      address,
+      byteValue,
+      encodedByteValue,
+    })
+    const [error] = context.ram.writeOctets(address, encodedByteValue)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(operands, 4)
+    return `${this.name} r${registerA} r${registerB} ${immediateX}`
   }
 }
 
 /**
  * STORE_IND_U16 instruction (opcode 0x121)
  * Store to register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * mem'[reg_B + immed_X:2] = encode[2](reg_A mod 2^16)
  */
 export class STORE_IND_U16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.STORE_IND_U16
   readonly name = 'STORE_IND_U16'
   readonly description = 'Store to register + immediate address (16-bit)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const value = this.getRegisterValue(context.registers, registerD)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing STORE_IND_U16 instruction', {
-      registerD,
+    const registerAValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediate,
-      address,
-      value,
-    })
+    )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
 
-    // TODO: Implement memory write for 16-bit value
-    // const bytes = new Uint8Array(2)
-    // new DataView(bytes.buffer).setUint16(0, Number(value % (2n ** 16n)), true) // little-endian
-    // context.memory.set(bytes, Number(address))
+    // Consume gas first
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
     }
-  }
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Check if memory is writable - inaccessible memory causes FAULT
+    if (!context.ram.isWritable(address, 2n)) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    const value = registerAValue & 0xffffn
+
+    const encodedValue = this.bigIntToBytesLE(value, 2)
+    const [error] = context.ram.writeOctets(address, encodedValue)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -109,48 +140,69 @@ export class STORE_IND_U16Instruction extends BaseInstruction {
 /**
  * STORE_IND_U32 instruction (opcode 0x122)
  * Store to register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * mem'[reg_B + immed_X:4] = encode[4](reg_A mod 2^32)
  */
 export class STORE_IND_U32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.STORE_IND_U32
   readonly name = 'STORE_IND_U32'
   readonly description = 'Store to register + immediate address (32-bit)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const value = this.getRegisterValue(context.registers, registerD)
-    const address = registerValue + immediate
-
-    logger.debug('Executing STORE_IND_U32 instruction', {
-      registerD,
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerAValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediate,
+    )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
+
+    console.log('STORE_IND_U32: Address calculation', {
+      registerA,
+      registerB,
+      immediateX,
+      registerAValue,
+      registerBValue,
       address,
-      value,
+      addressHex: address.toString(16),
     })
 
-    // TODO: Implement memory write for 32-bit value
-    // const bytes = new Uint8Array(4)
-    // new DataView(bytes.buffer).setUint32(0, Number(value % (2n ** 32n)), true) // little-endian
-    // context.memory.set(bytes, Number(address))
+    // Consume gas first
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      console.log('STORE_IND_U32: PANIC - address < 2^16', { address })
+      return { resultCode: RESULT_CODES.PANIC }
     }
-  }
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Check if memory is writable - inaccessible memory causes FAULT
+    if (!context.ram.isWritable(address, 4n)) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    // Write 32-bit value to memory (little-endian)
+    const value = registerAValue & 0xffffffffn
+    const encodedValue = this.bigIntToBytesLE(value, 4)
+    const [error] = context.ram.writeOctets(address, encodedValue)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -158,48 +210,69 @@ export class STORE_IND_U32Instruction extends BaseInstruction {
 /**
  * STORE_IND_U64 instruction (opcode 0x123)
  * Store to register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * mem'[reg_B + immed_X:8] = encode[8](reg_A)
  */
 export class STORE_IND_U64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.STORE_IND_U64
   readonly name = 'STORE_IND_U64'
   readonly description = 'Store to register + immediate address (64-bit)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const value = this.getRegisterValue(context.registers, registerD)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
+
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const registerAValue = this.getRegisterValueAs64(
+      context.registers,
+      registerA,
+    )
+    const address = registerBValue + immediateX
 
     logger.debug('Executing STORE_IND_U64 instruction', {
-      registerD,
-      registerA,
-      immediate,
+      registerB,
+      registerBValue,
+      immediateX,
+      registerAValue,
       address,
-      value,
     })
 
-    // TODO: Implement memory write for 64-bit value
-    // const bytes = new Uint8Array(8)
-    // new DataView(bytes.buffer).setBigUint64(0, value, true) // little-endian
-    // context.memory.set(bytes, Number(address))
+    // Consume gas first
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
     }
-  }
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Check if memory is writable - inaccessible memory causes FAULT
+    if (!context.ram.isWritable(address, 8n)) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    const value = registerAValue & 0xffffffffffffffffn
+
+    // Write 64-bit value to memory (little-endian)
+    // Gray Paper: memwr[reg_B + immed_X:8] = encode[8]{reg_A}
+    const encodedValue = this.bigIntToBytesLE(value, 8)
+    const [error] = context.ram.writeOctets(address, encodedValue)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
+    }
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -207,49 +280,59 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
 /**
  * LOAD_IND_U8 instruction (opcode 0x124)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = decode[1](mem[reg_B + immed_X:1])
  */
 export class LOAD_IND_U8Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_U8
   readonly name = 'LOAD_IND_U8'
   readonly description =
     'Load from register + immediate address (8-bit unsigned)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing LOAD_IND_U8 instruction', {
-      registerD,
+    const registerAValue = this.getRegisterValueAs64(
+      context.registers,
       registerA,
-      immediate,
+    )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
+
+    console.log('Executing LOAD_IND_U8 instruction', {
+      registerB,
+      registerBValue,
+      immediateX,
+      registerAValue,
       address,
     })
 
-    // TODO: Implement memory read
-    // const value = BigInt(context.memory[Number(address)])
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 8-bit unsigned value from memory
+    const [error, bytes] = context.ram.readOctets(address, 1n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const byteValue = bytes[0]
+    const value = BigInt(byteValue)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -257,49 +340,53 @@ export class LOAD_IND_U8Instruction extends BaseInstruction {
 /**
  * LOAD_IND_I8 instruction (opcode 0x125)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = sext[8](decode[1](mem[reg_B + immed_X:1]))
  */
 export class LOAD_IND_I8Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_I8
   readonly name = 'LOAD_IND_I8'
   readonly description = 'Load from register + immediate address (8-bit signed)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing LOAD_IND_I8 instruction', {
-      registerD,
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
+
+    console.log('Executing LOAD_IND_I8 instruction', {
       registerA,
-      immediate,
+      registerB,
+      immediateX,
       address,
     })
-
-    // TODO: Implement memory read with sign extension
-    // const rawValue = context.memory[Number(address)]
-    // const value = (rawValue & 0x80) ? BigInt(rawValue - 256) : BigInt(rawValue)
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 8-bit signed value from memory
+    const [error, bytes] = context.ram.readOctets(address, 1n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const byteValue = bytes[0]
+    // Sign-extend: if bit 7 is set, it's negative
+    const value = byteValue & 0x80 ? BigInt(byteValue - 256) : BigInt(byteValue)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -307,50 +394,51 @@ export class LOAD_IND_I8Instruction extends BaseInstruction {
 /**
  * LOAD_IND_U16 instruction (opcode 0x126)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = decode[2](mem[reg_B + immed_X:2])
  */
 export class LOAD_IND_U16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_U16
   readonly name = 'LOAD_IND_U16'
   readonly description =
     'Load from register + immediate address (16-bit unsigned)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing LOAD_IND_U16 instruction', {
-      registerD,
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
+
+    console.log('Executing LOAD_IND_U16 instruction', {
+      registerB,
       registerA,
-      immediate,
       address,
     })
-
-    // TODO: Implement memory read for 16-bit value
-    // const bytes = context.memory.slice(Number(address), Number(address) + 2)
-    // const value = BigInt(new DataView(bytes.buffer).getUint16(0, true)) // little-endian
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 16-bit unsigned value from memory (little-endian)
+    const [error, bytes] = context.ram.readOctets(address, 2n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const value = this.bytesToBigIntLE(bytes)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -358,51 +446,51 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
 /**
  * LOAD_IND_I16 instruction (opcode 0x127)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = sext[16](decode[2](mem[reg_B + immed_X:2]))
  */
 export class LOAD_IND_I16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_I16
   readonly name = 'LOAD_IND_I16'
   readonly description =
     'Load from register + immediate address (16-bit signed)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
 
-    logger.debug('Executing LOAD_IND_I16 instruction', {
-      registerD,
+    console.log('Executing LOAD_IND_I16 instruction', {
+      registerB,
       registerA,
-      immediate,
+      immediateX,
       address,
     })
-
-    // TODO: Implement memory read for 16-bit signed value
-    // const bytes = context.memory.slice(Number(address), Number(address) + 2)
-    // const rawValue = new DataView(bytes.buffer).getInt16(0, true) // little-endian
-    // const value = BigInt(rawValue)
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 16-bit signed value from memory (little-endian)
+    const [error, bytes] = context.ram.readOctets(address, 2n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const value = this.signExtend(this.bytesToBigIntLE(bytes), 2)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -410,50 +498,52 @@ export class LOAD_IND_I16Instruction extends BaseInstruction {
 /**
  * LOAD_IND_U32 instruction (opcode 0x128)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = decode[4](mem[reg_B + immed_X:4])
  */
 export class LOAD_IND_U32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_U32
   readonly name = 'LOAD_IND_U32'
   readonly description =
     'Load from register + immediate address (32-bit unsigned)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
 
-    logger.debug('Executing LOAD_IND_U32 instruction', {
-      registerD,
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
+
+    console.log('Executing LOAD_IND_U32 instruction', {
+      registerB,
       registerA,
-      immediate,
+      immediateX,
       address,
     })
-
-    // TODO: Implement memory read for 32-bit value
-    // const bytes = context.memory.slice(Number(address), Number(address) + 4)
-    // const value = BigInt(new DataView(bytes.buffer).getUint32(0, true)) // little-endian
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 32-bit unsigned value from memory (little-endian)
+    const [error, bytes] = context.ram.readOctets(address, 4n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const value = this.bytesToBigIntLE(bytes)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -461,51 +551,51 @@ export class LOAD_IND_U32Instruction extends BaseInstruction {
 /**
  * LOAD_IND_I32 instruction (opcode 0x129)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = sext[32](decode[4](mem[reg_B + immed_X:4]))
  */
 export class LOAD_IND_I32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_I32
   readonly name = 'LOAD_IND_I32'
   readonly description =
     'Load from register + immediate address (32-bit signed)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
 
-    logger.debug('Executing LOAD_IND_I32 instruction', {
-      registerD,
+    console.log('Executing LOAD_IND_I32 instruction', {
       registerA,
-      immediate,
+      registerB,
+      immediateX,
       address,
     })
-
-    // TODO: Implement memory read for 32-bit signed value
-    // const bytes = context.memory.slice(Number(address), Number(address) + 4)
-    // const rawValue = new DataView(bytes.buffer).getInt32(0, true) // little-endian
-    // const value = BigInt(rawValue)
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 32-bit signed value from memory (little-endian)
+    const [error, bytes] = context.ram.readOctets(address, 4n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const value = this.signExtend(this.bytesToBigIntLE(bytes), 4)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
@@ -513,50 +603,51 @@ export class LOAD_IND_I32Instruction extends BaseInstruction {
 /**
  * LOAD_IND_U64 instruction (opcode 0x12A)
  * Load from register + immediate address as specified in Gray Paper
+ *
+ * Gray Paper pvm.tex formula:
+ * reg'_A = decode[8](mem[reg_B + immed_X:8])
  */
 export class LOAD_IND_U64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IND_U64
   readonly name = 'LOAD_IND_U64'
   readonly description =
     'Load from register + immediate address (64-bit unsigned)'
-
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const immediate = this.getImmediateValue(context.instruction.operands, 2n)
-    const registerValue = this.getRegisterValue(context.registers, registerA)
-    const address = registerValue + immediate
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediateUnsigned(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
+    const address = registerBValue + immediateX
 
-    logger.debug('Executing LOAD_IND_U64 instruction', {
-      registerD,
+    console.log('Executing LOAD_IND_U64 instruction', {
       registerA,
-      immediate,
+      registerB,
+      immediateX,
       address,
     })
-
-    // TODO: Implement memory read for 64-bit value
-    // const bytes = context.memory.slice(Number(address), Number(address) + 8)
-    // const value = new DataView(bytes.buffer).getBigUint64(0, true) // little-endian
-
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, 0n) // Placeholder
-
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
+    // Load 64-bit unsigned value from memory (little-endian)
+    const [error, bytes] = context.ram.readOctets(address, 8n)
+    if (error) {
+      return { resultCode: RESULT_CODES.FAULT }
     }
-  }
+    const value = this.bytesToBigIntLE(bytes)
+    this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
-  validate(operands: Uint8Array): boolean {
-    return operands.length >= 3 // Need two registers and immediate
+    // Mutate context directly
+    context.gas -= 1n
+
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 2n)
+    const registerD = this.getRegisterA(operands)
+    const registerA = this.getRegisterB(operands)
+    const immediate = this.getImmediateValue(operands, 1)
     return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }

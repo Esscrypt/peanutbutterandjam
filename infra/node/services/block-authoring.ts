@@ -39,7 +39,7 @@ import type { EntropyService } from './entropy'
 import type { HeaderConstructor } from './header-constructor'
 import type { KeyPairService } from './keypair-service'
 import type { SealKeyService } from './seal-key'
-import type { TicketHolderService } from './ticket-holder-service'
+import type { TicketService } from './ticket-service'
 import type { ValidatorSetManager } from './validator-set'
 
 /**
@@ -56,7 +56,7 @@ export class BlockAuthoringService extends BaseService {
   private readonly sealKeyService: SealKeyService
   private readonly clockService: ClockService
   private readonly configService: ConfigService
-  private readonly ticketHolderService: TicketHolderService
+  private readonly ticketHolderService: TicketService
   private readonly validatorSetManagerService: ValidatorSetManager
 
   constructor(options: {
@@ -69,7 +69,7 @@ export class BlockAuthoringService extends BaseService {
     sealKeyService: SealKeyService
     clockService: ClockService
     configService: ConfigService
-    ticketHolderService: TicketHolderService
+    ticketHolderService: TicketService
     validatorSetManagerService: ValidatorSetManager
   }) {
     super('block-authoring-service')
@@ -86,7 +86,7 @@ export class BlockAuthoringService extends BaseService {
     this.validatorSetManagerService = options.validatorSetManagerService
 
     // Register slot change handler to check if current validator is elected to author blocks
-    this.eventBusService.onSlotChange(this.handleSlotChange)
+    this.eventBusService.addSlotChangeCallback(this.handleSlotChange.bind(this))
   }
 
   /**

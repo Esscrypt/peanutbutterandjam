@@ -31,11 +31,6 @@ export function selectAuditTranche0(
   coreWorkReports: CoreWorkReport[],
   bandersnatchVrfOutput: Hex,
 ): AuditTrancheSelection {
-  logger.debug('Selecting audit tranche 0', {
-    coreCount: coreWorkReports.length,
-    vrfOutput: `${bandersnatchVrfOutput.slice(0, 16)}...`,
-  })
-
   // Create core-workreport pairs as per Gray Paper
   // [(c, local_reports[c]) for c in coreindex]
   const corePairs = coreWorkReports.map((core) => ({
@@ -49,25 +44,9 @@ export function selectAuditTranche0(
 
   // Select first 10 non-empty cores for auditing
   // local_tranche_0 = {wrc for wrc in p[0:10] if wr != None}
-  const selectedCores: Array<{
-    coreIndex: bigint
-    workReports: Array<{
-      workReportHash: Hex
-      metadata?: Uint8Array
-    }>
-  }> = []
-
-  for (const core of shuffledSequence) {
-    // Only include cores with non-empty work reports
-    if (core.workReports.length > 0) {
-      selectedCores.push(core)
-
-      // Stop after selecting 10 cores
-      if (selectedCores.length >= MAX_AUDIT_CORES) {
-        break
-      }
-    }
-  }
+  const selectedCores = shuffledSequence
+    .filter((core) => core.workReports.length > 0) // Only cores with work reports
+    .slice(0, MAX_AUDIT_CORES) // Take first 10
 
   logger.debug('Audit tranche 0 selected', {
     selectedCoreCount: selectedCores.length,

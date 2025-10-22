@@ -1,8 +1,12 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
+/**
+ * SHLO_L_64 instruction (opcode 0xCF)
+ * Gray Paper formula: reg'_D = (reg_A · 2^(reg_B mod 64)) mod 2^64
+ */
 export class SHLO_L_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_64
   readonly name = 'SHLO_L_64'
@@ -12,11 +16,10 @@ export class SHLO_L_64Instruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const shiftAmount = Number(
-      this.getRegisterValue(context.registers, registerB) % 64n,
-    )
-    const result = valueA << BigInt(shiftAmount)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = valueB % 64n
+    const result = valueA << shiftAmount
 
     logger.debug('Executing SHLO_L_64 instruction', {
       registerD,
@@ -26,23 +29,12 @@ export class SHLO_L_64Instruction extends BaseInstruction {
       shiftAmount,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -53,6 +45,10 @@ export class SHLO_L_64Instruction extends BaseInstruction {
   }
 }
 
+/**
+ * SHLO_R_64 instruction (opcode 0xD0)
+ * Gray Paper formula: reg'_D = floor(reg_A ÷ 2^(reg_B mod 64))
+ */
 export class SHLO_R_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_R_64
   readonly name = 'SHLO_R_64'
@@ -62,11 +58,10 @@ export class SHLO_R_64Instruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const shiftAmount = Number(
-      this.getRegisterValue(context.registers, registerB) % 64n,
-    )
-    const result = valueA >> BigInt(shiftAmount)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = valueB % 64n
+    const result = valueA >> shiftAmount
 
     logger.debug('Executing SHLO_R_64 instruction', {
       registerD,
@@ -76,23 +71,12 @@ export class SHLO_R_64Instruction extends BaseInstruction {
       shiftAmount,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -103,6 +87,10 @@ export class SHLO_R_64Instruction extends BaseInstruction {
   }
 }
 
+/**
+ * SHAR_R_64 instruction (opcode 0xD1)
+ * Gray Paper formula: reg'_D = unsigned{floor(signed(reg_A) ÷ 2^(reg_B mod 64))}
+ */
 export class SHAR_R_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHAR_R_64
   readonly name = 'SHAR_R_64'
@@ -112,15 +100,14 @@ export class SHAR_R_64Instruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const shiftAmount = Number(
-      this.getRegisterValue(context.registers, registerB) % 64n,
-    )
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = Number(valueB % 64n)
 
     // Convert to signed for arithmetic shift
-    const signedValue = valueA > 2n ** 63n - 1n ? valueA - 2n ** 64n : valueA
+    const signedValue = this.toSigned64(valueA)
     const shiftedValue = signedValue >> BigInt(shiftAmount)
-    const result = shiftedValue < 0n ? shiftedValue + 2n ** 64n : shiftedValue
+    const result = this.toUnsigned64(shiftedValue)
 
     logger.debug('Executing SHAR_R_64 instruction', {
       registerD,
@@ -132,23 +119,12 @@ export class SHAR_R_64Instruction extends BaseInstruction {
       shiftedValue,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -156,5 +132,21 @@ export class SHAR_R_64Instruction extends BaseInstruction {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
     return `${this.name} r${registerD} r${registerA} r${registerB}`
+  }
+
+  private toSigned64(value: bigint): bigint {
+    // Convert 64-bit unsigned to signed
+    if (value >= 2n ** 63n) {
+      return value - 2n ** 64n
+    }
+    return value
+  }
+
+  private toUnsigned64(value: bigint): bigint {
+    // Convert signed back to unsigned
+    if (value < 0n) {
+      return value + 2n ** 64n
+    }
+    return value
   }
 }

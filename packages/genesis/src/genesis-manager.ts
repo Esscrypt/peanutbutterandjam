@@ -5,13 +5,13 @@
  * GenesisState. Provides complete chain spec to genesis state conversion.
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import type {
   ChainSpecJson,
   GenesisHeader,
   GenesisJson,
   Hex,
-  SafePromise,
+  Safe,
 } from '@pbnj/core'
 import {
   blake2bHash,
@@ -35,30 +35,24 @@ import type {
 /**
  * Load and parse chain-spec.json file (returns Zod-validated input)
  */
-export async function loadChainSpec(
-  filePath: string,
-): SafePromise<ChainSpecJson> {
-  const content = await readFile(filePath, 'utf8')
+export function loadChainSpec(filePath: string): Safe<ChainSpecJson> {
+  const content = readFileSync(filePath, 'utf8')
   return parseChainSpec(content)
 }
 
 /**
  * Load and parse genesis.json file
  */
-export async function loadGenesisJson(
-  filePath: string,
-): SafePromise<GenesisJson> {
-  const content = await readFile(filePath, 'utf8')
+export function loadGenesisJson(filePath: string): Safe<GenesisJson> {
+  const content = readFileSync(filePath, 'utf8')
   return parseGenesisJson(content)
 }
 
 /**
  * Load and parse genesis-header.json file
  */
-export async function loadGenesisHeader(
-  filePath: string,
-): SafePromise<GenesisHeader> {
-  const content = await readFile(filePath, 'utf8')
+export function loadGenesisHeader(filePath: string): Safe<GenesisHeader> {
+  const content = readFileSync(filePath, 'utf8')
   return parseGenesisHeader(content)
 }
 
@@ -92,11 +86,11 @@ export function convertGenesisHeaderToBlockHeader(
 /**
  * Load and compute hash from genesis-header.json
  */
-export async function loadGenesisHeaderAndComputeHash(
+export function loadGenesisHeaderAndComputeHash(
   filePath: string,
   config: IConfigService,
-): SafePromise<{ genesisHeader: BlockHeader; genesisHash: Hex }> {
-  const [error, genesisHeaderJson] = await loadGenesisHeader(filePath)
+): Safe<{ genesisHeader: BlockHeader; genesisHash: Hex }> {
+  const [error, genesisHeaderJson] = loadGenesisHeader(filePath)
   if (error) {
     return safeError(error)
   }

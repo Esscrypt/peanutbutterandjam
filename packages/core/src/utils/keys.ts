@@ -80,9 +80,17 @@ export function generateBandersnatchKeyPairFromSeed(
     // Convert public key point to bytes (32 bytes as per Gray Paper)
     const publicKey = BandersnatchCurveNoble.pointToBytes(publicKeyPoint)
 
+    // Convert scalar to 32-byte little-endian format for private key
+    const privateKeyBytes = new Uint8Array(32)
+    let temp = privateKeyScalar
+    for (let i = 0; i < 32; i++) {
+      privateKeyBytes[i] = Number(temp & 0xffn)
+      temp >>= 8n
+    }
+
     return safeResult({
       publicKey,
-      privateKey: bandersnatchSecretSeed,
+      privateKey: privateKeyBytes,
     })
   } catch (error) {
     return safeError(
@@ -167,19 +175,18 @@ export function verifyBLSSignature(
   publicKey: Uint8Array,
   message: Uint8Array,
   signature: Uint8Array,
-): boolean {
-  try {
-    const blss = bls12_381.shortSignatures
-    // BLS requires the message to be hashed to G1 curve
-    const hashedMessage = bls12_381.G1.hashToCurve(message)
-    // Convert signature bytes back to Point for verification
-    const signaturePoint = bls12_381.G1.encodeToCurve(signature)
-    // Convert public key bytes back to Point for verification
-    const publicKeyPoint = bls12_381.G2.encodeToCurve(publicKey.slice(0, 96)) // Use first 96 bytes
-    return blss.verify(signaturePoint, hashedMessage, publicKeyPoint)
-  } catch {
-    return false
+): Safe<boolean> {
+  if (publicKey.length !== 96) {
+    return safeError(new Error('Public key must be 96 bytes'))
   }
+  const blss = bls12_381.shortSignatures
+  // BLS requires the message to be hashed to G1 curve
+  const hashedMessage = bls12_381.G1.hashToCurve(message)
+  // Convert signature bytes back to Point for verification
+  const signaturePoint = bls12_381.G1.encodeToCurve(signature)
+  // Convert public key bytes back to Point for verification
+  const publicKeyPoint = bls12_381.G2.encodeToCurve(publicKey.slice(0, 96)) // Use first 96 bytes
+  return safeResult(blss.verify(signaturePoint, hashedMessage, publicKeyPoint))
 }
 
 /**

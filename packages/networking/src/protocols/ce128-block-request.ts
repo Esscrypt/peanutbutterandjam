@@ -5,7 +5,7 @@
  * This is a Common Ephemeral (CE) stream for requesting sequences of blocks.
  */
 
-import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import type { EventBusService, Hex, Safe, SafePromise } from '@pbnj/core'
 import {
   bytesToHex,
   concatBytes,
@@ -14,7 +14,6 @@ import {
   safeResult,
 } from '@pbnj/core'
 import {
-  calculateBlockHash,
   decodeBlock,
   decodeFixedLength,
   decodeNatural,
@@ -22,7 +21,6 @@ import {
   encodeFixedLength,
   encodeNatural,
 } from '@pbnj/serialization'
-import type { BlockStore } from '@pbnj/state'
 import type {
   Block,
   BlockRequest,
@@ -31,7 +29,6 @@ import type {
 } from '@pbnj/types'
 import { BlockRequestDirection } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
-
 /**
  * Block request protocol handler
  */
@@ -39,67 +36,12 @@ export class BlockRequestProtocol extends NetworkingProtocol<
   BlockRequest,
   BlockResponse
 > {
-  private blockCache: Map<Hex, Block> = new Map()
-  private blockStore: BlockStore
-  private configService: IConfigService
-  constructor(blockStore: BlockStore, configService: IConfigService) {
+  private readonly eventBusService: EventBusService
+  private readonly configService: IConfigService
+  constructor(eventBusService: EventBusService, configService: IConfigService) {
     super()
-    this.blockStore = blockStore
+    this.eventBusService = eventBusService
     this.configService = configService
-  }
-
-  /**
-   * Check if block is available locally
-   */
-  hasBlock(blockHash: Hex): boolean {
-    return this.blockCache.has(blockHash)
-  }
-
-  /**
-   * Get block from local store
-   */
-  getBlock(blockHash: Hex): Safe<Block | null> {
-    return safeResult(this.blockCache.get(blockHash) ?? null)
-  }
-
-  /**
-   * Get block from database if not in local store
-   */
-  async getBlockFromDatabase(blockHash: Hex): SafePromise<Block | null> {
-    if (this.hasBlock(blockHash)) {
-      return this.getBlock(blockHash)!
-    }
-
-    if (!this.blockStore) return safeError(new Error('Block store not found'))
-
-    const [error, blockData] = await this.blockStore.getBlock(blockHash)
-
-    if (error) {
-      return safeError(error)
-    }
-
-    if (blockData) {
-      // Cache in local store
-      this.blockCache.set(blockHash, blockData)
-      return safeResult(blockData)
-    }
-
-    return safeResult(null)
-  }
-
-  /**
-   * Create block request message
-   */
-  createBlockRequest(
-    headerHash: Hex,
-    direction: BlockRequestDirection,
-    maximumBlocks: bigint,
-  ): BlockRequest {
-    return {
-      headerHash,
-      direction,
-      maximumBlocks,
-    }
   }
 
   /**
@@ -107,91 +49,10 @@ export class BlockRequestProtocol extends NetworkingProtocol<
    */
   async processRequest(
     request: BlockRequest,
-    _peerPublicKey: Hex,
-  ): SafePromise<BlockResponse> {
-    const rawBlocks: Block[] = []
-    let currentHash = request.headerHash
-    let blocksFound = 0
-
-    if (request.direction === BlockRequestDirection.ASCENDING_EXCLUSIVE) {
-      // Find children of the given block
-      while (blocksFound < request.maximumBlocks) {
-        const [error, childBlock] =
-          await this.blockStore.getChildBlock(currentHash)
-        if (error) {
-          return safeError(error)
-        }
-
-        if (!childBlock) break
-
-        const [childBlockHashError, childBlockHash] = calculateBlockHash(
-          childBlock,
-          this.configService,
-        )
-        if (childBlockHashError) {
-          return safeError(childBlockHashError)
-        }
-
-        // Check if block can be finalized
-        if (!(await this.canBeFinalized(childBlockHash))) break
-
-        rawBlocks.push(childBlock)
-        blocksFound++
-        currentHash = childBlockHash
-      }
-    } else if (
-      request.direction === BlockRequestDirection.DESCENDING_INCLUSIVE
-    ) {
-      while (blocksFound < request.maximumBlocks) {
-        const [error, parentBlock] =
-          await this.blockStore.getParentBlock(currentHash)
-        if (error) {
-          return safeError(error)
-        }
-
-        if (!parentBlock) break
-
-        const [parentBlockHashError, parentBlockHash] = calculateBlockHash(
-          parentBlock,
-          this.configService,
-        )
-        if (parentBlockHashError) {
-          return safeError(parentBlockHashError)
-        }
-
-        if (!(await this.canBeFinalized(parentBlockHash))) break
-
-        rawBlocks.push(parentBlock)
-        blocksFound++
-        currentHash = parentBlockHash
-      }
-    }
-
-    if (rawBlocks.length === 0) {
-      return safeResult({
-        blocks: [],
-      })
-    }
-
-    // Encode blocks using Gray Paper serialization as per JAMNP-S specification
-    const encodedBlocks: Block[] = []
-    for (const block of rawBlocks) {
-      encodedBlocks.push(block)
-    }
-
-    return safeResult({
-      blocks: encodedBlocks,
-    })
-  }
-
-  /**
-   * Check if block can be finalized
-   * This is a simplified implementation - in practice, you'd check finality criteria
-   */
-  private async canBeFinalized(_blockHash: Hex): Promise<boolean> {
-    // This would require checking finality criteria
-    // For now, we'll assume all blocks can be finalized
-    return true
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    this.eventBusService.emitBlocksRequested(request, peerPublicKey)
+    return safeResult(undefined)
   }
 
   /**
@@ -312,16 +173,10 @@ export class BlockRequestProtocol extends NetworkingProtocol<
 
   async processResponse(
     response: BlockResponse,
-    _peerPublicKey: Hex,
+    peerPublicKey: Hex,
   ): SafePromise<void> {
-    for (const block of response.blocks) {
-      const [error, blockHash] = calculateBlockHash(block, this.configService)
-      if (error) {
-        return safeError(error)
-      }
-      this.blockCache.set(blockHash, block)
-      this.blockStore.storeBlock(block)
-    }
+    this.eventBusService.emitBlocksReceived(response.blocks, peerPublicKey)
+
     return safeResult(undefined)
   }
 }

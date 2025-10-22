@@ -1,7 +1,7 @@
 /**
- * JAM Test Vector Validation Tests using ShardService
+ * JAM Test Vector Validation Tests using ErasureCodingService
  *
- * Tests the ShardService implementation against official JAM test vectors
+ * Tests the ErasureCodingService implementation against official JAM test vectors
  * Requires EXACT shard content matching for JAM protocol compliance
  * Uses the ConfigService to get proper Gray Paper parameters
  */
@@ -11,7 +11,7 @@ import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { ConfigService } from '../services/config-service'
-import { ShardService } from '../services/shard-service'
+import { ErasureCodingService } from '../services/shard-service'
 
 beforeAll(() => {
   logger.init()
@@ -65,12 +65,12 @@ function loadJAMTestVectors(directory: string): Array<{ file: string, testVector
   return testVectors
 }
 
-describe('JAM Test Vector Analysis using ShardService', () => {
+describe('JAM Test Vector Analysis using ErasureCodingService', () => {
   let eventBusService: EventBusService
   let tinyConfigService: ConfigService
   let fullConfigService: ConfigService
-  let tinyShardService: ShardService
-  let fullShardService: ShardService
+  let tinyShardService: ErasureCodingService
+  let fullShardService: ErasureCodingService
 
   beforeAll(async () => {
     eventBusService = new EventBusService()
@@ -82,8 +82,8 @@ describe('JAM Test Vector Analysis using ShardService', () => {
     fullConfigService = new ConfigService('full')
     
     // Initialize shard services
-    tinyShardService = new ShardService(tinyConfigService, eventBusService)
-    fullShardService = new ShardService(fullConfigService, eventBusService)
+    tinyShardService = new ErasureCodingService(tinyConfigService, eventBusService)
+    fullShardService = new ErasureCodingService(fullConfigService, eventBusService)
     
     // Start shard services
     const [tinyStartError, tinyStartResult] = await tinyShardService.start()
@@ -142,7 +142,7 @@ describe('JAM Test Vector Analysis using ShardService', () => {
           const shardSize = shardSizeMatch ? parseInt(shardSizeMatch[1], 10) : 2 // Default to 2 if not found
           
           try {
-            // Encode using ShardService
+            // Encode using ErasureCodingService
             const [encodeError, encodeResult] = await shardService.encodeData(inputData)
             
             if (encodeError || !encodeResult) {
@@ -150,7 +150,7 @@ describe('JAM Test Vector Analysis using ShardService', () => {
               continue
             }
             
-            // Decode using ShardService
+            // Decode using ErasureCodingService
             const [decodeError, decodeResult] = await shardService.decode(encodeResult.shards, encodeResult.originalLength)
             
             if (decodeError || !decodeResult) {
@@ -226,7 +226,7 @@ describe('JAM Test Vector Analysis using ShardService', () => {
         }
       }
       
-      logger.info('JAM test vector results using ShardService', {
+      logger.info('JAM test vector results using ErasureCodingService', {
         totalVectorsFound,
         totalVectorsTested,
         roundTripSuccessRate: vectorResults.filter(r => r.roundTripSuccess).length / vectorResults.length,

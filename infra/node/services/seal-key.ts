@@ -17,7 +17,7 @@ import { generateFallbackKeySequence } from '@pbnj/safrole'
 import { BaseService, type SafroleTicket } from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'
-import type { TicketHolderService } from './ticket-holder-service'
+import type { TicketService } from './ticket-service'
 import type { ValidatorSetManager } from './validator-set'
 
 /**
@@ -34,12 +34,12 @@ export class SealKeyService extends BaseService {
   private readonly eventBusService: EventBusService
   private readonly entropyService: EntropyService
   private validatorSetManager!: ValidatorSetManager // Initialized in init method
-  private readonly ticketHolderService: TicketHolderService
+  private readonly ticketHolderService: TicketService
   private readonly configService: ConfigService
   constructor(
     eventBusService: EventBusService,
     entropyService: EntropyService,
-    ticketHolderService: TicketHolderService,
+    ticketHolderService: TicketService,
     configService: ConfigService,
   ) {
     super('seal-key-service')
@@ -178,6 +178,22 @@ export class SealKeyService extends BaseService {
     }
 
     return safeError(new Error('No ticket or Bandersnatch key found for slot'))
+  }
+
+  getSealKeys(): (SafroleTicket | Uint8Array)[] {
+    const sealKeys: (SafroleTicket | Uint8Array)[] = []
+    for (let phase = 0; phase < this.configService.epochDuration; phase++) {
+      const ticket = this.sealTicketForPhase.get(BigInt(phase))
+      if (ticket) {
+        sealKeys.push(ticket)
+      } else {
+        const fallbackKey = this.fallbackKeyForPhase.get(BigInt(phase))
+        if (fallbackKey) {
+          sealKeys.push(fallbackKey)
+        }
+      }
+    }
+    return sealKeys
   }
 
   /**

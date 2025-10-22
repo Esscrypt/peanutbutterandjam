@@ -133,7 +133,9 @@ function decodeStateTicket(
  * - k_bls: BLS key (144 bytes)
  * - k_metadata: metadata (128 bytes)
  */
-function encodeValidatorPublicKeys(validator: ValidatorPublicKeys): Uint8Array {
+export function encodeValidatorPublicKeys(
+  validator: ValidatorPublicKeys,
+): Uint8Array {
   const validatorBytes = new Uint8Array(336)
   let offset = 0
 
@@ -169,7 +171,7 @@ function encodeValidatorPublicKeys(validator: ValidatorPublicKeys): Uint8Array {
  * - k_bls: BLS key (144 bytes)
  * - k_metadata: metadata (128 bytes)
  */
-function decodeValidatorPublicKeys(
+export function decodeValidatorPublicKeys(
   data: Uint8Array,
 ): Safe<DecodingResult<ValidatorPublicKeys>> {
   if (data.length < 336) {

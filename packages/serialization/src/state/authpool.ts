@@ -64,25 +64,21 @@ export function encodeAuthpool(
       )
     }
 
-    // Distribute authorizations across cores based on core assignments
-    // If no specific core assignment, distribute round-robin
-    authpool.authorizations.forEach((auth, index) => {
-      const coreIndex =
-        authpool.coreAssignments.get(BigInt(index)) ?? BigInt(index % coreCount)
-      const coreIdx = Number(coreIndex)
-
-      if (coreIdx >= 0 && coreIdx < coreCount) {
-        // Find first empty slot in this core
-        const emptySlotIndex = coreAuthorizations[coreIdx].findIndex(
-          (slot) =>
-            slot ===
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-        )
-        if (emptySlotIndex !== -1) {
-          coreAuthorizations[coreIdx][emptySlotIndex] = auth
+    // Copy authorizations from authpool (2D array structure)
+    for (
+      let coreIndex = 0;
+      coreIndex < Math.min(authpool.length, coreCount);
+      coreIndex++
+    ) {
+      const corePool = authpool[coreIndex] || []
+      // Copy up to AUTH_POOL_SIZE authorizations, pad with zeros if needed
+      for (let authIndex = 0; authIndex < AUTH_POOL_SIZE; authIndex++) {
+        if (authIndex < corePool.length) {
+          coreAuthorizations[coreIndex][authIndex] = corePool[authIndex]
         }
+        // Else: already initialized with zero hash
       }
-    })
+    }
 
     // Encode as fixed-length sequence of cores
     const [error, encodedData] = encodeSequenceGeneric(
@@ -140,27 +136,14 @@ export function decodeAuthpool(
 
     if (error) return safeError(error)
 
-    // Reconstruct AuthPool from decoded data
-    const authorizations: Hex[] = []
-    const coreAssignments = new Map<bigint, bigint>()
+    // Reconstruct AuthPool from decoded data (2D array structure)
     const ZERO_HASH =
       '0x0000000000000000000000000000000000000000000000000000000000000000'
 
-    result.value.forEach((coreAuths, coreIndex) => {
-      coreAuths.forEach((auth) => {
-        // Only include non-zero hashes (skip empty slots)
-        if (auth !== ZERO_HASH) {
-          const globalAuthIndex = BigInt(authorizations.length)
-          authorizations.push(auth)
-          coreAssignments.set(globalAuthIndex, BigInt(coreIndex))
-        }
-      })
+    const authpool: AuthPool = result.value.map((coreAuths) => {
+      // Filter out zero hashes (empty slots) for each core
+      return coreAuths.filter((auth) => auth !== ZERO_HASH)
     })
-
-    const authpool: AuthPool = {
-      authorizations,
-      coreAssignments,
-    }
 
     return safeResult({
       value: authpool,

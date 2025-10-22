@@ -11,13 +11,10 @@
  * - Provide block import status tracking
  */
 
-import {
-  extractSealOutput,
-  verifyEntropyVRFSignature,
-} from '@pbnj/bandersnatch-vrf'
+import { verifyAssuranceSignature } from '@pbnj/assurance'
+import { banderout, verifyEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
 import {
   type BlockProcessedEvent,
-  blake2bHash,
   type EventBusService,
   type Hex,
   hexToBytes,
@@ -27,12 +24,12 @@ import {
   safeResult,
   verifySignature,
 } from '@pbnj/core'
+import { verifyBlockExtrinsicGuaranteeSignature } from '@pbnj/guarantor'
 import {
   isSafroleTicket,
   verifyFallbackSealSignature,
   verifyTicketBasedSealSignature,
 } from '@pbnj/safrole'
-import { encodeWorkReport } from '@pbnj/serialization'
 import type { BlockStore } from '@pbnj/state'
 import type {
   Assurance,
@@ -47,6 +44,7 @@ import type {
   Verdict,
 } from '@pbnj/types'
 import { BaseService as BaseServiceClass } from '@pbnj/types'
+import type { AssuranceService } from './assurance-service'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
 
@@ -77,6 +75,7 @@ export class BlockImporterService extends BaseServiceClass {
   private readonly entropyService: IEntropyService
   private readonly sealKeyService: SealKeyService
   private readonly blockStore: BlockStore
+  private readonly assuranceService: AssuranceService
   constructor(options: {
     eventBusService: EventBusService
     clockService: IClockService
@@ -86,6 +85,7 @@ export class BlockImporterService extends BaseServiceClass {
     entropyService: IEntropyService
     sealKeyService: SealKeyService
     blockStore: BlockStore
+    assuranceService: AssuranceService
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -96,6 +96,7 @@ export class BlockImporterService extends BaseServiceClass {
     this.entropyService = options.entropyService
     this.sealKeyService = options.sealKeyService
     this.blockStore = options.blockStore
+    this.assuranceService = options.assuranceService
   }
 
   // ============================================================================
@@ -130,9 +131,9 @@ export class BlockImporterService extends BaseServiceClass {
     }
 
     // validate the assurances
-    const [assuranceValidationError] = this.validateAssurances(
+    const [assuranceValidationError] = this.assuranceService.validateAssurances(
       block.body.assurances,
-      this.validatorSetManagerService,
+      block.header.parent,
     )
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
@@ -276,7 +277,7 @@ export class BlockImporterService extends BaseServiceClass {
       }
 
       // validate the guarantee signatures
-      const [error] = this.validateGuaranteeSignatures(
+      const [error] = verifyBlockExtrinsicGuaranteeSignature(
         guarantees[i],
         validatorSetManagerService,
       )
@@ -289,132 +290,11 @@ export class BlockImporterService extends BaseServiceClass {
     return safeResult(undefined)
   }
 
-  validateAssurances(
-    assurances: Assurance[],
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<void> {
-    for (const assurance of assurances) {
-      // 1. TODO: validate that the anchor is a know header hash in the recent history
-      if (!this.recentHistoryService.isValidAnchor(assurance.anchor)) {
-        return safeError(
-          new Error('assurance anchor is not in the recent history'),
-        )
-      }
-      // 2. TODO: validate that the bitfield length is as long as the number of cores
-
-      // 3. validate the signature
-      const [error, isValid] = this.validateAssuranceSignature(
-        assurance,
-        validatorSetManagerService,
-      )
-      if (error) {
-        return safeError(error)
-      }
-      if (!isValid) {
-        return safeError(new Error('assurance signature is invalid'))
-      }
-    }
-    return safeResult(undefined)
-  }
-
-  validateGuaranteeSignatures(
-    guarantee: Guarantee,
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<void> {
-    if (guarantee.signatures.length < 2) {
-      return safeError(new Error('guarantee signatures are less than 2'))
-    }
-
-    // Construct the correct message according to Gray Paper:
-    // s ∈ edsignature{(k_v)_vk_ed}{X_guarantee ∥ blake{xg_workreport}}
-    // Where X_guarantee = "$jam_guarantee"
-
-    // Step 1: Serialize the work report
-    const [workReportBytesError, workReportBytes] = encodeWorkReport(
-      guarantee.report,
-    )
-    if (workReportBytesError) {
-      return safeError(new Error('failed to encode work report'))
-    }
-
-    // Step 2: Compute Blake2b hash of the work report
-    const [hashError, workReportHash] = blake2bHash(workReportBytes)
-    if (hashError) {
-      return safeError(new Error('failed to hash work report'))
-    }
-
-    // Step 3: Construct the message: "$jam_guarantee" + Blake2b(work_report)
-    const contextString = '$jam_guarantee'
-    const contextBytes = new TextEncoder().encode(contextString)
-    const hashBytes = hexToBytes(workReportHash)
-    const message = new Uint8Array(contextBytes.length + hashBytes.length)
-    message.set(contextBytes, 0)
-    message.set(hashBytes, contextBytes.length)
-
-    // Validate each signature according to Gray Paper equation (274)
-    for (const signature of guarantee.signatures) {
-      const [publicKeyError, publicKeys] =
-        validatorSetManagerService.getValidatorAtIndex(
-          Number(signature.validator_index),
-        )
-      if (publicKeyError) {
-        return safeError(
-          new Error(
-            `failed to get validator at index ${signature.validator_index}`,
-          ),
-        )
-      }
-
-      // Step 4: Verify the Ed25519 signature
-      const publicKey = publicKeys.ed25519
-      const signatureBytes = hexToBytes(signature.signature)
-      const isValid = verifySignature(
-        hexToBytes(publicKey),
-        message,
-        signatureBytes,
-      )
-
-      if (!isValid) {
-        return safeError(new Error('guarantee signature is invalid'))
-      }
-    }
-    return safeResult(undefined)
-  }
-
   validateAssuranceSignature(
     assurance: Assurance,
     validatorSetManagerService: IValidatorSetManager,
   ): Safe<boolean> {
-    // Construct the correct message according to Gray Paper equation (160):
-    // a_xa_signature ∈ edsignature{activeset[a_xa_assurer]_vk_ed}{X_available ∥ blake{encode{H_parent, a_xa_availabilities}}}
-    // Where X_available = "$jam_available"
-
-    // Step 1: Encode the (parent_hash, bitfield) tuple
-    // In a full implementation, this would use proper JAM serialization
-    // For now, we'll create a simple encoding: parent_hash + bitfield
-    const parentHashBytes = hexToBytes(assurance.anchor)
-    const bitfieldBytes = hexToBytes(assurance.bitfield)
-    const encodedData = new Uint8Array(
-      parentHashBytes.length + bitfieldBytes.length,
-    )
-    encodedData.set(parentHashBytes, 0)
-    encodedData.set(bitfieldBytes, parentHashBytes.length)
-
-    // Step 2: Compute Blake2b hash of the encoded data
-    const [hashError, dataHash] = blake2bHash(encodedData)
-    if (hashError) {
-      return safeError(new Error('failed to hash assurance data'))
-    }
-
-    // Step 3: Construct the message: "$jam_available" + Blake2b(encoded_data)
-    const contextString = '$jam_available'
-    const contextBytes = new TextEncoder().encode(contextString)
-    const hashBytes = hexToBytes(dataHash)
-    const message = new Uint8Array(contextBytes.length + hashBytes.length)
-    message.set(contextBytes, 0)
-    message.set(hashBytes, contextBytes.length)
-
-    // Step 4: Get validator's Ed25519 public key
+    // Get validator's Ed25519 public key
     const [publicKeyError, publicKeys] =
       validatorSetManagerService.getValidatorAtIndex(assurance.validator_index)
     if (publicKeyError) {
@@ -425,16 +305,13 @@ export class BlockImporterService extends BaseServiceClass {
       )
     }
 
-    // Step 5: Verify the Ed25519 signature
-    const publicKey = publicKeys.ed25519
-    const signatureBytes = hexToBytes(assurance.signature)
-    const isValid = verifySignature(
-      hexToBytes(publicKey),
-      message,
-      signatureBytes,
+    // Use assurance package to verify signature
+    // Gray Paper: reporting_assurance.tex, Equation 159-160
+    return verifyAssuranceSignature(
+      assurance,
+      assurance.anchor,
+      hexToBytes(publicKeys.ed25519),
     )
-
-    return safeResult(isValid)
   }
 
   /**
@@ -550,9 +427,7 @@ export class BlockImporterService extends BaseServiceClass {
 
     // Extract VRF output from seal signature using banderout function
     // Gray Paper: banderout{H_sealsig} - first 32 bytes of VRF output hash
-    const [extractError, sealOutput] = extractSealOutput(
-      hexToBytes(header.sealSig),
-    )
+    const [extractError, sealOutput] = banderout(hexToBytes(header.sealSig))
     if (extractError) {
       return safeError(extractError)
     }

@@ -51,8 +51,8 @@ import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
 import type {
   DecodingResult,
   IConfigService,
+  PendingReport,
   Reports,
-  WorkReport,
 } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
@@ -108,9 +108,9 @@ export function encodeStateWorkReports(
   // Gray Paper: sequence[Ccorecount]{optional{tup{workreport, timestamp}}}
   for (let coreIndex = 0; coreIndex < coreCount; coreIndex++) {
     // Check if this core has a pending report
-    const coreReport = reports.coreReports.get(BigInt(coreIndex))
+    const coreReport = reports.coreReports[coreIndex]
 
-    if (coreReport?.workReport && coreReport?.timestamp !== undefined) {
+    if (coreReport?.workReport && coreReport?.timeslot !== undefined) {
       // Some: encode discriminator (1) + workreport + timestamp
       parts.push(new Uint8Array([1])) // some discriminator
 
@@ -123,7 +123,7 @@ export function encodeStateWorkReports(
 
       // Gray Paper: encode[4]{rs_timestamp} - 4-byte fixed-length timestamp
       const [error2, encodedTimestamp] = encodeFixedLength(
-        coreReport.timestamp,
+        BigInt(coreReport.timeslot),
         4n,
       )
       if (error2) {
@@ -165,10 +165,7 @@ export function decodeStateWorkReports(
 ): Safe<DecodingResult<Reports>> {
   const coreCount = configService.numCores
   let currentData = data
-  const coreReports = new Map<
-    bigint,
-    { workReport: WorkReport; timestamp: bigint }
-  >()
+  const coreReports: (PendingReport | null)[] = new Array(coreCount).fill(null)
 
   // Gray Paper: sequence[Ccorecount]{optional{tup{workreport, timestamp}}}
   for (let coreIndex = 0; coreIndex < coreCount; coreIndex++) {
@@ -205,10 +202,10 @@ export function decodeStateWorkReports(
       }
       currentData = timestampResult.remaining
 
-      coreReports.set(BigInt(coreIndex), {
+      coreReports[coreIndex] = {
         workReport: workReportResult.value,
-        timestamp: timestampResult.value,
-      })
+        timeslot: Number(timestampResult.value),
+      }
     } else {
       return safeError(
         new Error(

@@ -8,7 +8,6 @@
 import type { Hex } from '@pbnj/core'
 import type { Block } from './block-authoring'
 import type { ValidatorPublicKeys } from './consensus'
-import type { Extrinsic } from './core'
 import type { BlockHeader } from './global-state'
 import type { WorkPackage, WorkReport } from './serialization'
 
@@ -96,10 +95,10 @@ export interface BlockAnnouncementHandshake {
   /** Latest finalized block slot */
   finalBlockSlot: bigint
   /** Known leaves (descendants of finalized block with no children) */
-  leaves: Array<{
+  leaves: {
     hash: Uint8Array
     slot: bigint
-  }>
+  }[]
 }
 
 /**
@@ -184,41 +183,110 @@ export interface TicketDistributionRequest {
 }
 
 /**
+ * Ticket Distribution Response
+ *
+ * Response to a ticket distribution request
+ */
+export interface TicketDistributionResponse {
+  /** Epoch index for ticket usage */
+  epochIndex: bigint
+  /** Success status */
+  success: boolean
+  /** Error message if unsuccessful */
+  error?: string
+}
+
+/**
+ * Ticket Distribution Event
+ *
+ * Event emitted during ticket distribution phases
+ */
+export interface TicketDistributionEvent {
+  /** Epoch index for ticket usage */
+  epochIndex: bigint
+  /** Phase of distribution (1 or 2) */
+  phase: number
+  /** Timestamp of the event */
+  timestamp: number
+}
+
+/**
  * CE 133: Work Package Submission Protocol Types
  */
+/**
+ * CE 133: Work Package Submission Request
+ *
+ * Gray Paper Reference: work_packages_and_reports.tex, Equation 247
+ * JAMNP-S Reference: CE 133
+ *
+ * Builder submits work package with extrinsic data to guarantor.
+ *
+ * Extrinsics are raw data blobs concatenated in order, matching the
+ * (hash, length) pairs in work items' wi_extrinsics fields.
+ */
 export interface WorkPackageSubmissionRequest {
-  /** Core index */
+  /** Core index (4 bytes) */
   coreIndex: bigint
-  /** Work package */
+  /** Work package (Gray Paper encoded) */
   workPackage: WorkPackage
-  /** Extrinsic data */
-  extrinsic: Extrinsic
+  /**
+   * Extrinsic data blobs concatenated
+   *
+   * All extrinsic data referenced by work items, in order.
+   * For each (hash, length) in wi_extrinsics across all work items:
+   * - The corresponding blob must be included
+   * - blake{blob} must equal hash
+   * - len{blob} must equal length
+   *
+   * Total size must equal Σ(length) from all extrinsic references.
+   */
+  extrinsics: Uint8Array
 }
 
 /**
  * CE 134: Work Package Sharing Protocol Types
+ *
+ * Gray Paper: Guarantors share work packages and segments-root mappings
+ * Message format (Guarantor -> Guarantor):
+ * --> Core Index ++ Segments-Root Mappings ++ Work-Package Bundle ++ FIN
+ * <-- Work-Report Hash ++ Ed25519 Signature ++ FIN
  */
 export interface WorkPackageSharing {
-  /** Core index */
+  /** Core index (4 bytes) */
   coreIndex: bigint
-  /** Segments-root mappings */
-  segmentsRootMappings: Array<{
-    workPackageHash: Hex
-    segmentsRoot: Hex
-  }>
-  /** Work package bundle */
+  /**
+   * Segments-Root Mappings = len++[Work-Package Hash ++ Segments-Root]
+   * Array of mappings from work package hash to segments root
+   */
+  segmentsRootMappings: {
+    /** Work package hash (32 bytes) */
+    workPackageHash: Uint8Array
+    /** Segments root (32 bytes) - Merkle root of erasure-coded chunks */
+    segmentsRoot: Uint8Array
+  }[]
+  /** Work package bundle (Gray Paper WorkPackage structure) */
   workPackageBundle: WorkPackage
 }
 
+/**
+ * CE 134: Work Package Sharing Response Protocol Types
+ * @param workReportHash - The hash of the work report
+ * @param signature - The signature of the work report
+ */
 export interface WorkPackageSharingResponse {
-  /** Work report hash */
-  workReportHash: Hex
-  /** Ed25519 signature */
-  signature: Hex
+  /** Work report hash (32 bytes) */
+  workReportHash: Uint8Array
+  /** Ed25519 signature (64 bytes) - Co-guarantor's signature on work report */
+  signature: Uint8Array
 }
 
 /**
  * CE 135: Work Report Distribution Protocol Types
+ * @param workReport - The work report
+ * @param slot - The slot
+ * @param signatures - The signatures array of validator index and signature
+ * @param validatorIndex - The validator index
+ * @param signature - The signature. look at `validateGuaranteeSignatures` in `guarantor` package for the structure
  */
 export interface GuaranteedWorkReport {
   /** Work report */
@@ -247,6 +315,8 @@ export interface WorkReportResponse {
 
 /**
  * CE 137: Shard Distribution Protocol Types
+ * @param erasureRoot - The erasure root we would like to query for
+ * @param shardIndex - The shard index we would like to query for
  */
 export interface ShardDistributionRequest {
   /** Erasure root */
@@ -255,6 +325,12 @@ export interface ShardDistributionRequest {
   shardIndex: bigint
 }
 
+/**
+ * CE 137: Shard Distribution Protocol Types
+ * @param bundleShard - The bundle shard we need to return. It needs to merklize into the requested erasure root
+ * @param segmentShards - The segment shards we need to return. They need to merklize into the requested erasure root
+ * @param justification - The justification (merkle trace)
+ */
 export interface ShardDistributionResponse {
   /** Bundle shard */
   bundleShard: Hex
@@ -307,7 +383,7 @@ export interface AssuranceDistributionRequest {
   /** Header hash (anchor) */
   anchorHash: Hex
   /** Bitfield (one bit per core) */
-  bitfield: Uint8Array
+  bitfield: Hex
   /** Ed25519 signature */
   signature: Hex
 }

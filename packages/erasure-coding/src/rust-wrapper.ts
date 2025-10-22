@@ -1,14 +1,16 @@
 import { Buffer } from 'node:buffer'
 import { logger } from '@pbnj/core'
-import type { EncodedData, ErasureCoder } from '@pbnj/types'
+import type { EncodedData, ErasureCoder, ShardWithIndex } from '@pbnj/types'
 
 // Rust native module types
+interface RustShardWithIndex {
+  shard: Buffer
+  index: number
+}
+
 interface RustEncodedResult {
-  shards: Buffer[]
-  k: number
-  n: number
+  shardsWithIndices: RustShardWithIndex[]
   originalLength: number
-  indices: number[]
 }
 
 interface RustReedSolomonClass {
@@ -91,55 +93,30 @@ export class RustReedSolomonCoder implements ErasureCoder {
     const actualK = this.k
     const actualN = this.n
 
-    logger.debug('DEBUG: RustReedSolomonCoder.encode called', {
-      inputSize: data.length,
-      actualK,
-      actualN,
-      nativeModuleAvailable: this.nativeModuleAvailable,
-    })
-
     if (actualK <= 0 || actualN <= actualK) {
       throw new Error(`Invalid parameters: k=${actualK}, n=${actualN}`)
     }
 
-    logger.debug('Encoding with Rust Reed-Solomon (Gray Paper H.6)', {
-      inputSize: data.length,
-      k: actualK,
-      n: actualN,
+    const dataBuffer = Buffer.from(data)
+    const result: RustEncodedResult = this.rustInstance.encode(dataBuffer)
+
+    logger.debug('Rust encode result', {
+      result: JSON.stringify(result, null, 2),
+      hasShardsWithIndices: !!result.shardsWithIndices,
+      shardsWithIndicesLength: result.shardsWithIndices?.length,
     })
 
-    try {
-      const dataBuffer = Buffer.from(data)
-      const result: RustEncodedResult = this.rustInstance.encode(dataBuffer)
+    // Convert Rust shards to TypeScript format
+    const shards: ShardWithIndex[] = result.shardsWithIndices.map(
+      (rustShard) => ({
+        shard: new Uint8Array(rustShard.shard),
+        index: rustShard.index,
+      }),
+    )
 
-      logger.debug('Rust encoding complete', {
-        shardCount: result.shards.length,
-        k: result.k,
-        n: result.n,
-        originalLength: result.originalLength,
-        shardSizes: result.shards.map((s) => s.length),
-        fullResult: result,
-      })
-
-      logger.debug('DEBUG: About to return EncodedData', {
-        originalLength: result.originalLength,
-        dataLength: data.length,
-        match: result.originalLength === data.length,
-      })
-
-      // Convert Buffer[] to Uint8Array[]
-      const shards = result.shards.map((buffer) => new Uint8Array(buffer))
-
-      return {
-        shards,
-        k: result.k,
-        n: result.n,
-        originalLength: result.originalLength,
-        indices: result.indices,
-      }
-    } catch (error) {
-      logger.error('Rust encoding failed', { error })
-      throw error
+    return {
+      shardsWithIndices: shards,
+      originalLength: result.originalLength,
     }
   }
 
@@ -147,58 +124,19 @@ export class RustReedSolomonCoder implements ErasureCoder {
    * Decode shards using the Rust Reed-Solomon implementation
    * Follows Gray Paper Appendix H.6 specification
    */
-  decode(shards: Uint8Array[], originalLength: number): Uint8Array {
-    const actualK = this.k
-    const actualN = this.n
+  decode(shards: ShardWithIndex[], originalLength: number): Uint8Array {
+    // Convert TypeScript shards to Rust format
+    const rustShards: RustShardWithIndex[] = shards.map((shard) => ({
+      shard: Buffer.from(shard.shard),
+      index: shard.index,
+    }))
 
-    if (actualK <= 0 || actualN <= actualK) {
-      throw new Error(`Invalid parameters: k=${actualK}, n=${actualN}`)
+    const encodedResult: RustEncodedResult = {
+      shardsWithIndices: rustShards,
+      originalLength: originalLength >>> 0,
     }
 
-    logger.debug('Decoding with Rust Reed-Solomon (Gray Paper H.6)', {
-      totalShards: shards.length,
-      k: actualK,
-      originalLength,
-    })
-
-    try {
-      // Convert Uint8Array[] to Buffer[]
-      const shardBuffers = shards.map((shard) => Buffer.from(shard))
-
-      // Create EncodedResult object for the Rust decode method
-      // Note: Rust implementation produces k + 2*k shards total
-      const totalShards = actualK + 2 * actualK
-
-      logger.debug('DEBUG: TypeScript decode wrapper', {
-        inputShards: shards.length,
-        expectedShards: totalShards,
-        actualK,
-        actualN,
-        originalLength,
-      })
-
-      const encodedResult: RustEncodedResult = {
-        shards: shardBuffers,
-        k: actualK,
-        n: totalShards,
-        originalLength: originalLength >>> 0,
-        indices: Array.from({ length: totalShards }, (_, i) => i),
-      }
-
-      const result: Buffer = this.rustInstance.decode(encodedResult)
-
-      logger.debug('Rust decoding complete', {
-        decodedLength: result.length,
-        originalLength,
-        shardCount: shardBuffers.length,
-        shardSizes: shardBuffers.map((s) => s.length),
-      })
-
-      return new Uint8Array(result)
-    } catch (error) {
-      logger.error('Rust decoding failed', { error })
-      throw error
-    }
+    return new Uint8Array(this.rustInstance.decode(encodedResult))
   }
 }
 

@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class ROT_L_64Instruction extends BaseInstruction {
@@ -26,23 +26,12 @@ export class ROT_L_64Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -95,23 +84,12 @@ export class ROT_L_32Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -163,23 +141,12 @@ export class ROT_R_64Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -232,23 +199,12 @@ export class ROT_R_32Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
+    this.setRegisterValue(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    // Mutate context directly
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    if (operands.length !== 3) {
-      return false
-    }
-    return true
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

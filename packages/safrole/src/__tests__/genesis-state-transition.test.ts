@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { hexToBytes, bytesToHex } from '@pbnj/core'
-import { merklizeHex, type Hex , type GenesisJson, type KeyValuePair } from '@pbnj/core'
+import { merklizeState, type Hex , type GenesisJson, type KeyValuePair } from '@pbnj/core'
   
 /**
  * Load genesis.json from fallback traces
@@ -111,7 +111,7 @@ describe('Genesis State Transition', () => {
     const genesis = await loadGenesisFromFallback()
     const keyValuePairs = deserializeGenesisKeyValues(genesis)
     
-    // Convert to hex format for merklizeHex (31-byte keys as per Gray Paper)
+    // Convert to hex format for merklizeState (31-byte keys as per Gray Paper)
     const hexKeyValues: Record<string, string> = {}
     for (const kvp of keyValuePairs) {
       const keyHex = bytesToHex(kvp.key)
@@ -120,7 +120,7 @@ describe('Genesis State Transition', () => {
     }
     
     // Compute merkle root
-    const [error, merkleRoot] = merklizeHex(hexKeyValues)
+    const [error, merkleRoot] = merklizeState(hexKeyValues)
     if (error) {
       throw error
     }

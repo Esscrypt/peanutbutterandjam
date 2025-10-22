@@ -1,6 +1,6 @@
 import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 export class ANDInstruction extends BaseInstruction {
@@ -12,8 +12,8 @@ export class ANDInstruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const valueB = this.getRegisterValue(context.registers, registerB)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA & valueB
 
     logger.debug('Executing AND instruction', {
@@ -24,20 +24,11 @@ export class ANDInstruction extends BaseInstruction {
       valueB,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -57,8 +48,8 @@ export class XORInstruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const valueB = this.getRegisterValue(context.registers, registerB)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA ^ valueB
 
     logger.debug('Executing XOR instruction', {
@@ -69,20 +60,11 @@ export class XORInstruction extends BaseInstruction {
       valueB,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {
@@ -102,8 +84,8 @@ export class ORInstruction extends BaseInstruction {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
     const registerB = this.getRegisterB(context.instruction.operands)
-    const valueA = this.getRegisterValue(context.registers, registerA)
-    const valueB = this.getRegisterValue(context.registers, registerB)
+    const valueA = this.getRegisterValueAs64(context.registers, registerA)
+    const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA | valueB
 
     logger.debug('Executing OR instruction', {
@@ -114,20 +96,11 @@ export class ORInstruction extends BaseInstruction {
       valueB,
       result,
     })
+    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    const newRegisters = { ...context.registers }
-    this.setRegisterValue(newRegisters, registerD, result)
+    context.gas -= 1n
 
-    return {
-      resultCode: RESULT_CODES.HALT,
-      newInstructionPointer: context.instructionPointer + 1n,
-      newGasCounter: context.gasCounter - 1n,
-      newRegisters,
-    }
-  }
-
-  validate(operands: Uint8Array): boolean {
-    return BigInt(operands.length) >= 3n // Need three registers
+    return { resultCode: null }
   }
 
   disassemble(operands: Uint8Array): string {

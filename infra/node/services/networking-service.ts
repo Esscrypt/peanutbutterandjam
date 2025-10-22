@@ -7,6 +7,7 @@
 import type { QUICConnection } from '@infisical/quic'
 import { type events, QUICClient, QUICServer } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
+import type { EventAll } from '@matrixai/events'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2'
 import {
@@ -49,8 +50,10 @@ export class NetworkingService extends BaseService {
   private readonly listenAddress: string
   private readonly listenPort: number
   /** public key of the validator to the connection */
-  private readonly connections: Map<string, QUICConnection> = new Map()
-  connectionToPublicKey: Map<string, Hex> = new Map()
+  private readonly connections: Map<
+    string,
+    { connection: QUICConnection; publicKey: Hex }
+  > = new Map()
   publicKeyToConnection: Map<Hex, QUICConnection> = new Map()
   /** public key of the validator to the stream */
   private readonly streams: Map<Hex, QUICStream> = new Map()
@@ -147,98 +150,98 @@ export class NetworkingService extends BaseService {
     kindByte: StreamKind,
     message: Uint8Array,
   ): SafePromise<void> {
-    logger.info('📤 Sending message to validator...', {
+    const [validatorPublicKeyError, validatorPublicKey] =
+      this.validatorSetManagerService.getValidatorAtIndex(
+        Number(validatorIndex),
+      )
+    if (validatorPublicKeyError) {
+      logger.error('❌ Failed to get validator public key', {
+        validatorIndex: validatorIndex.toString(),
+        error: validatorPublicKeyError.message,
+      })
+      return safeError(validatorPublicKeyError)
+    }
+
+    logger.info('🔑 Found validator public key', {
       validatorIndex: validatorIndex.toString(),
-      kindByte,
-      messageSize: message.length,
-      messagePreview: `${bytesToHex(message.slice(0, Math.min(16, message.length)))}...`,
+      publicKey: validatorPublicKey.ed25519,
     })
 
+    // Send size first - convert Uint8Array to hex string for lookup
+    const validatorPublicKeyHex = validatorPublicKey.ed25519
+    return await this.sendMessageByPublicKey(
+      validatorPublicKeyHex,
+      kindByte,
+      message,
+    )
+  }
+
+  async sendMessageByPublicKey(
+    publicKey: Hex,
+    kindByte: StreamKind,
+    message: Uint8Array,
+  ): SafePromise<void> {
+    // Add kind byte to message content
+    const messageWithKind = new Uint8Array(1 + message.length)
+    messageWithKind[0] = kindByte
+    messageWithKind.set(message, 1)
+
+    // Create size buffer (32-bit little-endian) for the complete message
+    const sizeBuffer = new ArrayBuffer(4)
+    const sizeView = new DataView(sizeBuffer)
+    sizeView.setUint32(0, messageWithKind.length, true) // little-endian
+
+    logger.info('📦 Created size buffer for message', {
+      originalMessageSize: message.length,
+      messageWithKindSize: messageWithKind.length,
+      sizeBufferHex: bytesToHex(new Uint8Array(sizeBuffer)),
+    })
+
+    const stream = this.streams.get(publicKey)
+    if (!stream) {
+      logger.error('❌ No stream found for validator', {
+        publicKey: publicKey,
+        streamsCount: this.streams.size,
+        availableStreams: Array.from(this.streams.keys()),
+      })
+      return safeError(
+        new Error(`Validator ${publicKey} not found in streams map`),
+      )
+    }
+
+    logger.info('🔄 Found stream for validator', {
+      publicKey: publicKey,
+      streamReadable: !!stream.readable,
+      streamWritable: !!stream.writable,
+    })
+
+    const writer = stream.writable.getWriter()
     try {
-      // Add kind byte to message content
-      const messageWithKind = new Uint8Array(1 + message.length)
-      messageWithKind[0] = kindByte
-      messageWithKind.set(message, 1)
+      // Combine size buffer and message content into a single write
+      const combinedMessage = new Uint8Array(
+        sizeBuffer.byteLength + messageWithKind.length,
+      )
+      combinedMessage.set(new Uint8Array(sizeBuffer), 0)
+      combinedMessage.set(messageWithKind, sizeBuffer.byteLength)
 
-      // Create size buffer (32-bit little-endian) for the complete message
-      const sizeBuffer = new ArrayBuffer(4)
-      const sizeView = new DataView(sizeBuffer)
-      sizeView.setUint32(0, messageWithKind.length, true) // little-endian
-
-      logger.info('📦 Created size buffer for message', {
+      logger.info('📝 Writing combined message to stream...', {
+        sizeBuffer: bytesToHex(new Uint8Array(sizeBuffer)),
+        kindByte,
         originalMessageSize: message.length,
         messageWithKindSize: messageWithKind.length,
-        sizeBufferHex: bytesToHex(new Uint8Array(sizeBuffer)),
+        messagePreview: `${bytesToHex(message.slice(0, Math.min(16, message.length)))}...`,
+        combinedSize: combinedMessage.length,
       })
+      await writer.write(combinedMessage)
 
-      const [validatorPublicKeyError, validatorPublicKey] =
-        this.validatorSetManagerService.getValidatorAtIndex(
-          Number(validatorIndex),
-        )
-      if (validatorPublicKeyError) {
-        logger.error('❌ Failed to get validator public key', {
-          validatorIndex: validatorIndex.toString(),
-          error: validatorPublicKeyError.message,
-        })
-        return safeError(validatorPublicKeyError)
-      }
-
-      logger.info('🔑 Found validator public key', {
-        validatorIndex: validatorIndex.toString(),
-        publicKey: validatorPublicKey.ed25519,
+      logger.info('✅ Message successfully written to stream', {
+        publicKey: publicKey,
+        messageSize: message.length,
       })
-
-      // Send size first
-      const stream = this.streams.get(validatorPublicKey.ed25519)
-      if (!stream) {
-        logger.error('❌ No stream found for validator', {
-          validatorIndex: validatorIndex.toString(),
-          publicKey: validatorPublicKey.ed25519,
-          streamsCount: this.streams.size,
-          availableStreams: Array.from(this.streams.keys()),
-        })
-        return safeError(
-          new Error(`Validator ${validatorIndex} not found in streams map`),
-        )
-      }
-
-      logger.info('🔄 Found stream for validator', {
-        validatorIndex: validatorIndex.toString(),
-        streamReadable: !!stream.readable,
-        streamWritable: !!stream.writable,
-      })
-
-      const writer = stream.writable.getWriter()
-      try {
-        // Combine size buffer and message content into a single write
-        const combinedMessage = new Uint8Array(
-          sizeBuffer.byteLength + messageWithKind.length,
-        )
-        combinedMessage.set(new Uint8Array(sizeBuffer), 0)
-        combinedMessage.set(messageWithKind, sizeBuffer.byteLength)
-
-        logger.info('📝 Writing combined message to stream...', {
-          sizeBuffer: bytesToHex(new Uint8Array(sizeBuffer)),
-          kindByte,
-          originalMessageSize: message.length,
-          messageWithKindSize: messageWithKind.length,
-          messagePreview: `${bytesToHex(message.slice(0, Math.min(16, message.length)))}...`,
-          combinedSize: combinedMessage.length,
-        })
-        await writer.write(combinedMessage)
-
-        logger.info('✅ Message successfully written to stream', {
-          validatorIndex: validatorIndex.toString(),
-          messageSize: message.length,
-        })
-      } finally {
-        writer.releaseLock()
-      }
-
-      return safeResult(undefined)
-    } catch (error) {
-      return safeError(new Error(`Failed to send JAMNP message: ${error}`))
+    } finally {
+      writer.releaseLock()
     }
+    return safeResult(undefined)
   }
 
   /**
@@ -352,7 +355,7 @@ export class NetworkingService extends BaseService {
     }
 
     // Get sender context
-    const senderPublicKey = this.connectionToPublicKey.get(connectionId)
+    const senderPublicKey = this.connections.get(connectionId)?.publicKey
     if (!senderPublicKey) {
       logger.error('❌ Failed to get sender public key', {
         connectionId: `${connectionId.slice(0, 20)}...`,
@@ -376,11 +379,28 @@ export class NetworkingService extends BaseService {
       messageDataLength: messageData.length,
     })
 
-    await protocol.handleStreamData(messageData, senderPublicKey)
+    // Use event-driven approach - non-blocking
+    // This is a RESPONSE to our request
+    const [parseError, event] = protocol.handleStreamData(
+      messageData,
+      senderPublicKey,
+      'response', // Explicitly mark as response
+    )
+    if (parseError) {
+      logger.error('❌ Failed to parse response message', {
+        connectionId: `${connectionId.slice(0, 20)}...`,
+        kindByte,
+        error: parseError.message,
+      })
+      return safeError(parseError)
+    }
 
-    logger.info('✅ Message processed successfully', {
+    logger.info('✅ Response message parsed and event emitted', {
       connectionId: `${connectionId.slice(0, 20)}...`,
       kindByte,
+      messageId: event.messageId,
+      timestamp: event.timestamp,
+      messageType: event.messageType,
     })
 
     return safeResult(kindByte)
@@ -406,7 +426,7 @@ export class NetworkingService extends BaseService {
           const { value, done } = await reader.read()
 
           if (done) {
-            logger.info('📖 Stream reading completed', {
+            logger.debug('📖 Stream reading completed', {
               peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
             })
             break
@@ -426,19 +446,39 @@ export class NetworkingService extends BaseService {
           }
         }
       } catch (error) {
-        logger.error('❌ Error reading from stream:', {
-          error: error instanceof Error ? error.message : String(error),
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        })
+        // Only log errors that aren't expected during cleanup
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        if (
+          !errorMessage.includes('null') &&
+          !errorMessage.includes('Peer closed')
+        ) {
+          logger.error('❌ Unexpected error reading from stream:', {
+            error: errorMessage,
+            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          })
+        } else {
+          logger.debug('🔌 Stream closed (expected during cleanup)', {
+            error: errorMessage,
+            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          })
+        }
       }
     }
 
     // Start reading in the background
     startReading().catch((error) => {
-      logger.error('❌ Stream reading failed:', {
-        error: error instanceof Error ? error.message : String(error),
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-      })
+      const errorMessage =
+        error instanceof Error ? error.message : String(error)
+      if (
+        !errorMessage.includes('null') &&
+        !errorMessage.includes('Peer closed')
+      ) {
+        logger.error('❌ Stream reading failed:', {
+          error: errorMessage,
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        })
+      }
     })
   }
 
@@ -535,12 +575,28 @@ export class NetworkingService extends BaseService {
         messageDataLength: messageData.length,
       })
 
-      // Handle the message
-      await protocol.handleStreamData(messageData, peerPublicKey)
+      // Use event-driven approach - non-blocking
+      // This is a REQUEST coming from a peer
+      const [parseError, event] = protocol.handleStreamData(
+        messageData,
+        peerPublicKey,
+        'request', // Explicitly mark as request
+      )
+      if (parseError) {
+        logger.error('❌ Failed to parse request message', {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          kindByte,
+          error: parseError.message,
+        })
+        return
+      }
 
-      logger.info('✅ Message processed successfully', {
+      logger.info('✅ Request message parsed and event emitted', {
         peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
         kindByte,
+        messageId: event.messageId,
+        timestamp: event.timestamp,
+        messageType: event.messageType,
       })
     } catch (error) {
       logger.error('❌ Error processing stream data:', {
@@ -578,112 +634,113 @@ export class NetworkingService extends BaseService {
       connectionId: `${connectionId.slice(0, 32)}...`,
     })
 
-    if (!this.connections.has(connectionId)) {
-      this.connections.set(connectionId, connection)
+    if (this.connections.has(connectionId)) {
+      logger.warn('❌ Connection already exists', {
+        connectionId: `${connectionId.slice(0, 20)}...`,
+      })
+      return
+    }
 
-      // Extract certificate to get peer public key for server role validation
-      const certDERs = (connection as any).certDERs
-      if (certDERs && certDERs.length > 0) {
-        const [extractError, peerPublicKey] =
-          extractPublicKeyFromDERCertificate(certDERs[0])
+    // Extract certificate to get peer public key for server role validation
+    const certDERs = (connection as any).certDERs
+    if (certDERs && certDERs.length > 0) {
+      const [extractError, peerPublicKey] = extractPublicKeyFromDERCertificate(
+        certDERs[0],
+      )
 
-        if (!extractError && peerPublicKey) {
-          const publicKeyHex = bytesToHex(peerPublicKey)
-          logger.info('✅ Successfully extracted public key:', {
+      if (!extractError && peerPublicKey) {
+        const publicKeyHex = bytesToHex(peerPublicKey)
+        logger.info('✅ Successfully extracted public key:', {
+          connectionId: `${connectionId.slice(0, 20)}...`,
+          extractedKey: publicKeyHex,
+          keyLength: peerPublicKey.length,
+        })
+
+        this.connections.set(connectionId, {
+          connection,
+          publicKey: publicKeyHex,
+        })
+
+        // Create a bidirectional stream for server-to-client communication
+        try {
+          const serverStream = connection.newStream('bidi')
+          this.streams.set(publicKeyHex, serverStream)
+
+          // Set up data listener on the server stream
+          this.setupStreamDataListener(serverStream, publicKeyHex)
+
+          logger.info('✅ Created server stream for peer communication', {
             connectionId: `${connectionId.slice(0, 20)}...`,
-            extractedKey: publicKeyHex,
-            keyLength: peerPublicKey.length,
+            peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
+            streamId: (serverStream as any).id || 'unknown',
           })
-
-          // Store the public key in the connection mapping
-          this.connectionToPublicKey.set(connectionId, publicKeyHex)
-          logger.info('✅ Stored public key in connectionToPublicKey mapping', {
+        } catch (error) {
+          logger.error('❌ Failed to create server stream:', {
+            error: error instanceof Error ? error.message : String(error),
             connectionId: `${connectionId.slice(0, 20)}...`,
-            mappingSize: this.connectionToPublicKey.size,
+            peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
           })
-
-          // Create a bidirectional stream for server-to-client communication
-          try {
-            const serverStream = connection.newStream('bidi')
-            this.streams.set(publicKeyHex, serverStream)
-
-            // Set up data listener on the server stream
-            this.setupStreamDataListener(serverStream, publicKeyHex)
-
-            logger.info('✅ Created server stream for peer communication', {
-              connectionId: `${connectionId.slice(0, 20)}...`,
-              peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
-              streamId: (serverStream as any).id || 'unknown',
-            })
-          } catch (error) {
-            logger.error('❌ Failed to create server stream:', {
-              error: error instanceof Error ? error.message : String(error),
-              connectionId: `${connectionId.slice(0, 20)}...`,
-              peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
-            })
-          }
-        } else {
-          logger.error(
-            '❌ Failed to extract peer public key for server role assignment:',
-            {
-              error: extractError,
-              connectionId: `${connectionId.slice(0, 20)}...`,
-            },
-          )
         }
       } else {
-        logger.warn(
-          '⚠️ No peer certificates available for server role assignment:',
+        logger.error(
+          '❌ Failed to extract peer public key for server role assignment:',
           {
+            error: extractError,
             connectionId: `${connectionId.slice(0, 20)}...`,
           },
         )
       }
-
-      // Only set up essential events: stream creation and connection close
-
-      // Set up connection events for streams and cleanup
-      connection.addEventListener(
-        'EventQUICConnectionStream',
-        async (streamEvent: any) => {
-          if (!streamEvent?.detail) {
-            logger.warn('⚠️ Stream event has no detail property')
-            return
-          }
-
-          const stream = streamEvent.detail
-          logger.info('📡 New stream received in connection:', {
-            connectionId: `${connectionId.slice(0, 20)}...`,
-            streamId: stream?.id,
-            streamReadable: !!stream?.readable,
-            streamWritable: !!stream?.writable,
-          })
-
-          // Set up data listener on the stream to handle incoming messages
-          const peerPublicKey = this.connectionToPublicKey.get(connectionId)
-          if (peerPublicKey) {
-            this.setupStreamDataListener(stream, peerPublicKey)
-          } else {
-            logger.warn(
-              '⚠️ No peer public key found for stream data listener setup',
-              {
-                connectionId: `${connectionId.slice(0, 20)}...`,
-              },
-            )
-          }
+    } else {
+      logger.warn(
+        '⚠️ No peer certificates available for server role assignment:',
+        {
+          connectionId: `${connectionId.slice(0, 20)}...`,
         },
       )
-
-      connection.addEventListener('EventQUICConnectionClose', async () => {
-        logger.debug('🧹 Cleaning up connection mappings', {
-          connectionId: `${connectionId.slice(0, 32)}...`,
-        })
-        // Clean up all connection mappings
-        this.connections.delete(connectionId)
-        this.connectionToPublicKey.delete(connectionId)
-        // Clean up connection context
-      })
     }
+
+    // Only set up essential events: stream creation and connection close
+
+    // Set up connection events for streams and cleanup
+    connection.addEventListener(
+      'EventQUICConnectionStream',
+      async (streamEvent: any) => {
+        if (!streamEvent?.detail) {
+          logger.warn('⚠️ Stream event has no detail property')
+          return
+        }
+
+        const stream = streamEvent.detail
+        logger.info('📡 New stream received in connection:', {
+          connectionId: `${connectionId.slice(0, 20)}...`,
+          streamId: stream?.id,
+          streamReadable: !!stream?.readable,
+          streamWritable: !!stream?.writable,
+        })
+
+        // Set up data listener on the stream to handle incoming messages
+        const peerPublicKey = this.connections.get(connectionId)?.publicKey
+        if (peerPublicKey) {
+          this.setupStreamDataListener(stream, peerPublicKey)
+        } else {
+          logger.warn(
+            '⚠️ No peer public key found for stream data listener setup',
+            {
+              connectionId: `${connectionId.slice(0, 20)}...`,
+            },
+          )
+        }
+      },
+    )
+
+    connection.addEventListener('EventQUICConnectionClose', async () => {
+      logger.debug('🧹 Cleaning up connection mappings', {
+        connectionId: `${connectionId.slice(0, 32)}...`,
+      })
+      // Clean up all connection mappings
+      this.connections.delete(connectionId)
+      // Clean up connection context
+    })
   }
 
   /**
@@ -732,21 +789,32 @@ export class NetworkingService extends BaseService {
   }
 
   private async serverConnectionCloseHandler(
-    event: events.EventQUICConnectionStopped,
+    event: EventAll<events.EventQUICConnectionStopped>,
   ): Promise<void> {
     logger.info('🎯 EventQUICServerConnectionClose received!', {
-      eventType: event?.type,
-      hasDetail: !!event?.detail,
-      detailType: typeof event?.detail,
-      detailKeys: event?.detail ? Object.keys(event?.detail) : [],
+      eventType: event.type,
+      hasDetail: !!event.detail,
+      detailType: typeof event.detail,
+      detailKeys: event.detail ? Object.keys(event.detail) : [],
       event: JSON.stringify(event),
     })
+    if (!event.detail) {
+      logger.error(
+        '❌[serverConnectionCloseHandler] EventQUICServerConnectionClose received with no detail',
+      )
+      return
+    }
+    const connectionData = this.connections.get(event.detail.connectionIdShared)
+    if (!connectionData) {
+      logger.error('❌[serverConnectionCloseHandler] Connection not found')
+      return
+    }
+    this.publicKeyToConnection.delete(connectionData.publicKey)
 
     // Clean up connection mappings
-    this.connections.delete(event?.detail?.connectionIdShared)
-
-    // todo get public key first to delete from connectionToPublicKey
-    this.connectionToPublicKey.delete(event?.detail?.connectionIdShared)
+    this.connections.delete(
+      connectionData.connection.connectionIdShared.toString(),
+    )
   }
 
   async serverErrorHandler(event: any): Promise<void> {
@@ -890,60 +958,10 @@ export class NetworkingService extends BaseService {
       logger.debug('✅ Bidirectional stream created and stored')
 
       // 10. Store connection
-      this.connections.set(
-        quicConnection.connectionIdShared.toString(),
-        quicConnection,
-      )
-
-      // Handle incoming data on connection
-      // quicConnection.addEventListener('data', async (event: any) => {
-      //   logger.debug('📨 Received data event from QUIC connection:', {
-      //     connectionId: quicConnection.connectionIdShared?.toString(),
-      //     eventType: typeof event,
-      //   })
-
-      //   try {
-      //     // Handle incoming stream data
-      //     const handleStreamData = async (stream: QUICStream) => {
-      //       logger.debug('🔍 Processing incoming QUIC stream...')
-      //       await this.handleIncomingData(stream)
-      //     }
-
-      //     // If event has direct stream access
-      //     if (event && typeof event === 'object' && 'stream' in event) {
-      //       await handleStreamData(event.stream)
-      //     }
-      //     // If event is the stream itself
-      //     else if (event && typeof event.readable === 'object') {
-      //       await handleStreamData(event)
-      //     }
-      //     // Otherwise log the event structure for debugging
-      //     else {
-      //       logger.debug('🔍 Data event structure:', {
-      //         hasStream: event && 'stream' in event,
-      //         hasReadable: event && typeof event.readable === 'object',
-      //         eventKeys: event ? Object.keys(event) : 'null',
-      //       })
-      //     }
-      //   } catch (error) {
-      //     logger.error('❌ Error handling incoming data:', error)
-      //   }
-      // })
-
-      // // Listen for connection close
-      // quicConnection.addEventListener('close', async () => {
-      //   logger.info('QUIC connection closed', {
-      //     connectionId: quicConnection.connectionIdShared.toString(),
-      //   })
-      //   this.connections.delete(quicConnection.connectionIdShared.toString())
-      //   await quicConnection.stop({ isApp: true })
-      // })
-
-      // logger.info('Successfully connected to peer with JAMNP-S compliance', {
-      //   peer: quicConnection.connectionIdShared.toString(),
-      //   host: endpoint.host,
-      //   port: endpoint.port.toString(),
-      // })
+      this.connections.set(quicConnection.connectionIdShared.toString(), {
+        connection: quicConnection,
+        publicKey: bytesToHex(endpoint.publicKey),
+      })
 
       return safeResult(true)
     } catch (error) {
@@ -959,11 +977,15 @@ export class NetworkingService extends BaseService {
     }
   }
 
+  public isConnectedToPeer(publicKey: Hex): boolean {
+    return this.publicKeyToConnection.has(publicKey)
+  }
+
   /**
    * Close a connection
    */
   async closeConnection(publicKey: Hex): SafePromise<boolean> {
-    const connection = this.connections.get(publicKey)
+    const connection = this.publicKeyToConnection.get(publicKey)
     if (!connection) {
       return safeError(new Error(`Connection ${publicKey} not found`))
     }
@@ -976,7 +998,8 @@ export class NetworkingService extends BaseService {
     } catch (error) {
       logger.error(`Failed to close connection ${publicKey}:`, error)
     } finally {
-      this.connections.delete(publicKey)
+      this.publicKeyToConnection.delete(publicKey)
+      this.connections.delete(connection.connectionIdShared.toString())
     }
 
     return safeResult(true)

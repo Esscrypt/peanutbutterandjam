@@ -11,7 +11,8 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@noble/curves": "^2.0.0",
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:",
     "@pbnj/core": "workspace:*",
     "@pbnj/types": "workspace:*"
   },

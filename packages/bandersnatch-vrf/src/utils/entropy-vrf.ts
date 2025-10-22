@@ -184,7 +184,7 @@ export function verifyEntropyVRFSignature(
  * @param sealSignature - IETF VRF seal signature (96 bytes)
  * @returns First 32 bytes of VRF output hash
  */
-export function extractSealOutput(sealSignature: Uint8Array): Safe<Uint8Array> {
+export function banderout(sealSignature: Uint8Array): Safe<Uint8Array> {
   if (sealSignature.length !== 96) {
     return safeError(new Error('Seal signature must be 96 bytes'))
   }

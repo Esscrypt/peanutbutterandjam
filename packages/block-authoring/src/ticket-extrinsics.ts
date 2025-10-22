@@ -2,14 +2,14 @@ import { type SafePromise, safeResult } from '@pbnj/core'
 import type {
   IClockService,
   IConfigService,
-  ITicketHolderService,
+  ITicketService,
   SafroleTicket,
 } from '@pbnj/types'
 
 export async function getTicketsForExtrinsic(
   clockService: IClockService,
   configService: IConfigService,
-  ticketHolderService: ITicketHolderService,
+  ticketHolderService: ITicketService,
 ): SafePromise<SafroleTicket[]> {
   const currentPhase = clockService.getCurrentPhase()
 

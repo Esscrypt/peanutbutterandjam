@@ -5,31 +5,71 @@
  * Reference: graypaper/text/pvm.tex
  */
 
+import type { Safe } from '@pbnj/core'
 import type { Hex } from 'viem'
-import type { OperandTuple, ServiceAccount } from './serialization'
+import type { OperandTuple, ServiceAccount, WorkPackage } from './serialization'
 
 // Register indices: 0-7 are 64-bit, 8-12 are 32-bit
-export type RegisterIndex64 = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
-export type RegisterIndex32 = 8 | 9 | 10 | 11 | 12
-export type RegisterIndex = RegisterIndex64 | RegisterIndex32
+// All 13 registers (r0-r12) can store 64-bit values
+export type RegisterIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12
 
-// Register state: 13 registers as specified in PVM
-export interface RegisterState {
-  // 64-bit registers (ϱ₀ through ϱ₇)
-  r0: bigint
-  r1: bigint
-  r2: bigint
-  r3: bigint
-  r4: bigint
-  r5: bigint
-  r6: bigint
-  r7: bigint
-  // 32-bit registers (ϱ₈ through ϱ₁₂)
-  r8: bigint
-  r9: bigint
-  r10: bigint
-  r11: bigint
-  r12: bigint
+/**
+ * Register state: 13 registers split by width
+ * Gray Paper: All registers are 64-bit (pvmreg ≡ N_64)
+ *
+ * Split into two arrays for implementation efficiency:
+ * - registers64: r0-r7 (8 registers, 64-bit operations, stored as bigint)
+ * - registers32: r8-r12 (5 registers, 32-bit operations with sign-extension, stored as number)
+ *
+ * Mapping:
+ * - r0 = registers64[0], r1 = registers64[1], ..., r7 = registers64[7]
+ * - r8 = registers32[0], r9 = registers32[1], ..., r12 = registers32[4]
+ */
+// All 13 PVM registers (r0-r12) can store 64-bit values
+// The distinction between "32-bit" and "64-bit" registers only applies to
+// how certain operations interpret them, not their storage capacity
+export type RegisterState = bigint[] // 13 elements (r0-r12)
+
+/**
+ * Memory access types as specified in Gray Paper
+ * Gray Paper: RAM access can be 'none', 'R' (read), 'W' (write), or 'R+W' (read+write)
+ */
+export type MemoryAccessType = 'none' | 'read' | 'write' | 'read+write'
+
+/**
+ * RAM interface for PVM memory operations
+ * Provides byte-level read/write access with page-based protection
+ * Implements Gray Paper RAM specification with proper access control
+ */
+export interface RAM {
+  /** Read multiple consecutive bytes from memory */
+  readOctets(address: bigint, count: bigint): Safe<Uint8Array>
+
+  /** Write multiple consecutive bytes to memory */
+  writeOctets(address: bigint, values: Uint8Array): Safe<void>
+
+  /** Check if an address range is readable */
+  isReadable(address: bigint, size?: bigint): boolean
+
+  /** Check if an address range is writable */
+  isWritable(address: bigint, size?: bigint): boolean
+
+  /** Initialize a memory page (for test vectors) */
+  initializePage(
+    address: bigint,
+    length: number,
+    accessType: MemoryAccessType,
+  ): void
+
+  /** Set memory page access rights (Gray Paper PAGES function) */
+  setPageAccessRights(
+    address: bigint,
+    length: number,
+    accessType: MemoryAccessType,
+  ): void
+
+  /** Get memory page access type */
+  getPageAccessType(address: bigint): MemoryAccessType
 }
 
 // Result codes as specified in PVM
@@ -83,66 +123,13 @@ export interface FaultInfo {
   details: string
 }
 
-// RAM: dictionary from natural numbers to octets
-export interface RAM {
-  // Map from address (natural bigint) to octet (8-bit value)
-  cells: Map<bigint, Uint8Array>
-
-  // Read multiple octets
-  readOctets(address: bigint, count: bigint): Uint8Array
-
-  // Write multiple octets
-  writeOctets(address: bigint, values: Uint8Array): void
-
-  // Check if address is readable (for fault detection)
-  isReadable(address: bigint): boolean
-
-  // Check if address is writable (for fault detection)
-  isWritable(address: bigint): boolean
-
-  // Get memory layout information
-  getMemoryLayout(): {
-    stackStart: bigint
-    heapStart: bigint
-    totalSize: bigint
-  }
-}
-
-// Call stack frame as specified in PVM
-export interface CallStackFrame {
-  returnAddress: bigint // Instruction pointer for return
-  registerState: RegisterState // Register state at call time
-  stackPointer: bigint // Stack pointer value at call time
-}
-
-// Call stack: sequence of frames
-export interface CallStack {
-  frames: CallStackFrame[]
-
-  // Push a new frame
-  pushFrame(frame: CallStackFrame): void
-
-  // Pop the top frame
-  popFrame(): CallStackFrame | undefined
-
-  // Get current frame
-  getCurrentFrame(): CallStackFrame | undefined
-
-  // Check if stack is empty
-  isEmpty(): boolean
-
-  // Get stack depth
-  getDepth(): bigint
-}
-
 export interface PVMState {
   resultCode: ResultCode | null // ε: result code
   instructionPointer: bigint // ı: instruction pointer (index)
   registerState: RegisterState // ϱ: register state
-  callStack: CallStack // φ: call stack
   ram: RAM // µ: RAM
   gasCounter: bigint // Gas counter as specified in Gray Paper
-  stackPointer?: bigint // Stack pointer for stack operations
+  jumpTable: bigint[] // j: jump table for dynamic jumps (Gray Paper)
   instructionData?: Uint8Array // Raw instruction data
   instructions?: PVMInstruction[] // Parsed instructions
 }
@@ -156,32 +143,41 @@ export interface ProgramBlob {
 export interface PVMInstruction {
   opcode: bigint
   operands: Uint8Array
-  address: bigint
+  fskip: number
+  jumpTable: bigint[]
 }
 
+/**
+ * Instruction execution context (mutable)
+ * Instructions modify this context directly
+ */
 export interface InstructionContext {
   instruction: PVMInstruction
   registers: RegisterState
   ram: RAM
-  callStack: CallStack
-  instructionPointer: bigint
-  stackPointer: bigint
-  gasCounter: bigint
+  pc: bigint // instruction pointer
+  gas: bigint // gas counter
+  jumpTable: bigint[] // jump table for dynamic jumps
+  fskip: number
 }
 
+export interface HostFunctionContext {
+  gasCounter: bigint
+  registers: RegisterState
+  ram: RAM
+}
+
+/**
+ * Simplified instruction result
+ * Only returns result code - context is mutated in place
+ */
 export interface InstructionResult {
-  resultCode: ResultCode
-  newRegisters?: Partial<RegisterState>
-  newRam?: Map<bigint, Uint8Array>
-  newCallStack?: CallStackFrame[]
-  newInstructionPointer?: bigint
-  newStackPointer?: bigint
-  newGasCounter?: bigint
-  memoryAccesses?: Array<{
-    address: bigint
-    value: Uint8Array
-    isWrite: boolean
-  }>
+  resultCode: ResultCode | null // null = continue execution
+  faultInfo?: FaultInfo
+}
+
+export interface HostFunctionResult {
+  resultCode: ResultCode | null // null = continue execution
   faultInfo?: FaultInfo
 }
 
@@ -189,107 +185,6 @@ export interface SingleStepResult {
   resultCode: ResultCode
   newState: PVMState
   faultInfo?: FaultInfo
-}
-
-export interface PVMRuntime {
-  // Current state
-  state: PVMState
-
-  // Load program from blob
-  loadProgram(blob: ProgramBlob): void
-
-  // Single step execution
-  step(): SingleStepResult
-
-  // Run until halt
-  run(): void
-
-  // Reset to initial state
-  reset(): void
-
-  // Get current state
-  getState(): PVMState
-
-  // Set state
-  setState(state: PVMState): void
-
-  // Set gas limit
-  setGasLimit(limit: bigint): void
-
-  // Get gas counter
-  getGasCounter(): bigint
-}
-
-// Error classes
-export class PVMError extends Error {
-  constructor(
-    message: string,
-    public code: string,
-    public context?: Record<string, unknown>,
-  ) {
-    super(message)
-    this.name = 'PVMError'
-  }
-}
-
-export class ParseError extends PVMError {
-  constructor(
-    message: string,
-    public line?: bigint,
-    public column?: bigint,
-  ) {
-    super(message, 'PARSE_ERROR')
-    this.name = 'ParseError'
-  }
-}
-
-export class RuntimeError extends PVMError {
-  constructor(
-    message: string,
-    public instruction?: PVMInstruction,
-  ) {
-    super(message, 'RUNTIME_ERROR')
-    this.name = 'RuntimeError'
-  }
-}
-
-export class MemoryError extends PVMError {
-  constructor(
-    message: string,
-    public address?: bigint,
-  ) {
-    super(message, 'MEMORY_ERROR')
-    this.name = 'MemoryError'
-  }
-}
-
-export class GasError extends PVMError {
-  constructor(
-    message: string,
-    public gasUsed?: bigint,
-    public gasLimit?: bigint,
-  ) {
-    super(message, 'GAS_ERROR')
-    this.name = 'GasError'
-  }
-}
-
-export interface ParseResult {
-  success: boolean
-  instruction?: PVMInstruction
-  error?: string
-  line?: bigint
-  column?: bigint
-}
-
-export interface Parser {
-  parseInstruction(data: Uint8Array): ParseResult
-  parseProgram(blob: ProgramBlob): {
-    success: boolean
-    instructions: PVMInstruction[]
-    errors: string[]
-  }
-  disassemble(instruction: PVMInstruction): string
 }
 
 export interface DeblobResult {
@@ -301,26 +196,6 @@ export interface DeblobResult {
 }
 
 export type DeblobFunction = (blob: Uint8Array) => DeblobResult
-
-// Host call system types
-export type ContextMutator<X> = (
-  hostCallId: bigint,
-  gasCounter: bigint,
-  registers: RegisterState,
-  ram: RAM,
-  context: X,
-) =>
-  | {
-      resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-      gasCounter: bigint
-      registers: RegisterState
-      ram: RAM
-      context: X
-    }
-  | {
-      resultCode: 'fault'
-      address: bigint
-    }
 
 export interface HostCallHandler {
   handleHostCall(
@@ -374,26 +249,6 @@ export interface JumpTableEntry {
 
 // (Moved to end of file to avoid duplicates)
 
-// Is-Authorized context mutator function
-export type IsAuthorizedContextMutator = (
-  hostCallId: bigint,
-  gasCounter: bigint,
-  registers: RegisterState,
-  ram: RAM,
-  context: null,
-) =>
-  | {
-      resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-      gasCounter: bigint
-      registers: RegisterState
-      ram: RAM
-      context: null
-    }
-  | {
-      resultCode: 'fault'
-      address: bigint
-    }
-
 // ===== REFINE INVOCATION TYPES =====
 
 // PVM-specific service account interface (for PVM runtime)
@@ -420,54 +275,109 @@ export type Accounts = Map<bigint, ServiceAccount>
 // Segment type (blob of length Csegmentsize)
 export type Segment = Uint8Array
 
+// Forward declaration for PVM class
+declare class PVM {
+  constructor(options?: {
+    code?: Uint8Array
+    ram?: RAM
+    pc?: bigint
+    gasCounter?: bigint
+    registerState?: bigint[]
+  })
+
+  invoke(
+    gasLimit: bigint,
+    registers: bigint[],
+  ): {
+    resultCode: ResultCode
+    hostCallId?: bigint
+    finalRegisters: bigint[]
+    finalPC: bigint
+    finalGas: bigint
+  }
+}
+
 // PVM Guest type as per Gray Paper equation eq:pvmguest
 export interface PVMGuest {
   code: Uint8Array // pg_code
   ram: RAM // pg_ram
   pc: bigint // pg_pc
+  pvm?: PVM // Actual PVM instance for execution
 }
 
 // Refine context type as per Gray Paper
-export type RefineContextPVM = [Map<bigint, PVMGuest>, Segment[]]
+// Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
+// where (m, e) = refine context pair, s = service ID, d = accounts dict, t = timeslot
+export interface RefineContextPVM {
+  // Core refine context pair (Gray Paper: (m, e))
+  machines: Map<bigint, PVMGuest> // m: Dictionary of PVM guests
+  exportSegments: Segment[] // e: Sequence of export segments
+
+  // Refine invocation parameters (Gray Paper: c, i, p, r, ī, segoff)
+  coreIndex: bigint // c: Core index
+  workItemIndex: bigint // i: Work item index
+  workPackage: WorkPackage // p: Work package
+  authorizerTrace: Hex // r: Authorizer trace
+  importSegments: Segment[][] // ī: Import segments by work item
+  exportSegmentOffset: bigint // segoff: Export segment offset
+
+  // Additional context from refine invocation
+  accountsDictionary: Map<bigint, ServiceAccount> // accounts: Service accounts
+  lookupTimeslot: bigint // lookup anchor time from work package context
+  currentServiceId: bigint // s: Current service ID (for host functions)
+}
 
 // Refine result type
 export type RefineResult = Uint8Array | WorkError
 
-// Refine context mutator function F as per Gray Paper equation eq:refinemutator
-export type RefineContextMutator = (
-  hostCallId: bigint,
-  gasCounter: bigint,
-  registers: RegisterState,
-  ram: RAM,
-  context: RefineContextPVM,
-) =>
-  | {
-      resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-      gasCounter: bigint
-      registers: RegisterState
-      ram: RAM
-      context: RefineContextPVM
-    }
-  | {
-      resultCode: 'fault'
-      address: bigint
-    }
-
 // ===== ACCUMULATE INVOCATION TYPES =====
 
+/**
+ * Partial state type as per Gray Paper section 31.1
+ * @param accounts - Map of service IDs to service accounts
+ * @param stagingset - Array of validator keys
+ * @param authqueue - Array of arrays of authorization hashes
+ * @param manager - Service ID of the manager
+ * @param assigners - Array of service IDs
+ * @param delegator - Service ID of the delegator
+ * @param registrar - Service ID of the registrar
+ * @param alwaysaccers - Map of service IDs to gas
+ * 
+ * partialstate ≡ tuple{
+  ps_accounts: dictionary<serviceid, serviceaccount>,
+  ps_stagingset: sequence[Cvalcount]{valkey},
+  ps_authqueue: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}},
+  ps_manager: serviceid,
+  ps_assigners: sequence[Ccorecount]{serviceid},
+  ps_delegator: serviceid,
+  ps_registrar: serviceid,
+  ps_alwaysaccers: dictionary<serviceid, gas>,
+} 
+ */
 export interface PartialState {
+  // ps_accounts: dictionary<serviceid, serviceaccount>
   accounts: Map<bigint, ServiceAccount>
-  authqueue: Map<bigint, Uint8Array[]>
-  assigners: Map<bigint, bigint>
+
+  // ps_stagingset: sequence[Cvalcount]{valkey}
   stagingset: Uint8Array[]
-  nextfreeid: bigint
+
+  // ps_authqueue: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}}
+  authqueue: Uint8Array[][]
+
+  // ps_manager: serviceid
   manager: bigint
-  registrar: bigint
+
+  // ps_assigners: sequence[Ccorecount]{serviceid}
+  assigners: bigint[]
+
+  // ps_delegator: serviceid
   delegator: bigint
+
+  // ps_registrar: serviceid
+  registrar: bigint
+
+  // ps_alwaysaccers: dictionary<serviceid, gas>
   alwaysaccers: Map<bigint, bigint>
-  xfers: Uint8Array[]
-  provisions: Map<bigint, Uint8Array[]>
-  yield: Uint8Array | null
 }
 
 export interface DeferredTransfer {
@@ -478,6 +388,24 @@ export interface DeferredTransfer {
   gas: bigint // DX_gas (8 bytes)
 }
 
+/**
+ * Implications type as per Gray Paper section 31.1
+ * @param id - Service ID
+ * @param state - Partial state
+ * @param nextfreeid - Next free ID
+ * @param xfers - Deferred transfers
+ * @param yield - Yield result hash (optional)
+ * @param provisions - Provisions
+ * 
+ * implications ≡ tuple{
+  im_id: serviceid,           // Service account ID
+  im_state: partialstate,     // Partial blockchain state
+  im_nextfreeid: serviceid,   // Next free service ID
+  im_xfers: defxfers,         // Deferred transfers
+  im_yield: optional<hash>,   // Yield result (optional)
+  im_provisions: protoset<tuple{serviceid, blob}> // Provisions
+} 
+ */
 export interface Implications {
   id: bigint
   state: PartialState
@@ -507,23 +435,9 @@ export interface AccumulateOutput {
   provisions: Map<bigint, Uint8Array>
 }
 
-export type AccumulateInvocationResult = AccumulateOutput | WorkError
-
-export type AccumulateContextMutator = (
-  hostCallId: bigint,
-  gasCounter: bigint,
-  registers: RegisterState,
-  ram: RAM,
-  context: ImplicationsPair,
-) =>
-  | {
-      resultCode: 'continue' | 'halt' | 'panic' | 'oog'
-      gasCounter: bigint
-      registers: RegisterState
-      ram: RAM
-      context: ImplicationsPair
-    }
-  | { resultCode: 'fault'; address: bigint }
+export type AccumulateInvocationResult =
+  | { ok: true; value: AccumulateOutput }
+  | { ok: false; err: WorkError }
 
 /**
  * Export segment structure
@@ -592,3 +506,49 @@ export const PVM_CONSTANTS = {
   MAX_OPERANDS: 4n,
   DEFAULT_INSTRUCTION_LENGTH: 1n,
 } as const
+
+/**
+ * Decoded PVM program blob components (Gray Paper: deblob function)
+ */
+export interface DecodedBlob {
+  /** Instruction data (c) */
+  code: Uint8Array
+  /** Opcode bitmask (k) - marks which bytes are opcodes */
+  bitmask: Uint8Array
+  /** Dynamic jump table (j) */
+  jumpTable: bigint[]
+  /** Jump table element size in bytes */
+  elementSize: number
+  /** Total header size (for PC offset calculations) */
+  headerSize: number
+}
+
+/**
+ * PVM constructor options
+ */
+export interface PVMOptions {
+  /** Initial program code (blob) */
+  code?: Uint8Array
+  /** Initial RAM instance */
+  ram?: RAM
+  /** Initial program counter */
+  pc?: bigint
+  /** Initial gas counter */
+  gasCounter?: bigint
+  /** Initial register state */
+  registerState?: bigint[]
+}
+
+export type ContextMutator<T> = (
+  hostCallId: bigint,
+  gasCounter: bigint,
+  registers: bigint[],
+  memory: RAM,
+  context: T,
+) => {
+  resultCode: ResultCode
+  gasCounter: bigint
+  registers: bigint[]
+  memory: RAM
+  context: T
+}

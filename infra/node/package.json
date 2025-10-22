@@ -28,6 +28,8 @@
     "@pbnj/events": "workspace:*",
     "@pbnj/audit": "workspace:*",
     "@pbnj/block-authoring": "workspace:*",
+    "@pbnj/guarantor": "workspace:*",
+    "@pbnj/assurance": "workspace:*",
     "commander": "^12.0.0",
     "@pbnj/types": "workspace:*",
     "@opentelemetry/api": "^1.7.0",

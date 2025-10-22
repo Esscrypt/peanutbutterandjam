@@ -6,15 +6,19 @@
  */
 
 import {
+  type AssuranceDistributionEvent,
+  type AuditTrancheEvent,
   type EventBusService,
   logger,
   type SafePromise,
   safeResult,
 } from '@pbnj/core'
 import {
+  AUDIT_CONSTANTS,
   BaseService,
   type IClockService,
   JAM_COMMON_ERA_START_TIME,
+  type TicketDistributionEvent,
 } from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { ValidatorSetManager } from './validator-set'
@@ -30,6 +34,8 @@ export class ClockService extends BaseService implements IClockService {
   private conectivityChangeTimer: NodeJS.Timeout | null = null
   private ticketDistributionFirstStepTimer: NodeJS.Timeout | null = null
   private ticketDistributionSecondStepTimer: NodeJS.Timeout | null = null
+  private assuranceDistributionTimer: NodeJS.Timeout | null = null
+  private auditTimer: NodeJS.Timeout | null = null
   private currentSlot = 0n
   private currentEpoch = 0n
 
@@ -76,6 +82,12 @@ export class ClockService extends BaseService implements IClockService {
     // Start slot timing
     this.startSlotTiming()
 
+    // Start assurance distribution timing
+    this.startAssuranceDistributionTiming()
+
+    //audit timing
+    this.startAuditTiming()
+
     this.setRunning(true)
     logger.info('Clock service started successfully')
 
@@ -97,6 +109,18 @@ export class ClockService extends BaseService implements IClockService {
 
     // Clear ticket distribution timers
     this.clearTicketDistributionTimers()
+
+    // Clear assurance distribution timer
+    if (this.assuranceDistributionTimer) {
+      clearTimeout(this.assuranceDistributionTimer)
+      this.assuranceDistributionTimer = null
+    }
+
+    // Clear audit timer
+    if (this.auditTimer) {
+      clearTimeout(this.auditTimer)
+      this.auditTimer = null
+    }
 
     super.stop()
     return safeResult(true)
@@ -186,6 +210,85 @@ export class ClockService extends BaseService implements IClockService {
     logger.info(
       `Started slot timing with ${this.configService.slotDuration}ms interval`,
     )
+  }
+
+  /**
+   * Start audit timing
+   * Gray Paper: Every Ctrancheseconds = 8 seconds following a new time slot
+   */
+  private startAuditTiming(): void {
+    if (this.auditTimer) {
+      clearInterval(this.auditTimer)
+    }
+
+    // Gray Paper: Ctrancheseconds = 8 seconds between audit tranches
+    const AUDIT_TRANCHE_SECONDS = 8000 // 8 seconds in milliseconds
+
+    this.auditTimer = setInterval(() => {
+      this.processAuditTranche()
+    }, AUDIT_TRANCHE_SECONDS)
+
+    logger.info(
+      `Started audit timing with ${AUDIT_TRANCHE_SECONDS}ms interval (8 seconds)`,
+    )
+  }
+
+  /**
+   * Process audit tranche
+   * Gray Paper: Calculate tranche number using n = floor((wallclock - slot_seconds * timeslot) / Ctrancheseconds)
+   */
+  private processAuditTranche(): void {
+    const now = Date.now()
+    const wallclock = now - JAM_COMMON_ERA_START_TIME
+    const slotSeconds = this.configService.slotDuration
+    const trancheSeconds = AUDIT_CONSTANTS.C_TRANCHESECONDS * 1000 // Ctrancheseconds = 8 seconds
+
+    // Gray Paper formula: n = floor((wallclock - slot_seconds * timeslot) / Ctrancheseconds)
+    const trancheNumber = Math.floor(
+      (wallclock - slotSeconds * Number(this.currentSlot)) / trancheSeconds,
+    )
+
+    const auditTrancheEvent: AuditTrancheEvent = {
+      timestamp: now,
+      slot: this.currentSlot,
+      epoch: this.currentEpoch,
+      phase: this.getCurrentPhase(),
+      trancheNumber,
+      wallclock,
+    }
+
+    this.eventBusService.emitAuditTranche(auditTrancheEvent)
+  }
+
+  /**
+   * Start assurance distribution timing
+   */
+  private startAssuranceDistributionTiming(): void {
+    if (this.assuranceDistributionTimer) {
+      clearInterval(this.assuranceDistributionTimer)
+    }
+
+    // Validators distribute assurances ~2 seconds before each slot
+    this.assuranceDistributionTimer = setInterval(() => {
+      this.processAssuranceDistribution()
+    }, this.configService.slotDuration - 2000)
+
+    logger.info(
+      `Started assurance distribution timing with ${this.configService.slotDuration}ms interval`,
+    )
+  }
+
+  /**
+   * Process assurance distribution
+   */
+  private processAssuranceDistribution(): void {
+    const assuranceDistributionEvent: AssuranceDistributionEvent = {
+      timestamp: Date.now(),
+      slot: this.currentSlot,
+      epoch: this.currentEpoch,
+      phase: this.getCurrentPhase(),
+    }
+    this.eventBusService.emitAssuranceDistribution(assuranceDistributionEvent)
   }
 
   /**
@@ -294,7 +397,7 @@ export class ClockService extends BaseService implements IClockService {
    * - First step (CE 131): max(⌊E/60⌋, 1) slots after connectivity changes
    * - Second step (CE 132): max(⌊E/20⌋, 1) slots after connectivity changes
    */
-  private scheduleTicketDistribution(_epochTransitionEvent: any): void {
+  private scheduleTicketDistribution(_epochTransitionEvent: unknown): void {
     // Clear any existing timers
     this.clearTicketDistributionTimers()
 
@@ -313,48 +416,30 @@ export class ClockService extends BaseService implements IClockService {
     const secondStepDelayMs =
       secondStepDelaySlots * this.configService.slotDuration
 
-    logger.info('Scheduling ticket distribution', {
-      firstStepDelaySlots,
-      secondStepDelaySlots,
-      firstStepDelayMs,
-      secondStepDelayMs,
-      slot: this.currentSlot.toString(),
-      epoch: this.currentEpoch.toString(),
-    })
-
     // Schedule first step (CE 131)
     this.ticketDistributionFirstStepTimer = setTimeout(() => {
-      this.eventBusService.emitTicketDistribution({
+      const firstPhaseTicketDistributionEvent: TicketDistributionEvent = {
+        epochIndex: this.currentEpoch,
+        phase: Number(this.getCurrentPhase()),
         timestamp: Date.now(),
-        slot: this.currentSlot,
-        epoch: this.currentEpoch,
-        phase: 'first-step',
-        delaySlots: BigInt(firstStepDelaySlots),
-        totalValidators: this.validatorSetManager!.getActiveValidators().size,
-      })
-      logger.info('Ticket distribution first step event emitted', {
-        slot: this.currentSlot.toString(),
-        epoch: this.currentEpoch.toString(),
-        delaySlots: firstStepDelaySlots,
-      })
+      }
+      this.eventBusService.emitFirstPhaseTicketDistribution(
+        firstPhaseTicketDistributionEvent,
+      )
       this.ticketDistributionFirstStepTimer = null
     }, firstStepDelayMs)
 
     // Schedule second step (CE 132)
     this.ticketDistributionSecondStepTimer = setTimeout(() => {
-      this.eventBusService.emitTicketDistribution({
+      const secondPhaseTicketDistributionEvent: TicketDistributionEvent = {
+        epochIndex: this.currentEpoch,
+        phase: Number(this.getCurrentPhase()),
         timestamp: Date.now(),
-        slot: this.currentSlot,
-        epoch: this.currentEpoch,
-        phase: 'second-step',
-        delaySlots: BigInt(secondStepDelaySlots),
-        totalValidators: this.validatorSetManager!.getActiveValidators().size,
-      })
-      logger.info('Ticket distribution second step event emitted', {
-        slot: this.currentSlot.toString(),
-        epoch: this.currentEpoch.toString(),
-        delaySlots: secondStepDelaySlots,
-      })
+      }
+      this.eventBusService.emitSecondPhaseTicketDistribution(
+        secondPhaseTicketDistributionEvent,
+      )
+
       this.ticketDistributionSecondStepTimer = null
     }, secondStepDelayMs)
   }

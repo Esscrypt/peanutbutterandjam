@@ -1,19 +1,17 @@
+import { banderout, generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
 import {
-  extractSealOutput,
-  generateEntropyVRFSignature,
-} from '@pbnj/bandersnatch-vrf'
-import {
+  type BlockProcessedEvent,
   blake2bHash,
-  bytesToHex,
   type EventBusService,
   hexToBytes,
   logger,
   type Safe,
   safeError,
   safeResult,
+  zeroHash,
 } from '@pbnj/core'
-import type { EpochTransitionEvent, SlotChangeEvent } from '@pbnj/events'
-import { BaseService, type BlockHeader } from '@pbnj/types'
+import type { EpochTransitionEvent } from '@pbnj/events'
+import { BaseService, type BlockHeader, type EntropyState } from '@pbnj/types'
 
 /**
  * EntropyService - Manages Gray Paper entropy tracking
@@ -22,21 +20,24 @@ import { BaseService, type BlockHeader } from '@pbnj/types'
  * Updates per block and rotates on epoch transitions
  */
 export class EntropyService extends BaseService {
-  private entropyAccumulator: Uint8Array = new Uint8Array(32).fill(0)
-  private entropy1: Uint8Array = new Uint8Array(32).fill(0) // Most recent epoch
-  private entropy2: Uint8Array = new Uint8Array(32).fill(0) // Used for validator operations
-  private entropy3: Uint8Array = new Uint8Array(32).fill(0) // Used for seal verification
-
+  private entropy: EntropyState = {
+    accumulator: zeroHash,
+    entropy1: zeroHash,
+    entropy2: zeroHash,
+    entropy3: zeroHash,
+  }
   // Event handlers
   private eventBusService: EventBusService
 
   constructor(eventBusService: EventBusService) {
     super('entropy-service')
     this.eventBusService = eventBusService
-    this.eventBusService.onSlotChange(this.handleSlotChange)
-    this.eventBusService.onEpochTransition(this.handleEpochTransition)
-    this.eventBusService.onBestBlockChanged(this.handleBestBlockChanged)
-    this.eventBusService.onFinalizedBlockChanged(
+    this.eventBusService.addBlockProcessedCallback(this.handleBlockProcessing)
+    this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
+    this.eventBusService.addBestBlockChangedCallback(
+      this.handleBestBlockChanged,
+    )
+    this.eventBusService.addFinalizedBlockChangedCallback(
       this.handleFinalizedBlockChanged,
     )
   }
@@ -48,25 +49,14 @@ export class EntropyService extends BaseService {
    * Note: This is a fallback handler for slot changes. The primary entropy updates
    * should happen via handleBestBlockChanged when actual block headers are available.
    */
-  private handleSlotChange(event: SlotChangeEvent): Safe<void> {
-    try {
-      // TODO: This handler should ideally not update entropy directly
-      // Entropy should be updated via handleBestBlockChanged with actual block headers
-      // For now, we'll skip entropy updates on slot changes without block headers
-
-      logger.debug(
-        'Slot change received, but entropy updates require block headers',
-        {
-          slot: event.slot,
-          epoch: event.epoch,
-        },
-      )
-
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error('Failed to handle slot change in entropy service', { error })
-      return safeError(error as Error)
+  private handleBlockProcessing(event: BlockProcessedEvent): Safe<void> {
+    const [updateError] = this.updateEntropyAccumulator(
+      hexToBytes(event.header.vrfSig),
+    )
+    if (updateError) {
+      return safeError(updateError)
     }
+    return safeResult(undefined)
   }
 
   /**
@@ -78,9 +68,9 @@ export class EntropyService extends BaseService {
       this.rotateEntropyHistory()
       logger.info('Entropy history rotated on epoch transition', {
         newEpoch: event.newEpoch,
-        entropy1Length: this.entropy1.length,
-        entropy2Length: this.entropy2.length,
-        entropy3Length: this.entropy3.length,
+        entropy1Length: this.entropy.entropy1,
+        entropy2Length: this.entropy.entropy2.length,
+        entropy3Length: this.entropy.entropy3.length,
       })
       return safeResult(undefined)
     } catch (error) {
@@ -97,25 +87,13 @@ export class EntropyService extends BaseService {
    * This is the PRIMARY mechanism for entropy updates per Gray Paper Eq. 174
    */
   private handleBestBlockChanged(blockHeader: BlockHeader): Safe<void> {
-    try {
-      // Extract VRF output directly from the block header
-      const vrfOutput = blockHeader.vrfSig
-      this.updateEntropyAccumulator(hexToBytes(vrfOutput))
-
-      logger.debug('Entropy accumulator updated on best block change', {
-        slot: blockHeader.timeslot,
-        authorIndex: blockHeader.authorIndex,
-        vrfSig: blockHeader.vrfSig,
-        entropyAccumulator: bytesToHex(this.entropyAccumulator),
-      })
-
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error('Failed to handle best block change in entropy service', {
-        error,
-      })
-      return safeError(error as Error)
+    const [updateError] = this.updateEntropyAccumulator(
+      hexToBytes(blockHeader.vrfSig),
+    )
+    if (updateError) {
+      return safeError(updateError)
     }
+    return safeResult(undefined)
   }
 
   /**
@@ -147,19 +125,30 @@ export class EntropyService extends BaseService {
    * Update entropy accumulator with VRF output
    * Gray Paper: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
    */
-  private updateEntropyAccumulator(vrfOutput: Uint8Array): void {
+  private updateEntropyAccumulator(vrfOutput: Uint8Array): Safe<Uint8Array> {
+    const [banderoutError, banderoutResult] = banderout(vrfOutput)
+    if (banderoutError) {
+      return safeError(banderoutError)
+    }
+    if (!banderoutResult) {
+      return safeError(new Error('Banderout result is undefined'))
+    }
+
     const combined = new Uint8Array(
-      this.entropyAccumulator.length + vrfOutput.length,
+      this.entropy.accumulator.length + banderoutResult.length,
     )
-    combined.set(this.entropyAccumulator, 0)
-    combined.set(vrfOutput, this.entropyAccumulator.length)
+
+    combined.set(hexToBytes(this.entropy.accumulator), 0)
+    combined.set(banderoutResult, 32) // 32 bytes of vrfOutput is already in banderoutResult
 
     const [hashError, hashData] = blake2bHash(combined)
     if (hashError) {
-      logger.error('Failed to hash entropy accumulator', { error: hashError })
+      return safeError(hashError)
     } else {
-      this.entropyAccumulator = hexToBytes(hashData)
+      this.entropy.accumulator = hashData
     }
+
+    return safeResult(hexToBytes(hashData))
   }
 
   /**
@@ -167,13 +156,10 @@ export class EntropyService extends BaseService {
    * Gray Paper: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2)
    */
   private rotateEntropyHistory(): void {
-    // Store current accumulator as entropy_0 before rotation
-    const entropy0 = new Uint8Array(this.entropyAccumulator)
-
     // Rotate: entropy_3 = entropy_2, entropy_2 = entropy_1, entropy_1 = entropy_0
-    this.entropy3 = new Uint8Array(this.entropy2)
-    this.entropy2 = new Uint8Array(this.entropy1)
-    this.entropy1 = entropy0
+    this.entropy.entropy3 = this.entropy.entropy2
+    this.entropy.entropy2 = this.entropy.entropy1
+    this.entropy.entropy1 = this.entropy.accumulator
   }
 
   /**
@@ -181,7 +167,7 @@ export class EntropyService extends BaseService {
    * Used for: validator set operations, core assignments, fallback seal generation
    */
   getEntropy2(): Uint8Array {
-    return new Uint8Array(this.entropy2)
+    return hexToBytes(this.entropy.entropy2)
   }
 
   /**
@@ -189,21 +175,29 @@ export class EntropyService extends BaseService {
    * Used for: seal verification, ticket condition checks
    */
   getEntropy3(): Uint8Array {
-    return new Uint8Array(this.entropy3)
+    return hexToBytes(this.entropy.entropy3)
   }
 
   /**
    * Get current entropy accumulator
    */
   getEntropyAccumulator(): Uint8Array {
-    return new Uint8Array(this.entropyAccumulator)
+    return hexToBytes(this.entropy.accumulator)
+  }
+
+  getEntropy(): EntropyState {
+    return this.entropy
+  }
+
+  setEntropy(entropy: EntropyState): void {
+    this.entropy = entropy
   }
 
   /**
    * Get entropy_1 (most recent epoch entropy)
    */
   getEntropy1(): Uint8Array {
-    return new Uint8Array(this.entropy1)
+    return hexToBytes(this.entropy.entropy1)
   }
 
   /**
@@ -221,7 +215,7 @@ export class EntropyService extends BaseService {
     sealSignature: Uint8Array,
   ): Safe<Uint8Array> {
     // Extract VRF output from seal signature using banderout function
-    const [extractError, sealOutput] = extractSealOutput(sealSignature)
+    const [extractError, sealOutput] = banderout(sealSignature)
     if (extractError) {
       return safeError(extractError)
     }

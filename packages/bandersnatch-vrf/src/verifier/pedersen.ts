@@ -5,7 +5,6 @@
  * Reference: Bandersnatch VRF specification section 3.3
  */
 
-import type { EdwardsPoint } from '@noble/curves/abstract/edwards.js'
 import {
   BANDERSNATCH_PARAMS,
   BandersnatchCurveNoble,
@@ -91,16 +90,6 @@ export class PedersenVRFVerifier {
   }
 
   /**
-   * Compare two curve points for equality
-   */
-  private static pointsEqual(
-    point1: EdwardsPoint,
-    point2: EdwardsPoint,
-  ): boolean {
-    return point1.equals(point2)
-  }
-
-  /**
    * Verify Pedersen VRF proof with provided gamma point according to bandersnatch-vrf-spec
    * Steps:
    * 1. (Y_bar, R, O_k, s, s_b) ← π
@@ -143,7 +132,7 @@ export class PedersenVRFVerifier {
       const cO = BandersnatchCurveNoble.scalarMultiply(OPoint, c)
       const leftSide = BandersnatchCurveNoble.add(O_kPoint, cO)
       const rightSide = BandersnatchCurveNoble.scalarMultiply(IPoint, sScalar)
-      const theta0 = this.pointsEqual(leftSide, rightSide)
+      const theta0 = leftSide.equals(rightSide)
 
       // Step 4: Verify key commitment: R + c·Y_bar = s·G + s_b·B
       const cY_bar = BandersnatchCurveNoble.scalarMultiply(Y_barPoint, c)
@@ -157,7 +146,7 @@ export class PedersenVRFVerifier {
       const sG = BandersnatchCurveNoble.scalarMultiply(G, sScalar)
       const s_bB = BandersnatchCurveNoble.scalarMultiply(B, s_bScalar)
       const rightSideKey = BandersnatchCurveNoble.add(sG, s_bB)
-      const theta1 = this.pointsEqual(leftSideKey, rightSideKey)
+      const theta1 = leftSideKey.equals(rightSideKey)
 
       // Step 5: Final result
       const isValid = theta0 && theta1

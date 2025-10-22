@@ -10,7 +10,6 @@ export type {
   EncodedData,
   ErasureCoder,
   ErasureCodingParams,
-  ErasureCodingValidationResult,
   FieldElement,
   Polynomial,
 } from '@pbnj/types'

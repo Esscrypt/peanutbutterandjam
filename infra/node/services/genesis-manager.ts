@@ -13,7 +13,7 @@ import type {
   GenesisJson,
   Hex,
 } from '@pbnj/core'
-import { type Safe, type SafePromise, safeError, safeResult } from '@pbnj/core'
+import { type Safe, safeError, safeResult } from '@pbnj/core'
 import {
   loadChainSpec,
   loadGenesisHeaderAndComputeHash,
@@ -37,9 +37,6 @@ import { BaseService } from '@pbnj/types'
  * Implements BaseService for integration with the main service.
  */
 export class NodeGenesisManager extends BaseService {
-  private readonly chainSpecPath: string
-  private readonly genesisJsonPath?: string
-  private readonly genesisHeaderPath?: string
   private readonly config: IConfigService
   private genesisBlockHeader: BlockHeader | null = null
   private parsedBootnodes: ParsedBootnode[] = []
@@ -49,74 +46,64 @@ export class NodeGenesisManager extends BaseService {
   private genesisBlockHeaderHash: Hex | null = null
   constructor(
     config: IConfigService,
-    chainSpecPath: string,
     options?: {
+      chainSpecPath?: string
       genesisJsonPath?: string
       genesisHeaderPath?: string
     },
   ) {
     super('genesis-manager')
     this.config = config
-    this.chainSpecPath = chainSpecPath
-    this.genesisJsonPath = options?.genesisJsonPath
-    this.genesisHeaderPath = options?.genesisHeaderPath
     this.genesisBlockHeader = null
     this.chainSpecJson = null
     this.genesisJson = null
     this.parsedBootnodes = []
     this.genesisBlockHeaderHash = null
-  }
-
-  /**
-   * Start the genesis manager service and load genesis state
-   */
-  async start(): SafePromise<boolean> {
-    super.start()
 
     // Load chain spec (required)
-    if (!existsSync(this.chainSpecPath)) {
-      return safeError(
-        new Error(`Chain spec file not found: ${this.chainSpecPath}`),
+    if (options?.chainSpecPath) {
+      if (!existsSync(options.chainSpecPath)) {
+        throw new Error(`Chain spec file not found: ${options.chainSpecPath}`)
+      }
+
+      const [chainSpecError, chainSpecResult] = loadChainSpec(
+        options?.chainSpecPath,
       )
+      if (chainSpecError) {
+        throw new Error('Failed to load chain spec')
+      }
+      this.chainSpecJson = chainSpecResult
     }
-
-    const [chainSpecError, chainSpecResult] = await loadChainSpec(
-      this.chainSpecPath,
-    )
-    if (chainSpecError) {
-      return safeError(chainSpecError)
-    }
-    this.chainSpecJson = chainSpecResult
-
-    // Optionally load genesis.json
-    if (this.genesisJsonPath && existsSync(this.genesisJsonPath)) {
-      const [genesisJsonError, genesisJsonResult] = await loadGenesisJson(
-        this.genesisJsonPath,
+    if (options?.genesisJsonPath) {
+      if (!existsSync(options.genesisJsonPath)) {
+        throw new Error(
+          `Genesis json file not found: ${options.genesisJsonPath}`,
+        )
+      }
+      const [genesisJsonError, genesisJsonResult] = loadGenesisJson(
+        options.genesisJsonPath,
       )
       if (genesisJsonError) {
-        return safeError(genesisJsonError)
+        throw new Error('Failed to load genesis json')
       }
       this.genesisJson = genesisJsonResult
-
-      console.log(`📁 Loading genesis.json from ${this.genesisJsonPath}`)
-      console.log('✅ Genesis JSON loaded successfully')
     }
+    if (options?.genesisHeaderPath) {
+      if (!existsSync(options.genesisHeaderPath)) {
+        throw new Error(
+          `Genesis header file not found: ${options.genesisHeaderPath}`,
+        )
+      }
 
-    // Optionally load genesis-header.json
-    if (this.genesisHeaderPath && existsSync(this.genesisHeaderPath)) {
-      console.log(
-        `📁 Loading genesis-header.json from ${this.genesisHeaderPath}`,
-      )
-      const [headerError, headerResult] = await loadGenesisHeaderAndComputeHash(
-        this.genesisHeaderPath,
+      const [headerError, headerResult] = loadGenesisHeaderAndComputeHash(
+        options.genesisHeaderPath,
         this.config,
       )
       if (headerError) {
-        return safeError(headerError)
+        throw new Error('Failed to load genesis header')
       }
       this.genesisBlockHeader = headerResult.genesisHeader
       this.genesisBlockHeaderHash = headerResult.genesisHash
-      console.log('✅ Genesis Header loaded successfully')
     }
 
     // Extract bootnodes from chain spec
@@ -128,8 +115,6 @@ export class NodeGenesisManager extends BaseService {
         ) || []
       console.log(`📡 Parsed bootnodes: ${this.parsedBootnodes.length}`)
     }
-
-    return safeResult(true)
   }
 
   getState(): Safe<GenesisHeaderState> {
