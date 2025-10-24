@@ -23,6 +23,15 @@ export class ADD_32Instruction extends BaseInstruction {
 
     const valueA = this.getRegisterValueAs32(context.registers, registerA)
     const valueB = this.getRegisterValueAs32(context.registers, registerB)
+
+    console.log('Executing ADD_32 instruction', {
+      registerD,
+      registerA,
+      registerB,
+      valueA,
+      valueB,
+    })
+
     const sum = (valueA + valueB) & 0xffffffffn
     const result = this.signExtend(sum, 4)
 
@@ -36,7 +45,7 @@ export class ADD_32Instruction extends BaseInstruction {
     })
 
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -81,7 +90,7 @@ export class SUB_32Instruction extends BaseInstruction {
       registerD,
       BigInt(result),
     )
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -126,7 +135,7 @@ export class MUL_32Instruction extends BaseInstruction {
       registerD,
       BigInt(result),
     )
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -178,7 +187,7 @@ export class DIV_U_32Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -243,7 +252,7 @@ export class DIV_S_32Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -286,7 +295,7 @@ export class REM_U_32Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -345,7 +354,7 @@ export class REM_S_32Instruction extends BaseInstruction {
     }
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

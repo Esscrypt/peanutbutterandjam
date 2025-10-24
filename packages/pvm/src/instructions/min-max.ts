@@ -32,7 +32,7 @@ export class MINInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -72,7 +72,7 @@ export class MIN_UInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -114,7 +114,7 @@ export class MAXInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -154,7 +154,7 @@ export class MAX_UInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

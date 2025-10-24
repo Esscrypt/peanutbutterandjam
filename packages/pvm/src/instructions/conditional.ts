@@ -29,7 +29,7 @@ export class CMOV_IZ_IMMInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -68,7 +68,7 @@ export class CMOV_NZ_IMMInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

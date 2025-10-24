@@ -40,16 +40,10 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
       registerValue: context.registers[registerA],
     })
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${immediate}`
-  }
 }
 
 /**
@@ -70,14 +64,25 @@ export class STORE_IMM_U8Instruction extends BaseInstruction {
       context.fskip,
     )
 
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     // mem'[immed_X] = immed_Y mod 2^8
-    const value = Number(immediateY & 0xffn)
-    const [error] = context.ram.writeOctets(immediateX, new Uint8Array([value]))
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const value = immediateY & 0xffn
+
+    console.log('STORE_IMM_U8: Writing value to memory', {
+      immediateX,
+      value,
+    })
+    if (immediateX < 65536n) {
+      console.log('STORE_IMM_U8: Address < 2^16, returning PANIC')
+      return { resultCode: RESULT_CODES.PANIC }
     }
 
-    context.gas -= 1n
+    const faultAddress = context.ram.writeOctets(immediateX, this.bigIntToBytesLE(value, 1))
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
+    }
+
     return { resultCode: null }
   }
 }
@@ -100,17 +105,18 @@ export class STORE_IMM_U16Instruction extends BaseInstruction {
       context.fskip,
     )
 
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     // mem'[immed_X:2] = encode[2](immed_Y mod 2^16)
     const value = immediateY & 0xffffn
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       this.bigIntToBytesLE(value, 2),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 }
@@ -133,17 +139,18 @@ export class STORE_IMM_U32Instruction extends BaseInstruction {
       context.fskip,
     )
 
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     // mem'[immed_X:4] = encode[4](immed_Y mod 2^32)
     const value = immediateY & 0xffffffffn
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       this.bigIntToBytesLE(value, 4),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 }
@@ -166,17 +173,18 @@ export class STORE_IMM_U64Instruction extends BaseInstruction {
       context.fskip,
     )
 
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     // mem'[immed_X:8] = encode[8](immed_Y)
     // No modulo for U64 - use full 64-bit value
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       this.bigIntToBytesLE(immediateY, 8),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 }
@@ -211,7 +219,6 @@ export class LOAD_IMMInstruction extends BaseInstruction {
     })
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
@@ -242,15 +249,18 @@ export class LOAD_U8Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_U8 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 1n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 1n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
     }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
+    }
+
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
@@ -282,24 +292,23 @@ export class LOAD_I8Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_I8 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 1n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 1n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
     }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
+    }
+
     const value = this.signExtend(this.bytesToBigIntLE(bytes), 1)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
+
 }
 
 /**
@@ -322,24 +331,22 @@ export class LOAD_U16Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_U16 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 2n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 2n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
     }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
+    }
+
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
 }
 
 /**
@@ -362,24 +369,21 @@ export class LOAD_I16Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_I16 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 2n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 2n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+    }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
     }
     const value = this.signExtend(this.bytesToBigIntLE(bytes), 2)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
 }
 
 /**
@@ -402,23 +406,20 @@ export class LOAD_U32Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_U32 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 4n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 4n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
     }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
+    }
+
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
   }
 }
 
@@ -442,23 +443,16 @@ export class LOAD_I32Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_I32 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 4n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 4n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+    }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
     }
     const value = this.signExtend(this.bytesToBigIntLE(bytes), 4)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
-
-    // Mutate context directly
-    context.gas -= 1n
-
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
   }
 }
 
@@ -482,9 +476,12 @@ export class LOAD_U64Instruction extends BaseInstruction {
 
     logger.debug('Executing LOAD_U64 instruction', { registerA, immediateX })
 
-    const [error, bytes] = context.ram.readOctets(immediateX, 8n)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const [bytes, faultAddress] = context.ram.readOctets(immediateX, 8n)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+    }
+    if (!bytes) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: immediateX, details: 'Memory not readable' } }
     }
     this.setRegisterValueWith64BitResult(
       context.registers,
@@ -493,15 +490,8 @@ export class LOAD_U64Instruction extends BaseInstruction {
     )
 
     // Mutate context directly
-    context.gas -= 1n
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
   }
 }
 
@@ -518,6 +508,8 @@ export class STORE_U8Instruction extends BaseInstruction {
   readonly description = 'Store unsigned 8-bit to memory'
 
   execute(context: InstructionContext): InstructionResult {
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     const { registerA, immediateX } = this.parseOneRegisterAndImmediate(
       context.instruction.operands,
       context.fskip,
@@ -531,23 +523,17 @@ export class STORE_U8Instruction extends BaseInstruction {
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       new Uint8Array([Number(value)]),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
 }
 
 /**
@@ -576,23 +562,17 @@ export class STORE_U16Instruction extends BaseInstruction {
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       this.bigIntToBytesLE(value, 2),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
 }
 
 /**
@@ -619,23 +599,17 @@ export class STORE_U32Instruction extends BaseInstruction {
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       address,
       this.bigIntToBytesLE(value, 4),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
-  }
 }
 
 /**
@@ -657,28 +631,21 @@ export class STORE_U64Instruction extends BaseInstruction {
     )
     const value = this.getRegisterValueAs64(context.registers, registerA)
 
-    logger.debug('Executing STORE_U64 instruction', {
+    console.log('Executing STORE_U64 instruction', {
       registerA,
       immediateX,
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       immediateX,
       this.bigIntToBytesLE(value, 8),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const address = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${address}`
   }
 }
 
@@ -696,44 +663,42 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
     'Store immediate to register + immediate address (8-bit)'
 
   execute(context: InstructionContext): InstructionResult {
-    console.log('STORE_IMM_IND_U8: Starting execution')
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     const { registerA, immediateX, immediateY } =
       this.parseRegisterAndTwoImmediates(
         context.instruction.operands,
         context.fskip,
       )
-    console.log('STORE_IMM_IND_U8: Parsed values', { registerA, immediateX })
-
     const registerAValue = this.getRegisterValueAs64(
       context.registers,
       registerA,
     )
-    // For test vectors: memwr[reg_A] = immed_X (no offset)
     const address = registerAValue + immediateX
+
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
+
     const value = immediateY & 0xffn
 
-    console.log('STORE_IMM_IND_U8: Address calculation', {
-      registerAValue,
-      address,
-      value,
-    })
-
-    logger.debug('Executing STORE_IMM_IND_U8 instruction', {
+    console.log('Executing STORE_IMM_IND_U8 instruction', {
       registerA,
       registerAValue,
       address,
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       address,
       this.bigIntToBytesLE(value, 1),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 }
@@ -746,12 +711,18 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
  * mem'[reg_A + immed_X:2] = encode[2](immed_Y mod 2^16)
  */
 export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
+  // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
   readonly opcode = OPCODES.STORE_IMM_IND_U16
   readonly name = 'STORE_IMM_IND_U16'
   readonly description =
     'Store immediate to register + immediate address (16-bit)'
 
   execute(context: InstructionContext): InstructionResult {
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+    console.log('STORE_IMM_IND_U16: Starting execution', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+    })
     const { registerA, immediateX, immediateY } =
       this.parseRegisterAndTwoImmediates(
         context.instruction.operands,
@@ -764,25 +735,32 @@ export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
     )
     const address = registerAValue + immediateX
 
+    console.log('STORE_IMM_IND_U16: Address calculation', {
+      registerA,
+      registerAValue,
+      immediateX,
+      address,
+    })
+
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      console.log('STORE_IMM_IND_U16: Address < 2^16, returning PANIC')
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
+
     // mem'[reg_A + immed_X] = immed_Y mod 2^16
     const value = immediateY & 0xffffn
 
-    logger.debug('Executing STORE_IMM_IND_U16 instruction', {
-      registerA,
-      registerAValue,
-      address,
-      value,
-    })
-
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       address,
       this.bigIntToBytesLE(value, 2),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      console.log('STORE_IMM_IND_U16: Memory write error, returning FAULT')
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 
@@ -808,6 +786,8 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
     'Store immediate to register + immediate address (32-bit)'
 
   execute(context: InstructionContext): InstructionResult {
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     // Format: [register, valueBytes...]
     const { registerA, immediateX, immediateY } =
       this.parseRegisterAndTwoImmediates(
@@ -821,6 +801,11 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
     )
     const address = registerAValue + immediateX
 
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
     // mem'[reg_A + immed_X] = immed_Y mod 2^32
     const value = immediateY & 0xffffffffn
 
@@ -830,15 +815,14 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
       value,
     })
 
-    const [error] = context.ram.writeOctets(
+    const faultAddress = context.ram.writeOctets(
       address,
       this.bigIntToBytesLE(value, 4),
     )
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 
@@ -864,18 +848,13 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
     'Store immediate to register + immediate address (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
-    // Format: [register, valueBytes...]
-    console.log('STORE_IMM_IND_U64: Starting execution')
+    // Consume gas first (Gray Paper: gas is always charged when execution is attempted)
+
     const { registerA, immediateX, immediateY } =
       this.parseRegisterAndTwoImmediates(
         context.instruction.operands,
         context.fskip,
       )
-    console.log('STORE_IMM_IND_U64: Parsed values', {
-      registerA,
-      immediateX,
-      immediateY,
-    })
 
     const registerAValue = this.getRegisterValueAs64(
       context.registers,
@@ -883,15 +862,14 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
     )
     const address = registerAValue + immediateX
 
+    // Check memory access - addresses < 2^16 cause PANIC
+    if (address < 65536n) {
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
+
     // mem'[reg_A + immed_X] = immed_Y mod 2^64
     const value = immediateY & 0xffffffffffffffffn
-
-    console.log('STORE_IMM_IND_U64: Address calculation', {
-      registerAValue,
-      immediateX,
-      address,
-      value,
-    })
 
     logger.debug('Executing STORE_IMM_IND_U64 instruction', {
       registerA,
@@ -903,15 +881,11 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
     })
 
     const bytes = this.bigIntToBytesLE(value, 8)
-    console.log('STORE_IMM_IND_U64: Writing bytes', {
-      bytes: Array.from(bytes),
-    })
-    const [error] = context.ram.writeOctets(address, bytes)
-    if (error) {
-      return { resultCode: RESULT_CODES.FAULT }
+    const faultAddress = context.ram.writeOctets(address, bytes)
+    if (faultAddress) {
+      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
     }
 
-    context.gas -= 1n
     return { resultCode: null }
   }
 

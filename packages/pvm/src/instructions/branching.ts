@@ -27,13 +27,26 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
       registerA,
     )
 
+  console.log('Executing BRANCH_EQ_IMM instruction', {
+    bitmask: context.bitmask,
+    opcode: this.opcode,
+    name: this.name,
+    description: this.description,
+    operands: context.instruction.operands,
+    pc: context.pc,
+    registers: context.registers,
+    registerA,
+    immediateX,
+    targetAddress: targetAddress.toString(),
+    registerValue: registerValue.toString(),
+  })
     // Branch if register equals immediate
     if (registerValue === immediateX) {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -70,7 +83,7 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -105,7 +118,7 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -140,7 +153,7 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -176,7 +189,7 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -212,7 +225,7 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -249,7 +262,7 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
   disassemble(operands: Uint8Array): string {
@@ -285,7 +298,7 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -323,7 +336,7 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -361,7 +374,7 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -407,7 +420,7 @@ export class BRANCH_EQInstruction extends BaseInstruction {
     }
     // else: not branching - PVM will advance PC normally
 
-    context.gas -= 1n
+    
     return { resultCode: null }
   }
 
@@ -445,7 +458,7 @@ export class BRANCH_NEInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -484,7 +497,7 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -523,7 +536,7 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -563,7 +576,7 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -603,7 +616,7 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
       context.pc = targetAddress
     }
     // else: not branching - PVM will advance PC normally
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

@@ -5,7 +5,6 @@
  * Reference: graypaper/text/pvm.tex
  */
 
-import type { Safe } from '@pbnj/core'
 import type { Hex } from 'viem'
 import type { OperandTuple, ServiceAccount, WorkPackage } from './serialization'
 
@@ -43,16 +42,16 @@ export type MemoryAccessType = 'none' | 'read' | 'write' | 'read+write'
  */
 export interface RAM {
   /** Read multiple consecutive bytes from memory */
-  readOctets(address: bigint, count: bigint): Safe<Uint8Array>
+  readOctets(address: bigint, count: bigint): [Uint8Array | null, bigint | null]
 
   /** Write multiple consecutive bytes to memory */
-  writeOctets(address: bigint, values: Uint8Array): Safe<void>
+  writeOctets(address: bigint, values: Uint8Array): bigint | null
 
   /** Check if an address range is readable */
-  isReadable(address: bigint, size?: bigint): boolean
+  isReadableWithFault(address: bigint, size?: bigint): [boolean, bigint | null]
 
   /** Check if an address range is writable */
-  isWritable(address: bigint, size?: bigint): boolean
+  isWritableWithFault(address: bigint, size?: bigint): [boolean, bigint | null]
 
   /** Initialize a memory page (for test vectors) */
   initializePage(
@@ -130,8 +129,8 @@ export interface PVMState {
   ram: RAM // µ: RAM
   gasCounter: bigint // Gas counter as specified in Gray Paper
   jumpTable: bigint[] // j: jump table for dynamic jumps (Gray Paper)
-  instructionData?: Uint8Array // Raw instruction data
-  instructions?: PVMInstruction[] // Parsed instructions
+  code: Uint8Array // c: code
+  bitmask: Uint8Array // k: opcode bitmask
 }
 
 export interface ProgramBlob {
@@ -144,7 +143,6 @@ export interface PVMInstruction {
   opcode: bigint
   operands: Uint8Array
   fskip: number
-  jumpTable: bigint[]
 }
 
 /**
@@ -158,6 +156,8 @@ export interface InstructionContext {
   pc: bigint // instruction pointer
   gas: bigint // gas counter
   jumpTable: bigint[] // jump table for dynamic jumps
+  code: Uint8Array // code
+  bitmask: Uint8Array // opcode bitmask
   fskip: number
 }
 

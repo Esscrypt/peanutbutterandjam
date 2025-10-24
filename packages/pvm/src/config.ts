@@ -509,3 +509,59 @@ export const ACCUMULATE_ERROR_CODES = {
   HUH: 2n ** 64n - 9n, // The item is already solicited, cannot be forgotten or the operation is invalid due to privilege level
   OK: 0n, // The return value indicating general success
 } as const
+
+/**
+ * Set of basic block termination opcodes according to Gray Paper
+ *
+ * Gray Paper section 7.2 defines the following as termination instructions:
+ * - Trap and fallthrough: trap, fallthrough
+ * - Jumps: jump, jump_ind
+ * - Load-and-Jumps: load_imm_jump, load_imm_jump_ind
+ * - Branches: branch_eq, branch_ne, branch_ge_u, branch_ge_s, branch_lt_u, branch_lt_s, branch_eq_imm, branch_ne_imm
+ * - Immediate branches: branch_lt_u_imm, branch_lt_s_imm, branch_le_u_imm, branch_le_s_imm, branch_ge_u_imm, branch_ge_s_imm, branch_gt_u_imm, branch_gt_s_imm
+ */
+export const TERMINATION_OPCODES = new Set<bigint>([
+  // Trap and fallthrough
+  OPCODES.TRAP,
+  OPCODES.FALLTHROUGH,
+
+  // Jumps
+  OPCODES.JUMP,
+  OPCODES.JUMP_IND,
+
+  // Load-and-Jumps
+  OPCODES.LOAD_IMM_JUMP,
+  OPCODES.LOAD_IMM_JUMP_IND,
+
+  // Branches (register-based)
+  OPCODES.BRANCH_EQ,
+  OPCODES.BRANCH_NE,
+  OPCODES.BRANCH_LT_U,
+  OPCODES.BRANCH_LT_S,
+  OPCODES.BRANCH_GE_U,
+  OPCODES.BRANCH_GE_S,
+
+  // Branches (immediate-based)
+  OPCODES.BRANCH_EQ_IMM,
+  OPCODES.BRANCH_NE_IMM,
+
+  // Immediate branches
+  OPCODES.BRANCH_LT_U_IMM,
+  OPCODES.BRANCH_LE_U_IMM,
+  OPCODES.BRANCH_GE_U_IMM,
+  OPCODES.BRANCH_GT_U_IMM,
+  OPCODES.BRANCH_LT_S_IMM,
+  OPCODES.BRANCH_LE_S_IMM,
+  OPCODES.BRANCH_GE_S_IMM,
+  OPCODES.BRANCH_GT_S_IMM,
+])
+
+/**
+ * Check if an opcode is a basic block termination instruction
+ *
+ * @param opcode - The opcode to check
+ * @returns true if the opcode is a termination instruction
+ */
+export function isTerminationInstruction(opcode: bigint): boolean {
+  return TERMINATION_OPCODES.has(opcode)
+}

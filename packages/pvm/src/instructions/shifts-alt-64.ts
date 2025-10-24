@@ -30,7 +30,7 @@ export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -70,7 +70,7 @@ export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -115,7 +115,7 @@ export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

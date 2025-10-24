@@ -26,7 +26,7 @@ export class ANDInstruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -62,7 +62,7 @@ export class XORInstruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -98,7 +98,7 @@ export class ORInstruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

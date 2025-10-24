@@ -26,7 +26,7 @@ export class MOVE_REGInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, value)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -59,7 +59,7 @@ export class SBRKInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, allocatedAddress)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -101,7 +101,7 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -144,7 +144,7 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -189,7 +189,7 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -235,7 +235,7 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -280,7 +280,7 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -326,7 +326,7 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -364,7 +364,7 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, extendedValue)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -403,7 +403,7 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, extendedValue)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -439,7 +439,7 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, value)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -480,7 +480,7 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, reversed)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

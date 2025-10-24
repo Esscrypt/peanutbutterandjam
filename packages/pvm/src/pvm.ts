@@ -20,7 +20,6 @@ import { GAS_CONFIG, INIT_CONFIG, RESULT_CODES } from './config'
 import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
 import { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
-import { PVMParser } from './parser'
 import { PVMRAM } from './ram'
 
 /**
@@ -31,7 +30,6 @@ import { PVMRAM } from './ram'
 export class PVM {
   protected state: PVMState
   protected readonly registry: InstructionRegistry
-  protected readonly parser: PVMParser
   protected readonly hostFunctionRegistry: HostFunctionRegistry
   protected readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   protected currentAccumulateContext?: ImplicationsPair
@@ -43,9 +41,6 @@ export class PVM {
     this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry()
     this.registry = new InstructionRegistry()
 
-    // Initialize parser with registry
-    this.parser = new PVMParser(this.registry)
-
     // Initialize state with options
     this.state = {
       resultCode: null,
@@ -54,6 +49,8 @@ export class PVM {
       ram: options.ram ?? new PVMRAM(),
       gasCounter: options.gasCounter ?? GAS_CONFIG.DEFAULT_GAS_LIMIT,
       jumpTable: [], // Jump table for dynamic jumps
+      code: new Uint8Array(0), // code
+      bitmask: new Uint8Array(0), // opcode bitmask
     }
   }
 
@@ -189,6 +186,9 @@ export class PVM {
     // Execute instruction (Ψ₁) - gas consumption handled by instruction itself
     const resultCode = this.executeInstruction(instruction)
 
+    // Consume 1 gas for each instruction
+    this.state.gasCounter -= 1n
+
     if (resultCode === RESULT_CODES.HOST) {
       // Extract host call ID from registers (typically r0 or r1)
       const hostCallId = this.state.registerState[0] // Assuming host call ID is in r0
@@ -199,13 +199,13 @@ export class PVM {
         ram: this.state.ram,
       }
       // Call context mutator to handle the host call
-      const mutatorResult = await this.hostFunctionRegistry
-        .get(hostCallId)
-        ?.execute(context)
+      const hostFunction = this.hostFunctionRegistry.get(hostCallId)
 
-      if (!mutatorResult) {
+      if (!hostFunction) {
         return RESULT_CODES.PANIC
       }
+
+      const mutatorResult = await hostFunction.execute(context)
 
       this.state.gasCounter = context.gasCounter
       this.state.registerState = context.registers
@@ -217,14 +217,7 @@ export class PVM {
       }
     }
 
-    // Handle result codes
-    if (resultCode !== null) {
-      this.state.resultCode = resultCode
-      return resultCode
-    }
-
-    // Continue execution
-    return null
+    return resultCode
   }
 
   /**
@@ -271,6 +264,7 @@ export class PVM {
 
     const { code, bitmask, jumpTable } = decoded.value
 
+    this.state.jumpTable = jumpTable
     // Gray Paper pvm.tex equation: ζ ≡ c ⌢ [0, 0, . . . ]
     // Append 16 zeros to ensure no out-of-bounds access and trap behavior
     // This implements the infinite sequence of zeros as specified in the Gray Paper
@@ -284,8 +278,11 @@ export class PVM {
     extendedBitmask.set(bitmask)
     extendedBitmask.fill(1, bitmask.length) // Fill remaining positions with 1s
 
+    this.state.code = extendedCode
+    this.state.bitmask = extendedBitmask
+
     let resultCode: ResultCode | null = null
-    while (!resultCode) {
+    while (resultCode === null) {
       const instructionIndex = Number(this.state.instructionPointer)
       const opcode = extendedCode[instructionIndex]
 
@@ -304,11 +301,16 @@ export class PVM {
         opcode: BigInt(opcode),
         operands,
         fskip,
-        jumpTable: jumpTable,
       }
 
       resultCode = await this.step(instruction)
+      console.log('PVM.run: Result code', {
+        resultCode,
+        gas: this.state.gasCounter.toString(),
+        pc: this.state.instructionPointer.toString(),
+      })
     }
+
     this.state.resultCode = resultCode
     return resultCode
   }
@@ -324,6 +326,14 @@ export class PVM {
       return RESULT_CODES.PANIC
     }
 
+    console.log('PVM.executeInstruction: Executing instruction', {
+      handler: handler.name,
+      operands: Array.from(instruction.operands),
+      gasBefore: this.state.gasCounter.toString(),
+      pc: this.state.instructionPointer.toString(),
+      fskip: instruction.fskip,
+    })
+
     try {
       // Save PC before execution
       const pcBefore = this.state.instructionPointer
@@ -335,8 +345,10 @@ export class PVM {
         ram: this.state.ram,
         gas: this.state.gasCounter,
         pc: this.state.instructionPointer,
-        jumpTable: this.state.jumpTable,
+        jumpTable: this.state.jumpTable, // j
         fskip: instruction.fskip,
+        bitmask: this.state.bitmask, // k
+        code: this.state.code, // c
       }
 
       // Execute instruction (mutates context)
@@ -344,7 +356,7 @@ export class PVM {
 
       // Context was mutated - sync back to state
       // (registers/ram/callStack are already references, so already synced)
-      this.state.gasCounter = context.gas
+      // this.state.gasCounter = context.gas
 
       // Check result code BEFORE advancing PC
       if (result.resultCode !== null) {
@@ -367,7 +379,7 @@ export class PVM {
       }
 
       // Return null to continue execution
-      return null
+      return result.resultCode
     } catch (error) {
       logger.error('Instruction execution exception', {
         instruction: handler.name,
@@ -390,6 +402,8 @@ export class PVM {
       ram: new PVMRAM(),
       gasCounter: GAS_CONFIG.DEFAULT_GAS_LIMIT,
       jumpTable: [],
+      code: new Uint8Array(0),
+      bitmask: new Uint8Array(0),
     }
   }
 

@@ -53,7 +53,7 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -94,7 +94,7 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
     )
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -139,7 +139,7 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -182,7 +182,7 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

@@ -40,7 +40,7 @@ export class ECALLIInstruction extends BaseInstruction {
     logger.debug('Executing ECALLI instruction', { hostCallId })
 
     // Consume gas
-    context.gas -= 1n
+    
 
     context.registers[0] = hostCallId
 

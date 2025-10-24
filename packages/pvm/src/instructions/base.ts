@@ -72,7 +72,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    * Gray Paper: l_X = min(4, (operands[0] >> 4) & 0x07)
    */
   protected getImmediateLengthX(operands: Uint8Array): number {
-    return Math.min(4, Math.floor((operands[1] >> 4) & 0x07))
+    return Math.min(4, Math.floor((operands[0] >> 4) & 0x07))
   }
 
   /**
@@ -329,71 +329,6 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     return { registerA, registerB, lengthX, immediateX }
   }
 
-  protected parseTwoRegistersAndImmediateUnsigned(
-    operands: Uint8Array,
-    fskip: number,
-  ): {
-    registerA: RegisterIndex
-    registerB: RegisterIndex
-    lengthX: number
-    immediateX: bigint
-  } {
-    // r_A from low 4 bits, r_B from high 4 bits
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-
-    // l_X = min(4, max(0, ℓ - 1))
-    const lengthX = Math.min(4, Math.max(0, fskip - 1))
-
-    // immed_X starts at operands[1], unsigned
-    const immediateX = this.getImmediateValueUnsigned(operands, 1, lengthX)
-
-    return { registerA, registerB, lengthX, immediateX }
-  }
-  /**
-   * Get operand length for two registers and one immediate instructions
-   * Gray Paper pvm.tex §7.4.9: Total length = 1 (packed registers) + l_X
-   * Where: l_X = min(4, max(0, ℓ - 1))
-   */
-  protected getTwoRegistersAndImmediateOperandLength(
-    operands: Uint8Array,
-    _skip = 4,
-  ): number {
-    const lengthX = this.getImmediateLengthXFromHighBits(operands)
-    return 1 + lengthX
-  }
-
-  protected getOneRegisterAndImmediateOperandLength(
-    operands: Uint8Array,
-    _skip = 4,
-  ): number {
-    const lengthX = this.getImmediateLengthX(operands)
-    return 1 + lengthX
-  }
-
-  /**
-   * Get operand length for branch instructions (One Register, One Immediate, One Offset)
-   * Gray Paper pvm.tex §7.4.7: Opcodes 80-90
-   *
-   * Operand format (lines 386-395):
-   * - operands[0]: r_A (low 4 bits) + l_X encoding (bits 4-6)
-   * - operands[1:1+l_X]: immed_X
-   * - operands[1+l_X:1+l_X+l_Y]: offset
-   *
-   * Where:
-   * - l_X = min(4, floor(operands[0] / 16) mod 8)
-   * - l_Y = min(4, max(0, ℓ - l_X - 1))
-   *
-   * Total length = 1 + l_X + l_Y
-   */
-  protected getTwoImmediatesOperandLength(
-    operands: Uint8Array,
-    skip = 4,
-  ): number {
-    const lengthX = this.getImmediateLengthX(operands)
-    const lengthY = Math.min(4, Math.max(0, skip - lengthX - 1))
-    return 1 + lengthX + lengthY
-  }
 
   /**
    * Parse branch instruction operands (One Register, One Immediate, One Offset)
@@ -550,7 +485,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     length?: number,
   ): bigint {
     // Determine how many bytes to read
-    const bytesToRead = length || Math.min(4, operands.length - startIndex)
+    const bytesToRead = length ?? Math.min(4, operands.length - startIndex)
     const end = Math.min(operands.length, startIndex + bytesToRead)
 
     if (end <= startIndex) return 0n

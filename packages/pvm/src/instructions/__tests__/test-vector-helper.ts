@@ -15,8 +15,9 @@ import { PVMRAM } from '../../ram'
  * Parse JSON with all numbers as strings to avoid precision loss
  * Wraps all numeric values in quotes before parsing
  */
-function parseJsonSafe(jsonString: string): unknown {
-  // Wrap all numbers in quotes: matches numbers after [, : or at start, followed by , } or ]
+export function parseJsonSafe(jsonString: string): unknown {
+  // Wrap all numbers in quotes to avoid precision loss
+  // Handle both integers and large numbers that might lose precision
   const quoted = jsonString.replace(/(\[|:)?(\d+)([,}\]])/g, '$1"$2"$3')
   return JSON.parse(quoted)
 }
@@ -116,7 +117,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
 }> {
     // Create PVM instance
   const registry = new InstructionRegistry()
-  const parser = new PVMParser(registry)
+  const parser = new PVMParser()
 
   // Parse the program using PVM's parser (which has the instruction registry)
   const programBytes = testVector.program.map(v => Number(v))
@@ -163,7 +164,8 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   const options: PVMOptions = {
     pc: BigInt(testVector['initial-pc']),
     gasCounter: BigInt(testVector['initial-gas']),
-    registerState: testVector['initial-regs'].map(v => BigInt(v)),
+    // gasCounter: 10n,
+    registerState: testVector['initial-regs'].map(v => BigInt(String(v))),
     ram: ram,
   }
   const pvm = new PVM(options);
@@ -172,29 +174,12 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   // Run program
   const resultCode = await pvm.run(programBlob)
 
-  logger.info('Final state after execution', {
-    pc: pvm.getState().instructionPointer.toString(),
-    gas: pvm.getState().gasCounter.toString(),
-    resultCode,
-    r7: pvm.getState().registerState[7].toString(),
-    r8: pvm.getState().registerState[8].toString(),
-    r9: pvm.getState().registerState[9].toString(),
-  })
-
   // Extract final registers as bigint array for comparison
   const finalRegisters: bigint[] = new Array(13)
   for (let i = 0; i < 13; i++) {
     finalRegisters[i] = pvm.getState().registerState[i]
   }
 
-  logger.debug(`Final state after execution`, {
-    pc: pvm.getState().instructionPointer.toString(),
-    gas: pvm.getState().gasCounter.toString(),
-    resultCode,
-    r7: finalRegisters[7].toString(),
-    r8: finalRegisters[8].toString(),
-    r9: finalRegisters[9].toString(),
-  })
 
   // Map result code to status string
   const statusMap: Record<number, string> = {

@@ -27,7 +27,7 @@ export class AND_IMMInstruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -64,7 +64,7 @@ export class XOR_IMMInstruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -101,7 +101,7 @@ export class OR_IMMInstruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

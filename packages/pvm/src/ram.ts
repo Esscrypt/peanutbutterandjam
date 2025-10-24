@@ -1,4 +1,4 @@
-import { logger, type Safe, safeError, safeResult } from '@pbnj/core'
+import { logger } from '@pbnj/core'
 import type { MemoryAccessType, RAM } from '@pbnj/types'
 import { MEMORY_CONFIG } from './config'
 
@@ -52,6 +52,10 @@ export class PVMRAM implements RAM {
     length: number,
     accessType: MemoryAccessType,
   ): void {
+    if (BigInt(length) % this.CPVM_PAGE_SIZE !== 0n) {
+      throw new Error(`Page length must be divisible by ${this.CPVM_PAGE_SIZE}`)
+    }
+
     this.setPageAccessRights(address, length, accessType)
   }
 
@@ -66,10 +70,13 @@ export class PVMRAM implements RAM {
     length: number,
     accessType: MemoryAccessType,
   ): void {
+    if (BigInt(length) % this.CPVM_PAGE_SIZE !== 0n) {
+      throw new Error(`Page length must be divisible by ${this.CPVM_PAGE_SIZE}`)
+    }
     const startPage = this.getPageIndex(address)
-    const endPage = this.getPageIndex(address + BigInt(length))
-
-    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+    const count = BigInt(length) / this.CPVM_PAGE_SIZE
+    for (let i = 0; i < count; i++) {
+      const pageIndex = startPage + BigInt(i)
       if (pageIndex >= 0n && pageIndex < this.TOTAL_PAGES) {
         this.pageAccess.set(pageIndex, accessType)
       }
@@ -92,44 +99,41 @@ export class PVMRAM implements RAM {
     return this.pageAccess.get(pageIndex) ?? 'none'
   }
 
-  readOctets(address: bigint, count: bigint): Safe<Uint8Array> {
+  readOctets(address: bigint, count: bigint): [Uint8Array | null, bigint | null] {
     // Check if entire range is readable first
-    if (!this.isReadable(address, count)) {
-      return safeError(
-        new Error(
-          `Memory read fault: range ${address}-${address + count - 1n} not readable`,
-        ),
-      )
+    const [readable, faultAddress] = this.isReadableWithFault(address, count)
+    if (!readable) {
+      return [null, faultAddress]
     }
 
     const result = new Uint8Array(Number(count))
     for (let i = 0; i < Number(count); i++) {
       result[i] = this.memoryData.get(address + BigInt(i)) ?? 0
     }
-    return safeResult(result)
+    return [result, null]
   }
 
-  writeOctets(address: bigint, values: Uint8Array): Safe<void> {
+  writeOctets(address: bigint, values: Uint8Array): bigint | null {
     // Check if entire range is writable first
-    if (!this.isWritable(address, BigInt(values.length))) {
-      return safeError(
-        new Error(
-          `Memory write fault: range ${address}-${address + BigInt(values.length) - 1n} not writable`,
-        ),
-      )
+    const [writable, faultAddress] = this.isWritableWithFault(
+      address,
+      BigInt(values.length),
+    )
+    if (!writable) {
+      return faultAddress
     }
 
     // Write each byte individually (O(N) but necessary for sparse storage)
     for (let i = 0; i < values.length; i++) {
       this.memoryData.set(address + BigInt(i), values[i])
     }
-    return safeResult(undefined)
+    return null
   }
 
-  isReadable(address: bigint, size = 1n): boolean {
+  isReadableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
-      return false
+      return [false, address]
     }
 
     // Gray Paper: readable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] ≠ none}
@@ -137,20 +141,25 @@ export class PVMRAM implements RAM {
     const startPage = this.getPageIndex(address)
     const endPage = this.getPageIndex(address + size - 1n)
 
-    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
-      const accessType = this.pageAccess.get(pageIndex) ?? 'none'
-      if (accessType === 'none') {
-        return false
+    // Check each page in the range
+    for (let page = startPage; page <= endPage; page++) {
+      const pageAccess = this.pageAccess.get(page)
+      if (pageAccess === 'none' || pageAccess === undefined) {
+        // Calculate the first address in this page that caused the fault
+        const pageStartAddress = page * this.CPVM_PAGE_SIZE
+        const faultAddress =
+          address > pageStartAddress ? address : pageStartAddress
+        return [false, faultAddress]
       }
     }
 
-    return true
+    return [true, null]
   }
 
-  isWritable(address: bigint, size = 1n): boolean {
+  isWritableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
-      return false
+      return [false, address]
     }
 
     // Gray Paper: writable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] = W}
@@ -158,49 +167,19 @@ export class PVMRAM implements RAM {
     const startPage = this.getPageIndex(address)
     const endPage = this.getPageIndex(address + size - 1n)
 
-    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
-      const accessType = this.pageAccess.get(pageIndex) ?? 'none'
-      if (accessType !== 'write' && accessType !== 'read+write') {
-        return false
+    // Check each page in the range
+    for (let page = startPage; page <= endPage; page++) {
+      const pageAccess = this.pageAccess.get(page)
+      if (pageAccess !== 'write' && pageAccess !== 'read+write') {
+        // Calculate the first address in this page that caused the fault
+        const pageStartAddress = page * this.CPVM_PAGE_SIZE
+        const faultAddress =
+          address > pageStartAddress ? address : pageStartAddress
+        return [false, faultAddress]
       }
     }
 
-    return true
-  }
-
-  /**
-   * Get memory statistics for debugging
-   */
-  getMemoryStats(): {
-    maxAddress: string
-    totalPages: number
-    pageSize: number
-    allocatedPages: number
-    allocatedBytes: number
-    accessiblePages: number
-    writablePages: number
-  } {
-    let accessiblePages = 0
-    let writablePages = 0
-
-    for (const accessType of this.pageAccess.values()) {
-      if (accessType !== 'none') {
-        accessiblePages++
-      }
-      if (accessType === 'write' || accessType === 'read+write') {
-        writablePages++
-      }
-    }
-
-    return {
-      maxAddress: '4GB',
-      totalPages: Number(this.TOTAL_PAGES),
-      pageSize: Number(this.CPVM_PAGE_SIZE),
-      allocatedPages: this.pageAccess.size,
-      allocatedBytes: this.memoryData.size,
-      accessiblePages,
-      writablePages,
-    }
+    return [true, null]
   }
 
   /**

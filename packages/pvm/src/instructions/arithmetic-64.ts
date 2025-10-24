@@ -27,7 +27,7 @@ export class ADD_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -63,7 +63,7 @@ export class SUB_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -99,7 +99,7 @@ export class MUL_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -137,7 +137,7 @@ export class DIV_U_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -190,7 +190,7 @@ export class DIV_S_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -228,7 +228,7 @@ export class REM_U_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -284,7 +284,7 @@ export class REM_S_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }

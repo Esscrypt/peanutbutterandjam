@@ -1,6 +1,5 @@
 import { decodeBlob } from '@pbnj/serialization'
 import type { PVMInstruction } from '@pbnj/types'
-import type { InstructionRegistry } from './instructions/registry'
 /**
  * PVM Parser implementation
  * Parses PVM instruction data and program blobs according to Gray Paper specification
@@ -8,9 +7,7 @@ import type { InstructionRegistry } from './instructions/registry'
  * Gray Paper Reference: pvm.tex sections 7.1-7.3
  */
 export class PVMParser {
-  constructor(instructionRegistry: InstructionRegistry) {
-    this.instructionRegistry = instructionRegistry
-  }
+
 
   /**
    * Skip function Fskip(i) - determines distance to next instruction
@@ -126,7 +123,6 @@ export class PVMParser {
           opcode: BigInt(opcode),
           operands,
           fskip,
-          jumpTable,
         }
 
         instructions.push(instruction)

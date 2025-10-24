@@ -44,7 +44,7 @@ export class SHLO_L_IMM_32Instruction extends BaseInstruction {
       result,
     )
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -98,7 +98,7 @@ export class SHLO_R_IMM_32Instruction extends BaseInstruction {
       result,
     )
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -152,7 +152,7 @@ export class SHAR_R_IMM_32Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
@@ -205,7 +205,7 @@ export class NEG_ADD_IMM_32Instruction extends BaseInstruction {
       BigInt(result),
     )
 
-    context.gas -= 1n
+    
 
     return { resultCode: null }
   }
