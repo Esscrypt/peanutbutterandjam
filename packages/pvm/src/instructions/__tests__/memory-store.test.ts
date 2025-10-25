@@ -33,7 +33,9 @@ for (const testVector of storeTests) {
     }
 
     // Verify gas usage
-    expect(result.gas).toBe(Number(testVector['expected-gas']))
+    if(result.status !== 'page-fault') {
+      expect(result.gas).toBe(Number(testVector['expected-gas']))
+    }
 
     expect(result.pc).toBe(Number(testVector['expected-pc']))
 

@@ -226,6 +226,15 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
     )
     const address = registerBValue + immediateX
 
+    console.log('STORE_IND_U64: Address calculation', {
+      registerA,
+      registerB,
+      immediateX,
+      registerAValue: registerAValue.toString(),
+      registerBValue: registerBValue.toString(),
+      address: address.toString(),
+    })
+
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < 65536n) {
       return { resultCode: RESULT_CODES.PANIC }

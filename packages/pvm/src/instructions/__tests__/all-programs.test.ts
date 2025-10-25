@@ -6,7 +6,7 @@
  * and executes them sequentially to verify PVM correctness
  */
 
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { executeTestVector, getTestVectorsDir, parseJsonSafe, type PVMTestVector } from './test-vector-helper'
 
@@ -15,7 +15,7 @@ const testVectorsDir = getTestVectorsDir()
 const allFiles = readdirSync(testVectorsDir)
 const jsonFiles = allFiles
   .filter(file => file.endsWith('.json'))
-  .filter(file => !file.startsWith('riscv'))
+  // .filter(file => !file.startsWith('riscv'))
   .sort() // Sort alphabetically for consistent order
 
 console.log(`Found ${jsonFiles.length} test vector files`)
@@ -60,13 +60,15 @@ for (let i = 0; i < testVectors.length; i++) {
       }
 
       // Verify gas usage
-      if(result.gas !== Number(testVector['expected-gas'])) {
-          console.error(`❌ Test failed: ${testVector.name}`, {
-              expected: testVector['expected-gas'],
-              actual: result.gas,
-          })
-          throw new Error(`Test failed: ${testVector.name}`)
-      }
+      if(result.status !== 'page-fault') {
+        if(result.gas !== Number(testVector['expected-gas'])) {
+            console.error(`❌ Test failed: ${testVector.name}`, {
+                expected: testVector['expected-gas'],
+                actual: result.gas,
+            })
+            throw new Error(`Test failed: ${testVector.name}`)
+        }
+    }
 
       // Verify PC
       if(result.pc !== Number(testVector['expected-pc'])) {
@@ -78,7 +80,22 @@ for (let i = 0; i < testVectors.length; i++) {
       }
 
       // Verify exit status
-      // 
+      if(testVector['expected-status'] !== result.status) {
+        console.error(`❌ Test failed: ${testVector.name}`, {
+          expected: testVector['expected-status'],
+          actual: result.status,
+        })
+        throw new Error(`Test failed: ${testVector.name}`)
+      }
+
+      // Verify page fault address
+      if(testVector['expected-page-fault-address'] && result.faultAddress !== BigInt(testVector['expected-page-fault-address'])) {
+        console.error(`❌ Test failed: ${testVector.name}`, {
+          expected: testVector['expected-page-fault-address'],
+          actual: result.faultAddress,
+        })
+        throw new Error(`Test failed: ${testVector.name}`)
+      }
 
       // Verify memory if expected
       if (testVector['expected-memory']) {

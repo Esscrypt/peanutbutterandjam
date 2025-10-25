@@ -113,6 +113,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   pc: number
   gas: number
   status: string
+  faultAddress: bigint | null
   memory: Map<bigint, number>
 }> {
     // Create PVM instance
@@ -180,6 +181,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     finalRegisters[i] = pvm.getState().registerState[i]
   }
 
+  const faultAddress = pvm.getState().faultAddress
 
   // Map result code to status string
   const statusMap: Record<number, string> = {
@@ -189,7 +191,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     3: 'host',
     4: 'out-of-gas',
   }
-  const status = statusMap[resultCode] || 'panic'
+  const status = statusMap[pvm.getState().resultCode]
 
   // Extract final memory state
   // Access the private cells map through the PVMRAM instance
@@ -201,11 +203,13 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
       const length = memBlock.contents.length
       for (let i = 0; i < length; i++) {
         const addr = address + BigInt(i)
-        const [error, value] = pvm.getState().ram.readOctets(addr, 1n)
-        if (error) {
-          throw new Error(`Failed to read memory at address ${addr.toString()}: ${error}`)
+        const [bytes, faultAddress] = pvm.getState().ram.readOctets(addr, 1n)
+        if (faultAddress) {
+          throw new Error(`Failed to read memory at address ${addr.toString()}: ${faultAddress}`)
         }
-        finalMemory.set(addr, Number(value[0]))
+        if (bytes) {
+          finalMemory.set(addr, Number(bytes[0]))
+        }
       }
     }
   }
@@ -217,6 +221,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     pc: Number(pvm.getState().instructionPointer),
     gas: Number(pvm.getState().gasCounter),
     status,
+    faultAddress,
     memory: finalMemory,
   }
 }

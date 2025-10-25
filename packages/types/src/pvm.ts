@@ -123,7 +123,7 @@ export interface FaultInfo {
 }
 
 export interface PVMState {
-  resultCode: ResultCode | null // ε: result code
+  resultCode: ResultCode // ε: result code
   instructionPointer: bigint // ı: instruction pointer (index)
   registerState: RegisterState // ϱ: register state
   ram: RAM // µ: RAM
@@ -131,6 +131,7 @@ export interface PVMState {
   jumpTable: bigint[] // j: jump table for dynamic jumps (Gray Paper)
   code: Uint8Array // c: code
   bitmask: Uint8Array // k: opcode bitmask
+  faultAddress: bigint | null // Fault address
 }
 
 export interface ProgramBlob {

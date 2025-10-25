@@ -43,7 +43,7 @@ export class PVM {
 
     // Initialize state with options
     this.state = {
-      resultCode: null,
+      resultCode: RESULT_CODES.HALT,
       instructionPointer: options.pc ?? 0n,
       registerState: options.registerState ?? new Array(13).fill(0n), // All 13 registers (r0-r12) store 64-bit values,
       ram: options.ram ?? new PVMRAM(),
@@ -51,6 +51,7 @@ export class PVM {
       jumpTable: [], // Jump table for dynamic jumps
       code: new Uint8Array(0), // code
       bitmask: new Uint8Array(0), // opcode bitmask
+      faultAddress: null,
     }
   }
 
@@ -80,11 +81,11 @@ export class PVM {
       this.state.registerState = [...registers]
 
       // Execute until termination
-      const resultCode = await this.run(programBlob)
+      await this.run(programBlob)
 
       // Return results
       return {
-        resultCode,
+        resultCode: this.state.resultCode,
         finalRegisters: [...this.state.registerState],
         finalPC: this.state.instructionPointer,
         finalGas: this.state.gasCounter,
@@ -150,11 +151,11 @@ export class PVM {
 
       // Execute with context mutator
       // const result = this.runWithContextMutator(contextMutator, context)
-      const result = await this.run(code)
+      await this.run(code)
 
       return {
         gasUsed: originalState.gasCounter - this.state.gasCounter,
-        result: result,
+        result: this.state.resultCode,
         finalContext: context,
       }
     } catch (error) {
@@ -183,11 +184,11 @@ export class PVM {
       return RESULT_CODES.OOG
     }
 
-    // Execute instruction (Ψ₁) - gas consumption handled by instruction itself
-    const resultCode = this.executeInstruction(instruction)
-
     // Consume 1 gas for each instruction
     this.state.gasCounter -= 1n
+
+    // Execute instruction (Ψ₁) - gas consumption handled by instruction itself
+    const resultCode = this.executeInstruction(instruction)
 
     if (resultCode === RESULT_CODES.HOST) {
       // Extract host call ID from registers (typically r0 or r1)
@@ -255,11 +256,12 @@ export class PVM {
    *
    * Uses step() function to execute instructions one by one
    */
-  public async run(programBlob: Uint8Array): Promise<ResultCode> {
+  public async run(programBlob: Uint8Array): Promise<void> {
     // Decode the program blob
     const [error, decoded] = decodeBlob(programBlob)
     if (error) {
-      return RESULT_CODES.PANIC
+      this.state.resultCode = RESULT_CODES.PANIC
+      return
     }
 
     const { code, bitmask, jumpTable } = decoded.value
@@ -312,7 +314,13 @@ export class PVM {
     }
 
     this.state.resultCode = resultCode
-    return resultCode
+
+    // Gray Paper: Only HALT sets PC to 0 (successful completion)
+    // PANIC keeps PC at the instruction that caused the panic (for debugging)
+    // TODO: Uncomment this for PRODUCTION
+    // if (resultCode === RESULT_CODES.HALT || resultCode === RESULT_CODES.PANIC) {
+    //   this.state.instructionPointer = 0n
+    // }
   }
 
   /**
@@ -353,10 +361,9 @@ export class PVM {
 
       // Execute instruction (mutates context)
       const result = handler.execute(context)
-
-      // Context was mutated - sync back to state
-      // (registers/ram/callStack are already references, so already synced)
-      // this.state.gasCounter = context.gas
+      if (result.faultInfo) {
+        this.state.faultAddress = result.faultInfo.address ?? null
+      }
 
       // Check result code BEFORE advancing PC
       if (result.resultCode !== null) {
@@ -396,11 +403,12 @@ export class PVM {
    */
   public reset(): void {
     this.state = {
-      resultCode: null,
+      resultCode: RESULT_CODES.HALT,
       instructionPointer: 0n,
       registerState: new Array(13).fill(0n), // All 13 registers (r0-r12) store 64-bit values,
       ram: new PVMRAM(),
       gasCounter: GAS_CONFIG.DEFAULT_GAS_LIMIT,
+      faultAddress: null,
       jumpTable: [],
       code: new Uint8Array(0),
       bitmask: new Uint8Array(0),

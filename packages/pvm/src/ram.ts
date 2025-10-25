@@ -99,7 +99,10 @@ export class PVMRAM implements RAM {
     return this.pageAccess.get(pageIndex) ?? 'none'
   }
 
-  readOctets(address: bigint, count: bigint): [Uint8Array | null, bigint | null] {
+  readOctets(
+    address: bigint,
+    count: bigint,
+  ): [Uint8Array | null, bigint | null] {
     // Check if entire range is readable first
     const [readable, faultAddress] = this.isReadableWithFault(address, count)
     if (!readable) {
@@ -145,10 +148,9 @@ export class PVMRAM implements RAM {
     for (let page = startPage; page <= endPage; page++) {
       const pageAccess = this.pageAccess.get(page)
       if (pageAccess === 'none' || pageAccess === undefined) {
-        // Calculate the first address in this page that caused the fault
-        const pageStartAddress = page * this.CPVM_PAGE_SIZE
-        const faultAddress =
-          address > pageStartAddress ? address : pageStartAddress
+        // Gray Paper: fault address is the start of the page containing the fault
+        // Formula: Cpvmpagesize × ⌊min(x) ÷ Cpvmpagesize⌋
+        const faultAddress = page * this.CPVM_PAGE_SIZE
         return [false, faultAddress]
       }
     }
@@ -171,10 +173,9 @@ export class PVMRAM implements RAM {
     for (let page = startPage; page <= endPage; page++) {
       const pageAccess = this.pageAccess.get(page)
       if (pageAccess !== 'write' && pageAccess !== 'read+write') {
-        // Calculate the first address in this page that caused the fault
-        const pageStartAddress = page * this.CPVM_PAGE_SIZE
-        const faultAddress =
-          address > pageStartAddress ? address : pageStartAddress
+        // Gray Paper: fault address is the start of the page containing the fault
+        // Formula: Cpvmpagesize × ⌊min(x) ÷ Cpvmpagesize⌋
+        const faultAddress = page * this.CPVM_PAGE_SIZE
         return [false, faultAddress]
       }
     }
