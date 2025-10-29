@@ -46,32 +46,38 @@ export type AuthPool = Hex[][]
  */
 export interface Recent {
   /** Recent block history */
-  history: RecentHistory
+  history: RecentHistoryEntry
   /** Accumulation output belt (Merkle mountain range) */
   accoutBelt: AccoutBelt
 }
 
 /**
- * Recent history (β_H)
- * Information on the most recent blocks
+ * Recent history entry for a single block
+ * Based on Gray Paper equation (8-12)
  */
-export interface RecentHistory {
-  /** Header hash */
+export interface RecentHistoryEntry {
+  /** Header hash (rh_headerhash) */
   headerHash: Hex
-  /** Accumulation output super-peak */
-  accoutLogSuperPeak: Hex
-  /** State root */
+  /** State root (rh_stateroot) */
   stateRoot: Hex
-  /** Reported package hashes */
-  reportedPackageHashes: Hex[]
+  /** Accumulation output super-peak (rh_accoutlogsuperpeak) */
+  accoutLogSuperPeak: Hex
+  /** Reported package hashes (rh_reportedpackagehashes) */
+  reportedPackageHashes: Map<Hex, Hex> // packageHash -> segRoot
 }
 
 /**
  * Accumulation output belt (β_B)
  * Merkle mountain belt for accumulating outputs
+ *
+ * Gray Paper: accoutbelt ∈ sequence{optional{hash}}
+ *
+ * Note: The MMR is a sparse array where some peaks may be null.
+ * For serialization, we filter out nulls to get peaks: Hex[].
+ * But internally, we preserve the full structure including nulls.
  */
 export interface AccoutBelt {
-  /** Mountain range peaks */
+  /** Mountain range peaks (without nulls, for serialization) */
   peaks: Hex[]
   /** Total accumulated count */
   totalCount: bigint
@@ -360,8 +366,10 @@ export interface Ready {
   /**
    * Sequence of epoch slots, each containing ready items
    * Length should be C_epochlen (typically 600)
+   * ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
+   * array of C_epochlen arrays of ready items, first index is the epoch slot, second index is the ready item
    */
-  epochSlots: Map<bigint, ReadyItem[]>
+  epochSlots: ReadyItem[][]
 }
 
 /**
@@ -370,9 +378,8 @@ export interface Ready {
  */
 export interface Accumulated {
   /** Recently accumulated packages */
-  packages: Hex[]
-  /** Accumulation metadata */
-  metadata: Map<Hex, AccumulationMetadata>
+  //accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+  packages: Set<Hex>[] // array of C_epochlen sets of hashes
 }
 
 /**

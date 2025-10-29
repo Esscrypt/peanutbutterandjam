@@ -11,36 +11,28 @@ export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = (immed_X · 2^(reg_B mod 64)) mod 2^64
     // ALT: immediate << register (not register << immediate!)
-    const registerA = this.getRegisterA(context.instruction.operands) // low nibble = destination
-    const registerB = this.getRegisterB(context.instruction.operands) // high nibble = shift amount source
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
-    const shiftAmount = Number(
-      this.getRegisterValueAs64(context.registers, registerB) % 64n,
-    )
+    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
+
+    const registerBValue = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = registerBValue % 64n
 
     // ALT: shift the immediate value by the register amount
-    const result = immediate << BigInt(shiftAmount)
+    const result = immediateX << shiftAmount
 
-    logger.debug('Executing SHLO_L_IMM_ALT_64 instruction', {
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
+
+    console.log('Executing SHLO_L_IMM_ALT_64 instruction', {
       registerA,
       registerB,
-      immediate,
+      immediateX,
+      registerBValue,
       shiftAmount,
       result,
     })
-    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
-
-    
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }
 
 export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
@@ -51,35 +43,27 @@ export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = floor(immed_X / 2^(reg_B mod 64))
     // ALT: immediate >> register (not register >> immediate!)
-    const registerA = this.getRegisterA(context.instruction.operands) // low nibble = destination
-    const registerB = this.getRegisterB(context.instruction.operands) // high nibble = shift amount source
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
-    const shiftAmount = Number(
-      this.getRegisterValueAs64(context.registers, registerB) % 64n,
-    )
+    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
+    
+    const registerBValue = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = registerBValue % 64n
 
     // ALT: shift the immediate value by the register amount (unsigned)
-    const result = immediate >> BigInt(shiftAmount)
+    const result = immediateX >> shiftAmount
 
-    logger.debug('Executing SHLO_R_IMM_ALT_64 instruction', {
-      registerA,
-      registerB,
-      immediate,
-      shiftAmount,
-      result,
-    })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    
+    console.log('Executing SHLO_R_IMM_ALT_64 instruction', {
+      registerA,
+      registerB,
+      immediateX,
+      registerBValue,  
+      shiftAmount,
+      result,
+      registers: context.registers,
+    })    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -92,22 +76,21 @@ export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = unsigned{floor(signed_64(immed_X) / 2^(reg_B mod 64))}
     // ALT: immediate >> register (not register >> immediate!) with arithmetic shift
-    const registerA = this.getRegisterA(context.instruction.operands) // low nibble = destination
-    const registerB = this.getRegisterB(context.instruction.operands) // high nibble = shift amount source
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
-    const shiftAmount = Number(
-      this.getRegisterValueAs64(context.registers, registerB) % 64n,
-    )
+    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
+    
+    const registerBValue = this.getRegisterValueAs64(context.registers, registerB)
+    const shiftAmount = registerBValue % 64n
 
     // ALT: arithmetic shift the immediate value by the register amount
-    const signedImmediate = this.toSigned64(immediate)
+    const signedImmediate = this.toSigned64(immediateX)
     const shiftedValue = signedImmediate >> BigInt(shiftAmount)
     const result = this.toUnsigned64(shiftedValue)
 
     logger.debug('Executing SHAR_R_IMM_ALT_64 instruction', {
       registerA,
       registerB,
-      immediate,
+      immediateX,
+      registerBValue,
       signedImmediate,
       shiftAmount,
       shiftedValue,

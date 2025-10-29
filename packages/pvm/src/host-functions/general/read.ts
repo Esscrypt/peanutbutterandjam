@@ -2,7 +2,7 @@ import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  RefineInvocationContext,
   ServiceAccount,
 } from '@pbnj/types'
 import {
@@ -33,15 +33,8 @@ export class ReadHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-    context.gasCounter -= this.gasCost
 
     const serviceId = context.registers[7]
     const keyOffset = context.registers[8]
@@ -51,11 +44,16 @@ export class ReadHostFunction extends BaseHostFunction {
     const length = context.registers[12]
 
     // Read key from memory
-    const [error, key] = context.ram.readOctets(keyOffset, keyLength)
-    if (error) {
+    const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
+    if (!key) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress ?? 0n,
+          details: 'Memory not readable',
+        },
       }
     }
 
@@ -70,7 +68,7 @@ export class ReadHostFunction extends BaseHostFunction {
     }
 
     // Read storage value by key
-    const value = this.readStorage(serviceAccount, key)
+    const value = serviceAccount.storage.get(bytesToHex(key)) || null
     if (!value) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
@@ -89,7 +87,17 @@ export class ReadHostFunction extends BaseHostFunction {
       Number(fromOffset) + actualLength,
     )
 
-    context.ram.writeOctets(outputOffset, dataToWrite)
+    const faultAddress2 = context.ram.writeOctets(outputOffset, dataToWrite)
+    if (faultAddress2) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress2,
+          details: 'Memory not writable',
+        },
+      }
+    }
 
     // Return length of value
     context.registers[7] = BigInt(value.length)
@@ -100,16 +108,10 @@ export class ReadHostFunction extends BaseHostFunction {
   }
 
   private getServiceAccount(
-    refineContext: RefineContextPVM,
+    refineContext: RefineInvocationContext,
     serviceId: bigint,
   ): ServiceAccount | null {
     return refineContext.accountsDictionary.get(serviceId) || null
   }
 
-  private readStorage(
-    serviceAccount: ServiceAccount,
-    key: Uint8Array,
-  ): Uint8Array | null {
-    return serviceAccount.storage.get(bytesToHex(key)) || null
-  }
 }

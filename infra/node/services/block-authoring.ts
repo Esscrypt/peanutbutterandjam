@@ -333,12 +333,15 @@ export class BlockAuthoringService extends BaseService {
         localKeyPair.bandersnatchKeyPair.publicKey
 
       // Check if current validator is elected to author this block
-      const isElected =
+      const [electedError, isElected] =
         this.validatorSetManagerService.isValidatorElectedForSlot(
           bytesToHex(currentValidatorBandersnatchKey),
           BigInt(event.slot),
         )
 
+      if (electedError) {
+        return safeError(electedError)
+      }
       if (!isElected) {
         return safeResult(undefined)
       }

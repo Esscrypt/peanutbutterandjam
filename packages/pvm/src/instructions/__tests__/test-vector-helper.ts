@@ -5,11 +5,15 @@
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { PVM } from '../../pvm'
-import { logger } from '@pbnj/core'
+import { EventBusService, logger } from '@pbnj/core'
 import { PVMParser } from '../../parser'
 import { InstructionRegistry } from '../registry'
 import type { PVMOptions } from '@pbnj/types'
 import { PVMRAM } from '../../ram'
+import { HostFunctionRegistry } from '../../host-functions/general/registry'
+import { ConfigService } from '../../../../../infra/node/services/config-service'
+import { ServiceAccountService } from '../../../../../infra/node/services/service-account-service'
+import { ClockService } from '../../../../../infra/node/services/clock-service'
 
 /**
  * Parse JSON with all numbers as strings to avoid precision loss
@@ -54,7 +58,7 @@ export function getTestVectorsDir(): string {
   const projectRoot = process.cwd().includes('/packages/pvm')
     ? process.cwd().split('/packages/pvm')[0]
     : process.cwd()
-  return join(projectRoot, 'pvm-test-vectors', 'pvm', 'programs')
+  return join(projectRoot, 'submodules', 'pvm-test-vectors', 'pvm', 'programs')
 }
 
 /**
@@ -125,7 +129,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   const programBlob = new Uint8Array(programBytes)
     const parseResult = parser.parseProgram(new Uint8Array(programBytes))
 
-    logger.info('instructions:', { instructions: parseResult.instructions.map(i => `${registry.getHandler(i.opcode)?.name} (${i.opcode}) operands: ${i.operands.join(', ')}`) })
+    logger.info('instructions:', { instructions: parseResult.instructions.map(i => `${registry.getHandler(i.opcode)?.name} (${i.opcode}) operands: ${i.operands.join(', ')} pc: ${i.pc}`) })
     logger.info('jumpTable:', { jumpTable: parseResult.jumpTable })
     logger.info('bitmask:', { bitmask: parseResult.bitmask })
 
@@ -144,8 +148,8 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
       const isWritable = page['is-writable']
       
       // Convert boolean to MemoryAccessType
-      // Test vectors only use read vs read+write, but we support the full Gray Paper model
-      const accessType = isWritable ? 'read+write' : 'read'
+      // Test vectors only use read vs write, but we support the full Gray Paper model
+      const accessType = isWritable ? 'write' : 'read'
       
       // Initialize page in RAM
       ram.initializePage(address, length, accessType)
@@ -157,7 +161,12 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     for (const memBlock of testVector['initial-memory']) {
       const address = BigInt(memBlock.address)
       const contents = memBlock.contents.map(v => Number(v))
-      ram.writeOctets(address, new Uint8Array(contents))
+      
+      // Bypass writability check during initialization - this is setting up initial state
+      // Write directly to the memory data map
+      for (let i = 0; i < contents.length; i++) {
+        ram['memoryData'].set(address + BigInt(i), contents[i])
+      }
     }
   }
 
@@ -169,11 +178,26 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     registerState: testVector['initial-regs'].map(v => BigInt(String(v))),
     ram: ram,
   }
-  const pvm = new PVM(options);
+  const configService = new ConfigService('tiny')
+  const eventBusService = new EventBusService()
+  const clockService = new ClockService({
+    eventBusService: eventBusService,
+    configService: configService,
+  })
+  const serviceAccountService = new ServiceAccountService({
+    preimageStore: null,
+    configService: new ConfigService('tiny'),
+    eventBusService: eventBusService,
+    clockService: clockService,
+    networkingService: null,
+    preimageRequestProtocol: null,
+  })
+  const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountService, new ConfigService('tiny'))
+  const pvm = new PVM(hostFunctionRegistry, options);
   // Load parsed instructions (RISC-V test vectors don't have jump tables)
 
   // Run program
-  const resultCode = await pvm.run(programBlob)
+  await pvm.run(programBlob)
 
   // Extract final registers as bigint array for comparison
   const finalRegisters: bigint[] = new Array(13)

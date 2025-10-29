@@ -1,21 +1,19 @@
-import {
-  ExportHostFunction,
-  ExpungeHostFunction,
-  FetchHostFunction,
-  GasHostFunction,
-  HistoricalLookupHostFunction,
-  InfoHostFunction,
-  InvokeHostFunction,
-  LookupHostFunction,
-  MachineHostFunction,
-  PagesHostFunction,
-  PeekHostFunction,
-  PokeHostFunction,
-  ReadHostFunction,
-  WriteHostFunction,
-} from '.'
+import type { IConfigService, IServiceAccountService } from '@pbnj/types'
 import type { BaseHostFunction } from './base'
-
+import { ExportHostFunction } from './export'
+import { ExpungeHostFunction } from './expunge'
+import { FetchHostFunction } from './fetch'
+import { GasHostFunction } from './gas'
+import { HistoricalLookupHostFunction } from './historical-lookup'
+import {InfoHostFunction} from './info'
+import { LookupHostFunction } from './lookup'
+import { ReadHostFunction } from './read'
+import { WriteHostFunction } from './write'
+import { MachineHostFunction } from './machine'
+import { PeekHostFunction } from './peek'
+import { PokeHostFunction } from './poke'
+import { PagesHostFunction } from './pages'
+import { InvokeHostFunction } from './invoke'
 /**
  * Registry for managing all host functions
  *
@@ -24,21 +22,26 @@ import type { BaseHostFunction } from './base'
  */
 export class HostFunctionRegistry {
   private readonly functions = new Map<bigint, BaseHostFunction>()
-
-  constructor() {
-    this.registerHostFunctions()
+  constructor(
+    serviceAccountService: IServiceAccountService,
+    configService: IConfigService,
+  ) {
+    this.registerHostFunctions(serviceAccountService, configService)
   }
 
-  private registerHostFunctions(): void {
+  private registerHostFunctions(
+    serviceAccountService: IServiceAccountService,
+    configService: IConfigService,
+  ): void {
     this.register(new GasHostFunction())
-    this.register(new FetchHostFunction())
-    this.register(new HistoricalLookupHostFunction())
-    this.register(new LookupHostFunction())
+    this.register(new FetchHostFunction(configService))
+    this.register(new HistoricalLookupHostFunction(serviceAccountService))
+    this.register(new LookupHostFunction(serviceAccountService))
     this.register(new ReadHostFunction())
     this.register(new WriteHostFunction())
-    this.register(new InfoHostFunction())
+    this.register(new InfoHostFunction(serviceAccountService))
     this.register(new ExportHostFunction())
-    this.register(new MachineHostFunction())
+    this.register(new MachineHostFunction(this))
     this.register(new PeekHostFunction())
     this.register(new PokeHostFunction())
     this.register(new PagesHostFunction())

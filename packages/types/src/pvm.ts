@@ -33,7 +33,7 @@ export type RegisterState = bigint[] // 13 elements (r0-r12)
  * Memory access types as specified in Gray Paper
  * Gray Paper: RAM access can be 'none', 'R' (read), 'W' (write), or 'R+W' (read+write)
  */
-export type MemoryAccessType = 'none' | 'read' | 'write' | 'read+write'
+export type MemoryAccessType = 'none' | 'read' | 'write'
 
 /**
  * RAM interface for PVM memory operations
@@ -122,6 +122,16 @@ export interface FaultInfo {
   details: string
 }
 
+export interface IPVM {
+  state: PVMState
+
+  invoke(
+    gasLimit: bigint,
+    registers: bigint[],
+    programBlob: Uint8Array,
+  ): Promise<void>
+}
+
 export interface PVMState {
   resultCode: ResultCode // ε: result code
   instructionPointer: bigint // ı: instruction pointer (index)
@@ -132,6 +142,7 @@ export interface PVMState {
   code: Uint8Array // c: code
   bitmask: Uint8Array // k: opcode bitmask
   faultAddress: bigint | null // Fault address
+  hostCallId: bigint | null // Host call ID
 }
 
 export interface ProgramBlob {
@@ -144,6 +155,7 @@ export interface PVMInstruction {
   opcode: bigint
   operands: Uint8Array
   fskip: number
+  pc: bigint
 }
 
 /**
@@ -276,40 +288,16 @@ export type Accounts = Map<bigint, ServiceAccount>
 // Segment type (blob of length Csegmentsize)
 export type Segment = Uint8Array
 
-// Forward declaration for PVM class
-declare class PVM {
-  constructor(options?: {
-    code?: Uint8Array
-    ram?: RAM
-    pc?: bigint
-    gasCounter?: bigint
-    registerState?: bigint[]
-  })
-
-  invoke(
-    gasLimit: bigint,
-    registers: bigint[],
-  ): {
-    resultCode: ResultCode
-    hostCallId?: bigint
-    finalRegisters: bigint[]
-    finalPC: bigint
-    finalGas: bigint
-  }
-}
-
 // PVM Guest type as per Gray Paper equation eq:pvmguest
 export interface PVMGuest {
   code: Uint8Array // pg_code
-  ram: RAM // pg_ram
-  pc: bigint // pg_pc
-  pvm?: PVM // Actual PVM instance for execution
+  pvm: IPVM // Actual PVM instance for execution
 }
 
 // Refine context type as per Gray Paper
 // Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
 // where (m, e) = refine context pair, s = service ID, d = accounts dict, t = timeslot
-export interface RefineContextPVM {
+export interface RefineInvocationContext {
   // Core refine context pair (Gray Paper: (m, e))
   machines: Map<bigint, PVMGuest> // m: Dictionary of PVM guests
   exportSegments: Segment[] // e: Sequence of export segments

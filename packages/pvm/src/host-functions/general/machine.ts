@@ -4,7 +4,7 @@ import type {
   HostFunctionResult,
   PVMGuest,
   PVMOptions,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -12,8 +12,8 @@ import {
   RESULT_CODES,
 } from '../../config'
 import { PVM } from '../../pvm'
-import { PVMRAM } from '../../ram'
 import { BaseHostFunction } from './base'
+import type { HostFunctionRegistry } from './registry'
 
 /**
  * MACHINE host function (Ω_M)
@@ -33,9 +33,15 @@ export class MachineHostFunction extends BaseHostFunction {
   readonly name = 'machine'
   readonly gasCost = 10n
 
+  private readonly hostFunctionRegistry: HostFunctionRegistry
+  constructor(hostFunctionRegistry: HostFunctionRegistry) {
+    super()
+    this.hostFunctionRegistry = hostFunctionRegistry
+  }
+
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
     // Validate execution
     if (context.gasCounter < this.gasCost) {
@@ -51,19 +57,19 @@ export class MachineHostFunction extends BaseHostFunction {
     const initialPC = context.registers[9]
 
     // Read program from memory
-    const [accessError, program] = context.ram.readOctets(
+    const [programData, _faultAddress] = context.ram.readOctets(
       programOffset,
       programLength,
     )
-    if (accessError) {
+    if (!programData) {
       return {
         resultCode: RESULT_CODES.FAULT,
       }
     }
 
     // Validate program (deblob)
-    const [error] = decodeBlob(program)
-    if (error) {
+    const [error, programBlob] = decodeBlob(programData)
+    if (error || !programBlob) {
       // Return HUH (2^64 - 9) if program is invalid
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
       return {
@@ -83,7 +89,7 @@ export class MachineHostFunction extends BaseHostFunction {
     const machines = refineContext.machines
 
     // Create new PVM machine
-    const machineId = this.createPVMMachine(machines, program, initialPC)
+    const machineId = this.createPVMMachine(machines, programData, initialPC)
 
     // Return machine ID
     context.registers[7] = machineId
@@ -101,28 +107,18 @@ export class MachineHostFunction extends BaseHostFunction {
     // Generate new machine ID
     const machineId = BigInt(machines.size + 1)
 
-    // Create new RAM instance for the machine
-    const ram = new PVMRAM()
-
     // Create PVM instance with options
     const pvmOptions: PVMOptions = {
-      code: program,
-      ram: ram,
       pc: initialPC,
     }
 
-    const pvm = new PVM(pvmOptions)
-
-    // Create PVM guest wrapper
-    const machine: PVMGuest = {
-      code: program,
-      ram: ram,
-      pc: initialPC,
-      pvm: pvm, // Store the actual PVM instance
-    }
+    const pvm = new PVM(this.hostFunctionRegistry, pvmOptions)
 
     // Add machine to context
-    machines.set(machineId, machine)
+    machines.set(machineId, {
+      code: program,
+      pvm: pvm,
+    })
 
     return machineId
   }

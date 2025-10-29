@@ -23,39 +23,34 @@
 
 import {
   type BlockProcessedEvent,
+  bytesToHex,
+  defaultKeccakHash,
   type EventBusService,
   type Hex,
+  hexToBytes,
   logger,
+  type MMRRange,
+  merklizewb,
+  mmrappend,
+  mmrsuperpeak,
   type Safe,
+  safeError,
   safeResult,
 } from '@pbnj/core'
 import { calculateBlockHashFromHeader } from '@pbnj/serialization'
 import type {
   AccoutBelt,
+  BlockBody,
   BlockHeader,
   IConfigService,
   Recent,
+  RecentHistoryEntry,
 } from '@pbnj/types'
-import { BaseService as BaseServiceClass } from '@pbnj/types'
+import { BaseService as BaseServiceClass, HISTORY_CONSTANTS } from '@pbnj/types'
 
 // ============================================================================
 // Recent History Service
 // ============================================================================
-
-/**
- * Recent history entry for a single block
- * Based on Gray Paper equation (8-12)
- */
-export interface RecentHistoryEntry {
-  /** Header hash (rh_headerhash) */
-  headerHash: Hex
-  /** State root (rh_stateroot) */
-  stateRoot: Hex
-  /** Accumulation output super-peak (rh_accoutlogsuperpeak) */
-  accoutLogSuperPeak: Hex
-  /** Reported package hashes (rh_reportedpackagehashes) */
-  reportedPackageHashes: Map<Hex, Hex> // packageHash -> segRoot
-}
 
 /**
  * Recent history service configuration
@@ -79,7 +74,10 @@ export interface RecentHistoryConfig {
 export class RecentHistoryService extends BaseServiceClass {
   private readonly eventBusService: EventBusService
   private recentHistory: RecentHistoryEntry[] = []
+  /** Accumulation output belt (for serialization) - contains only non-null peaks */
   private readonly accoutBelt: AccoutBelt
+  /** Full MMR range including null positions (for mmrappend/mmrsuperpeak operations) */
+  private mmrPeaks: MMRRange = []
   private currentBlockNumber = 0n
   private readonly configService: IConfigService
   constructor(eventBusService: EventBusService, configService: IConfigService) {
@@ -89,6 +87,7 @@ export class RecentHistoryService extends BaseServiceClass {
       peaks: [],
       totalCount: 0n,
     }
+    this.mmrPeaks = []
     this.configService = configService
   }
 
@@ -123,7 +122,7 @@ export class RecentHistoryService extends BaseServiceClass {
   private async handleBlockProcessed(
     event: BlockProcessedEvent,
   ): Promise<Safe<void>> {
-    logger.debug('Processing block for recent history', {
+    console.log('Processing block for recent history', {
       slot: event.slot.toString(),
       authorIndex: event.authorIndex,
       blockNumber: this.currentBlockNumber.toString(),
@@ -145,16 +144,7 @@ export class RecentHistoryService extends BaseServiceClass {
     // Increment block counter
     this.currentBlockNumber++
 
-    // Persist to database if enabled
-    // if (this.config.enablePersistence) {
-    //   this.persistenceCounter++
-    //   if (this.persistenceCounter >= this.config.persistenceInterval) {
-    //     await this.persistToDatabase()
-    //     this.persistenceCounter = 0
-    //   }
-    // }
-
-    logger.debug('Recent history updated', {
+    console.log('Recent history updated', {
       historyLength: this.recentHistory.length,
       blockNumber: this.currentBlockNumber.toString(),
     })
@@ -205,7 +195,7 @@ export class RecentHistoryService extends BaseServiceClass {
             '0x0000000000000000000000000000000000000000000000000000000000000000',
           accoutLogSuperPeak:
             '0x0000000000000000000000000000000000000000000000000000000000000000',
-          reportedPackageHashes: [],
+          reportedPackageHashes: new Map<Hex, Hex>(),
         },
         accoutBelt: this.accoutBelt,
       }
@@ -218,9 +208,7 @@ export class RecentHistoryService extends BaseServiceClass {
         headerHash: latestEntry.headerHash,
         stateRoot: latestEntry.stateRoot,
         accoutLogSuperPeak: latestEntry.accoutLogSuperPeak,
-        reportedPackageHashes: Array.from(
-          latestEntry.reportedPackageHashes.keys(),
-        ),
+        reportedPackageHashes: latestEntry.reportedPackageHashes,
       },
       accoutBelt: this.accoutBelt,
     }
@@ -231,9 +219,104 @@ export class RecentHistoryService extends BaseServiceClass {
    */
   clearHistory(): void {
     this.recentHistory = []
+    this.mmrPeaks = []
     this.currentBlockNumber = 0n
     // this.persistenceCounter = 0
     logger.info('Recent history cleared')
+  }
+
+  /**
+   * Set recent history from pre-state (for test vectors)
+   *
+   * Sets both recentHistory and accoutBelt from pre_state.beta
+   */
+  setRecentHistoryFromPreState(preState: {
+    beta: {
+      history: Array<{
+        header_hash: string
+        beefy_root: string
+        state_root: string | null
+        reported: Array<{ hash: string; exports_root: string }>
+      }>
+      mmr: { peaks: Array<string | null> }
+    }
+  }): void {
+    this.clearHistory()
+
+    // Set history entries
+    if (preState?.beta?.history) {
+      for (const entry of preState.beta.history) {
+        const reportedPackageHashes = new Map<Hex, Hex>()
+        if (entry.reported) {
+          for (const pkg of entry.reported) {
+            reportedPackageHashes.set(pkg.hash as Hex, pkg.exports_root as Hex)
+          }
+        }
+
+        this.recentHistory.push({
+          headerHash: entry.header_hash as Hex,
+          stateRoot: entry.state_root as Hex,
+          accoutLogSuperPeak: entry.beefy_root as Hex,
+          reportedPackageHashes,
+        })
+      }
+    }
+
+    // Set MMR belt from pre_state.beta.mmr.peaks
+    // NOTE: MMR peaks can include null values, so we must preserve them
+    if (preState?.beta?.mmr?.peaks) {
+      // Store full MMR range with nulls as mmrPeaks (Uint8Array[])
+      this.mmrPeaks = preState.beta.mmr.peaks.map((p: string | null) =>
+        p !== null ? hexToBytes(p as Hex) : null,
+      )
+
+      // Update accoutBelt for compatibility (non-null peaks only)
+      this.accoutBelt.peaks = preState.beta.mmr.peaks
+        .map((p: string | null) => (p !== null ? (p as Hex) : null))
+        .filter((p): p is Hex => p !== null)
+
+      this.accoutBelt.totalCount = BigInt(this.mmrPeaks.length)
+    } else {
+      // If no peaks provided, clear the belt
+      this.mmrPeaks = []
+      this.accoutBelt.peaks = []
+      this.accoutBelt.totalCount = 0n
+    }
+  }
+
+  /**
+   * Update accoutBelt with accumulate_root (for test vectors)
+   *
+   * Gray Paper: accoutBelt' = mmrappend(accoutBelt, accumulate_root, keccak)
+   */
+  updateAccoutBeltWithRoot(accumulateRoot: Hex): Safe<void> {
+    try {
+      const accumulateRootBytes = hexToBytes(accumulateRoot)
+
+      // Append to MMR (uses mmrPeaks which preserves null positions)
+      const [mmrError, updatedRange] = mmrappend(
+        this.mmrPeaks,
+        accumulateRootBytes,
+      )
+
+      if (mmrError) {
+        return safeError(mmrError)
+      }
+
+      // Update internal MMR peaks (preserves null positions)
+      this.mmrPeaks = updatedRange
+
+      // Update accoutBelt for compatibility (non-null peaks only)
+      this.accoutBelt.peaks = updatedRange
+        .map((peak) => (peak !== null ? bytesToHex(peak) : null))
+        .filter((peak): peak is Hex => peak !== null)
+
+      this.accoutBelt.totalCount = BigInt(updatedRange.length)
+
+      return safeResult(undefined)
+    } catch (error) {
+      return safeError(error as Error)
+    }
   }
 
   // ============================================================================
@@ -247,7 +330,7 @@ export class RecentHistoryService extends BaseServiceClass {
    */
   private createRecentHistoryEntry(
     header: BlockHeader,
-    body: unknown,
+    body: BlockBody,
     config: IConfigService,
   ): RecentHistoryEntry {
     // Extract reported package hashes from guarantees extrinsic
@@ -261,10 +344,16 @@ export class RecentHistoryService extends BaseServiceClass {
       throw new Error('Failed to calculate header hash')
     }
 
+    const [accoutLogSuperPeakError, accoutLogSuperPeak] =
+      this.calculateAccoutLogSuperPeak()
+    if (accoutLogSuperPeakError) {
+      throw new Error('Failed to calculate accumulation super-peak')
+    }
+
     return {
       headerHash,
       stateRoot: header.priorStateRoot, // Will be updated during state transition
-      accoutLogSuperPeak: this.calculateAccoutLogSuperPeak(body),
+      accoutLogSuperPeak: bytesToHex(accoutLogSuperPeak),
       reportedPackageHashes,
     }
   }
@@ -272,30 +361,150 @@ export class RecentHistoryService extends BaseServiceClass {
   /**
    * Add entry to circular buffer
    * Maintains exactly maxHistoryLength entries
+   *
+   * *** GRAY PAPER FORMULA ***
+   * Gray Paper: recent_history.tex, equations 23-25 and 38-43
+   *
+   * Before adding new entry:
+   * - Update previous entry's state_root to parent_state_root (eq 23-25)
+   * - New entry's state_root is set to zero (eq 41)
+   *
+   * Formula:
+   * recenthistorypostparentstaterootupdate = recenthistory exc {recenthistory[len-1].stateroot = priorStateRoot}
+   * recenthistory' = recenthistorypostparentstaterootupdate append {..., stateroot=0x0, ...}
    */
-  private addToHistory(entry: RecentHistoryEntry): void {
+  public addToHistory(entry: RecentHistoryEntry, parentStateRoot?: Hex): void {
+    // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root
+    if (this.recentHistory.length > 0 && parentStateRoot) {
+      const previousEntry = this.recentHistory[this.recentHistory.length - 1]
+      previousEntry.stateRoot = parentStateRoot
+    }
+
+    // Add new entry (state_root should already be 0x0 per eq 41)
     this.recentHistory.push(entry)
 
     // Maintain circular buffer size
-    if (this.recentHistory.length > 8) {
+    if (this.recentHistory.length > HISTORY_CONSTANTS.C_RECENTHISTORYLEN) {
       this.recentHistory.shift() // Remove oldest entry
     }
   }
 
   /**
+   * Add block with automatic super-peak calculation
+   *
+   * Gray Paper: This computes rh_accoutlogsuperpeak = mmrsuperpeak(accoutBelt')
+   * from the current accout belt state
+   *
+   * @param entry - Block entry data (without accoutLogSuperPeak)
+   * @param parentStateRoot - Parent block's state root (for eq 23-25)
+   */
+  public addBlockWithSuperPeak(
+    entry: Omit<RecentHistoryEntry, 'accoutLogSuperPeak'>,
+    parentStateRoot?: Hex,
+  ): void {
+    const [error, accoutLogSuperPeak] = this.calculateAccoutLogSuperPeak()
+    if (error) {
+      logger.error('Failed to calculate super-peak, using zero hash', { error })
+    }
+
+    const beefyRoot = error
+      ? '0x0000000000000000000000000000000000000000000000000000000000000000'
+      : bytesToHex(accoutLogSuperPeak)
+
+    this.addToHistory(
+      {
+        ...entry,
+        accoutLogSuperPeak: beefyRoot,
+      },
+      parentStateRoot,
+    )
+  }
+
+  /**
    * Update accumulation output belt
    *
-   * Gray Paper Reference: Equation (28-32)
+   * *** GRAY PAPER FORMULA ***
+   * Gray Paper: recent_history.tex, equations 28-32
+   *
+   * Process:
+   * 1. Get lastaccout' (accumulation output sequence) from block body
+   * 2. Encode: s = [encode[4](serviceId) concat encode(hash) for each (serviceId, hash)]
+   * 3. Merklize: merklizewb(s, keccak)
+   * 4. Append to belt: mmrappend(accoutBelt, merklize_result, keccak)
+   * 5. Update accoutBelt.peaks
+   *
+   * Formula:
+   * using s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
+   * accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
    */
-  private updateAccoutBelt(_body: unknown): void {
-    // TODO: Implement proper MMR (Merkle Mountain Range) logic
-    // For now, just add a placeholder peak
-    const newPeak = this.calculateAccumulationPeak(_body)
-    this.accoutBelt.peaks.push(newPeak)
+  private updateAccoutBelt(body: BlockBody): Safe<void> {
+    try {
+      // Step 1: Get lastaccout' (accumulation outputs)
+      // This would come from the block's accumulation results
+      // For now, we'll need to extract this from the body
+      const lastaccout: Array<{ serviceId: bigint; hash: Uint8Array }> = []
 
-    // Maintain reasonable size (simplified)
-    if (this.accoutBelt.peaks.length > 100) {
-      this.accoutBelt.peaks.shift()
+      // TODO: Extract lastaccout from block body
+      // This should come from guarantees or accumulation results
+      // For test vectors, we'll need to pass this in
+
+      // Step 2: Encode the sequence per Gray Paper equation 29
+      // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
+      const encodedSequence: Uint8Array[] = lastaccout.map(
+        ({ serviceId, hash }) => {
+          // encode[4](serviceId) - 4-byte encoding
+          const serviceIdBytes = new Uint8Array(4)
+          const view = new DataView(serviceIdBytes.buffer)
+          view.setUint32(0, Number(serviceId), false) // big-endian
+
+          // Concatenate serviceId + hash
+          const combined = new Uint8Array(4 + hash.length)
+          combined.set(serviceIdBytes, 0)
+          combined.set(hash, 4)
+
+          return combined
+        },
+      )
+
+      // Step 3: Merklize the encoded sequence
+      // merklizewb(s, keccak) creates a well-balanced merkle tree
+      const [merklizeError, merklizedRoot] = merklizewb(encodedSequence)
+      if (merklizeError) {
+        logger.error('Failed to merklize accumulation outputs', {
+          error: merklizeError,
+        })
+        return safeResult(undefined) // Skip update on error
+      }
+
+      // Step 4: Convert accoutBelt.peaks to MMRRange (nullable array)
+      const mmrRange: MMRRange = this.accoutBelt.peaks.map((peak) =>
+        hexToBytes(peak),
+      )
+
+      // Step 5: Append to MMR belt
+      // accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+      const [mmrError, updatedRange] = mmrappend(
+        mmrRange,
+        merklizedRoot,
+        defaultKeccakHash,
+      )
+
+      if (mmrError) {
+        logger.error('Failed to append to MMR belt', { error: mmrError })
+        return safeResult(undefined) // Skip update on error
+      }
+
+      // Step 6: Update accoutBelt with new peaks (filter out nulls)
+      this.accoutBelt.peaks = updatedRange
+        .map((peak) => (peak !== null ? bytesToHex(peak) : null))
+        .filter((peak): peak is Hex => peak !== null)
+
+      this.accoutBelt.totalCount = BigInt(this.accoutBelt.peaks.length)
+
+      return safeResult(undefined)
+    } catch (error) {
+      logger.error('Error updating accout belt', { error })
+      return safeResult(undefined)
     }
   }
 
@@ -304,46 +513,29 @@ export class RecentHistoryService extends BaseServiceClass {
    *
    * Gray Paper Reference: Equation (44-52)
    */
-  private extractReportedPackageHashes(_body: unknown): Map<Hex, Hex> {
-    const packageHashes = new Map<Hex, Hex>()
-
-    // TODO: Implement proper extraction from guarantees extrinsic
-    // This would parse the guarantees extrinsic and extract:
-    // - packageHash from work report availability spec
-    // - segRoot from work report availability spec
-
-    // For now, return empty map
-    return packageHashes
+  private extractReportedPackageHashes(body: BlockBody): Map<Hex, Hex> {
+    // const packageHashes = new Map<Hex, Hex>()
+    // const guaranteesExtrinsic = body.guarantees.find((guarantee) => guarantee.report.)
+    // if(guaranteesExtrinsic) {
+    //   return packageHashes.set(guaranteesExtrinsic.packageHash, guaranteesExtrinsic.segRoot)
+    // }
+    // return packageHashes
+    return new Map<Hex, Hex>()
   }
 
   /**
    * Calculate accumulation output super-peak
    *
-   * Gray Paper Reference: Equation (42)
+   * *** GRAY PAPER FORMULA ***
+   * Gray Paper: recent_history.tex, equation 42
+   *
+   * Formula: rh_accoutlogsuperpeak = mmrsuperpeak(accoutBelt')
+   *
+   * The super-peak is a single hash commitment to the entire MMR belt
    */
-  private calculateAccoutLogSuperPeak(_body: unknown): Hex {
-    // TODO: Implement proper MMR super-peak calculation
-    // For now, return placeholder
-    return '0x0000000000000000000000000000000000000000000000000000000000000000'
+  private calculateAccoutLogSuperPeak(): Safe<Uint8Array> {
+    // Use mmrPeaks which preserves null positions
+    // mmrsuperpeak filters out nulls internally and computes the super-peak
+    return mmrsuperpeak(this.mmrPeaks)
   }
-
-  /**
-   * Calculate accumulation peak for MMR
-   */
-  private calculateAccumulationPeak(_body: unknown): Hex {
-    // TODO: Implement proper accumulation peak calculation
-    // For now, return placeholder
-    return '0x0000000000000000000000000000000000000000000000000000000000000000'
-  }
-
-  /**
-   * Persist recent history to database
-   */
-  // private async persistToDatabase(): Promise<void> {
-  //   // TODO: Implement database persistence
-  //   // This would save recent history entries to a database table
-  //   logger.debug('Persisting recent history to database', {
-  //     historyLength: this.recentHistory.length,
-  //   })
-  // }
 }

@@ -16,23 +16,29 @@ import {
 } from '@pbnj/core'
 import {
   AuditAnnouncementProtocol,
+  AuditShardRequestProtocol,
   BlockRequestProtocol,
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
+  CE134WorkPackageSharingProtocol,
+  
+
   type NetworkingProtocol,
   PreimageAnnouncementProtocol,
   PreimageRequestProtocol,
   SegmentShardRequestProtocol,
+  ShardDistributionProtocol,
   StateRequestProtocol,
   WorkPackageSubmissionProtocol,
   WorkReportDistributionProtocol,
   WorkReportRequestProtocol,
 } from '@pbnj/networking'
-import { BlockStore, PreimageStore, TicketStore, WorkStore } from '@pbnj/state'
-import { TelemetryClient } from '@pbnj/telemetry'
+import { BlockStore, PreimageStore, WorkStore } from '@pbnj/state'
+// import { TelemetryClient } from '@pbnj/telemetry'
 import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
 import { BaseService } from '@pbnj/types'
 import { db } from '../db'
+import { AssuranceService } from './assurance-service'
 import { BlockImporterService } from './block-importer-service'
 // import { BlockAuthoringService } from './block-authoring'
 import { ClockService } from './clock-service'
@@ -47,15 +53,16 @@ import { HeaderConstructor } from './header-constructor'
 import { KeyPairService } from './keypair-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
-import { PreimageHolderService } from './preimage-holder-service'
 import { RecentHistoryService } from './recent-history-service'
 import { ServiceRegistry } from './registry'
 // import { SafroleConsensusService } from './safrole-consensus-service'
 import { SealKeyService } from './seal-key'
+import { ServiceAccountService } from './service-account-service'
 import { StatisticsService } from './statistics-service'
 // import { TelemetryEventEmitterService } from './telemetry'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
+import { WorkReportService } from './work-report-service'
 // import { WorkPackageProcessor } from './work-package-processor'
 /**
  * Main service configuration
@@ -99,7 +106,7 @@ export class MainService extends BaseService {
   private readonly disputesService: DisputesService
   private readonly blockImporterService: BlockImporterService
   // private readonly workPackageProcessorService: WorkPackageProcessor
-  private readonly telemetryService: TelemetryEventEmitterService
+  // private readonly telemetryService: TelemetryEventEmitterService
   private readonly keyPairService: KeyPairService
   // private safroleConsensusService: SafroleConsensusService
   // private connectionManagerService: ConnectionManagerService
@@ -111,15 +118,17 @@ export class MainService extends BaseService {
   private blockStore: BlockStore | null = null
   private workStore: WorkStore | null = null
   private preimageStore: PreimageStore | null = null
-  private ticketStore: TicketStore | null = null
 
-  private readonly ticketHolderService: TicketService
-  private readonly preimageHolderService: PreimageHolderService
+  private readonly ticketService: TicketService
+  private readonly serviceAccountService: ServiceAccountService
 
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null =
     null
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null =
     null
+  private ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null =
+    null
+  private ce143PreimageRequestProtocol: PreimageRequestProtocol | null = null
 
   private readonly ringProver: RingVRFProver
   private readonly protocolRegistry: Map<
@@ -127,9 +136,10 @@ export class MainService extends BaseService {
     NetworkingProtocol<unknown, unknown>
   > = new Map()
 
-  private readonly ticketDistributionService: TicketDistributionService
   private readonly configService: ConfigService
   private readonly shardService: ErasureCodingService
+  private readonly workReportService: WorkReportService
+  private readonly assuranceService: AssuranceService
 
   constructor(config: MainServiceConfig) {
     super('main-service')
@@ -147,13 +157,11 @@ export class MainService extends BaseService {
     // Initialize event bus service first
     this.eventBusService = new EventBusService()
 
-    this.ticketHolderService = new TicketService({
+    this.clockService = new ClockService({
+      eventBusService: this.eventBusService,
       configService: this.configService,
     })
-    this.preimageHolderService = new PreimageHolderService(
-      this.preimageStore!,
-      this.configService,
-    )
+
     // Initialize entropy service
     this.entropyService = new EntropyService(this.eventBusService)
 
@@ -170,11 +178,11 @@ export class MainService extends BaseService {
       },
     })
 
-    const telemetryClient = new TelemetryClient(this.config.telemetry)
-    this.telemetryService = new TelemetryEventEmitterService({
-      client: telemetryClient,
-      eventBusService: this.eventBusService,
-    })
+    // const telemetryClient = new TelemetryClient(this.config.telemetry)
+    // this.telemetryService = new TelemetryEventEmitterService({
+    //   client: telemetryClient,
+    //   eventBusService: this.eventBusService,
+    // })
 
     this.metricsCollector = new MetricsCollector(this.config.nodeId)
 
@@ -182,14 +190,17 @@ export class MainService extends BaseService {
     //   'extrinsic-validator',
     // )
 
-    this.genesisManagerService = new NodeGenesisManager(
-      this.configService,
-      this.config.genesis.chainSpecPath,
-      {
-        genesisJsonPath: this.config.genesis.genesisJsonPath,
-        genesisHeaderPath: this.config.genesis.genesisHeaderPath,
-      },
-    )
+    this.genesisManagerService = new NodeGenesisManager(this.configService, {
+      chainSpecPath: this.config.genesis.chainSpecPath,
+      genesisJsonPath: this.config.genesis.genesisJsonPath,
+      genesisHeaderPath: this.config.genesis.genesisHeaderPath,
+    })
+
+    const [chainHashError, chainHash] =
+      this.genesisManagerService.getGenesisHeaderHash()
+    if (chainHashError) {
+      throw new Error('Failed to get chain hash')
+    }
 
     // Initialize statistics service
     this.statisticsService = new StatisticsService(this.eventBusService)
@@ -200,18 +211,34 @@ export class MainService extends BaseService {
       this.configService,
     )
 
-    this.clockService = new ClockService({
-      eventBusService: this.eventBusService,
-      configService: this.configService,
+    this.networkingService = new NetworkingService({
+      listenAddress: this.config.networking.listenAddress,
+      listenPort: Number(this.config.networking.listenPort),
+      keyPairService: this.keyPairService,
+      chainHash: chainHash,
+      protocolRegistry: this.protocolRegistry,
     })
+
     // this.workPackageProcessorService = new WorkPackageProcessor(
     //   'work-package-processor',
     // )
 
+    this.ticketService = new TicketService({
+      configService: this.configService,
+      eventBusService: this.eventBusService,
+      keyPairService: this.keyPairService,
+      entropyService: this.entropyService,
+      networkingService: this.networkingService,
+      ce131TicketDistributionProtocol: this.ce131TicketDistributionProtocol!,
+      ce132TicketDistributionProtocol: this.ce132TicketDistributionProtocol!,
+      clockService: this.clockService,
+      prover: this.ringProver,
+    })
+
     this.sealKeyService = new SealKeyService(
       this.eventBusService,
       this.entropyService,
-      this.ticketHolderService,
+      this.ticketService,
       this.configService,
     )
 
@@ -225,18 +252,24 @@ export class MainService extends BaseService {
       eventBusService: this.eventBusService,
       sealKeyService: this.sealKeyService,
       ringProver: this.ringProver,
-      ticketHolderService: this.ticketHolderService,
+      ticketService: this.ticketService,
       keyPairService: this.keyPairService,
       configService: this.configService,
-      // initialValidators: initialValidators
-      //   .filter((v) => v.publicKey && v.ed25519)
-      //   .map((v, i) => ({
-      //     index: i,
-      //     keys: {
-      //       bandersnatch: v.publicKey!,
-      //       ed25519: v.ed25519!,
-      //     },
-      //   })),
+      entropyService: this.entropyService,
+      clockService: this.clockService,
+      initialValidators: null,
+    })
+
+    this.ticketService.setValidatorSetManager(this.validatorSetManagerService)
+    this.networkingService.setValidatorSetManager(this.validatorSetManagerService)
+
+    this.serviceAccountService = new ServiceAccountService({
+      preimageStore: this.preimageStore!,
+      configService: this.configService,
+      eventBusService: this.eventBusService,
+      clockService: this.clockService,
+      networkingService: this.networkingService,
+      preimageRequestProtocol: this.ce143PreimageRequestProtocol!,
     })
 
     this.disputesService = new DisputesService(
@@ -252,12 +285,6 @@ export class MainService extends BaseService {
       validatorSetManagerService: this.validatorSetManagerService,
       genesisManagerService: this.genesisManagerService,
     })
-
-    const [chainHashError, chainHash] =
-      this.genesisManagerService.getGenesisHeaderHash()
-    if (chainHashError) {
-      throw new Error('Failed to get chain hash')
-    }
 
     // this.connectionManagerService = new ConnectionManagerService({
     //   validatorSetManager: this.validatorSetManagerService,
@@ -292,29 +319,24 @@ export class MainService extends BaseService {
 
     // const networkingStore = new NetworkingStore(db)
 
-    this.networkingService = new NetworkingService({
-      listenAddress: this.config.networking.listenAddress,
-      listenPort: Number(this.config.networking.listenPort),
-      validatorSetManagerService: this.validatorSetManagerService,
-      keyPairService: this.keyPairService,
-      chainHash: chainHash,
-      protocolRegistry: this.protocolRegistry,
-    })
-
-    this.ticketDistributionService = new TicketDistributionService({
-      eventBusService: this.eventBusService,
-      validatorSetManager: this.validatorSetManagerService,
-      networkingService: this.networkingService,
-      ce131TicketDistributionProtocol: this.ce131TicketDistributionProtocol!,
-      ticketHolderService: this.ticketHolderService,
-      ce132TicketDistributionProtocol: this.ce132TicketDistributionProtocol!,
-    })
-
     // Initialize shard service with config service
     // Shard size is fixed at 2 octet pairs (4 octets) per Gray Paper
-    this.shardService = new ErasureCodingService(
+    this.shardService = new ErasureCodingService(this.configService)
+
+    this.workReportService = new WorkReportService({
+      workStore: this.workStore!,
+      eventBus: this.eventBusService,
+      networkingService: this.networkingService,
+      ce136WorkReportRequestProtocol: this.ce136WorkReportRequestProtocol!,
+      validatorSetManager: this.validatorSetManagerService,
+    })
+
+    this.assuranceService = new AssuranceService(
       this.configService,
+      this.workReportService,
+      this.validatorSetManagerService,
       this.eventBusService,
+      this.sealKeyService,
     )
 
     // Initialize block importer service
@@ -327,6 +349,7 @@ export class MainService extends BaseService {
       entropyService: this.entropyService,
       sealKeyService: this.sealKeyService,
       blockStore: this.blockStore!,
+      assuranceService: this.assuranceService,
     })
 
     // Register created services with the registry
@@ -345,12 +368,14 @@ export class MainService extends BaseService {
     this.registry.register(this.sealKeyService)
     // this.registry.register(this.blockAuthoringService)
     this.registry.register(this.networkingService)
-    this.registry.register(this.telemetryService)
+    // this.registry.register(this.telemetryService)
     this.registry.register(this.keyPairService)
     // this.registry.register(this.safroleConsensusService)
-    this.registry.register(this.ticketHolderService)
-    this.registry.register(this.ticketDistributionService)
+    this.registry.register(this.ticketService)
     this.registry.register(this.shardService)
+    this.registry.register(this.workReportService)
+    this.registry.register(this.assuranceService)
+    this.registry.register(this.serviceAccountService)
     // Register this service as the main service
     this.registry.registerMain(this)
   }
@@ -406,20 +431,21 @@ export class MainService extends BaseService {
     this.blockStore = new BlockStore(db, this.configService)
     this.workStore = new WorkStore(db)
     this.preimageStore = new PreimageStore(db)
-    this.ticketStore = new TicketStore(db)
+    // this.ticketStore = new TicketStore(db)
   }
 
   initNetworkingProtocols(): void {
     this.ce131TicketDistributionProtocol = new CE131TicketDistributionProtocol(
-      this.ticketStore!,
-      this.ticketHolderService,
-      this.keyPairService,
-      this.entropyService,
-      this.validatorSetManagerService,
+      this.eventBusService,
     )
     this.ce132TicketDistributionProtocol = new CE132TicketDistributionProtocol(
-      this.ticketStore!,
-      this.ticketHolderService,
+      this.eventBusService,
+    )
+    this.ce136WorkReportRequestProtocol = new WorkReportRequestProtocol(
+      this.eventBusService,
+    )
+    this.ce143PreimageRequestProtocol = new PreimageRequestProtocol(
+      this.eventBusService,
     )
   }
 
@@ -427,29 +453,35 @@ export class MainService extends BaseService {
     // this.protocolRegistry.set(0, new BlockAnnouncementProtocol(options.blockStore))
     this.protocolRegistry.set(
       128,
-      new BlockRequestProtocol(this.blockStore!, this.configService),
+      new BlockRequestProtocol(this.eventBusService, this.configService),
     )
-    this.protocolRegistry.set(129, new StateRequestProtocol(this.blockStore!))
+    this.protocolRegistry.set(
+      129,
+      new StateRequestProtocol(this.eventBusService),
+    )
     this.protocolRegistry.set(131, this.ce131TicketDistributionProtocol!)
     this.protocolRegistry.set(132, this.ce132TicketDistributionProtocol!)
     this.protocolRegistry.set(
       133,
-      new WorkPackageSubmissionProtocol(this.workStore!),
+      new WorkPackageSubmissionProtocol(this.eventBusService),
     )
-    // this.protocolRegistry.set(
-    //   134,
-    //   new WorkPackageSharingProtocol(options.workStore),
-    // )
+    this.protocolRegistry.set(
+      134,
+      new CE134WorkPackageSharingProtocol(this.eventBusService),
+    )
     this.protocolRegistry.set(
       135,
-      new WorkReportDistributionProtocol(this.workStore!),
+      new WorkReportDistributionProtocol(this.eventBusService),
+    )
+    this.protocolRegistry.set(136, this.ce136WorkReportRequestProtocol!)
+    this.protocolRegistry.set(
+      137,
+      new ShardDistributionProtocol(this.eventBusService),
     )
     this.protocolRegistry.set(
-      136,
-      new WorkReportRequestProtocol(this.workStore!),
+      138,
+      new AuditShardRequestProtocol(this.eventBusService),
     )
-    // this.protocolRegistry.set(137, new ShardDistributionProtocol(options.workStore))
-    // this.protocolRegistry.set(138, new AuditShardRequestProtocol(options.workStore))
     this.protocolRegistry.set(
       139,
       new SegmentShardRequestProtocol(this.eventBusService),
@@ -461,15 +493,9 @@ export class MainService extends BaseService {
     // this.protocolRegistry.set(141, new AssuranceDistributionProtocol(blockStore))
     this.protocolRegistry.set(
       142,
-      new PreimageAnnouncementProtocol(this.preimageHolderService),
+      new PreimageAnnouncementProtocol(this.eventBusService),
     )
-    this.protocolRegistry.set(
-      143,
-      new PreimageRequestProtocol(
-        this.preimageHolderService,
-        this.clockService,
-      ),
-    )
+    this.protocolRegistry.set(143, this.ce143PreimageRequestProtocol!)
     this.protocolRegistry.set(
       144,
       new AuditAnnouncementProtocol(this.eventBusService),

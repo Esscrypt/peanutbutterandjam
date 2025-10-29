@@ -1,7 +1,7 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 
 /**
@@ -36,6 +36,6 @@ export abstract class BaseHostFunction {
    */
   abstract execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult | Promise<HostFunctionResult>
 }

@@ -65,7 +65,7 @@ import type { AuditAnnouncement, IConfigService, WorkReport } from '@pbnj/types'
  * Gray Paper hardcoded context string for audit VRF
  * Gray Paper auditing.tex: Xaudit = token("$jam_audit")
  */
-const XAUDIT = new TextEncoder().encode('$jam_audit')
+const XAUDIT = new TextEncoder().encode('jam_audit')
 
 /**
  * Audit signature result

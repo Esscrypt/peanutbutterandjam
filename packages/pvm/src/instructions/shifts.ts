@@ -44,8 +44,6 @@ export class SHLO_L_IMM_32Instruction extends BaseInstruction {
       result,
     )
 
-    
-
     return { resultCode: null }
   }
 
@@ -97,8 +95,6 @@ export class SHLO_R_IMM_32Instruction extends BaseInstruction {
       registerA, // Destination register
       result,
     )
-
-    
 
     return { resultCode: null }
   }
@@ -152,16 +148,7 @@ export class SHAR_R_IMM_32Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
-    
-
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -204,8 +191,6 @@ export class NEG_ADD_IMM_32Instruction extends BaseInstruction {
       registerA,
       BigInt(result),
     )
-
-    
 
     return { resultCode: null }
   }

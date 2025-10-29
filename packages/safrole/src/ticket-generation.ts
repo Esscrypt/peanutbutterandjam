@@ -226,7 +226,7 @@ export function verifyTicket(
   const entropy2 = entropyService.getEntropy2()
 
   // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
-  const XTICKET_SEAL = new TextEncoder().encode('$jam_ticket_seal')
+  const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
   // Gray Paper Eq. 292: Create VRF context: Xticket ∥ entropy'_2 ∥ xt_entryindex
   // Use the same encoding as generateRingVRFProof for consistency

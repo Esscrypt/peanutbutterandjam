@@ -92,7 +92,7 @@ export function encodeWorkPackageSpec(spec: WorkPackageSpec): Safe<Uint8Array> {
   parts.push(hexToBytes(spec.hash))
 
   // 2. encode[4]{AS_bundlelen} (4 bytes fixed-length)
-  const [error1, bundleLenEncoded] = encodeFixedLength(spec.length, 4n)
+  const [error1, bundleLenEncoded] = encodeFixedLength(BigInt(spec.length), 4n)
   if (error1) return safeError(error1)
   parts.push(bundleLenEncoded)
 
@@ -103,7 +103,10 @@ export function encodeWorkPackageSpec(spec: WorkPackageSpec): Safe<Uint8Array> {
   parts.push(hexToBytes(spec.exports_root))
 
   // 5. encode[2]{AS_segcount} (2 bytes fixed-length)
-  const [error2, segCountEncoded] = encodeFixedLength(spec.exports_count, 2n)
+  const [error2, segCountEncoded] = encodeFixedLength(
+    BigInt(spec.exports_count),
+    2n,
+  )
   if (error2) return safeError(error2)
   parts.push(segCountEncoded)
 

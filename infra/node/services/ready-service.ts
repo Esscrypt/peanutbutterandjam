@@ -1,5 +1,6 @@
 /**
  * Ready Service
+ * Work Reports ready for accumulation processing
  *
  * Manages ready work-reports according to Gray Paper specifications.
  *
@@ -45,14 +46,6 @@ export interface IReadyService {
   updateDependencies(workReportHash: Hex, dependencies: Set<Hex>): void
   removeDependency(workReportHash: Hex, dependencyHash: Hex): void
   addDependency(workReportHash: Hex, dependencyHash: Hex): void
-
-  // Statistics
-  getStats(): {
-    totalSlots: number
-    totalReadyItems: number
-    averageItemsPerSlot: number
-    slotsWithItems: number
-  }
 }
 
 /**
@@ -61,10 +54,15 @@ export interface IReadyService {
 export class ReadyService extends BaseService implements IReadyService {
   private ready: Ready
 
-  constructor(_configService: IConfigService) {
+  private readonly configService: IConfigService
+  constructor(options: {
+    configService: IConfigService
+  }) {
     super('ready-service')
+
+    this.configService = options.configService
     this.ready = {
-      epochSlots: new Map<bigint, ReadyItem[]>(),
+      epochSlots: new Array(this.configService.epochDuration).fill([]),
     }
   }
 
@@ -80,13 +78,6 @@ export class ReadyService extends BaseService implements IReadyService {
    */
   setReady(ready: Ready): void {
     this.ready = ready
-    logger.debug('Ready state updated', {
-      totalSlots: ready.epochSlots.size,
-      totalItems: Array.from(ready.epochSlots.values()).reduce(
-        (sum, items) => sum + items.length,
-        0,
-      ),
-    })
   }
 
   /**
@@ -95,18 +86,18 @@ export class ReadyService extends BaseService implements IReadyService {
    * Gray Paper: ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
    */
   getReadyItemsForSlot(slotIndex: bigint): ReadyItem[] {
-    return this.ready.epochSlots.get(slotIndex) || []
+    return this.ready.epochSlots[Number(slotIndex)] || []
   }
 
   /**
    * Add ready item to a specific epoch slot
    */
   addReadyItemToSlot(slotIndex: bigint, readyItem: ReadyItem): void {
-    if (!this.ready.epochSlots.has(slotIndex)) {
-      this.ready.epochSlots.set(slotIndex, [])
+    if (slotIndex > this.configService.epochDuration) {
+      throw new Error('Slot index out of bounds')
     }
 
-    const slotItems = this.ready.epochSlots.get(slotIndex)!
+    const slotItems = this.ready.epochSlots[Number(slotIndex)]!
     slotItems.push(readyItem)
 
     const [hashError, workReportHash] = calculateWorkReportHash(
@@ -125,28 +116,22 @@ export class ReadyService extends BaseService implements IReadyService {
    * Remove ready item from a specific epoch slot
    */
   removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): void {
-    const slotItems = this.ready.epochSlots.get(slotIndex)
-    if (!slotItems) return
+    const slotItems = this.ready.epochSlots[Number(slotIndex)]
+    if (!slotItems) throw new Error('Slot items not found')
 
     const index = slotItems.findIndex((item) => {
       const [hashError, hash] = calculateWorkReportHash(item.workReport)
       return !hashError && hash === workReportHash
     })
-    if (index !== -1) {
-      slotItems.splice(index, 1)
-      logger.debug('Ready item removed from slot', {
-        slotIndex: slotIndex.toString(),
-        workReportHash,
-      })
-    }
+    if (index === -1) throw new Error('Ready item not found')
+    slotItems.splice(index, 1)
   }
 
   /**
    * Clear all ready items from a specific epoch slot
    */
   clearSlot(slotIndex: bigint): void {
-    this.ready.epochSlots.delete(slotIndex)
-    logger.debug('Slot cleared', { slotIndex: slotIndex.toString() })
+    this.ready.epochSlots[Number(slotIndex)] = []
   }
 
   /**
@@ -167,7 +152,7 @@ export class ReadyService extends BaseService implements IReadyService {
    * Remove ready item from any slot
    */
   removeReadyItem(workReportHash: Hex): void {
-    for (const [, items] of this.ready.epochSlots) {
+    for (const items of this.ready.epochSlots) {
       const index = items.findIndex((item) => {
         const [hashError, hash] = calculateWorkReportHash(item.workReport)
         return !hashError && hash === workReportHash
@@ -201,10 +186,6 @@ export class ReadyService extends BaseService implements IReadyService {
     const readyItem = this.getReadyItem(workReportHash)
     if (readyItem) {
       readyItem.dependencies = dependencies
-      logger.debug('Dependencies updated', {
-        workReportHash,
-        dependenciesCount: dependencies.size,
-      })
     }
   }
 
@@ -215,7 +196,6 @@ export class ReadyService extends BaseService implements IReadyService {
     const readyItem = this.getReadyItem(workReportHash)
     if (readyItem) {
       readyItem.dependencies.delete(dependencyHash)
-      logger.debug('Dependency removed', { workReportHash, dependencyHash })
     }
   }
 
@@ -227,37 +207,6 @@ export class ReadyService extends BaseService implements IReadyService {
     if (readyItem) {
       readyItem.dependencies.add(dependencyHash)
       logger.debug('Dependency added', { workReportHash, dependencyHash })
-    }
-  }
-
-  /**
-   * Get service statistics
-   */
-  getStats(): {
-    totalSlots: number
-    totalReadyItems: number
-    averageItemsPerSlot: number
-    slotsWithItems: number
-  } {
-    const totalSlots = this.ready.epochSlots.size
-    let totalReadyItems = 0
-    let slotsWithItems = 0
-
-    for (const items of this.ready.epochSlots.values()) {
-      totalReadyItems += items.length
-      if (items.length > 0) {
-        slotsWithItems++
-      }
-    }
-
-    const averageItemsPerSlot =
-      totalSlots > 0 ? totalReadyItems / totalSlots : 0
-
-    return {
-      totalSlots,
-      totalReadyItems,
-      averageItemsPerSlot,
-      slotsWithItems,
     }
   }
 }

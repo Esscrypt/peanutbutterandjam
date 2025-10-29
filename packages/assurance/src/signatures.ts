@@ -32,7 +32,7 @@ export function createAssuranceSignature(
 ): Safe<Hex> {
   try {
     // Gray Paper: X_available ≡ "$jam_available"
-    const availablePrefix = new TextEncoder().encode('$jam_available')
+    const availablePrefix = new TextEncoder().encode('jam_available')
 
     // Encode parent_hash and bitfield for hashing
     const parentHashBytes = hexToBytes(parentHash)
@@ -86,7 +86,7 @@ export function verifyAssuranceSignature(
 ): Safe<boolean> {
   try {
     // Gray Paper: X_available ≡ "$jam_available"
-    const availablePrefix = new TextEncoder().encode('$jam_available')
+    const availablePrefix = new TextEncoder().encode('jam_available')
 
     // Encode parent_hash and bitfield for hashing
     const parentHashBytes = hexToBytes(parentHash)

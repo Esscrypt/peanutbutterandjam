@@ -6,7 +6,7 @@
  */
 
 import { blake2bHash, logger } from '@pbnj/core'
-import { decodePreimage } from '@pbnj/serialization'
+import { encodeNatural } from '@pbnj/serialization'
 import type {
   AccumulateInput,
   AccumulateInvocationResult,
@@ -14,7 +14,6 @@ import type {
   IConfigService,
   Implications,
   ImplicationsPair,
-  IPreimageHolderService,
   PartialState,
   PVMOptions,
   RAM,
@@ -22,6 +21,8 @@ import type {
 } from '@pbnj/types'
 import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '../config'
 import { PVM } from '../pvm'
+import type { HostFunctionRegistry } from '../host-functions/general/registry'
+import type { AccumulateHostFunctionRegistry } from '../host-functions/accumulate/registry'
 
 /**
  * Simplified PVM implementation
@@ -29,19 +30,37 @@ import { PVM } from '../pvm'
  * Gray Paper Ψ function: Executes instructions until a halting condition
  */
 export class AccumulatePVM extends PVM {
-  constructor(
-    preimageService: IPreimageHolderService,
-    configService: IConfigService,
-    options: PVMOptions = {},
-  ) {
-    super(options)
-    this.preimageService = preimageService
-    this.state.gasCounter =
-      options.gasCounter || BigInt(configService.maxBlockGas)
+  private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
+  constructor(options: {
+    hostFunctionRegistry: HostFunctionRegistry
+    accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
+    configService: IConfigService
+    pvmOptions?: PVMOptions
+  }) {
+    super(options.hostFunctionRegistry, options.pvmOptions)
+    this.accumulateHostFunctionRegistry = options.accumulateHostFunctionRegistry
+    this.state.gasCounter = options.pvmOptions?.gasCounter || BigInt(options.configService.maxBlockGas)
   }
 
   /**
    * Execute accumulate invocation (Ψ_A)
+   *
+   * Gray Paper Equation 148: Ψ_A: (partialstate, timeslot, serviceid, gas, sequence{accinput}) → acconeout
+   *
+   * Accumulate Invocation Constituents (Gray Paper):
+   * - partialstate: Current partial state of the system
+   * - timeslot: Current block timeslot (t)
+   * - serviceid: Service account ID (s)
+   * - gas: Available gas for execution (g)
+   * - sequence{accinput}: Sequence of accumulation inputs (i)
+   *
+   * Internal Processing (Gray Paper):
+   * 1. Extract service code: c = partialstate.accounts[s].code
+   * 2. Process deferred transfers: Update service balance with deferred transfer amounts
+   * 3. Create post-transfer state: postxferstate with updated balances
+   * 4. Initialize implications context: I(postxferstate, s)²
+   * 5. Encode arguments: encode(timeslot, serviceid, len(inputs))
+   * 6. Execute marshalling invocation: Ψ_M(c, 5, g, encodedArgs, F, initialContext)
    *
    * @param partialState - Current partial state
    * @param timeslot - Current block timeslot
@@ -50,33 +69,25 @@ export class AccumulatePVM extends PVM {
    * @param inputs - Sequence of accumulation inputs
    * @returns AccumulateInvocationResult
    */
-  public executeAccumulate(
+  public async executeAccumulate(
     partialState: PartialState,
     timeslot: bigint,
     serviceId: bigint,
     gas: bigint,
     inputs: AccumulateInput[],
-  ): AccumulateInvocationResult {
+  ): Promise<AccumulateInvocationResult> {
     try {
-      // Check if service exists and get its code
+      // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
       const serviceAccount = partialState.accounts.get(serviceId)
       if (!serviceAccount) {
         return { ok: false, err: 'BAD' }
       }
 
-      const preimageData = serviceAccount.preimages.get(serviceAccount.codehash)
-      if (!preimageData) {
+      // Gray Paper: Get service code from preimages using codehash
+      const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
+      if (!serviceCode) {
         return { ok: false, err: 'BAD' }
       }
-
-      // Decode the preimage to extract metadata + code
-      const [error, preimageResult] = decodePreimage(preimageData)
-      if (error) {
-        return { ok: false, err: 'BAD' }
-      }
-      const { blob: codeHex } = preimageResult.value
-      // Convert hex string to Uint8Array
-      const serviceCode = new Uint8Array(Buffer.from(codeHex.slice(2), 'hex'))
 
       // Check for null code or oversized code (Gray Paper eq:accinvocation)
       if (
@@ -104,7 +115,7 @@ export class AccumulatePVM extends PVM {
       )
 
       // Initialize Implications context
-      const initialContext = this.initializeImplicationsContext(
+      const implicationsPair = this.initializeImplicationsContext(
         postTransferState,
         serviceId,
         timeslot,
@@ -125,22 +136,25 @@ export class AccumulatePVM extends PVM {
       )
 
       // Execute Ψ_M(c, 5, g, encode(t, s, len(i)), F, I(postxferstate, s)^2)
-      const marshallingResult = this.executeMarshallingInvocation(
+      const [error, _] = await this.executeMarshallingInvocation(
         serviceCode,
         5n, // Initial PC = 5 (Gray Paper)
         gas,
         encodedArgs,
         accumulateContextMutator,
-        initialContext,
+        implicationsPair,
       )
+      if (error) {
+        return { ok: false, err: 'BAD' }
+      }
 
       // Collapse result based on termination type
       return this.collapseAccumulateResult(
         {
-          resultCode: marshallingResult.result as ResultCode,
-          gasUsed: marshallingResult.gasUsed,
+          resultCode: this.state.resultCode,
+          gasUsed: this.state.gasCounter,
         },
-        marshallingResult.finalContext,
+        implicationsPair,
       )
     } catch (error) {
       logger.error('Accumulate invocation failed', { error, serviceId })
@@ -180,31 +194,71 @@ export class AccumulatePVM extends PVM {
       // Create refine context for host functions
 
       try {
-        // Get accumulate host function by ID
-        const hostFunction = this.accumulateHostFunctionRegistry.get(hostCallId)
-
-        if (!hostFunction) {
-          logger.error('Unknown accumulate host function', { hostCallId })
+        // Gray Paper: Apply gas cost (10 gas for all host functions)
+        const gasCost = 10n
+        if (gasCounter < gasCost) {
           return {
-            resultCode: RESULT_CODES.PANIC,
+            resultCode: RESULT_CODES.OOG,
             gasCounter,
             registers,
             memory,
             context,
           }
         }
+        const newGasCounter = gasCounter - gasCost
 
-        // Execute host function
-        const result = hostFunction.execute(
-          gasCounter,
-          registers,
-          memory,
-          context,
-          timeslot,
-        )
+        // Try accumulate host functions first (14-26)
+        if (hostCallId >= 14n && hostCallId <= 26n) {
+          const hostFunction =
+            this.accumulateHostFunctionRegistry.get(hostCallId)
+          if (hostFunction) {
+            const result = hostFunction.execute(
+              newGasCounter,
+              registers,
+              memory,
+              context,
+              timeslot,
+            )
+            return {
+              resultCode: result.resultCode || RESULT_CODES.PANIC,
+              gasCounter: newGasCounter,
+              registers,
+              memory,
+              context,
+            }
+          }
+        }
 
+        // Try general host functions (0-13)
+        const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+        if (hostFunction) {
+          const result = hostFunction.execute(
+            {
+              gasCounter: newGasCounter,
+              registers,
+              ram: memory,
+            },
+            this.currentRefineContext,
+          )
+
+          // Handle both sync and async results
+          const resultCode =
+            result instanceof Promise
+              ? RESULT_CODES.PANIC // For now, treat async as panic - should be handled properly
+              : result.resultCode || RESULT_CODES.PANIC
+
+          return {
+            resultCode,
+            gasCounter: newGasCounter,
+            registers,
+            memory,
+            context,
+          }
+        }
+
+        logger.error('Unknown accumulate host function', { hostCallId })
         return {
-          resultCode: result.resultCode || RESULT_CODES.PANIC,
+          resultCode: RESULT_CODES.PANIC,
           gasCounter,
           registers,
           memory,
@@ -224,22 +278,24 @@ export class AccumulatePVM extends PVM {
         }
       } finally {
         // Clear refine context
-        this.currentRefineContext = undefined
+        this.currentRefineContext = null
       }
     }
   }
 
   /**
    * Calculate post-transfer state
+   * Gray Paper equation 168: x = sq{build{i}{i ∈ i, i ∈ defxfer}}
    */
   private calculatePostTransferState(
     partialState: PartialState,
     serviceId: bigint,
     inputs: AccumulateInput[],
   ): PartialState {
-    // Extract deferred transfers
+    // Gray Paper: Extract deferred transfers (defxfer pattern)
+    // For now, assume all inputs are deferred transfers - this should be refined based on actual defxfer definition
     const deferredTransfers = inputs
-      .filter((input) => input.type === 1n)
+      .filter((input) => this.isDeferredTransfer(input))
       .map((input) => input.value as DeferredTransfer)
 
     // Calculate total transfer amount to service
@@ -261,6 +317,21 @@ export class AccumulatePVM extends PVM {
       ...partialState,
       accounts: updatedAccounts,
     }
+  }
+
+  /**
+   * Check if input is a deferred transfer according to Gray Paper defxfer pattern
+   * This is a placeholder - the actual defxfer pattern needs to be defined
+   */
+  private isDeferredTransfer(input: AccumulateInput): boolean {
+    // TODO: Implement proper defxfer pattern matching
+    // For now, use a simple heuristic
+    return (
+      input.type === 1n &&
+      input.value &&
+      typeof input.value === 'object' &&
+      'dest' in input.value
+    )
   }
 
   /**
@@ -297,25 +368,53 @@ export class AccumulatePVM extends PVM {
   }
 
   /**
-   * Encode accumulate arguments
+   * Encode accumulate arguments according to Gray Paper specification
+   *
+   * Gray Paper: encode(timeslot, serviceid, len(inputs))
+   * - timeslot: encode[4]{thetime} (4 bytes) - merklization.tex C(11)
+   * - serviceid: encode[4]{serviceid} (4 bytes) - work package/item patterns
+   * - len(inputs): encodeNatural (variable) - sequence length pattern
    */
   private encodeAccumulateArguments(
     timeslot: bigint,
     serviceId: bigint,
     inputLength: bigint,
   ): Uint8Array {
-    const buffer = new ArrayBuffer(24) // 8 + 8 + 8 bytes
-    const view = new DataView(buffer)
+    const parts: Uint8Array[] = []
 
-    view.setBigUint64(0, timeslot, true) // Little endian
-    view.setBigUint64(8, serviceId, true)
-    view.setBigUint64(16, inputLength, true)
+    // 1. Timeslot (4 bytes) - Gray Paper: encode[4]{thetime}
+    const timeslotBytes = new Uint8Array(4)
+    const timeslotView = new DataView(timeslotBytes.buffer)
+    timeslotView.setUint32(0, Number(timeslot), true) // little-endian
+    parts.push(timeslotBytes)
 
-    return new Uint8Array(buffer)
+    // 2. Service ID (4 bytes) - Gray Paper: encode[4]{serviceid}
+    const serviceIdBytes = new Uint8Array(4)
+    const serviceIdView = new DataView(serviceIdBytes.buffer)
+    serviceIdView.setUint32(0, Number(serviceId), true) // little-endian
+    parts.push(serviceIdBytes)
+
+    // 3. Input length (variable) - Gray Paper: encodeNatural pattern
+    const [error, lengthEncoded] = encodeNatural(inputLength)
+    if (error) {
+      throw new Error(`Failed to encode input length: ${error.message}`)
+    }
+    parts.push(lengthEncoded)
+
+    // Concatenate all parts
+    const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
+    const result = new Uint8Array(totalLength)
+    let offset = 0
+    for (const part of parts) {
+      result.set(part, offset)
+      offset += part.length
+    }
+    return result
   }
 
   /**
    * Collapse accumulate result
+   * Gray Paper equation 217: C: (gas, blob ∪ {oog, panic}, implicationspair) → acconeout
    */
   private collapseAccumulateResult(
     executionResult: { resultCode: ResultCode; gasUsed: bigint },
@@ -323,9 +422,13 @@ export class AccumulatePVM extends PVM {
   ): AccumulateInvocationResult {
     const [imX, imY] = implicationsPair
 
-    // Use regular dimension for normal termination, exceptional for panic/oog
+    // Gray Paper: Use exceptional dimension (imY) for panic/oog, regular dimension (imX) for normal termination
     const finalImplications =
-      executionResult.resultCode === RESULT_CODES.HALT ? imX : imY
+      executionResult.resultCode === RESULT_CODES.PANIC ||
+      executionResult.resultCode === RESULT_CODES.OOG
+        ? imY
+        : imX
+
     return {
       ok: true,
       value: {

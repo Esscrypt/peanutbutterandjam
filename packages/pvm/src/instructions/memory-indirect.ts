@@ -62,7 +62,6 @@ export class STORE_IND_U8Instruction extends BaseInstruction {
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-
     // Write 8-bit value to memory
     const byteValue = registerAValue & 0xffn
     const encodedByteValue = this.bigIntToBytesLE(byteValue, 1)
@@ -81,7 +80,14 @@ export class STORE_IND_U8Instruction extends BaseInstruction {
 
     if (faultAddress) {
       console.log('STORE_IND_U8: writeOctets failed, returning FAULT')
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     console.log('STORE_IND_U8: writeOctets succeeded')
@@ -110,6 +116,10 @@ export class STORE_IND_U16Instruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: some gas is always charged whenever execution is attempted
     // This is the case even if no instruction is effectively executed
+    console.log('STORE_IND_U16: Starting execution', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+    })
 
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
@@ -125,25 +135,41 @@ export class STORE_IND_U16Instruction extends BaseInstruction {
       context.registers,
       registerB,
     )
-    const address = registerBValue + immediateX
+    const address = registerBValue + (immediateX & 0xffffn)
 
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < 65536n) {
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-
     const value = registerAValue & 0xffffn
 
     const encodedValue = this.bigIntToBytesLE(value, 2)
     const faultAddress = context.ram.writeOctets(address, encodedValue)
+    console.log('STORE_IND_U16: executing', {
+      registerA,
+      registerB,
+      immediateX,
+      registerAValue,
+      registerBValue,
+      address,
+      value,
+      encodedValue: Array.from(encodedValue),
+      faultAddress: faultAddress?.toString(),
+    })
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -176,23 +202,37 @@ export class STORE_IND_U32Instruction extends BaseInstruction {
     )
     const address = registerBValue + immediateX
 
+    console.log('STORE_IND_U32: Address calculation', {
+      registerA,
+      registerB,
+      immediateX,
+      registerAValue: registerAValue.toString(),
+      registerBValue: registerBValue.toString(),
+      address: address.toString(),
+    })
+
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < 65536n) {
       return { resultCode: RESULT_CODES.PANIC }
     }
-
 
     // Write 32-bit value to memory (little-endian)
     const value = registerAValue & 0xffffffffn
     const encodedValue = this.bigIntToBytesLE(value, 4)
     const faultAddress = context.ram.writeOctets(address, encodedValue)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -207,6 +247,11 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
   readonly name = 'STORE_IND_U64'
   readonly description = 'Store to register + immediate address (64-bit)'
   execute(context: InstructionContext): InstructionResult {
+    console.log('STORE_IND_U64: Starting execution', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+    })
+
     // Gray Paper: some gas is always charged whenever execution is attempted
     // This is the case even if no instruction is effectively executed
 
@@ -215,6 +260,12 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
         context.instruction.operands,
         context.fskip,
       )
+
+    console.log('STORE_IND_U64: Parsed operands', {
+      registerA,
+      registerB,
+      immediateX,
+    })
 
     const registerBValue = this.getRegisterValueAs64(
       context.registers,
@@ -225,6 +276,14 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
       registerA,
     )
     const address = registerBValue + immediateX
+
+    console.log('STORE_IND_U64: Register values before operation', {
+      registerA,
+      registerB,
+      registerAValue: registerAValue.toString(),
+      registerBValue: registerBValue.toString(),
+      immediateX: immediateX.toString(),
+    })
 
     console.log('STORE_IND_U64: Address calculation', {
       registerA,
@@ -237,23 +296,52 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
 
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < 65536n) {
+      console.log('STORE_IND_U64: PANIC - address < 2^16', {
+        address: address.toString(),
+        threshold: '65536',
+      })
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-
     const value = registerAValue & 0xffffffffffffffffn
+
+    console.log('STORE_IND_U64: Value preparation', {
+      registerAValue: registerAValue.toString(),
+      value: value.toString(),
+      masked: value.toString(),
+    })
 
     // Write 64-bit value to memory (little-endian)
     // Gray Paper: memwr[reg_B + immed_X:8] = encode[8]{reg_A}
     const encodedValue = this.bigIntToBytesLE(value, 8)
+    console.log('STORE_IND_U64: Memory write', {
+      address: address.toString(),
+      value: value.toString(),
+      encodedValue: Array.from(encodedValue),
+    })
+
     const faultAddress = context.ram.writeOctets(address, encodedValue)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_write', address: faultAddress, details: 'Memory not writable' } }
+      console.log('STORE_IND_U64: FAULT - memory write failed', {
+        faultAddress: faultAddress.toString(),
+      })
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
+      }
     }
+
+    console.log('STORE_IND_U64: Successfully completed', {
+      address: address.toString(),
+      value: value.toString(),
+    })
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -286,10 +374,24 @@ export class LOAD_IND_U8Instruction extends BaseInstruction {
     // Load 8-bit unsigned value from memory
     const [bytes, faultAddress] = context.ram.readOctets(address, 1n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
 
     const byteValue = bytes[0]
@@ -342,10 +444,24 @@ export class LOAD_IND_I8Instruction extends BaseInstruction {
     // Load 8-bit signed value from memory
     const [bytes, faultAddress] = context.ram.readOctets(address, 1n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
 
     const byteValue = bytes[0]
@@ -355,7 +471,6 @@ export class LOAD_IND_I8Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -391,14 +506,27 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
       registerBValue,
     })
 
-
     // Load 16-bit unsigned value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 2n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
 
     const value = this.bytesToBigIntLE(bytes)
@@ -406,7 +534,6 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -443,17 +570,30 @@ export class LOAD_IND_I16Instruction extends BaseInstruction {
     // Load 16-bit signed value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 2n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
     const value = this.signExtend(this.bytesToBigIntLE(bytes), 2)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -491,17 +631,30 @@ export class LOAD_IND_U32Instruction extends BaseInstruction {
     // Load 32-bit unsigned value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 4n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -537,17 +690,30 @@ export class LOAD_IND_I32Instruction extends BaseInstruction {
     // Load 32-bit signed value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 4n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
     const value = this.signExtend(this.bytesToBigIntLE(bytes), 4)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -584,15 +750,28 @@ export class LOAD_IND_U64Instruction extends BaseInstruction {
     // Load 64-bit unsigned value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 8n)
     if (faultAddress) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: faultAddress, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
+      }
     }
     if (!bytes) {
-      return { resultCode: RESULT_CODES.FAULT, faultInfo: { type: 'memory_read', address: address, details: 'Memory not readable' } }
+      return {
+        resultCode: RESULT_CODES.FAULT,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     return { resultCode: null }
   }
-
 }

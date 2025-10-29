@@ -1,6 +1,5 @@
 // General host functions (GENERAL_FUNCTIONS)
 
-export { BaseHostFunction } from './base'
 export { ExportHostFunction } from './export'
 export { ExpungeHostFunction } from './expunge'
 export { FetchHostFunction } from './fetch'

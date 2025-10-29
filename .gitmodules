@@ -28,7 +28,7 @@
 [submodule "submodules/jam-conformance"]
 	path = submodules/jam-conformance
 	url = https://github.com/davxy/jam-conformance.git
-[submodule "pvm-test-vectors"]
-	path = pvm-test-vectors
+[submodule "submodules/pvm-test-vectors"]
+	path = submodules/pvm-test-vectors
 	url = https://github.com/koute/jamtestvectors.git
 	branch = master_pvm_initial

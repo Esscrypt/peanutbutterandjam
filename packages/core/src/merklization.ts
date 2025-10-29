@@ -393,7 +393,7 @@ function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
   }
 
   // Hash the concatenation with "$node" prefix per Gray Paper Equation 179
-  const nodePrefix = new TextEncoder().encode('$node')
+  const nodePrefix = new TextEncoder().encode('node')
   const combined = new Uint8Array(
     nodePrefix.length + leftHash.length + rightHash.length,
   )
@@ -502,7 +502,7 @@ function merkleNodeCD(values: Uint8Array[]): Safe<Uint8Array> {
   }
 
   // Hash the concatenation with "$node" prefix
-  const nodePrefix = new TextEncoder().encode('$node')
+  const nodePrefix = new TextEncoder().encode('node')
   const combined = new Uint8Array(
     nodePrefix.length + leftHash.length + rightHash.length,
   )
@@ -645,8 +645,8 @@ function mmrSuperPeakHelper(
       return safeError(prevError)
     }
 
-    // Hash with "$peak" prefix
-    const peakPrefix = new TextEncoder().encode('$peak')
+    // Hash with "peak" prefix (without $)
+    const peakPrefix = new TextEncoder().encode('peak')
     const combined = new Uint8Array(
       peakPrefix.length + prevSuperPeak.length + lastPeak.length,
     )
@@ -974,7 +974,7 @@ function combineNodes(
   sibling: Uint8Array,
   currentIsLeft: boolean,
 ): Safe<Uint8Array> {
-  const nodePrefix = new TextEncoder().encode('$node')
+  const nodePrefix = new TextEncoder().encode('node')
 
   let combined: Uint8Array
   if (currentIsLeft) {

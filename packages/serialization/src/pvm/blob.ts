@@ -170,7 +170,7 @@ export function decodeBlob(
 }
 
 /**
- * Decodes a standard PVM program blob according to Gray Paper Y function specification
+ * Decodes a PVM program blob according to Gray Paper Y function specification
  *
  * Gray Paper pvm.tex: Y function (Standard Program Initialization)
  *
@@ -187,13 +187,17 @@ export function decodeBlob(
  * - c: Instruction data
  *
  * @param programBlob - The program blob bytes
- * @param argumentData - Optional argument data for initialization
- * @returns Decoded standard program components or error if invalid
+ * @returns Decoded program components or error if invalid
  */
-export function decodeStandardProgram(
-  programBlob: Uint8Array,
-  _argumentData: Uint8Array = new Uint8Array(0),
-): Safe<DecodingResult<StandardProgram>> {
+export function decodeProgram(programBlob: Uint8Array): Safe<
+  DecodingResult<{
+    code: Uint8Array
+    roData: Uint8Array
+    rwData: Uint8Array
+    stackSize: number
+    jumpTableEntrySize: number
+  }>
+> {
   let offset = 0
 
   // Helper function to read big-endian numbers
@@ -223,8 +227,6 @@ export function decodeStandardProgram(
 
     // 4. Decode E₃(s) - stack size (3 bytes)
     const stackSize = readBE(3)
-
-    const headerSize = offset
 
     // 5. Extract read-only data section (o)
     if (offset + roDataLength > programBlob.length) {
@@ -256,21 +258,6 @@ export function decodeStandardProgram(
     const code = programBlob.slice(offset, offset + codeLength)
     offset += codeLength
 
-    // Initialize registers (all zeros as per Gray Paper)
-    const registers: RegisterState = new Array(13).fill(0n)
-
-    // Initialize RAM with standard memory layout
-    // This is a simplified implementation - in practice, you'd use a proper RAM implementation
-    const ram: RAM = {
-      readOctets: () => safeResult(new Uint8Array(0)),
-      writeOctets: () => safeResult(undefined),
-      isReadable: () => false,
-      isWritable: () => false,
-      initializePage: () => {},
-      setPageAccessRights: () => {},
-      getPageAccessType: () => 'none',
-    }
-
     return safeResult({
       value: {
         code,
@@ -278,9 +265,6 @@ export function decodeStandardProgram(
         rwData,
         stackSize,
         jumpTableEntrySize,
-        registers,
-        ram,
-        headerSize,
       },
       remaining: programBlob.slice(offset),
       consumed: offset,

@@ -27,20 +27,49 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
   readonly description = 'Add immediate to 32-bit register'
 
   execute(context: InstructionContext): InstructionResult {
+    console.log('ADD_IMM_32: Starting execution', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+    })
+
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
         context.instruction.operands,
         context.fskip,
       )
 
+    console.log('ADD_IMM_32: Parsed operands', {
+      registerA,
+      registerB,
+      immediateX,
+    })
+
     const registerValue = this.getRegisterValueAs32(
       context.registers,
       registerB,
     )
 
+    console.log('ADD_IMM_32: Register values before operation', {
+      registerA,
+      registerB,
+      registerAValue: context.registers[registerA],
+      registerBValue: context.registers[registerB],
+      registerValue,
+      immediateX,
+    })
+
     // Gray Paper: reg'_A = sext_4((reg_B + immed_X) mod 2^32)
     const immediateValue = immediateX & 0xffffffffn
-    const result = this.signExtend(registerValue + immediateValue, 4)
+    const addition = registerValue + immediateValue
+    const result = this.signExtend(addition, 4)
+
+    console.log('ADD_IMM_32: Calculation steps', {
+      registerValue,
+      immediateValue,
+      addition,
+      result,
+      signExtended: result,
+    })
 
     logger.debug('Executing ADD_IMM_32 instruction', {
       registerA,
@@ -52,8 +81,13 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
 
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
+    console.log('ADD_IMM_32: After setting register', {
+      registerA,
+      result,
+      finalRegisterValue: context.registers[registerA],
+    })
+
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -94,7 +128,6 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
     )
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -117,17 +150,48 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Add immediate to 64-bit register'
 
   execute(context: InstructionContext): InstructionResult {
+    console.log('ADD_IMM_64: Starting execution', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+    })
+
     // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
         context.instruction.operands,
         context.fskip,
       )
+
+    console.log('ADD_IMM_64: Parsed operands', {
+      registerA,
+      registerB,
+      immediateX,
+    })
+
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerB,
     )
-    const result = (registerValue + immediateX) & 0xffffffffffffffffn // mod 2^64
+
+    console.log('ADD_IMM_64: Register values before operation', {
+      registerA,
+      registerB,
+      registerAValue: context.registers[registerA],
+      registerBValue: context.registers[registerB],
+      registerValue,
+      immediateX,
+    })
+
+    const addition = registerValue + immediateX
+    const result = addition & 0xffffffffffffffffn // mod 2^64
+
+    console.log('ADD_IMM_64: Calculation steps', {
+      registerValue,
+      immediateX,
+      addition,
+      result,
+      masked: result,
+    })
 
     logger.debug('Executing ADD_IMM_64 instruction', {
       registerA,
@@ -138,8 +202,13 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
     })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
+    console.log('ADD_IMM_64: After setting register', {
+      registerA,
+      result,
+      finalRegisterValue: context.registers[registerA],
+    })
+
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -182,7 +251,6 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

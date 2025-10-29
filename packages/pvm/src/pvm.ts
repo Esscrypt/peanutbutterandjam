@@ -5,19 +5,26 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { logger } from '@pbnj/core'
-import { decodeBlob } from '@pbnj/serialization'
+import {
+  logger,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/core'
+import { decodeBlob, decodeProgram } from '@pbnj/serialization'
 import type {
   ContextMutator,
   ImplicationsPair,
   PVMInstruction,
   PVMOptions,
   PVMState,
-  RefineContextPVM,
+  RefineInvocationContext,
   ResultCode,
+  IPVM,
+  WorkError,
 } from '@pbnj/types'
 import { GAS_CONFIG, INIT_CONFIG, RESULT_CODES } from './config'
-import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
 import { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMRAM } from './ram'
@@ -27,18 +34,21 @@ import { PVMRAM } from './ram'
  *
  * Gray Paper Ψ function: Executes instructions until a halting condition
  */
-export class PVM {
-  protected state: PVMState
+export class PVM implements IPVM {
+  public state: PVMState
   protected readonly registry: InstructionRegistry
   protected readonly hostFunctionRegistry: HostFunctionRegistry
-  protected readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   protected currentAccumulateContext?: ImplicationsPair
-  protected currentRefineContext?: RefineContextPVM
+  protected currentRefineContext: RefineInvocationContext | null = null
+  protected currentContextMutator: ContextMutator<any> | null = null
+  protected currentContext: any | null = null
 
-  constructor(options: PVMOptions = {}) {
+  constructor(
+    hostFunctionRegistry: HostFunctionRegistry,
+    options: PVMOptions = {},
+  ) {
     // Initialize instruction registry (singleton)
-    this.hostFunctionRegistry = new HostFunctionRegistry()
-    this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry()
+    this.hostFunctionRegistry = hostFunctionRegistry
     this.registry = new InstructionRegistry()
 
     // Initialize state with options
@@ -49,9 +59,10 @@ export class PVM {
       ram: options.ram ?? new PVMRAM(),
       gasCounter: options.gasCounter ?? GAS_CONFIG.DEFAULT_GAS_LIMIT,
       jumpTable: [], // Jump table for dynamic jumps
-      code: new Uint8Array(0), // code
+      code: options.code ?? new Uint8Array(0), // code
       bitmask: new Uint8Array(0), // opcode bitmask
       faultAddress: null,
+      hostCallId: null,
     }
   }
 
@@ -64,113 +75,192 @@ export class PVM {
     gasLimit: bigint,
     registers: bigint[],
     programBlob: Uint8Array,
-  ): Promise<{
-    resultCode: ResultCode
-    finalRegisters: bigint[]
-    finalPC: bigint
-    finalGas: bigint
-  }> {
-    // Save current state
-    const originalGasCounter = this.state.gasCounter
-    const originalRegisters = [...this.state.registerState]
-    const originalPC = this.state.instructionPointer
+  ): Promise<void> {
+    this.reset()
+    // Set invocation parameters
+    this.state.gasCounter = gasLimit
+    this.state.registerState = [...registers]
 
-    try {
-      // Set invocation parameters
-      this.state.gasCounter = gasLimit
-      this.state.registerState = [...registers]
+    // Execute until termination
+    await this.run(programBlob)
+  }
 
-      // Execute until termination
-      await this.run(programBlob)
-
-      // Return results
-      return {
-        resultCode: this.state.resultCode,
-        finalRegisters: [...this.state.registerState],
-        finalPC: this.state.instructionPointer,
-        finalGas: this.state.gasCounter,
-      }
-    } finally {
-      // Restore original state
-      this.state.gasCounter = originalGasCounter
-      this.state.registerState = originalRegisters
-      this.state.instructionPointer = originalPC
+  /**
+   * Y - Standard initialization function
+   * Gray Paper equation 753-760: Y(blob, blob) → (blob, registers, ram)?
+   *
+   * Decodes program blob and argument data to yield program code, registers, and RAM.
+   * Returns null if the conditions cannot be satisfied with unique values.
+   *
+   * @param programBlob - Program blob containing code, output, writable, and init data
+   * @param argumentData - Argument data blob (max Cpvminitinputsize)
+   * @returns Tuple of (code, registers, ram) or null if invalid
+   */
+  private initializeProgram(
+    programBlob: Uint8Array,
+    argumentData: Uint8Array,
+  ): Safe<Uint8Array> {
+    // Try to decode as standard program format first (Gray Paper Y function)
+    const [error, decoded] = decodeProgram(programBlob)
+    if (error) {
+      return safeError(error)
     }
+    const { code, roData, rwData, stackSize, jumpTableEntrySize } =
+      decoded.value
+
+    // Gray Paper equation 803-811: Initialize registers
+    this.state.registerState[0] = 2n ** 32n - 2n ** 16n // 2^32 - 2^16
+    this.state.registerState[1] =
+      2n ** 32n - 2n * INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE // 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
+    this.state.registerState[7] =
+      2n ** 32n - INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE // 2^32 - Cpvminitzonesize - Cpvminitinputsize
+    this.state.registerState[8] = BigInt(argumentData.length) // len(argumentData)
+
+    // Set up memory sections according to Gray Paper memory layout
+    this.initializeMemoryLayout(roData, rwData, stackSize, argumentData)
+
+    // Initialize jump table (empty for standard program format)
+    // Standard program format doesn't include jump table, so we use empty array
+    // jumpTableEntrySize indicates the size of each entry if present
+    this.state.jumpTable = []
+
+    logger.debug('Y function initialized program', {
+      codeLength: code.length,
+      roDataLength: roData.length,
+      rwDataLength: rwData.length,
+      stackSize,
+      jumpTableEntrySize,
+      jumpTableLength: this.state.jumpTable.length,
+      argLength: argumentData.length,
+    })
+
+    return safeResult(code)
+  }
+
+  /**
+   * Initialize memory layout according to Gray Paper equation 770-802
+   *
+   * @param ram - RAM instance to initialize
+   * @param roData - Read-only data section
+   * @param rwData - Read-write data section
+   * @param stackSize - Stack size
+   * @param argumentData - Argument data
+   */
+  private initializeMemoryLayout(
+    roData: Uint8Array,
+    rwData: Uint8Array,
+    stackSize: number,
+    argumentData: Uint8Array,
+  ): void {
+    // Gray Paper equation 770-802: Memory layout implementation
+    // Implement proper memory layout with access rights according to Gray Paper
+
+    // Helper function to align to page boundary
+    const alignToPage = (size: number): number => {
+      const pageSize = 4096 // Cpvmpagesize = 2^12
+      return Math.ceil(size / pageSize) * pageSize
+    }
+
+    // 1. Read-only data section (o) - Gray Paper: R access
+    if (roData.length > 0) {
+      const roStart = INIT_CONFIG.INIT_ZONE_SIZE
+      const roAlignedLength = alignToPage(roData.length)
+
+      this.state.ram.writeOctets(roStart, roData)
+      this.state.ram.setPageAccessRights(roStart, roAlignedLength, 'read')
+    }
+
+    // 2. Read-write data section (w) - Gray Paper: W access
+    if (rwData.length > 0) {
+      const rwStart = 2n * INIT_CONFIG.INIT_ZONE_SIZE
+      const rwAlignedLength = alignToPage(rwData.length)
+
+      this.state.ram.writeOctets(rwStart, rwData)
+      this.state.ram.setPageAccessRights(rwStart, rwAlignedLength, 'write')
+    }
+
+    // 3. Stack section - Gray Paper: W access
+    if (stackSize > 0) {
+      const stackStart =
+        2n ** 32n -
+        2n * INIT_CONFIG.INIT_ZONE_SIZE -
+        INIT_CONFIG.INIT_INPUT_SIZE -
+        BigInt(alignToPage(stackSize))
+      const stackAlignedLength = alignToPage(stackSize)
+
+      this.state.ram.setPageAccessRights(
+        stackStart,
+        stackAlignedLength,
+        'write',
+      )
+    }
+
+    // 4. Argument data section (a) - Gray Paper: R access
+    if (argumentData.length > 0) {
+      const argStart =
+        2n ** 32n - INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+      const argAlignedLength = alignToPage(argumentData.length)
+
+      this.state.ram.writeOctets(argStart, argumentData)
+      this.state.ram.setPageAccessRights(argStart, argAlignedLength, 'read')
+    }
+
+    logger.debug('Memory layout initialized', {
+      roDataLength: roData.length,
+      rwDataLength: rwData.length,
+      stackSize,
+      argDataLength: argumentData.length,
+    })
   }
 
   /**
    * Ψ_M - Marshalling PVM invocation function
-   * Gray Paper equation 817: Ψ_M(blob, pvmreg, gas, blob, contextmutator, X) → (gas, blob ∪ {panic, oog}, X)
+   * Gray Paper: Ψ_M(blob, pvmreg, gas, blob, contextmutator, X) → (gas, blob ∪ {panic, oog}, X)
+   *
+   * This is a pure wrapper that calls the core Ψ function with proper context handling.
+   * Uses the Y function to initialize registers and memory according to Gray Paper.
    *
    * @param code - Service code blob
-   * @param initialPC - Initial program counter (typically 5 for accumulate)
+   * @param initialPC - Initial program counter (typically 0 for refine, 5 for accumulate)
    * @param gasLimit - Gas limit for execution
    * @param encodedArgs - Encoded arguments blob
    * @param contextMutator - Context mutator function F
-   * @param context - Context X (ImplicationsPair for accumulate)
-   * @returns Tuple of (gas, result, context)
+   * @param context - Context X (ImplicationsPair for accumulate, RefineContext for refine)
+   * @returns Tuple of (gas, result, context) where result is blob ∪ {panic, oog}
    */
   protected async executeMarshallingInvocation<T>(
-    code: Uint8Array,
+    programBlob: Uint8Array,
     initialPC: bigint,
     gasLimit: bigint,
     encodedArgs: Uint8Array,
-    _contextMutator: ContextMutator<T>,
+    contextMutator: ContextMutator<T>,
     context: T,
-  ): Promise<{
-    gasUsed: bigint
-    result: ResultCode | Uint8Array
-    finalContext: T
-  }> {
-    // Save current state
-    const originalState = { ...this.state }
-    const originalAccumulateContext = this.currentAccumulateContext
-    const originalRefineContext = this.currentRefineContext
+  ): SafePromise<void> {
+    // Store context mutator and context for use during execution
+    this.currentContextMutator = contextMutator
+    this.currentContext = context
 
-    try {
-      // Load the service code
+    // Gray Paper: Ψ_M calls the core Ψ function
+    // Ψ_M(blob, pvmreg, gas, blob, contextmutator, X) → (gas, blob ∪ {panic, oog}, X)
 
-      // Set initial state according to Gray Paper equation 803-810
-      this.state.instructionPointer = initialPC
-      this.state.gasCounter = gasLimit
-      this.state.registerState = new Array(13).fill(0n)
-
-      // Set up registers according to Gray Paper equation 803-810
-      this.state.registerState[0] = 2n ** 32n - 2n ** 16n // r0 = 2^32 - 2^16
-      this.state.registerState[1] =
-        2n ** 32n -
-        2n * INIT_CONFIG.INIT_ZONE_SIZE -
-        INIT_CONFIG.INIT_INPUT_SIZE
-      this.state.registerState[7] =
-        2n ** 32n - INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
-      this.state.registerState[8] = BigInt(encodedArgs.length) // Length of arguments
-
-      // Write encoded arguments to memory at the init zone
-      const initZoneStart = 2n ** 32n - INIT_CONFIG.INIT_ZONE_SIZE
-      this.state.ram.writeOctets(initZoneStart, encodedArgs)
-
-      // Execute with context mutator
-      // const result = this.runWithContextMutator(contextMutator, context)
-      await this.run(code)
-
-      return {
-        gasUsed: originalState.gasCounter - this.state.gasCounter,
-        result: this.state.resultCode,
-        finalContext: context,
-      }
-    } catch (error) {
-      logger.error('Marshalling invocation failed', { error })
-      return {
-        gasUsed: originalState.gasCounter - this.state.gasCounter,
-        result: RESULT_CODES.PANIC,
-        finalContext: context,
-      }
-    } finally {
-      // Restore original state
-      this.state = originalState
-      this.currentAccumulateContext = originalAccumulateContext
-      this.currentRefineContext = originalRefineContext
+    // Gray Paper equation 822: Use Y function to initialize program state
+    // Y(programBlob, argumentData) → (code, registers, ram)?
+    const [error, decodedCode] = this.initializeProgram(
+      programBlob,
+      encodedArgs,
+    )
+    if (error) {
+      return safeError(error)
     }
+
+    this.state.gasCounter = gasLimit
+    this.state.instructionPointer = initialPC
+
+    // Gray Paper: Call core Ψ function with context mutator
+    // The core Ψ function (this.run) handles all PVM execution logic
+    await this.run(decodedCode)
+
+    return safeResult(undefined)
   }
 
   /**
@@ -193,32 +283,81 @@ export class PVM {
     if (resultCode === RESULT_CODES.HOST) {
       // Extract host call ID from registers (typically r0 or r1)
       const hostCallId = this.state.registerState[0] // Assuming host call ID is in r0
-
-      const context = {
-        gasCounter: this.state.gasCounter,
-        registers: this.state.registerState,
-        ram: this.state.ram,
-      }
-      // Call context mutator to handle the host call
-      const hostFunction = this.hostFunctionRegistry.get(hostCallId)
-
-      if (!hostFunction) {
-        return RESULT_CODES.PANIC
+      this.state.hostCallId = hostCallId
+      if (this.state.gasCounter <= 0n) {
+        this.state.resultCode = RESULT_CODES.OOG
+        return RESULT_CODES.OOG
       }
 
-      const mutatorResult = await hostFunction.execute(context)
+      // Consume 1 gas for each instruction
+      this.state.gasCounter -= 10n
 
-      this.state.gasCounter = context.gasCounter
-      this.state.registerState = context.registers
-      this.state.ram = context.ram
+      // Use context mutator if available (for accumulate/refine invocations)
+      if (this.currentContextMutator && this.currentContext !== undefined) {
+        const mutatorResult = this.currentContextMutator(
+          hostCallId,
+          this.state.gasCounter,
+          this.state.registerState,
+          this.state.ram,
+          this.currentContext,
+        )
 
-      // Check if mutator wants to halt execution
-      if (mutatorResult.resultCode !== null) {
-        return mutatorResult.resultCode
+        // Update state from mutator result
+        this.state.gasCounter = mutatorResult.gasCounter
+        this.state.registerState = mutatorResult.registers
+        this.state.ram = mutatorResult.memory
+        this.currentContext = mutatorResult.context
+
+        // Check if mutator wants to halt execution
+        if (mutatorResult.resultCode !== null) {
+          return mutatorResult.resultCode
+        }
+      } else {
+        // Fallback to generic host function registry (for standalone PVM execution)
+        const context = {
+          gasCounter: this.state.gasCounter,
+          registers: this.state.registerState,
+          ram: this.state.ram,
+        }
+
+        const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+        if (!hostFunction) {
+          return RESULT_CODES.PANIC
+        }
+
+        const mutatorResult = await hostFunction.execute(
+          context,
+          this.currentRefineContext,
+        )
+
+        this.state.gasCounter = context.gasCounter
+        this.state.registerState = context.registers
+        this.state.ram = context.ram
+
+        // Check if mutator wants to halt execution
+        if (mutatorResult.resultCode !== null) {
+          return mutatorResult.resultCode
+        }
       }
     }
 
     return resultCode
+  }
+
+  /**
+   * Extract result from memory - placeholder implementation
+   */
+  protected extractResultFromMemory(): Uint8Array | WorkError {
+    const start = this.state.registerState[7]
+    const length = this.state.registerState[8]
+    const [response, faultAddress] = this.state.ram.readOctets(start, length)
+    if (faultAddress) {
+      return 'PANIC'
+    }
+    if (!response) {
+      return 'PANIC'
+    }
+    return response
   }
 
   /**
@@ -303,6 +442,7 @@ export class PVM {
         opcode: BigInt(opcode),
         operands,
         fskip,
+        pc: this.state.instructionPointer,
       }
 
       resultCode = await this.step(instruction)
@@ -333,14 +473,6 @@ export class PVM {
     if (!handler) {
       return RESULT_CODES.PANIC
     }
-
-    console.log('PVM.executeInstruction: Executing instruction', {
-      handler: handler.name,
-      operands: Array.from(instruction.operands),
-      gasBefore: this.state.gasCounter.toString(),
-      pc: this.state.instructionPointer.toString(),
-      fskip: instruction.fskip,
-    })
 
     try {
       // Save PC before execution
@@ -412,6 +544,7 @@ export class PVM {
       jumpTable: [],
       code: new Uint8Array(0),
       bitmask: new Uint8Array(0),
+      hostCallId: null,
     }
   }
 

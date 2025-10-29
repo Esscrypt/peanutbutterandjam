@@ -1,108 +1,24 @@
 import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { PVM } from '../pvm'
+import type { Hex } from 'viem'
 import type { 
   PartialState, 
   ServiceAccount, 
   AccumulateInput,
+  AccumulateTestVector,
+  OperandTuple,
+  ServiceAccountCore,
 } from '@pbnj/types'
+import { ConfigService } from '../services/config-service'
+import { HostFunctionRegistry, AccumulateHostFunctionRegistry, AccumulatePVM } from '@pbnj/pvm'
+import { hexToBytes } from '../../../packages/core/src/utils/crypto'
+import { ServiceAccountService } from '../services/service-account-service'
+import { EventBusService } from '@pbnj/core'
+import { ClockService } from '../services/clock-service'
+import { PreimageRequestProtocol } from '@pbnj/networking'
+import { AccumulationService } from '../services/accumulation-service'
 
-interface AccumulateTestVector {
-  input: {
-    slot: number
-    reports: Array<{
-      package_spec: {
-        hash: string
-        length: number
-        erasure_root: string
-        exports_root: string
-        exports_count: number
-      }
-      context: {
-        anchor: string
-        state_root: string
-        beefy_root: string
-        lookup_anchor: string
-        lookup_anchor_slot: number
-        prerequisites: any[]
-      }
-      core_index: number
-      authorizer_hash: string
-      auth_gas_used: number
-      auth_output: string
-      segment_root_lookup: any[]
-      results: Array<{
-        service_id: number
-        code_hash: string
-        payload_hash: string
-        accumulate_gas: number
-        result: {
-          ok?: string
-          err?: null
-        }
-        refine_load: {
-          gas_used: number
-          imports: number
-          extrinsic_count: number
-          extrinsic_size: number
-          exports: number
-          accumulate_count: number
-          accumulate_gas_used: number
-        }
-      }>
-    }>
-  }
-  pre_state: {
-    slot: number
-    entropy: string
-    ready_queue: any[][]
-    accumulated: any[][]
-    privileges: {
-      bless: number
-      assign: number[]
-      designate: number
-      register: number
-      always_acc: number[]
-    }
-    statistics: any[]
-    accounts: Array<{
-      id: number
-      data: {
-        service: {
-          version: number
-          code_hash: string
-          balance: number
-          min_item_gas: number
-          min_memo_gas: number
-          bytes: number
-          deposit_offset: number
-          items: number
-          creation_slot: number
-          last_accumulation_slot: number
-          parent_service: number
-        }
-        storage: Array<{
-          key: string
-          value: string
-        }>
-        preimages_blob: Array<{
-          hash: string
-          blob: string
-        }>
-        preimages_status: Array<{
-          hash: string
-          status: number[]
-        }>
-      }
-    }>
-  }
-  output: {
-    ok?: string
-    err?: null
-  }
-  post_state: any
-}
 
 describe('Accumulate Test Vector Execution', () => {
   test('should execute accumulate test vector from JSON', async () => {
@@ -110,9 +26,16 @@ describe('Accumulate Test Vector Execution', () => {
     const testVectorPath = join(__dirname, '../../../../submodules/jam-test-vectors/stf/accumulate/tiny/process_one_immediate_report-1.json')
     const testVectorData = readFileSync(testVectorPath, 'utf-8')
     const testVector: AccumulateTestVector = JSON.parse(testVectorData)
-
+    
     // Create PVM instance
-    const pvm = new PVM()
+    const configService = new ConfigService('tiny')
+    const eventBusService = new EventBusService()
+    const clockService = new ClockService({eventBusService: eventBusService, configService: configService})
+    const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
+    const serviceAccountService = new ServiceAccountService({preimageStore: null, configService: configService, eventBusService: eventBusService, clockService: clockService, networkingService: null, preimageRequestProtocol: preimageRequestProtocol})
+    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry()
+    const pvm = new AccumulatePVM({hostFunctionRegistry: new HostFunctionRegistry(null, configService), accumulateHostFunctionRegistry: accumulateHostFunctionRegistry, configService: configService, pvmOptions: {gasCounter: 1_000_000n}})
+    const accumulationService = new AccumulationService({configService: configService, clockService: clockService, serviceAccountService: serviceAccountService, privilegesService: null, validatorSetManager: null, authQueueService: null, accumulatePVM: pvm})
 
     // Convert test vector data to our types
     const partialState = convertToPartialState(testVector.pre_state)
@@ -122,7 +45,7 @@ describe('Accumulate Test Vector Execution', () => {
     const inputs = convertToAccumulateInputs(testVector.input.reports)
 
     // Execute accumulate invocation
-    const result = pvm.executeAccumulate(
+    const result = await pvm.executeAccumulate(
       partialState,
       timeslot,
       serviceId,
@@ -158,9 +81,9 @@ function convertToPartialState(preState: AccumulateTestVector['pre_state']): Par
     const serviceId = BigInt(accountData.id)
     const serviceInfo = accountData.data.service
     
-    const serviceAccount: ServiceAccount = {
+    const serviceAccount: ServiceAccountCore = {
     //   version: BigInt(serviceInfo.version),
-      codehash: `0x${serviceInfo.code_hash}`,
+      codehash: serviceInfo.code_hash as Hex,
       balance: BigInt(serviceInfo.balance),
       minaccgas: BigInt(serviceInfo.min_item_gas),
       minmemogas: BigInt(serviceInfo.min_memo_gas),
@@ -177,17 +100,17 @@ function convertToPartialState(preState: AccumulateTestVector['pre_state']): Par
 
     // Convert storage
     for (const storageEntry of accountData.data.storage) {
-      serviceAccount.storage.set(`0x${storageEntry.key}`, new TextDecoder().decode(Uint8Array.from(storageEntry.value.split(',').map(Number))))
+      serviceAccount.storage.set(storageEntry.key as Hex, hexToBytes(storageEntry.value as Hex))
     }
 
     // Convert preimages
     for (const preimageEntry of accountData.data.preimages_blob) {
-      serviceAccount.preimages.set(`0x${preimageEntry.hash}`, new TextDecoder().decode(Uint8Array.from(preimageEntry.blob.split(',').map(Number))))
+      serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
     }
 
     // Convert preimage status (requests)
     for (const statusEntry of accountData.data.preimages_status) {
-      serviceAccount.requests.set(`0x${statusEntry.hash}`, new Map(statusEntry.status.map(BigInt).map(status => [BigInt(status), new Uint8Array(0)])))
+      serviceAccount.requests.set(statusEntry.hash as Hex, new Map(statusEntry.status.map(BigInt).map(status => [BigInt(status), new Uint8Array(0)])))
     }
 
     accounts.set(serviceId, serviceAccount)
@@ -204,7 +127,15 @@ function convertToPartialState(preState: AccumulateTestVector['pre_state']): Par
 
 function convertToAccumulateInputs(reports: AccumulateTestVector['input']['reports']): AccumulateInput[] {
   return reports.map(report => ({
-    type: 0n, // Work report type
-    value: report, // Raw report data
+    type: 0n, // Work report type // for operand tuple
+    value: {
+      packageHash: report.package_spec.hash,
+      segmentRoot: report.package_spec.erasure_root,
+      authorizer: report.authorizer_hash,
+      payloadHash: report.results[0].payload_hash,
+      gasLimit: BigInt(report.results[0].accumulate_gas),
+      result: report.results[0].result as WorkExecutionResult,
+      authTrace: report.auth_output,
+    } as OperandTuple, // Raw report data
   }))
 }

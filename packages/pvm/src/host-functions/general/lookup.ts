@@ -2,9 +2,8 @@ import { bytesToHex, hexToBytes } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  IPreimageHolderService,
-  RefineContextPVM,
-  ServiceAccount,
+  IServiceAccountService,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -43,16 +42,16 @@ export class LookupHostFunction extends BaseHostFunction {
   readonly name = 'lookup'
   readonly gasCost = 10n
 
-  private readonly preimageService: IPreimageHolderService
-  constructor(preimageService: IPreimageHolderService) {
+  private readonly serviceAccountService: IServiceAccountService
+  constructor(serviceAccountService: IServiceAccountService) {
     super()
-    this.preimageService = preimageService
+    this.serviceAccountService = serviceAccountService
   }
 
-  async execute(
+  execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
-  ): Promise<HostFunctionResult> {
+    refineContext: RefineInvocationContext | null,
+  ): HostFunctionResult {
     // Validate execution
     if (context.gasCounter < this.gasCost) {
       return {
@@ -78,7 +77,17 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Get service account
-    const serviceAccount = this.getServiceAccount(refineContext, serviceId)
+    const [serviceAccountError, serviceAccount] = this.serviceAccountService.getServiceAccount(serviceId)
+    if (serviceAccountError) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'basic_block',
+          address: serviceId,
+          details: 'Service account not found',
+        },
+      }
+    }
     if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
@@ -88,15 +97,15 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Read hash from memory (32 bytes)
-    const [accessError, hashData] = context.ram.readOctets(hashOffset, 32n)
-    if (accessError) {
+    const [hashData, _faultAddress] = context.ram.readOctets(hashOffset, 32n)
+    if (!hashData) {
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
       }
     }
 
     // Look up preimage by hash
-    const [lookupError, preimage] = await this.preimageService.getPreimage(
+    const [lookupError, preimage] = this.serviceAccountService.getPreimage(
       bytesToHex(hashData),
     )
     if (lookupError || !preimage) {
@@ -127,10 +136,15 @@ export class LookupHostFunction extends BaseHostFunction {
     const dataToWrite = hexToBytes(preimage.blob).subarray(f, f + actualLength)
 
     // Write preimage slice to memory
-    const [writeError, _] = context.ram.writeOctets(outputOffset, dataToWrite)
-    if (writeError) {
+    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
+    if (faultAddress) {
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
       }
     }
 
@@ -142,22 +156,4 @@ export class LookupHostFunction extends BaseHostFunction {
     }
   }
 
-  private getServiceAccount(
-    refineContext: RefineContextPVM,
-    serviceId: bigint,
-  ): ServiceAccount | null {
-    // Gray Paper: Ω_L(gascounter, registers, memory, s, s, d)
-    // where s = current service account, s = current service ID, d = accounts dict
-
-    // If registers[7] = NONE (2^64 - 1), use current service
-    if (serviceId === ACCUMULATE_ERROR_CODES.NONE) {
-      return (
-        refineContext.accountsDictionary.get(refineContext.currentServiceId) ||
-        null
-      )
-    }
-
-    // Otherwise, lookup service by ID from accounts dictionary
-    return refineContext.accountsDictionary.get(serviceId) || null
-  }
 }

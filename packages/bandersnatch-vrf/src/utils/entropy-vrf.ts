@@ -47,7 +47,7 @@ import { logger, type Safe, safeError, safeResult } from '@pbnj/core'
  * Gray Paper hardcoded context string for entropy VRF
  * Gray Paper safrole.tex equation 159: Xentropy = "$jam_entropy"
  */
-const XENTROPY = new TextEncoder().encode('$jam_entropy')
+const XENTROPY = new TextEncoder().encode('jam_entropy')
 
 /**
  * Generate IETF VRF signature for entropy according to Gray Paper equation 158

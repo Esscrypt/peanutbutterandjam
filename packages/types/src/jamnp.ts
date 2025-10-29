@@ -378,6 +378,9 @@ export interface SegmentShardResponse {
 
 /**
  * CE 141: Assurance Distribution Protocol Types
+ * @param anchorHash - The anchor hash
+ * @param bitfield - The bitfield
+ * @param signature - The signature
  */
 export interface AssuranceDistributionRequest {
   /** Header hash (anchor) */

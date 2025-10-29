@@ -4,7 +4,7 @@ import type {
   MemoryAccessType,
   PVMGuest,
   RAM,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import { PVM_CONSTANTS } from '@pbnj/types'
 import {
@@ -19,17 +19,36 @@ import { BaseHostFunction } from './base'
  *
  * Manages memory pages in PVM machine instances
  *
+ * *** GRAY PAPER FORMULA ***
+ * Gray Paper: pvm_invocations.tex, Ω_Z (pages = 11)
+ *
+ * Access rights (equation 610-614):
+ * (u'_ram_access)[p:c] = {
+ *   {none, none, ...}  when r = 0
+ *   {R, R, ...}        when r = 1 ∨ r = 3
+ *   {W, W, ...}        when r = 2 ∨ r = 4
+ * }
+ *
+ * Page data (equation 606-609):
+ * (u'_ram_value)[p*Cpvmpagesize...(p+c)*Cpvmpagesize] = {
+ *   {0, 0, ...}                when r < 3  (clear data)
+ *   (u_ram_value)[p*Cpvmpagesize...(p+c)*Cpvmpagesize]  when r >= 3 (preserve data)
+ * }
+ *
+ * Return codes:
+ * - registers[7] = WHO when n ∉ keys(m)
+ * - registers[7] = HUH when r > 4 ∨ p < 16 ∨ p+c >= 2^32/Cpvmpagesize
+ * - registers[7] = HUH when r > 2 ∧ (u_ram_access)[p:c] ∋ none
+ * - registers[7] = OK otherwise
+ *
  * Gray Paper Specification:
  * - Function ID: 11 (pages)
  * - Gas Cost: 10
- * - Signature: Ω_Z(gascounter, registers, memory, (m, e))
  * - Parameters: registers[7:4] = [n, p, c, r]
  *   - n: machine ID
- *   - p: page start index
+ *   - p: page start index (must be >= 16)
  *   - c: page count
- *   - r: access rights (0=none, 1=read, 2=write, 3=read+write, 4=write+preserve)
- * - Returns: registers[7] = OK, WHO, or HUH
- * - Sets page access rights and optionally clears page data
+ *   - r: access mode (0=none, 1=R, 2=W, 3=R+preserve, 4=W+preserve)
  */
 export class PagesHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.PAGES
@@ -43,17 +62,8 @@ export class PagesHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
     // Extract parameters from registers
     const [machineId, pageStart, pageCount, accessRights] =
       context.registers.slice(7, 11)
@@ -67,7 +77,7 @@ export class PagesHostFunction extends BaseHostFunction {
     }
 
     // Get PVM machine
-    const machine = this.getPVMMachine(refineContext, machineId)
+    const machine = refineContext.machines.get(machineId)
     if (!machine) {
       // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
@@ -92,7 +102,7 @@ export class PagesHostFunction extends BaseHostFunction {
     // Additional validation: if r > 2, check that pages don't contain 'none' access
     if (accessRights > 2n) {
       const hasInaccessiblePages = this.checkForInaccessiblePages(
-        machine.ram,
+        machine.pvm.state.ram,
         pageStart,
         pageCount,
       )
@@ -127,15 +137,6 @@ export class PagesHostFunction extends BaseHostFunction {
     }
   }
 
-  private getPVMMachine(
-    refineContext: RefineContextPVM,
-    machineId: bigint,
-  ): PVMGuest | null {
-    // Gray Paper: Ω_Z(gascounter, registers, memory, (m, e))
-    // where m = machines dictionary
-    return refineContext.machines.get(machineId) || null
-  }
-
   private checkForInaccessiblePages(
     ram: RAM,
     pageStart: bigint,
@@ -156,15 +157,20 @@ export class PagesHostFunction extends BaseHostFunction {
     return false
   }
 
+  /**
+   * Set memory page access rights and optionally clear data
+   *
+   * Gray Paper equation 606-614:
+   * 1. Clear data if r < 3: (u'_ram_value) = {0, 0, ...}
+   * 2. Preserve data if r >= 3: (u'_ram_value) = (u_ram_value)
+   * 3. Set access rights per convertAccessRights()
+   */
   private setMemoryPageAccessRights(
     machine: PVMGuest,
     pageStart: bigint,
     pageCount: bigint,
     accessRights: bigint,
   ): boolean {
-    // Gray Paper: u' = u exc { ... }
-    // Update RAM with new access rights and optionally clear data
-
     for (let i = 0n; i < pageCount; i++) {
       const pageIndex = pageStart + i
       const pageAddress = pageIndex * this.CPVM_PAGE_SIZE
@@ -172,16 +178,20 @@ export class PagesHostFunction extends BaseHostFunction {
       // Convert access rights to MemoryAccessType
       const accessType = this.convertAccessRights(accessRights)
       if (!accessType) {
-        return false // Invalid access rights
+        return false
       }
 
-      // Clear page data if r < 3 (Gray Paper: clear when r < 3)
+      // Gray Paper equation 606-609: Clear page data when r < 3
       if (accessRights < 3n) {
-        this.clearPageData(machine.ram, pageAddress, this.CPVM_PAGE_SIZE)
+        this.clearPageData(
+          machine.pvm.state.ram,
+          pageAddress,
+          this.CPVM_PAGE_SIZE,
+        )
       }
 
-      // Set page access rights using the new RAM interface
-      machine.ram.setPageAccessRights(
+      // Gray Paper equation 610-614: Set access rights
+      machine.pvm.state.ram.setPageAccessRights(
         pageAddress,
         Number(this.CPVM_PAGE_SIZE),
         accessType,
@@ -191,27 +201,36 @@ export class PagesHostFunction extends BaseHostFunction {
     return true
   }
 
+  /**
+   * Convert access rights parameter r to MemoryAccessType
+   *
+   * Gray Paper equation 610-614:
+   * r = 0 → none access (no read/write)
+   * r = 1 or 3 → read access only (R)
+   * r = 2 or 4 → write access only (W)
+   */
   private convertAccessRights(accessRights: bigint): MemoryAccessType | null {
-    // Gray Paper access rights mapping:
-    // 0 = none, 1 = read, 2 = write, 3 = read+write, 4 = write+preserve
     switch (accessRights) {
       case 0n:
-        return 'none'
+        return 'none' // r = 0
       case 1n:
-        return 'read'
-      case 2n:
-        return 'write'
       case 3n:
+        return 'read' // r = 1 ∨ r = 3 → R
+      case 2n:
       case 4n:
-        return 'read+write'
+        return 'write' // r = 2 ∨ r = 4 → W
       default:
-        return null // Invalid access rights
+        return null // Invalid r
     }
   }
 
+  /**
+   * Clear page data by writing zeros
+   *
+   * Gray Paper equation 606-609:
+   * (u'_ram_value)[p*Cpvmpagesize...(p+c)*Cpvmpagesize] = {0, 0, ...}
+   */
   private clearPageData(ram: RAM, startAddress: bigint, size: bigint): void {
-    // Gray Paper: (u'_ram_value)[p*Cpvmpagesize...c*Cpvmpagesize] = {0, 0, ...}
-    // Clear page data by writing zeros
     const zeroData = new Uint8Array(Number(size))
     ram.writeOctets(startAddress, zeroData)
   }

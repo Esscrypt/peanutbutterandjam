@@ -60,7 +60,7 @@ export class NetworkingService extends BaseService {
 
   private server: QUICServer | null = null
 
-  private readonly validatorSetManagerService: ValidatorSetManager
+  private validatorSetManagerService: ValidatorSetManager | null = null
   private readonly keyPairService: KeyPairService
   private readonly chainHash: string
 
@@ -68,18 +68,20 @@ export class NetworkingService extends BaseService {
     listenAddress: string
     listenPort: number
     protocolRegistry: Map<StreamKind, NetworkingProtocol<unknown, unknown>>
-    validatorSetManagerService: ValidatorSetManager
     keyPairService: KeyPairService
     chainHash: string
   }) {
     super('networking-service')
     this.listenAddress = options.listenAddress
     this.listenPort = options.listenPort
-    this.validatorSetManagerService = options.validatorSetManagerService
     this.keyPairService = options.keyPairService
     this.chainHash = options.chainHash
     this.protocolRegistry = options.protocolRegistry
     // Convert PEM to raw private key bytes
+  }
+
+  setValidatorSetManager(validatorSetManager: ValidatorSetManager): void {
+    this.validatorSetManagerService = validatorSetManager
   }
 
   async init(): SafePromise<boolean> {
@@ -150,6 +152,9 @@ export class NetworkingService extends BaseService {
     kindByte: StreamKind,
     message: Uint8Array,
   ): SafePromise<void> {
+    if(!this.validatorSetManagerService) {
+      return safeError(new Error('Validator set manager not set'))
+    }
     const [validatorPublicKeyError, validatorPublicKey] =
       this.validatorSetManagerService.getValidatorAtIndex(
         Number(validatorIndex),

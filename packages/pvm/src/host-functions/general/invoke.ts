@@ -1,9 +1,9 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  PVMGuest,
+  PVMState,
   RAM,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -31,19 +31,10 @@ export class InvokeHostFunction extends BaseHostFunction {
   readonly name = 'invoke'
   readonly gasCost = 10n
 
-  execute(
+  async execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
-  ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
+    refineContext: RefineInvocationContext | null,
+  ): Promise<HostFunctionResult> {
     const machineId = context.registers[7]
     const memoryOffset = context.registers[8]
 
@@ -77,17 +68,26 @@ export class InvokeHostFunction extends BaseHostFunction {
     }
 
     // Execute PVM machine
-    const result = this.executePVMMachine(
-      machine,
-      params.gasLimit,
-      params.registers,
-    )
+    // const result = this.executePVMMachine(
+    //   machine,
+    //   params.gasLimit,
+    //   params.registers,
+    // )
+    await machine.pvm.invoke(params.gasLimit, params.registers, machine.code)
 
     // Write results back to memory
-    this.writeInvokeResults(context.ram, memoryOffset, result)
+    this.writeInvokeResults(context.ram, memoryOffset, machine.pvm.state)
 
-    // Return execution result code
-    context.registers[7] = BigInt(result.resultCode)
+    // Gray Paper: Update machine state (RAM and PC)
+
+    // Gray Paper: Return result code in registers[7]
+    // If HOST or FAULT, also return ID/address in registers[8]
+    context.registers[7] = BigInt(machine.pvm.state.resultCode)
+    if(machine.pvm.state.resultCode === RESULT_CODES.HOST) {
+      context.registers[8] = machine.pvm.state.hostCallId ?? 0n
+    } else if(machine.pvm.state.resultCode === RESULT_CODES.FAULT) {
+      context.registers[8] = machine.pvm.state.faultAddress ?? 0n
+    }
 
     return {
       resultCode: null, // continue execution
@@ -99,16 +99,16 @@ export class InvokeHostFunction extends BaseHostFunction {
     offset: bigint,
   ): { gasLimit: bigint; registers: bigint[] } | null {
     try {
-      // Read gas limit (8 bytes)
-      const [accessError, gasLimitData] = ram.readOctets(offset, 8n)
-      if (accessError || !gasLimitData) {
+      // Gray Paper: Read gas limit (8 bytes)
+      const [gasLimitData] = ram.readOctets(offset, 8n)
+      if (gasLimitData === null) {
         return null
       }
       const gasLimit = new DataView(gasLimitData.buffer).getBigUint64(0, true)
 
-      // Read register values (13 registers * 8 bytes each = 104 bytes)
-      const [accessError2, registersData] = ram.readOctets(offset + 8n, 104n)
-      if (accessError2 || !registersData) {
+      // Gray Paper: Read register values (13 registers * 8 bytes each = 104 bytes)
+      const [registersData, _faultAddress] = ram.readOctets(offset + 8n, 104n)
+      if (!registersData) {
         return null
       }
 
@@ -124,78 +124,29 @@ export class InvokeHostFunction extends BaseHostFunction {
     }
   }
 
-  private executePVMMachine(
-    machine: PVMGuest,
-    gasLimit: bigint,
-    registers: bigint[],
-  ): {
-    resultCode: number
-    hostCallId?: bigint
-    finalRegisters: bigint[]
-    finalPC: bigint
-    finalGas: bigint
-  } {
-    // Use the actual PVM instance if available
-    if (machine.pvm) {
-      const result = machine.pvm.invoke(gasLimit, registers)
 
-      // Update machine state
-      machine.pc = result.finalPC
 
-      return {
-        resultCode: result.resultCode,
-        hostCallId: result.hostCallId,
-        finalRegisters: result.finalRegisters,
-        finalPC: result.finalPC,
-        finalGas: result.finalGas,
-      }
-    }
-
-    // Fallback: return error if no PVM instance
-    return {
-      resultCode: RESULT_CODES.PANIC,
-      finalRegisters: registers,
-      finalPC: machine.pc,
-      finalGas: gasLimit,
-    }
-  }
 
   private writeInvokeResults(
     ram: RAM,
     offset: bigint,
-    result: {
-      resultCode: number
-      hostCallId?: bigint
-      finalRegisters: bigint[]
-      finalPC: bigint
-      finalGas: bigint
-    },
+    pvm: PVMState,
   ): void {
     try {
+      // Gray Paper: mem*[o:112] = encode[8]{g'} ∥ encode[8]{w'}
+      // Write final gas (8 bytes)
+      const gasData = new Uint8Array(8)
+      new DataView(gasData.buffer).setBigUint64(0, pvm.gasCounter, true)
+      ram.writeOctets(offset, gasData)
+
       // Write final registers (13 registers * 8 bytes each = 104 bytes)
       const registersData = new Uint8Array(104)
       for (let i = 0; i < 13; i++) {
-        const registerValue = result.finalRegisters[i] || 0n
+        const registerValue = pvm.registerState[i] || 0n
         const view = new DataView(registersData.buffer, i * 8, 8)
         view.setBigUint64(0, registerValue, true)
       }
-      ram.writeOctets(offset, registersData)
-
-      // Write final PC (8 bytes)
-      const pcData = new Uint8Array(8)
-      new DataView(pcData.buffer).setBigUint64(0, result.finalPC, true)
-      ram.writeOctets(offset + 104n, pcData)
-
-      // Write final gas (8 bytes)
-      const gasData = new Uint8Array(8)
-      new DataView(gasData.buffer).setBigUint64(0, result.finalGas, true)
-      ram.writeOctets(offset + 112n, gasData)
-
-      // Write host call ID if present (8 bytes)
-      const hostCallId = result.hostCallId || 0n
-      const hostCallData = new Uint8Array(8)
-      new DataView(hostCallData.buffer).setBigUint64(0, hostCallId, true)
-      ram.writeOctets(offset + 120n, hostCallData)
+      ram.writeOctets(offset + 8n, registersData)
     } catch {
       // Ignore write errors
     }

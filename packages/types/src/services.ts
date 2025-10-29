@@ -2,17 +2,18 @@ import type { Hex, Safe, SafePromise } from '@pbnj/core'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
 import type { EntropyState } from './global-state'
-import type { PreimageAnnouncement } from './jamnp'
 import type { ValidatorCredentials } from './keys'
+
 import type {
   Guarantee,
   GuaranteeSignature,
   Judgment,
-  Preimage,
   SafroleTicket,
+  ServiceAccount,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
+  Preimage,
 } from './serialization'
 import type { BaseService } from './service'
 
@@ -26,6 +27,17 @@ export interface IValidatorSetManager extends BaseService {
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void
+}
+
+export interface IServiceAccountService extends BaseService {
+  getServiceAccount(serviceId: bigint): Safe<ServiceAccount>
+  setServiceAccount(serviceId: bigint, serviceAccount: ServiceAccount): Safe<void>
+  deleteServiceAccount(serviceId: bigint): Safe<void>
+  updateServiceAccount(serviceId: bigint, serviceAccount: ServiceAccount): Safe<void>
+  getServiceAccountStorage(serviceId: bigint): Safe<Map<Hex, Uint8Array>>
+  histLookupServiceAccount(serviceAccount: ServiceAccount, hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
+  histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
+  getPreimage(hash: Hex): Safe<Preimage | null>
 }
 
 export interface IKeyPairService extends BaseService {
@@ -48,26 +60,6 @@ export interface ITicketService extends BaseService {
   getReceivedTickets(): SafroleTicket[]
 }
 
-export interface IPreimageHolderService extends BaseService {
-  getPreimage(hash: Hex): SafePromise<Preimage | null>
-  storePreimage(preimage: Preimage, creationSlot: bigint): SafePromise<Hex>
-  storePreimageToRequest(announcement: PreimageAnnouncement): void
-  getPreimagesToRequest(): Hex[]
-  clearPreimageToRequest(hash: Hex): void
-
-  /**
-   * Gray Paper histlookup function
-   *
-   * Gray Paper equation 115-127:
-   * histlookup(a, t, h) ≡ a.sa_preimages[h] when h ∈ keys(a.sa_preimages) ∧ I(a.sa_requests[h, len(a.sa_preimages[h])], t)
-   *
-   * @param serviceAccount - Service account containing preimages and requests
-   * @param timeslot - Timeslot for historical lookup
-   * @param hash - Hash to lookup
-   * @returns Preimage blob or null if not found/not available
-   */
-  histlookup(timeslot: bigint, hash: Hex): SafePromise<Uint8Array | null>
-}
 
 export interface IJudgmentHolderService extends BaseService {
   getJudgements(): Judgment[]

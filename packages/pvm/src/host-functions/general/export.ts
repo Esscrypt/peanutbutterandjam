@@ -1,7 +1,12 @@
-import type { HostFunctionContext, HostFunctionResult } from '@pbnj/types'
+import type {
+  HostFunctionContext,
+  HostFunctionResult,
+  RefineInvocationContext,
+} from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
+  REFINE_CONFIG,
   RESULT_CODES,
 } from '../../config'
 import { BaseHostFunction } from './base'
@@ -9,77 +14,130 @@ import { BaseHostFunction } from './base'
 /**
  * EXPORT host function (Ω_E)
  *
- * Exports data segments from PVM memory
- *
- * Gray Paper Specification:
+ * Gray Paper Specification (pvm_invocations.tex, lines 529-544):
  * - Function ID: 7 (export)
  * - Gas Cost: 10
- * - Uses registers[7:2] to specify memory offset and length
- * - Creates a zero-padded segment of fixed size
+ * - Uses registers[7] for memory offset (p)
+ * - Uses registers[8] for length, capped at Csegmentsize (4104)
+ * - Creates zero-padded segment of exactly Csegmentsize
  * - Appends segment to export sequence
- * - Returns FULL if too many exports, segment offset otherwise
+ * - Returns FULL if segoff + len(𝐞) >= Cmaxpackageexports (3072)
+ * - Otherwise returns segoff + len(𝐞)
  */
 export class ExportHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.EXPORT
   readonly name = 'export'
   readonly gasCost = 10n
 
-  execute(context: HostFunctionContext): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
+  execute(
+    context: HostFunctionContext,
+    refineContext: RefineInvocationContext | null,
+  ): HostFunctionResult {
+    // Gray Paper: Check if refine context is available
+    if (!refineContext) {
+      // Without refine context, we can't export
+      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
       return {
-        resultCode: RESULT_CODES.OOG,
+        resultCode: RESULT_CODES.PANIC,
       }
     }
 
-    context.gasCounter -= this.gasCost
-
+    // Gray Paper: p = registers[7]
     const memoryOffset = context.registers[7]
-    const length = context.registers[8]
+    // Gray Paper: z = min(registers[8], Csegmentsize)
+    const rawLength = context.registers[8]
+    const cappedLength =
+      rawLength < REFINE_CONFIG.SEGMENT_SIZE
+        ? rawLength
+        : REFINE_CONFIG.SEGMENT_SIZE
 
-    // Read data from memory
-    const [accessError, data] = context.ram.readOctets(memoryOffset, length)
-    if (accessError) {
+    // Gray Paper: Check if Nrange[p][z] ⊆ readable[memory]
+    const [readable, readableFaultAddress] = context.ram.isReadableWithFault(
+      memoryOffset,
+      cappedLength,
+    )
+    if (!readable) {
+      // Gray Paper: Return PANIC if memory not readable
+      context.registers[7] = 0n
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: readableFaultAddress ?? 0n,
+          details: 'Memory is not readable',
+        },
       }
     }
 
-    // Create zero-padded segment
+    // Gray Paper: Read data from memory
+    const [data, readFaultAddress] = context.ram.readOctets(
+      memoryOffset,
+      cappedLength,
+    )
+    if (data === null) {
+      context.registers[7] = 0n
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: readFaultAddress ?? 0n,
+          details: 'Failed to read memory',
+        },
+      }
+    }
+
+    // Gray Paper: Create zero-padded segment of Csegmentsize
     const segment = this.createZeroPaddedSegment(data)
 
-    // Append to export sequence
-    const result = this.appendToExports(context, segment)
+    // Gray Paper: Append to export sequence and check limits
+    const result = this.appendToExports(refineContext, segment)
 
     if (result === 'FULL') {
-      // Return FULL (2^64 - 5) if too many exports
+      // Gray Paper: Return FULL (2^64 - 5)
       context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
     } else {
-      // Return segment offset
+      // Gray Paper: Return segoff + len(𝐞)
       context.registers[7] = result
     }
 
     return {
-      resultCode: null,
+      resultCode: null, // Continue execution
     }
   }
 
+  /**
+   * Gray Paper: Create zero-padded segment of exactly Csegmentsize
+   * zeropad{Csegmentsize}{mem[p:p+z]}
+   */
   private createZeroPaddedSegment(data: Uint8Array): Uint8Array {
-    // Create zero-padded segment of fixed size
-    // This is a placeholder implementation
-    const segmentSize = 1024 // Placeholder segment size
-    const segment = new Uint8Array(segmentSize)
+    const segment = new Uint8Array(Number(REFINE_CONFIG.SEGMENT_SIZE))
     segment.set(data, 0)
+    // Remaining bytes are already zero (Uint8Array initialization)
     return segment
   }
 
+  /**
+   * Gray Paper: Append segment to export sequence (𝐞)
+   * Check if segoff + len(𝐞) >= Cmaxpackageexports
+   * Return FULL if limit exceeded, otherwise return segoff + len(𝐞)
+   */
   private appendToExports(
-    context: HostFunctionContext,
+    refineContext: RefineInvocationContext,
     segment: Uint8Array,
   ): bigint | 'FULL' {
-    // Append segment to export sequence
-    // This is a placeholder implementation
-    context.ram.writeOctets(context.registers[7], segment)
-    return context.registers[7]
+    const exportSegments = refineContext.exportSegments
+    const segoff = refineContext.exportSegmentOffset
+
+    // Gray Paper: Check if segoff + len(𝐞) >= Cmaxpackageexports
+    const currentLength = BigInt(exportSegments.length)
+    if (segoff + currentLength >= REFINE_CONFIG.MAX_PACKAGE_EXPORTS) {
+      return 'FULL'
+    }
+
+    // Gray Paper: Append segment
+    exportSegments.push(segment)
+
+    // Gray Paper: Return segoff + len(𝐞)
+    return segoff + currentLength
   }
 }

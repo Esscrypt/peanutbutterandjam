@@ -2,7 +2,8 @@ import { encodeServiceAccount } from '@pbnj/serialization'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  IServiceAccountService,
+  RefineInvocationContext,
   ServiceAccountCore,
 } from '@pbnj/types'
 import {
@@ -30,18 +31,16 @@ export class InfoHostFunction extends BaseHostFunction {
   readonly name = 'info'
   readonly gasCost = 10n
 
+  private readonly serviceAccountService: IServiceAccountService
+  constructor(serviceAccountService: IServiceAccountService) {
+    super()
+    this.serviceAccountService = serviceAccountService
+  }
+
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    _refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
 
     const serviceId = context.registers[7]
     const outputOffset = context.registers[8]
@@ -49,7 +48,17 @@ export class InfoHostFunction extends BaseHostFunction {
     const length = context.registers[10]
 
     // Get service account
-    const serviceAccount = this.getServiceAccount(refineContext!, serviceId)
+    const [serviceAccountError, serviceAccount] = this.serviceAccountService.getServiceAccount(serviceId)
+    if (serviceAccountError) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'basic_block',
+          address: serviceId,
+          details: 'Service account not found',
+        },
+      }
+    }
     if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
@@ -77,7 +86,17 @@ export class InfoHostFunction extends BaseHostFunction {
       Number(fromOffset) + actualLength,
     )
 
-    context.ram.writeOctets(outputOffset, dataToWrite)
+    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
+    if (faultAddress) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Memory not writable',
+        },
+      }
+    }
 
     // Return length of info
     context.registers[7] = BigInt(info.length)
@@ -85,15 +104,5 @@ export class InfoHostFunction extends BaseHostFunction {
     return {
       resultCode: null, // continue execution
     }
-  }
-
-  private getServiceAccount(
-    refineContext: RefineContextPVM,
-    serviceId: bigint,
-  ): any | null {
-    // Get service account from context
-    // This is a placeholder implementation
-    // In a real implementation, this would access the service account store
-    return refineContext.accountsDictionary.get(serviceId) || null
   }
 }

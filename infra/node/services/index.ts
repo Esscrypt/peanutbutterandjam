@@ -12,8 +12,6 @@ export {
 } from './work-package-manager'
 
 export {
-  type IWorkReportService,
-  type WorkReportEntry,
   WorkReportService,
   type WorkReportState,
 } from './work-report-service'

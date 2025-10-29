@@ -1,9 +1,13 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
-import { GENERAL_FUNCTIONS, RESULT_CODES } from '../../config'
+import {
+  ACCUMULATE_ERROR_CODES,
+  GENERAL_FUNCTIONS,
+  RESULT_CODES,
+} from '../../config'
 import { BaseHostFunction } from './base'
 
 /**
@@ -34,23 +38,14 @@ export class ExpungeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
     const machineId = context.registers[7]
 
     // Check if refine context is available
     if (!refineContext) {
       // If no refine context available, return WHO
-      context.registers[7] = 2n ** 64n - 4n // WHO
+      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO //a WHO
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -61,7 +56,7 @@ export class ExpungeHostFunction extends BaseHostFunction {
     // Check if machine exists
     if (!machines.has(machineId)) {
       // Return WHO (2^64 - 4) if machine doesn't exist
-      context.registers[7] = 2n ** 64n - 4n
+      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -69,7 +64,7 @@ export class ExpungeHostFunction extends BaseHostFunction {
 
     // Get machine's PC before removal
     const machine = machines.get(machineId)!
-    const pc = machine.pc
+    const pc = machine.pvm.state.instructionPointer ?? 0n
 
     // Remove machine from context
     machines.delete(machineId)

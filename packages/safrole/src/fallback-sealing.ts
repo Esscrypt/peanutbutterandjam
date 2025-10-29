@@ -59,7 +59,7 @@ import type {
  * Gray Paper hardcoded context string for fallback sealing
  * Gray Paper safrole.tex equation 160: Xfallback = "$jam_fallback_seal"
  */
-const XFALLBACK_SEAL = new TextEncoder().encode('$jam_fallback_seal')
+const XFALLBACK_SEAL = new TextEncoder().encode('jam_fallback_seal')
 
 /**
  * Generate IETF VRF signature for fallback block sealing

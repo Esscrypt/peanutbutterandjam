@@ -2,7 +2,7 @@ import { getBanderoutFromGamma, RingVRFProver } from '@pbnj/bandersnatch-vrf'
 import { type Safe, safeError, safeResult } from '@pbnj/core'
 
 // Xticket = "$jam_ticket_seal" (Gray Paper safrole.tex equation 161)
-const Xticket = new TextEncoder().encode('$jam_ticket_seal')
+const Xticket = new TextEncoder().encode('jam_ticket_seal')
 
 /**
  * bsringproof - Generate Ring VRF proof according to Gray Paper specification

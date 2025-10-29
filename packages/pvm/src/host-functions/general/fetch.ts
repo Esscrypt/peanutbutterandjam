@@ -7,12 +7,12 @@ import {
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  IConfigService,
+  RefineInvocationContext,
   WorkItem,
 } from '@pbnj/types'
 import {
   AUTHORIZATION_CONSTANTS,
-  CORE_CONSTANTS,
   DEPOSIT_CONSTANTS,
   GAS_CONSTANTS,
   HISTORY_CONSTANTS,
@@ -49,23 +49,22 @@ export class FetchHostFunction extends BaseHostFunction {
   readonly name = 'fetch'
   readonly gasCost = 10n
 
+  private readonly configService: IConfigService
+  constructor(configService: IConfigService) {
+    super()
+    this.configService = configService
+  }
+
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
     const selector = context.registers[10]
     const outputOffset = context.registers[7]
     const fromOffset = context.registers[8]
     const length = context.registers[9]
+
+
 
     // Fetch data based on selector according to Gray Paper specification
     const fetchedData = this.fetchData(selector, context, refineContext)
@@ -85,6 +84,21 @@ export class FetchHostFunction extends BaseHostFunction {
         Number(fromOffset) + actualLength,
       )
 
+      const [writable, faultAddress] = context.ram.isWritableWithFault(
+        outputOffset,
+        BigInt(dataToWrite.length),
+      )
+      if (!writable) {
+        return {
+          resultCode: RESULT_CODES.PANIC,
+          faultInfo: {
+            type: 'memory_write',
+            address: faultAddress ?? 0n,
+            details: 'Memory is not writable',
+          },
+        }
+      }
+
       context.ram.writeOctets(outputOffset, dataToWrite)
 
       // Return length of fetched data
@@ -99,7 +113,7 @@ export class FetchHostFunction extends BaseHostFunction {
   private fetchData(
     selector: bigint,
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: Ω_Y(gascounter, registers, memory, p, n, r, i, ī, x̄, i, ...)
     // where p = work package, n = work package hash, r = authorizer trace,
@@ -232,15 +246,15 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 8
 
     // encode[2]{Ccorecount = 341}
-    view.setUint16(offset, CORE_CONSTANTS.C_CORECOUNT, true)
+    view.setUint16(offset, this.configService.numCores, true)
     offset += 2
 
     // encode[4]{Cexpungeperiod = 19200}
-    view.setUint32(offset, TIME_CONSTANTS.C_EXPUNGEPERIOD, true)
+    view.setUint32(offset, this.configService.preimageExpungePeriod, true)
     offset += 4
 
     // encode[4]{Cepochlen = 600}
-    view.setUint32(offset, CORE_CONSTANTS.C_EPOCHLEN, true)
+    view.setUint32(offset, this.configService.epochDuration, true)
     offset += 4
 
     // encode[8]{Creportaccgas = 10000000}
@@ -264,7 +278,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 8
 
     // encode[8]{Cblockaccgas = 3500000000}
-    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_BLOCKACCGAS), true)
+    view.setBigUint64(offset, BigInt(this.configService.maxBlockGas), true)
     offset += 8
 
     // encode[2]{Crecenthistorylen = 8}
@@ -288,7 +302,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[2]{Cticketentries = 2}
-    view.setUint16(offset, TICKET_CONSTANTS.C_TICKETENTRIES, true)
+    view.setUint16(offset, this.configService.ticketsPerValidator, true)
     offset += 2
 
     // encode[2]{Cauthpoolsize = 8}
@@ -296,7 +310,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    view.setUint16(offset, CORE_CONSTANTS.C_SLOTSECONDS, true)
+    view.setUint16(offset, this.configService.slotDuration, true)
     offset += 2
 
     // encode[2]{Cauthqueuesize = 80}
@@ -304,7 +318,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Crotationperiod = 10}
-    view.setUint16(offset, TIME_CONSTANTS.C_ROTATIONPERIOD, true)
+    view.setUint16(offset, this.configService.rotationPeriod, true)
     offset += 2
 
     // encode[2]{Cmaxpackagexts = 128}
@@ -316,7 +330,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cvalcount = 1023}
-    view.setUint16(offset, CORE_CONSTANTS.C_VALCOUNT, true)
+    view.setUint16(offset, this.configService.numValidators, true)
     offset += 2
 
     // encode[4]{Cmaxauthcodesize = 64000}
@@ -362,7 +376,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getExportSegment(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     segmentIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: x̄[registers[11]][registers[12]] when x̄ ≠ none ∧ registers[10] = 3
@@ -392,7 +406,7 @@ export class FetchHostFunction extends BaseHostFunction {
   // provides the full work package context
 
   private getWorkPackageHash(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: n when n ≠ none ∧ registers[10] = 1
     // Returns work package hash from refine context
@@ -413,7 +427,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getAuthorizerTrace(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: r when r ≠ none ∧ registers[10] = 2
     // Returns authorizer trace from refine context
@@ -423,35 +437,49 @@ export class FetchHostFunction extends BaseHostFunction {
     }
 
     // Convert hex string to bytes
-    return new Uint8Array(
-      Buffer.from(refineContext.authorizerTrace.slice(2), 'hex'),
-    )
+    return hexToBytes(refineContext.authorizerTrace)
   }
 
   private getExportSegmentByWorkItem(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     segmentIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: x̄[i][registers[11]] when x̄ ≠ none ∧ i ≠ none ∧ registers[10] = 4
-    // Returns export segment for specific work item
+    // Gray Paper defines x̄ as a nested sequence organized by work item
+    // Each work item has export segments from its extrinsics
 
-    if (!refineContext?.workItemIndex || !refineContext?.exportSegments) {
+    if (!refineContext?.workItemIndex || !refineContext?.workPackage) {
       return null
     }
 
+    const workItemIdx = Number(refineContext.workItemIndex)
     const segmentIdx = Number(segmentIndex)
 
-    // For now, we'll use the exportSegments array directly
-    // In a full implementation, this would be organized by work item
-    if (segmentIdx >= refineContext.exportSegments.length) {
+    // Gray Paper lines 109-117: x̄ is constructed from work package extrinsics
+    // For work item i, get its extrinsics and return segment index
+    const workItems = refineContext.workPackage.workItems
+
+    if (workItemIdx >= workItems.length) {
       return null
     }
 
-    return refineContext.exportSegments[segmentIdx]
+    const workItem = workItems[workItemIdx]
+
+    // Check bounds for the segment index
+    if (segmentIdx >= workItem.extrinsics.length) {
+      return null
+    }
+
+    // Gray Paper: x̄[i][segmentIdx] is the actual blob x from extrinsics
+    // The current implementation would need access to the actual extrinsic blob data
+    // For now, we can't return the actual blob without the extrinsic data
+    // This needs to be resolved from extrinsic storage or cache
+
+    return null // Extrinsic blob data not available in current context
   }
 
   private getImportSegment(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     segmentIndex: bigint,
     subIndex: bigint,
   ): Uint8Array | null {
@@ -478,7 +506,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getImportSegmentByWorkItem(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     segmentIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: ī[i][registers[11]] when ī ≠ none ∧ i ≠ none ∧ registers[10] = 6
@@ -504,7 +532,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkPackage(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: encode(p) when p ≠ none ∧ registers[10] = 7
     // Returns encoded work package
@@ -522,7 +550,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getAuthConfig(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: p.authconfig when p ≠ none ∧ registers[10] = 8
     // Returns work package authorization configuration
@@ -535,7 +563,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getAuthToken(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: p.authtoken when p ≠ none ∧ registers[10] = 9
     // Returns work package authorization token
@@ -548,7 +576,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkContext(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: encode(p.context) when p ≠ none ∧ registers[10] = 10
     // Returns encoded work package context
@@ -562,7 +590,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkItemsSummary(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: encode({S(w) | w ∈ p.workitems}) when p ≠ none ∧ registers[10] = 11
     // Returns encoded summary of all work items
@@ -596,7 +624,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkItem(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     itemIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: S(p.workitems[registers[11]]) when p ≠ none ∧ registers[10] = 12
@@ -622,7 +650,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkItemPayload(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     itemIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: p.workitems[registers[11]].payload when p ≠ none ∧ registers[10] = 13
@@ -644,7 +672,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkItems(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
   ): Uint8Array | null {
     // Gray Paper: encode(i) when i ≠ none ∧ registers[10] = 14
     // Returns encoded work items (extrinsics)
@@ -678,7 +706,7 @@ export class FetchHostFunction extends BaseHostFunction {
   }
 
   private getWorkItemByIndex(
-    refineContext: RefineContextPVM | undefined,
+    refineContext: RefineInvocationContext | null,
     itemIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: encode(i[registers[11]]) when i ≠ none ∧ registers[10] = 15

@@ -2,7 +2,7 @@ import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineContextPVM,
+  RefineInvocationContext,
   ServiceAccount,
 } from '@pbnj/types'
 import { DEPOSIT_CONSTANTS } from '@pbnj/types'
@@ -37,16 +37,8 @@ export class WriteHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
 
     // Extract parameters from registers
     const [keyOffset, keyLength, valueOffset, valueLength] =
@@ -70,10 +62,15 @@ export class WriteHostFunction extends BaseHostFunction {
     }
 
     // Read key from memory
-    const key = context.ram.readOctets(keyOffset, keyLength)
+    const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
     if (!key) {
       return {
         resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress ?? 0n,
+          details: 'Memory not readable',
+        },
       }
     }
 
@@ -84,10 +81,15 @@ export class WriteHostFunction extends BaseHostFunction {
       context.registers[7] = previousLength
     } else {
       // Read value from memory
-      const value = context.ram.readOctets(valueOffset, valueLength)
+      const [value, _faultAddress] = context.ram.readOctets(valueOffset, valueLength)
       if (!value) {
         return {
           resultCode: RESULT_CODES.PANIC,
+          faultInfo: {
+            type: 'memory_read',
+            address: _faultAddress ?? 0n,
+            details: 'Memory not readable',
+          },
         }
       }
 
@@ -120,7 +122,7 @@ export class WriteHostFunction extends BaseHostFunction {
   }
 
   private getServiceAccount(
-    refineContext: RefineContextPVM,
+    refineContext: RefineInvocationContext,
   ): ServiceAccount | null {
     // Gray Paper: Ω_W(gascounter, registers, memory, s, s)
     // where s = current service account (always self)

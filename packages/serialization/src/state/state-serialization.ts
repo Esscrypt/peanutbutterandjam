@@ -62,13 +62,19 @@
 import {
   bytesToBigInt,
   bytesToHex,
+  concatBytes,
   type Hex,
   hexToBytes,
   type Safe,
   safeError,
   safeResult,
 } from '@pbnj/core'
-import type { GlobalState, IConfigService, StateTrie } from '@pbnj/types'
+import type {
+  AccumulatedItem,
+  GlobalState,
+  IConfigService,
+  StateTrie,
+} from '@pbnj/types'
 import { encodeAccumulated } from './accumulated'
 import { encodeActivity } from './activity'
 import { encodeAuthpool } from './authpool'
@@ -465,10 +471,21 @@ export function createStateTrie(
   }
 
   // Chapter 15: accumulated
+  // Gray Paper: C(15) ↦ encode{sq{build{var{i}}{i orderedin accumulated}}}
+  // accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+  // Each element i is a set of hashes
+  // var{i} encodes the set as: var{sq{hash, hash, ...}} = length + sequence of hashes
   const accumulatedKey = createStateKey(15)
-  const [error15, accumulatedData] = encodeAccumulated(
-    globalState.accumulated.packages.map((pkg) => ({ data: hexToBytes(pkg) })),
-  )
+  const accumulatedItems: AccumulatedItem[] =
+    globalState.accumulated.packages.map((hashSet) => {
+      // Convert set of hashes to a sequence of hashes
+      const hashBytes = Array.from(hashSet).map((hash) => hexToBytes(hash))
+      // Concatenate all hashes
+      const setData = concatBytes(hashBytes)
+      return { data: setData }
+    })
+
+  const [error15, accumulatedData] = encodeAccumulated(accumulatedItems)
   if (error15) {
     return safeError(error15)
   }

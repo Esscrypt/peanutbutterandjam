@@ -47,7 +47,7 @@ export abstract class BaseAccumulateHostFunction {
     offset: bigint,
     length: bigint,
   ): boolean {
-    return ram.isReadable(offset, length)
+    return ram.isReadableWithFault(offset, length)[0]
   }
 
   protected isMemoryRangeWritable(
@@ -55,6 +55,6 @@ export abstract class BaseAccumulateHostFunction {
     offset: bigint,
     length: bigint,
   ): boolean {
-    return ram.isWritable(offset, length)
+    return ram.isWritableWithFault(offset, length)[0]
   }
 }

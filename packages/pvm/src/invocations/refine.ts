@@ -8,28 +8,25 @@
 import { logger } from '@pbnj/core'
 import { encodeRefineArguments } from '@pbnj/serialization'
 import type {
-  IPreimageHolderService,
+  PVMOptions,
   RAM,
-  RefineContextPVM,
+  RefineInvocationContext,
   ResultCode,
   WorkError,
   WorkItem,
   WorkPackage,
+  IServiceAccountService,
 } from '@pbnj/types'
 
 import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '../config'
-
+import type { HostFunctionRegistry } from '../host-functions/general/registry'
 import { PVM } from '../pvm'
 
-/**
- * Simplified PVM implementation
- *
- * Gray Paper Ψ function: Executes instructions until a halting condition
- */
 export class RefinePVM extends PVM {
-  constructor(options: PVMOptions, preimageService: IPreimageHolderService) {
-    super(options)
-    this.preimageService = preimageService
+  private readonly serviceAccountService: IServiceAccountService
+  constructor(hostFunctionRegistry: HostFunctionRegistry, serviceAccountService: IServiceAccountService, options: PVMOptions = {}) {
+    super(hostFunctionRegistry, options)
+    this.serviceAccountService = serviceAccountService
   }
 
   /**
@@ -136,35 +133,45 @@ export class RefinePVM extends PVM {
    * Get service code from work item
    * In practice, this would retrieve from service preimages using codeHash
    */
-  private getServiceCodeFromWorkItem(_workItem: WorkItem): Uint8Array | null {
-    // TODO: Implement proper preimage lookup using workItem.codeHash
+  private getServiceCodeFromWorkItem(workItem: WorkItem): Uint8Array | null {
     // For now, return a placeholder
-    return new Uint8Array([0x00, 0x01, 0x02, 0x03]) // Placeholder
+    const [error, serviceAccount] = this.serviceAccountService.getServiceAccount(workItem.serviceindex)
+    if (error) {
+      return null
+    }
+    if (!serviceAccount) {
+      return null
+    }
+    const preimage = serviceAccount.preimages.get(workItem.codehash)
+    if (!preimage) {
+      return null
+    }
+    return preimage
   }
 
   /**
    * Create Refine context mutator F
    * Gray Paper equation 93-118: F ∈ contextmutator{tuple{dictionary{N}{pvmguest}, sequence{segment}}}
    */
-  private createRefineContextMutator(_refineContext: RefineContextPVM): (
+  private createRefineContextMutator(_refineContext: RefineInvocationContext): (
     hostCallId: bigint,
     gasCounter: bigint,
     registers: bigint[],
     memory: RAM,
-    context: RefineContextPVM,
+    context: RefineInvocationContext,
   ) => {
     resultCode: ResultCode
     gasCounter: bigint
     registers: bigint[]
     memory: RAM
-    context: RefineContextPVM
+    context: RefineInvocationContext
   } {
     return (
       hostCallId: bigint,
       gasCounter: bigint,
       registers: bigint[],
       memory: RAM,
-      context: RefineContextPVM,
+      context: RefineInvocationContext,
     ) => {
       try {
         // Get general host function by ID
@@ -256,7 +263,7 @@ export class RefinePVM extends PVM {
     _authorizerTrace: Uint8Array,
     _importSegments: Uint8Array[][],
     _exportSegmentOffset: bigint,
-  ): RefineContextPVM {
+  ): RefineInvocationContext {
     return {
       currentServiceId: 0n, // Will be set from work item
       accountsDictionary: new Map(), // Will be populated from recent state

@@ -12,6 +12,7 @@ import { BaseInstruction } from './base'
 /**
  * MOVE_REG instruction (opcode 0x100)
  * Move register value as specified in Gray Paper
+ * Gray Paper formula: reg'_D = reg_A
  */
 export class MOVE_REGInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MOVE_REG
@@ -26,7 +27,6 @@ export class MOVE_REGInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, value)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -41,6 +41,7 @@ export class MOVE_REGInstruction extends BaseInstruction {
 /**
  * SBRK instruction (opcode 0x101)
  * Allocate memory as specified in Gray Paper
+ * Gray Paper formula: reg'_D ≡ min(x ∈ pvmreg): x ≥ h ∧ Nrange{x}{reg_A} ⊄ readable{memory} ∧ Nrange{x}{reg_A} ⊆ writable{memory'}
  */
 export class SBRKInstruction extends BaseInstruction {
   readonly opcode = OPCODES.SBRK
@@ -59,7 +60,6 @@ export class SBRKInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, allocatedAddress)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -74,6 +74,7 @@ export class SBRKInstruction extends BaseInstruction {
 /**
  * COUNT_SET_BITS_64 instruction (opcode 0x102)
  * Count set bits in 64-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = Σ(i=0 to 63) bitsfunc{8}(reg_A)[i]
  */
 export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_64
@@ -101,21 +102,15 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerB, count)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
   }
 }
 
 /**
  * COUNT_SET_BITS_32 instruction (opcode 0x103)
  * Count set bits in 32-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = Σ(i=0 to 31) bitsfunc{4}(reg_A mod 2^32)[i]
  */
 export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_32
@@ -135,30 +130,27 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
       temp >>= 1n
     }
 
-    logger.debug('Executing COUNT_SET_BITS_32 instruction', {
+    this.setRegisterValue(context.registers, registerB, count)
+
+    console.log('Executing COUNT_SET_BITS_32 instruction', {
       registerB,
       registerA,
       value,
       count,
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerB, count)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * LEADING_ZERO_BITS_64 instruction (opcode 0x104)
  * Count leading zero bits in 64-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = max(n ∈ Nmax{65}) where Σ(i=0 to i<n) revbitsfunc{8}(reg_A)[i] = 0
  */
 export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_64
@@ -180,30 +172,27 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
       }
     }
 
-    logger.debug('Executing LEADING_ZERO_BITS_64 instruction', {
+    this.setRegisterValue(context.registers, registerB, count)
+
+    console.log('Executing LEADING_ZERO_BITS_64 instruction', {
       registerB,
       registerA,
       value,
       count,
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerB, count)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * LEADING_ZERO_BITS_32 instruction (opcode 0x105)
  * Count leading zero bits in 32-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = max(n ∈ Nmax{33}) where Σ(i=0 to i<n) revbitsfunc{4}(reg_A mod 2^32)[i] = 0
  */
 export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_32
@@ -226,30 +215,27 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
       }
     }
 
-    logger.debug('Executing LEADING_ZERO_BITS_32 instruction', {
-      registerB,
-      registerA,
-      value,
-      count,
-    })
     this.setRegisterValue(context.registers, registerB, count)
 
-    // Mutate context directly
-    
+    console.log('Executing LEADING_ZERO_BITS_32 instruction', {
+      registerB,
+      registerA,
+      value: value.toString(),
+      count: count.toString(),
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
+    })
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * TRAILING_ZERO_BITS_64 instruction (opcode 0x106)
  * Count trailing zero bits in 64-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = max(n ∈ Nmax{65}) where Σ(i=0 to i<n) bitsfunc{8}(reg_A)[i] = 0
  */
 export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAILING_ZERO_BITS_64
@@ -271,16 +257,18 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
       }
     }
 
-    logger.debug('Executing TRAILING_ZERO_BITS_64 instruction', {
-      registerB,
-      registerA,
-      value,
-      count,
-    })
     this.setRegisterValue(context.registers, registerB, count)
 
-    // Mutate context directly
-    
+    console.log('Executing TRAILING_ZERO_BITS_64 instruction', {
+      registerB,
+      registerA,
+      value: value.toString(),
+      count: count.toString(),
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
+    })
 
     return { resultCode: null }
   }
@@ -295,6 +283,7 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
 /**
  * TRAILING_ZERO_BITS_32 instruction (opcode 0x107)
  * Count trailing zero bits in 32-bit register as specified in Gray Paper
+ * Gray Paper formula: reg'_D = max(n ∈ Nmax{33}) where Σ(i=0 to i<n) bitsfunc{4}(reg_A mod 2^32)[i] = 0
  */
 export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAILING_ZERO_BITS_32
@@ -317,30 +306,27 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
       }
     }
 
-    logger.debug('Executing TRAILING_ZERO_BITS_32 instruction', {
-      registerB,
-      registerA,
-      value,
-      count,
-    })
     this.setRegisterValue(context.registers, registerB, count)
 
-    // Mutate context directly
-    
+    console.log('Executing TRAILING_ZERO_BITS_32 instruction', {
+      registerB,
+      registerA,
+      value: value.toString(),
+      count: count.toString(),
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
+    })
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * SIGN_EXTEND_8 instruction (opcode 0x108)
  * Sign extend 8-bit value as specified in Gray Paper
+ * Gray Paper formula: reg'_D = unsigned{signedn{1}{reg_A mod 2^8}}
  */
 export class SIGN_EXTEND_8Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SIGN_EXTEND_8
@@ -355,30 +341,27 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
     const signBit = value & (1n << 7n)
     const extendedValue = signBit ? value | ~((1n << 8n) - 1n) : value
 
-    logger.debug('Executing SIGN_EXTEND_8 instruction', {
+    this.setRegisterValue(context.registers, registerB, extendedValue)
+
+    console.log('Executing SIGN_EXTEND_8 instruction', {
       registerB,
       registerA,
       value,
       extendedValue,
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerB, extendedValue)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * SIGN_EXTEND_16 instruction (opcode 0x109)
  * Sign extend 16-bit value as specified in Gray Paper
+ * Gray Paper formula: reg'_D = unsigned{signedn{2}{reg_A mod 2^16}}
  */
 export class SIGN_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SIGN_EXTEND_16
@@ -394,30 +377,27 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
     const signBit = value & (1n << 15n)
     const extendedValue = signBit ? value | ~((1n << 16n) - 1n) : value
 
-    logger.debug('Executing SIGN_EXTEND_16 instruction', {
+    this.setRegisterValue(context.registers, registerB, extendedValue)
+
+    console.log('Executing SIGN_EXTEND_16 instruction', {
       registerB,
       registerA,
       value,
-      extendedValue,
+      extendedValue: extendedValue.toString(),
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerB, extendedValue)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
 /**
  * ZERO_EXTEND_16 instruction (opcode 0x10A)
  * Zero extend 16-bit value as specified in Gray Paper
+ * Gray Paper formula: reg'_D = reg_A mod 2^16
  */
 export class ZERO_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ZERO_EXTEND_16
@@ -430,30 +410,26 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
 
     // Zero extend 16-bit to 64-bit (no change needed since we're already using BigInt)
+    this.setRegisterValue(context.registers, registerB, value)
 
-    logger.debug('Executing ZERO_EXTEND_16 instruction', {
+    console.log('Executing ZERO_EXTEND_16 instruction', {
       registerB,
       registerA,
       value,
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerB, value)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
   }
 }
 
 /**
  * REVERSE_BYTES instruction (opcode 0x10B)
  * Reverse byte order as specified in Gray Paper
+ * Gray Paper formula: ∀i ∈ N_8 : encode[8]{reg'_D}[i] = encode[8]{reg_A}[7-i]
  */
 export class REVERSE_BYTESInstruction extends BaseInstruction {
   readonly opcode = OPCODES.REVERSE_Uint8Array
@@ -471,23 +447,19 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
       reversed |= byte << BigInt((7 - i) * 8)
     }
 
-    logger.debug('Executing REVERSE_BYTES instruction', {
+    this.setRegisterValue(context.registers, registerD, reversed)
+
+    console.log('Executing REVERSE_BYTES instruction', {
       registerD,
       registerA,
       value,
       reversed,
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      registers: context.registers,
     })
-    this.setRegisterValue(context.registers, registerD, reversed)
-
-    // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
   }
 }

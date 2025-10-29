@@ -102,11 +102,11 @@ export class SHAR_R_64Instruction extends BaseInstruction {
     const registerB = this.getRegisterB(context.instruction.operands)
     const valueA = this.getRegisterValueAs64(context.registers, registerA)
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
-    const shiftAmount = Number(valueB % 64n)
+    const shiftAmount = valueB % 64n
 
     // Convert to signed for arithmetic shift
     const signedValue = this.toSigned64(valueA)
-    const shiftedValue = signedValue >> BigInt(shiftAmount)
+    const shiftedValue = signedValue >> shiftAmount
     const result = this.toUnsigned64(shiftedValue)
 
     logger.debug('Executing SHAR_R_64 instruction', {
@@ -125,13 +125,6 @@ export class SHAR_R_64Instruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 
   private toSigned64(value: bigint): bigint {

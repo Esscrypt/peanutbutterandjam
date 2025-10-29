@@ -69,3 +69,5 @@ export * from './state'
 export * from './telemetry'
 // VRF types
 export * from './vrf'
+// Test vectors types
+export * from './test-vectors'

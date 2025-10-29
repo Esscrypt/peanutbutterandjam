@@ -123,6 +123,7 @@ export class PVMParser {
           opcode: BigInt(opcode),
           operands,
           fskip,
+          pc: BigInt(instructionIndex),
         }
 
         instructions.push(instruction)

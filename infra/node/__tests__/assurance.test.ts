@@ -6,55 +6,68 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { hexToBytes } from '@pbnj/core'
+import { EventBusService} from '@pbnj/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type {
-  Assurance,
-  PendingReport,
-  ValidatorPublicKeys,
+  AssuranceTestVector,
   WorkReport,
 } from '@pbnj/types'
-import type { Hex } from 'viem'
 import { AssuranceService } from '../services/assurance-service'
 import { ConfigService } from '../services/config-service'
-import type { ValidatorSetManager } from '../services/validator-set'
-import type { IWorkReportService } from '../services/work-report-service'
+import { ValidatorSetManager } from '../services/validator-set'
+import { WorkReportService } from '../services/work-report-service'
+import { ClockService } from '../services/clock-service'
 
-// Test vector interface based on observed structure
-interface AssuranceTestVector {
-  input: {
-    assurances: Assurance[]
-    slot: number
-    parent: Hex
+// Helper function to convert JSON numbers to bigints for WorkReport
+function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
+  return {
+    ...jsonReport,
+    core_index: BigInt(jsonReport.core_index || 0),
+    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
+    context: {
+      ...jsonReport.context,
+      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
+    },
+    results: jsonReport.results.map((r: any) => ({
+      ...r,
+      service_id: BigInt(r.service_id || 0),
+      accumulate_gas: BigInt(r.accumulate_gas || 0),
+      refine_load: {
+        ...r.refine_load,
+        gas_used: BigInt(r.refine_load.gas_used || 0),
+        imports: BigInt(r.refine_load.imports || 0),
+        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
+        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
+        exports: BigInt(r.refine_load.exports || 0),
+      },
+    })),
   }
-  pre_state: {
-    avail_assignments: Array<{
-      report: WorkReport
-      timeout: number
-    } | null>
-    curr_validators: Array<{
-      bandersnatch: Hex
-      ed25519: Hex
-      bls: Hex
-      metadata: Hex
-    }>
-  }
-  output: {
-    ok?: unknown
-    err?: string
-  } | null
-  post_state: {
-    avail_assignments: Array<{
-      report: WorkReport
-      timeout: number
-    } | null>
-    curr_validators: Array<{
-      bandersnatch: Hex
-      ed25519: Hex
-      bls: Hex
-      metadata: Hex
-    }>
+}
+
+// Helper function to convert WorkReport bigints back to numbers for JSON comparison
+function convertWorkReportToJson(workReport: WorkReport): any {
+  return {
+    ...workReport,
+    core_index: Number(workReport.core_index),
+    auth_gas_used: Number(workReport.auth_gas_used),
+    context: {
+      ...workReport.context,
+      lookup_anchor_slot: Number(workReport.context.lookup_anchor_slot),
+    },
+    results: workReport.results.map(r => ({
+      ...r,
+      service_id: Number(r.service_id),
+      accumulate_gas: Number(r.accumulate_gas),
+      refine_load: {
+        ...r.refine_load,
+        gas_used: Number(r.refine_load.gas_used),
+        imports: Number(r.refine_load.imports),
+        extrinsic_count: Number(r.refine_load.extrinsic_count),
+        extrinsic_size: Number(r.refine_load.extrinsic_size),
+        exports: Number(r.refine_load.exports),
+      },
+    })),
   }
 }
 
@@ -64,80 +77,6 @@ const fullConfigService = new ConfigService('full')
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
-
-/**
- * Create a mock WorkReportService from test vector pre_state
- */
-function createMockWorkReportService(
-  availAssignments: Array<{ report: WorkReport; timeout: number } | null>,
-): IWorkReportService {
-  const coreReports: (PendingReport | null)[] = new Array(availAssignments.length).fill(null)
-  for (let i = 0; i < availAssignments.length; i++) {
-    const assignment = availAssignments[i]
-    if (assignment) {
-      coreReports[i] = {
-        workReport: assignment.report,
-        timeslot: assignment.timeout,
-      }
-    }
-  }
-
-  return {
-    // State component operations
-    getReports: () => ({ coreReports }),
-    setReports: () => {},
-    getCoreReport: (coreIndex: bigint) => coreReports.get(coreIndex) || null,
-    addWorkReport: async () => [undefined, '0x00' as `0x${string}`],
-    removeWorkReport: () => {},
-    clearAllReports: () => {},
-    
-    // Storage operations
-    storeGuaranteedWorkReport: async () => [undefined, '0x00' as `0x${string}`],
-    getWorkReportByHash: () => null,
-    getWorkReportsForCore: () => [],
-    
-    // Lifecycle operations
-    updateWorkReportState: () => [undefined, undefined],
-    recordAssurance: () => [undefined, undefined],
-    markAsAvailable: () => [undefined, undefined],
-    
-    // Query operations
-    getWorkReportsByState: () => [],
-    getTimedOutReports: () => [],
-    getStats: () => ({
-      totalReports: 0,
-      reportsByState: new Map(),
-      coresWithPendingReports: 0,
-      reportsWithSupermajority: 0,
-    }),
-  }
-}
-
-/**
- * Create a mock ValidatorSetManager from test vector validators
- */
-function createMockValidatorSetManager(
-  validators: Array<{
-    bandersnatch: Hex
-    ed25519: Hex
-    bls: Hex
-    metadata: Hex
-  }>,
-): ValidatorSetManager {
-  const validatorMap = new Map<number, ValidatorPublicKeys>()
-  for (let i = 0; i < validators.length; i++) {
-    validatorMap.set(i, {
-      bandersnatch: validators[i].bandersnatch,
-      ed25519: validators[i].ed25519,
-      bls: validators[i].bls,
-      metadata: validators[i].metadata,
-    })
-  }
-
-  return {
-    getActiveValidators: () => validatorMap,
-  } as unknown as ValidatorSetManager
-}
 
 /**
  * Load all test vector JSON files from the directory for a given configuration
@@ -183,148 +122,117 @@ describe('Assurance Service - JAM Test Vectors', () => {
         describe(`Test Vector: ${name}`, () => {
           it('should validate assurances according to Gray Paper rules', () => {
             // Step 1: Create mock services
-            const workReportService = createMockWorkReportService(
-              vector.pre_state.avail_assignments,
-            )
-            const validatorSetManager = createMockValidatorSetManager(
-              vector.pre_state.curr_validators,
-            )
+            // const workReportService = createMockWorkReportService(
+            //   vector.pre_state.avail_assignments,
+            // )
+
+            const eventBusService = new EventBusService()
+
+            const validatorSetManager = new ValidatorSetManager({
+              eventBusService: eventBusService,
+              sealKeyService: null,
+              keyPairService: null,
+              ringProver: null,
+              ticketService: null,
+              configService: configService,
+              entropyService: null,
+              clockService: new ClockService({ eventBusService, configService }),
+              initialValidators: new Map(vector.pre_state.curr_validators.map((validator, index) => [index, {
+                bandersnatch: validator.bandersnatch,
+                ed25519: validator.ed25519,
+                bls: validator.bls,
+                metadata: validator.metadata,
+              }])),
+            })
+            const workReportService = new WorkReportService({
+              workStore: null,
+              eventBus: eventBusService,
+              networkingService: null,
+              ce136WorkReportRequestProtocol: null,
+              validatorSetManager: validatorSetManager,
+              configService: configService,
+            })
+            // const validatorSetManager = createMockValidatorSetManager(
+            //   vector.pre_state.curr_validators,
+            // )
 
             // Step 2: Initialize AssuranceService with mocked dependencies
             const assuranceService = new AssuranceService(
               configService,
               workReportService,
               validatorSetManager,
+              eventBusService,
+              null,
+              null
             )
+
+            // Reset assurance counts before each test
+            assuranceService.resetAssuranceCounts()
+
+            // add pending work reports from test vector
+            for (const assignment of vector.pre_state.avail_assignments) {
+              if (assignment) {
+                // Convert JSON numbers to correct types
+                const report = convertJsonReportToWorkReport(assignment.report)
+                // Use assignment.timeout as the timeslot (when the report was created)
+                workReportService.addPendingWorkReport(
+                  BigInt(Number(assignment.report.core_index)),
+                  report,
+                  Number(assignment.timeout),
+                )
+              }
+            }
 
             // Step 3: Validate assurances
-            const [error] = assuranceService.validateAssurances(
-              vector.input.assurances,
-              vector.input.parent,
-            )
-
+              // If validation didn't fail, try state transition (error might come from transition)
+              const [transitionError] = assuranceService.applyAssuranceTransition(
+                vector.input.assurances,
+                vector.input.slot,
+                vector.input.parent,
+                configService,
+              )
+              
             // Step 4: Check expected outcome
             if (vector.output && 'err' in vector.output && vector.output.err) {
-              // Expected to fail
-              expect(error).toBeDefined()
-              // Check error message matches expected error code from test vector
-              if (error) {
-                const errorMessage = error.message
+              // Expected to fail - check if error comes from validation
+              if (transitionError) {
+                const errorMessage = transitionError.message
                 const expectedError = vector.output.err
-                // Our error messages now match test vector error codes exactly
                 expect(errorMessage).toBe(expectedError)
+                return // Don't proceed to state transitions if validation failed
               }
-            } else {
-              // Expected to succeed
-              // Note: Signature verification will fail due to known test vector bug
-              // See packages/assurance/KNOWN_ISSUES.md
-              if (error && error.message === 'bad_signature') {
-                // Known issue: test vector signatures don't verify (bitfield encoding bug)
-                // Skip this assertion for now
-                console.log('  ⚠️  Skipping signature verification (known test vector bug)')
-              } else {
-                expect(error).toBeUndefined()
-              }
-            }
-
-            // Step 5: Apply state transitions and verify post-state
-            if (!error) {
-              // Build pending reports map from pre_state
-              const pendingReports = new Map<number, { report: WorkReport; timeout: number }>()
-              for (let i = 0; i < vector.pre_state.avail_assignments.length; i++) {
-                const assignment = vector.pre_state.avail_assignments[i]
-                if (assignment) {
-                  pendingReports.set(i, {
-                    report: assignment.report,
-                    timeout: assignment.timeout,
-                  })
-                }
-              }
-
-              // Apply assurance state transition
-              const updatedReports = assuranceService.applyAssuranceTransition(
-                vector.input.assurances,
-                pendingReports,
-                vector.input.slot,
-                vector.pre_state.curr_validators.length,
-              )
-
-              // Convert updated reports back to test vector format
-              const expectedPostState = Array.from({ length: vector.pre_state.avail_assignments.length }, (_, idx) => {
-                const updated = updatedReports.get(idx)
-                return updated ? { report: updated.report, timeout: updated.timeout } : null
-              })
-
-              // Verify post-state matches
-              expect(vector.post_state.avail_assignments).toEqual(expectedPostState)
               
-              // Validators don't change from assurances
-              expect(vector.post_state.curr_validators).toEqual(
-                vector.pre_state.curr_validators,
-              )
+              
+              // Should not reach here if error is expected
+              throw new Error('Expected error but none occurred')
+            } else {
+
+
+                            // Should not have any errors in successful cases
+                            expect(transitionError).toBeUndefined()
+
+                            // Convert updated reports back to test vector format
+                            const expectedPostState = Array.from({ length: vector.pre_state.avail_assignments.length }, (_, idx) => {
+                              const updated = workReportService.getCoreReport(BigInt(idx))
+                              if (!updated) return null
+                              
+                              // Convert WorkReport back to JSON format for comparison
+                              const jsonReport = convertWorkReportToJson(updated.workReport)
+                              return { report: jsonReport, timeout: updated.timeslot }
+                            })
+              
+                            // Verify post-state matches
+                            expect(vector.post_state.avail_assignments).toEqual(expectedPostState)
+                            
+                            // Validators don't change from assurances
+                            expect(vector.post_state.curr_validators).toEqual(
+                              vector.pre_state.curr_validators,
+                            )
+
             }
+
           })
 
-          it('should correctly identify available cores', () => {
-            // Step 1: Create mock services
-            const workReportService = createMockWorkReportService(
-              vector.pre_state.avail_assignments,
-            )
-            const validatorSetManager = createMockValidatorSetManager(
-              vector.pre_state.curr_validators,
-            )
-
-            // Step 2: Initialize service
-            const assuranceService = new AssuranceService(
-              configService,
-              workReportService,
-              validatorSetManager,
-            )
-
-            // Step 3: Get available cores (if validation would succeed)
-            if (!vector.output || !('err' in vector.output) || !vector.output.err) {
-              const totalValidators = vector.pre_state.curr_validators.length
-              const availableCores = assuranceService.getAvailableCores(
-                vector.input.assurances,
-                totalValidators,
-              )
-
-              // Step 3: Verify availability calculation
-              // Count assurances per core
-              const coreAssuranceCounts = new Map<number, number>()
-
-              for (const assurance of vector.input.assurances) {
-                const bitfield = hexToBytes(assurance.bitfield)
-
-                for (let coreIndex = 0; coreIndex < configService.numCores; coreIndex++) {
-                  const byteIndex = Math.floor(coreIndex / 8)
-                  const bitIndex = coreIndex % 8
-
-                  if (byteIndex < bitfield.length) {
-                    const isSet = (bitfield[byteIndex] & (1 << bitIndex)) !== 0
-
-                    if (isSet) {
-                      coreAssuranceCounts.set(
-                        coreIndex,
-                        (coreAssuranceCounts.get(coreIndex) || 0) + 1,
-                      )
-                    }
-                  }
-                }
-              }
-
-              // Verify 2/3 threshold
-              const threshold = Math.ceil((totalValidators * 2) / 3)
-
-              for (const [coreIndex, count] of coreAssuranceCounts.entries()) {
-                if (count >= threshold) {
-                  expect(availableCores.has(coreIndex)).toBe(true)
-                } else {
-                  expect(availableCores.has(coreIndex)).toBe(false)
-                }
-              }
-            }
-          })
         })
       }
     })

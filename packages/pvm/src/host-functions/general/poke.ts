@@ -1,9 +1,8 @@
-import type { Safe } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   PVMGuest,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -17,12 +16,22 @@ import { BaseHostFunction } from './base'
  *
  * Writes memory to a PVM machine instance
  *
- * Gray Paper Specification:
- * - Function ID: 10 (poke)
- * - Gas Cost: 10
- * - Uses registers[7:4] to specify machine ID, source offset, dest offset, length
- * - Writes data from current PVM to specified PVM machine
- * - Returns WHO if machine doesn't exist, OOB if out of bounds
+ * *** GRAY PAPER FORMULA ***
+ * Gray Paper: pvm_invocations.tex, Ω_O (poke = 10)
+ *
+ * Parameters: [n, s, o, z] = registers[7:4]
+ * - n: machine ID
+ * - s: source offset in current memory
+ * - o: destination offset in machine's memory
+ * - z: length
+ *
+ * Return states (equation 586-593):
+ * - panic when Nrange{s}{z} not ⊆ readable[memory]  (source not readable)
+ * - continue with WHO when n not ∈ keys(m)  (machine doesn't exist)
+ * - continue with OOB when Nrange{o}{z} not ⊆ writable{m[n].ram}  (destination not writable)
+ * - continue with OK otherwise
+ *
+ * Memory update: (m'[n].ram)[o:z] = mem[s:z]
  */
 export class PokeHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.POKE
@@ -31,56 +40,58 @@ export class PokeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
-    const machineId = context.registers[7]
-    const sourceOffset = context.registers[8]
-    const destOffset = context.registers[9]
-    const length = context.registers[10]
-
-    // Check if machine exists
-    const machine = this.getPVMMachine(refineContext!, machineId)
-    if (!machine) {
-      // Return WHO (2^64 - 4) if machine doesn't exist
+    if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
       return {
         resultCode: RESULT_CODES.HALT,
       }
     }
 
+    // Gray Paper: [n, s, o, z] = registers[7:4]
+    const machineId = context.registers[7]
+    const sourceOffset = context.registers[8] // s: source
+    const destOffset = context.registers[9] // o: destination
+    const length = context.registers[10] // z: length
+
+    // Gray Paper error check order:
+    // 1. Check if source range is readable in current memory → panic
     // Read data from current PVM's memory
-    const [readError, data] = context.ram.readOctets(sourceOffset, length)
-    if (readError) {
-      context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+    const [data, readFaultAddress] = context.ram.readOctets(
+      sourceOffset,
+      length,
+    )
+    if (!data) {
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: readFaultAddress ?? 0n,
+          details: 'Memory not readable',
+        },
       }
     }
 
-    // Check if dest range is writable in machine's memory
-    if (!this.isMachineMemoryWritable(machine, destOffset, length)) {
-      // Return OOB (2^64 - 3) if out of bounds
-      context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+    // 2. Check if machine exists → WHO
+    const machine = this.getPVMMachine(refineContext, machineId)
+    if (!machine) {
+      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
       return {
-        resultCode: RESULT_CODES.HALT,
+        resultCode: null, // continue
       }
     }
 
-    // Write data to machine's memory
-    const [error] = this.writeToMachineMemory(machine, destOffset, data)
-    if (error) {
+    // 3. Check if destination range is writable → OOB
+    // Gray Paper: (m'[n].ram)[o:z] = mem[s:z]
+    const writeFaultAddress = machine.pvm.state.ram.writeOctets(
+      destOffset,
+      data,
+    )
+    if (writeFaultAddress) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
       return {
-        resultCode: RESULT_CODES.HALT,
+        resultCode: null, // continue (not HALT)
       }
     }
 
@@ -93,27 +104,9 @@ export class PokeHostFunction extends BaseHostFunction {
   }
 
   private getPVMMachine(
-    refineContext: RefineContextPVM,
+    refineContext: RefineInvocationContext,
     machineId: bigint,
   ): PVMGuest | null {
     return refineContext.machines.get(machineId) || null
-  }
-
-  private isMachineMemoryWritable(
-    machine: PVMGuest,
-    offset: bigint,
-    length: bigint,
-  ): boolean {
-    // Check if memory range is writable in machine's memory
-    return machine.ram.isWritable(offset, length)
-  }
-
-  private writeToMachineMemory(
-    machine: PVMGuest,
-    offset: bigint,
-    data: Uint8Array,
-  ): Safe<void> {
-    // Write data to machine's memory
-    return machine.ram.writeOctets(offset, data)
   }
 }

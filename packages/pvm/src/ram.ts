@@ -45,7 +45,7 @@ export class PVMRAM implements RAM {
    * Initialize a memory page (used for test vectors)
    * @param address - Base address of the page
    * @param length - Length of the page in bytes
-   * @param accessType - Access type: 'none', 'read', 'write', or 'read+write'
+   * @param accessType - Access type: 'none', 'read', 'write'
    */
   initializePage(
     address: bigint,
@@ -63,7 +63,7 @@ export class PVMRAM implements RAM {
    * Set memory page access rights (Gray Paper PAGES function)
    * @param address - Base address of the page
    * @param length - Length of the page in bytes
-   * @param accessType - Access type: 'none', 'read', 'write', or 'read+write'
+   * @param accessType - Access type: 'none', 'read', 'write'
    */
   setPageAccessRights(
     address: bigint,
@@ -172,7 +172,7 @@ export class PVMRAM implements RAM {
     // Check each page in the range
     for (let page = startPage; page <= endPage; page++) {
       const pageAccess = this.pageAccess.get(page)
-      if (pageAccess !== 'write' && pageAccess !== 'read+write') {
+      if (pageAccess !== 'write') {
         // Gray Paper: fault address is the start of the page containing the fault
         // Formula: Cpvmpagesize × ⌊min(x) ÷ Cpvmpagesize⌋
         const faultAddress = page * this.CPVM_PAGE_SIZE

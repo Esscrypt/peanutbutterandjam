@@ -194,7 +194,7 @@ export function verifyBlockExtrinsicGuaranteeSignature(
   }
 
   // Step 3: Construct the message: "$jam_guarantee" + Blake2b(work_report)
-  const contextString = '$jam_guarantee'
+  const contextString = 'jam_guarantee'
   const contextBytes = new TextEncoder().encode(contextString)
   const hashBytes = hexToBytes(workReportHash)
   const message = new Uint8Array(contextBytes.length + hashBytes.length)

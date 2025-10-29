@@ -51,7 +51,7 @@ export function verifyAnnouncementSignature(
   // - x_n = encoded work report set
   // - blake{H} = Blake2b hash of block header
 
-  const XANNOUNCE = new TextEncoder().encode('$jam_announce')
+  const XANNOUNCE = new TextEncoder().encode('jam_announce')
 
   // Convert tranche number to bytes (8 bytes, little-endian)
   const trancheBytes = new Uint8Array(8)

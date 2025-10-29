@@ -3,7 +3,7 @@ import type {
   HostFunctionContext,
   HostFunctionResult,
   PVMGuest,
-  RefineContextPVM,
+  RefineInvocationContext,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -17,13 +17,22 @@ import { BaseHostFunction } from './base'
  *
  * Reads memory from a PVM machine instance
  *
- * Gray Paper Specification:
- * - Function ID: 9 (peek)
- * - Gas Cost: 10
- * - Uses registers[7:4] to specify machine ID, source offset, dest offset, length
- * - Reads memory from specified PVM machine
- * - Writes data to current PVM's memory
- * - Returns WHO if machine doesn't exist, OOB if out of bounds
+ * *** GRAY PAPER FORMULA ***
+ * Gray Paper: pvm_invocations.tex, Ω_P (peek = 9)
+ *
+ * Parameters: [n, o, s, z] = registers[7:4]
+ * - n: machine ID
+ * - o: destination offset in current memory
+ * - s: source offset in machine's memory
+ * - z: length
+ *
+ * Return states (equation 571-577):
+ * - panic when Nrange{o}{z} not ⊆ writable[memory]  (destination not writable)
+ * - continue with WHO when n not ∈ keys(m)  (machine doesn't exist)
+ * - continue with OOB when Nrange{s}{z} not ⊆ readable{m[n].ram}  (source not readable)
+ * - continue with OK otherwise
+ *
+ * Memory update: mem'[o:z] = (m[n].ram)[s:z]
  */
 export class PeekHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.PEEK
@@ -32,38 +41,52 @@ export class PeekHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
-
-    const machineId = context.registers[7]
-    const sourceOffset = context.registers[8]
-    const destOffset = context.registers[9]
-    const length = context.registers[10]
-
-    // Check if machine exists
-    const machine = this.getPVMMachine(refineContext!, machineId)
-    if (!machine) {
-      // Return WHO (2^64 - 4) if machine doesn't exist
+    if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
       return {
         resultCode: RESULT_CODES.HALT,
       }
     }
 
-    // Check if source range is readable in machine's memory
+    // Gray Paper: [n, o, s, z] = registers[7:4]
+    const machineId = context.registers[7]
+    const destOffset = context.registers[8] // o: destination
+    const sourceOffset = context.registers[9] // s: source
+    const length = context.registers[10] // z: length
+
+    // Gray Paper error check order:
+    // 1. Check if destination range is writable → panic
+    const [destWritable, faultAddress] = context.ram.isWritableWithFault(
+      destOffset,
+      length,
+    )
+    if (!destWritable) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress ?? 0n,
+          details: 'Memory not writable',
+        },
+      }
+    }
+
+    // 2. Check if machine exists → WHO
+    const machine = this.getPVMMachine(refineContext, machineId)
+    if (!machine) {
+      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      return {
+        resultCode: null, // continue (not HALT)
+      }
+    }
+
+    // 3. Check if source range is readable → OOB
     if (!this.isMachineMemoryReadable(machine, sourceOffset, length)) {
-      // Return OOB (2^64 - 3) if out of bounds
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
       return {
-        resultCode: RESULT_CODES.HALT,
+        resultCode: null, // continue (not HALT)
       }
     }
 
@@ -76,15 +99,20 @@ export class PeekHostFunction extends BaseHostFunction {
     if (error) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
       return {
-        resultCode: RESULT_CODES.HALT,
+        resultCode: null, // continue
       }
     }
 
-    // Write data to current PVM's memory
-    const [error2] = context.ram.writeOctets(destOffset, data)
-    if (error2) {
+    // Gray Paper: mem'[o:z] = (m[n].ram)[s:z]
+    const writeFaultAddress = context.ram.writeOctets(destOffset, data)
+    if (writeFaultAddress) {
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: writeFaultAddress,
+          details: 'Memory not writable',
+        },
       }
     }
 
@@ -96,7 +124,7 @@ export class PeekHostFunction extends BaseHostFunction {
   }
 
   private getPVMMachine(
-    refineContext: RefineContextPVM,
+    refineContext: RefineInvocationContext,
     machineId: bigint,
   ): PVMGuest | null {
     // Get PVM machine by ID from context
@@ -108,7 +136,7 @@ export class PeekHostFunction extends BaseHostFunction {
     offset: bigint,
     length: bigint,
   ): boolean {
-    return machine.ram.isReadable(offset, length)
+    return machine.pvm.state.ram.isReadableWithFault(offset, length)[0]
   }
 
   private readFromMachineMemory(
@@ -118,9 +146,12 @@ export class PeekHostFunction extends BaseHostFunction {
   ): Safe<Uint8Array> {
     // Read data from machine's memory
     // This is a placeholder implementation
-    const [error, data] = machine.ram.readOctets(offset, length)
-    if (error) {
-      return safeError(error)
+    const [data, _faultAddress] = machine.pvm.state.ram.readOctets(
+      offset,
+      length,
+    )
+    if (!data) {
+      return safeError(new Error('Memory not readable'))
     }
     return safeResult(data)
   }

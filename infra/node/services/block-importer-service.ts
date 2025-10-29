@@ -514,7 +514,7 @@ export class BlockImporterService extends BaseServiceClass {
 
     // Step 2: Construct the message according to Gray Paper
     // Message = "$jam_valid" || report_hash OR "$jam_invalid" || report_hash
-    const contextString = judgment.vote ? '$jam_valid' : '$jam_invalid'
+    const contextString = judgment.vote ? 'jam_valid' : 'jam_invalid'
     const contextBytes = new TextEncoder().encode(contextString)
     const reportHashBytes = hexToBytes(reportHash)
     const message = new Uint8Array(contextBytes.length + reportHashBytes.length)

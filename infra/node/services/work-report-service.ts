@@ -32,7 +32,6 @@ import {
   type GuaranteedWorkReport,
   type PendingReport,
   type Reports,
-  TIME_CONSTANTS,
   type ValidatorPublicKeys,
   type WorkReport,
   type WorkReportRequest,
@@ -40,15 +39,15 @@ import {
 } from '@pbnj/types'
 import type { NetworkingService } from './networking-service'
 import type { ValidatorSetManager } from './validator-set'
+import type { ConfigService } from './config-service'
 
 /**
  * Work Report State according to Gray Paper lifecycle
  */
 export type WorkReportState =
-  | 'submitted' // Builder submitted, waiting for evaluation
+  | 'pending' // Work report is pending, meaning it has not been assured yet
   | 'evaluating' // Guarantor is computing work-report
   | 'guaranteed' // Work-report signed, guarantee created
-  | 'reported' // Work-report included on-chain (in reports state)
   | 'erasure_coded' // Erasure coded and distributed to validators
   | 'assured' // Availability assured by validators
   | 'available' // Available and ready for accumulation
@@ -57,142 +56,35 @@ export type WorkReportState =
   | 'rejected' // Failed validation or authorization
 
 /**
- * Work Report Service Interface
- */
-export interface IWorkReportService {
-  // ===== State Component Operations (Gray Paper reports) =====
-
-  /**
-   * Get current reports state component
-   * Gray Paper: reports ∈ sequence[Ccorecount]{optional{tup{workreport, timestamp}}}
-   */
-  getReports(): Reports
-
-  /**
-   * Set reports state component
-   * Gray Paper: reports ∈ sequence[Ccorecount]{optional{tup{workreport, timestamp}}}
-   */
-  setReports(reports: Reports): Promise<void>
-
-  /**
-   * Get pending report for a specific core
-   * Gray Paper: Each core can have at most one pending work report
-   */
-  getCoreReport(coreIndex: bigint): PendingReport | null
-
-  /**
-   * Add work report to pending state for a core
-   * Transitions report to 'reported' state
-   */
-  addWorkReport(
-    coreIndex: bigint,
-    workReport: WorkReport,
-    timestamp: bigint,
-  ): Promise<Safe<Hex>>
-
-  /**
-   * Remove work report from pending state (became available or timed out)
-   */
-  removeWorkReport(coreIndex: bigint): void
-
-  /**
-   * Clear all pending reports
-   */
-  clearAllReports(): void
-
-  // ===== Storage & Retrieval Operations =====
-
-  /**
-   * Store a guaranteed work report (from networking protocol)
-   * Does NOT add to pending state - use addWorkReport for that
-   */
-  storeGuaranteedWorkReport(
-    workReport: WorkReport,
-    state: WorkReportState,
-  ): Promise<Safe<Hex>>
-
-  /**
-   * Get work report by hash
-   */
-  getWorkReportByHash(hash: Hex): WorkReport | null
-
-  /**
-   * Get all work reports for a specific core (all states)
-   */
-  getWorkReportsForCore(coreIndex: bigint): WorkReport[]
-
-  // ===== Lifecycle Management =====
-
-  /**
-   * Update work report state
-   */
-  updateWorkReportState(hash: Hex, newState: WorkReportState): Safe<void>
-
-  /**
-   * Record assurance for a work report
-   */
-  recordAssurance(hash: Hex): Safe<void>
-
-  /**
-   * Mark work report as having supermajority (2/3 assurances)
-   */
-  markAsAvailable(hash: Hex): Safe<void>
-
-  // ===== Query Operations =====
-
-  /**
-   * Get all work reports in a specific state
-   */
-  getWorkReportsByState(state: WorkReportState): WorkReport[]
-
-  /**
-   * Get work reports that have timed out
-   */
-  getTimedOutReports(currentSlot: bigint): WorkReport[]
-
-  /**
-   * Get statistics
-   */
-  getStats(): {
-    totalReports: number
-    reportsByState: Map<WorkReportState, number>
-    coresWithPendingReports: number
-    reportsWithSupermajority: number
-  }
-}
-
-/**
  * Work Report Service Implementation
  */
-export class WorkReportService
-  extends BaseService
-  implements IWorkReportService
-{
+export class WorkReportService extends BaseService {
   // Extended storage: all work reports by hash (for full lifecycle tracking)
   private readonly workReportsByHash: Map<Hex, WorkReport> = new Map()
-
-  // work report assurance count by work report hash
-  private readonly assuranceCountByCoreIndex: Map<bigint, number> = new Map()
 
   // Index: work reports by core (for quick lookup of all reports on a core)
   private readonly workReportHashByCore: Map<bigint, Hex> = new Map()
 
   private readonly workReportState: Map<Hex, WorkReportState> = new Map()
 
-  private readonly workReportReportedAtSlot: Map<Hex, bigint> = new Map()
+  // Index: pending work reports by core
+  // Gray Paper: only one report may be assigned to a core at any given time
+  private readonly pendingWorkReports: Map<bigint, PendingReport> = new Map()
 
-  private readonly workStore: WorkStore
+  private readonly workStore: WorkStore | null
   private readonly eventBus: EventBusService
-  private readonly networkingService: NetworkingService
-  private readonly ce136WorkReportRequestProtocol: WorkReportRequestProtocol
-  private readonly validatorSetManager: ValidatorSetManager
+  private readonly networkingService: NetworkingService | null
+  private readonly ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
+  private readonly validatorSetManager: ValidatorSetManager | null
+  private readonly configService: ConfigService
 
   constructor(options: {
-    workStore: WorkStore
+    workStore: WorkStore | null
     eventBus: EventBusService
-    networkingService: NetworkingService
-    ce136WorkReportRequestProtocol: WorkReportRequestProtocol
-    validatorSetManager: ValidatorSetManager
+    networkingService: NetworkingService | null
+    ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
+    validatorSetManager: ValidatorSetManager | null
+    configService: ConfigService
   }) {
     super('work-report-service')
     this.workStore = options.workStore
@@ -200,6 +92,7 @@ export class WorkReportService
     this.networkingService = options.networkingService
     this.ce136WorkReportRequestProtocol = options.ce136WorkReportRequestProtocol
     this.validatorSetManager = options.validatorSetManager
+    this.configService = options.configService
     // Initialize state indexes
 
     this.eventBus.addWorkReportRequestCallback(
@@ -226,25 +119,18 @@ export class WorkReportService
    * Only includes work reports that are currently in 'reported' state and pending
    * availability assurance.
    */
-  getReports(): Reports {
+  getPendingReports(): Reports {
     // Initialize array of length Ccorecount (341) with null values
-    const coreReports: (PendingReport | null)[] = new Array(341).fill(null)
+    const coreReports: (PendingReport | null)[] = new Array(this.configService.numCores).fill(null)
 
-    // Get all work reports in 'reported' state
-    const reportedHashes = this.workReportHashByCore.values()
-
-    // Build the core reports array
-    for (const hash of reportedHashes) {
-      const entry = this.workReportsByHash.get(hash)
-      if (entry && this.workReportReportedAtSlot.get(hash) !== undefined) {
-        const coreIndex = Number(entry.core_index)
-        if (coreIndex >= 0 && coreIndex < 341) {
-          coreReports[coreIndex] = {
-            workReport: entry,
-            timeslot: Number(this.workReportReportedAtSlot.get(hash)!),
-          }
-        }
+    for (const [
+      coreIndex,
+      pendingReport,
+    ] of this.pendingWorkReports.entries()) {
+      if(!pendingReport) {
+        continue
       }
+      coreReports[Number(coreIndex)] = pendingReport
     }
 
     return { coreReports }
@@ -261,6 +147,12 @@ export class WorkReportService
         workReportHash: request.workReportHash,
       })
       return
+    }
+    if (!this.ce136WorkReportRequestProtocol) {
+      throw new Error('CE 136 work report request protocol not found')
+    }
+    if (!this.networkingService) {
+      throw new Error('Networking service not found')
     }
     const [messageError, message] =
       this.ce136WorkReportRequestProtocol.serializeResponse({
@@ -279,13 +171,16 @@ export class WorkReportService
     response: WorkReportResponse,
     _peerPublicKey: Hex,
   ): void {
-    this.storeGuaranteedWorkReport(response.workReport, 'guaranteed')
+    this.storeGuaranteedWorkReport(response.workReport)
   }
 
   handleWorkReportDistributionRequest(
     request: GuaranteedWorkReport,
     _peerPublicKey: Hex,
   ): Safe<void> {
+    if (!this.validatorSetManager) {
+      throw new Error('Validator set manager not found')
+    }
     const [hashError, workReportHash] = calculateWorkReportHash(
       request.workReport,
     )
@@ -345,26 +240,10 @@ export class WorkReportService
 
     // Step 3: Store the work report
     // Store in local cache
-    this.workReportsByHash.set(workReportHash, {
-      workReport: request.workReport,
-      state: 'guaranteed',
-      hash: workReportHash,
-      coreIndex: request.workReport.core_index,
-      receivedAt: BigInt(Date.now()),
-      assuranceCount: 0,
-      hasSupermajority: false,
-    })
-    this.addToIndexes(
-      workReportHash,
-      request.workReport.core_index,
-      'guaranteed',
-    )
+    this.workReportsByHash.set(workReportHash, request.workReport)
 
     // Store in WorkReportService (handles both storage and state tracking)
-    const [storeError] = this.storeGuaranteedWorkReport(
-      request.workReport,
-      'guaranteed', // Mark as guaranteed since it has valid signatures
-    )
+    const [storeError] = this.storeGuaranteedWorkReport(request.workReport)
     if (storeError) {
       logger.error('Failed to store work report in WorkReportService', {
         workReportHash,
@@ -390,29 +269,14 @@ export class WorkReportService
    */
   getCoreReport(coreIndex: bigint): PendingReport | null {
     // Get all work reports in 'reported' state for this core
-    const workReportHash = this.workReportHashByCore.get(coreIndex)
-    if (!workReportHash) {
-      return null
-    }
-    const workReport = this.workReportsByHash.get(workReportHash)
-    if (!workReport) {
-      return null
-    }
-    const reportedAt = this.workReportReportedAtSlot.get(workReportHash)
-    if (!reportedAt) {
-      return null
-    }
-    return {
-      workReport: workReport,
-      timeslot: Number(reportedAt),
-    }
+    return this.pendingWorkReports.get(coreIndex) || null
   }
 
-  async addWorkReport(
+  addPendingWorkReport(
     coreIndex: bigint,
     workReport: WorkReport,
-    timestamp: bigint,
-  ): Promise<Safe<Hex>> {
+    timeslot: number,
+  ): Safe<Hex> {
     // Calculate hash
     const [hashError, hash] = calculateWorkReportHash(workReport)
     if (hashError) {
@@ -422,21 +286,17 @@ export class WorkReportService
     this.workReportHashByCore.set(coreIndex, hash)
 
     // Update existing entry
-    this.workReportState.set(hash, 'reported')
-    this.workReportReportedAtSlot.set(hash, timestamp)
+    if (!this.pendingWorkReports.get(coreIndex)) {
+      this.pendingWorkReports.set(coreIndex, {
+        workReport: workReport,
+        timeslot: timeslot,
+      })
+    }
 
     // Persist to database
-    const [storeError] = await this.workStore.storeWorkReport(
-      workReport,
-      hash,
-      'pending',
-    )
-    if (storeError) {
-      logger.error('Failed to persist work report to database', {
-        hash,
-        error: storeError.message,
-      })
-      // Don't fail the operation if DB fails - we still have it in memory
+    // not awaited on purpose
+    if (this.workStore) {
+      this.workStore.storeWorkReport(workReport, hash, 'pending')
     }
 
     return safeResult(hash)
@@ -444,16 +304,13 @@ export class WorkReportService
 
   // ===== Storage & Retrieval Operations =====
 
-  async storeGuaranteedWorkReport(
-    workReport: WorkReport,
-    state: WorkReportState = 'guaranteed',
-  ): Promise<Safe<Hex>> {
+  storeGuaranteedWorkReport(workReport: WorkReport): Safe<Hex> {
     const [hashError, hash] = calculateWorkReportHash(workReport)
     if (hashError) {
       return safeError(hashError)
     }
 
-    const coreIndex = BigInt(workReport.core_index)
+    const coreIndex = workReport.core_index
 
     // Check if already exists
     const existingEntry = this.workReportsByHash.get(hash)
@@ -463,15 +320,16 @@ export class WorkReportService
     }
 
     this.workReportHashByCore.set(coreIndex, hash)
-    this.workReportState.set(hash, state)
+    this.workReportState.set(hash, 'guaranteed')
+
+    // remove from pending work reports
+    this.pendingWorkReports.delete(coreIndex)
 
     // Persist to database
     // not awaited on purpose
-    void this.workStore.storeWorkReport(
-      workReport,
-      hash,
-      state === 'guaranteed' ? 'guaranteed' : undefined,
-    )
+    if (this.workStore) {
+      this.workStore.storeWorkReport(workReport, hash, 'guaranteed')
+    }
 
     return safeResult(hash)
   }
@@ -490,43 +348,8 @@ export class WorkReportService
 
   // ===== Lifecycle Management =====
 
-  recordAssurance(hash: Hex): Safe<void> {
-    const entry = this.workReportsByHash.get(hash)
-    if (!entry) {
-      return safeError(new Error(`Work report not found: ${hash}`))
-    }
-
-    this.assuranceCountByCoreIndex.set(
-      entry.core_index,
-      (this.assuranceCountByCoreIndex.get(entry.core_index) || 0) + 1,
-    )
-    return safeResult(undefined)
-  }
-
-  markAsAvailable(hash: Hex): Safe<void> {
-    const entry = this.workReportsByHash.get(hash)
-    if (!entry) {
-      return safeError(new Error(`Work report not found: ${hash}`))
-    }
-
-    this.workReportState.set(hash, 'available')
-
-    return safeResult(undefined)
-  }
-
-  // ===== Query Operations =====
-
-  // mark as timed out
-  markAsTimedOut(slot: bigint): Safe<void> {
-    this.workReportReportedAtSlot.entries().forEach(([hash, reportedSlot]) => {
-      if (
-        slot >=
-        reportedSlot + BigInt(TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD)
-      ) {
-        this.workReportState.set(hash, 'timed_out')
-        // this.workReportHashByCore.delete(hash)
-      }
-    })
+  removePendingWorkReport(coreIndex: bigint): Safe<void> {
+    this.pendingWorkReports.delete(coreIndex)
     return safeResult(undefined)
   }
 }

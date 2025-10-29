@@ -11,6 +11,7 @@ import type {
   RegisterIndex,
   RegisterState,
 } from '@pbnj/types'
+import { isTerminationInstruction, RESULT_CODES } from '../config'
 
 /**
  * Base interface for all PVM instruction handlers
@@ -329,7 +330,6 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     return { registerA, registerB, lengthX, immediateX }
   }
 
-
   /**
    * Parse branch instruction operands (One Register, One Immediate, One Offset)
    * Returns: {registerA, immediateX, offset, targetAddress}
@@ -452,6 +452,59 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     const targetAddress = currentPC + offset
 
     return { registerA, registerB, offset, targetAddress }
+  }
+
+  /**
+   * Parse one offset operand according to Gray Paper formula
+   * Used by JUMP instruction (opcode 0x40)
+   *
+   * Gray Paper pvm.tex §7.4.3 lines 308-314:
+   * \using l_X = \min(4, \ell) \,,\quad
+   * \immed_X \equiv \imath + \signfunc{l_X}(\decode[l_X]{\instructions\subrange{\imath+1}{l_X}})
+   *
+   * @param operands The operand bytes (starting from ι+1)
+   * @param fskip The skip distance (ℓ)
+   * @param currentPC The current program counter (ι)
+   * @returns The target address (immed_X)
+   */
+  protected parseOneOffset(
+    operands: Uint8Array,
+    fskip: number,
+    currentPC: bigint,
+  ): bigint {
+    // l_X = min(4, ℓ)
+    const lengthX = Math.min(4, fskip)
+
+    // Read the offset bytes starting from operands[0] (which is ι+1)
+    // Gray Paper: \signfunc{l_X}(\decode[l_X]{\instructions\subrange{\imath+1}{l_X}})
+    const rawOffset = this.getImmediateValueUnsigned(operands, 0, lengthX)
+
+    // Apply Gray Paper sign function: \signfunc{l_X}
+    // signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
+    const signBitPosition = BigInt(8 * lengthX - 1)
+    const signBit = (rawOffset >> signBitPosition) & 1n
+    const offset =
+      signBit === 0n ? rawOffset : rawOffset - 2n ** BigInt(8 * lengthX)
+
+    // Debug logging for problematic cases
+    if (rawOffset > 1000n || offset !== rawOffset) {
+      console.log('parseOneOffset: Sign function applied', {
+        operands: Array.from(operands),
+        fskip,
+        lengthX,
+        currentPC: currentPC.toString(),
+        rawOffset: rawOffset.toString(),
+        signBitPosition: signBitPosition.toString(),
+        signBit: signBit.toString(),
+        offset: offset.toString(),
+        targetAddress: (currentPC + offset).toString(),
+      })
+    }
+
+    // Calculate target address: immed_X = ι + signfunc{l_X}(offset)
+    const targetAddress = currentPC + offset
+
+    return targetAddress
   }
 
   /**
@@ -649,6 +702,97 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
       val = val >> 8n
     }
     return bytes
+  }
+
+  /**
+   * Validate branch target address according to Gray Paper basic block rules
+   * Used by all branching instructions (JUMP, BRANCH_*, etc.)
+   *
+   * Gray Paper: Branches must target basic block starts
+   * Basic blocks are defined as:
+   * basicblocks ≡ ({0} ∪ {n + 1 + Fskip(n) | n ∈ Nmax(len(c)) ∧ k[n] = 1 ∧ c[n] ∈ T}) ∩ {n | k[n] = 1 ∧ c[n] ∈ U}
+   *
+   * Where T is the set of termination instructions (trap, fallthrough, jumps, branches)
+   *
+   * @param targetAddress The address to validate
+   * @param context The instruction context
+   * @returns InstructionResult with PANIC if invalid, null if valid
+   */
+  protected validateBranchTarget(
+    targetAddress: bigint,
+    context: InstructionContext,
+  ): InstructionResult | null {
+    // Check if target address is within valid bounds
+    if (targetAddress < 0n || targetAddress >= BigInt(context.code.length)) {
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
+    // Check if target is address 0 (always valid basic block start)
+    if (targetAddress === 0n) {
+      return null // Valid - allow the branch
+    }
+
+    // Check if target is a valid opcode position (bitmask check)
+    if (
+      targetAddress >= context.bitmask.length ||
+      context.bitmask[Number(targetAddress)] === 0
+    ) {
+      return { resultCode: RESULT_CODES.PANIC }
+    }
+
+    // Gray Paper: Check if target is a basic block start
+    // Basic blocks are defined as:
+    // basicblocks ≡ ({0} ∪ {n + 1 + Fskip(n) | n ∈ Nmax(len(c)) ∧ k[n] = 1 ∧ c[n] ∈ T}) ∩ {n | k[n] = 1 ∧ c[n] ∈ U}
+    //
+    // Where T is the set of termination instructions
+    // This means a valid basic block start is either:
+    // 1. Address 0 (already handled above)
+    // 2. An instruction that follows a termination instruction: n + 1 + Fskip(n)
+
+    // Check if target follows a termination instruction
+    const targetIndex = Number(targetAddress)
+
+    // Look backwards to find if there's a termination instruction that ends just before our target
+    for (let i = 0; i < targetIndex; i++) {
+      if (context.bitmask[i] === 1) {
+        const opcode = BigInt(context.code[i])
+        if (isTerminationInstruction(opcode)) {
+          // Calculate where this termination instruction ends using Fskip
+          const skipDistance = this.calculateSkipDistance(i, context.bitmask)
+          const instructionEnd = i + 1 + skipDistance
+
+          // If this termination instruction ends just before our target, it's a valid basic block start
+          if (instructionEnd === targetIndex) {
+            return null // Valid basic block start
+          }
+        }
+      }
+    }
+
+    // If we get here, the target is not a valid basic block start
+    return { resultCode: RESULT_CODES.PANIC }
+  }
+
+  /**
+   * Calculate skip distance for an instruction (Gray Paper Fskip function)
+   * Gray Paper: Fskip(i) = min(24, j ∈ N : (k ∥ {1,1,...})[i+1+j] = 1)
+   *
+   * This calculates how many octets (minus 1) to the next instruction's opcode
+   */
+  private calculateSkipDistance(
+    instructionIndex: number,
+    bitmask: Uint8Array,
+  ): number {
+    // Gray Paper: Fskip(i) = min(24, j ∈ N : (k ∥ {1,1,...})[i+1+j] = 1)
+    // We need to find the next set bit after instructionIndex + 1
+
+    for (let j = 1; j <= 24; j++) {
+      const nextIndex = instructionIndex + j
+      if (nextIndex >= bitmask.length || bitmask[nextIndex] === 1) {
+        return j - 1
+      }
+    }
+    return 24 // Maximum skip distance
   }
 
   /**

@@ -59,7 +59,6 @@ import type {
   ValidatorPublicKeys,
 } from '@pbnj/types'
 import type { Hex } from 'viem'
-import type { AccumulatedService } from './accumulated-service'
 import type { ActivityService } from './activity-service'
 import type { AuthPoolService } from './auth-pool-service'
 import type { AuthQueueService } from './auth-queue-service'
@@ -69,13 +68,14 @@ import type { EntropyService } from './entropy'
 import type { NodeGenesisManager } from './genesis-manager'
 import type { LastAccoutService } from './lastaccout-service'
 import type { PrivilegesService } from './privileges-service'
-import type { ReadyService } from './ready-service'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
 import type { ServiceAccountsService } from './service-accounts-service'
 import type { TicketService } from './ticket-service'
 import type { ValidatorSetManager } from './validator-set'
-import type { IWorkReportService } from './work-report-service'
+import type { AccumulationService } from './accumulation-service'
+import type { WorkReportService } from './work-report-service'
+import type { ReadyService } from './ready-service'
 
 /**
  * State component update reasons
@@ -175,9 +175,9 @@ export class StateService implements IStateServiceManager {
   private activityService: ActivityService
   private disputesService: DisputesService
   private readyService: ReadyService
-  private accumulatedService: AccumulatedService
+  private accumulatedService: AccumulationService
   private lastAccoutService: LastAccoutService
-  private workReportService: IWorkReportService
+  private workReportService: WorkReportService  
   private privilegesService: PrivilegesService
   private serviceAccountsService: ServiceAccountsService
   private recentHistoryService: RecentHistoryService
@@ -194,9 +194,9 @@ export class StateService implements IStateServiceManager {
     activityService: ActivityService
     disputesService: DisputesService
     readyService: ReadyService
-    accumulatedService: AccumulatedService
+    accumulatedService: AccumulationService
     lastAccoutService: LastAccoutService
-    workReportService: IWorkReportService
+    workReportService: WorkReportService
     privilegesService: PrivilegesService
     serviceAccountsService: ServiceAccountsService
     recentHistoryService: RecentHistoryService
@@ -617,7 +617,7 @@ export class StateService implements IStateServiceManager {
       // 17. accumulated (ξ) - Recently accumulated work-packages
       case 'accumulated':
         if (this.accumulatedService) {
-          this.accumulatedService.setAccumulated(value as Accumulated)
+          this.accumulatedService.accumulated(value as Accumulated)
           return
         }
         break

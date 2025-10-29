@@ -2,8 +2,8 @@ import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  IPreimageHolderService,
-  RefineContextPVM,
+  IServiceAccountService,
+  RefineInvocationContext,
   ServiceAccount,
 } from '@pbnj/types'
 import {
@@ -48,25 +48,17 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
   readonly name = 'historical_lookup'
   readonly gasCost = 10n
 
-  private readonly preimageService: IPreimageHolderService
+  private readonly serviceAccountService: IServiceAccountService
 
-  constructor(preimageService: IPreimageHolderService) {
+  constructor(serviceAccountService: IServiceAccountService) {
     super()
-    this.preimageService = preimageService
+    this.serviceAccountService = serviceAccountService
   }
 
   async execute(
     context: HostFunctionContext,
-    refineContext?: RefineContextPVM,
+    refineContext: RefineInvocationContext | null,
   ): Promise<HostFunctionResult> {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
 
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
@@ -84,10 +76,15 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     }
 
     // Read hash from memory (32 bytes)
-    const [accessError, hashData] = context.ram.readOctets(hashOffset, 32n)
-    if (accessError) {
+    const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
+    if (hashData === null) {
       return {
-        resultCode: RESULT_CODES.FAULT,
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: readFaultAddress ?? 0n,
+          details: 'Failed to read memory',
+        },
       }
     }
 
@@ -105,9 +102,10 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     const lookupTime = this.getLookupTime(refineContext)
 
     // Perform historical lookup using histlookup function
-    const [lookupError, preimage] = await this.preimageService.histlookup(
-      lookupTime,
+    const [lookupError, preimage] = this.serviceAccountService.histLookup(
+      serviceId,
       bytesToHex(hashData),
+      lookupTime,
     )
     if (lookupError || !preimage) {
       // Return NONE (2^64 - 1) for not found
@@ -137,7 +135,17 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     const dataToWrite = preimage.slice(f, f + actualLength)
 
     // Write preimage slice to memory
-    context.ram.writeOctets(outputOffset, dataToWrite)
+    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
+    if(faultAddress) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: faultAddress,
+          details: 'Failed to write memory',
+        },
+      }
+    }
 
     // Return length of preimage
     context.registers[7] = BigInt(preimageLength)
@@ -148,7 +156,7 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
   }
 
   private getServiceAccount(
-    refineContext: RefineContextPVM,
+    refineContext: RefineInvocationContext,
     serviceId: bigint,
   ): ServiceAccount | null {
     // Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
@@ -166,73 +174,9 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     return refineContext.accountsDictionary.get(serviceId) || null
   }
 
-  private getLookupTime(refineContext: RefineContextPVM): bigint {
+  private getLookupTime(refineContext: RefineInvocationContext): bigint {
     // Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
     // where t = timeslot for historical lookup
     return refineContext.lookupTimeslot
   }
-
-  // private historicalLookup(
-  //   serviceAccount: ServiceAccount,
-  //   lookupTime: bigint,
-  //   hash: Uint8Array,
-  // ): Uint8Array | null {
-  //   // Convert hash to hex string for lookup
-  //   const hashHex = bytesToHex(hash)
-
-  //   // Check if hash exists in service account's preimages
-  //   const preimage = serviceAccount.preimages.get(hashHex)
-  //   if (!preimage) {
-  //     return null
-  //   }
-
-  //   // Get the request map for this hash
-  //   const requestMap = serviceAccount.requests.get(hashHex)
-  //   if (!requestMap) {
-  //     return null
-  //   }
-
-  //   // Get the request status for this hash and preimage length
-  //   const requestStatus = requestMap.get(BigInt(preimage.length))
-  //   if (!requestStatus) {
-  //     return null
-  //   }
-
-  //   // Apply the Gray Paper histlookup logic
-  //   // I(l, t) = {
-  //   //   ⊥ when [] = l
-  //   //   x ≤ t when [x] = l
-  //   //   x ≤ t < y when [x, y] = l
-  //   //   x ≤ t < y ∨ z ≤ t when [x, y, z] = l
-  //   // }
-  //   const isValid = this.checkRequestValidity(requestStatus, lookupTime)
-
-  //   return isValid ? preimage : null
-  // }
-
-  // private checkRequestValidity(
-  //   requestList: bigint[],
-  //   lookupTime: bigint,
-  // ): boolean {
-  //   // Gray Paper histlookup validity function I(l, t)
-  //   if (requestList.length === 0) {
-  //     // [] = l: return ⊥ (false)
-  //     return false
-  //   } else if (requestList.length === 1) {
-  //     // [x] = l: return x ≤ t
-  //     const x = requestList[0]
-  //     return x <= lookupTime
-  //   } else if (requestList.length === 2) {
-  //     // [x, y] = l: return x ≤ t < y
-  //     const [x, y] = requestList
-  //     return x <= lookupTime && lookupTime < y
-  //   } else if (requestList.length === 3) {
-  //     // [x, y, z] = l: return x ≤ t < y ∨ z ≤ t
-  //     const [x, y, z] = requestList
-  //     return (x <= lookupTime && lookupTime < y) || z <= lookupTime
-  //   } else {
-  //     // Invalid request list length
-  //     return false
-  //   }
-  // }
 }

@@ -41,7 +41,7 @@ export function generateTicketBasedSealSignature(
 ): Safe<Uint8Array> {
   try {
     // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
-    const XTICKET_SEAL = new TextEncoder().encode('$jam_ticket_seal')
+    const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
     // Gray Paper Eq. 148: Build VRF context
     // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
@@ -158,7 +158,7 @@ export function verifyTicketBasedSealSignature(
     }
 
     // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
-    const XTICKET_SEAL = new TextEncoder().encode('$jam_ticket_seal')
+    const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
     // Gray Paper Eq. 148: Build VRF context
     // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex

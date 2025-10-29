@@ -42,12 +42,12 @@ export class ValidatorSetManager
   implements IValidatorSetManager
 {
   private readonly eventBusService: EventBusService
-  private readonly sealKeyService: SealKeyService
-  private readonly keyPairService: KeyPairService
-  private readonly ticketHolderService: TicketService
-  private readonly ringProver: RingVRFProver
+  private readonly sealKeyService: SealKeyService | null
+  private readonly keyPairService: KeyPairService | null
+  private ticketService: TicketService | null
+  private readonly ringProver: RingVRFProver | null
   private readonly configService: ConfigService
-  private readonly entropyService: EntropyService
+  private readonly entropyService: EntropyService | null
   private readonly clockService: ClockService
 
   // Gray Paper validator set definitions (preamble.tex lines 763-765)
@@ -62,25 +62,34 @@ export class ValidatorSetManager
 
   constructor(options: {
     eventBusService: EventBusService
-    sealKeyService: SealKeyService
-    keyPairService: KeyPairService
-    ringProver: RingVRFProver
-    ticketHolderService: TicketService
+    sealKeyService: SealKeyService | null
+    keyPairService: KeyPairService | null
+    ringProver: RingVRFProver | null
+    ticketService: TicketService | null
     configService: ConfigService
-    entropyService: EntropyService
+    entropyService: EntropyService | null
     clockService: ClockService
+    initialValidators: Map<number, ValidatorPublicKeys> | null
   }) {
     super('validator-set-manager')
     this.eventBusService = options.eventBusService
     this.sealKeyService = options.sealKeyService
     this.keyPairService = options.keyPairService
-    this.ticketHolderService = options.ticketHolderService
+    this.ticketService = options.ticketService
     this.ringProver = options.ringProver
     this.configService = options.configService
     this.entropyService = options.entropyService
     this.clockService = options.clockService
 
+    if(options.initialValidators) {
+      this.activeSet = options.initialValidators
+    }
+
     this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
+  }
+
+  setTicketService(ticketService: TicketService): void {
+    this.ticketService = ticketService
   }
 
   override stop(): Safe<boolean> {
@@ -398,56 +407,49 @@ export class ValidatorSetManager
    * @returns true if the validator is elected for this slot
    * @throws Error if SealKeyService is not available
    */
-  isValidatorElectedForSlot(publicKey: Hex, slotIndex: bigint): boolean {
+  isValidatorElectedForSlot(publicKey: Hex, slotIndex: bigint): Safe<boolean> {
+    if (!this.sealKeyService) {
+      return safeError(new Error('Seal key service not found'))
+    }
     const validatorIndex = this.publicKeysToValidatorIndex.get(publicKey)
     if (!validatorIndex) {
-      logger.warn('Validator not found in public keys to validator index map', {
-        publicKey: publicKey,
-      })
-      return false
+      return safeError(
+        new Error('Validator not found in public keys to validator index map'),
+      )
     }
     // First check if the validator exists in the active set
     const validator = this.activeSet.get(validatorIndex)
     if (!validator) {
-      logger.debug('Validator not in active set', {
-        validatorIndex: validatorIndex.toString(),
-        slotIndex: slotIndex.toString(),
-      })
-      return false
+      return safeError(new Error('Validator not in active set'))
     }
 
     // Get the seal key for this slot from the seal key service
     const [sealKeyError, sealKey] =
       this.sealKeyService.getSealKeyForSlot(slotIndex)
     if (sealKeyError) {
-      logger.warn('No seal key found for slot', {
-        slotIndex: slotIndex.toString(),
-      })
-      return false
+      return safeError(new Error('No seal key found for slot'))
     }
 
     if (!sealKey) {
-      logger.warn('No seal key found for slot', {
-        slotIndex: slotIndex.toString(),
-      })
-      return false
+      return safeError(new Error('No seal key found for slot'))
     }
 
     if (isSafroleTicket(sealKey)) {
+      if (!this.ticketService) {
+        return safeError(new Error('Ticket service not found'))
+      }
       const [ticketHolderError, ticketHolderPublicKey] =
-        this.ticketHolderService.getTicketHolder(sealKey)
+        this.ticketService.getTicketHolder(sealKey)
       if (ticketHolderError) {
-        logger.warn('No ticket holder found for seal key')
-        return false
+        return safeError(new Error('No ticket holder found for seal key'))
       }
       if (!ticketHolderPublicKey) {
-        logger.warn('No ticket holder found for seal key')
-        return false
+        return safeError(new Error('No ticket holder found for seal key'))
       }
-      return ticketHolderPublicKey === publicKey
+      return safeResult(ticketHolderPublicKey === publicKey)
     } else {
       // fallback -> check public key match
-      return bytesToHex(sealKey) === publicKey
+      return safeResult(bytesToHex(sealKey) === publicKey)
     }
   }
 
@@ -464,6 +466,12 @@ export class ValidatorSetManager
    * @returns The epoch root as a 32-byte hash
    */
   getEpochRoot(): Safe<Uint8Array> {
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not found'))
+    }
+    if (!this.ringProver) {
+      return safeError(new Error('Ring VRF prover not found'))
+    }
     // Extract Bandersnatch keys from pending validators
     const bandersnatchKeys: Uint8Array[] = this.pendingSet
       .values()
@@ -710,21 +718,26 @@ export class ValidatorSetManager
    * 5. Return core for validatorIndex
    */
   getAssignedCore(validatorIndex: number): Safe<number> {
-    try {
-      // Get values from services
-      const entropy2 = this.entropyService.getEntropy2()
-      const currentSlot = this.clockService.getCurrentSlot()
-      const config = {
-        numValidators: this.configService.numValidators,
-        numCores: this.configService.numCores,
-        epochDuration: this.configService.epochDuration,
-        rotationPeriod: this.configService.rotationPeriod,
-      }
-
-      // Use the guarantor package helper function
-      return getAssignedCore(validatorIndex, entropy2, currentSlot, config)
-    } catch (error) {
-      return safeError(error as Error)
+    if (!this.entropyService) {
+      return safeError(new Error('Entropy service not found'))
     }
+    if (!this.clockService) {
+      return safeError(new Error('Clock service not found'))
+    }
+    if (!this.configService) {
+      return safeError(new Error('Config service not found'))
+    }
+    // Get values from services
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    const config = {
+      numValidators: this.configService.numValidators,
+      numCores: this.configService.numCores,
+      epochDuration: this.configService.epochDuration,
+      rotationPeriod: this.configService.rotationPeriod,
+    }
+
+    // Use the guarantor package helper function
+    return getAssignedCore(validatorIndex, entropy2, currentSlot, config)
   }
 }

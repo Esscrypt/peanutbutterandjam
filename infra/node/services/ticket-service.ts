@@ -55,24 +55,21 @@ export class TicketService extends BaseService implements ITicketService {
   private eventBusService: EventBusService
   private keyPairService: KeyPairService
   private entropyService: EntropyService
-  private validatorSetManager: ValidatorSetManager
+  private validatorSetManager: ValidatorSetManager | null = null
   private networkingService: NetworkingService
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol
-  private ticketHolderService: TicketService
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol
   private clockService: ClockService
   private prover: RingVRFProver
-  private localValidatorIndex: number
+  private localValidatorIndex: number | null = null
 
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
     keyPairService: KeyPairService
     entropyService: EntropyService
-    validatorSetManager: ValidatorSetManager
     networkingService: NetworkingService
     ce131TicketDistributionProtocol: CE131TicketDistributionProtocol
-    ticketHolderService: TicketService
     ce132TicketDistributionProtocol: CE132TicketDistributionProtocol
     clockService: ClockService
     prover: RingVRFProver
@@ -82,24 +79,13 @@ export class TicketService extends BaseService implements ITicketService {
     this.eventBusService = options.eventBusService
     this.keyPairService = options.keyPairService
     this.entropyService = options.entropyService
-    this.validatorSetManager = options.validatorSetManager
     this.networkingService = options.networkingService
     this.ce131TicketDistributionProtocol =
       options.ce131TicketDistributionProtocol
-    this.ticketHolderService = options.ticketHolderService
     this.ce132TicketDistributionProtocol =
       options.ce132TicketDistributionProtocol
     this.clockService = options.clockService
     this.prover = options.prover
-
-    const publicKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
-    const [validatorIndexError, validatorIndex] =
-      this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
-    if (validatorIndexError) {
-      throw new Error('Failed to get validator index')
-    }
-    this.localValidatorIndex = validatorIndex
 
     this.eventBusService.addFirstPhaseTicketDistributionCallback(
       this.handleFirstPhaseTicketDistribution.bind(this),
@@ -110,6 +96,27 @@ export class TicketService extends BaseService implements ITicketService {
     this.eventBusService.addTicketDistributionRequestCallback(
       this.handleTicketDistributionRequest.bind(this),
     )
+  }
+
+  start(): Safe<boolean> {
+    if (!this.validatorSetManager) {
+      return safeError(new Error('Validator set manager not set'))
+    }
+    const publicKey =
+      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
+
+    const [validatorIndexError, validatorIndex] =
+      this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
+    if (validatorIndexError) {
+      throw new Error('Failed to get validator index')
+    }
+    this.localValidatorIndex = validatorIndex
+
+    return safeResult(true)
+  }
+
+  setValidatorSetManager(validatorSetManager: ValidatorSetManager): void {
+    this.validatorSetManager = validatorSetManager
   }
 
   stop(): Safe<boolean> {
@@ -130,6 +137,9 @@ export class TicketService extends BaseService implements ITicketService {
     request: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): Safe<void> {
+    if(!this.validatorSetManager) {
+      return safeError(new Error('Validator set manager not set'))
+    }
     const safroleTicket: SafroleTicket = {
       id: getTicketIdFromProof(request.ticket.proof),
       entryIndex: request.ticket.entryIndex,
@@ -388,6 +398,9 @@ export class TicketService extends BaseService implements ITicketService {
    * Execute first step ticket distribution (CE 131)
    */
   private async handleFirstPhaseTicketDistribution(): SafePromise<void> {
+    if(!this.validatorSetManager) {
+      return safeError(new Error('Validator set manager not set'))
+    }
     const [generateTicketsError, tickets] = generateTicketsForEpoch(
       this.validatorSetManager,
       this.keyPairService,
@@ -448,10 +461,13 @@ export class TicketService extends BaseService implements ITicketService {
    * Execute second step ticket distribution (CE 132)
    */
   private async handleSecondPhaseTicketDistribution(): SafePromise<void> {
+    if(!this.validatorSetManager) {
+      return safeError(new Error('Validator set manager not set'))
+    }
     // Get current validator set
     const validators = this.validatorSetManager.getActiveValidators()
 
-    const ticketsToForward = this.ticketHolderService.getProxyValidatorTickets()
+    const ticketsToForward = this.getProxyValidatorTickets()
     const currentEpoch = this.clockService.getCurrentEpoch()
 
     for (const ticket of ticketsToForward) {
