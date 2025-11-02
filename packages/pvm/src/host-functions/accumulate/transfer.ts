@@ -47,7 +47,13 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
 
       // Read memo from memory (128 bytes - Gray Paper Cmemosize)
       const C_MEMO_SIZE = 128n
-      const memoData = ram.readOctets(o, C_MEMO_SIZE)
+      const [memoData, faultAddress] = ram.readOctets(o, C_MEMO_SIZE)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
       if (!memoData) {
         this.setAccumulateError(registers, 'WHAT')
         return {

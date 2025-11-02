@@ -6,15 +6,15 @@
  * Reference: Gray Paper Eq. 202-228 (The Slot Key Sequence)
  */
 
+import type { EpochTransitionEvent, EventBusService } from '@pbnj/core'
+import { generateFallbackKeySequence } from '@pbnj/safrole'
 import {
-  type EpochTransitionEvent,
-  type EventBusService,
+  BaseService,
   type Safe,
+  type SafroleTicket,
   safeError,
   safeResult,
-} from '@pbnj/core'
-import { generateFallbackKeySequence } from '@pbnj/safrole'
-import { BaseService, type SafroleTicket } from '@pbnj/types'
+} from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'
 import type { TicketService } from './ticket-service'
@@ -48,7 +48,7 @@ export class SealKeyService extends BaseService {
     this.ticketHolderService = ticketHolderService
     this.configService = configService
     // Register for epoch transition events
-    this.eventBusService.onEpochTransition(this.handleEpochTransition)
+    this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
   }
 
   /**

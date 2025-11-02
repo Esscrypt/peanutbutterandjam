@@ -1,88 +1,264 @@
-import { describe, test, expect } from 'bun:test'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { describe, it, expect } from 'bun:test'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import type { Hex } from 'viem'
 import type { 
-  PartialState, 
+  Accumulated,
   ServiceAccount, 
-  AccumulateInput,
   AccumulateTestVector,
-  OperandTuple,
-  ServiceAccountCore,
+  Ready,
+  ReadyItem,
+  WorkReport,
+  PreimageRequestStatus,
 } from '@pbnj/types'
 import { ConfigService } from '../services/config-service'
 import { HostFunctionRegistry, AccumulateHostFunctionRegistry, AccumulatePVM } from '@pbnj/pvm'
-import { hexToBytes } from '../../../packages/core/src/utils/crypto'
+import { hexToBytes, zeroHash } from '../../../packages/core/src/utils/crypto'
 import { ServiceAccountService } from '../services/service-account-service'
 import { EventBusService } from '@pbnj/core'
 import { ClockService } from '../services/clock-service'
 import { PreimageRequestProtocol } from '@pbnj/networking'
 import { AccumulationService } from '../services/accumulation-service'
+import { ReadyService } from '../services/ready-service'
+import { EntropyService } from '../services/entropy'
+import { StatisticsService } from '../services/statistics-service'
+import { AuthQueueService } from '../services/auth-queue-service'
+import { ValidatorSetManager } from '../services/validator-set'
+import { PrivilegesService } from '../services/privileges-service'
 
+// Test vectors directory (relative to workspace root)
+const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
-describe('Accumulate Test Vector Execution', () => {
-  test('should execute accumulate test vector from JSON', async () => {
-    // Read the test vector JSON file
-    const testVectorPath = join(__dirname, '../../../../submodules/jam-test-vectors/stf/accumulate/tiny/process_one_immediate_report-1.json')
-    const testVectorData = readFileSync(testVectorPath, 'utf-8')
-    const testVector: AccumulateTestVector = JSON.parse(testVectorData)
-    
-    // Create PVM instance
-    const configService = new ConfigService('tiny')
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({eventBusService: eventBusService, configService: configService})
-    const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
-    const serviceAccountService = new ServiceAccountService({preimageStore: null, configService: configService, eventBusService: eventBusService, clockService: clockService, networkingService: null, preimageRequestProtocol: preimageRequestProtocol})
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry()
-    const pvm = new AccumulatePVM({hostFunctionRegistry: new HostFunctionRegistry(null, configService), accumulateHostFunctionRegistry: accumulateHostFunctionRegistry, configService: configService, pvmOptions: {gasCounter: 1_000_000n}})
-    const accumulationService = new AccumulationService({configService: configService, clockService: clockService, serviceAccountService: serviceAccountService, privilegesService: null, validatorSetManager: null, authQueueService: null, accumulatePVM: pvm})
+// Mock config services for tiny and full test vectors
+const tinyConfigService = new ConfigService('tiny')
+const fullConfigService = new ConfigService('full')
 
-    // Convert test vector data to our types
-    const partialState = convertToPartialState(testVector.pre_state)
-    const timeslot = BigInt(testVector.input.slot)
-    const serviceId = BigInt(testVector.pre_state.accounts[0].id) // Use first service
-    const gas = 1_000_000n // Set a reasonable gas limit
-    const inputs = convertToAccumulateInputs(testVector.input.reports)
+/**
+ * Load all test vector JSON files from the directory for a given configuration
+ */
+function loadTestVectors(
+  config: 'tiny' | 'full',
+): Array<{ name: string; vector: AccumulateTestVector }> {
+  const testVectorsDir = path.join(
+    WORKSPACE_ROOT,
+    `submodules/jam-test-vectors/stf/accumulate/${config}`,
+  )
 
-    // Execute accumulate invocation
-    const result = await pvm.executeAccumulate(
-      partialState,
-      timeslot,
-      serviceId,
-      gas,
-      inputs
-    )
+  const files = fs.readdirSync(testVectorsDir)
+  const jsonFiles = files.filter((file) => file.endsWith('.json'))
 
-    // Verify the result
-    expect(result).toBeDefined()
-    console.log('Accumulate execution result:', result)
-    
-    // The test vector expects success (ok output)
-    if (testVector.output.ok !== undefined) {
-      // Should return AccumulateOutput object, not 'BAD'
-      expect(typeof result).toBe('object')
-      expect(result).toHaveProperty('poststate')
-      expect(result).toHaveProperty('defxfers')
-      expect(result).toHaveProperty('yield')
-      expect(result).toHaveProperty('gasused')
-      expect(result).toHaveProperty('provisions')
-    } else if (testVector.output.err !== undefined) {
-      // Should return WorkError string
-      expect(typeof result).toBe('string')
-      expect(result).toBe('BAD')
+  return jsonFiles.map((file) => {
+    const filePath = path.join(testVectorsDir, file)
+    const content = fs.readFileSync(filePath, 'utf-8')
+    const vector = JSON.parse(content) as AccumulateTestVector
+
+    return {
+      name: file.replace('.json', ''),
+      vector,
     }
   })
+}
+
+// Helper function to convert JSON numbers to bigints for WorkReport
+function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
+  return {
+    ...jsonReport,
+    core_index: BigInt(jsonReport.core_index || 0),
+    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
+    context: {
+      ...jsonReport.context,
+      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
+    },
+    results: jsonReport.results.map((r: any) => ({
+      ...r,
+      service_id: BigInt(r.service_id || 0),
+      accumulate_gas: BigInt(r.accumulate_gas || 0),
+      refine_load: {
+        ...r.refine_load,
+        gas_used: BigInt(r.refine_load.gas_used || 0),
+        imports: BigInt(r.refine_load.imports || 0),
+        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
+        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
+        exports: BigInt(r.refine_load.exports || 0),
+      },
+    })),
+  }
+}
+
+describe('Accumulate Test Vector Execution', () => {
+  // Test both tiny and full configurations
+  for (const configType of ['tiny', 'full'] as const) {
+    describe(`Configuration: ${configType}`, () => {
+      const configService = configType === 'tiny' ? tinyConfigService : fullConfigService
+      const testVectors = loadTestVectors(configType)
+
+      // Ensure we loaded test vectors
+      it('should load test vectors', () => {
+        expect(testVectors.length).toBeGreaterThan(0)
+      })
+
+      // Test each vector
+      for (const { name, vector } of testVectors) {
+        describe(`Test Vector: ${name}`, () => {
+          it('should correctly transition accumulation state', async () => {
+            // Create services
+            const eventBusService = new EventBusService()
+            const clockService = new ClockService({
+              eventBusService: eventBusService,
+              configService: configService,
+            })
+            const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
+            const serviceAccountService = new ServiceAccountService({
+              preimageStore: null,
+              configService: configService,
+              eventBusService: eventBusService,
+              clockService: clockService,
+              networkingService: null,
+              preimageRequestProtocol: preimageRequestProtocol,
+            })
+            const statisticsService = new StatisticsService({
+              configService: configService,
+              eventBusService: eventBusService,
+              clockService: clockService,
+            })
+            const entropyService = new EntropyService(eventBusService)
+            const readyService = new ReadyService({ configService: configService })
+            const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
+            const pvm = new AccumulatePVM({
+              hostFunctionRegistry: new HostFunctionRegistry(serviceAccountService, configService),
+              accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
+              configService: configService,
+              pvmOptions: { gasCounter: 1_000_000n },
+            })
+            const privilegesService = new PrivilegesService({
+              configService: configService,
+            })
+            const validatorSetManager = new ValidatorSetManager({
+              eventBusService: eventBusService,
+              sealKeyService: null,
+              keyPairService: null,
+              ringProver: null,
+              ticketService: null,
+              initialValidators: null,
+              configService: configService,
+            })
+            const authQueueService = new AuthQueueService({
+              configService: configService,
+            })
+            const accumulationService = new AccumulationService({
+              configService: configService,
+              clockService: clockService,
+              serviceAccountsService: serviceAccountService,
+              privilegesService: privilegesService,
+              validatorSetManager: validatorSetManager,
+              authQueueService: authQueueService,
+              accumulatePVM: pvm,
+              readyService: readyService,
+              // statisticsService: statisticsService,
+              // entropyService: entropyService,
+            })
+
+
+            entropyService.setEntropy({
+              accumulator: vector.pre_state.entropy as Hex,
+              entropy1: zeroHash,
+              entropy2: zeroHash,
+              entropy3: zeroHash,
+            })
+
+            // Initialize pre_state
+            // Note: Clock service slot is managed internally, we don't need to set it explicitly
+
+            // Set service accounts from pre_state.accounts
+            const accounts = convertToAccounts(vector.pre_state.accounts)
+            for (const [serviceId, account] of accounts) {
+              serviceAccountService.setServiceAccount(serviceId, account)
+            }
+
+            // Set ready queue from pre_state.ready_queue
+            const readyQueue = convertToReady(
+              vector.pre_state.ready_queue,
+              vector.pre_state.slot,
+              configService.epochDuration,
+            )
+            readyService.setReady(readyQueue)
+
+            // Set accumulated from pre_state.accumulated
+            const accumulated = convertToAccumulated(vector.pre_state.accumulated)
+            accumulationService.setAccumulated(accumulated)
+
+            // Convert input.reports to WorkReport[]
+            const reports = vector.input.reports.map(convertJsonReportToWorkReport)
+
+            // Apply transition
+            const result = await accumulationService.applyTransition(
+              BigInt(vector.input.slot),
+              reports,
+            )
+
+            // Verify result
+            if (vector.output.err !== undefined && vector.output.err !== null) {
+              expect(result.ok).toBe(false)
+              if (!result.ok && result.err) {
+                const errorMessage =
+                  result.err instanceof Error ? result.err.message : String(result.err)
+                expect(errorMessage).toBe(vector.output.err)
+              }
+              return
+            }
+
+            expect(result.ok).toBe(true)
+
+            // Verify post_state
+            // 1. Verify ready_queue
+            const postReady = accumulationService.getReady()
+            const expectedReady = convertToReady(
+              vector.post_state.ready_queue,
+              vector.post_state.slot,
+              configService.epochDuration,
+            )
+            expect(postReady.epochSlots.length).toBe(expectedReady.epochSlots.length)
+            for (let i = 0; i < postReady.epochSlots.length; i++) {
+              expect(postReady.epochSlots[i].length).toBe(expectedReady.epochSlots[i].length)
+            }
+
+            // 2. Verify accumulated
+            const postAccumulated = accumulationService.getAccumulated()
+            const expectedAccumulated = convertToAccumulated(vector.post_state.accumulated)
+            expect(postAccumulated.packages.length).toBe(expectedAccumulated.packages.length)
+            for (let i = 0; i < postAccumulated.packages.length; i++) {
+              const postPackages = Array.from(postAccumulated.packages[i]).sort()
+              const expectedPackages = Array.from(expectedAccumulated.packages[i]).sort()
+              expect(postPackages).toEqual(expectedPackages)
+            }
+
+            // 3. Verify accounts
+            const postAccounts = serviceAccountService.getServiceAccounts()
+            const expectedAccounts = convertToAccounts(vector.post_state.accounts)
+            for (const [serviceId, expectedAccount] of expectedAccounts) {
+              const postAccount = postAccounts.accounts.get(serviceId)
+              expect(postAccount).toBeDefined()
+              if (postAccount) {
+                expect(postAccount.codehash).toBe(expectedAccount.codehash)
+                expect(postAccount.balance).toBe(expectedAccount.balance)
+                expect(postAccount.lastacc).toBe(expectedAccount.lastacc)
+              }
+            }
+          })
+        })
+      }
+    })
+  }
 })
 
-function convertToPartialState(preState: AccumulateTestVector['pre_state']): PartialState {
-  const accounts = new Map<bigint, ServiceAccount>()
+function convertToAccounts(accounts: AccumulateTestVector['pre_state']['accounts']): Map<bigint, ServiceAccount> {
+  const result = new Map<bigint, ServiceAccount>()
   
-  for (const accountData of preState.accounts) {
+  for (const accountData of accounts) {
     const serviceId = BigInt(accountData.id)
     const serviceInfo = accountData.data.service
     
-    const serviceAccount: ServiceAccountCore = {
-    //   version: BigInt(serviceInfo.version),
+    const serviceAccount: ServiceAccount = {
       codehash: serviceInfo.code_hash as Hex,
       balance: BigInt(serviceInfo.balance),
       minaccgas: BigInt(serviceInfo.min_item_gas),
@@ -94,8 +270,8 @@ function convertToPartialState(preState: AccumulateTestVector['pre_state']): Par
       lastacc: BigInt(serviceInfo.last_accumulation_slot),
       parent: BigInt(serviceInfo.parent_service),
       storage: new Map(),
-      requests: new Map(),
       preimages: new Map(),
+      requests: new Map(),
     }
 
     // Convert storage
@@ -109,33 +285,60 @@ function convertToPartialState(preState: AccumulateTestVector['pre_state']): Par
     }
 
     // Convert preimage status (requests)
+    // requests is Map<Hex, Map<bigint, PreimageRequestStatus>>
+    // where PreimageRequestStatus = bigint[]
+    // Test vector has preimages_status with hash and status array
+    // We need to map status array to PreimageRequestStatus for each hash
+    // The test vector doesn't provide length, so we'll use 0 as default
     for (const statusEntry of accountData.data.preimages_status) {
-      serviceAccount.requests.set(statusEntry.hash as Hex, new Map(statusEntry.status.map(BigInt).map(status => [BigInt(status), new Uint8Array(0)])))
+      const hash = statusEntry.hash as Hex
+      const statusMap = new Map<bigint, PreimageRequestStatus>()
+      // Convert status array to PreimageRequestStatus (bigint[])
+      const status: PreimageRequestStatus = statusEntry.status.map(BigInt)
+      // Use 0 as default length (test vectors don't provide length)
+      statusMap.set(0n, status)
+      serviceAccount.requests.set(hash, statusMap)
     }
 
-    accounts.set(serviceId, serviceAccount)
+    result.set(serviceId, serviceAccount)
   }
+  
+  return result
+}
 
+function convertToReady(readyQueue: AccumulateTestVector['pre_state']['ready_queue'], currentSlot: number, epochDuration: number): Ready {
+  // Initialize epoch slots array
+  const epochSlots: ReadyItem[][] = new Array(epochDuration).fill(null).map(() => [])
+  
+  // The ready_queue in the test vector is organized by slot index
+  // Each slot index maps to an array of ready items
+  for (let slotIndex = 0; slotIndex < readyQueue.length && slotIndex < epochDuration; slotIndex++) {
+    const slotItems = readyQueue[slotIndex] || []
+    for (const queueItem of slotItems) {
+      const workReport = convertJsonReportToWorkReport(queueItem.report)
+      const dependencies = new Set<Hex>(queueItem.dependencies.map(dep => dep as Hex))
+      
+      const readyItem: ReadyItem = {
+        workReport,
+        dependencies,
+      }
+      
+      epochSlots[slotIndex].push(readyItem)
+    }
+  }
+  
   return {
-    accounts: new Map<bigint, ServiceAccount>(Array.from(accounts.entries()).map(([serviceId, serviceAccount]) => [BigInt(serviceId), serviceAccount])),
-    nextfreeid: 65536n,
-    xfers: [],
-    yield: new Uint8Array(0),
-    provisions: new Map<bigint, Uint8Array>(),
+    epochSlots,
   }
 }
 
-function convertToAccumulateInputs(reports: AccumulateTestVector['input']['reports']): AccumulateInput[] {
-  return reports.map(report => ({
-    type: 0n, // Work report type // for operand tuple
-    value: {
-      packageHash: report.package_spec.hash,
-      segmentRoot: report.package_spec.erasure_root,
-      authorizer: report.authorizer_hash,
-      payloadHash: report.results[0].payload_hash,
-      gasLimit: BigInt(report.results[0].accumulate_gas),
-      result: report.results[0].result as WorkExecutionResult,
-      authTrace: report.auth_output,
-    } as OperandTuple, // Raw report data
-  }))
+function convertToAccumulated(accumulated: AccumulateTestVector['pre_state']['accumulated']): Accumulated {
+  // Initialize accumulated packages array
+  const packages: Set<Hex>[] = accumulated.map((slotPackages: string[]) => {
+    return new Set<Hex>(slotPackages.map((pkg: string) => pkg as Hex))
+  })
+  
+  return {
+    packages,
+  }
 }

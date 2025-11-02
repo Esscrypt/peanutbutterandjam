@@ -62,8 +62,14 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
       const [o, z] = registers.slice(7, 9)
 
       // Read hash from memory (32 bytes)
-      const hashData = ram.readOctets(o, 32n)
-      if (!hashData || hashData.length !== 32) {
+      const [hashData, faultAddress] = ram.readOctets(o, 32n)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      if (!hashData) {
         this.setAccumulateError(registers, 'WHAT')
         return {
           resultCode: RESULT_CODES.PANIC,

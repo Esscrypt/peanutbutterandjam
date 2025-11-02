@@ -40,20 +40,14 @@ import {
   IETFVRFProver,
   IETFVRFVerifier,
 } from '@pbnj/bandersnatch-vrf'
-import {
-  blake2bHash,
-  hexToBytes,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { blake2bHash, hexToBytes, logger } from '@pbnj/core'
 import { encodeUnsignedHeader } from '@pbnj/serialization'
 import type {
   IConfigService,
   IValidatorSetManager,
   UnsignedBlockHeader,
 } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/types'
 
 /**
  * Gray Paper hardcoded context string for fallback sealing

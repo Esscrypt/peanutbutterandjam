@@ -1,11 +1,6 @@
-import {
-  logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { Service } from '@pbnj/types'
+import { logger } from '@pbnj/core'
+import type { Safe, SafePromise, Service } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 /**
  * Service registry for managing all services
  */

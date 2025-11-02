@@ -57,6 +57,8 @@ export * from './network'
 // Export PVM work types for compatibility
 // PVM types
 export * from './pvm'
+// Safe types
+export * from './safe'
 // Serialization types - export specific types to avoid conflicts
 export * from './serialization'
 // Service types
@@ -67,7 +69,7 @@ export * from './services'
 export * from './state'
 // Telemetry types
 export * from './telemetry'
-// VRF types
-export * from './vrf'
 // Test vectors types
 export * from './test-vectors'
+// VRF types
+export * from './vrf'

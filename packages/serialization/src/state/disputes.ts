@@ -44,16 +44,9 @@
  * maintains network integrity through validator accountability.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, Disputes } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, Disputes, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,
@@ -179,7 +172,7 @@ export function decodeDisputeState(
   let currentData = data
 
   // 1. goodset: Variable-length sequence of ordered work-report hashes
-  const [error1, goodsetResult] = decodeVariableSequence(
+  const [error1, goodsetResult] = decodeVariableSequence<Uint8Array>(
     currentData,
     (data) => {
       if (data.length < 32) {
@@ -198,23 +191,26 @@ export function decodeDisputeState(
   currentData = goodsetResult.remaining
 
   // 2. badset: Variable-length sequence of ordered work-report hashes
-  const [error2, badsetResult] = decodeVariableSequence(currentData, (data) => {
-    if (data.length < 32) {
-      return safeError(new Error('Insufficient data for work-report hash'))
-    }
-    const hash = data.slice(0, 32)
-    return safeResult({
-      value: hash,
-      remaining: data.slice(32),
-      consumed: 32,
-    })
-  })
+  const [error2, badsetResult] = decodeVariableSequence<Uint8Array>(
+    currentData,
+    (data) => {
+      if (data.length < 32) {
+        return safeError(new Error('Insufficient data for work-report hash'))
+      }
+      const hash = data.slice(0, 32)
+      return safeResult({
+        value: hash,
+        remaining: data.slice(32),
+        consumed: 32,
+      })
+    },
+  )
   if (error2) return safeError(error2)
   const badset = new Set(badsetResult.value.map((hash) => bytesToHex(hash)))
   currentData = badsetResult.remaining
 
   // 3. wonkyset: Variable-length sequence of ordered work-report hashes
-  const [error3, wonkysetResult] = decodeVariableSequence(
+  const [error3, wonkysetResult] = decodeVariableSequence<Uint8Array>(
     currentData,
     (data) => {
       if (data.length < 32) {
@@ -233,7 +229,7 @@ export function decodeDisputeState(
   currentData = wonkysetResult.remaining
 
   // 4. offenders: Variable-length sequence of ordered validator Ed25519 keys
-  const [error4, offendersResult] = decodeVariableSequence(
+  const [error4, offendersResult] = decodeVariableSequence<Uint8Array>(
     currentData,
     (data) => {
       if (data.length < 32) {

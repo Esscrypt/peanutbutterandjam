@@ -14,16 +14,11 @@
  * 4. Retrieval: Provide access to work reports by hash or core index
  */
 
+import { type EventBusService, type Hex, hexToBytes, logger } from '@pbnj/core'
 import {
-  type EventBusService,
-  type Hex,
-  hexToBytes,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import { verifyWorkReportDistributionSignature } from '@pbnj/guarantor'
+  getAssignedCore,
+  verifyWorkReportDistributionSignature,
+} from '@pbnj/guarantor'
 import type { WorkReportRequestProtocol } from '@pbnj/networking'
 import { calculateWorkReportHash } from '@pbnj/serialization'
 import type { WorkStore } from '@pbnj/state'
@@ -32,14 +27,19 @@ import {
   type GuaranteedWorkReport,
   type PendingReport,
   type Reports,
+  type Safe,
+  safeError,
+  safeResult,
   type ValidatorPublicKeys,
   type WorkReport,
   type WorkReportRequest,
   type WorkReportResponse,
 } from '@pbnj/types'
+import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
+import type { EntropyService } from './entropy'
 import type { NetworkingService } from './networking-service'
 import type { ValidatorSetManager } from './validator-set'
-import type { ConfigService } from './config-service'
 
 /**
  * Work Report State according to Gray Paper lifecycle
@@ -59,6 +59,10 @@ export type WorkReportState =
  * Work Report Service Implementation
  */
 export class WorkReportService extends BaseService {
+  // According to Gray Paper: For each guaranteed work report, we need to know
+  // which core it belongs to and which authorizer was used
+  private readonly authorizerHashByCore: Map<number, Hex> = new Map()
+
   // Extended storage: all work reports by hash (for full lifecycle tracking)
   private readonly workReportsByHash: Map<Hex, WorkReport> = new Map()
 
@@ -77,7 +81,8 @@ export class WorkReportService extends BaseService {
   private readonly ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
   private readonly validatorSetManager: ValidatorSetManager | null
   private readonly configService: ConfigService
-
+  private readonly entropyService: EntropyService | null
+  private readonly clockService: ClockService | null
   constructor(options: {
     workStore: WorkStore | null
     eventBus: EventBusService
@@ -85,6 +90,8 @@ export class WorkReportService extends BaseService {
     ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
     validatorSetManager: ValidatorSetManager | null
     configService: ConfigService
+    entropyService: EntropyService | null
+    clockService: ClockService | null
   }) {
     super('work-report-service')
     this.workStore = options.workStore
@@ -93,6 +100,8 @@ export class WorkReportService extends BaseService {
     this.ce136WorkReportRequestProtocol = options.ce136WorkReportRequestProtocol
     this.validatorSetManager = options.validatorSetManager
     this.configService = options.configService
+    this.entropyService = options.entropyService
+    this.clockService = options.clockService
     // Initialize state indexes
 
     this.eventBus.addWorkReportRequestCallback(
@@ -121,13 +130,15 @@ export class WorkReportService extends BaseService {
    */
   getPendingReports(): Reports {
     // Initialize array of length Ccorecount (341) with null values
-    const coreReports: (PendingReport | null)[] = new Array(this.configService.numCores).fill(null)
+    const coreReports: (PendingReport | null)[] = new Array(
+      this.configService.numCores,
+    ).fill(null)
 
     for (const [
       coreIndex,
       pendingReport,
     ] of this.pendingWorkReports.entries()) {
-      if(!pendingReport) {
+      if (!pendingReport) {
         continue
       }
       coreReports[Number(coreIndex)] = pendingReport
@@ -181,6 +192,12 @@ export class WorkReportService extends BaseService {
     if (!this.validatorSetManager) {
       throw new Error('Validator set manager not found')
     }
+    if (!this.entropyService) {
+      throw new Error('Entropy service not found')
+    }
+    if (!this.clockService) {
+      throw new Error('Clock service not found')
+    }
     const [hashError, workReportHash] = calculateWorkReportHash(
       request.workReport,
     )
@@ -209,9 +226,15 @@ export class WorkReportService extends BaseService {
         continue
       }
       validatorKeys.set(sig.validator_index, validatorKey)
+      const entropy2 = this.entropyService.getEntropy2()
+      const currentSlot = this.clockService.getCurrentSlot()
       // find core index for validator
-      const [coreIndexError, coreIndex] =
-        this.validatorSetManager.getAssignedCore(sig.validator_index)
+      const [coreIndexError, coreIndex] = getAssignedCore(
+        sig.validator_index,
+        entropy2,
+        currentSlot,
+        this.configService,
+      )
       if (coreIndexError) {
         logger.error('Failed to get core index', {
           error: coreIndexError.message,
@@ -351,5 +374,77 @@ export class WorkReportService extends BaseService {
   removePendingWorkReport(coreIndex: bigint): Safe<void> {
     this.pendingWorkReports.delete(coreIndex)
     return safeResult(undefined)
+  }
+
+  setAuthorizerHashByCore(coreIndex: number, authorizerHash: Hex): void {
+    this.authorizerHashByCore.set(coreIndex, authorizerHash)
+  }
+
+  getAuthorizerHashByCore(coreIndex: number): Hex | null {
+    return this.authorizerHashByCore.get(coreIndex) || null
+  }
+
+  /**
+   * Check if a core has an available work report
+   * A core is engaged if it has either a pending or available report
+   */
+  hasAvailableReport(coreIndex: bigint): boolean {
+    const workReport = this.getWorkReportForCore(coreIndex)
+    if (!workReport) {
+      return false
+    }
+    const [hashError, hash] = calculateWorkReportHash(workReport)
+    if (hashError) {
+      return false
+    }
+    const state = this.workReportState.get(hash)
+    return state === 'available'
+  }
+
+  /**
+   * Mark a work report as available
+   *
+   * Gray Paper Reference: reporting_assurance.tex
+   * When guarantees are processed, [[work reports]] become available
+   *
+   * @param workReport - The work report to mark as available
+   * @param timeout - The timeout slot when this report expires
+   */
+  markAsAvailable(workReport: WorkReport, timeout: bigint): Safe<void> {
+    try {
+      const [hashError, hash] = calculateWorkReportHash(workReport)
+      if (hashError) {
+        return safeError(hashError)
+      }
+
+      const coreIndex = workReport.core_index
+
+      // Store work report by hash if not already stored
+      if (!this.workReportsByHash.has(hash)) {
+        this.workReportsByHash.set(hash, workReport)
+      }
+
+      // Store work report by core index for quick lookup
+      this.workReportHashByCore.set(coreIndex, hash)
+
+      // Update state to available
+      this.workReportState.set(hash, 'available')
+
+      // Remove from pending reports (core is now available)
+      this.pendingWorkReports.delete(coreIndex)
+
+      // Store timeout for this core (for avail_assignments)
+      // TODO: Store timeout if needed for avail_assignments structure
+
+      logger.debug('Work report marked as available', {
+        hash,
+        coreIndex: coreIndex.toString(),
+        timeout: timeout.toString(),
+      })
+
+      return safeResult(undefined)
+    } catch (error) {
+      return safeError(error as Error)
+    }
   }
 }

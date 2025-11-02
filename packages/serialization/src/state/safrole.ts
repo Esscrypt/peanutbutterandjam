@@ -32,22 +32,17 @@
  * ✅ CORRECT: Variable-length ticketaccumulator with proper encoding
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import { isSafroleTicket } from '@pbnj/safrole'
 import type {
   DecodingResult,
   IConfigService,
+  Safe,
   SafroleState,
   SafroleTicketWithoutProof,
   ValidatorPublicKeys,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeVariableSequence, encodeSequenceGeneric } from '../core/sequence'
 
@@ -310,10 +305,10 @@ export function decodeSafrole(
   let currentData = data
 
   // 1. Decode pendingset - ValidatorPublicKeys sequence
-  const [pendingError, pendingResult] = decodeVariableSequence(
-    currentData,
-    (data) => decodeValidatorPublicKeys(data),
-  )
+  const [pendingError, pendingResult] =
+    decodeVariableSequence<ValidatorPublicKeys>(currentData, (data) =>
+      decodeValidatorPublicKeys(data),
+    )
   if (pendingError) {
     return safeError(pendingError)
   }
@@ -362,10 +357,10 @@ export function decodeSafrole(
   }
 
   // 5. Decode var{ticketaccumulator} - variable-length sequence with length prefix
-  const [accumError, accumResult] = decodeVariableSequence(
-    currentData,
-    (data) => decodeStateTicket(data),
-  )
+  const [accumError, accumResult] =
+    decodeVariableSequence<SafroleTicketWithoutProof>(currentData, (data) =>
+      decodeStateTicket(data),
+    )
   if (accumError) {
     return safeError(accumError)
   }

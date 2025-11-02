@@ -34,22 +34,16 @@
  * ✅ CORRECT: Handles work report and dependency set properly
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
 import type {
   DecodingResult,
   IConfigService,
   Ready,
   ReadyItem,
+  Safe,
   WorkReport,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeSequenceGeneric,
   decodeVariableSequence,
@@ -101,7 +95,7 @@ function decodeReadyItem(data: Uint8Array): Safe<DecodingResult<ReadyItem>> {
   currentData = workReportResult.remaining
 
   // Decode dependencies as variable-length sequence of hashes
-  const [error2, dependenciesResult] = decodeVariableSequence(
+  const [error2, dependenciesResult] = decodeVariableSequence<Hex>(
     currentData,
     (data) => {
       if (data.length < 32) {
@@ -172,20 +166,18 @@ export function decodeReady(
 ): Safe<DecodingResult<Ready>> {
   // Decode as fixed-length sequence of epoch slots
   // Outer sequence is fixed-length (C_epochlen), inner sequences are variable-length
-  const [error, result] = decodeSequenceGeneric(
+  const [error, result] = decodeSequenceGeneric<ReadyItem[]>(
     data,
     (data) => {
       // Decode each slot as a variable-length sequence of ready items
-      return decodeVariableSequence(data, decodeReadyItem)
+      return decodeVariableSequence<ReadyItem>(data, decodeReadyItem)
     },
     configService.epochDuration, // Fixed length: C_epochlen
   )
   if (error) return safeError(error)
 
   const ready: Ready = {
-    epochSlots: new Map(
-      result.value.map((slotItem, i) => [BigInt(i), slotItem]),
-    ),
+    epochSlots: result.value,
   }
 
   return safeResult({

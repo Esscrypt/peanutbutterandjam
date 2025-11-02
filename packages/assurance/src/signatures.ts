@@ -9,10 +9,9 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519'
-import { blake2bHash, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { Assurance } from '@pbnj/types'
-import type { Hex } from 'viem'
-import { bytesToHex, hexToBytes } from 'viem'
+import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
+import type { Assurance, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Create an assurance signature

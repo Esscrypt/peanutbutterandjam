@@ -36,16 +36,10 @@
  * BABE-style slot-based authorship and finality mechanisms.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import { getTicketIdFromProof } from '@pbnj/safrole'
-import type { DecodingResult, SafroleTicket } from '@pbnj/types'
+import type { DecodingResult, Safe, SafroleTicket } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
 
@@ -241,7 +235,7 @@ export function decodeSafroleTickets(
   }
 
   // Then decode the sequence with the known count
-  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric<SafroleTicket>(
     lengthResult.remaining,
     decodeSafroleTicket,
     count,

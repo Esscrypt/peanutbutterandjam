@@ -35,7 +35,6 @@ export class ReadHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-
     const serviceId = context.registers[7]
     const keyOffset = context.registers[8]
     const keyLength = context.registers[9]
@@ -113,5 +112,4 @@ export class ReadHostFunction extends BaseHostFunction {
   ): ServiceAccount | null {
     return refineContext.accountsDictionary.get(serviceId) || null
   }
-
 }

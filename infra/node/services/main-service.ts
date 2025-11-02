@@ -5,15 +5,7 @@
  * Manages the service registry and provides the application lifecycle
  */
 import { RingVRFProver } from '@pbnj/bandersnatch-vrf'
-import {
-  bytesToHex,
-  EventBusService,
-  type Hex,
-  logger,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, EventBusService, type Hex, logger } from '@pbnj/core'
 import {
   AuditAnnouncementProtocol,
   AuditShardRequestProtocol,
@@ -21,8 +13,6 @@ import {
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
   CE134WorkPackageSharingProtocol,
-  
-
   type NetworkingProtocol,
   PreimageAnnouncementProtocol,
   PreimageRequestProtocol,
@@ -33,12 +23,28 @@ import {
   WorkReportDistributionProtocol,
   WorkReportRequestProtocol,
 } from '@pbnj/networking'
+import {
+  AccumulateHostFunctionRegistry,
+  AccumulatePVM,
+  HostFunctionRegistry,
+} from '@pbnj/pvm'
 import { BlockStore, PreimageStore, WorkStore } from '@pbnj/state'
 // import { TelemetryClient } from '@pbnj/telemetry'
 import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import {
+  BaseService,
+  PVM_CONSTANTS,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 import { db } from '../db'
+// import { WorkPackageProcessor } from './work-package-processor'
+import { AccumulationService } from './accumulation-service'
+import { ActivityService } from './activity-service'
 import { AssuranceService } from './assurance-service'
+import { AuthPoolService } from './auth-pool-service'
+import { AuthQueueService } from './auth-queue-service'
 import { BlockImporterService } from './block-importer-service'
 // import { BlockAuthoringService } from './block-authoring'
 import { ClockService } from './clock-service'
@@ -49,21 +55,23 @@ import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
 // import { ExtrinsicValidator } from './extrinsic-validator'
 import { NodeGenesisManager } from './genesis-manager'
+import { GuarantorService } from './guarantor-service'
 import { HeaderConstructor } from './header-constructor'
 import { KeyPairService } from './keypair-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
+import { PrivilegesService } from './privileges-service'
 import { RecentHistoryService } from './recent-history-service'
 import { ServiceRegistry } from './registry'
 // import { SafroleConsensusService } from './safrole-consensus-service'
 import { SealKeyService } from './seal-key'
 import { ServiceAccountService } from './service-account-service'
+import { ShardService } from './shard-service'
 import { StatisticsService } from './statistics-service'
 // import { TelemetryEventEmitterService } from './telemetry'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 import { WorkReportService } from './work-report-service'
-// import { WorkPackageProcessor } from './work-package-processor'
 /**
  * Main service configuration
  */
@@ -104,6 +112,9 @@ export class MainService extends BaseService {
   private readonly statisticsService: StatisticsService
   private readonly recentHistoryService: RecentHistoryService
   private readonly disputesService: DisputesService
+  private readonly authQueueService: AuthQueueService
+  private readonly authPoolService: AuthPoolService
+  private readonly guarantorService: GuarantorService
   private readonly blockImporterService: BlockImporterService
   // private readonly workPackageProcessorService: WorkPackageProcessor
   // private readonly telemetryService: TelemetryEventEmitterService
@@ -114,7 +125,9 @@ export class MainService extends BaseService {
   private readonly clockService: ClockService
   private readonly sealKeyService: SealKeyService
   private readonly entropyService: EntropyService
-
+  private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
+  private readonly hostFunctionRegistry: HostFunctionRegistry
+  private readonly accumulatePVM: AccumulatePVM
   private blockStore: BlockStore | null = null
   private workStore: WorkStore | null = null
   private preimageStore: PreimageStore | null = null
@@ -126,7 +139,11 @@ export class MainService extends BaseService {
     null
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null =
     null
+  private ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol | null =
+    null
   private ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null =
+    null
+  private ce137ShardDistributionProtocol: ShardDistributionProtocol | null =
     null
   private ce143PreimageRequestProtocol: PreimageRequestProtocol | null = null
 
@@ -137,10 +154,13 @@ export class MainService extends BaseService {
   > = new Map()
 
   private readonly configService: ConfigService
-  private readonly shardService: ErasureCodingService
+  private readonly shardService: ShardService
+  private readonly erasureCodingService: ErasureCodingService
   private readonly workReportService: WorkReportService
   private readonly assuranceService: AssuranceService
-
+  private readonly accumulationService: AccumulationService
+  private readonly activityService: ActivityService
+  private readonly privilegesService: PrivilegesService
   constructor(config: MainServiceConfig) {
     super('main-service')
     this.config = config
@@ -203,7 +223,11 @@ export class MainService extends BaseService {
     }
 
     // Initialize statistics service
-    this.statisticsService = new StatisticsService(this.eventBusService)
+    this.statisticsService = new StatisticsService({
+      eventBusService: this.eventBusService,
+      configService: this.configService,
+      clockService: this.clockService,
+    })
 
     // Initialize recent history service
     this.recentHistoryService = new RecentHistoryService(
@@ -255,13 +279,15 @@ export class MainService extends BaseService {
       ticketService: this.ticketService,
       keyPairService: this.keyPairService,
       configService: this.configService,
-      entropyService: this.entropyService,
-      clockService: this.clockService,
+      // entropyService: this.entropyService,
+      // clockService: this.clockService,
       initialValidators: null,
     })
 
     this.ticketService.setValidatorSetManager(this.validatorSetManagerService)
-    this.networkingService.setValidatorSetManager(this.validatorSetManagerService)
+    this.networkingService.setValidatorSetManager(
+      this.validatorSetManagerService,
+    )
 
     this.serviceAccountService = new ServiceAccountService({
       preimageStore: this.preimageStore!,
@@ -321,23 +347,113 @@ export class MainService extends BaseService {
 
     // Initialize shard service with config service
     // Shard size is fixed at 2 octet pairs (4 octets) per Gray Paper
-    this.shardService = new ErasureCodingService(this.configService)
+    this.erasureCodingService = new ErasureCodingService({
+      configService: this.configService,
+    })
+    this.shardService = new ShardService({
+      configService: this.configService,
+      erasureCodingService: this.erasureCodingService,
+      eventBusService: this.eventBusService,
+      networkingService: this.networkingService,
+      shardDistributionProtocol: this.ce137ShardDistributionProtocol!,
+    })
 
     this.workReportService = new WorkReportService({
       workStore: this.workStore!,
+      configService: this.configService,
       eventBus: this.eventBusService,
       networkingService: this.networkingService,
       ce136WorkReportRequestProtocol: this.ce136WorkReportRequestProtocol!,
       validatorSetManager: this.validatorSetManagerService,
+      entropyService: this.entropyService,
+      clockService: this.clockService,
     })
 
-    this.assuranceService = new AssuranceService(
+    this.assuranceService = new AssuranceService({
+      configService: this.configService,
+      workReportService: this.workReportService,
+      validatorSetManager: this.validatorSetManagerService,
+      eventBusService: this.eventBusService,
+      sealKeyService: this.sealKeyService,
+      recentHistoryService: this.recentHistoryService,
+    })
+
+    this.authQueueService = new AuthQueueService({
+      configService: this.configService,
+    })
+
+    this.authPoolService = new AuthPoolService({
+      configService: this.configService,
+      workReportService: this.workReportService,
+      eventBusService: this.eventBusService,
+      authQueueService: this.authQueueService,
+    })
+
+    this.erasureCodingService = new ErasureCodingService({
+      configService: this.configService,
+    })
+    this.shardService = new ShardService({
+      networkingService: this.networkingService,
+      shardDistributionProtocol: this.ce137ShardDistributionProtocol!,
+      eventBusService: this.eventBusService,
+      configService: this.configService,
+      erasureCodingService: this.erasureCodingService,
+    })
+
+    this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
       this.configService,
-      this.workReportService,
-      this.validatorSetManagerService,
-      this.eventBusService,
-      this.sealKeyService,
     )
+    this.hostFunctionRegistry = new HostFunctionRegistry(
+      this.serviceAccountService,
+      this.configService,
+    )
+
+    this.accumulatePVM = new AccumulatePVM({
+      hostFunctionRegistry: this.hostFunctionRegistry,
+      accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
+      configService: this.configService,
+      pvmOptions: { gasCounter: PVM_CONSTANTS.DEFAULT_GAS_LIMIT },
+    })
+
+    this.activityService = new ActivityService({
+      configService: this.configService,
+    })
+
+    this.privilegesService = new PrivilegesService({
+      configService: this.configService,
+    })
+
+    this.accumulationService = new AccumulationService({
+      configService: this.configService,
+      clockService: this.clockService,
+      serviceAccountsService: this.serviceAccountService,
+      privilegesService: this.privilegesService,
+      validatorSetManager: this.validatorSetManagerService,
+      authQueueService: this.authQueueService,
+      accumulatePVM: this.accumulatePVM,
+      readyService: null,
+      // statisticsService: this.statisticsService,
+      // entropyService: this.entropyService,
+    })
+
+    this.guarantorService = new GuarantorService({
+      eventBusService: this.eventBusService,
+      configService: this.configService,
+      clockService: this.clockService,
+      entropyService: this.entropyService,
+      authPoolService: this.authPoolService,
+      networkService: this.networkingService,
+      ce134WorkPackageSharingProtocol: this.ce134WorkPackageSharingProtocol,
+      keyPairService: this.keyPairService,
+      workReportService: this.workReportService,
+      validatorSetManager: this.validatorSetManagerService,
+      recentHistoryService: this.recentHistoryService,
+      serviceAccountService: this.serviceAccountService,
+      statisticsService: this.statisticsService,
+      // erasureCodingService: this.erasureCodingService,
+      // shardService: this.shardService,
+      accumulationService: this.accumulationService,
+    })
 
     // Initialize block importer service
     this.blockImporterService = new BlockImporterService({
@@ -350,6 +466,9 @@ export class MainService extends BaseService {
       sealKeyService: this.sealKeyService,
       blockStore: this.blockStore!,
       assuranceService: this.assuranceService,
+      guarantorService: this.guarantorService,
+      disputesService: this.disputesService,
+      serviceAccountService: this.serviceAccountService,
     })
 
     // Register created services with the registry
@@ -376,6 +495,11 @@ export class MainService extends BaseService {
     this.registry.register(this.workReportService)
     this.registry.register(this.assuranceService)
     this.registry.register(this.serviceAccountService)
+    this.registry.register(this.authQueueService)
+    this.registry.register(this.authPoolService)
+    this.registry.register(this.guarantorService)
+    this.registry.register(this.activityService)
+    this.registry.register(this.privilegesService)
     // Register this service as the main service
     this.registry.registerMain(this)
   }
@@ -441,7 +565,13 @@ export class MainService extends BaseService {
     this.ce132TicketDistributionProtocol = new CE132TicketDistributionProtocol(
       this.eventBusService,
     )
+    this.ce134WorkPackageSharingProtocol = new CE134WorkPackageSharingProtocol(
+      this.eventBusService,
+    )
     this.ce136WorkReportRequestProtocol = new WorkReportRequestProtocol(
+      this.eventBusService,
+    )
+    this.ce137ShardDistributionProtocol = new ShardDistributionProtocol(
       this.eventBusService,
     )
     this.ce143PreimageRequestProtocol = new PreimageRequestProtocol(

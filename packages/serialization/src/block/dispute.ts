@@ -40,14 +40,7 @@
  * while maintaining efficient encoding for the common case of no disputes.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import type {
   Culprit,
   DecodingResult,
@@ -55,8 +48,10 @@ import type {
   Fault,
   IConfigService,
   Judgment,
+  Safe,
   Verdict,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
 import {
@@ -779,7 +774,7 @@ export function decodeDisputes(
 
   // Decode verdicts (variable-length sequence)
   const verdictDecoder = (data: Uint8Array) => decodeVerdict(data, config)
-  const [verdictsError, verdictsResult] = decodeVariableSequence(
+  const [verdictsError, verdictsResult] = decodeVariableSequence<Verdict>(
     currentData,
     verdictDecoder,
   )
@@ -796,7 +791,7 @@ export function decodeDisputes(
   currentData = verdictsResult.remaining
 
   // Decode culprits (variable-length sequence)
-  const [culpritsError, culpritsResult] = decodeVariableSequence(
+  const [culpritsError, culpritsResult] = decodeVariableSequence<Culprit>(
     currentData,
     decodeCulprit,
   )
@@ -807,7 +802,7 @@ export function decodeDisputes(
   currentData = culpritsResult.remaining
 
   // Decode faults (variable-length sequence)
-  const [faultsError, faultsResult] = decodeVariableSequence(
+  const [faultsError, faultsResult] = decodeVariableSequence<Fault>(
     currentData,
     decodeFault,
   )

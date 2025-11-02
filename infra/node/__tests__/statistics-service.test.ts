@@ -1,253 +1,200 @@
 /**
- * Statistics Service Tests
- * 
- * Tests the Gray Paper-compliant statistics tracking implementation
+ * Statistics Service Test Vectors
+ *
+ * Loads JAM statistics test vectors (tiny/full) and runs a minimal
+ * state transition on StatisticsService by emitting a BlockProcessedEvent.
+ *
+ * Mirrors the style of disputes.test.ts for loading and setup.
  */
 
-import { describe, it, expect, beforeEach } from 'bun:test'
-import { 
-  StatisticsService, 
-  createStatisticsService, 
-  createInitialActivity
-} from '../services/statistics-service'
-import { EventBusService } from '@pbnj/core'
-import type { BlockHeader, BlockBody } from '@pbnj/types'
+import { describe, it, expect } from 'bun:test'
+import { EventBusService, hexToBytes, type Hex } from '@pbnj/core'
+import { getTicketIdFromProof } from '@pbnj/safrole'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@pbnj/types'
+import { ConfigService } from '../services/config-service'
+import { StatisticsService } from '../services/statistics-service'
+import { ClockService } from '../services/clock-service'
 
-describe('StatisticsService', () => {
-  let statisticsService: StatisticsService
-  let eventBusService: EventBusService
-  const validatorCount = 6
-  const coreCount = 4
-  const epochLength = 1000n
+const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
-  beforeEach(() => {
-    eventBusService = new EventBusService()
-    statisticsService = createStatisticsService(validatorCount, coreCount, eventBusService, epochLength)
-    statisticsService.start()
+function loadStatisticsVectors(
+  config: 'tiny' | 'full',
+): Array<{ name: string; vector: StatisticsTestVector }> {
+  const dir = path.join(
+    WORKSPACE_ROOT,
+    `submodules/jam-test-vectors/stf/statistics/${config}`,
+  )
+
+  const files = fs.readdirSync(dir)
+  const jsonFiles = files.filter((f) => f.endsWith('.json'))
+
+  return jsonFiles.map((file) => {
+    const filePath = path.join(dir, file)
+    const content = fs.readFileSync(filePath, 'utf-8')
+    const vector = JSON.parse(content) as StatisticsTestVector
+    return { name: file.replace('.json', ''), vector }
   })
+}
 
-  describe('Initialization', () => {
-    it('should create service with correct initial state', () => {
-      const activity = statisticsService.getActivity()
-      
-      expect(activity.validatorStatsAccumulator).toHaveLength(validatorCount)
-      expect(activity.validatorStatsPrevious).toHaveLength(validatorCount)
-      expect(activity.coreStats).toHaveLength(coreCount)
-      expect(activity.serviceStats.size).toBe(0)
-      
-      // Check all validator stats are initialized to zero
-      activity.validatorStatsAccumulator.forEach(stats => {
-        expect(stats.blocks).toBe(0n)
-        expect(stats.tickets).toBe(0n)
-        expect(stats.preimageCount).toBe(0n)
-        expect(stats.preimageSize).toBe(0n)
-        expect(stats.guarantees).toBe(0n)
-        expect(stats.assurances).toBe(0n)
+// Helper: convert JSON WorkReport (numbers) to WorkReport with bigint fields where required
+function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
+  return {
+    ...jsonReport,
+    core_index: BigInt(jsonReport.core_index || 0),
+    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
+    context: {
+      ...jsonReport.context,
+      lookup_anchor_slot: BigInt(jsonReport.context?.lookup_anchor_slot || 0),
+    },
+    results: (jsonReport.results || []).map((r: any) => ({
+      ...r,
+      service_id: BigInt(r.service_id || 0),
+      accumulate_gas: BigInt(r.accumulate_gas || 0),
+      refine_load: {
+        ...r.refine_load,
+        gas_used: BigInt(r.refine_load?.gas_used || 0),
+        imports: BigInt(r.refine_load?.imports || 0),
+        extrinsic_count: BigInt(r.refine_load?.extrinsic_count || 0),
+        extrinsic_size: BigInt(r.refine_load?.extrinsic_size || 0),
+        exports: BigInt(r.refine_load?.exports || 0),
+      },
+    })),
+  }
+}
+
+describe('Statistics Service - JAM Test Vectors', () => {
+  for (const configType of ['tiny', 'full'] as const) {
+    describe(`Configuration: ${configType}`, () => {
+      const vectors = loadStatisticsVectors(configType)
+
+      it('should load statistics vectors', () => {
+        expect(vectors.length).toBeGreaterThan(0)
       })
-    })
 
-    it('should have correct epoch configuration', () => {
-      expect(statisticsService.getCurrentEpoch()).toBe(0n)
-      expect(statisticsService.getEpochLength()).toBe(epochLength)
-    })
-  })
+      for (const { name, vector } of vectors) {
+        it(`Statistics Vector: ${name}`, async () => {
+          const eventBusService = new EventBusService()
+          const configService = new ConfigService(configType)
+          const clockService = new ClockService({eventBusService: eventBusService, configService: configService})
+          const statsService = new StatisticsService({eventBusService: eventBusService, configService: configService, clockService: clockService})
+          // Initialize activity from pre_state BEFORE starting to avoid any accidental resets
+          statsService.setActivityFromPreState({
+            vals_curr_stats: vector.pre_state.vals_curr_stats,
+            vals_last_stats: vector.pre_state.vals_last_stats,
+          })
+          statsService.start()
 
-  describe('Block Processing', () => {
-    it('should update validator statistics for block author', async () => {
-      const mockEvent = {
-        timestamp: Date.now(),
-        slot: 500n,
-        epoch: 0n,
-        authorIndex: 1,
-        header: createMockHeader(500n, 1),
-        body: createMockBody(),
+          // Construct a minimal BlockHeader using vector input
+          const zero: Hex =
+            '0x0000000000000000000000000000000000000000000000000000000000000000'
+          const header: BlockHeader = {
+            parent: zero,
+            priorStateRoot: zero,
+            extrinsicHash: zero,
+            timeslot: BigInt(vector.input.slot),
+            epochMark: null,
+            winnersMark: null,
+            offendersMark: [],
+            authorIndex: BigInt(vector.input.author_index),
+            vrfSig: zero,
+            sealSig: zero,
+          }
+
+          // Build BlockBody from extrinsic fields where types align
+          const body: BlockBody = {
+            tickets: vector.input.extrinsic.tickets.map((t) => ({
+              entryIndex: BigInt(t.attempt),
+              proof: t.signature as Hex,
+              id: getTicketIdFromProof(hexToBytes(t.signature as Hex)),
+            })),
+            preimages: (vector.input.extrinsic.preimages || []).map((p) => ({
+              requester: BigInt(p.requester),
+              blob: p.blob as Hex,
+            })),
+            guarantees: (vector.input.extrinsic.guarantees || []).map((g) => ({
+              report: convertJsonReportToWorkReport(g.report),
+              slot: BigInt(g.slot),
+              signatures: g.signatures.map((s) => ({
+                validator_index: Number(s.validator_index), // TODO: fix this
+                signature: s.signature as Hex,
+              })),
+            })),
+            assurances: (vector.input.extrinsic.assurances || []).map((a) => ({
+              anchor: a.anchor as Hex,
+              bitfield: a.bitfield as Hex,
+              validator_index: Number(a.validator_index), // TODO: fix this
+              signature: a.signature as Hex,
+            })),
+            disputes: [{
+              verdicts: vector.input.extrinsic.disputes.verdicts.map((v) => ({
+                target: v.target as Hex,
+                age: BigInt(v.age),
+                votes: v.votes.map((vv) => ({
+                  vote: !!vv.vote,
+                  index: BigInt(vv.index),
+                  signature: vv.signature as Hex,
+                })),
+              })),
+              culprits: vector.input.extrinsic.disputes.culprits.map((c) => ({
+                target: c.target as Hex,
+                key: c.key as Hex,
+                signature: c.signature as Hex,
+              })),
+              faults: vector.input.extrinsic.disputes.faults.map((f) => ({
+                target: f.target as Hex,
+                vote: !!f.vote,
+                key: f.key as Hex,
+                signature: f.signature as Hex,
+              })),
+            }],
+          }
+
+          // Emit a BlockProcessedEvent to drive StatisticsService
+          await eventBusService.emitBlockProcessed({
+            timestamp: Date.now(),
+            slot: header.timeslot,
+            epoch: 0n,
+            authorIndex: Number(vector.input.author_index),
+            header,
+            body,
+          })
+
+          // Validate validator statistics against post_state
+          const activity = statsService.getActivity()
+
+          // 1) Current epoch validator stats (vals_curr_stats)
+          const actualCurr = activity.validatorStatsAccumulator.map((s) => ({
+            blocks: s.blocks,
+            tickets: s.tickets,
+            pre_images: s.preimageCount,
+            pre_images_size: s.preimageSize,
+            guarantees: s.guarantees,
+            assurances: s.assurances,
+          }))
+          expect(actualCurr.length).toBe(vector.post_state.vals_curr_stats.length)
+          for (let i = 0; i < actualCurr.length; i++) {
+            expect(actualCurr[i]).toEqual(vector.post_state.vals_curr_stats[i])
+          }
+
+          // 2) Previous epoch validator stats (vals_last_stats)
+          const actualPrev = activity.validatorStatsPrevious.map((s) => ({
+            blocks: s.blocks,
+            tickets: s.tickets,
+            pre_images: s.preimageCount,
+            pre_images_size: s.preimageSize,
+            guarantees: s.guarantees,
+            assurances: s.assurances,
+          }))
+          expect(actualPrev.length).toBe(vector.post_state.vals_last_stats.length)
+          for (let i = 0; i < actualPrev.length; i++) {
+            expect(actualPrev[i]).toEqual(vector.post_state.vals_last_stats[i])
+          }
+        })
       }
-
-      await eventBusService.emitBlockProcessed(mockEvent)
-      
-      const authorStats = statisticsService.getValidatorStats(1)
-      expect(authorStats).not.toBeNull()
-      expect(authorStats!.blocks).toBe(1n) // Should increment block count
     })
-
-    it('should handle epoch transition correctly', async () => {
-      // Process block in epoch 0
-      const event1 = {
-        timestamp: Date.now(),
-        slot: 500n,
-        epoch: 0n,
-        authorIndex: 0,
-        header: createMockHeader(500n, 0),
-        body: createMockBody(),
-      }
-      await eventBusService.emitBlockProcessed(event1)
-
-      // Process block in epoch 1 (should trigger transition)
-      const event2 = {
-        timestamp: Date.now(),
-        slot: 1500n,
-        epoch: 1n,
-        authorIndex: 1,
-        header: createMockHeader(1500n, 1),
-        body: createMockBody(),
-      }
-
-      await eventBusService.emitBlockProcessed(event2)
-      
-      expect(statisticsService.getCurrentEpoch()).toBe(1n)
-      
-      // Previous epoch stats should have the block from epoch 0
-      const previousStats = statisticsService.getValidatorStats(0, true)
-      expect(previousStats!.blocks).toBe(1n)
-      
-      // Current accumulator should be reset
-      const currentStats = statisticsService.getValidatorStats(1)
-      expect(currentStats!.blocks).toBe(1n) // New block in new epoch
-    })
-  })
-
-  describe('Epoch Transition', () => {
-    it('should rollover accumulator to previous on epoch transition', async () => {
-      // Add some statistics
-      const event = {
-        timestamp: Date.now(),
-        slot: 500n,
-        epoch: 0n,
-        authorIndex: 0,
-        header: createMockHeader(500n, 0),
-        body: createMockBody(),
-      }
-      await eventBusService.emitBlockProcessed(event)
-
-      // Trigger epoch transition
-      const epochEvent = {
-        timestamp: Date.now(),
-        slot: 1000n,
-        epoch: 1n,
-        phase: 0n,
-        previousEpoch: 0n,
-        newEpoch: 1n,
-        previousSlotPhase: 0n,
-        validatorSetChanged: false,
-      }
-      await eventBusService.emitEpochTransition(epochEvent)
-
-      // Check rollover
-      const previousStats = statisticsService.getValidatorStats(0, true)
-      const currentStats = statisticsService.getValidatorStats(0, false)
-      
-      expect(previousStats!.blocks).toBe(1n) // Previous epoch had 1 block
-      expect(currentStats!.blocks).toBe(0n) // New epoch accumulator reset
-    })
-  })
-
-  describe('Getters', () => {
-    beforeEach(async () => {
-      // Add some test data
-      const event = {
-        timestamp: Date.now(),
-        slot: 500n,
-        epoch: 0n,
-        authorIndex: 1,
-        header: createMockHeader(500n, 1),
-        body: createMockBody(),
-      }
-      await eventBusService.emitBlockProcessed(event)
-    })
-
-    it('should return activity state', () => {
-      const activity = statisticsService.getActivity()
-      expect(activity).toBeDefined()
-      expect(activity.validatorStatsAccumulator).toHaveLength(validatorCount)
-    })
-
-    it('should return validator statistics', () => {
-      const accumulator = statisticsService.getValidatorStatsAccumulator()
-      const previous = statisticsService.getValidatorStatsPrevious()
-      
-      expect(accumulator).toHaveLength(validatorCount)
-      expect(previous).toHaveLength(validatorCount)
-    })
-
-    it('should return specific validator stats', () => {
-      const stats = statisticsService.getValidatorStats(1)
-      expect(stats).not.toBeNull()
-      expect(stats!.blocks).toBe(1n)
-    })
-
-    it('should return null for invalid validator index', () => {
-      const stats = statisticsService.getValidatorStats(999)
-      expect(stats).toBeNull()
-    })
-
-    it('should return core statistics', () => {
-      const coreStats = statisticsService.getCoreStats()
-      expect(coreStats).toHaveLength(coreCount)
-    })
-
-    it('should return service statistics', () => {
-      const serviceStats = statisticsService.getServiceStats()
-      expect(serviceStats).toBeInstanceOf(Map)
-    })
-  })
-
-  describe('Work Report Processing', () => {
-    it('should handle work report processing events', async () => {
-      const event = {
-        timestamp: Date.now(),
-        slot: 500n,
-        epoch: 0n,
-        availableReports: [],
-        incomingReports: [],
-      }
-
-      // Should not throw
-      await expect(eventBusService.emitWorkReportProcessed(event)).resolves.not.toThrow()
-    })
-  })
-
-  describe('Factory Functions', () => {
-    it('should create initial activity correctly', () => {
-      const activity = createInitialActivity(3, 2)
-      
-      expect(activity.validatorStatsAccumulator).toHaveLength(3)
-      expect(activity.validatorStatsPrevious).toHaveLength(3)
-      expect(activity.coreStats).toHaveLength(2)
-      expect(activity.serviceStats.size).toBe(0)
-    })
-
-    it('should create statistics service correctly', () => {
-      const service = createStatisticsService(5, 3, eventBusService, 2000n)
-      
-      expect(service.getCurrentEpoch()).toBe(0n)
-      expect(service.getEpochLength()).toBe(2000n)
-      expect(service.getActivity().validatorStatsAccumulator).toHaveLength(5)
-      expect(service.getActivity().coreStats).toHaveLength(3)
-    })
-  })
+  }
 })
 
-// ============================================================================
-// Test Helpers
-// ============================================================================
 
-function createMockHeader(timeSlot: bigint, authorIndex: number): BlockHeader {
-  return {
-    parent: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    priorStateRoot: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    extrinsicHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    timeslot: timeSlot,
-    epochMark: null,
-    winnersMark: null,
-    authorIndex,
-    entropySource: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    offendersMark: [],
-    sealSig: '0x0000000000000000000000000000000000000000000000000000000000000000'
-  }
-}
-
-function createMockBody(): BlockBody {
-  return {
-    extrinsics: []
-  }
-}

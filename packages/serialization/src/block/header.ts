@@ -41,24 +41,19 @@
  * complete header contents while including the signature in the commitment.
  */
 
-import {
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
 import type {
   BlockHeader,
   DecodingResult,
   EpochMark,
   IConfigService,
+  Safe,
   SafroleTicket,
   UnsignedBlockHeader,
   ValidatorKeyPair,
   ValidatorKeyTuple,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

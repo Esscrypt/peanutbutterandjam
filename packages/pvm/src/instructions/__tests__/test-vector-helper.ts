@@ -49,6 +49,7 @@ export interface PVMTestVector {
     address: number | string
     contents: (number | string)[]
   }>
+  'expected-page-fault-address'?: number | string
 }
 
 /**

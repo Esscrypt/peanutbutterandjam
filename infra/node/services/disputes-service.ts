@@ -23,18 +23,22 @@ import {
   type BlockProcessedEvent,
   type EventBusService,
   type Hex,
-  hexToBytes,
   logger,
-  type Safe,
-  safeResult,
-  verifySignature,
   type WorkReportJudgmentEvent,
 } from '@pbnj/core'
 import {
-  BaseService as BaseServiceClass,
+  validateCulpritSignature,
+  validateFaultSignature,
+  validateVerdicts,
+} from '@pbnj/disputes'
+import {
+  BaseService,
+  type Dispute,
   type Disputes,
-  type IValidatorSetManager,
-  type Verdict,
+  type IConfigService,
+  type Safe,
+  safeError,
+  safeResult,
 } from '@pbnj/types'
 import type { ValidatorSetManager } from './validator-set'
 
@@ -49,7 +53,7 @@ import type { ValidatorSetManager } from './validator-set'
  * Uses in-memory sets for efficient dispute tracking with optional
  * database persistence.
  */
-export class DisputesService extends BaseServiceClass {
+export class DisputesService extends BaseService {
   private readonly eventBusService: EventBusService
 
   // Four sets as specified in Gray Paper
@@ -59,14 +63,17 @@ export class DisputesService extends BaseServiceClass {
   private readonly offenders = new Set<Hex>()
 
   private readonly validatorSetManagerService: ValidatorSetManager
+  private readonly configService: IConfigService | null
 
   constructor(
     eventBusService: EventBusService,
     validatorSetManagerService: ValidatorSetManager,
+    configService?: IConfigService,
   ) {
     super('disputes-service')
     this.eventBusService = eventBusService
     this.validatorSetManagerService = validatorSetManagerService
+    this.configService = configService || null
   }
 
   override start(): Safe<boolean> {
@@ -93,6 +100,262 @@ export class DisputesService extends BaseServiceClass {
   }
 
   // ============================================================================
+  // Dispute Processing
+  // ============================================================================
+
+  /**
+   * Process disputes according to Gray Paper specifications
+   *
+   * Gray Paper Reference: graypaper/text/judgments.tex
+   *
+   * Processes disputes extrinsic (XT_disputes) which comprises:
+   * - Verdicts: Collections of judgments on work-report validity
+   * - Culprits: Validators who guaranteed invalid work-reports
+   * - Faults: Validators with contradictory judgments
+   *
+   * @param disputes - Array of dispute extrinsics to process
+   * @param currentTimeslot - Current timeslot (tau) for age validation
+   * @returns Safe result containing offenders_mark (Ed25519 keys of offenders)
+   */
+  public processDisputes(
+    disputes: Dispute[],
+    currentTimeslot: bigint,
+  ): Safe<Hex[]> {
+    if (!this.configService) {
+      return safeError(
+        new Error('ConfigService is required for processing disputes'),
+      )
+    }
+
+    const offendersMark: Hex[] = []
+
+    // Process each dispute
+    for (const dispute of disputes) {
+      // Validate verdicts are sorted and unique by target (Gray Paper line 73)
+      // \xtverdicts = \sqorderuniqby{\xv¬reporthash}{...}
+      for (let i = 0; i < dispute.verdicts.length; i++) {
+        if (i > 0) {
+          const prevTarget = dispute.verdicts[i - 1].target
+          const currentTarget = dispute.verdicts[i].target
+          // Check if out of order or duplicate
+          if (currentTarget <= prevTarget) {
+            return safeError(new Error('verdicts_not_sorted_unique'))
+          }
+        }
+      }
+
+      // Process verdicts
+      for (const verdict of dispute.verdicts) {
+        // Validate judgments are sorted and unique by index (Gray Paper line 81)
+        // \xv¬judgments = \sqorderuniqby{\xvj¬judgeindex}{...}
+        for (let i = 0; i < verdict.votes.length; i++) {
+          if (i > 0) {
+            const prevIndex = verdict.votes[i - 1].index
+            const currentIndex = verdict.votes[i].index
+            // Check if out of order or duplicate
+            if (currentIndex <= prevIndex) {
+              return safeError(new Error('judgements_not_sorted_unique'))
+            }
+          }
+        }
+
+        // Check if already judged - return error according to Gray Paper
+        if (
+          this.goodSet.has(verdict.target) ||
+          this.badSet.has(verdict.target) ||
+          this.wonkySet.has(verdict.target)
+        ) {
+          return safeError(new Error('already_judged'))
+        }
+
+        // Validate verdict signatures
+        const [validationError] = validateVerdicts(
+          [verdict],
+          this.validatorSetManagerService,
+          this.configService,
+          currentTimeslot,
+        )
+        if (validationError) {
+          return safeError(validationError)
+        }
+
+        // Determine verdict based on votes
+        // Gray Paper line 92: verdict approval must be exactly one of:
+        // {0, floor(1/3*Cvalcount), floor(2/3*Cvalcount) + 1}
+        const positiveVotes = verdict.votes.filter((v) => v.vote).length
+
+        // Gray Paper: Validate that the approval value (sum of positive votes) is valid
+        const requiredWonky = Math.floor(this.configService.numValidators / 3)
+        const requiredGood =
+          Math.floor((2 * this.configService.numValidators) / 3) + 1
+        const allowedApprovalValues = [0, requiredWonky, requiredGood]
+
+        // The approval value is the sum of positive votes
+        if (!allowedApprovalValues.includes(positiveVotes)) {
+          return safeError(new Error('bad_vote_split'))
+        }
+
+        // Determine which set to add the verdict target to
+        if (positiveVotes === requiredGood) {
+          // Good verdict: floor(2/3*Cvalcount) + 1 positive votes
+          this.goodSet.add(verdict.target)
+        } else if (positiveVotes === 0) {
+          // Bad verdict: 0 positive votes
+          this.badSet.add(verdict.target)
+        } else if (positiveVotes === requiredWonky) {
+          // Wonky verdict: floor(1/3*Cvalcount) positive votes
+          this.wonkySet.add(verdict.target)
+        } else {
+          // This should never happen due to the validation above, but handle it anyway
+          return safeError(new Error('bad_vote_split'))
+        }
+      }
+
+      // Gray Paper line 105-111: Validate constraints on verdict composition
+      // For good verdicts (2/3+1 positive votes): must have at least one fault
+      // For bad verdicts (0 positive votes): must have at least 2 culprits
+      for (const verdict of dispute.verdicts) {
+        const positiveVotes = verdict.votes.filter((v) => v.vote).length
+        const totalVotes = verdict.votes.length
+        const requiredPositiveVotes =
+          Math.floor((2 * this.configService.numValidators) / 3) + 1
+
+        // Gray Paper line 107-108: good verdict (2/3+1 positive votes) → must have at least one fault
+        // A verdict is "good" if positiveVotes >= requiredPositiveVotes (floor(2/3*Cvalcount) + 1)
+        if (positiveVotes >= requiredPositiveVotes && totalVotes > 0) {
+          const faultsForTarget = dispute.faults.filter(
+            (f) => f.target === verdict.target,
+          )
+          if (faultsForTarget.length < 1) {
+            return safeError(new Error('not_enough_faults'))
+          }
+        }
+
+        // Gray Paper line 109-110: bad verdict (0 positive votes) → must have at least 2 culprits
+        if (positiveVotes === 0 && totalVotes > 0) {
+          const culpritsForTarget = dispute.culprits.filter(
+            (c) => c.target === verdict.target,
+          )
+          if (culpritsForTarget.length < 2) {
+            return safeError(new Error('not_enough_culprits'))
+          }
+        }
+      }
+
+      // Validate culprits are sorted and unique by key (Gray Paper line 74)
+      // \xtculprits = \sqorderuniqby{\xc¬offenderindex}{...}
+      for (let i = 0; i < dispute.culprits.length; i++) {
+        if (i > 0) {
+          const prevKey = dispute.culprits[i - 1].key
+          const currentKey = dispute.culprits[i].key
+          // Check if out of order or duplicate
+          if (currentKey <= prevKey) {
+            return safeError(new Error('culprits_not_sorted_unique'))
+          }
+        }
+      }
+
+      // Process culprits - validators who guaranteed invalid work-reports
+      // Gray Paper equation (58-61): culprits must have valid signatures and target in badSet
+      // Gray Paper: "may not report keys which are already in the punish-set"
+      for (const culprit of dispute.culprits) {
+        // Step 1: Check if key is already in offenders (must check FIRST before any other validation)
+        // This includes keys from pre_state.offenders AND keys added by previous culprits in this batch
+        if (this.offenders.has(culprit.key)) {
+          return safeError(new Error('offender_already_reported'))
+        }
+
+        // Step 2: Validate culprit signature according to Gray Paper
+        const [sigError] = validateCulpritSignature(
+          culprit,
+          this.validatorSetManagerService,
+        )
+        if (sigError) {
+          // Return the error (could be bad_guarantor_key or bad_signature)
+          return safeError(sigError)
+        }
+
+        // Step 3: Verify the culprit's target is in badSet (Gray Paper requirement)
+        // Gray Paper: reprothash ∈ badset'
+        if (!this.badSet.has(culprit.target)) {
+          return safeError(new Error('culprits_verdict_not_bad'))
+        }
+
+        // Step 4: Add culprit's Ed25519 key to offenders
+        this.offenders.add(culprit.key)
+        offendersMark.push(culprit.key)
+      }
+
+      // Validate faults are sorted and unique by key (Gray Paper line 75)
+      // \xtfaults = \sqorderuniqby{\xf¬offenderindex}{...}
+      for (let i = 0; i < dispute.faults.length; i++) {
+        if (i > 0) {
+          const prevKey = dispute.faults[i - 1].key
+          const currentKey = dispute.faults[i].key
+          // Check if out of order or duplicate
+          if (currentKey <= prevKey) {
+            return safeError(new Error('faults_not_sorted_unique'))
+          }
+        }
+      }
+
+      // Process faults - validators with contradictory judgments
+      // Gray Paper equation (63-66): faults must have valid signatures and contradict verdicts
+      for (const fault of dispute.faults) {
+        // Step 1: Check if key is already in offenders (must check FIRST before any other validation)
+        // This includes keys from pre_state.offenders AND keys added by previous faults/culprits in this batch
+        // Gray Paper: Similar to culprits, faults cannot report keys already in the punish-set
+        if (this.offenders.has(fault.key)) {
+          return safeError(new Error('offender_already_reported'))
+        }
+
+        // Step 2: Validate fault signature according to Gray Paper
+        const [sigError] = validateFaultSignature(
+          fault,
+          this.validatorSetManagerService,
+        )
+        if (sigError) {
+          return safeError(sigError)
+        }
+
+        // Step 3: Check verdict relationship according to Gray Paper
+        // Gray Paper: reprothash ∈ badset' ⇔ reprothash ∉ goodset' ⇔ validity
+        // This means: if fault.vote (validity) = true, then target must be in badset
+        //            if fault.vote (validity) = false, then target must be in goodset
+        const isGood = this.goodSet.has(fault.target)
+        const isBad = this.badSet.has(fault.target)
+
+        // Gray Paper condition: fault.vote must match the verdict state
+        // fault.vote = true → target should be in badset (not goodset)
+        // fault.vote = false → target should be in goodset (not badset)
+        const verdictMatchesFaultVote =
+          (fault.vote && isBad && !isGood) || // fault.vote=true → badset
+          (!fault.vote && isGood && !isBad) // fault.vote=false → goodset
+
+        if (!verdictMatchesFaultVote) {
+          // Fault vote does not match verdict state
+          return safeError(new Error(`fault_verdict_wrong`))
+        }
+
+        // Step 4: If verdict matches fault vote, the validator who signed this fault vote
+        // is in contradiction with the verdict, so they are an offender
+        // (The fault proves the validator voted fault.vote, but the verdict went the opposite way)
+        // Actually wait - if fault.vote=true and verdict is bad, that means validator voted
+        // "good" (fault.vote=true means jam_valid), but verdict is "bad" → contradiction → offender
+        // If fault.vote=false and verdict is good, that means validator voted "bad" (fault.vote=false
+        // means jam_invalid), but verdict is "good" → contradiction → offender
+        // Both cases represent contradictions, so add to offenders
+        if (!this.offenders.has(fault.key)) {
+          this.offenders.add(fault.key)
+          offendersMark.push(fault.key)
+        }
+      }
+    }
+
+    return safeResult(offendersMark)
+  }
+
+  // ============================================================================
   // Event Handlers
   // ============================================================================
 
@@ -110,64 +373,30 @@ export class DisputesService extends BaseServiceClass {
       offendersSize: this.offenders.size,
     })
 
-    // Parse block for dispute extrinsics and update sets
-    // This would extract dispute data from the block and update the appropriate sets
-    event.body.disputes.forEach((dispute) => {
-      dispute.verdicts.forEach((verdict) => {
-        const validSignatures = this.verifyVerdictSignatures(
-          verdict,
-          this.validatorSetManagerService,
-        )
-        if (validSignatures < Math.floor(verdict.votes.length / 2) + 1) {
-          this.wonkySet.add(verdict.target)
-        } else {
-          // for each vote, if the vote is true, add to the good set
-          verdict.votes.forEach((vote) => {
-            if (vote.vote) {
-              this.goodSet.add(verdict.target)
-            } else {
-              this.badSet.add(verdict.target)
-              // this.addOffender(vote.index)
-            }
-          })
-        }
-      })
-    })
+    // Process disputes from block
+    const [processError, offendersMark] = this.processDisputes(
+      event.body.disputes,
+      event.header.timeslot,
+    )
+    if (processError) {
+      logger.error('Failed to process disputes', { error: processError })
+      return safeError(processError)
+    }
 
-    // add offenders to the offenders set
+    // Update header's offendersMark with computed offenders
+    // Note: This should ideally be set by the caller, but we populate it here for convenience
+    if (offendersMark) {
+      offendersMark.forEach((offender) => {
+        event.header.offendersMark.push(offender)
+      })
+    }
+
+    // Add all offenders from header to offenders set (in case they were set externally)
     event.header.offendersMark.forEach((offender) => {
       this.offenders.add(offender)
     })
 
     return safeResult(undefined)
-  }
-
-  private verifyVerdictSignatures(
-    verdict: Verdict,
-    validatorSetManagerService: IValidatorSetManager,
-  ): number {
-    let validSignatures = 0
-    verdict.votes.forEach((vote) => {
-      const [publicKeyError, publicKeys] =
-        validatorSetManagerService.getValidatorAtIndex(Number(vote.index))
-      if (publicKeyError) {
-        logger.error('Failed to get validator at index', {
-          error: publicKeyError,
-        })
-        return
-      }
-      const publicKey = publicKeys.ed25519
-      // TODO: check against GP what the message for verdict should be
-      const isValid = verifySignature(
-        hexToBytes(publicKey),
-        vote.vote === true ? Uint8Array.from([0x01]) : Uint8Array.from([0x00]),
-        hexToBytes(vote.signature),
-      )
-      if (isValid) {
-        validSignatures++
-      }
-    })
-    return validSignatures
   }
 
   /**
@@ -279,13 +508,6 @@ export class DisputesService extends BaseServiceClass {
     disputes.badSet.forEach((hash) => this.badSet.add(hash))
     disputes.wonkySet.forEach((hash) => this.wonkySet.add(hash))
     disputes.offenders.forEach((hash) => this.offenders.add(hash))
-
-    logger.debug('Disputes state updated', {
-      goodSetSize: this.goodSet.size,
-      badSetSize: this.badSet.size,
-      wonkySetSize: this.wonkySet.size,
-      offendersSize: this.offenders.size,
-    })
   }
 
   /**

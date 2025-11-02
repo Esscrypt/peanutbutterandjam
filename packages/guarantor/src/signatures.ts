@@ -19,10 +19,8 @@
 import {
   blake2bHash,
   bytesToHex,
+  type Hex,
   hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
   signEd25519,
   verifySignature,
 } from '@pbnj/core'
@@ -31,8 +29,10 @@ import type {
   Guarantee,
   GuaranteeSignature,
   IValidatorSetManager,
+  Safe,
   WorkReport,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Create signature for work-report
@@ -167,12 +167,14 @@ export function verifyWorkReportDistributionSignature(
  * @param validatorSetManagerService - Validator set manager service
  * @returns Safe<void> - True if signature is valid
  */
-export function verifyBlockExtrinsicGuaranteeSignature(
+export function verifyGuaranteeSignature(
   guarantee: Guarantee,
   validatorSetManagerService: IValidatorSetManager,
+  currentSlot: bigint,
+  rotationPeriod: number,
 ): Safe<void> {
   if (guarantee.signatures.length < 2) {
-    return safeError(new Error('guarantee signatures are less than 2'))
+    return safeError(new Error('insufficient_guarantees'))
   }
 
   // Construct the correct message according to Gray Paper:
@@ -193,7 +195,7 @@ export function verifyBlockExtrinsicGuaranteeSignature(
     return safeError(new Error('failed to hash work report'))
   }
 
-  // Step 3: Construct the message: "$jam_guarantee" + Blake2b(work_report)
+  // Step 3: Construct the message: "jam_guarantee" + Blake2b(work_report)
   const contextString = 'jam_guarantee'
   const contextBytes = new TextEncoder().encode(contextString)
   const hashBytes = hexToBytes(workReportHash)
@@ -201,31 +203,97 @@ export function verifyBlockExtrinsicGuaranteeSignature(
   message.set(contextBytes, 0)
   message.set(hashBytes, contextBytes.length)
 
+  // Determine which rotation the guarantee is from
+  const currentRotation = currentSlot / BigInt(rotationPeriod)
+  const guaranteeRotation = guarantee.slot / BigInt(rotationPeriod)
+  const isFromPreviousRotation = guaranteeRotation < currentRotation
+
+  // Get validator sets directly (not using getValidatorAtIndex which aggregates them)
+  const activeValidators = validatorSetManagerService.getActiveValidators()
+  const previousValidators = validatorSetManagerService.getPreviousValidators()
+
   // Validate each signature according to Gray Paper equation (274)
   for (const signature of guarantee.signatures) {
-    const [publicKeyError, publicKeys] =
-      validatorSetManagerService.getValidatorAtIndex(
-        Number(signature.validator_index),
-      )
-    if (publicKeyError) {
-      return safeError(
-        new Error(
-          `failed to get validator at index ${signature.validator_index}`,
-        ),
-      )
+    const validatorIdx = Number(signature.validator_index)
+
+    // Step 4: Get validator from the appropriate set based on rotation
+    // Prioritize the set that matches the guarantee's rotation
+    const activeValidator = activeValidators.get(validatorIdx)
+    const previousValidator = previousValidators.get(validatorIdx)
+
+    // Check if validator exists in either set
+    if (!activeValidator && !previousValidator) {
+      return safeError(new Error('bad_validator_index'))
     }
 
-    // Step 4: Verify the Ed25519 signature
-    const publicKey = publicKeys.ed25519
-    const signatureBytes = hexToBytes(signature.signature)
-    const isValid = verifySignature(
-      hexToBytes(publicKey),
-      message,
-      signatureBytes,
-    )
+    // Step 5: Try validator from the set that matches the rotation first
+    let publicKey: Hex | null = null
 
-    if (!isValid) {
-      return safeError(new Error('guarantee signature is invalid'))
+    if (isFromPreviousRotation) {
+      // Previous rotation guarantee: try previous validator first
+      if (previousValidator) {
+        const previousKey = previousValidator.ed25519
+        const signatureBytes = hexToBytes(signature.signature)
+        const isValidPrevious = verifySignature(
+          hexToBytes(previousKey),
+          message,
+          signatureBytes,
+        )
+
+        if (isValidPrevious) {
+          publicKey = previousKey
+        }
+      }
+
+      // If previous didn't match, try current as fallback
+      if (!publicKey && activeValidator) {
+        const currentKey = activeValidator.ed25519
+        const signatureBytes = hexToBytes(signature.signature)
+        const isValidCurrent = verifySignature(
+          hexToBytes(currentKey),
+          message,
+          signatureBytes,
+        )
+
+        if (isValidCurrent) {
+          publicKey = currentKey
+        }
+      }
+    } else {
+      // Current rotation guarantee: try current validator first
+      if (activeValidator) {
+        const currentKey = activeValidator.ed25519
+        const signatureBytes = hexToBytes(signature.signature)
+        const isValidCurrent = verifySignature(
+          hexToBytes(currentKey),
+          message,
+          signatureBytes,
+        )
+
+        if (isValidCurrent) {
+          publicKey = currentKey
+        }
+      }
+
+      // If current didn't match, try previous as fallback (shouldn't happen for current rotation)
+      if (!publicKey && previousValidator) {
+        const previousKey = previousValidator.ed25519
+        const signatureBytes = hexToBytes(signature.signature)
+        const isValidPrevious = verifySignature(
+          hexToBytes(previousKey),
+          message,
+          signatureBytes,
+        )
+
+        if (isValidPrevious) {
+          publicKey = previousKey
+        }
+      }
+    }
+
+    // If neither validator matched (but validator exists), return bad_signature
+    if (!publicKey) {
+      return safeError(new Error('bad_signature'))
     }
   }
   return safeResult(undefined)

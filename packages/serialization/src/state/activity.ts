@@ -28,14 +28,16 @@
  * ✅ CORRECT: Properly encodes all fields of each statistic type
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
+import { concatBytes } from '@pbnj/core'
 import type {
   Activity,
   CoreStats,
   DecodingResult,
+  Safe,
   ServiceStats,
   ValidatorStats,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
   decodeVariableSequence,
@@ -460,23 +462,19 @@ export function decodeActivity(
   let currentData = data
 
   // valstatsaccumulator: variable-length sequence of validator statistics
-  const [error1, validatorStatsAccumulatorResult] = decodeVariableSequence(
-    currentData,
-    decodeValidatorStats,
-  )
+  const [error1, validatorStatsAccumulatorResult] =
+    decodeVariableSequence<ValidatorStats>(currentData, decodeValidatorStats)
   if (error1) return safeError(error1)
   currentData = validatorStatsAccumulatorResult.remaining
 
   // valstatsprevious: variable-length sequence of validator statistics
-  const [error2, validatorStatsPreviousResult] = decodeVariableSequence(
-    currentData,
-    decodeValidatorStats,
-  )
+  const [error2, validatorStatsPreviousResult] =
+    decodeVariableSequence<ValidatorStats>(currentData, decodeValidatorStats)
   if (error2) return safeError(error2)
   currentData = validatorStatsPreviousResult.remaining
 
   // corestats: variable-length sequence of core statistics
-  const [error3, coreStatsResult] = decodeVariableSequence(
+  const [error3, coreStatsResult] = decodeVariableSequence<CoreStats>(
     currentData,
     decodeCoreStats,
   )
@@ -484,9 +482,9 @@ export function decodeActivity(
   currentData = coreStatsResult.remaining
 
   // servicestats: variable-length sequence of (serviceId, serviceStats) tuples
-  const [error4, serviceStatsTuplesResult] = decodeVariableSequence(
-    currentData,
-    (data) => {
+  type ServiceStatsTuple = { serviceId: bigint; stats: ServiceStats }
+  const [error4, serviceStatsTuplesResult] =
+    decodeVariableSequence<ServiceStatsTuple>(currentData, (data) => {
       let tupleData = data
 
       // Decode service ID
@@ -507,8 +505,7 @@ export function decodeActivity(
         remaining: tupleData,
         consumed: data.length - tupleData.length,
       })
-    },
-  )
+    })
   if (error4) return safeError(error4)
   currentData = serviceStatsTuplesResult.remaining
 

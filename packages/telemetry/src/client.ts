@@ -6,9 +6,9 @@
  */
 
 import { createConnection, type Socket } from 'node:net'
-import type { SafePromise } from '@pbnj/core'
-import { logger, safeError, safeResult } from '@pbnj/core'
-import type { TelemetryConfig, TelemetryEvent } from '@pbnj/types'
+import { logger } from '@pbnj/core'
+import type { SafePromise, TelemetryConfig, TelemetryEvent } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   createTelemetryMessage,
   encodeNodeInfo,

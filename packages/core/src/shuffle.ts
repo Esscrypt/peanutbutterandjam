@@ -104,11 +104,6 @@ function fisherYatesShuffle<T>(sequence: T[], randomSequence: number[]): T[] {
  * @returns Shuffled copy of the input array
  */
 export function jamShuffle<T>(input: T[], entropy: Hex): T[] {
-  logger.debug('JAM shuffle starting', {
-    inputLength: input.length,
-    entropy: `${entropy.slice(0, 10)}...`,
-  })
-
   // Handle edge cases
   if (input.length === 0) {
     return []
@@ -140,11 +135,6 @@ export function jamShuffle<T>(input: T[], entropy: Hex): T[] {
 
     // Perform Fisher-Yates shuffle
     const result = fisherYatesShuffle([...input], randomSequence)
-
-    logger.debug('JAM shuffle completed', {
-      inputLength: input.length,
-      outputLength: result.length,
-    })
 
     return result
   } catch (error) {

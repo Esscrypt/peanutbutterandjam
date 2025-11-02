@@ -15,7 +15,8 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BaseService, type IConfigService, type Privileges } from '@pbnj/types'
+import { BaseService, type Privileges } from '@pbnj/types'
+import type { ConfigService } from './config-service'
 
 /**
  * Privileges Service Interface
@@ -52,16 +53,6 @@ export interface IPrivilegesService {
   // Validation
   validatePrivileges(): boolean
   isServicePrivileged(serviceId: bigint): boolean
-
-  // Statistics
-  getStats(): {
-    manager: bigint
-    delegator: bigint
-    registrar: bigint
-    assignerCount: number
-    alwaysAccerCount: number
-    totalGasAllocated: bigint
-  }
 }
 
 /**
@@ -72,11 +63,11 @@ export class PrivilegesService
   implements IPrivilegesService
 {
   private privileges: Privileges
-  private readonly configService: IConfigService
+  private readonly configService: ConfigService
 
-  constructor(configService: IConfigService) {
+  constructor(options: { configService: ConfigService }) {
     super('privileges-service')
-    this.configService = configService
+    this.configService = options.configService
     this.privileges = {
       manager: 0n,
       delegator: 0n,
@@ -319,31 +310,5 @@ export class PrivilegesService
       this.privileges.assigners.includes(serviceId) ||
       this.privileges.alwaysaccers.has(serviceId)
     )
-  }
-
-  /**
-   * Get service statistics
-   */
-  getStats(): {
-    manager: bigint
-    delegator: bigint
-    registrar: bigint
-    assignerCount: number
-    alwaysAccerCount: number
-    totalGasAllocated: bigint
-  } {
-    let totalGasAllocated = 0n
-    for (const gasLimit of this.privileges.alwaysaccers.values()) {
-      totalGasAllocated += gasLimit
-    }
-
-    return {
-      manager: this.privileges.manager,
-      delegator: this.privileges.delegator,
-      registrar: this.privileges.registrar,
-      assignerCount: this.privileges.assigners.length,
-      alwaysAccerCount: this.privileges.alwaysaccers.size,
-      totalGasAllocated,
-    }
   }
 }

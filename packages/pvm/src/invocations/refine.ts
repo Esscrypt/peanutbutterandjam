@@ -5,17 +5,18 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { logger } from '@pbnj/core'
+import { bytesToHex, logger } from '@pbnj/core'
 import { encodeRefineArguments } from '@pbnj/serialization'
 import type {
+  IServiceAccountService,
   PVMOptions,
   RAM,
   RefineInvocationContext,
   ResultCode,
+  Segment,
   WorkError,
   WorkItem,
   WorkPackage,
-  IServiceAccountService,
 } from '@pbnj/types'
 
 import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '../config'
@@ -24,7 +25,11 @@ import { PVM } from '../pvm'
 
 export class RefinePVM extends PVM {
   private readonly serviceAccountService: IServiceAccountService
-  constructor(hostFunctionRegistry: HostFunctionRegistry, serviceAccountService: IServiceAccountService, options: PVMOptions = {}) {
+  constructor(
+    hostFunctionRegistry: HostFunctionRegistry,
+    serviceAccountService: IServiceAccountService,
+    options: PVMOptions = {},
+  ) {
     super(hostFunctionRegistry, options)
     this.serviceAccountService = serviceAccountService
   }
@@ -41,18 +46,18 @@ export class RefinePVM extends PVM {
    * @param exportSegmentOffset - Export segment offset
    * @returns Tuple of (result, exportSegments, gasUsed)
    */
-  public executeRefine(
+  public async executeRefine(
     coreIndex: bigint,
     workItemIndex: bigint,
     workPackage: WorkPackage,
     authorizerTrace: Uint8Array,
     importSegments: Uint8Array[][],
     exportSegmentOffset: bigint,
-  ): {
+  ): Promise<{
     result: Uint8Array | WorkError
     exportSegments: Uint8Array[]
     gasUsed: bigint
-  } {
+  }> {
     try {
       // Get the work item to refine
       const workItem = workPackage.workItems[Number(workItemIndex)]
@@ -98,7 +103,7 @@ export class RefinePVM extends PVM {
         this.createRefineContextMutator(refineContext)
 
       // Execute Ψ_M(serviceCode, 0, Cpackagerefgas, encodedArgs, F, refineContext)
-      const marshallingResult = this.executeMarshallingInvocation(
+      const [error] = await this.executeMarshallingInvocation(
         serviceCode,
         0n, // Initial PC = 0 (Gray Paper)
         ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE, // Use accumulate config for now
@@ -106,6 +111,9 @@ export class RefinePVM extends PVM {
         refineContextMutator,
         refineContext,
       )
+      if (error) {
+        return { result: 'BAD', exportSegments: [], gasUsed: 0n }
+      }
 
       // Extract export segments from context
       const exportSegments = refineContext.exportSegments
@@ -113,11 +121,11 @@ export class RefinePVM extends PVM {
       // Return result, export segments, and gas used
       return {
         result:
-          marshallingResult.result === RESULT_CODES.HALT
+          this.state.resultCode === RESULT_CODES.HALT
             ? this.extractResultFromMemory()
             : 'BAD',
         exportSegments,
-        gasUsed: marshallingResult.gasUsed,
+        gasUsed: this.state.gasCounter,
       }
     } catch (error) {
       logger.error('Refine invocation failed', {
@@ -135,7 +143,8 @@ export class RefinePVM extends PVM {
    */
   private getServiceCodeFromWorkItem(workItem: WorkItem): Uint8Array | null {
     // For now, return a placeholder
-    const [error, serviceAccount] = this.serviceAccountService.getServiceAccount(workItem.serviceindex)
+    const [error, serviceAccount] =
+      this.serviceAccountService.getServiceAccount(workItem.serviceindex)
     if (error) {
       return null
     }
@@ -189,14 +198,20 @@ export class RefinePVM extends PVM {
         }
 
         // Execute host function with Refine context
-        const result = hostFunction.execute({
-          gasCounter,
-          registers,
-          ram: memory,
-        })
+        const result = hostFunction.execute(
+          {
+            gasCounter,
+            registers,
+            ram: memory,
+          },
+          context,
+        )
 
         return {
-          resultCode: result.resultCode || RESULT_CODES.PANIC,
+          resultCode:
+            result instanceof Promise
+              ? RESULT_CODES.PANIC
+              : result.resultCode || RESULT_CODES.PANIC,
           gasCounter,
           registers,
           memory,
@@ -258,18 +273,27 @@ export class RefinePVM extends PVM {
    * Create refine context
    */
   private createRefineContext(
-    _workPackage: WorkPackage,
-    _workItemIndex: bigint,
-    _authorizerTrace: Uint8Array,
-    _importSegments: Uint8Array[][],
-    _exportSegmentOffset: bigint,
+    workPackage: WorkPackage,
+    workItemIndex: bigint,
+    authorizerTrace: Uint8Array,
+    importSegments: Uint8Array[][],
+    exportSegmentOffset: bigint,
   ): RefineInvocationContext {
     return {
-      currentServiceId: 0n, // Will be set from work item
-      accountsDictionary: new Map(), // Will be populated from recent state
-      lookupTimeslot: 0n, // Will be set from work package context
+      // Core refine context pair (Gray Paper: (m, e))
       machines: new Map(),
       exportSegments: [],
+      // Refine invocation parameters (Gray Paper: c, i, p, r, ī, segoff)
+      coreIndex: 0n, // c: Core index - will be set from work package
+      workItemIndex, // i: Work item index
+      workPackage, // p: Work package
+      authorizerTrace: bytesToHex(authorizerTrace), // r: Authorizer trace
+      importSegments: importSegments as Segment[][], // ī: Import segments by work item (Segment = Uint8Array)
+      exportSegmentOffset, // segoff: Export segment offset
+      // Additional context from refine invocation
+      accountsDictionary: new Map(), // Will be populated from recent state
+      lookupTimeslot: 0n, // Will be set from work package context
+      currentServiceId: 0n, // Will be set from work item
     }
   }
 }

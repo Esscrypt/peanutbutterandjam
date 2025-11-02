@@ -39,7 +39,6 @@ export class WriteHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-
     // Extract parameters from registers
     const [keyOffset, keyLength, valueOffset, valueLength] =
       context.registers.slice(7, 11)
@@ -81,7 +80,10 @@ export class WriteHostFunction extends BaseHostFunction {
       context.registers[7] = previousLength
     } else {
       // Read value from memory
-      const [value, _faultAddress] = context.ram.readOctets(valueOffset, valueLength)
+      const [value, _faultAddress] = context.ram.readOctets(
+        valueOffset,
+        valueLength,
+      )
       if (!value) {
         return {
           resultCode: RESULT_CODES.PANIC,

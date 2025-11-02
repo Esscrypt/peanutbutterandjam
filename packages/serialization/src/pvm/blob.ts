@@ -1,10 +1,11 @@
-import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type {
   DecodedBlob,
   DecodingResult,
   RAM,
   RegisterState,
+  Safe,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural } from '../core/natural-number'
 
 /**

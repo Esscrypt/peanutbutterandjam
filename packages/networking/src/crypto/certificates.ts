@@ -5,14 +5,10 @@
  * Based on the specification in certs.md
  */
 
-import {
-  generateAlternativeName,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { generateAlternativeName } from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
-import type { KeyPair } from '@pbnj/types'
+import type { KeyPair, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   certToPEM,
   generateCertificate,

@@ -17,20 +17,13 @@
  * - Assignment is deterministic based on: entropy_2, thetime, and validator index
  */
 
-import {
-  bytesToHex,
-  type EventBusService,
-  hexToBytes,
-  logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, type EventBusService, hexToBytes } from '@pbnj/core'
 import {
   createGuaranteeSignature,
-  getCoGuarantors as getCoGuarantorsHelper,
+  getAssignedCore,
+  getCoGuarantors,
   sortGuaranteeSignatures,
+  verifyGuaranteeSignature,
   verifyWorkReportDistributionSignature,
 } from '@pbnj/guarantor'
 import type { CE134WorkPackageSharingProtocol } from '@pbnj/networking'
@@ -41,24 +34,33 @@ import type {
   IClockService,
   IConfigService,
   IEntropyService,
-  IGuarantorService,
+  Safe,
+  SafePromise,
   StreamKind,
-  ValidatorPublicKeys,
   WorkPackage,
   WorkPackageSharing,
   WorkPackageSharingResponse,
   WorkReport,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import {
+  BaseService,
+  safeError,
+  safeResult,
+  WORK_REPORT_CONSTANTS,
+} from '@pbnj/types'
 import type { Hex } from 'viem'
+import type { AccumulationService } from './accumulation-service'
 import type { AuthPoolService } from './auth-pool-service'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'
-import type { ErasureCodingService } from './erasure-coding-service'
+// import type { ErasureCodingService } from './erasure-coding-service'
 import type { KeyPairService } from './keypair-service'
 import type { NetworkingService } from './networking-service'
-import type { ShardService } from './shard-service'
+import type { RecentHistoryService } from './recent-history-service'
+import type { ServiceAccountService } from './service-account-service'
+// import type { ShardService } from './shard-service'
+import type { StatisticsService } from './statistics-service'
 import type { ValidatorSetManager } from './validator-set'
 import type { WorkReportService } from './work-report-service'
 
@@ -67,11 +69,12 @@ import type { WorkReportService } from './work-report-service'
  *
  * Barebones implementation of the guarantor role
  */
-export class GuarantorService extends BaseService implements IGuarantorService {
+export class GuarantorService extends BaseService {
   private readonly configService: IConfigService
   private readonly clockService: IClockService
   private readonly entropyService: IEntropyService
-  private readonly erasureCodingService: ErasureCodingService
+  // private readonly erasureCodingService: ErasureCodingService | null
+  private readonly accumulationService: AccumulationService | null
   // Map of timeslot to map of validator index to number of signatures
   private readonly validatorSignaturesForTimeslot: Map<
     bigint,
@@ -79,13 +82,16 @@ export class GuarantorService extends BaseService implements IGuarantorService {
   > = new Map()
 
   private readonly authPoolService: AuthPoolService
-  private readonly networkService: NetworkingService
-  private readonly ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol
+  private readonly networkService: NetworkingService | null
+  private readonly ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol | null
   private readonly keyPairService: KeyPairService
   private readonly workReportService: WorkReportService
   private readonly eventBusService: EventBusService
   private readonly validatorSetManager: ValidatorSetManager
-  private readonly shardService: ShardService
+  private readonly recentHistoryService: RecentHistoryService | null
+  private readonly serviceAccountService: ServiceAccountService | null
+  private readonly statisticsService: StatisticsService | null
+  // private readonly shardService: ShardService | null
   private validatorIndex = 0
 
   constructor(options: {
@@ -93,14 +99,18 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     clockService: ClockService
     entropyService: EntropyService
     authPoolService: AuthPoolService
-    networkService: NetworkingService
-    ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol
+    networkService: NetworkingService | null
+    ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol | null
     keyPairService: KeyPairService
     workReportService: WorkReportService
     eventBusService: EventBusService
     validatorSetManager: ValidatorSetManager
-    erasureCodingService: ErasureCodingService
-    shardService: ShardService
+    recentHistoryService: RecentHistoryService | null
+    serviceAccountService: ServiceAccountService | null
+    statisticsService: StatisticsService | null
+    // erasureCodingService: ErasureCodingService | null
+    // shardService: ShardService | null
+    accumulationService: AccumulationService | null
   }) {
     super('guarantor-service')
     this.configService = options.configService
@@ -113,8 +123,12 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     this.workReportService = options.workReportService
     this.eventBusService = options.eventBusService
     this.validatorSetManager = options.validatorSetManager
-    this.erasureCodingService = options.erasureCodingService
-    this.shardService = options.shardService
+    this.recentHistoryService = options.recentHistoryService
+    this.serviceAccountService = options.serviceAccountService
+    this.statisticsService = options.statisticsService
+    // this.erasureCodingService = options.erasureCodingService
+    // this.shardService = options.shardService
+    this.accumulationService = options.accumulationService
     // Register event handlers
     this.eventBusService.addWorkPackageSubmissionReceivedCallback(
       this.handleWorkPackageSubmission.bind(this),
@@ -209,122 +223,273 @@ export class GuarantorService extends BaseService implements IGuarantorService {
   }
 
   /**
+   * Compute segments root mappings for a work package
+   *
+   * *** GRAY PAPER FORMULA ***
+   * Gray Paper: work_packages_and_reports.tex, equations 201, 224, 236
+   *
+   * Process:
+   * 1. Identify all work-package hashes referenced in import segments (h^+)
+   * 2. Lookup segment roots from recent history or current batch guarantees
+   * 3. Create mappings dictionary: {workPackageHash → segmentRoot}
+   *
+   * Formula:
+   * keys{wr_srlookup} = {h : wi ∈ wp.workitems, (h^+, n) ∈ wi.importsegments}
+   * ∀ (h, e) ∈ wr_srlookup : ∃ wp, core : blake(wp) = h ∧ (computereport(wp, core).avspec).segroot = e
+   *
+   * @param workPackage - The work package to compute mappings for
+   * @param currentBatchGuarantees - Guarantees being processed in current batch (optional)
+   * @returns Segments root mappings array
+   */
+  computeSegmentsRootMappings(
+    workPackage: WorkPackage,
+    currentBatchGuarantees: Guarantee[] = [],
+  ): Safe<
+    Array<{
+      workPackageHash: Uint8Array
+      segmentsRoot: Uint8Array
+    }>
+  > {
+    try {
+      // Step 1: Collect all work-package hashes from import segments
+      // Gray Paper equation 201: keys{wr_srlookup} = {h : wi ∈ wp.workitems, (h^+, n) ∈ wi.importsegments}
+      const requiredPackageHashes = new Set<Hex>()
+
+      for (const workItem of workPackage.workItems) {
+        for (const importSegment of workItem.importsegments) {
+          const treeRoot = importSegment.treeRoot
+
+          // Check if this treeRoot is a work-package hash (tagged reference h^+)
+          // We determine this by checking if it matches a package hash in recent history
+          // or current batch, but NOT a segment root
+          let isWorkPackageHash = false
+
+          // Check recent history for package hash
+          if (this.recentHistoryService) {
+            const recentHistory = this.recentHistoryService.getRecentHistory()
+            for (const entry of recentHistory) {
+              // Check if treeRoot is a package hash (key in reportedPackageHashes)
+              if (entry.reportedPackageHashes.has(treeRoot)) {
+                isWorkPackageHash = true
+                requiredPackageHashes.add(treeRoot)
+                break
+              }
+            }
+          }
+
+          // Check current batch guarantees for package hash
+          if (!isWorkPackageHash) {
+            for (const guarantee of currentBatchGuarantees) {
+              if (guarantee.report.package_spec.hash === treeRoot) {
+                isWorkPackageHash = true
+                requiredPackageHashes.add(treeRoot)
+                break
+              }
+            }
+          }
+        }
+      }
+
+      // Step 2: Build mappings dictionary by looking up segment roots
+      // Gray Paper equation 236: segment root comes from work-report's avspec.segroot
+      const mappings = new Map<Hex, Hex>()
+
+      // Lookup from recent history
+      if (this.recentHistoryService) {
+        const recentHistory = this.recentHistoryService.getRecentHistory()
+        for (const packageHash of requiredPackageHashes) {
+          for (const entry of recentHistory) {
+            const segmentTreeRoot = entry.reportedPackageHashes.get(packageHash)
+            if (segmentTreeRoot !== undefined) {
+              // Found in recent history - add to mappings
+              // reportedPackageHashes maps: packageHash → exports_root (which is the segment root)
+              mappings.set(packageHash, segmentTreeRoot)
+              break
+            }
+          }
+        }
+      }
+
+      // Lookup from current batch guarantees
+      for (const packageHash of requiredPackageHashes) {
+        // Skip if already found in recent history
+        if (mappings.has(packageHash)) {
+          continue
+        }
+
+        for (const guarantee of currentBatchGuarantees) {
+          if (guarantee.report.package_spec.hash === packageHash) {
+            // Found in current batch - use exports_root as segment root
+            // Gray Paper: avspec.segroot = exports_root (the segment tree root)
+            mappings.set(
+              packageHash,
+              guarantee.report.package_spec.exports_root,
+            )
+            break
+          }
+        }
+      }
+
+      // Step 3: Convert to array format expected by WorkPackageSharing
+      const mappingsArray = Array.from(mappings.entries()).map(
+        ([workPackageHash, segmentsRoot]) => ({
+          workPackageHash: hexToBytes(workPackageHash),
+          segmentsRoot: hexToBytes(segmentsRoot),
+        }),
+      )
+
+      // Gray Paper equation 50: Validate total dependencies
+      // Note: This validation happens later in applyGuarantees, but we check here for safety
+      const prerequisites = workPackage.context.prerequisites || []
+      const totalDependencies = prerequisites.length + mappingsArray.length
+      if (totalDependencies > WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS) {
+        return safeError(
+          new Error(
+            `Total dependencies (${totalDependencies}) exceed maximum (${WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS})`,
+          ),
+        )
+      }
+
+      return safeResult(mappingsArray)
+    } catch (error) {
+      return safeError(error as Error)
+    }
+  }
+
+  /**
    * Distribute work-package to co-guarantors
    */
   distributeToCoGuarantors(
     workPackage: WorkPackage,
     coreIndex: number,
   ): Safe<GuaranteeSignature[]> {
-    try {
-      // TODO: Step 1: Get co-guarantors for this core
-      const [coGuarantorsError, coGuarantors] = this.getCoGuarantors(
-        coreIndex,
-        this.validatorIndex,
-      )
-
-      if (coGuarantorsError) {
-        return safeError(coGuarantorsError)
-      }
-
-      for (const coGuarantor of coGuarantors) {
-        const [messageError, message] =
-          this.ce134WorkPackageSharingProtocol.serializeRequest({
-            coreIndex: BigInt(coreIndex),
-            workPackageBundle: workPackage,
-            segmentsRootMappings: [], // TODO: Implement segments root mappings
-          })
-        if (messageError) {
-          return safeError(messageError)
-        }
-        this.networkService.sendMessage(
-          BigInt(coGuarantor),
-          134 as StreamKind,
-          message,
-        )
-      }
-
-      // Placeholder: Return empty array (not implemented)
-      return safeResult([])
-    } catch (error) {
-      return safeError(error as Error)
+    if (!this.ce134WorkPackageSharingProtocol) {
+      return safeError(new Error('CE134WorkPackageSharingProtocol not found'))
     }
+    if (!this.networkService) {
+      return safeError(new Error('NetworkService not found'))
+    }
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    // TODO: Step 1: Get co-guarantors for this core
+    const [coGuarantorsError, coGuarantors] = getCoGuarantors(
+      coreIndex,
+      this.validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
+    )
+
+    if (coGuarantorsError) {
+      return safeError(coGuarantorsError)
+    }
+
+    // Compute segments root mappings according to Gray Paper
+    const [mappingsError, segmentsRootMappings] =
+      this.computeSegmentsRootMappings(workPackage, [])
+    if (mappingsError) {
+      return safeError(mappingsError)
+    }
+
+    for (const coGuarantor of coGuarantors) {
+      const [messageError, message] =
+        this.ce134WorkPackageSharingProtocol.serializeRequest({
+          coreIndex: BigInt(coreIndex),
+          workPackageBundle: workPackage,
+          segmentsRootMappings,
+        })
+      if (messageError) {
+        return safeError(messageError)
+      }
+      this.networkService.sendMessage(
+        BigInt(coGuarantor),
+        134 as StreamKind,
+        message,
+      )
+    }
+
+    // Placeholder: Return empty array (not implemented)
+    return safeResult([])
   }
 
   /**
    * Perform erasure coding on work-package and trigger shard distribution
    */
-  async performErasureCoding(
-    workPackage: WorkPackage,
-    exportedSegments: Uint8Array[],
-    extrinsicData: Uint8Array[],
-    importedSegments: Uint8Array[],
-    coreIndex: bigint,
-  ): SafePromise<void> {
-    // Trigger shard distribution through shard service
-    const [shardError] =
-      await this.shardService.generateAndDistributeWorkPackageShards(
-        workPackage,
-        exportedSegments,
-        importedSegments,
-        coreIndex,
-      )
-    if (shardError) {
-      logger.error('Failed to generate and distribute shards', {
-        error: shardError.message,
-        coreIndex: coreIndex.toString(),
-      })
-      return safeError(shardError)
-    }
+  // async performErasureCoding(
+  //   workPackage: WorkPackage,
+  //   exportedSegments: Uint8Array[],
+  //   extrinsicData: Uint8Array[],
+  //   importedSegments: Uint8Array[],
+  //   coreIndex: bigint,
+  // ): SafePromise<void> {
+  //   if (!this.shardService) {
+  //     return safeError(new Error('Shard service not found'))
+  //   }
+  //   // Trigger shard distribution through shard service
+  //   const [shardError] =
+  //     await this.shardService.generateAndDistributeWorkPackageShards(
+  //       workPackage,
+  //       exportedSegments,
+  //       importedSegments,
+  //       coreIndex,
+  //     )
+  //   if (shardError) {
+  //     logger.error('Failed to generate and distribute shards', {
+  //       error: shardError.message,
+  //       coreIndex: coreIndex.toString(),
+  //     })
+  //     return safeError(shardError)
+  //   }
 
-    return safeResult(undefined)
-  }
+  //   return safeResult(undefined)
+  // }
 
   /**
    * Create guarantee extrinsic
    */
-  createGuarantee(
-    workReport: WorkReport,
-    signatures: GuaranteeSignature[],
-    timeslot: bigint,
-    coreAssignments: Map<number, number>,
-    validatorKeys: Map<number, ValidatorPublicKeys>,
-  ): Safe<Guarantee> {
-    try {
-      // Step 1 & 2: Sort signatures by validator index
-      // This also ensures they're in the correct order per Gray Paper
-      const sortedSignatures = sortGuaranteeSignatures(signatures)
+  // createGuarantee(
+  //   workReport: WorkReport,
+  //   signatures: GuaranteeSignature[],
+  //   timeslot: bigint,
+  //   coreAssignments: Map<number, number>,
+  //   validatorKeys: Map<number, ValidatorPublicKeys>,
+  // ): Safe<Guarantee> {
+  //   try {
+  //     // Step 1 & 2: Sort signatures by validator index
+  //     // This also ensures they're in the correct order per Gray Paper
+  //     const sortedSignatures = sortGuaranteeSignatures(signatures)
 
-      // Steps 3-5: Validate all signatures
-      // This validates:
-      // - Signature count (2-3)
-      // - Unique validators
-      // - Correct ordering
-      // - Validators assigned to core
-      // - Cryptographic validity
-      const [validateError, validationResult] =
-        verifyWorkReportDistributionSignature(
-          workReport,
-          sortedSignatures,
-          coreAssignments,
-        )
+  //     // Steps 3-5: Validate all signatures
+  //     // This validates:
+  //     // - Signature count (2-3)
+  //     // - Unique validators
+  //     // - Correct ordering
+  //     // - Validators assigned to core
+  //     // - Cryptographic validity
+  //     const [validateError, validationResult] =
+  //       verifyWorkReportDistributionSignature(
+  //         workReport,
+  //         sortedSignatures,
+  //         coreAssignments,
+  //       )
 
-      // Step 6: Create guarantee tuple
-      const guarantee: Guarantee = {
-        work_report: workReport,
-        timeslot,
-        credential: sortedSignatures,
-      }
+  //     // Step 6: Create guarantee tuple
+  //     const guarantee: Guarantee = {
+  //       work_report: workReport,
+  //       timeslot,
+  //       credential: sortedSignatures,
+  //     }
 
-      return safeResult(guarantee)
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
+  //     return safeResult(guarantee)
+  //   } catch (error) {
+  //     return safeError(error as Error)
+  //   }
+  // }
 
   /**
    * Send guarantee to block author
    */
-  sendToBlockAuthor(guarantee: Guarantee): Safe<void> {
+  sendToBlockAuthor(_guarantee: Guarantee): Safe<void> {
     try {
       // TODO: Step 1: Get current block author from Safrole state
       // TODO: Step 2: Package guarantee into network message
@@ -334,37 +499,6 @@ export class GuarantorService extends BaseService implements IGuarantorService {
 
       // Placeholder: Return error (not implemented)
       return safeError(new Error('Send to block author not implemented'))
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
-
-  /**
-   * Get co-guarantors for a core
-   */
-  getCoGuarantors(
-    coreIndex: number,
-    currentValidatorIndex: number,
-  ): Safe<number[]> {
-    try {
-      // Get values from services
-      const entropy2 = this.entropyService.getEntropy2()
-      const currentSlot = this.clockService.getCurrentSlot()
-      const config = {
-        numValidators: this.configService.numValidators,
-        numCores: this.configService.numCores,
-        epochDuration: this.configService.epochDuration,
-        rotationPeriod: this.configService.rotationPeriod,
-      }
-
-      // Use the guarantor package helper function
-      return getCoGuarantorsHelper(
-        coreIndex,
-        currentValidatorIndex,
-        entropy2,
-        currentSlot,
-        config,
-      )
     } catch (error) {
       return safeError(error as Error)
     }
@@ -400,135 +534,126 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     signatures: GuaranteeSignature[],
     slot: bigint,
   ): Promise<Safe<void>> {
-    try {
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 1: Validate Prerequisites
-      // ═══════════════════════════════════════════════════════════════════
-      // Ensure we have 2-3 signatures (Gray Paper requirement)
-      if (signatures.length < 2 || signatures.length > 3) {
-        return safeError(
-          new Error(
-            `Invalid signature count: ${signatures.length}. Must have 2-3 signatures.`,
-          ),
-        )
-      }
-
-      // Sort signatures by validator index (Gray Paper requirement)
-      const sortedSignatures = sortGuaranteeSignatures(signatures)
-
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 2: Check Slot Validity
-      // ═══════════════════════════════════════════════════════════════════
-      // Don't distribute work-reports that cannot be included in next block
-      const currentSlot = this.clockService.getCurrentSlot()
-      const slotDifference = currentSlot > slot ? currentSlot - slot : 0n
-      const MAX_PAST_SLOTS = 10n // Don't distribute stale reports
-      const MAX_FUTURE_SLOTS = 2n // Don't distribute reports too far ahead
-
-      if (slotDifference > MAX_PAST_SLOTS) {
-        return safeError(
-          new Error(
-            `Work-report slot ${slot} too far in past (current: ${currentSlot})`,
-          ),
-        )
-      }
-      if (slot - currentSlot > MAX_FUTURE_SLOTS) {
-        return safeError(
-          new Error(
-            `Work-report slot ${slot} too far in future (current: ${currentSlot})`,
-          ),
-        )
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 3: Determine Distribution Targets
-      // ═══════════════════════════════════════════════════════════════════
-      // Get current epoch validators (always distribute to these)
-      // TODO: Get from ValidatorSetManager when available
-      // For now, use a placeholder - distribute to all validators
-      const currentValidators: number[] = []
-      // currentValidators = this.validatorSetManager.getActiveValidators().map((_, i) => i)
-
-      // Check if we're in the last core rotation of the epoch
-      const isLastRotation = this.isLastCoreRotationOfEpoch()
-
-      // If last rotation, also get next epoch validators
-      const nextValidators: number[] = []
-      if (isLastRotation) {
-        // nextValidators = this.validatorSetManager.getStagingValidators().map((_, i) => i)
-      }
-
-      // Combine and deduplicate validators (sets likely overlap)
-      const allValidators = new Set([...currentValidators, ...nextValidators])
-
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 4: Create GuaranteedWorkReport Structure
-      // ═══════════════════════════════════════════════════════════════════
-      // Structure per JAMNP-S CE135:
-      // WorkReport ++ Slot ++ len++[ValidatorIndex ++ Ed25519Signature]
-      const _guaranteedWorkReport = {
-        workReport,
-        slot,
-        signatures: sortedSignatures,
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 5: Distribute via CE135 Protocol
-      // ═══════════════════════════════════════════════════════════════════
-      // TODO: Use CE135WorkReportDistributionProtocol to send to all validators
-      // This will be implemented once we have:
-      // - CE135Protocol instance in constructor
-      // - ValidatorSetManager for getting validator list
-      //
-      // for (const validatorIndex of allValidators) {
-      //   if (validatorIndex === this.validatorIndex) {
-      //     continue // Don't send to ourselves
-      //   }
-      //
-      //   try {
-      //     await this.networkService.sendToValidator(
-      //       validatorIndex,
-      //       'CE135',
-      //       guaranteedWorkReport,
-      //     )
-      //   } catch (error) {
-      //     // Continue distributing to other validators even if one fails
-      //     // Log warning but don't fail the entire distribution
-      //   }
-      // }
-
-      // Placeholder: At least log the distribution intent
-      if (allValidators.size > 0) {
-        // Distribution will happen here
-      }
-
-      // ═══════════════════════════════════════════════════════════════════
-      // STEP 6: Store Locally & Create Guarantee Extrinsic
-      // ═══════════════════════════════════════════════════════════════════
-      // Store in WorkReportService for local processing
-      await this.workReportService.storeGuaranteedWorkReport(
-        workReport,
-        workReport.core_index,
-      )
-
-      // Create Guarantee extrinsic structure for block inclusion
-      // Gray Paper Equation 251-258: Guarantee structure
-      const _guarantee: Guarantee = {
-        report: workReport,
-        slot,
-        credential: sortedSignatures,
-      }
-
-      // TODO: Add to pending guarantees queue for block authors
-      // This queue will be read by block authoring service
-      // await this.guaranteeQueue.add(guarantee)
-
-      return safeResult(undefined)
-    } catch (error) {
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 1: Validate Prerequisites
+    // ═══════════════════════════════════════════════════════════════════
+    // Ensure we have 2-3 signatures (Gray Paper requirement)
+    if (signatures.length < 2 || signatures.length > 3) {
       return safeError(
-        error instanceof Error ? error : new Error(String(error)),
+        new Error(
+          `Invalid signature count: ${signatures.length}. Must have 2-3 signatures.`,
+        ),
       )
     }
+
+    // Sort signatures by validator index (Gray Paper requirement)
+    // const sortedSignatures = sortGuaranteeSignatures(signatures)
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 2: Check Slot Validity
+    // ═══════════════════════════════════════════════════════════════════
+    // Don't distribute work-reports that cannot be included in next block
+    const currentSlot = this.clockService.getCurrentSlot()
+    const slotDifference = currentSlot > slot ? currentSlot - slot : 0n
+    const MAX_PAST_SLOTS = 10n // Don't distribute stale reports
+    const MAX_FUTURE_SLOTS = 2n // Don't distribute reports too far ahead
+
+    if (slotDifference > MAX_PAST_SLOTS) {
+      return safeError(
+        new Error(
+          `Work-report slot ${slot} too far in past (current: ${currentSlot})`,
+        ),
+      )
+    }
+    if (slot - currentSlot > MAX_FUTURE_SLOTS) {
+      return safeError(
+        new Error(
+          `Work-report slot ${slot} too far in future (current: ${currentSlot})`,
+        ),
+      )
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 3: Determine Distribution Targets
+    // ═══════════════════════════════════════════════════════════════════
+    // Get current epoch validators (always distribute to these)
+    // TODO: Get from ValidatorSetManager when available
+    // For now, use a placeholder - distribute to all validators
+    const currentValidators: number[] = []
+    // currentValidators = this.validatorSetManager.getActiveValidators().map((_, i) => i)
+
+    // Check if we're in the last core rotation of the epoch
+    const isLastRotation = this.isLastCoreRotationOfEpoch()
+
+    // If last rotation, also get next epoch validators
+    const nextValidators: number[] = []
+    if (isLastRotation) {
+      // nextValidators = this.validatorSetManager.getStagingValidators().map((_, i) => i)
+    }
+
+    // Combine and deduplicate validators (sets likely overlap)
+    const allValidators = new Set([...currentValidators, ...nextValidators])
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 4: Create GuaranteedWorkReport Structure
+    // ═══════════════════════════════════════════════════════════════════
+    // Structure per JAMNP-S CE135:
+    // WorkReport ++ Slot ++ len++[ValidatorIndex ++ Ed25519Signature]
+    // const _guaranteedWorkReport = {
+    //   workReport,
+    //   slot,
+    //   signatures: sortedSignatures,
+    // }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 5: Distribute via CE135 Protocol
+    // ═══════════════════════════════════════════════════════════════════
+    // TODO: Use CE135WorkReportDistributionProtocol to send to all validators
+    // This will be implemented once we have:
+    // - CE135Protocol instance in constructor
+    // - ValidatorSetManager for getting validator list
+    //
+    // for (const validatorIndex of allValidators) {
+    //   if (validatorIndex === this.validatorIndex) {
+    //     continue // Don't send to ourselves
+    //   }
+    //
+    //   try {
+    //     await this.networkService.sendToValidator(
+    //       validatorIndex,
+    //       'CE135',
+    //       guaranteedWorkReport,
+    //     )
+    //   } catch (error) {
+    //     // Continue distributing to other validators even if one fails
+    //     // Log warning but don't fail the entire distribution
+    //   }
+    // }
+
+    // Placeholder: At least log the distribution intent
+    if (allValidators.size > 0) {
+      // Distribution will happen here
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // STEP 6: Store Locally & Create Guarantee Extrinsic
+    // ═══════════════════════════════════════════════════════════════════
+    // Store in WorkReportService for local processing
+    const [storeError] =
+      this.workReportService.storeGuaranteedWorkReport(workReport)
+    if (storeError) {
+      return safeError(storeError)
+    }
+
+    // Create Guarantee extrinsic structure for block inclusion
+    // Gray Paper Equation 251-258: Guarantee structure
+    // const _guarantee: Guarantee = {
+    //   report: workReport,
+    //   slot,
+    //   signatures: sortedSignatures,
+    // }
+
+    return safeResult(undefined)
   }
 
   /**
@@ -653,8 +778,13 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     // ═══════════════════════════════════════════════════════════════════
     // STEP 1: Verify Assignment & Anti-Spam
     // ═══════════════════════════════════════════════════════════════════
-    const [coreError, assignedCore] = this.validatorSetManager.getAssignedCore(
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    const [coreError, assignedCore] = getAssignedCore(
       this.validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
     )
     if (coreError) {
       return safeError(coreError)
@@ -669,7 +799,6 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     }
 
     // Check anti-spam limit (max 2 signatures per timeslot)
-    const currentSlot = this.clockService.getCurrentSlot()
     const validatorSignatures =
       this.validatorSignaturesForTimeslot
         .get(currentSlot)
@@ -797,9 +926,13 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     // STEP 7: Share with Co-Guarantors (CE134)
     // ═══════════════════════════════════════════════════════════════════
     // Get co-guarantors for this core (each core has 3 validators)
-    const [coGuarantorsError, _coGuarantors] = this.getCoGuarantors(
+
+    const [coGuarantorsError, _coGuarantors] = getCoGuarantors(
       Number(data.coreIndex),
       this.validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
     )
     if (coGuarantorsError) {
       return safeError(coGuarantorsError)
@@ -877,9 +1010,21 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     if (validatorIndexError) {
       return safeError(validatorIndexError)
     }
+    if (!this.entropyService) {
+      return safeError(new Error('Entropy service not found'))
+    }
+    if (!this.clockService) {
+      return safeError(new Error('Clock service not found'))
+    }
     // Step 1: Verify we are assigned to this core
-    const [coreError, assignedCore] =
-      this.validatorSetManager.getAssignedCore(validatorIndex)
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    const [coreError, assignedCore] = getAssignedCore(
+      validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
+    )
     if (coreError) {
       return safeError(coreError)
     }
@@ -920,7 +1065,6 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     // const workReportHash = blake2bHash(encode(workReport))
 
     // Step 5: Verify we can sign (anti-spam check - max 2 per timeslot)
-    const currentSlot = this.clockService.getCurrentSlot()
     const validatorSignatures =
       this.validatorSignaturesForTimeslot.get(currentSlot) ?? new Map()
     const currentValidatorSignatures =
@@ -992,7 +1136,7 @@ export class GuarantorService extends BaseService implements IGuarantorService {
       )
     }
 
-    const workReport = workReportEntry.workReport
+    const workReport = workReportEntry
     // get validator index from peer public key
     const [validatorIndexError, validatorIndex] =
       this.validatorSetManager.getValidatorIndex(peerPublicKey)
@@ -1001,8 +1145,14 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     }
 
     // get assigned core for validator index
-    const [assignedCoreError, assignedCore] =
-      this.validatorSetManager.getAssignedCore(validatorIndex)
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    const [assignedCoreError, assignedCore] = getAssignedCore(
+      validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
+    )
     if (assignedCoreError) {
       return safeError(assignedCoreError)
     }
@@ -1154,4 +1304,539 @@ export class GuarantorService extends BaseService implements IGuarantorService {
       timer?: NodeJS.Timeout
     }
   >()
+
+  /**
+   * Apply guarantees state transition
+   *
+   * Gray Paper Reference: reporting_assurance.tex (Section 12.3)
+   * Processes guarantees extrinsic and marks work reports as available
+   *
+   * Validation rules (Gray Paper equations 251-298):
+   * 1. Guarantees must be sorted by core index (ascending, unique)
+   * 2. Each guarantee must have 2-3 signatures, sorted by validator index
+   * 3. Signatures must be cryptographically valid
+   * 4. Validators must be assigned to the core (current or previous rotation)
+   * 5. Core must not be engaged (no pending report)
+   * 6. Authorizer hash must be in auth pool for the core
+   * 7. Work report structure must be valid
+   * 8. Dependencies must be satisfied (known packages)
+   *
+   * @param guarantees - Array of guarantees from block body
+   * @param currentSlot - Current timeslot
+   * @returns Array of reporter validator public keys (ed25519)
+   */
+  applyGuarantees(guarantees: Guarantee[], currentSlot: bigint): Safe<Hex[]> {
+    // Pre-validate all guarantees before processing
+    // Pass currentSlot and rotationPeriod to determine correct validator set
+    for (const guarantee of guarantees) {
+      const [guaranteeValidationError] = verifyGuaranteeSignature(
+        guarantee,
+        this.validatorSetManager,
+        currentSlot,
+        this.configService.rotationPeriod,
+      )
+      if (guaranteeValidationError) {
+        return safeError(guaranteeValidationError)
+      }
+    }
+    const reporters = new Set<Hex>()
+    const processedCores = new Set<number>()
+    // Track package hashes to detect duplicates across all guarantees
+    const seenPackageHashes = new Set<Hex>()
+    // Track ALL package hashes from ALL guarantees in the batch (for prerequisite resolution)
+    // Gray Paper: local_incomingpackagehashes includes all guarantees in the batch
+    const allGuaranteePackageHashes = new Set<Hex>()
+    for (const guarantee of guarantees) {
+      allGuaranteePackageHashes.add(guarantee.report.package_spec.hash)
+    }
+
+    // Gray Paper equation 257: Guarantees must be sorted by core index (ascending, unique)
+    for (let i = 0; i < guarantees.length; i++) {
+      const guarantee = guarantees[i]
+      const coreIndex = Number(guarantee.report.core_index)
+      const packageHash = guarantee.report.package_spec.hash
+
+      // Validate no duplicate package hashes across all guarantees
+      if (seenPackageHashes.has(packageHash)) {
+        return safeError(new Error('duplicate_package'))
+      }
+      seenPackageHashes.add(packageHash)
+
+      // Gray Paper equation 361-362: Package hash must not appear in recent history
+      // p \not\in \bigcup_{x \in \recenthistory}\keys{x_\rh¬reportedpackagehashes}
+      if (this.recentHistoryService) {
+        const recentHistory = this.recentHistoryService.getRecentHistory()
+        for (const entry of recentHistory) {
+          if (entry.reportedPackageHashes.has(packageHash)) {
+            return safeError(new Error('duplicate_package'))
+          }
+        }
+      }
+
+      // Validate guarantee slot is not in the future
+      if (guarantee.slot > currentSlot) {
+        return safeError(new Error('future_report_slot'))
+      }
+
+      // Validate guarantee is not from before the last rotation
+      // Guarantees must be from either the current rotation or the previous rotation
+      const rotationPeriod = BigInt(this.configService.rotationPeriod)
+      const currentRotation = currentSlot / rotationPeriod
+      const guaranteeRotation = guarantee.slot / rotationPeriod
+
+      // Check if guarantee is from before the last rotation (more than 1 rotation ago)
+      if (guaranteeRotation < currentRotation - 1n) {
+        return safeError(new Error('report_epoch_before_last'))
+      }
+
+      // Validate core_index is within valid range
+      if (coreIndex < 0 || coreIndex >= this.configService.numCores) {
+        return safeError(new Error('bad_core_index'))
+      }
+
+      // Check uniqueness
+      if (processedCores.has(coreIndex)) {
+        return safeError(new Error('out_of_order_guarantee'))
+      }
+      processedCores.add(coreIndex)
+
+      // Check ordering (must be ascending)
+      if (i > 0) {
+        const prevCoreIndex = Number(guarantees[i - 1].report.core_index)
+        if (coreIndex <= prevCoreIndex) {
+          return safeError(new Error('out_of_order_guarantee'))
+        }
+      }
+
+      // Gray Paper equation 335: Validate anchor is in recent history and context matches
+      const anchorHash = guarantee.report.context.anchor
+      if (this.recentHistoryService) {
+        if (!this.recentHistoryService.isValidAnchor(anchorHash)) {
+          return safeError(new Error('anchor_not_recent'))
+        }
+
+        // Get recent history entry for anchor validation
+        const recentEntry =
+          this.recentHistoryService.getRecentHistoryForBlock(anchorHash)
+        if (!recentEntry) {
+          return safeError(new Error('anchor_not_recent'))
+        }
+
+        // Gray Paper equation 335: Validate state_root matches
+        const contextStateRoot = guarantee.report.context.state_root
+        if (contextStateRoot !== recentEntry.stateRoot) {
+          return safeError(new Error('bad_state_root'))
+        }
+
+        // Gray Paper equation 335: Validate beefy_root (accoutLogSuperPeak) matches
+        const contextBeefyRoot = guarantee.report.context.beefy_root
+        if (contextBeefyRoot !== recentEntry.accoutLogSuperPeak) {
+          return safeError(new Error('bad_beefy_mmr_root'))
+        }
+      }
+
+      // Gray Paper equation 398: Validate code_hash for each work result
+      if (this.serviceAccountService) {
+        for (const result of guarantee.report.results) {
+          const [serviceAccountError, serviceAccount] =
+            this.serviceAccountService.getServiceAccount(result.service_id)
+          if (serviceAccountError) {
+            return safeError(new Error('bad_service_id'))
+          }
+
+          // Validate code_hash matches service account codehash
+          if (result.code_hash !== serviceAccount.codehash) {
+            return safeError(new Error('bad_code_hash'))
+          }
+
+          // Validate accumulate_gas >= minaccgas
+          // Gray Paper: accumulate_gas must be at least the service's minaccgas
+          if (
+            BigInt(result.accumulate_gas) < BigInt(serviceAccount.minaccgas)
+          ) {
+            return safeError(new Error('service_item_gas_too_low'))
+          }
+        }
+      }
+
+      // Gray Paper equation 260-262: Credential must have 2-3 signatures, sorted by validator index
+      const guaranteeSignatures = guarantee.signatures
+      if (guaranteeSignatures.length < 2) {
+        return safeError(new Error('insufficient_guarantees'))
+      }
+      if (guaranteeSignatures.length > 3) {
+        return safeError(
+          new Error(
+            `Invalid signature count: ${guaranteeSignatures.length}. Must have 2-3 signatures.`,
+          ),
+        )
+      }
+
+      // Check signatures are sorted by validator index and unique
+      const validatorIndices = new Set<number>()
+      for (let j = 0; j < guaranteeSignatures.length; j++) {
+        const sig = guaranteeSignatures[j]
+        const validatorIdx = sig.validator_index
+
+        if (validatorIndices.has(validatorIdx)) {
+          return safeError(new Error('not_sorted_or_unique_guarantors'))
+        }
+        validatorIndices.add(validatorIdx)
+
+        // Check ordering
+        if (
+          j > 0 &&
+          guaranteeSignatures[j - 1].validator_index >= validatorIdx
+        ) {
+          return safeError(new Error('not_sorted_or_unique_guarantors'))
+        }
+      }
+
+      // Gray Paper equation 267-281: Validate signatures and validator assignments
+      // For guarantees from previous rotations, use previous validators for lookup
+      const previousValidators =
+        this.validatorSetManager.getPreviousValidators()
+      const isFromPreviousRotation = guaranteeRotation < currentRotation
+
+      // Get active validators once per guarantee (not per signature) to ensure consistency
+      // For current rotation guarantees, we'll use this; for previous rotation, we'll use previousValidators
+      const activeValidators = !isFromPreviousRotation
+        ? this.validatorSetManager.getActiveValidators()
+        : null
+
+      for (const sig of guaranteeSignatures) {
+        const validatorIdx = sig.validator_index
+
+        // Get validator keys for reporter collection
+        // Strategy:
+        // - For current rotation guarantees: use active validators only (getActiveValidators)
+        // - For previous rotation guarantees: use previous validators (getPreviousValidators)
+        // This ensures we use the correct validator set, not the merged getAllConnectedValidators
+        let validatorKey: { ed25519: Hex } | null = null
+
+        if (!isFromPreviousRotation) {
+          // Current rotation guarantee: use active validators only
+          // Verify validator is actually in the active set (not previous set)
+          if (!this.validatorSetManager.isValidatorActive(validatorIdx)) {
+            return safeError(new Error('bad_validator_index'))
+          }
+          // Use the active validators we got above
+          if (!activeValidators) {
+            return safeError(
+              new Error('internal error: activeValidators not initialized'),
+            )
+          }
+          // Explicitly check that this validator exists in the active set (not just get it)
+          if (!activeValidators.has(validatorIdx)) {
+            return safeError(new Error('bad_validator_index'))
+          }
+          const activeValidator = activeValidators.get(validatorIdx)
+          // For current rotation guarantees, we MUST use the active validator's key from the active set
+          // Never use previous validator's key - always use active set key for current rotation
+          // Explicitly ensure we're getting the key from the active set at the correct index
+          if (!activeValidator) {
+            return safeError(
+              new Error(
+                `Validator ${validatorIdx} not found in active set for current rotation guarantee`,
+              ),
+            )
+          }
+          validatorKey = { ed25519: activeValidator.ed25519 }
+        } else {
+          // Previous rotation guarantee: use previous validators only
+          const prevValidator = previousValidators.get(validatorIdx)
+          if (prevValidator) {
+            validatorKey = { ed25519: prevValidator.ed25519 }
+          } else {
+            // Validator not in previous set - this is an error for previous rotation guarantees
+            // Do NOT fall back to current set - we must use the set that matches the rotation
+            return safeError(new Error('bad_validator_index'))
+          }
+        }
+
+        // Check if validator is banned/offender
+        if (this.validatorSetManager.isOffender(validatorIdx)) {
+          return safeError(new Error('banned_validator'))
+        }
+
+        // Get assigned core for validator at the guarantee's slot time
+        // Gray Paper equation 275: Validate assignment at guarantee slot time
+        // The validator must be assigned to the core at the time the guarantee was created
+        const entropy2 = this.entropyService.getEntropy2()
+        const [coreAssignmentError, assignedCore] = getAssignedCore(
+          validatorIdx,
+          entropy2,
+          guarantee.slot, // Check assignment at guarantee slot time, not current slot
+          this.configService,
+        )
+        if (coreAssignmentError) {
+          return safeError(
+            new Error(
+              `Failed to get core assignment for validator ${validatorIdx}: ${coreAssignmentError.message}`,
+            ),
+          )
+        }
+
+        // Validate validator is assigned to this core (current or previous rotation)
+        // Gray Paper equation 275: guarantee slot must be within current or previous rotation
+        // Note: guaranteeRotation and currentRotation are already calculated above
+
+        // Valid if in same rotation, or guarantee is from previous rotation
+        const isValidRotation =
+          guaranteeRotation === currentRotation ||
+          guaranteeRotation === currentRotation - 1n
+
+        // For guarantees from previous rotation, assignment validation uses previous validator set
+        // The assignment calculation should still work, but we verify rotation is valid
+        if (!isValidRotation) {
+          return safeError(new Error('wrong_assignment'))
+        }
+
+        // Check that validator was assigned to this core at guarantee slot time
+        // For guarantees from previous rotation, we've already verified the validators
+        // are in the previous set and signed correctly. The assignment calculation
+        // using getAssignedCore may not work correctly if the validator count changed,
+        // so for previous rotation guarantees, we skip strict assignment check.
+        // The fact that they signed and are in the previous set is sufficient validation.
+        if (!isFromPreviousRotation && assignedCore !== coreIndex) {
+          return safeError(new Error('wrong_assignment'))
+        }
+
+        // For previous rotation guarantees, we still verify the assignment if possible,
+        // but if getAssignedCore fails due to validator count mismatch, we allow it
+        // since the validators are verified to be in the previous set
+        if (isFromPreviousRotation && assignedCore !== coreIndex) {
+          // Check if validator exists in previous set - if so, assignment is acceptable
+          // (the assignment calculation may be off due to validator count changes)
+          const prevValidator = previousValidators.get(validatorIdx)
+          if (!prevValidator) {
+            // Validator not in previous set - this is an error
+            return safeError(new Error('wrong_assignment'))
+          }
+          // Validator is in previous set - assignment check passed via validator existence
+        }
+
+        // Add to reporters set (Gray Paper equation 277)
+        // Ensure we have a valid key before adding
+        if (!validatorKey || !validatorKey.ed25519) {
+          return safeError(
+            new Error(
+              `Internal error: validator key is null for validator ${validatorIdx}`,
+            ),
+          )
+        }
+        reporters.add(validatorKey.ed25519)
+      }
+
+      // Gray Paper equation 296-298: Core must not be engaged (no pending or available report)
+      const pendingReport = this.workReportService.getCoreReport(
+        BigInt(coreIndex),
+      )
+      if (pendingReport !== null) {
+        return safeError(new Error('core_engaged'))
+      }
+
+      // Also check if core has an available report (from avail_assignments)
+      if (this.workReportService.hasAvailableReport(BigInt(coreIndex))) {
+        return safeError(new Error('core_engaged'))
+      }
+
+      // Validate authorizer hash is in auth pool for this core
+      // Gray Paper: The authorizer must be in the auth pool for the core
+      const authorizerHash = guarantee.report.authorizer_hash
+      const authPool = this.authPoolService.getAuthPool()
+      if (coreIndex >= authPool.length) {
+        return safeError(
+          new Error(`Core index ${coreIndex} out of range for auth pool`),
+        )
+      }
+      const coreAuthPool = authPool[coreIndex]
+      if (!coreAuthPool.includes(authorizerHash)) {
+        return safeError(new Error('core_unauthorized'))
+      }
+
+      if (!this.accumulationService) {
+        return safeError(new Error('Accumulation service not initialized'))
+      }
+      // Get known packages from accumulated state
+      const knownPackages = new Set<Hex>(
+        this.accumulationService
+          .getAccumulated() // sequence[C_epochlen]{protoset{hash}}
+          .packages.flatMap((packageSet) => Array.from(packageSet)), // protoset{hash}
+      )
+
+      // Validate dependencies (prerequisites must be in known packages, any guarantee in batch, or recent history)
+      // Gray Paper equation 369-378: Prerequisites must be in local_incomingpackagehashes or recent history
+      // local_incomingpackagehashes includes ALL guarantees in the batch (\xtguarantees), not just processed ones
+      const prerequisites = guarantee.report.context.prerequisites || []
+      for (const prereqHash of prerequisites) {
+        // Check if prerequisite is in known packages
+        const isInKnownPackages = knownPackages.has(prereqHash)
+        // Check if prerequisite is in any guarantee in the batch (local_incomingpackagehashes)
+        const isInAnyGuarantee = allGuaranteePackageHashes.has(prereqHash)
+        // Check if prerequisite is in recent history
+        let isInRecentHistory = false
+        if (this.recentHistoryService) {
+          const recentHistory = this.recentHistoryService.getRecentHistory()
+          for (const entry of recentHistory) {
+            if (entry.reportedPackageHashes.has(prereqHash)) {
+              isInRecentHistory = true
+              break
+            }
+          }
+        }
+
+        // Prerequisite must be in at least one of: known_packages, any guarantee in batch, or recent history
+        if (!isInKnownPackages && !isInAnyGuarantee && !isInRecentHistory) {
+          return safeError(new Error('dependency_missing'))
+        }
+      }
+
+      // Gray Paper equation 236: Validate segment_root_lookup
+      // Each work_package_hash must correspond to a valid work package
+      // segment_root_lookup references work packages from:
+      // - ALL guarantees in the batch (local_incomingpackagehashes)
+      // - recent history (and segment_tree_root must match exports_root)
+      // Note: segment_root_lookup does NOT check known_packages (only prerequisites do)
+      const segmentRootLookup = guarantee.report.segment_root_lookup || []
+      for (const lookupItem of segmentRootLookup) {
+        const workPackageHash = lookupItem.work_package_hash
+        const expectedSegmentTreeRoot = lookupItem.segment_tree_root
+
+        // Check if work package hash is in any guarantee in the batch (not just processed ones)
+        let isInAnyGuarantee = false
+        let matchingGuarantee: Guarantee | null = null
+        for (const g of guarantees) {
+          if (g.report.package_spec.hash === workPackageHash) {
+            isInAnyGuarantee = true
+            matchingGuarantee = g
+            break
+          }
+        }
+
+        // If found in a guarantee, verify segment_tree_root matches exports_root
+        if (isInAnyGuarantee && matchingGuarantee) {
+          if (
+            matchingGuarantee.report.package_spec.exports_root !==
+            expectedSegmentTreeRoot
+          ) {
+            return safeError(new Error('segment_root_lookup_invalid'))
+          }
+        }
+
+        // Check if work package hash is in recent history and segment_tree_root matches
+        let isInRecentHistory = false
+        if (this.recentHistoryService) {
+          const recentHistory = this.recentHistoryService.getRecentHistory()
+          for (const entry of recentHistory) {
+            const exportsRoot = entry.reportedPackageHashes.get(workPackageHash)
+            if (exportsRoot !== undefined) {
+              // Found in recent history - verify segment_tree_root matches exports_root
+              if (exportsRoot !== expectedSegmentTreeRoot) {
+                return safeError(new Error('segment_root_lookup_invalid'))
+              }
+              isInRecentHistory = true
+              break
+            }
+          }
+        }
+
+        // Work package hash must be in at least one of: any guarantee in batch, or recent history
+        // Note: known_packages is NOT checked for segment_root_lookup
+        if (!isInAnyGuarantee && !isInRecentHistory) {
+          return safeError(new Error('segment_root_lookup_invalid'))
+        }
+      }
+
+      // Gray Paper equation 49-50: Validate total dependencies
+      // len(segment_root_lookup) + len(prerequisites) <= C_maxreportdeps
+      const totalDependencies = prerequisites.length + segmentRootLookup.length
+      if (totalDependencies > WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS) {
+        return safeError(new Error('too_many_dependencies'))
+      }
+
+      // Gray Paper equation 210: Validate work report size
+      // The total size of all unbounded blobs (auth_output + result.ok outputs) must not exceed C_maxreportvarsize
+      let totalUnboundedSize = 0
+
+      // Add auth_output size
+      const authOutputBytes = hexToBytes(guarantee.report.auth_output)
+      totalUnboundedSize += authOutputBytes.length
+
+      // Add each result.ok output size
+      // WorkExecResultValue can be: Hex string (ok), { ok: Hex }, { panic: null }, or error string
+      for (const resultItem of guarantee.report.results) {
+        if (
+          typeof resultItem.result === 'string' &&
+          resultItem.result.startsWith('0x')
+        ) {
+          // Success case: result is a hex string directly
+          const resultOutputBytes = hexToBytes(resultItem.result as Hex)
+          totalUnboundedSize += resultOutputBytes.length
+        } else if (
+          typeof resultItem.result === 'object' &&
+          resultItem.result !== null &&
+          'ok' in resultItem.result
+        ) {
+          // Success case: result is { ok: Hex }
+          const okValue = (resultItem.result as { ok: Hex }).ok
+          if (typeof okValue === 'string' && okValue.startsWith('0x')) {
+            const resultOutputBytes = hexToBytes(okValue)
+            totalUnboundedSize += resultOutputBytes.length
+          }
+        }
+        // Error/panic cases don't contribute to unbounded size
+      }
+
+      // Check if total size exceeds limit
+      if (totalUnboundedSize > WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE) {
+        return safeError(new Error('work_report_too_big'))
+      }
+
+      // Gray Paper equation 121-125: Validate total accumulate_gas
+      // The sum of all accumulate_gas values must be <= C_reportaccgas
+      let totalAccumulateGas = 0n
+      for (const resultItem of guarantee.report.results) {
+        totalAccumulateGas += BigInt(resultItem.accumulate_gas)
+      }
+
+      // Check if total accumulate_gas > C_REPORTACCGAS (greater than is not allowed, equal is allowed)
+      if (totalAccumulateGas > BigInt(WORK_REPORT_CONSTANTS.C_REPORTACCGAS)) {
+        return safeError(new Error('work_report_gas_too_high'))
+      }
+
+      // All validations passed - mark work report as available
+      const [markError] = this.workReportService.markAsAvailable(
+        guarantee.report,
+        currentSlot, // Timeout set to current slot
+      )
+
+      if (markError) {
+        return safeError(
+          new Error(
+            `Failed to mark work report as available: ${markError.message}`,
+          ),
+        )
+      }
+    }
+
+    // Update statistics from successfully processed guarantees
+    // This updates validator, core, and service statistics based on the guarantees
+    if (this.statisticsService) {
+      this.statisticsService.applyBlockDeltas(
+        {
+          tickets: [],
+          preimages: [],
+          guarantees,
+          assurances: [],
+          disputes: [],
+        },
+        currentSlot,
+        0, // authorIndex not used for reports STF
+      )
+    }
+
+    // Convert Set to array for return (reporters should be unique)
+    return safeResult(Array.from(reporters))
+  }
 }

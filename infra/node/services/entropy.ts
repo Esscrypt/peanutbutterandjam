@@ -5,13 +5,17 @@ import {
   type EventBusService,
   hexToBytes,
   logger,
-  type Safe,
-  safeError,
-  safeResult,
   zeroHash,
 } from '@pbnj/core'
 import type { EpochTransitionEvent } from '@pbnj/events'
-import { BaseService, type BlockHeader, type EntropyState } from '@pbnj/types'
+import {
+  BaseService,
+  type BlockHeader,
+  type EntropyState,
+  type Safe,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 
 /**
  * EntropyService - Manages Gray Paper entropy tracking

@@ -5,14 +5,7 @@
  * using fully normalized tables following Gray Paper specifications.
  */
 
-import {
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
 import {
   calculateWorkPackageHash,
   calculateWorkReportHash,
@@ -21,7 +14,13 @@ import {
   encodeWorkPackage,
   encodeWorkReport,
 } from '@pbnj/serialization'
-import type { WorkExecResultValue, WorkPackage, WorkReport } from '@pbnj/types'
+import type {
+  Safe,
+  WorkExecResultValue,
+  WorkPackage,
+  WorkReport,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { and, count, desc, eq, sum } from 'drizzle-orm'
 import type { CoreDb } from './index'
 import {
@@ -161,7 +160,7 @@ export class WorkStore {
               workPackageHash: packageHash,
               serviceIndex: item.serviceindex,
               codeHash: item.codehash,
-              payload: item.payload,
+              payload: bytesToHex(item.payload),
               gasLimit: item.refgaslimit,
               accGasLimit: item.accgaslimit,
               importSegments: JSON.stringify(item.importsegments), //TODO: Fix this

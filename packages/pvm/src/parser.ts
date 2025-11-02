@@ -7,8 +7,6 @@ import type { PVMInstruction } from '@pbnj/types'
  * Gray Paper Reference: pvm.tex sections 7.1-7.3
  */
 export class PVMParser {
-
-
   /**
    * Skip function Fskip(i) - determines distance to next instruction
    *

@@ -6,15 +6,10 @@
  */
 
 import crypto from 'node:crypto'
-import {
-  generateAlternativeName,
-  type Safe,
-  safeError,
-  safeResult,
-  signEd25519,
-} from '@pbnj/core'
+import { generateAlternativeName, signEd25519 } from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
-import type { AlternativeName, KeyPair } from '@pbnj/types'
+import type { AlternativeName, KeyPair, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import * as asn1js from 'asn1js'
 import * as pkijs from 'pkijs'
 import { generateALPNProtocol, pemToDer } from './tls'

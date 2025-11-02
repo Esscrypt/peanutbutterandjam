@@ -6,24 +6,15 @@
  */
 
 import {
-  verifyAnnouncementSignature,
-  verifyTranche0AuditSignature,
-  verifyTrancheNAuditSignature,
-} from '@pbnj/audit'
-import {
   bytesToHex,
   concatBytes,
   type EventBusService,
   type Hex,
   hexToBytes,
-  logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
-import type { AuditAnnouncement, WorkReport } from '@pbnj/types'
+import type { AuditAnnouncement, Safe, SafePromise } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

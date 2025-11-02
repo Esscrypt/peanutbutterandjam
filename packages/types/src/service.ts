@@ -5,7 +5,7 @@
  * Provides a registry for polymorphic service management
  */
 
-import { type Safe, type SafePromise, safeResult } from '@pbnj/core'
+import { type Safe, type SafePromise, safeResult } from './safe'
 
 /**
  * Standard service interface that all services must implement

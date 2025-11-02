@@ -5,27 +5,24 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import {
-  logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { logger } from '@pbnj/core'
 import { decodeBlob, decodeProgram } from '@pbnj/serialization'
 import type {
   ContextMutator,
   ImplicationsPair,
+  IPVM,
   PVMInstruction,
   PVMOptions,
   PVMState,
   RefineInvocationContext,
   ResultCode,
-  IPVM,
+  Safe,
+  SafePromise,
   WorkError,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { GAS_CONFIG, INIT_CONFIG, RESULT_CODES } from './config'
-import { HostFunctionRegistry } from './host-functions/general/registry'
+import type { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMRAM } from './ram'
 

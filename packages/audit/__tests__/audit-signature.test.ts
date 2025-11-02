@@ -5,14 +5,14 @@
  * Validates compliance with Gray Paper auditing.tex specification
  */
 
-import { describe, expect, it, beforeAll } from 'vitest'
+import { describe, expect, it, beforeAll } from 'bun:test'
 import {
   generateTranche0AuditSignature,
   generateTrancheNAuditSignature,
   verifyTranche0AuditSignature,
   verifyTrancheNAuditSignature,
 } from '../src/audit-signature'
-import { logger, type Hex, generateDevAccountValidatorKeyPair, hexToBytes } from '@pbnj/core'
+import { logger, type Hex, generateDevAccountValidatorKeyPair } from '@pbnj/core'
 import type { WorkReport, AuditAnnouncement, IValidatorSetManager, ValidatorKeyTuple } from '@pbnj/types'
 import { generateAnnouncementSignature, verifyAnnouncementSignature } from '../src/announcement'
 

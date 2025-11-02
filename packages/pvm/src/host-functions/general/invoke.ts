@@ -60,11 +60,53 @@ export class InvokeHostFunction extends BaseHostFunction {
     }
 
     // Read gas limit and register values from memory
-    const params = this.readInvokeParameters(context.ram, memoryOffset)
-    if (!params) {
+    // Gray Paper: Read gas limit (8 bytes)
+    const [gasLimitData, faultAddress] = context.ram.readOctets(
+      memoryOffset,
+      8n,
+    )
+    if (faultAddress) {
       return {
         resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress,
+          details: 'Memory not readable',
+        },
       }
+    }
+    if (gasLimitData === null) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress ?? 0n,
+          details: 'Memory not readable',
+        },
+      }
+    }
+    const gasLimit = new DataView(gasLimitData.buffer).getBigUint64(0, true)
+
+    // Gray Paper: Read register values (13 registers * 8 bytes each = 104 bytes)
+    const [registersData, faultAddress2] = context.ram.readOctets(
+      memoryOffset + 8n,
+      104n,
+    )
+    if (faultAddress2 || !registersData) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: faultAddress2 ?? 0n,
+          details: 'Memory not readable',
+        },
+      }
+    }
+
+    const registers: bigint[] = []
+    for (let i = 0; i < 13; i++) {
+      const registerData = registersData.slice(i * 8, (i + 1) * 8)
+      registers.push(new DataView(registerData.buffer).getBigUint64(0, true))
     }
 
     // Execute PVM machine
@@ -73,7 +115,7 @@ export class InvokeHostFunction extends BaseHostFunction {
     //   params.gasLimit,
     //   params.registers,
     // )
-    await machine.pvm.invoke(params.gasLimit, params.registers, machine.code)
+    await machine.pvm.invoke(gasLimit, registers, machine.code)
 
     // Write results back to memory
     this.writeInvokeResults(context.ram, memoryOffset, machine.pvm.state)
@@ -83,9 +125,9 @@ export class InvokeHostFunction extends BaseHostFunction {
     // Gray Paper: Return result code in registers[7]
     // If HOST or FAULT, also return ID/address in registers[8]
     context.registers[7] = BigInt(machine.pvm.state.resultCode)
-    if(machine.pvm.state.resultCode === RESULT_CODES.HOST) {
+    if (machine.pvm.state.resultCode === RESULT_CODES.HOST) {
       context.registers[8] = machine.pvm.state.hostCallId ?? 0n
-    } else if(machine.pvm.state.resultCode === RESULT_CODES.FAULT) {
+    } else if (machine.pvm.state.resultCode === RESULT_CODES.FAULT) {
       context.registers[8] = machine.pvm.state.faultAddress ?? 0n
     }
 
@@ -94,44 +136,7 @@ export class InvokeHostFunction extends BaseHostFunction {
     }
   }
 
-  private readInvokeParameters(
-    ram: RAM,
-    offset: bigint,
-  ): { gasLimit: bigint; registers: bigint[] } | null {
-    try {
-      // Gray Paper: Read gas limit (8 bytes)
-      const [gasLimitData] = ram.readOctets(offset, 8n)
-      if (gasLimitData === null) {
-        return null
-      }
-      const gasLimit = new DataView(gasLimitData.buffer).getBigUint64(0, true)
-
-      // Gray Paper: Read register values (13 registers * 8 bytes each = 104 bytes)
-      const [registersData, _faultAddress] = ram.readOctets(offset + 8n, 104n)
-      if (!registersData) {
-        return null
-      }
-
-      const registers: bigint[] = []
-      for (let i = 0; i < 13; i++) {
-        const registerData = registersData.slice(i * 8, (i + 1) * 8)
-        registers.push(new DataView(registerData.buffer).getBigUint64(0, true))
-      }
-
-      return { gasLimit, registers }
-    } catch {
-      return null
-    }
-  }
-
-
-
-
-  private writeInvokeResults(
-    ram: RAM,
-    offset: bigint,
-    pvm: PVMState,
-  ): void {
+  private writeInvokeResults(ram: RAM, offset: bigint, pvm: PVMState): void {
     try {
       // Gray Paper: mem*[o:112] = encode[8]{g'} ∥ encode[8]{w'}
       // Write final gas (8 bytes)

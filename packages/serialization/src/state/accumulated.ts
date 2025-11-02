@@ -48,8 +48,9 @@
  * This is critical for JAM's work-package dependency resolution and accumulation tracking.
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { AccumulatedItem, DecodingResult } from '@pbnj/types'
+import { concatBytes } from '@pbnj/core'
+import type { AccumulatedItem, DecodingResult, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
   decodeVariableSequence,
@@ -99,7 +100,7 @@ export function decodeAccumulated(
   try {
     // Gray Paper: decode sq{build{var{i}}{i ∈ accumulated}}
     // Variable-length sequence of variable-length accumulated items
-    const [error, decodedData] = decodeVariableSequence(
+    const [error, decodedData] = decodeVariableSequence<AccumulatedItem>(
       data,
       (itemData: Uint8Array) => {
         // Gray Paper: decode var{i} - variable-length blob with natural number length prefix

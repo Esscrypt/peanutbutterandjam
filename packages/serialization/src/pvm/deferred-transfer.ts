@@ -44,8 +44,9 @@
  * clear separation and gas accounting between services.
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { DecodingResult, DeferredTransfer } from '@pbnj/types'
+import { concatBytes } from '@pbnj/core'
+import type { DecodingResult, DeferredTransfer, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

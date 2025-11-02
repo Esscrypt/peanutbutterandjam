@@ -3,19 +3,15 @@ import {
   IETFVRFProver,
   IETFVRFVerifier,
 } from '@pbnj/bandersnatch-vrf'
-import {
-  bytesToHex,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, logger } from '@pbnj/core'
 import { encodeUnsignedHeader } from '@pbnj/serialization'
 import type {
   IConfigService,
+  Safe,
   SafroleTicket,
   UnsignedBlockHeader,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Generate ticket-based seal signature according to Gray Paper Eq. 147-148

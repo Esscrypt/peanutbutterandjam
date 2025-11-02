@@ -18,10 +18,10 @@ import {
   type Activity,
   BaseService,
   type CoreStats,
-  type IConfigService,
   type ServiceStats,
   type ValidatorStats,
 } from '@pbnj/types'
+import type { ConfigService } from './config-service'
 
 /**
  * Activity Service Interface
@@ -70,12 +70,21 @@ export interface IActivityService {
 export class ActivityService extends BaseService implements IActivityService {
   private activity: Activity
 
-  constructor(configService: IConfigService) {
+  private readonly configService: ConfigService
+
+  constructor(options: { configService: ConfigService }) {
     super('activity-service')
+    this.configService = options.configService
     this.activity = {
-      validatorStatsAccumulator: [],
-      validatorStatsPrevious: [],
-      coreStats: [],
+      validatorStatsAccumulator: new Array(
+        this.configService.epochDuration,
+      ).fill(this.createEmptyValidatorStats()),
+      validatorStatsPrevious: new Array(this.configService.epochDuration).fill(
+        this.createEmptyValidatorStats(),
+      ),
+      coreStats: new Array(this.configService.numCores).fill(
+        this.createEmptyCoreStats(),
+      ),
       serviceStats: new Map<bigint, ServiceStats>(),
     }
   }

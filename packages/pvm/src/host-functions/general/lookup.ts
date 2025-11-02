@@ -77,7 +77,8 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Get service account
-    const [serviceAccountError, serviceAccount] = this.serviceAccountService.getServiceAccount(serviceId)
+    const [serviceAccountError, serviceAccount] =
+      this.serviceAccountService.getServiceAccount(serviceId)
     if (serviceAccountError) {
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -155,5 +156,4 @@ export class LookupHostFunction extends BaseHostFunction {
       resultCode: null, // continue execution
     }
   }
-
 }

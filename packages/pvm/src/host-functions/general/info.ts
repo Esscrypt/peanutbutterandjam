@@ -41,14 +41,14 @@ export class InfoHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     _refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
-
     const serviceId = context.registers[7]
     const outputOffset = context.registers[8]
     const fromOffset = context.registers[9]
     const length = context.registers[10]
 
     // Get service account
-    const [serviceAccountError, serviceAccount] = this.serviceAccountService.getServiceAccount(serviceId)
+    const [serviceAccountError, serviceAccount] =
+      this.serviceAccountService.getServiceAccount(serviceId)
     if (serviceAccountError) {
       return {
         resultCode: RESULT_CODES.PANIC,

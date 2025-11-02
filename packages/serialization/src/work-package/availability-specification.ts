@@ -43,15 +43,9 @@
  * every validator to store every piece of data.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, WorkPackageSpec } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, Safe, WorkPackageSpec } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 
 /**

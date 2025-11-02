@@ -65,16 +65,15 @@ import {
   concatBytes,
   type Hex,
   hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import type {
   AccumulatedItem,
   GlobalState,
   IConfigService,
+  Safe,
   StateTrie,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { encodeAccumulated } from './accumulated'
 import { encodeActivity } from './activity'
 import { encodeAuthpool } from './authpool'

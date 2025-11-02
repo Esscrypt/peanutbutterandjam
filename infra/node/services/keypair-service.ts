@@ -12,18 +12,16 @@ import {
   generateValidatorKeyPairFromSeed,
   type Hex,
   hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
   signEd25519,
   verifyEd25519,
 } from '@pbnj/core'
 import type {
   ConnectionEndpoint,
+  Safe,
   ValidatorCredentials,
   ValidatorPublicKeys,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import { BaseService, safeError, safeResult } from '@pbnj/types'
 
 /**
  * Validator key pair with all components

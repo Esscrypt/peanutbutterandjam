@@ -1,3 +1,4 @@
+import type { IConfigService } from '@pbnj/types'
 import { AssignHostFunction } from './assign'
 import type { BaseAccumulateHostFunction } from './base'
 import { BlessHostFunction } from './bless'
@@ -22,15 +23,15 @@ import { YieldHostFunction } from './yield'
 export class AccumulateHostFunctionRegistry {
   private readonly handlers: Map<bigint, BaseAccumulateHostFunction> = new Map()
 
-  constructor() {
-    this.registerAccumulateHostFunctions()
+  constructor(configService: IConfigService) {
+    this.registerAccumulateHostFunctions(configService)
   }
 
-  private registerAccumulateHostFunctions(): void {
-    this.register(new AssignHostFunction())
-    this.register(new BlessHostFunction())
+  private registerAccumulateHostFunctions(configService: IConfigService): void {
+    this.register(new AssignHostFunction(configService))
+    this.register(new BlessHostFunction(configService))
     this.register(new CheckpointHostFunction())
-    this.register(new DesignateHostFunction())
+    this.register(new DesignateHostFunction(configService))
     this.register(new EjectHostFunction())
     this.register(new ForgetHostFunction())
     this.register(new NewHostFunction())

@@ -57,7 +57,13 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
       const serviceId = s === 2n ** 64n - 1n ? context[0].id : s
 
       // Read preimage data from memory
-      const preimageData = ram.readOctets(o, z)
+      const [preimageData, faultAddress] = ram.readOctets(o, z)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
       if (!preimageData) {
         this.setAccumulateError(registers, 'WHAT')
         return {

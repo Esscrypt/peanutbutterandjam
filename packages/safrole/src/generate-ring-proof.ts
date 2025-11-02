@@ -1,5 +1,6 @@
 import { getBanderoutFromGamma, RingVRFProver } from '@pbnj/bandersnatch-vrf'
-import { type Safe, safeError, safeResult } from '@pbnj/core'
+import type { Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 // Xticket = "$jam_ticket_seal" (Gray Paper safrole.tex equation 161)
 const Xticket = new TextEncoder().encode('jam_ticket_seal')

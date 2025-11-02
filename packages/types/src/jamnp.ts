@@ -464,10 +464,10 @@ export interface AuditAnnouncement {
   /** Announcement data */
   announcement: {
     /** Work reports to audit */
-    workReports: Array<{
+    workReports: {
       coreIndex: bigint
       workReportHash: Hex
-    }>
+    }[]
     /** Ed25519 signature */
     signature: Hex
   }

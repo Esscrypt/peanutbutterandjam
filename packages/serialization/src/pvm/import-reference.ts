@@ -40,16 +40,9 @@
  * type safety and integrity through cryptographic commitments.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, ImportSegment } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, ImportSegment, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 
 /**

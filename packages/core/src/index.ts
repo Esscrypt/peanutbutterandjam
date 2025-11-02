@@ -12,7 +12,6 @@ export * from './event-bus'
 export * from './logger'
 // Export merklization implementation
 export * from './merklization'
-export * from './safe'
 export * from './schemas'
 // Export shuffle functions
 export * from './shuffle'

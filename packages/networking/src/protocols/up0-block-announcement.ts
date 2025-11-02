@@ -15,10 +15,6 @@ import {
   hexToBytes,
   logger,
   numberToBytes,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import {
   decodeFixedLength,
@@ -31,7 +27,10 @@ import type {
   BlockAnnouncementHandshake,
   BlockHeader,
   IConfigService,
+  Safe,
+  SafePromise,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

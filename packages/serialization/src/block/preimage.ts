@@ -36,15 +36,9 @@
  * work package sizes manageable.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, Preimage } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, Preimage, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
@@ -276,7 +270,7 @@ export function decodePreimages(
   }
 
   // Then decode the sequence with the known count
-  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric<Preimage>(
     lengthResult.remaining,
     decodePreimage,
     count,

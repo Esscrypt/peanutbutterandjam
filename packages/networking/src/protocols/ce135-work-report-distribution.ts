@@ -11,10 +11,6 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 // import { validateGuaranteeSignatures } from '@pbnj/guarantor'
 import {
@@ -28,9 +24,12 @@ import {
 } from '@pbnj/serialization'
 import type {
   GuaranteedWorkReport,
+  Safe,
+  SafePromise,
   // ValidatorPublicKeys,
   WorkReport,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 // IWorkReportService interface for dependency injection

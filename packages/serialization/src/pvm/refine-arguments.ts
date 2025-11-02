@@ -38,15 +38,9 @@
  * complete context and integrity verification.
  */
 
-import {
-  blake2bHash,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, WorkItem, WorkPackage } from '@pbnj/types'
+import { blake2bHash, concatBytes, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, Safe, WorkItem, WorkPackage } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { encodeWorkPackage } from '../work-package/package'
 
 /**

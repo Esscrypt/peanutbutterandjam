@@ -2,11 +2,10 @@ import {
   bytesToHex,
   deriveSecretSeeds,
   generateAlternativeName,
-  type Safe,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import { decodeFixedLength } from '@pbnj/serialization'
+import type { Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 export interface ValidatorKeys {
   seed: string

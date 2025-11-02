@@ -11,10 +11,6 @@ import {
   type Hex,
   hexToBytes,
   logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import type {
   CE131TicketDistributionProtocol,
@@ -29,8 +25,12 @@ import {
 import {
   BaseService,
   type ITicketService,
+  type Safe,
+  type SafePromise,
   type SafroleTicket,
   type StreamKind,
+  safeError,
+  safeResult,
   type TicketDistributionRequest,
 } from '@pbnj/types'
 import type { ClockService } from './clock-service'
@@ -137,7 +137,7 @@ export class TicketService extends BaseService implements ITicketService {
     request: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): Safe<void> {
-    if(!this.validatorSetManager) {
+    if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
     const safroleTicket: SafroleTicket = {
@@ -398,7 +398,7 @@ export class TicketService extends BaseService implements ITicketService {
    * Execute first step ticket distribution (CE 131)
    */
   private async handleFirstPhaseTicketDistribution(): SafePromise<void> {
-    if(!this.validatorSetManager) {
+    if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
     const [generateTicketsError, tickets] = generateTicketsForEpoch(
@@ -461,7 +461,7 @@ export class TicketService extends BaseService implements ITicketService {
    * Execute second step ticket distribution (CE 132)
    */
   private async handleSecondPhaseTicketDistribution(): SafePromise<void> {
-    if(!this.validatorSetManager) {
+    if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
     // Get current validator set

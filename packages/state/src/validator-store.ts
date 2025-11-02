@@ -1,11 +1,7 @@
 //TODO: move this to a separate package
-import {
-  bytesToHex,
-  type SafePromise,
-  safeError,
-  safeResult,
-  safeTry,
-} from '@pbnj/core'
+import { bytesToHex } from '@pbnj/core'
+import type { SafePromise } from '@pbnj/types'
+import { safeError, safeResult, safeTry } from '@pbnj/types'
 import { and, eq } from 'drizzle-orm'
 import type { CoreDb } from '.'
 import {

@@ -19,12 +19,13 @@
     "@pbnj/core": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "2.1.9",
     "typescript": "5.8.2",
     "biome": "0.3.3",
-    "@pbnj/typescript-config": "workspace:*"
+    "@pbnj/typescript-config": "workspace:*",
+    "@types/bun": "catalog:"
   },
   "exports": {
     ".": "./src/index.ts"
-  }
+  },
+  "private": true
 }

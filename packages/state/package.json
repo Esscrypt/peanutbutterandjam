@@ -15,7 +15,7 @@
   "dependencies": {
     "drizzle-orm": "0.41.0",
     "postgres": "3.4.7",
-    "viem": "2.35.1"
+    "viem": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -30,8 +30,15 @@
  * so deserialization can parse elements sequentially.
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { Decoder, DecodingResult, Encoder, Sequence } from '@pbnj/types'
+import { concatBytes } from '@pbnj/core'
+import type {
+  Decoder,
+  DecodingResult,
+  Encoder,
+  Safe,
+  Sequence,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**

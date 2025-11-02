@@ -31,44 +31,52 @@ import {
   type PartialState,
   type Ready,
   type ReadyItem,
+  type WorkError,
+  type WorkExecResultValue,
+  type WorkExecutionResult,
   type WorkReport,
 } from '@pbnj/types'
 import type { Hex } from 'viem'
-import type { ClockService } from './clock-service'
-import type { PrivilegesService } from './privileges-service'
-import type { ServiceAccountsService } from './service-accounts-service'
-import type { ValidatorSetManager } from './validator-set'
-import type { ConfigService } from './config-service'
 import type { AuthQueueService } from './auth-queue-service'
+import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
+// import type { EntropyService } from './entropy'
+import type { PrivilegesService } from './privileges-service'
+import type { ReadyService } from './ready-service'
+import type { ServiceAccountService as ServiceAccountsService } from './service-account-service'
+// import type { StatisticsService } from './statistics-service'
+import type { ValidatorSetManager } from './validator-set'
 
 /**
  * Accumulation Service Implementation
  */
 export class AccumulationService extends BaseService {
-  public ready: Ready
   public accumulated: Accumulated
 
   private readonly clockService: ClockService
   private readonly configService: ConfigService
   private readonly serviceAccountsService: ServiceAccountsService
-  private readonly privilegesService: PrivilegesService
+  private readonly privilegesService: PrivilegesService | null
   private readonly validatorSetManager: ValidatorSetManager
-  private readonly accumulatePVM: AccumulatePVM
+  private readonly accumulatePVM: AccumulatePVM | null
   private readonly authQueueService: AuthQueueService
+  private readonly readyService: ReadyService | null
+  // private readonly statisticsService: StatisticsService | null
+  // private readonly entropyService: EntropyService | null
   constructor(options: {
     configService: ConfigService
     clockService: ClockService
     serviceAccountsService: ServiceAccountsService
-    privilegesService: PrivilegesService
+    privilegesService: PrivilegesService | null
     validatorSetManager: ValidatorSetManager
     authQueueService: AuthQueueService
-    accumulatePVM: AccumulatePVM
+    accumulatePVM: AccumulatePVM | null
+    readyService: ReadyService | null
+    // statisticsService: StatisticsService | null
+    // entropyService: EntropyService | null
   }) {
     super('accumulation-service')
     this.accumulatePVM = options.accumulatePVM
-    this.ready = {
-      epochSlots: new Array(options.configService.epochDuration).fill([]),
-    }
     this.accumulated = {
       packages: new Array(options.configService.epochDuration).fill(
         new Set<Hex>(),
@@ -80,20 +88,29 @@ export class AccumulationService extends BaseService {
     this.validatorSetManager = options.validatorSetManager
     this.configService = options.configService
     this.authQueueService = options.authQueueService
+    this.readyService = options.readyService
+    // this.statisticsService = options.statisticsService
+    // this.entropyService = options.entropyService
   }
 
   /**
    * Get current ready state
    */
   getReady(): Ready {
-    return this.ready
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
+    }
+    return this.readyService.getReady()
   }
 
   /**
    * Set ready state
    */
   setReady(ready: Ready): void {
-    this.ready = ready
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
+    }
+    this.readyService.setReady(ready)
     logger.debug('Ready state updated', {
       totalSlots: ready.epochSlots.length,
       totalItems: ready.epochSlots.reduce(
@@ -103,37 +120,45 @@ export class AccumulationService extends BaseService {
     })
   }
 
+  /**
+   * Get accumulated state
+   */
+  getAccumulated(): Accumulated {
+    return this.accumulated
+  }
+
+  /**
+   * Set accumulated state
+   */
+  setAccumulated(accumulated: Accumulated): void {
+    this.accumulated = accumulated
+  }
+
   getReadyItem(workReportHash: Hex): ReadyItem | undefined {
-    for (const items of this.ready.epochSlots) {
-      const item = items.find((item) => {
-        const [hashError, hash] = calculateWorkReportHash(item.workReport)
-        return !hashError && hash === workReportHash
-      })
-      if (item) return item
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
     }
-    return undefined
+    return this.readyService.getReadyItem(workReportHash)
   }
 
   /**
    * Remove a specific dependency from a ready item
    */
   removeDependency(workReportHash: Hex, dependencyHash: Hex): void {
-    const readyItem = this.getReadyItem(workReportHash)
-    if (readyItem) {
-      readyItem.dependencies.delete(dependencyHash)
-      logger.debug('Dependency removed', { workReportHash, dependencyHash })
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
     }
+    this.readyService.removeDependency(workReportHash, dependencyHash)
   }
 
   /**
    * Add a dependency to a ready item
    */
   addDependency(workReportHash: Hex, dependencyHash: Hex): void {
-    const readyItem = this.getReadyItem(workReportHash)
-    if (readyItem) {
-      readyItem.dependencies.add(dependencyHash)
-      logger.debug('Dependency added', { workReportHash, dependencyHash })
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
     }
+    this.readyService.addDependency(workReportHash, dependencyHash)
   }
 
   /**
@@ -147,14 +172,19 @@ export class AccumulationService extends BaseService {
    * 5. Clean up processed work-reports from ready queue
    */
   async processAccumulation(currentSlot: bigint): Promise<void> {
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
+    }
+    const readyItemsForSlot =
+      this.readyService.getReadyItemsForSlot(currentSlot)
     console.info('Starting accumulation process', {
       slot: currentSlot.toString(),
-      readyItemsCount: this.ready.epochSlots[Number(currentSlot)].length || 0,
+      readyItemsCount: readyItemsForSlot.length || 0,
       accumulatedCount: this.accumulated.packages[Number(currentSlot)].size,
     })
 
     // Step 1: Get ready work-reports for current slot
-    const readyItems = this.ready.epochSlots[Number(currentSlot)] || []
+    const readyItems = readyItemsForSlot
     if (readyItems.length === 0) {
       console.info('No ready work-reports for current slot')
       return
@@ -193,19 +223,33 @@ export class AccumulationService extends BaseService {
       const gasLimit = workReport.results[0]?.accumulate_gas || 100000n
 
       // Convert global state to partial state for PVM
+      // Gray Paper equation (133-144): partialstate includes components that are
+      // "both needed and mutable by the accumulation process"
+      // Even if services are null (test vectors), we must provide defaults
+      // because the PVM requires a complete PartialState structure
       const partialState: PartialState = {
-        accounts: this.serviceAccountsService.getAccounts(),
+        accounts: this.serviceAccountsService.getServiceAccounts().accounts,
         stagingset: this.validatorSetManager
-          .getStagingValidators()
-          .values()
-          .toArray()
-          .map(encodeValidatorPublicKeys),
-        authqueue: this.authQueueService.getAuthQueue().map((queue) => queue.map((item) => hexToBytes(item))),
-        manager: this.privilegesService.getManager(),
-        assigners: this.privilegesService.getAssigners(),
-        delegator: this.privilegesService.getDelegator(),
-        registrar: this.privilegesService.getRegistrar(),
-        alwaysaccers: this.privilegesService.getAlwaysAccers(),
+          ? this.validatorSetManager
+              .getStagingValidators()
+              .values()
+              .toArray()
+              .map(encodeValidatorPublicKeys)
+          : [], // Default: empty sequence[Cvalcount]{valkey}
+        authqueue: this.authQueueService
+          ? this.authQueueService
+              .getAuthQueue()
+              .map((queue) => queue.map((item) => hexToBytes(item)))
+          : new Array(this.configService.numCores).fill([]), // Default: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}}
+        manager: this.privilegesService?.getManager() ?? 0n, // Default: service ID 0
+        assigners:
+          this.privilegesService?.getAssigners() ??
+          new Array(this.configService.numCores).fill(0n), // Default: sequence[Ccorecount]{serviceid}
+        delegator: this.privilegesService?.getDelegator() ?? 0n, // Default: service ID 0
+        registrar: this.privilegesService?.getRegistrar() ?? 0n, // Default: service ID 0
+        alwaysaccers:
+          this.privilegesService?.getAlwaysAccers() ??
+          new Map<bigint, bigint>(), // Default: empty dictionary
       }
 
       // Execute accumulate invocation
@@ -219,7 +263,7 @@ export class AccumulationService extends BaseService {
 
       results.push(result)
       processedWorkReports.push(workReport)
-
+      // this.statisticsService.updateServiceStatisticsFromReports([workReport])
       console.info('Accumulate invocation completed', {
         serviceId: serviceId.toString(),
         success: result.ok,
@@ -228,20 +272,13 @@ export class AccumulationService extends BaseService {
     }
 
     // Step 5: Update global state with results
-    const updatedState = this.updateGlobalState(
-      globalState,
-      results,
-      processedWorkReports,
-      currentSlot,
-    )
+    this.updateGlobalState(results, processedWorkReports, currentSlot)
 
     console.info('Accumulation process completed', {
       processedWorkReports: processedWorkReports.length,
       successfulInvocations: results.filter((r) => r.ok).length,
       failedInvocations: results.filter((r) => !r.ok).length,
     })
-
-    return updatedState
   }
 
   /**
@@ -267,20 +304,62 @@ export class AccumulationService extends BaseService {
 
       // Check if all prerequisites are fulfilled
       let satisfiedDependencies = 0
-      for(const accumulatedHashSet of accumulatedHashSets) {
-        for(const dependency of prerequisites) {
-          if(accumulatedHashSet.has(dependency)) {
+      for (const accumulatedHashSet of accumulatedHashSets) {
+        for (const dependency of prerequisites) {
+          if (accumulatedHashSet.has(dependency)) {
             satisfiedDependencies++
             break
           }
         }
       }
-      if(satisfiedDependencies === prerequisites.length) {
+      if (satisfiedDependencies === prerequisites.length) {
         eligibleItems.push(item)
       }
     }
 
     return eligibleItems
+  }
+
+  /**
+   * Convert WorkExecResultValue to WorkExecutionResult
+   *
+   * WorkExecResultValue can be:
+   * - Hex string or { ok: Hex } → Uint8Array
+   * - { panic: null } → 'PANIC'
+   * - Error strings → WorkError
+   */
+  private convertWorkResultToExecutionResult(
+    value: WorkExecResultValue,
+  ): WorkExecutionResult {
+    if (typeof value === 'string') {
+      if (value.startsWith('0x')) {
+        // Hex string: convert to Uint8Array
+        return hexToBytes(value as Hex)
+      } else {
+        // Error string: map to WorkError
+        const errorMap: Record<string, WorkError> = {
+          out_of_gas: 'OOG',
+          bad_exports: 'BADEXPORTS',
+          oversize: 'OVERSIZE',
+          bad_code: 'BAD',
+        }
+        return errorMap[value] || 'BAD'
+      }
+    } else if (typeof value === 'object' && value !== null) {
+      if (
+        'ok' in value &&
+        typeof value.ok === 'string' &&
+        value.ok.startsWith('0x')
+      ) {
+        // { ok: Hex } → Uint8Array
+        return hexToBytes(value.ok)
+      } else if ('panic' in value) {
+        // { panic: null } → 'PANIC'
+        return 'PANIC'
+      }
+    }
+    // Fallback to BAD error
+    return 'BAD'
   }
 
   /**
@@ -298,6 +377,11 @@ export class AccumulationService extends BaseService {
         throw new Error('No results found for work report')
       }
 
+      // Convert WorkExecResultValue to WorkExecutionResult
+      const executionResult = this.convertWorkResultToExecutionResult(
+        workReport.results[0].result,
+      )
+
       // Create OperandTuple from work report
       const operandTuple = {
         packageHash: workReport.package_spec.hash,
@@ -305,8 +389,8 @@ export class AccumulationService extends BaseService {
         authorizer: workReport.authorizer_hash,
         payloadHash: workReport.results[0].payload_hash,
         gasLimit: workReport.results[0].accumulate_gas,
-        result: workReport.results[0].result,
-        authTrace: workReport.auth_output,
+        result: executionResult,
+        authTrace: hexToBytes(workReport.auth_output),
       }
 
       inputs.push({
@@ -332,6 +416,9 @@ export class AccumulationService extends BaseService {
     gas: bigint,
     inputs: AccumulateInput[],
   ): Promise<AccumulateInvocationResult> {
+    if (!this.accumulatePVM) {
+      throw new Error('Accumulate PVM not initialized')
+    }
     try {
       const result = await this.accumulatePVM.executeAccumulate(
         partialState,
@@ -357,6 +444,48 @@ export class AccumulationService extends BaseService {
   }
 
   /**
+   * Apply accumulation state transition
+   *
+   * This method implements the accumulation state transition function:
+   * 1. Enqueue new work reports to the ready queue with their dependencies
+   * 2. Process accumulation for the given slot
+   *
+   * @param slot - The current slot to process
+   * @param reports - Work reports to enqueue
+   * @returns Safe<void> indicating success or error
+   */
+  async applyTransition(
+    slot: bigint,
+    reports: WorkReport[],
+  ): Promise<{ ok: true } | { ok: false; err: Error }> {
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
+    }
+    try {
+      // Step 1: Add reports to ready queue with dependencies
+      const slotIndex = Number(slot) % this.configService.epochDuration
+      for (const report of reports) {
+        const dependencies = new Set<Hex>(report.context.prerequisites)
+        const readyItem: ReadyItem = {
+          workReport: report,
+          dependencies,
+        }
+        this.readyService.addReadyItemToSlot(BigInt(slotIndex), readyItem)
+      }
+
+      // Step 2: Process accumulation
+      await this.processAccumulation(slot)
+
+      return { ok: true }
+    } catch (error) {
+      return {
+        ok: false,
+        err: error instanceof Error ? error : new Error(String(error)),
+      }
+    }
+  }
+
+  /**
    * Update global state with accumulation results
    *
    * This method applies the changes from successful accumulation invocations
@@ -372,6 +501,18 @@ export class AccumulationService extends BaseService {
     processedWorkReports: WorkReport[],
     currentSlot: bigint,
   ): void {
+    if (!this.readyService) {
+      throw new Error('Ready service not initialized')
+    }
+    if (!this.serviceAccountsService) {
+      throw new Error('Service accounts service not initialized')
+    }
+    if (!this.privilegesService) {
+      throw new Error('Privileges service not initialized')
+    }
+    if (!this.clockService) {
+      throw new Error('Clock service not initialized')
+    }
     // Step 1: Update accumulated packages
     // Gray Paper equations 417-418:
     // accumulated'_{C_epochlen - 1} = P(justbecameavailable^*[..n])
@@ -392,7 +533,7 @@ export class AccumulationService extends BaseService {
 
     // Ensure accumulated.packages is properly sized
     if (this.accumulated.packages.length !== epochLength) {
-      this.accumulated.packages = Array(epochLength)
+      this.accumulated.packages = new Array(epochLength)
         .fill(null)
         .map(() => new Set<Hex>())
     }
@@ -414,7 +555,7 @@ export class AccumulationService extends BaseService {
 
         // Update service accounts with new state
         for (const [serviceId, account] of poststate.accounts) {
-          this.serviceAccountsService.setAccount(serviceId, account)
+          this.serviceAccountsService.setServiceAccount(serviceId, account)
         }
 
         this.privilegesService.setManager(poststate.manager)
@@ -426,20 +567,13 @@ export class AccumulationService extends BaseService {
     }
 
     // Step 3: Remove processed work-reports from ready queue
-    const updatedReady = { ...this.ready }
-    const currentSlotItems = updatedReady.epochSlots[Number(currentSlot)] || []
-
-    // Filter out processed work-reports
-    const remainingItems = currentSlotItems.filter(
-      (item) =>
-        !processedWorkReports.some(
-          (processed) =>
-            processed.package_spec.hash === item.workReport.package_spec.hash,
-        ),
-    )
-
-    updatedReady.epochSlots[Number(currentSlot)] = remainingItems
-    this.setReady(updatedReady)
+    for (const processedReport of processedWorkReports) {
+      const [hashError, workReportHash] =
+        calculateWorkReportHash(processedReport)
+      if (!hashError) {
+        this.readyService.removeReadyItemFromSlot(currentSlot, workReportHash)
+      }
+    }
 
     // Step 4: Update timeslot
     this.clockService.getCurrentSlot()

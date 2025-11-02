@@ -10,14 +10,14 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-  type Safe,
-  type SafePromise,
-  safeResult,
 } from '@pbnj/core'
 import type {
+  Safe,
+  SafePromise,
   ShardDistributionRequest,
   ShardDistributionResponse,
 } from '@pbnj/types'
+import { safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

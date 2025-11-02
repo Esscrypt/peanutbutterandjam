@@ -53,20 +53,15 @@
  * deterministic gas accounting and data flow dependencies.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import type {
   DecodingResult,
   ExtrinsicReference,
+  Safe,
   WorkItem,
   WorkPackage,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {

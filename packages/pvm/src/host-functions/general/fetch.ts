@@ -64,8 +64,6 @@ export class FetchHostFunction extends BaseHostFunction {
     const fromOffset = context.registers[8]
     const length = context.registers[9]
 
-
-
     // Fetch data based on selector according to Gray Paper specification
     const fetchedData = this.fetchData(selector, context, refineContext)
 

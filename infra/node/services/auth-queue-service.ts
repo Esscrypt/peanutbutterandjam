@@ -16,51 +16,34 @@
  * - designate: Validator designation (Ω_D) - validator assignment
  */
 
-import { logger, type Safe, safeError, safeResult } from '@pbnj/core'
+import { logger } from '@pbnj/core'
 import {
   AUTHORIZATION_CONSTANTS,
   type AuthQueue,
   BaseService,
-  type IConfigService,
+  type Safe,
+  safeError,
+  safeResult,
 } from '@pbnj/types'
 import type { Hex } from 'viem'
-
-/**
- * AuthQueue Service Interface
- */
-export interface IAuthQueueService {
-  getAuthQueue(): AuthQueue
-  setAuthQueue(authQueue: AuthQueue): void
-
-  // Core operations
-  assignToCore(coreIndex: number, authorizations: Hex[]): Safe<void>
-  getCoreAuthorizations(coreIndex: number): Hex[]
-  clearCoreAuthorizations(coreIndex: number): void
-
-  // Queue management
-  addAuthorization(coreIndex: number, authHash: Hex): Safe<void>
-  removeAuthorization(coreIndex: number, authHash: Hex): Safe<void>
-  getQueueSize(coreIndex: number): number
-  isQueueFull(coreIndex: number): boolean
-
-  // State transition - get last element for pool promotion
-  getLastAuthorization(coreIndex: number): Hex | null
-}
-
+import type { ConfigService } from './config-service'
 /**
  * AuthQueue Service Implementation
  */
-export class AuthQueueService extends BaseService implements IAuthQueueService {
+export class AuthQueueService extends BaseService {
   private authQueue: AuthQueue
-  private readonly configService: IConfigService
+  private readonly configService: ConfigService
 
-  constructor(configService: IConfigService) {
+  constructor(options: { configService: ConfigService }) {
     super('auth-queue-service')
-    this.configService = configService
+    this.configService = options.configService
 
     // Initialize as 2D array: authQueue[coreIndex][authIndex]
     // Outer array size: C_corecount (341 cores)
-    this.authQueue = Array.from({ length: configService.numCores }, () => [])
+    this.authQueue = Array.from(
+      { length: this.configService.numCores },
+      () => [],
+    )
   }
 
   /**
@@ -100,55 +83,6 @@ export class AuthQueueService extends BaseService implements IAuthQueueService {
     }
 
     this.authQueue = authQueue
-    logger.debug('Auth queue updated', {
-      coreCount: authQueue.length,
-      totalAuthorizations: authQueue.reduce(
-        (sum, queue) => sum + queue.length,
-        0,
-      ),
-    })
-  }
-
-  /**
-   * Assign authorizations to a specific core (Ω_A operation)
-   *
-   * Gray Paper: assign function updates authqueue[c] with new authorizations
-   */
-  assignToCore(coreIndex: number, authorizations: Hex[]): Safe<void> {
-    // Validate core index
-    if (coreIndex < 0 || coreIndex >= this.configService.numCores) {
-      return safeError(
-        new Error(
-          `Invalid core index: ${coreIndex} (must be 0 to ${this.configService.numCores - 1})`,
-        ),
-      )
-    }
-
-    // Check overflow: cannot exceed C_AUTHQUEUESIZE (80)
-    if (authorizations.length > AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE) {
-      return safeError(
-        new Error(
-          `Too many authorizations: ${authorizations.length} > ${AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE}`,
-        ),
-      )
-    }
-
-    // Validate authorization hashes
-    for (const auth of authorizations) {
-      if (!this.isValidAuthHash(auth)) {
-        return safeError(new Error(`Invalid authorization hash: ${auth}`))
-      }
-    }
-
-    // Assign authorizations to core
-    this.authQueue[coreIndex] = [...authorizations]
-
-    logger.debug('Authorizations assigned to core', {
-      coreIndex,
-      authCount: authorizations.length,
-    })
-
-    return safeResult(undefined)
   }
 
   /**
@@ -159,16 +93,6 @@ export class AuthQueueService extends BaseService implements IAuthQueueService {
       return []
     }
     return [...this.authQueue[coreIndex]]
-  }
-
-  /**
-   * Clear all authorizations for a specific core
-   */
-  clearCoreAuthorizations(coreIndex: number): void {
-    if (coreIndex >= 0 && coreIndex < this.authQueue.length) {
-      this.authQueue[coreIndex] = []
-      logger.debug('Core authorizations cleared', { coreIndex })
-    }
   }
 
   /**
@@ -204,12 +128,6 @@ export class AuthQueueService extends BaseService implements IAuthQueueService {
     // Add authorization
     coreQueue.push(authHash)
 
-    logger.debug('Authorization added to core queue', {
-      coreIndex,
-      authHash,
-      queueSize: coreQueue.length,
-    })
-
     return safeResult(undefined)
   }
 
@@ -231,12 +149,6 @@ export class AuthQueueService extends BaseService implements IAuthQueueService {
 
     // Remove authorization
     coreQueue.splice(index, 1)
-
-    logger.debug('Authorization removed from core queue', {
-      coreIndex,
-      authHash,
-      queueSize: coreQueue.length,
-    })
 
     return safeResult(undefined)
   }

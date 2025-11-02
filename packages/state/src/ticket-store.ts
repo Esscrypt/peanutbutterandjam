@@ -5,13 +5,9 @@
  * No JSONB usage - all extrinsics stored in dedicated tables
  */
 
-import {
-  type Hex,
-  type SafePromise,
-  safeError,
-  safeResult,
-  safeTry,
-} from '@pbnj/core'
+import type { Hex } from '@pbnj/core'
+import type { SafePromise } from '@pbnj/types'
+import { safeError, safeResult, safeTry } from '@pbnj/types'
 import { eq } from 'drizzle-orm'
 import type { CoreDb, DbSafroleTicket } from './index'
 import { safroleTickets } from './schema/core-schema'

@@ -10,14 +10,14 @@ import {
   type AuditTrancheEvent,
   type EventBusService,
   logger,
-  type SafePromise,
-  safeResult,
 } from '@pbnj/core'
 import {
   AUDIT_CONSTANTS,
   BaseService,
   type IClockService,
   JAM_COMMON_ERA_START_TIME,
+  type SafePromise,
+  safeResult,
   type TicketDistributionEvent,
 } from '@pbnj/types'
 import type { ConfigService } from './config-service'
@@ -181,10 +181,8 @@ export class ClockService extends BaseService implements IClockService {
   /**
    * Check if a slot represents an epoch transition
    */
-  isEpochTransition(slotIndex: bigint, previousSlotIndex: bigint): boolean {
-    const currentEpoch = this.getEpochFromSlot(slotIndex)
-    const previousEpoch = this.getEpochFromSlot(previousSlotIndex)
-    return currentEpoch > previousEpoch
+  isEpochTransition(slotIndex: bigint): boolean {
+    return slotIndex % BigInt(this.configService.epochDuration) === 0n
   }
 
   /**
@@ -318,10 +316,7 @@ export class ClockService extends BaseService implements IClockService {
     this.calculateCurrentSlotAndEpoch()
 
     const phase = this.getPhaseFromSlot(this.currentSlot)
-    const isEpochTransition = this.isEpochTransition(
-      this.currentSlot,
-      previousSlot,
-    )
+    const isEpochTransition = this.isEpochTransition(this.currentSlot)
 
     // Emit slot change event
     const slotChangeEvent = {

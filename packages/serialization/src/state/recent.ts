@@ -50,17 +50,19 @@
  * This is critical for JAM's recent block tracking and duplicate prevention.
  */
 
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import type {
+  DecodingResult,
+  Recent,
+  RecentHistoryEntry,
+  Safe,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
-  bytesToHex,
-  concatBytes,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, Recent, RecentHistory } from '@pbnj/types'
-import { decodeVariableSequence, encodeSequenceGeneric } from '../core/sequence'
+  decodeVariableSequence,
+  encodeSequenceGeneric,
+  encodeVariableSequence,
+} from '../core/sequence'
 
 /**
  * Encode recent state according to Gray Paper specification.
@@ -103,9 +105,9 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
 
   // Gray Paper: var{sq{build{tuple{rh_headerhash, rh_accoutlogsuperpeak, rh_stateroot, var{rh_reportedpackagehashes}}...}}}
   // Encode recent history as variable-length sequence
-  const [error1, historyData] = encodeSequenceGeneric(
-    [recent.history], // Single history entry for now
-    (history: RecentHistory) => {
+  const [error1, historyData] = encodeVariableSequence<RecentHistoryEntry>(
+    recent.history, // Single history entry for now
+    (history: RecentHistoryEntry) => {
       const historyParts: Uint8Array[] = []
 
       // Encode tuple{rh_headerhash, rh_accoutlogsuperpeak, rh_stateroot, var{rh_reportedpackagehashes}}
@@ -113,11 +115,23 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
       historyParts.push(hexToBytes(history.accoutLogSuperPeak))
       historyParts.push(hexToBytes(history.stateRoot))
 
-      // Gray Paper: var{rh_reportedpackagehashes} - variable-length sequence
-      const [packageError, packageHashesData] = encodeSequenceGeneric(
-        history.reportedPackageHashes,
-        (hash: Hex) => safeResult(hexToBytes(hash)),
-      )
+      // Gray Paper: var{rh_reportedpackagehashes} - dictionary{hash}{hash}
+      // encode(d ∈ dictionary{K,V}) ≡ encode(var{⟨⟨encode(k), encode(d[k])⟩⟩})
+      // Convert Map to array of [key, value] tuples, sorted by key
+      const dictionaryEntries: [Hex, Hex][] = Array.from(
+        history.reportedPackageHashes.entries(),
+      ).sort((a, b) => a[0].localeCompare(b[0])) // Sort by key (lexicographic order)
+
+      // Encode as variable-length sequence of key-value pairs
+      // Each pair is encoded as: encode(key) || encode(value) (both 32-byte hashes)
+      const [packageError, packageHashesData] = encodeVariableSequence<
+        [Hex, Hex]
+      >(dictionaryEntries, ([packageHash, segmentRoot]) => {
+        // Each dictionary entry is: ⟨encode(k), encode(d[k])⟩
+        const keyBytes = hexToBytes(packageHash)
+        const valueBytes = hexToBytes(segmentRoot)
+        return safeResult(concatBytes([keyBytes, valueBytes])) // 64 bytes total
+      })
       if (packageError) {
         return safeError(packageError)
       }
@@ -175,68 +189,83 @@ export function decodeRecent(data: Uint8Array): Safe<DecodingResult<Recent>> {
   let currentData = data
 
   // Gray Paper: decode var{sq{build{tuple{rh_headerhash, rh_accoutlogsuperpeak, rh_stateroot, var{rh_reportedpackagehashes}}...}}}
-  const [historyError, historyResult] = decodeVariableSequence(
-    currentData,
-    (entryData: Uint8Array) => {
-      let entryCurrentData = entryData
+  const [historyError, historyResult] =
+    decodeVariableSequence<RecentHistoryEntry>(
+      currentData,
+      (entryData: Uint8Array) => {
+        let entryCurrentData = entryData
 
-      // Decode tuple{rh_headerhash, rh_accoutlogsuperpeak, rh_stateroot, var{rh_reportedpackagehashes}}
-      if (entryCurrentData.length < 96) {
-        // 3 × 32-byte hashes
-        return safeError(
-          new Error('Insufficient data for recent history entry'),
-        )
-      }
+        // Decode tuple{rh_headerhash, rh_accoutlogsuperpeak, rh_stateroot, var{rh_reportedpackagehashes}}
+        if (entryCurrentData.length < 96) {
+          // 3 × 32-byte hashes
+          return safeError(
+            new Error('Insufficient data for recent history entry'),
+          )
+        }
 
-      // Decode headerHash (32 bytes)
-      const headerHashBytes = entryCurrentData.slice(0, 32)
-      const headerHash = bytesToHex(headerHashBytes)
-      entryCurrentData = entryCurrentData.slice(32)
+        // Decode headerHash (32 bytes)
+        const headerHashBytes = entryCurrentData.slice(0, 32)
+        const headerHash = bytesToHex(headerHashBytes)
+        entryCurrentData = entryCurrentData.slice(32)
 
-      // Decode accoutLogSuperPeak (32 bytes)
-      const accoutLogSuperPeakBytes = entryCurrentData.slice(0, 32)
-      const accoutLogSuperPeak = bytesToHex(accoutLogSuperPeakBytes)
-      entryCurrentData = entryCurrentData.slice(32)
+        // Decode accoutLogSuperPeak (32 bytes)
+        const accoutLogSuperPeakBytes = entryCurrentData.slice(0, 32)
+        const accoutLogSuperPeak = bytesToHex(accoutLogSuperPeakBytes)
+        entryCurrentData = entryCurrentData.slice(32)
 
-      // Decode stateRoot (32 bytes)
-      const stateRootBytes = entryCurrentData.slice(0, 32)
-      const stateRoot = bytesToHex(stateRootBytes)
-      entryCurrentData = entryCurrentData.slice(32)
+        // Decode stateRoot (32 bytes)
+        const stateRootBytes = entryCurrentData.slice(0, 32)
+        const stateRoot = bytesToHex(stateRootBytes)
+        entryCurrentData = entryCurrentData.slice(32)
 
-      // Decode var{rh_reportedpackagehashes} - variable-length sequence
-      const [packageError, packageResult] = decodeVariableSequence(
-        entryCurrentData,
-        (hashData: Uint8Array) => {
-          if (hashData.length < 32) {
-            return safeError(new Error('Insufficient data for package hash'))
+        // Decode var{rh_reportedpackagehashes} - dictionary{hash}{hash}
+        // Each entry is: ⟨encode(k), encode(d[k])⟩ = 32-byte key + 32-byte value = 64 bytes
+        const [packageError, packageResult] = decodeVariableSequence<
+          [Hex, Hex]
+        >(entryCurrentData, (pairData: Uint8Array) => {
+          if (pairData.length < 64) {
+            return safeError(
+              new Error(
+                'Insufficient data for dictionary pair (expected 64 bytes: 32 key + 32 value)',
+              ),
+            )
           }
-          const hashBytes = hashData.slice(0, 32)
-          const hash = bytesToHex(hashBytes)
+          // Decode key (32 bytes)
+          const keyBytes = pairData.slice(0, 32)
+          const packageHash = bytesToHex(keyBytes)
+          // Decode value (32 bytes)
+          const valueBytes = pairData.slice(32, 64)
+          const segmentRoot = bytesToHex(valueBytes)
           return safeResult({
-            value: hash,
-            remaining: hashData.slice(32),
-            consumed: 32,
+            value: [packageHash, segmentRoot] as [Hex, Hex],
+            remaining: pairData.slice(64),
+            consumed: 64,
           })
-        },
-      )
-      if (packageError) {
-        return safeError(packageError)
-      }
+        })
+        if (packageError) {
+          return safeError(packageError)
+        }
 
-      const history: RecentHistory = {
-        headerHash,
-        accoutLogSuperPeak,
-        stateRoot,
-        reportedPackageHashes: packageResult.value,
-      }
+        // Build Map from decoded key-value pairs
+        const reportedPackageHashes = new Map<Hex, Hex>()
+        for (const [packageHash, segmentRoot] of packageResult.value) {
+          reportedPackageHashes.set(packageHash, segmentRoot)
+        }
 
-      return safeResult({
-        value: history,
-        remaining: packageResult.remaining,
-        consumed: entryData.length - packageResult.remaining.length,
-      })
-    },
-  )
+        const history: RecentHistoryEntry = {
+          headerHash,
+          accoutLogSuperPeak,
+          stateRoot,
+          reportedPackageHashes,
+        }
+
+        return safeResult({
+          value: history,
+          remaining: packageResult.remaining,
+          consumed: entryData.length - packageResult.remaining.length,
+        })
+      },
+    )
   if (historyError) {
     return safeError(historyError)
   }
@@ -244,7 +273,7 @@ export function decodeRecent(data: Uint8Array): Safe<DecodingResult<Recent>> {
 
   // Gray Paper: decode mmrencode{accoutbelt} - Merkle mountain range encoding
   // Decode var{sq{build{maybe{x}}{x ∈ peaks}}} with discriminator pattern
-  const [beltError, beltResult] = decodeVariableSequence(
+  const [beltError, beltResult] = decodeVariableSequence<Hex | null>(
     currentData,
     (peakData: Uint8Array) => {
       if (peakData.length < 1) {
@@ -290,7 +319,7 @@ export function decodeRecent(data: Uint8Array): Safe<DecodingResult<Recent>> {
 
   return safeResult({
     value: {
-      history: historyResult.value[0], // Single history entry for now
+      history: historyResult.value, // Single history entry for now
       accoutBelt: {
         peaks: beltResult.value.filter((peak): peak is Hex => peak !== null), // Filter out None values
         totalCount: BigInt(beltResult.value.length), // Total count including None values

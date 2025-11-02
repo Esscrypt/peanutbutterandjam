@@ -51,8 +51,14 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
       const [o, g, m] = registers.slice(7, 10)
 
       // Read code hash from memory (32 bytes)
-      const codeHashData = ram.readOctets(o, 32n)
-      if (!codeHashData || codeHashData.length !== 32) {
+      const [codeHashData, faultAddress] = ram.readOctets(o, 32n)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      if (!codeHashData) {
         this.setAccumulateError(registers, 'WHAT')
         return {
           resultCode: RESULT_CODES.PANIC,

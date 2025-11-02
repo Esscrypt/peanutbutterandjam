@@ -1,20 +1,14 @@
-import {
-  bytesToHex,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-  z,
-  zeroHash,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, logger, z, zeroHash } from '@pbnj/core'
 import { createStateKey, createStateTrie } from '@pbnj/serialization'
 import type {
   Account,
   GenesisState,
   IConfigService,
+  Safe,
   ServiceAccount,
   Validator,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Helper function to convert Uint8Array to hex without 0x prefix
@@ -173,12 +167,14 @@ export function generateChainSpec(
     },
     authpool: [],
     recent: {
-      history: {
-        headerHash: zeroHash,
-        accoutLogSuperPeak: zeroHash,
-        stateRoot: zeroHash,
-        reportedPackageHashes: [],
-      },
+      history: [
+        {
+          headerHash: zeroHash,
+          accoutLogSuperPeak: zeroHash,
+          stateRoot: zeroHash,
+          reportedPackageHashes: new Map(),
+        },
+      ],
       accoutBelt: {
         peaks: [],
         totalCount: 0n,
@@ -225,11 +221,10 @@ export function generateChainSpec(
       serviceStats: new Map(),
     },
     ready: {
-      epochSlots: new Map(),
+      epochSlots: new Array(341).fill(null),
     },
     accumulated: {
       packages: [],
-      metadata: new Map(),
     },
   }
 
@@ -273,7 +268,9 @@ export function generateChainSpec(
   const convertedStateTrie: Record<string, string> = {}
   for (const [key, value] of Object.entries(genesisStateTrie)) {
     const keyWithoutPrefix = key.startsWith('0x') ? key.slice(2) : key
-    const valueWithoutPrefix = value.startsWith('0x') ? value.slice(2) : value
+    const valueWithoutPrefix = value.startsWith('0x')
+      ? value.slice(2)
+      : (value as Hex)
     convertedStateTrie[keyWithoutPrefix] = valueWithoutPrefix
   }
 

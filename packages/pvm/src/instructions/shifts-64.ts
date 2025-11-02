@@ -1,4 +1,3 @@
-
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -19,8 +18,15 @@ export class SHLO_L_IMM_64Instruction extends BaseInstruction {
     })
 
     // Test vector format: operands[0] = (A << 4) | D, operands[1+] = immediate
-    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
-    const registerValue = this.getRegisterValueAs64(context.registers, registerB)
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
 
     const shiftAmount = immediateX % 64n
     const result = registerValue << shiftAmount
@@ -53,8 +59,15 @@ export class SHLO_R_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Logical right shift by immediate (64-bit)'
   execute(context: InstructionContext): InstructionResult {
     // Test vector format: operands[0] = (A << 4) | D, operands[1+] = immediate
-      const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
-    const registerValue = this.getRegisterValueAs64(context.registers, registerB)
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
 
     // Ensure shift amount is within 64-bit range
     const shiftAmount = immediateX % 64n
@@ -77,7 +90,6 @@ export class SHLO_R_IMM_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -91,8 +103,15 @@ export class SHAR_R_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Arithmetic right shift by immediate (64-bit)'
   execute(context: InstructionContext): InstructionResult {
     // Test vector format: operands[0] = (A << 4) | D, operands[1+] = immediate
-    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
-    const registerBValue = this.getRegisterValueAs64(context.registers, registerB)
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
 
     // Convert to signed for arithmetic shift
     const signedValue = this.toSigned64(registerBValue)
@@ -101,7 +120,7 @@ export class SHAR_R_IMM_64Instruction extends BaseInstruction {
     const result = this.toUnsigned64(shiftedValue)
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
-    
+
     console.log('Executing SHAR_R_IMM_64 instruction', {
       registerA,
       registerB,
@@ -116,7 +135,6 @@ export class SHAR_R_IMM_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 
   private toSigned64(value: bigint): bigint {
     // Convert 64-bit unsigned to signed
@@ -147,11 +165,19 @@ export class NEG_ADD_IMM_64Instruction extends BaseInstruction {
 
   execute(context: InstructionContext): InstructionResult {
     // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
-    const { registerA, registerB, immediateX } = this.parseTwoRegistersAndImmediate(context.instruction.operands, context.fskip)
-    const registerBValue = this.getRegisterValueAs64(context.registers, registerB)
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
+    const registerBValue = this.getRegisterValueAs64(
+      context.registers,
+      registerB,
+    )
 
     // Negate the register value and add immediate
-    const result = (immediateX + 2n ** 64n - registerBValue) & 0xffffffffffffffffn
+    const result =
+      (immediateX + 2n ** 64n - registerBValue) & 0xffffffffffffffffn
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
@@ -166,5 +192,4 @@ export class NEG_ADD_IMM_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }

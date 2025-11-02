@@ -7,8 +7,7 @@
  * 2. Message content encoded as per regular JAM serialization
  */
 
-import type { Safe } from '@pbnj/core'
-import { numberToBytes, safeError, safeResult } from '@pbnj/core'
+import { numberToBytes } from '@pbnj/core'
 import {
   encodeFixedLength,
   encodeNatural,
@@ -23,11 +22,13 @@ import type {
   IsAuthorizedCost,
   NodeInfo,
   RefineCost,
+  Safe,
   TelemetryEvent,
   WorkItemOutline,
   WorkPackageOutline,
   WorkReportOutline,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Concatenate multiple Uint8Arrays

@@ -3,24 +3,17 @@ import {
   RingVRFProver,
   RingVRFVerifier,
 } from '@pbnj/bandersnatch-vrf'
-import {
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-
+import { bytesToHex, type Hex, hexToBytes, logger } from '@pbnj/core'
 import type {
   IConfigService,
   IEntropyService,
   IKeyPairService,
   IValidatorSetManager,
+  Safe,
   SafroleTicket,
   SealKey,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { generateRingVRFProof } from './generate-ring-proof'
 
 /**

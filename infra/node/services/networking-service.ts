@@ -7,17 +7,10 @@
 import type { QUICConnection } from '@infisical/quic'
 import { type events, QUICClient, QUICServer } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
-import type { EventAll } from '@matrixai/events'
+// import type { EventAll } from '@matrixai/events'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2'
-import {
-  bytesToHex,
-  type Hex,
-  logger,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, logger } from '@pbnj/core'
 
 // Configure Ed25519 with SHA-512
 ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
@@ -32,8 +25,8 @@ import {
   shouldLocalInitiate,
   verifyPeerCertificate,
 } from '@pbnj/networking'
-import type { ConnectionEndpoint, StreamKind } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import type { ConnectionEndpoint, SafePromise, StreamKind } from '@pbnj/types'
+import { BaseService, safeError, safeResult } from '@pbnj/types'
 import type { KeyPairService } from './keypair-service'
 import type { ValidatorSetManager } from './validator-set'
 
@@ -152,7 +145,7 @@ export class NetworkingService extends BaseService {
     kindByte: StreamKind,
     message: Uint8Array,
   ): SafePromise<void> {
-    if(!this.validatorSetManagerService) {
+    if (!this.validatorSetManagerService) {
       return safeError(new Error('Validator set manager not set'))
     }
     const [validatorPublicKeyError, validatorPublicKey] =
@@ -794,7 +787,7 @@ export class NetworkingService extends BaseService {
   }
 
   private async serverConnectionCloseHandler(
-    event: EventAll<events.EventQUICConnectionStopped>,
+    event: events.EventQUICConnectionStopped,
   ): Promise<void> {
     logger.info('🎯 EventQUICServerConnectionClose received!', {
       eventType: event.type,
@@ -809,7 +802,16 @@ export class NetworkingService extends BaseService {
       )
       return
     }
-    const connectionData = this.connections.get(event.detail.connectionIdShared)
+    // EventQUICConnectionStopped detail is the connection object itself
+    const connection = event.detail as QUICConnection
+    const connectionId = connection.connectionIdShared?.toString()
+    if (!connectionId) {
+      logger.error(
+        '❌[serverConnectionCloseHandler] Connection has no connectionIdShared',
+      )
+      return
+    }
+    const connectionData = this.connections.get(connectionId)
     if (!connectionData) {
       logger.error('❌[serverConnectionCloseHandler] Connection not found')
       return

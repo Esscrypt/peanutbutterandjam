@@ -52,8 +52,9 @@
  * proper access control and service capabilities.
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { DecodingResult, Privileges } from '@pbnj/types'
+import { concatBytes } from '@pbnj/core'
+import type { DecodingResult, Privileges, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   type DictionaryEntry,
   decodeDictionary,

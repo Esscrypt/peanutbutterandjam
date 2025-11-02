@@ -59,7 +59,6 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): Promise<HostFunctionResult> {
-
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]
@@ -102,11 +101,12 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     const lookupTime = this.getLookupTime(refineContext)
 
     // Perform historical lookup using histlookup function
-    const [lookupError, preimage] = this.serviceAccountService.histLookup(
-      serviceId,
-      bytesToHex(hashData),
-      lookupTime,
-    )
+    const [lookupError, preimage] =
+      this.serviceAccountService.histLookupForService(
+        serviceId,
+        bytesToHex(hashData),
+        lookupTime,
+      )
     if (lookupError || !preimage) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
@@ -136,7 +136,7 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
 
     // Write preimage slice to memory
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
-    if(faultAddress) {
+    if (faultAddress) {
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {

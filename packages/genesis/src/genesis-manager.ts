@@ -6,20 +6,12 @@
  */
 
 import { readFileSync } from 'node:fs'
-import type {
-  ChainSpecJson,
-  GenesisHeader,
-  GenesisJson,
-  Hex,
-  Safe,
-} from '@pbnj/core'
+import type { ChainSpecJson, GenesisHeader, GenesisJson, Hex } from '@pbnj/core'
 import {
   blake2bHash,
   parseChainSpec,
   parseGenesisHeader,
   parseGenesisJson,
-  safeError,
-  safeResult,
   zeroHash,
 } from '@pbnj/core'
 import { encodeHeader } from '@pbnj/serialization'
@@ -28,7 +20,9 @@ import type {
   GenesisState,
   IConfigService,
   ParsedBootnode,
+  Safe,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 // Helper methods merged into main class
 

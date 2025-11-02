@@ -13,6 +13,8 @@ import type { Hex } from 'viem'
 import { AuthPoolService } from '../services/auth-pool-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ConfigService } from '../services/config-service'
+import { WorkReportService } from '../services/work-report-service'
+import { EventBusService } from '@pbnj/core'
 
 // Test vector interface
 interface AuthorizationTestVector {
@@ -36,7 +38,7 @@ const tinyConfigService = new ConfigService('tiny')
 const fullConfigService = new ConfigService('full')
 
 // Test vectors directory (relative to workspace root)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
 /**
  * Load all test vector JSON files from the directory for a given configuration
@@ -81,8 +83,24 @@ describe('AuthPool and AuthQueue Services - JAM Test Vectors', () => {
         describe(`Test Vector: ${name}`, () => {
           it('should correctly transition auth pool and queue states', () => {
             // Step 1: Initialize services with pre-state
-            const authPoolService = new AuthPoolService(configService)
-            const authQueueService = new AuthQueueService(configService)
+            const authQueueService = new AuthQueueService({configService: configService})
+            const workReportService = new WorkReportService({
+              workStore: null,
+              eventBus: new EventBusService(),
+              networkingService: null,
+              ce136WorkReportRequestProtocol: null,
+              validatorSetManager: null,
+              configService: configService,
+              entropyService: null,
+              clockService: null,
+            })
+
+            const authPoolService = new AuthPoolService({
+              configService: configService,
+              workReportService: workReportService,
+              eventBusService: new EventBusService(),
+              authQueueService: authQueueService,
+            })
 
             // Set pre-state (deep clone to avoid test interference)
             const clonedAuthPool = JSON.parse(
@@ -99,24 +117,17 @@ describe('AuthPool and AuthQueue Services - JAM Test Vectors', () => {
             expect(authPoolService.getAuthPool()).toEqual(vector.pre_state.auth_pools)
             expect(authQueueService.getAuthQueue()).toEqual(vector.pre_state.auth_queues)
 
-        // Step 2: Build guaranteed work reports map from input.auths
-        // According to Gray Paper: For each guaranteed work report, we need to know
-        // which core it belongs to and which authorizer was used
-        const guaranteedWorkReports = new Map<number, Hex>()
-
         // Parse auths from test vector format: { core, auth_hash }
         for (const auth of vector.input.auths) {
-          guaranteedWorkReports.set(auth.core, auth.auth_hash)
+          workReportService.setAuthorizerHashByCore(auth.core, auth.auth_hash)
         }
 
         // Step 3: Set auth queue cache for the pool service
-        authPoolService.setAuthQueueCache(vector.pre_state.auth_queues as AuthQueue)
+        authQueueService.setAuthQueue(vector.pre_state.auth_queues as AuthQueue)
 
         // Step 4: Trigger block transition on auth pool
         const [poolError] = authPoolService.onBlockTransition(
-          BigInt(vector.input.slot),
-          vector.pre_state.auth_queues as AuthQueue,
-          guaranteedWorkReports,
+          BigInt(vector.input.slot)
         )
 
         expect(poolError).toBeUndefined()

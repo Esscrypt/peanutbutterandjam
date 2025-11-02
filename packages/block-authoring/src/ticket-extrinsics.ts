@@ -1,10 +1,10 @@
-import { type SafePromise, safeResult } from '@pbnj/core'
 import type {
   IClockService,
   IConfigService,
   ITicketService,
   SafroleTicket,
 } from '@pbnj/types'
+import { type SafePromise, safeResult } from '@pbnj/types'
 
 export async function getTicketsForExtrinsic(
   clockService: IClockService,

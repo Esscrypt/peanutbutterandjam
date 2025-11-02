@@ -31,8 +31,8 @@
  * which are common in blockchain operations (balances, indices, etc.).
  */
 
-import { type Safe, safeError, safeResult } from '@pbnj/core'
-import type { DecodingResult } from '@pbnj/types'
+import type { DecodingResult, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Encode natural number according to Gray Paper specification.

@@ -33,9 +33,6 @@ import {
   merklizewb,
   mmrappend,
   mmrsuperpeak,
-  type Safe,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import { calculateBlockHashFromHeader } from '@pbnj/serialization'
 import type {
@@ -45,8 +42,15 @@ import type {
   IConfigService,
   Recent,
   RecentHistoryEntry,
+  Safe,
 } from '@pbnj/types'
-import { BaseService as BaseServiceClass, HISTORY_CONSTANTS } from '@pbnj/types'
+
+import {
+  BaseService as BaseServiceClass,
+  HISTORY_CONSTANTS,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 
 // ============================================================================
 // Recent History Service
@@ -188,28 +192,24 @@ export class RecentHistoryService extends BaseServiceClass {
   getRecent(): Recent {
     if (this.recentHistory.length === 0) {
       return {
-        history: {
-          headerHash:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-          stateRoot:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-          accoutLogSuperPeak:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-          reportedPackageHashes: new Map<Hex, Hex>(),
-        },
+        history: [
+          {
+            headerHash:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            stateRoot:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            accoutLogSuperPeak:
+              '0x0000000000000000000000000000000000000000000000000000000000000000',
+            reportedPackageHashes: new Map<Hex, Hex>(),
+          },
+        ],
         accoutBelt: this.accoutBelt,
       }
     }
 
     // Return the most recent entry
-    const latestEntry = this.recentHistory[this.recentHistory.length - 1]
     return {
-      history: {
-        headerHash: latestEntry.headerHash,
-        stateRoot: latestEntry.stateRoot,
-        accoutLogSuperPeak: latestEntry.accoutLogSuperPeak,
-        reportedPackageHashes: latestEntry.reportedPackageHashes,
-      },
+      history: this.recentHistory,
       accoutBelt: this.accoutBelt,
     }
   }
@@ -436,76 +436,93 @@ export class RecentHistoryService extends BaseServiceClass {
    * Formula:
    * using s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
    * accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+   *
+   * Note: lastaccout' is defined in accumulation.tex eq 370:
+   * lastaccout' ≡ [tuple{s, h} ∈ b] where b is local_fnservouts (accumulation output pairings)
+   * Each tuple represents a service that was accumulated in this block.
    */
   private updateAccoutBelt(body: BlockBody): Safe<void> {
-    try {
-      // Step 1: Get lastaccout' (accumulation outputs)
-      // This would come from the block's accumulation results
-      // For now, we'll need to extract this from the body
-      const lastaccout: Array<{ serviceId: bigint; hash: Uint8Array }> = []
+    // Step 1: Extract lastaccout' from block body
+    // According to accumulation.tex eq 370, lastaccout' comes from accumulation outputs
+    // The guarantees extrinsic references work reports that were accumulated.
+    // Each guarantee.report.results contains WorkResult with service_id.
+    // The hash comes from the accumulation output (poststate hash or code_hash).
+    //
+    // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
+    // Extract from guarantees' work reports:
+    const lastaccout: Array<{ serviceId: bigint; hash: Uint8Array }> = []
 
-      // TODO: Extract lastaccout from block body
-      // This should come from guarantees or accumulation results
-      // For test vectors, we'll need to pass this in
+    // Extract from guarantees: each guarantee references an accumulated work report
+    for (const guarantee of body.guarantees) {
+      const workReport = guarantee.report
+      // Each work report can have multiple results (one per service accumulated)
+      for (const result of workReport.results) {
+        // service_id from the result
+        const serviceId = result.service_id
 
-      // Step 2: Encode the sequence per Gray Paper equation 29
-      // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
-      const encodedSequence: Uint8Array[] = lastaccout.map(
-        ({ serviceId, hash }) => {
-          // encode[4](serviceId) - 4-byte encoding
-          const serviceIdBytes = new Uint8Array(4)
-          const view = new DataView(serviceIdBytes.buffer)
-          view.setUint32(0, Number(serviceId), false) // big-endian
+        // Hash: use code_hash from the result as it represents the service state
+        // Gray Paper accumulation.tex: the hash is the accumulation output hash
+        // Using code_hash as it uniquely identifies the service code at accumulation time
+        const hash = hexToBytes(result.code_hash)
 
-          // Concatenate serviceId + hash
-          const combined = new Uint8Array(4 + hash.length)
-          combined.set(serviceIdBytes, 0)
-          combined.set(hash, 4)
-
-          return combined
-        },
-      )
-
-      // Step 3: Merklize the encoded sequence
-      // merklizewb(s, keccak) creates a well-balanced merkle tree
-      const [merklizeError, merklizedRoot] = merklizewb(encodedSequence)
-      if (merklizeError) {
-        logger.error('Failed to merklize accumulation outputs', {
-          error: merklizeError,
-        })
-        return safeResult(undefined) // Skip update on error
+        lastaccout.push({ serviceId, hash })
       }
-
-      // Step 4: Convert accoutBelt.peaks to MMRRange (nullable array)
-      const mmrRange: MMRRange = this.accoutBelt.peaks.map((peak) =>
-        hexToBytes(peak),
-      )
-
-      // Step 5: Append to MMR belt
-      // accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
-      const [mmrError, updatedRange] = mmrappend(
-        mmrRange,
-        merklizedRoot,
-        defaultKeccakHash,
-      )
-
-      if (mmrError) {
-        logger.error('Failed to append to MMR belt', { error: mmrError })
-        return safeResult(undefined) // Skip update on error
-      }
-
-      // Step 6: Update accoutBelt with new peaks (filter out nulls)
-      this.accoutBelt.peaks = updatedRange
-        .map((peak) => (peak !== null ? bytesToHex(peak) : null))
-        .filter((peak): peak is Hex => peak !== null)
-
-      this.accoutBelt.totalCount = BigInt(this.accoutBelt.peaks.length)
-
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error('Error updating accout belt', { error })
-      return safeResult(undefined)
     }
+
+    // Step 2: Encode the sequence per Gray Paper equation 29
+    // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
+    const encodedSequence: Uint8Array[] = lastaccout.map(
+      ({ serviceId, hash }) => {
+        // encode[4](serviceId) - 4-byte encoding
+        const serviceIdBytes = new Uint8Array(4)
+        const view = new DataView(serviceIdBytes.buffer)
+        view.setUint32(0, Number(serviceId), false) // big-endian
+
+        // Concatenate serviceId + hash
+        const combined = new Uint8Array(4 + hash.length)
+        combined.set(serviceIdBytes, 0)
+        combined.set(hash, 4)
+
+        return combined
+      },
+    )
+
+    // Step 3: Merklize the encoded sequence
+    // merklizewb(s, keccak) creates a well-balanced merkle tree
+    const [merklizeError, merklizedRoot] = merklizewb(encodedSequence)
+    if (merklizeError) {
+      logger.error('Failed to merklize accumulation outputs', {
+        error: merklizeError,
+      })
+      return safeResult(undefined) // Skip update on error
+    }
+
+    // Step 4: Convert accoutBelt.peaks to MMRRange (nullable array)
+    const mmrRange: MMRRange = this.accoutBelt.peaks.map((peak) =>
+      hexToBytes(peak),
+    )
+
+    // Step 5: Append to MMR belt
+    // accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    const [mmrError, updatedRange] = mmrappend(
+      mmrRange,
+      merklizedRoot,
+      defaultKeccakHash,
+    )
+
+    if (mmrError) {
+      logger.error('Failed to append to MMR belt', { error: mmrError })
+      return safeResult(undefined) // Skip update on error
+    }
+
+    // Step 6: Update accoutBelt with new peaks (filter out nulls)
+    this.accoutBelt.peaks = updatedRange
+      .map((peak) => (peak !== null ? bytesToHex(peak) : null))
+      .filter((peak): peak is Hex => peak !== null)
+
+    this.accoutBelt.totalCount = BigInt(this.accoutBelt.peaks.length)
+
+    return safeResult(undefined)
   }
 
   /**
@@ -514,13 +531,18 @@ export class RecentHistoryService extends BaseServiceClass {
    * Gray Paper Reference: Equation (44-52)
    */
   private extractReportedPackageHashes(body: BlockBody): Map<Hex, Hex> {
-    // const packageHashes = new Map<Hex, Hex>()
-    // const guaranteesExtrinsic = body.guarantees.find((guarantee) => guarantee.report.)
-    // if(guaranteesExtrinsic) {
-    //   return packageHashes.set(guaranteesExtrinsic.packageHash, guaranteesExtrinsic.segRoot)
-    // }
-    // return packageHashes
-    return new Map<Hex, Hex>()
+    const packageHashes = new Map<Hex, Hex>()
+    for (const guarantee of body.guarantees) {
+      packageHashes.set(
+        guarantee.report.package_spec.hash,
+        guarantee.report.segment_root_lookup.find(
+          (lookup) =>
+            lookup.work_package_hash === guarantee.report.package_spec.hash,
+        )?.segment_tree_root ||
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
+      )
+    }
+    return packageHashes
   }
 
   /**

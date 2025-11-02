@@ -10,13 +10,15 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import { decodeWorkReport, encodeWorkReport } from '@pbnj/serialization'
-import type { WorkReportRequest, WorkReportResponse } from '@pbnj/types'
+import type {
+  Safe,
+  SafePromise,
+  WorkReportRequest,
+  WorkReportResponse,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

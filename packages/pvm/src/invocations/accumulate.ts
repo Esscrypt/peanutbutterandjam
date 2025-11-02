@@ -20,9 +20,9 @@ import type {
   ResultCode,
 } from '@pbnj/types'
 import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '../config'
-import { PVM } from '../pvm'
-import type { HostFunctionRegistry } from '../host-functions/general/registry'
 import type { AccumulateHostFunctionRegistry } from '../host-functions/accumulate/registry'
+import type { HostFunctionRegistry } from '../host-functions/general/registry'
+import { PVM } from '../pvm'
 
 /**
  * Simplified PVM implementation
@@ -39,7 +39,9 @@ export class AccumulatePVM extends PVM {
   }) {
     super(options.hostFunctionRegistry, options.pvmOptions)
     this.accumulateHostFunctionRegistry = options.accumulateHostFunctionRegistry
-    this.state.gasCounter = options.pvmOptions?.gasCounter || BigInt(options.configService.maxBlockGas)
+    this.state.gasCounter =
+      options.pvmOptions?.gasCounter ||
+      BigInt(options.configService.maxBlockGas)
   }
 
   /**

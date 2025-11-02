@@ -4,12 +4,12 @@ import {
 } from '@pbnj/serialization'
 import type {
   HostFunctionResult,
+  IConfigService,
   ImplicationsPair,
   RAM,
   RegisterState,
   ValidatorPublicKeys,
 } from '@pbnj/types'
-import { CORE_CONSTANTS } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import { BaseAccumulateHostFunction } from './base'
 
@@ -35,6 +35,12 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.DESIGNATE
   readonly name = 'designate'
   readonly gasCost = 10n
+  readonly configService: IConfigService
+
+  constructor(configService: IConfigService) {
+    super()
+    this.configService = configService
+  }
 
   execute(
     gasCounter: bigint,
@@ -55,11 +61,20 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
       // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
       // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
-      const C_VALCOUNT = CORE_CONSTANTS.C_VALCOUNT // 1023 validators
+      const C_VALCOUNT = this.configService.numValidators // 1023 validators
       const VALIDATOR_SIZE = 336 // bytes per validator
       const totalSize = VALIDATOR_SIZE * C_VALCOUNT
 
-      const validatorsData = ram.readOctets(o, BigInt(totalSize))
+      const [validatorsData, faultAddress] = ram.readOctets(
+        o,
+        BigInt(totalSize),
+      )
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
       if (!validatorsData) {
         this.setAccumulateError(registers, 'WHAT')
         return {

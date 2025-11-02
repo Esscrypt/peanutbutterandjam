@@ -23,10 +23,6 @@ import {
   concatBytes,
   type EventBusService,
   type Hex,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import {
   decodeFixedLength,
@@ -34,7 +30,12 @@ import {
   encodeFixedLength,
   encodeWorkPackage,
 } from '@pbnj/serialization'
-import type { WorkPackageSubmissionRequest } from '@pbnj/types'
+import type {
+  Safe,
+  SafePromise,
+  WorkPackageSubmissionRequest,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

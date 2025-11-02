@@ -5,15 +5,15 @@
  * Following the same pattern as computeGenesisHeaderHash
  */
 
+import { type Hex, logger } from '@pbnj/core'
+import type { BlockStore } from '@pbnj/state'
 import {
-  type Hex,
-  logger,
+  BaseService,
+  type BlockHeader,
   type SafePromise,
   safeError,
   safeResult,
-} from '@pbnj/core'
-import type { BlockStore } from '@pbnj/state'
-import { BaseService, type BlockHeader } from '@pbnj/types'
+} from '@pbnj/types'
 
 /**
  * Block Header Service

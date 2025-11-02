@@ -68,8 +68,14 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       )
 
       // Read code hash from memory (32 bytes)
-      const codeHashData = ram.readOctets(o, l)
-      if (!codeHashData || codeHashData.length !== 32) {
+      const [codeHashData, faultAddress] = ram.readOctets(o, l)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      if (!codeHashData) {
         this.setAccumulateError(registers, 'WHAT')
         return {
           resultCode: RESULT_CODES.PANIC,

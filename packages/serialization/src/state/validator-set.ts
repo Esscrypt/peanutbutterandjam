@@ -49,19 +49,14 @@
  * smooth epoch transitions and validator set updates.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import type {
   DecodingResult,
   IConfigService,
+  Safe,
   ValidatorPublicKeys,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Encode staging set according to Gray Paper specification.

@@ -11,8 +11,8 @@
  * Gray Paper Reference: guaranteeing.tex (line 31-33)
  */
 
-import type { EventBusService, Safe, SafePromise } from '@pbnj/core'
-import { concatBytes, safeError, safeResult } from '@pbnj/core'
+import type { EventBusService } from '@pbnj/core'
+import { concatBytes } from '@pbnj/core'
 import {
   decodeVariableSequence,
   decodeWorkPackage,
@@ -20,9 +20,12 @@ import {
   encodeWorkPackage,
 } from '@pbnj/serialization'
 import type {
+  Safe,
+  SafePromise,
   WorkPackageSharing,
   WorkPackageSharingResponse,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import type { Hex } from 'viem'
 import { NetworkingProtocol } from './protocol'
 
@@ -158,24 +161,24 @@ export class CE134WorkPackageSharingProtocol extends NetworkingProtocol<
     offset += 4
 
     // 2. Segments-Root Mappings (len++[hash++root])
-    const [mappingsError, mappingsResult] = decodeVariableSequence(
-      data.slice(offset),
-      (itemData: Uint8Array) => {
-        if (itemData.length < 64) {
-          return safeError(
-            new Error(`Insufficient data for mapping: ${itemData.length}`),
-          )
-        }
-        return safeResult({
-          value: {
-            workPackageHash: itemData.slice(0, 32),
-            segmentsRoot: itemData.slice(32, 64),
-          },
-          remaining: itemData.slice(64),
-          consumed: 64,
-        })
-      },
-    )
+    const [mappingsError, mappingsResult] = decodeVariableSequence<{
+      workPackageHash: Uint8Array
+      segmentsRoot: Uint8Array
+    }>(data.slice(offset), (itemData: Uint8Array) => {
+      if (itemData.length < 64) {
+        return safeError(
+          new Error(`Insufficient data for mapping: ${itemData.length}`),
+        )
+      }
+      return safeResult({
+        value: {
+          workPackageHash: itemData.slice(0, 32),
+          segmentsRoot: itemData.slice(32, 64),
+        },
+        remaining: itemData.slice(64),
+        consumed: 64,
+      })
+    })
 
     if (mappingsError || !mappingsResult) {
       throw new Error(

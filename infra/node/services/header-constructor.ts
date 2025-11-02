@@ -5,15 +5,13 @@
  * Reference: Gray Paper header specifications
  */
 
-import type { Hex, Safe } from '@pbnj/core'
 import {
   blake2bHash,
   bytesToHex,
   concatBytes,
+  type Hex,
   hexToBytes,
   logger,
-  safeError,
-  safeResult,
   zeroHash,
 } from '@pbnj/core'
 import { encodeHeader, encodeUnsignedHeader } from '@pbnj/serialization'
@@ -21,9 +19,10 @@ import type {
   BlockHeader,
   Extrinsic,
   IConfigService,
+  Safe,
   UnsignedBlockHeader,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import { BaseService, safeError, safeResult } from '@pbnj/types'
 import type { NodeGenesisManager } from './genesis-manager'
 import type { KeyPairService } from './keypair-service'
 import type { ValidatorSetManager } from './validator-set'

@@ -5,9 +5,9 @@
  * Reference: JAM Protocol chain specification format
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/types'
 import type { Hex } from 'viem'
 import { z } from 'zod'
-import { type Safe, safeError, safeResult } from '../safe'
 
 // ============================================================================
 // Base Validators

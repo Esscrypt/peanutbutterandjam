@@ -48,8 +48,14 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
       const o = registers[7]
 
       // Read hash from memory (32 bytes)
-      const hashData = ram.readOctets(o, 32n)
-      if (!hashData || hashData.length !== 32) {
+      const [hashData, faultAddress] = ram.readOctets(o, 32n)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      if (!hashData) {
         this.setAccumulateError(registers, 'WHAT')
         return {
           resultCode: RESULT_CODES.PANIC,

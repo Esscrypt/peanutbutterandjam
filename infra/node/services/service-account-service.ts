@@ -7,20 +7,16 @@
 
 import {
   blake2bHash,
+  bytesToHex,
   type EventBusService,
   type Hex,
   hexToBytes,
   logger,
-  type Safe,
-  type SafePromise,
   type SlotChangeEvent,
-  safeError,
-  safeResult,
-  bytesToHex,
 } from '@pbnj/core'
 import type { PreimageRequestProtocol } from '@pbnj/networking'
 import { encodePreimage } from '@pbnj/serialization'
-import type { PreimageStore } from '@pbnj/state'
+import type { DbPreimage, PreimageStore } from '@pbnj/state'
 import {
   BaseService,
   type IServiceAccountService,
@@ -28,9 +24,13 @@ import {
   type PreimageAnnouncement,
   type PreimageRequest,
   type PreimageRequestStatus,
+  type Safe,
+  type SafePromise,
   type ServiceAccount,
   type ServiceAccountCore,
   type ServiceAccounts,
+  safeError,
+  safeResult,
 } from '@pbnj/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
@@ -54,12 +54,15 @@ export class ServiceAccountService
 
   private readonly serviceStorage: Map<bigint, Map<Hex, Uint8Array>>
   private readonly coreServiceAccounts: Map<bigint, ServiceAccountCore>
+  // per-service preimages mapping to avoid cross-service overwrite
+  private readonly servicePreimages: Map<bigint, Map<Hex, Uint8Array>> =
+    new Map()
 
   // used to determine if a preimage is available as of a timeslot or not
-  // preimash hash -> blob length -> request status
-  private readonly preimageRequests: Map<
-    Hex,
-    Map<bigint, PreimageRequestStatus>
+  // serviceId -> preimage hash -> blob length -> request status
+  private readonly serviceRequests: Map<
+    bigint,
+    Map<Hex, Map<bigint, PreimageRequestStatus>>
   > = new Map()
 
   private readonly preimageStore: PreimageStore | null
@@ -143,8 +146,9 @@ export class ServiceAccountService
             return safeError(encodeError)
           }
           const [error, creationSlot] = this.getPreimageCreationSlot(
+            preimage.requester,
             hash,
-            BigInt(preimage.blob.length),
+            BigInt(hexToBytes(preimage.blob).length),
           )
           if (error) {
             return safeError(error)
@@ -165,8 +169,15 @@ export class ServiceAccountService
     return safeResult(true)
   }
 
-  getPreimageCreationSlot(hash: Hex, blobLength: bigint): Safe<bigint | null> {
-    const requestStatus = this.preimageRequests.get(hash)?.get(blobLength)
+  getPreimageCreationSlot(
+    serviceId: bigint,
+    hash: Hex,
+    blobLength: bigint,
+  ): Safe<bigint | null> {
+    const requestStatus = this.serviceRequests
+      .get(serviceId)
+      ?.get(hash)
+      ?.get(blobLength)
     if (!requestStatus) {
       return safeResult(null)
     }
@@ -210,7 +221,7 @@ export class ServiceAccountService
     return safeResult(undefined)
   }
 
-  handlePreimageReceived(preimage: Preimage, peerPublicKey: Hex): void {
+  handlePreimageReceived(preimage: Preimage, _peerPublicKey: Hex): void {
     this.storePreimage(preimage, this.clockService.getCurrentSlot())
   }
 
@@ -249,35 +260,43 @@ export class ServiceAccountService
    * @returns Safe result indicating success
    */
   storePreimage(preimage: Preimage, creationSlot: bigint): Safe<Hex> {
-    const [encodeError, encodedPreimage] = encodePreimage(preimage)
-    if (encodeError) {
-      return safeError(encodeError)
+    // Validate first (no state changes on failure)
+    const [validationError] = this.validatePreimageRequest(preimage)
+    if (validationError) {
+      return safeError(validationError)
     }
 
-    const [hashError, hash] = blake2bHash(encodedPreimage)
+    // Gray Paper: preimage hash is computed over the blob only
+    const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
     if (hashError) {
       return safeError(hashError)
     }
 
+    const blobLength = BigInt(hexToBytes(preimage.blob).length)
+    const serviceBucket = this.serviceRequests.get(preimage.requester)!
+
     // Store the preimage
     this.preimageCache.set(hash, preimage)
+    const perServiceBucket =
+      this.servicePreimages.get(preimage.requester) ??
+      new Map<Hex, Uint8Array>()
+    perServiceBucket.set(hash, hexToBytes(preimage.blob))
+    this.servicePreimages.set(preimage.requester, perServiceBucket)
 
-    // fill the preimage request status
-    const hashToBlobLength = this.preimageRequests.get(hash)
-    if (hashToBlobLength) {
-      const requestStatus = hashToBlobLength.get(BigInt(preimage.blob.length))
-      if (requestStatus) {
-        requestStatus.push(creationSlot)
-      } else {
-        hashToBlobLength.set(BigInt(preimage.blob.length), [creationSlot])
-      }
+    // fill/update the preimage request status for this service
+    const hashToBlobLength = serviceBucket!.get(hash)!
+    const requestStatus = hashToBlobLength.get(blobLength)
+    if (requestStatus) {
+      requestStatus.push(creationSlot)
     } else {
-      const lengthMap = new Map<bigint, PreimageRequestStatus>()
-      lengthMap.set(BigInt(preimage.blob.length), [creationSlot])
-      this.preimageRequests.set(hash, lengthMap)
+      hashToBlobLength.set(blobLength, [creationSlot])
     }
 
     if (this.preimageStore) {
+      const [encodeError, encodedPreimage] = encodePreimage(preimage)
+      if (encodeError) {
+        return safeError(encodeError)
+      }
       this.preimageStore.storePreimage(
         encodedPreimage,
         preimage.requester,
@@ -287,6 +306,69 @@ export class ServiceAccountService
     }
 
     return safeResult(hash)
+  }
+
+  /**
+   * Validate a preimage against current state without mutating it
+   */
+  private validatePreimageRequest(preimage: Preimage): Safe<void> {
+    // Compute hash over blob only
+    const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
+    if (hashError) {
+      return safeError(hashError)
+    }
+
+    // Already present for this service -> unneeded
+    const existing = this.preimageCache.get(hash)
+    if (existing && existing.requester === preimage.requester) {
+      return safeError(new Error('preimage_unneeded'))
+    }
+
+    // Must be requested for this service and exact byte length
+    const blobLength = BigInt(hexToBytes(preimage.blob).length)
+    const serviceBucket = this.serviceRequests.get(preimage.requester)
+    const lengthMap = serviceBucket?.get(hash)
+    if (!lengthMap || !lengthMap.has(blobLength)) {
+      return safeError(new Error('preimage_unneeded'))
+    }
+
+    return safeResult(undefined)
+  }
+
+  /**
+   * Apply a batch of preimages for a given slot with ordering/uniqueness validation
+   * Returns error 'preimages_not_sorted_unique' when inputs violate sorting/uniqueness
+   */
+  applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
+    // Validate sorted by requester asc, then blob asc; and unique
+    for (let i = 1; i < preimages.length; i++) {
+      const a = preimages[i - 1]
+      const b = preimages[i]
+      if (a.requester > b.requester) {
+        return safeError(new Error('preimages_not_sorted_unique'))
+      }
+      if (a.requester === b.requester && a.blob > b.blob) {
+        return safeError(new Error('preimages_not_sorted_unique'))
+      }
+      if (a.requester === b.requester && a.blob === b.blob) {
+        return safeError(new Error('preimages_not_sorted_unique'))
+      }
+    }
+
+    // Pre-validate all items atomically; reject whole batch on first failure
+    for (const p of preimages) {
+      const [validationError] = this.validatePreimageRequest(p)
+      if (validationError) {
+        return safeError(validationError)
+      }
+    }
+
+    // Apply each preimage
+    for (const p of preimages) {
+      const [err] = this.storePreimage(p, creationSlot)
+      if (err) return safeError(err)
+    }
+    return safeResult(undefined)
   }
 
   /**
@@ -303,17 +385,17 @@ export class ServiceAccountService
     if (!this.preimageStore) {
       return safeError(new Error('Preimage store not found'))
     }
-    this.preimageStore.getPreimage(hash).then(([error, result]) => {
-      if (error) {
-        return safeError(error)
+    this.preimageStore.getPreimage(hash).then((response: Safe<DbPreimage>) => {
+      if (response[0]) {
+        return safeError(response[0])
       }
-      if (!result) {
+      if (!response[1]) {
         // TODO: request the preimage from peers
         return safeResult(null)
       }
       return safeResult({
-        requester: result.serviceIndex,
-        blob: hexToBytes(result.data),
+        requester: response[1].serviceIndex,
+        blob: response[1],
       })
     })
     return safeResult(null)
@@ -371,13 +453,15 @@ export class ServiceAccountService
       }
     }
 
-    // update all requests
-    for (const [hash, lengthMap] of this.preimageRequests.entries()) {
-      for (const [_blobLength, requestStatus] of lengthMap.entries()) {
-        const lastChangeSlot = requestStatus[requestStatus.length - 1]
-        if (slotChangeEvent.slot > lastChangeSlot - CEXPUNGE_PERIOD) {
-          requestStatus.push(slotChangeEvent.slot) // just became unavailable
-          this.preimageCache.delete(hash)
+    // update all requests (per service)
+    for (const [_, hashMap] of this.serviceRequests.entries()) {
+      for (const [hash, lengthMap] of hashMap.entries()) {
+        for (const [_blobLength, requestStatus] of lengthMap.entries()) {
+          const lastChangeSlot = requestStatus[requestStatus.length - 1]
+          if (slotChangeEvent.slot > lastChangeSlot - CEXPUNGE_PERIOD) {
+            requestStatus.push(slotChangeEvent.slot) // just became unavailable
+            this.preimageCache.delete(hash)
+          }
         }
       }
     }
@@ -439,6 +523,52 @@ export class ServiceAccountService
     return safeResult(preimage)
   }
 
+  /**
+   * Gray Paper histlookup by service id
+   * Looks up availability using internal per-service requests map
+   */
+  histLookupForService(
+    serviceId: bigint,
+    hash: Hex,
+    timeslot: bigint,
+  ): Safe<Uint8Array | null> {
+    // resolve preimage bytes for this service
+    const preimage = this.preimageCache.get(hash)
+    if (!preimage || preimage.requester !== serviceId) {
+      logger.debug('Hash does not belong to a preimage for service', {
+        hash,
+        serviceId: serviceId.toString(),
+      })
+      return safeResult(null)
+    }
+
+    const length = BigInt(hexToBytes(preimage.blob).length)
+    const lengthMap = this.serviceRequests.get(serviceId)?.get(hash)
+    if (!lengthMap) {
+      logger.debug('No request map found for hash', { hash })
+      return safeResult(null)
+    }
+    const requestStatus = lengthMap.get(length)
+    if (!requestStatus) {
+      logger.debug('No request status found for length', {
+        length: length.toString(),
+      })
+      return safeResult(null)
+    }
+
+    const isValid = this.checkRequestValidity(requestStatus, timeslot)
+    if (!isValid) {
+      logger.debug('Preimage not available at requested timeslot', {
+        hash,
+        timeslot: timeslot.toString(),
+        requestStatus: requestStatus.map((t) => t.toString()),
+      })
+      return safeResult(null)
+    }
+
+    return safeResult(hexToBytes(preimage.blob))
+  }
+
   histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null> {
     // Get the request map for this hash
     const preimage = this.preimageCache.get(hash)
@@ -447,9 +577,9 @@ export class ServiceAccountService
       return safeResult(null)
     }
 
-    const length = preimage.blob.length
+    const length = hexToBytes(preimage.blob).length
 
-    const lengthMap = this.preimageRequests.get(hash)
+    const lengthMap = this.serviceRequests.get(preimage.requester)?.get(hash)
     if (!lengthMap) {
       logger.debug('No request map found for hash', { hash })
       return safeResult(null)
@@ -536,19 +666,15 @@ export class ServiceAccountService
         this.serviceStorage.get(serviceId) ?? new Map<Hex, Uint8Array>()
 
       // Get preimages for this service (empty map for now - needs database queries)
-      const preimages = new Map<Hex, Uint8Array>()
-      for (const [hash, preimage] of this.preimageCache.entries()) {
-        if (preimage.requester === serviceId) {
-          preimages.set(hash, hexToBytes(preimage.blob))
-        }
-      }
+      const preimages =
+        this.servicePreimages.get(serviceId) ?? new Map<Hex, Uint8Array>()
 
-      // Get requests for this service (empty map for now - needs database queries)
+      // Get requests for this service directly from per-service map
       const requests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-      for (const [hash, requestStatus] of this.preimageRequests.entries()) {
-        const preimage = this.preimageCache.get(hash)
-        if (preimage?.requester === serviceId) {
-          requests.set(hash, requestStatus)
+      const bucket = this.serviceRequests.get(serviceId)
+      if (bucket) {
+        for (const [hash, byLen] of bucket.entries()) {
+          requests.set(hash, byLen)
         }
       }
 
@@ -575,15 +701,27 @@ export class ServiceAccountService
     this.coreServiceAccounts.set(serviceId, serviceAccount)
     this.serviceStorage.set(serviceId, serviceAccount.storage)
 
+    // set per-service preimages bucket
+    const preimageBucket = new Map<Hex, Uint8Array>()
     for (const [hash, preimage] of serviceAccount.preimages.entries()) {
+      preimageBucket.set(hash, preimage)
       this.preimageCache.set(hash, {
         requester: serviceId,
         blob: bytesToHex(preimage),
       })
     }
-    for (const [hash, requestStatus] of serviceAccount.requests.entries()) {
-      this.preimageRequests.set(hash, requestStatus)
+    this.servicePreimages.set(serviceId, preimageBucket)
+    // populate per-service requests bucket
+    const bucket =
+      this.serviceRequests.get(serviceId) ??
+      new Map<Hex, Map<bigint, PreimageRequestStatus>>()
+    for (const [
+      hash,
+      requestStatusByLen,
+    ] of serviceAccount.requests.entries()) {
+      bucket.set(hash, requestStatusByLen)
     }
+    this.serviceRequests.set(serviceId, bucket)
 
     return safeResult(undefined)
   }
@@ -621,17 +759,13 @@ export class ServiceAccountService
     }
     const storage =
       this.serviceStorage.get(serviceId) ?? new Map<Hex, Uint8Array>()
-    const preimages = new Map<Hex, Uint8Array>()
-    for (const [hash, preimage] of this.preimageCache.entries()) {
-      if (preimage.requester === serviceId) {
-        preimages.set(hash, hexToBytes(preimage.blob))
-      }
-    }
+    const preimages =
+      this.servicePreimages.get(serviceId) ?? new Map<Hex, Uint8Array>()
     const requests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-    for (const [hash, lengthMap] of this.preimageRequests.entries()) {
-      const preimage = this.preimageCache.get(hash)
-      if (preimage?.requester === serviceId) {
-        requests.set(hash, lengthMap)
+    const bucket = this.serviceRequests.get(serviceId)
+    if (bucket) {
+      for (const [hash, byLen] of bucket.entries()) {
+        requests.set(hash, byLen)
       }
     }
     return safeResult({ ...accountCore, storage, preimages, requests })

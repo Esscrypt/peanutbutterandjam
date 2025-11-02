@@ -43,10 +43,18 @@ export type AuthPool = Hex[][]
 /**
  * Recent activity log (β)
  * Log of recent blocks and accumulation outputs
+ *
+ * Gray Paper Reference: recent_history.tex (Equations 5-8, 38-43)
+ * recent ≡ tuple{recenthistory, accoutbelt}
+ * recenthistory ∈ sequence[:Crecenthistorylen]{tuple{...}}
+ * Crecenthistorylen = 8 (definitions.tex line 263)
+ *
+ * Recent history stores up to 8 RecentHistoryEntry items (one per block),
+ * maintained as a circular buffer that keeps the most recent 8 blocks.
  */
 export interface Recent {
-  /** Recent block history */
-  history: RecentHistoryEntry
+  /** Recent block history - sequence of up to 8 entries (Crecenthistorylen = 8) */
+  history: RecentHistoryEntry[]
   /** Accumulation output belt (Merkle mountain range) */
   accoutBelt: AccoutBelt
 }

@@ -41,7 +41,9 @@ import {
   IETFVRFVerifier,
   pointToHashRfc9381,
 } from '@pbnj/bandersnatch-vrf'
-import { logger, type Safe, safeError, safeResult } from '@pbnj/core'
+import { logger } from '@pbnj/core'
+import type { Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Gray Paper hardcoded context string for entropy VRF

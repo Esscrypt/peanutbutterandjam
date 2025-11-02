@@ -37,15 +37,14 @@
  * validators to participate while maintaining efficient encoding.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, Guarantee, GuaranteeSignature } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type {
+  DecodingResult,
+  Guarantee,
+  GuaranteeSignature,
+  Safe,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
@@ -275,7 +274,7 @@ export function decodeGuarantee(
   currentData = result3.remaining
 
   // Then decode the sequence with the known count
-  const [error4, result4] = decodeSequenceGeneric(
+  const [error4, result4] = decodeSequenceGeneric<GuaranteeSignature>(
     currentData,
     decodeCredential,
     credentialsCount,
@@ -367,7 +366,7 @@ export function decodeGuarantees(
   }
 
   // Then decode the sequence with the known count
-  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric<Guarantee>(
     lengthResult.remaining,
     decodeGuarantee,
     count,

@@ -5,12 +5,19 @@
  * Handles encoding, decoding, and shard recovery operations for JAM protocol
  */
 
-import { logger, type SafePromise, safeError, safeResult } from '@pbnj/core'
+import { logger } from '@pbnj/core'
 import {
   isRustModuleAvailable,
   RustReedSolomonCoder,
 } from '@pbnj/erasure-coding'
-import { BaseService, type EncodedData, type ShardWithIndex } from '@pbnj/types'
+import {
+  BaseService,
+  type EncodedData,
+  type SafePromise,
+  type ShardWithIndex,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 import type { ConfigService } from './config-service'
 
 /**
@@ -48,9 +55,9 @@ export class ErasureCodingService extends BaseService {
   private readonly coder: RustReedSolomonCoder
   private readonly isInitialized = false
 
-  constructor(configService: ConfigService) {
+  constructor(options: { configService: ConfigService }) {
     super('erasure-coding-service')
-    this.configService = configService
+    this.configService = options.configService
 
     // According to Gray Paper: shard size is always 2 octet pairs (4 octets)
     // k = numCores, n = numValidators

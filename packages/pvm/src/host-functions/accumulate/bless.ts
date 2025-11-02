@@ -1,5 +1,6 @@
 import type {
   HostFunctionResult,
+  IConfigService,
   ImplicationsPair,
   RAM,
   RegisterState,
@@ -34,6 +35,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.BLESS
   readonly name = 'bless'
   readonly gasCost = 10n
+  readonly configService: IConfigService
+
+  constructor(configService: IConfigService) {
+    super()
+    this.configService = configService
+  }
 
   execute(
     gasCounter: bigint,
@@ -52,12 +59,15 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       // Extract parameters from registers
       const [m, a, v, r, o, n] = registers.slice(7, 13)
 
-      // Gray Paper constants
-      const C_CORE_COUNT = 341n // Ccorecount
-
       // Read assigners array from memory (341 cores * 4 bytes each)
-      const assignersLength = C_CORE_COUNT * 4n
-      const assignersData = ram.readOctets(a, assignersLength)
+      const assignersLength = BigInt(this.configService.numCores) * 4n
+      const [assignersData, faultAddress] = ram.readOctets(a, assignersLength)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
       if (!assignersData) {
         this.setAccumulateError(registers, 'WHAT')
         return {
@@ -67,8 +77,17 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
 
       // Read always accessors array from memory (n entries * 12 bytes each)
       const accessorsLength = n * 12n
-      const accessorsData = ram.readOctets(o, accessorsLength)
+      const [accessorsData, accessorsFaultAddress] = ram.readOctets(
+        o,
+        accessorsLength,
+      )
       if (!accessorsData) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      if (accessorsFaultAddress) {
         this.setAccumulateError(registers, 'WHAT')
         return {
           resultCode: RESULT_CODES.PANIC,
@@ -77,7 +96,7 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
 
       // Parse assigners array (4 bytes per core ID)
       const assigners: bigint[] = []
-      for (let i = 0; i < Number(C_CORE_COUNT); i++) {
+      for (let i = 0; i < this.configService.numCores; i++) {
         const coreId = new DataView(assignersData.buffer, i * 4, 4).getUint32(
           0,
           true,

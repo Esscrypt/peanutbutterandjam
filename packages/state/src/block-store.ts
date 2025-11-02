@@ -5,17 +5,7 @@
  * No JSONB usage - all extrinsics stored in dedicated tables
  */
 
-import {
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-  safeTry,
-  zeroHash,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes, zeroHash } from '@pbnj/core'
 import {
   calculateBlockHash,
   calculateBlockHashFromHeader,
@@ -24,7 +14,14 @@ import {
   encodeBlock,
   encodeHeader,
 } from '@pbnj/serialization'
-import type { Block, BlockHeader, IConfigService } from '@pbnj/types'
+import type {
+  Block,
+  BlockHeader,
+  IConfigService,
+  Safe,
+  SafePromise,
+} from '@pbnj/types'
+import { safeError, safeResult, safeTry } from '@pbnj/types'
 import { count, desc, eq } from 'drizzle-orm'
 import type { CoreDb } from './index'
 import {

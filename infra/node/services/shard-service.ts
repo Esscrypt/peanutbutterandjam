@@ -9,15 +9,13 @@ import {
   logger,
   merklizewb,
   reconstructRoot,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
   verifyMerkleProof,
 } from '@pbnj/core'
-import { ShardDistributionProtocol } from '@pbnj/networking'
+import type { ShardDistributionProtocol } from '@pbnj/networking'
 import { encodeWorkPackage } from '@pbnj/serialization'
 import type {
+  Safe,
+  SafePromise,
   SegmentShardRequest,
   SegmentShardResponse,
   ShardDistributionRequest,
@@ -25,7 +23,7 @@ import type {
   ShardWithIndex,
   WorkPackage,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import { BaseService, safeError, safeResult } from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { ErasureCodingService } from './erasure-coding-service'
 import type { NetworkingService } from './networking-service'
@@ -40,8 +38,8 @@ export class ShardService extends BaseService {
   private readonly configService: ConfigService
   private readonly erasureCodingService: ErasureCodingService
   private readonly eventBusService: EventBusService
-  private readonly networkingService: NetworkingService
-  private readonly shardDistributionProtocol: ShardDistributionProtocol
+  private readonly networkingService: NetworkingService | null
+  private readonly shardDistributionProtocol: ShardDistributionProtocol | null
 
   /**
    * Storage for shards WE generate (as Guarantor/Assurer)
@@ -90,16 +88,15 @@ export class ShardService extends BaseService {
     configService: ConfigService
     erasureCodingService: ErasureCodingService
     eventBusService: EventBusService
-    networkingService: NetworkingService
+    networkingService: NetworkingService | null
+    shardDistributionProtocol: ShardDistributionProtocol | null
   }) {
     super('shard-service')
     this.configService = options.configService
     this.erasureCodingService = options.erasureCodingService
     this.eventBusService = options.eventBusService
     this.networkingService = options.networkingService
-    this.shardDistributionProtocol = new ShardDistributionProtocol(
-      this.eventBusService,
-    )
+    this.shardDistributionProtocol = options.shardDistributionProtocol
 
     this.eventBusService.addShardDistributionRequestCallback(
       this.handleShardDistributionRequest.bind(this),
@@ -210,93 +207,93 @@ export class ShardService extends BaseService {
     request: ShardDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    try {
-      const shardData = this.shardStorage.get(request.erasureRoot)
-      if (!shardData) {
-        return safeError(
-          new Error(
-            `Shards not found for erasure root: ${request.erasureRoot}`,
-          ),
-        )
-      }
+    if (!this.networkingService) {
+      return safeError(new Error('Networking service not available'))
+    }
+    if (!this.shardDistributionProtocol) {
+      return safeError(new Error('Shard distribution protocol not available'))
+    }
 
-      const shardIndex = Number(request.shardIndex)
-
-      // Get bundle shard (shards are sorted by index)
-      if (shardIndex < 0 || shardIndex >= shardData.bundleShards.length) {
-        return safeError(
-          new Error(
-            `Bundle shard index ${shardIndex} out of range [0, ${shardData.bundleShards.length})`,
-          ),
-        )
-      }
-      const bundleShard = shardData.bundleShards[shardIndex]
-
-      // Get segment shards for this index
-      const segmentShards = shardData.segmentShards.get(shardIndex) || []
-
-      // Build shard sequence (pairs of bundle hash + segment root) for justification
-      const [seqError, shardSequence] = await this.buildShardSequence(
-        shardData.bundleShards.map((shard, index) => ({ shard, index })),
-        shardData.segmentShards,
+    const shardData = this.shardStorage.get(request.erasureRoot)
+    if (!shardData) {
+      return safeError(
+        new Error(`Shards not found for erasure root: ${request.erasureRoot}`),
       )
-      if (seqError) {
-        return safeError(seqError)
-      }
+    }
 
-      // Generate justification using Gray Paper T function
-      const [justificationError, justification] = this.generateJustification(
-        shardSequence,
-        shardIndex,
+    const shardIndex = Number(request.shardIndex)
+
+    // Get bundle shard (shards are sorted by index)
+    if (shardIndex < 0 || shardIndex >= shardData.bundleShards.length) {
+      return safeError(
+        new Error(
+          `Bundle shard index ${shardIndex} out of range [0, ${shardData.bundleShards.length})`,
+        ),
       )
-      if (justificationError) {
-        return safeError(justificationError)
-      }
+    }
+    const bundleShard = shardData.bundleShards[shardIndex]
 
-      // Construct response
-      const response: ShardDistributionResponse = {
-        bundleShard: bytesToHex(bundleShard),
-        segmentShards,
-        justification,
-      }
+    // Get segment shards for this index
+    const segmentShards = shardData.segmentShards.get(shardIndex) || []
 
-      // Serialize response using CE 137 protocol
-      const [serializeError, serializedResponse] =
-        this.shardDistributionProtocol.serializeResponse(response)
-      if (serializeError) {
-        return safeError(serializeError)
-      }
+    // Build shard sequence (pairs of bundle hash + segment root) for justification
+    const [seqError, shardSequence] = await this.buildShardSequence(
+      shardData.bundleShards.map((shard, index) => ({ shard, index })),
+      shardData.segmentShards,
+    )
+    if (seqError) {
+      return safeError(seqError)
+    }
 
-      // Send response through networking service
-      const [sendError] = await this.networkingService.sendMessageByPublicKey(
-        peerPublicKey,
-        137, // CE 137: Shard Distribution
-        serializedResponse,
-      )
-      if (sendError) {
-        logger.error('Failed to send shard distribution response', {
-          error: sendError.message,
-          peerPublicKey,
-          erasureRoot: request.erasureRoot,
-          shardIndex: request.shardIndex.toString(),
-        })
-        return safeError(sendError)
-      }
+    // Generate justification using Gray Paper T function
+    const [justificationError, justification] = this.generateJustification(
+      shardSequence,
+      shardIndex,
+    )
+    if (justificationError) {
+      return safeError(justificationError)
+    }
 
-      logger.info('Shard distribution response sent successfully', {
+    // Construct response
+    const response: ShardDistributionResponse = {
+      bundleShard: bytesToHex(bundleShard),
+      segmentShards,
+      justification,
+    }
+
+    // Serialize response using CE 137 protocol
+    const [serializeError, serializedResponse] =
+      this.shardDistributionProtocol.serializeResponse(response)
+    if (serializeError) {
+      return safeError(serializeError)
+    }
+
+    // Send response through networking service
+    const [sendError] = await this.networkingService.sendMessageByPublicKey(
+      peerPublicKey,
+      137, // CE 137: Shard Distribution
+      serializedResponse,
+    )
+    if (sendError) {
+      logger.error('Failed to send shard distribution response', {
+        error: sendError.message,
         peerPublicKey,
         erasureRoot: request.erasureRoot,
         shardIndex: request.shardIndex.toString(),
-        bundleShardLength: bundleShard.length,
-        segmentShardCount: segmentShards.length,
-        justificationLength: justification.length,
       })
-
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error('Error handling shard distribution request', { error })
-      return safeError(error as Error)
+      return safeError(sendError)
     }
+
+    logger.info('Shard distribution response sent successfully', {
+      peerPublicKey,
+      erasureRoot: request.erasureRoot,
+      shardIndex: request.shardIndex.toString(),
+      bundleShardLength: bundleShard.length,
+      segmentShardCount: segmentShards.length,
+      justificationLength: justification.length,
+    })
+
+    return safeResult(undefined)
   }
 
   /**
@@ -540,6 +537,12 @@ export class ShardService extends BaseService {
     erasureRoot: Hex,
     coreIndex: bigint,
   ): SafePromise<void> {
+    if (!this.networkingService) {
+      return safeError(new Error('Networking service not available'))
+    }
+    if (!this.shardDistributionProtocol) {
+      return safeError(new Error('Shard distribution protocol not available'))
+    }
     const numValidators = Number(this.configService.numValidators)
     const recoveryThreshold = this.getRecoveryThreshold(numValidators)
 
@@ -711,7 +714,7 @@ export class ShardService extends BaseService {
     const pair = concatBytes([hexToBytes(bundleShardHash), segmentRoot])
 
     // Find the pair index in the sequence
-    const shardIndex = shardSequence.findIndex((existingPair) =>
+    const shardIndex = shardSequence.findIndex((existingPair: Uint8Array) =>
       existingPair.every((byte, i) => byte === pair[i]),
     )
 

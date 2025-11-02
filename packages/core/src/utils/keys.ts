@@ -14,13 +14,13 @@ import type {
   KeyPair,
   ValidatorCredentials,
 } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnj/types'
 import {
   deriveSecretSeeds,
   generateEd25519KeyPairFromSeed,
   generateTrivialSeed,
   mod,
 } from '../crypto'
-import { type Safe, safeError, safeResult } from '../safe'
 
 /**
  * Generate BLS key pair from seed (deterministic)
@@ -122,7 +122,7 @@ export function verifySignature(
   message: Uint8Array,
   signature: Uint8Array,
 ): boolean {
-  return ed.verify(publicKey, message, signature)
+  return ed.verify(signature, message, publicKey)
 }
 
 /**

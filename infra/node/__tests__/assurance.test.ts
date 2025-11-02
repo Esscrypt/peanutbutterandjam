@@ -135,8 +135,6 @@ describe('Assurance Service - JAM Test Vectors', () => {
               ringProver: null,
               ticketService: null,
               configService: configService,
-              entropyService: null,
-              clockService: new ClockService({ eventBusService, configService }),
               initialValidators: new Map(vector.pre_state.curr_validators.map((validator, index) => [index, {
                 bandersnatch: validator.bandersnatch,
                 ed25519: validator.ed25519,
@@ -151,6 +149,8 @@ describe('Assurance Service - JAM Test Vectors', () => {
               ce136WorkReportRequestProtocol: null,
               validatorSetManager: validatorSetManager,
               configService: configService,
+              entropyService: null,
+              clockService: null,
             })
             // const validatorSetManager = createMockValidatorSetManager(
             //   vector.pre_state.curr_validators,
@@ -158,12 +158,14 @@ describe('Assurance Service - JAM Test Vectors', () => {
 
             // Step 2: Initialize AssuranceService with mocked dependencies
             const assuranceService = new AssuranceService(
-              configService,
-              workReportService,
-              validatorSetManager,
-              eventBusService,
-              null,
-              null
+              {
+                configService: configService,
+                workReportService: workReportService,
+                validatorSetManager: validatorSetManager,
+                eventBusService: eventBusService,
+                sealKeyService: null,
+                recentHistoryService: null,
+              },
             )
 
             // Reset assurance counts before each test

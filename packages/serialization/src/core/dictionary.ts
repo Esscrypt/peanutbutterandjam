@@ -31,8 +31,9 @@
  * structures. Large dictionaries use the Merkle trie for efficiency.
  */
 
-import { bytesToHex, type Safe, safeError, safeResult } from '@pbnj/core'
-import type { DecodingResult } from '@pbnj/types'
+import { bytesToHex } from '@pbnj/core'
+import type { DecodingResult, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 
 /**

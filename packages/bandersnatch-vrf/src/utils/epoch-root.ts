@@ -1,19 +1,12 @@
 import type { RingVRFProver } from '@pbnj/bandersnatch-vrf'
-import {
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-  logger,
-  type Safe,
-  safeError,
-  safeResult,
-  zeroHash,
-} from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes, logger, zeroHash } from '@pbnj/core'
 import type {
   IKeyPairService,
   IValidatorSetManager,
+  Safe,
   ValidatorPublicKeys,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   BANDERSNATCH_VRF_CONFIG,
   RING_ROOT_OFFSETS,

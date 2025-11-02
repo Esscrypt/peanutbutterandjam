@@ -5,9 +5,9 @@
  * Reference: JAM Protocol genesis specifications
  */
 
+import { type Safe, safeError, safeResult } from '@pbnj/types'
 import type { Hex } from 'viem'
 import { z } from 'zod'
-import { type Safe, safeError, safeResult } from '../safe'
 
 // Hex string validation for 32-byte hashes
 const hex32Schema = z

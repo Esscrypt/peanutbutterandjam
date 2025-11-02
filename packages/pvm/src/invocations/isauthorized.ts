@@ -15,12 +15,13 @@ import type {
   WorkPackage,
 } from '@pbnj/types'
 import {
+  ACCUMULATE_ERROR_CODES,
+  GENERAL_FUNCTIONS,
   IS_AUTHORIZED_CONFIG,
   RESULT_CODES,
 } from '../config'
-
-import { PVM } from '../pvm'
 import type { HostFunctionRegistry } from '../host-functions/general/registry'
+import { PVM } from '../pvm'
 
 /**
  * Simplified PVM implementation
@@ -30,7 +31,8 @@ import type { HostFunctionRegistry } from '../host-functions/general/registry'
 export class IsAuthorizedPVM extends PVM {
   private readonly serviceAccountService: IServiceAccountService
 
-  constructor(options: {hostFunctionRegistry: HostFunctionRegistry
+  constructor(options: {
+    hostFunctionRegistry: HostFunctionRegistry
     serviceAccountService: IServiceAccountService
     pvmOptions?: PVMOptions
   }) {
@@ -53,82 +55,95 @@ export class IsAuthorizedPVM extends PVM {
     result: Uint8Array | WorkError
     gasUsed: bigint
   }> {
-      // Check if auth code exists (Gray Paper eq:isauthinvocation)
-      if (!workPackage.authCodeHash) {
-        return { result: 'BAD', gasUsed: 0n }
-      }
+    // Check if auth code exists (Gray Paper eq:isauthinvocation)
+    if (!workPackage.authCodeHash) {
+      return { result: 'BAD', gasUsed: 0n }
+    }
 
-      // do a lookup in the service account service
-      const [error, authCode] = this.serviceAccountService.histLookup(workPackage.authCodeHash, workPackage.context.lookup_anchor_slot)
-      if (error) {
-        return { result: 'BAD', gasUsed: 0n }
-      }
-
-      // Get auth code from work package
-      // Note: In practice, this would need to be retrieved from the service's preimages
-      // using workPackage.authCodeHash as the key
-      const [error, authCode] = this.serviceAccountService.getPreimage(
-        workPackage.context.lookup_anchor_slot,
+    const [serviceAccountError, serviceAccount] =
+      this.serviceAccountService.getServiceAccount(workPackage.authCodeHost)
+    if (serviceAccountError) {
+      return { result: 'BAD', gasUsed: 0n }
+    }
+    if (!serviceAccount) {
+      return { result: 'BAD', gasUsed: 0n }
+    }
+    // do a lookup in the service account service
+    const [authCodeError, authCode] =
+      this.serviceAccountService.histLookupServiceAccount(
+        serviceAccount,
         workPackage.authCodeHash,
+        workPackage.context.lookup_anchor_slot,
       )
-      if (error) {
-        return { result: 'BAD', gasUsed: 0n }
-      }
+    if (authCodeError) {
+      return { result: 'BAD', gasUsed: 0n }
+    }
+    if (!authCode) {
+      return { result: 'BAD', gasUsed: 0n }
+    }
 
-      if (!authCode) {
-        return { result: 'BAD', gasUsed: 0n }
-      }
+    // Check for oversized auth code (Gray Paper eq:isauthinvocation)
+    if (authCode.length > IS_AUTHORIZED_CONFIG.MAX_AUTH_CODE_SIZE) {
+      return { result: 'BIG', gasUsed: 0n }
+    }
 
-      // Check for oversized auth code (Gray Paper eq:isauthinvocation)
-      if (authCode.blob.length > IS_AUTHORIZED_CONFIG.MAX_AUTH_CODE_SIZE) {
-        return { result: 'BIG', gasUsed: 0n }
-      }
+    // Encode core index as 2-byte argument
+    const encodedArgs = new ArrayBuffer(2)
+    const view = new DataView(encodedArgs)
+    view.setUint16(0, Number(coreIndex), true) // Little endian
 
-      // Encode core index as 2-byte argument
-      const encodedArgs = new ArrayBuffer(2)
-      const view = new DataView(encodedArgs)
-      view.setUint16(0, Number(coreIndex), true) // Little endian
+    // Create Is-Authorized context mutator F
+    const isAuthorizedContextMutator =
+      this.createIsAuthorizedContextMutator(workPackage)
 
-      // Create Is-Authorized context mutator F
-      const isAuthorizedContextMutator =
-        this.createIsAuthorizedContextMutator(workPackage)
+    // Execute Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
+    await this.executeMarshallingInvocation(
+      authCode,
+      0n, // Initial PC = 0 (Gray Paper)
+      IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS,
+      new Uint8Array(encodedArgs),
+      isAuthorizedContextMutator,
+      null, // Context is none for Is-Authorized
+    )
 
-      // Execute Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
-      await this.executeMarshallingInvocation(
-        authCode.blob,
-        0n, // Initial PC = 0 (Gray Paper)
-        IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS,
-        new Uint8Array(encodedArgs),
-        isAuthorizedContextMutator,
-        null, // Context is none for Is-Authorized
-      )
-
-      if(this.state.resultCode === RESULT_CODES.PANIC) {
-        return {
-          gasUsed: this.state.gasCounter,
-          result: 'PANIC',
-        }
-      }
-
-      if(this.state.resultCode === RESULT_CODES.OOG) {
-        return {
-          gasUsed: this.state.gasCounter,
-          result: 'OOG',
-        }
-      }
-
+    if (this.state.resultCode === RESULT_CODES.PANIC) {
       return {
         gasUsed: this.state.gasCounter,
-        result: this.state.resultCode === RESULT_CODES.HALT ? this.extractResultFromMemory() : 'BAD',
+        result: 'PANIC',
       }
+    }
 
+    if (this.state.resultCode === RESULT_CODES.OOG) {
+      return {
+        gasUsed: this.state.gasCounter,
+        result: 'OOG',
+      }
+    }
+
+    return {
+      gasUsed: this.state.gasCounter,
+      result:
+        this.state.resultCode === RESULT_CODES.HALT
+          ? this.extractResultFromMemory()
+          : 'BAD',
+    }
   }
 
   /**
    * Create Is-Authorized context mutator F
    * Gray Paper equation 46-54: F ∈ contextmutator{emptyset}
+   *
+   * Supports only:
+   * - gas (ID = 0): Ω_G
+   * - fetch (ID = 1): Ω_Y(..., wpX, none, none, none, none, none, none, none)
+   *
+   * For unknown host calls:
+   * - Set registers[7] = WHAT
+   * - Subtract 10 gas
+   * - If gas < 0: return oog
+   * - Otherwise: continue
    */
-  private createIsAuthorizedContextMutator(_workPackage: WorkPackage): (
+  private createIsAuthorizedContextMutator(workPackage: WorkPackage): (
     hostCallId: bigint,
     gasCounter: bigint,
     registers: bigint[],
@@ -149,31 +164,123 @@ export class IsAuthorizedPVM extends PVM {
       _context: null,
     ) => {
       try {
-        // Get general host function by ID
-        const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+        // Gray Paper eq 46-54: Only support gas (0) and fetch (1)
+        if (hostCallId === GENERAL_FUNCTIONS.GAS) {
+          // Ω_G(gascounter, registers, memory)
+          const hostFunction = this.hostFunctionRegistry.get(
+            GENERAL_FUNCTIONS.GAS,
+          )
+          if (!hostFunction) {
+            logger.error('Gas host function not found in registry')
+            return {
+              resultCode: RESULT_CODES.PANIC,
+              gasCounter,
+              registers,
+              memory,
+              context: null,
+            }
+          }
 
-        if (!hostFunction) {
-          logger.error('Unknown general host function', { hostCallId })
-          return {
-            resultCode: RESULT_CODES.PANIC,
+          const hostContext = {
             gasCounter,
             registers,
+            ram: memory,
+          }
+
+          const result = hostFunction.execute(hostContext, null)
+
+          // Host function mutates context directly, resultCode is null if continue
+          return {
+            resultCode:
+              result instanceof Promise
+                ? RESULT_CODES.PANIC
+                : (result.resultCode ?? RESULT_CODES.HALT),
+            gasCounter: hostContext.gasCounter,
+            registers: hostContext.registers,
+            memory: hostContext.ram,
+            context: null,
+          }
+        }
+
+        if (hostCallId === GENERAL_FUNCTIONS.FETCH) {
+          // Ω_Y(gascounter, registers, memory, wpX, none, none, none, none, none, none, none)
+          const hostFunction = this.hostFunctionRegistry.get(
+            GENERAL_FUNCTIONS.FETCH,
+          )
+          if (!hostFunction) {
+            logger.error('Fetch host function not found in registry')
+            return {
+              resultCode: RESULT_CODES.PANIC,
+              gasCounter,
+              registers,
+              memory,
+              context: null,
+            }
+          }
+
+          // Create refine context with work package and all other params as null/none
+          // Gray Paper: Ω_Y(..., wpX, none, none, none, none, none, none, none)
+          const refineContext = {
+            machines: new Map(),
+            exportSegments: [],
+            coreIndex: 0n,
+            workItemIndex: 0n,
+            workPackage,
+            authorizerTrace: '0x' as const,
+            importSegments: [],
+            exportSegmentOffset: 0n,
+            accountsDictionary: new Map(),
+            lookupTimeslot: workPackage.context.lookup_anchor_slot,
+            currentServiceId: 0n,
+          }
+
+          const hostContext = {
+            gasCounter,
+            registers,
+            ram: memory,
+          }
+
+          const result = hostFunction.execute(hostContext, refineContext)
+
+          // Host function mutates context directly, resultCode is null if continue
+          return {
+            resultCode:
+              result instanceof Promise
+                ? RESULT_CODES.PANIC
+                : (result.resultCode ?? RESULT_CODES.HALT),
+            gasCounter: hostContext.gasCounter,
+            registers: hostContext.registers,
+            memory: hostContext.ram,
+            context: null,
+          }
+        }
+
+        // Unknown host call: Gray Paper default behavior
+        // registers' = registers except registers'[7] = WHAT
+        // gascounter' = gascounter - 10
+        const newRegisters = [...registers]
+        newRegisters[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+        const gasCost = 10n
+        const newGasCounter = gasCounter - gasCost
+
+        // If gas < 0: return oog
+        if (newGasCounter < 0n) {
+          return {
+            resultCode: RESULT_CODES.OOG,
+            gasCounter: newGasCounter,
+            registers: newRegisters,
             memory,
             context: null,
           }
         }
 
-        // Execute host function with Is-Authorized context
-        const result = hostFunction.execute({
-          gasCounter,
-          registers,
-          ram: memory,
-        }, null)
-
+        // Otherwise: continue (Gray Paper: continue means execution continues)
+        // Use HALT as default - execution will continue if resultCode allows
         return {
-          resultCode: result instanceof Promise ? RESULT_CODES.PANIC : result.resultCode || RESULT_CODES.PANIC,
-          gasCounter,
-          registers,
+          resultCode: RESULT_CODES.HALT,
+          gasCounter: newGasCounter,
+          registers: newRegisters,
           memory,
           context: null,
         }
@@ -192,5 +299,4 @@ export class IsAuthorizedPVM extends PVM {
       }
     }
   }
-
 }

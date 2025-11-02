@@ -40,8 +40,8 @@
  * This is critical for JAM's temporal ordering and epoch management.
  */
 
-import { type Safe, safeError, safeResult } from '@pbnj/core'
-import type { DecodingResult } from '@pbnj/types'
+import type { DecodingResult, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Encode the time according to Gray Paper C(11):

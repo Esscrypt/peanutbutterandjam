@@ -97,7 +97,7 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
       const workItem: WorkItem = {
         serviceindex: 1n,
         codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-        payload: '0x',
+        payload: new Uint8Array(),
         refgaslimit: 0n,
         accgaslimit: 0n,
         exportcount: 0n,
@@ -118,7 +118,7 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
 
       expect(decoded.value.serviceindex).toBe(1n)
       expect(decoded.value.codehash).toBe('0x0000000000000000000000000000000000000000000000000000000000000000')
-      expect(decoded.value.payload).toBe('0x')
+      expect(decoded.value.payload).toEqual(new Uint8Array())
       expect(decoded.value.refgaslimit).toBe(0n)
       expect(decoded.value.accgaslimit).toBe(0n)
       expect(decoded.value.exportcount).toBe(0n)
@@ -130,7 +130,7 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
       const workItem: WorkItem = {
         serviceindex: 1n,
         codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-        payload: '0x010203',
+        payload: new Uint8Array([1, 2, 3]),
         refgaslimit: 1000n,
         accgaslimit: 2000n,
         exportcount: 1n,
@@ -173,7 +173,7 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
       const workItem: WorkItem = {
         serviceindex: 1n,
         codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-        payload: '0x010203',
+        payload: new Uint8Array([1, 2, 3]),
         refgaslimit: 1000n,
         accgaslimit: 2000n,
         exportcount: 1n,

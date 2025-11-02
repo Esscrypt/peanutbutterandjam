@@ -1,5 +1,5 @@
-import type { Safe } from '@pbnj/core'
 import type { Hex } from 'viem'
+import type { Safe } from './safe'
 
 /**
  * Core Types for JAM Protocol

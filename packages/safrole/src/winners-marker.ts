@@ -1,12 +1,6 @@
-import {
-  blake2bHash,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { IConfigService, SafroleTicket } from '@pbnj/types'
+import { blake2bHash, type Hex, hexToBytes } from '@pbnj/core'
+import type { IConfigService, Safe, SafroleTicket } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Compute winning tickets marker according to Gray Paper Eq. 262-266

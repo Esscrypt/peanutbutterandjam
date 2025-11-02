@@ -2,13 +2,11 @@ import {
   bytesToHex,
   type Hex,
   hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
   signEd25519,
   verifyEd25519,
 } from '@pbnj/core'
-import type { AuditAnnouncement, IValidatorSetManager } from '@pbnj/types'
+import type { AuditAnnouncement, IValidatorSetManager, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Verify audit announcement signature according to Gray Paper Eq. 82

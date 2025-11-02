@@ -56,15 +56,9 @@
  * This is critical for JAM's service account state management system.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, ServiceAccountCore } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, Safe, ServiceAccountCore } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**

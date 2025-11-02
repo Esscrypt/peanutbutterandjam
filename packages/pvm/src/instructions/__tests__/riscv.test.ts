@@ -27,11 +27,11 @@ describe('PVM RISC-V Integration Tests', () => {
   logger.info(`Loaded ${riscvTests.length} RISC-V test vectors`)
 
   for (const testVector of riscvTests) {
-    it(`should execute: ${testVector.name}`, () => {
+    it(`should execute: ${testVector.name}`, async () => {
       logger.debug(`Running test: ${testVector.name}`)
 
       // Execute the program
-      const result = executeTestVector(testVector)
+      const result = await executeTestVector(testVector)
 
       // Verify registers match expected values
       for (let i = 0; i < 13; i++) {

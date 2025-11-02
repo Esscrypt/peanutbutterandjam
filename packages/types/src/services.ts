@@ -1,19 +1,20 @@
-import type { Hex, Safe, SafePromise } from '@pbnj/core'
+import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
 import type { EntropyState } from './global-state'
 import type { ValidatorCredentials } from './keys'
+import type { Safe, SafePromise } from './safe'
 
 import type {
   Guarantee,
   GuaranteeSignature,
   Judgment,
+  Preimage,
   SafroleTicket,
   ServiceAccount,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
-  Preimage,
 } from './serialization'
 import type { BaseService } from './service'
 
@@ -21,6 +22,7 @@ export interface IValidatorSetManager extends BaseService {
   getActiveValidatorKeys(): Uint8Array[]
   getValidatorIndex(ed25519PublicKey: Hex): Safe<number>
   getActiveValidators(): Map<number, ValidatorKeyTuple>
+  getPreviousValidators(): Map<number, ValidatorKeyTuple>
   getValidatorAtIndex(validatorIndex: number): Safe<ValidatorKeyTuple>
   getPendingValidators(): Map<number, ValidatorKeyTuple>
 
@@ -31,12 +33,28 @@ export interface IValidatorSetManager extends BaseService {
 
 export interface IServiceAccountService extends BaseService {
   getServiceAccount(serviceId: bigint): Safe<ServiceAccount>
-  setServiceAccount(serviceId: bigint, serviceAccount: ServiceAccount): Safe<void>
+  setServiceAccount(
+    serviceId: bigint,
+    serviceAccount: ServiceAccount,
+  ): Safe<void>
   deleteServiceAccount(serviceId: bigint): Safe<void>
-  updateServiceAccount(serviceId: bigint, serviceAccount: ServiceAccount): Safe<void>
+  updateServiceAccount(
+    serviceId: bigint,
+    serviceAccount: ServiceAccount,
+  ): Safe<void>
   getServiceAccountStorage(serviceId: bigint): Safe<Map<Hex, Uint8Array>>
-  histLookupServiceAccount(serviceAccount: ServiceAccount, hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
-  histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
+  histLookupServiceAccount(
+    serviceAccount: ServiceAccount,
+    hash: Hex,
+    timeslot: bigint,
+  ): Safe<Uint8Array | null>
+  /** Lookup using service id and internal state */
+  histLookupForService(
+    serviceId: bigint,
+    hash: Hex,
+    timeslot: bigint,
+  ): Safe<Uint8Array | null>
+  // histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
   getPreimage(hash: Hex): Safe<Preimage | null>
 }
 
@@ -59,7 +77,6 @@ export interface ITicketService extends BaseService {
   getProxyValidatorTickets(): SafroleTicket[]
   getReceivedTickets(): SafroleTicket[]
 }
-
 
 export interface IJudgmentHolderService extends BaseService {
   getJudgements(): Judgment[]

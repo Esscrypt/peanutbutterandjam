@@ -11,20 +11,12 @@
  * - Provide block import status tracking
  */
 
-import { verifyAssuranceSignature } from '@pbnj/assurance'
 import { banderout, verifyEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
 import {
   type BlockProcessedEvent,
   type EventBusService,
-  type Hex,
   hexToBytes,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-  verifySignature,
 } from '@pbnj/core'
-import { verifyBlockExtrinsicGuaranteeSignature } from '@pbnj/guarantor'
 import {
   isSafroleTicket,
   verifyFallbackSealSignature,
@@ -32,21 +24,26 @@ import {
 } from '@pbnj/safrole'
 import type { BlockStore } from '@pbnj/state'
 import type {
-  Assurance,
   Block,
   BlockHeader,
-  Guarantee,
   IClockService,
-  IConfigService,
   IEntropyService,
   IValidatorSetManager,
-  Judgment,
-  Verdict,
 } from '@pbnj/types'
-import { BaseService as BaseServiceClass } from '@pbnj/types'
+import {
+  BaseService,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 import type { AssuranceService } from './assurance-service'
+import type { ConfigService } from './config-service'
+import type { DisputesService } from './disputes-service'
+import type { GuarantorService } from './guarantor-service'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
+import type { ServiceAccountService } from './service-account-service'
 
 // ============================================================================
 // Block Importer Service
@@ -66,37 +63,46 @@ export interface BlockImportResult {
  * Validates blocks against current time slot and emits BlockProcessedEvent
  * for downstream processing by statistics and other services.
  */
-export class BlockImporterService extends BaseServiceClass {
+export class BlockImporterService extends BaseService {
   private readonly eventBusService: EventBusService
   private readonly clockService: IClockService
-  private readonly recentHistoryService: RecentHistoryService
-  private readonly configService: IConfigService
+  // private readonly recentHistoryService: RecentHistoryService
+  private readonly serviceAccountService: ServiceAccountService
+  private readonly configService: ConfigService
+  private readonly disputesService: DisputesService
   private readonly validatorSetManagerService: IValidatorSetManager
   private readonly entropyService: IEntropyService
   private readonly sealKeyService: SealKeyService
   private readonly blockStore: BlockStore
   private readonly assuranceService: AssuranceService
+  private readonly guarantorService: GuarantorService
   constructor(options: {
     eventBusService: EventBusService
     clockService: IClockService
     recentHistoryService: RecentHistoryService
-    configService: IConfigService
+    serviceAccountService: ServiceAccountService
+    configService: ConfigService
+    disputesService: DisputesService
     validatorSetManagerService: IValidatorSetManager
     entropyService: IEntropyService
     sealKeyService: SealKeyService
     blockStore: BlockStore
     assuranceService: AssuranceService
+    guarantorService: GuarantorService
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
     this.clockService = options.clockService
-    this.recentHistoryService = options.recentHistoryService
+    // this.recentHistoryService = options.recentHistoryService
+    this.serviceAccountService = options.serviceAccountService
     this.configService = options.configService
+    this.disputesService = options.disputesService
     this.validatorSetManagerService = options.validatorSetManagerService
     this.entropyService = options.entropyService
     this.sealKeyService = options.sealKeyService
     this.blockStore = options.blockStore
     this.assuranceService = options.assuranceService
+    this.guarantorService = options.guarantorService
   }
 
   // ============================================================================
@@ -121,25 +127,47 @@ export class BlockImporterService extends BaseServiceClass {
     }
 
     // read relevant GP sections first
-    const [guaranteeValidationError] = this.validateGuarantees(
-      block.body.guarantees,
-      this.configService,
-      this.validatorSetManagerService,
-    )
+    const [guaranteeValidationError, reporters] =
+      this.guarantorService.applyGuarantees(
+        block.body.guarantees,
+        block.header.timeslot,
+      )
     if (guaranteeValidationError) {
       return safeError(guaranteeValidationError)
     }
+    if (!reporters) {
+      return safeError(new Error('Guarantee validation failed'))
+    }
 
     // validate the assurances
-    const [assuranceValidationError] = this.assuranceService.validateAssurances(
-      block.body.assurances,
-      block.header.parent,
-    )
+    const [assuranceValidationError] =
+      this.assuranceService.applyAssuranceTransition(
+        block.body.assurances,
+        Number(block.header.timeslot),
+        block.header.parent,
+        this.configService,
+      )
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
     }
 
-    //validate the verdicts
+    // apply the service account transition
+    const [serviceAccountValidationError] =
+      this.serviceAccountService.applyPreimages(
+        block.body.preimages,
+        block.header.timeslot,
+      )
+    if (serviceAccountValidationError) {
+      return safeError(serviceAccountValidationError)
+    }
+    //apply disputes
+    const [disputeValidationError] = this.disputesService.processDisputes(
+      block.body.disputes,
+      block.header.timeslot,
+    )
+    if (disputeValidationError) {
+      return safeError(disputeValidationError)
+    }
 
     const currentEpoch = this.clockService.getCurrentEpoch()
 
@@ -163,7 +191,7 @@ export class BlockImporterService extends BaseServiceClass {
   async validateBlockHeader(
     header: BlockHeader,
     clockService: IClockService,
-    configService: IConfigService,
+    configService: ConfigService,
   ): SafePromise<void> {
     const currentSlot = clockService.getCurrentSlot()
 
@@ -234,84 +262,6 @@ export class BlockImporterService extends BaseServiceClass {
     }
 
     return safeResult(undefined)
-  }
-
-  validateGuarantees(
-    guarantees: Guarantee[],
-    configService: IConfigService,
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<void> {
-    if (guarantees.length > configService.numCores) {
-      return safeError(
-        new Error('guaranttees extrinsic count exceeds core count'),
-      )
-    }
-
-    // t. The core index of each guarantee must be unique and
-    // guarantees must be in ascending order of this. Formally:
-    const uniqueCoreIndices = new Set(
-      guarantees.map((g) => g.report.core_index),
-    )
-    if (uniqueCoreIndices.size !== guarantees.length) {
-      return safeError(new Error('guarantees have duplicate core indices'))
-    }
-
-    for (let i = 0; i < guarantees.length; i++) {
-      if (Number(guarantees[i].report.core_index) !== i) {
-        return safeError(
-          new Error('guarantees are not in ascending order of core index'),
-        )
-      }
-      // ensure the core index is unique
-      if (
-        guarantees.some(
-          (g) => g.report.core_index === guarantees[i].report.core_index,
-        )
-      ) {
-        return safeError(new Error('guarantees have duplicate core indices'))
-      }
-
-      // ensure the slot is in the past
-      if (guarantees[i].slot > this.clockService.getCurrentSlot()) {
-        return safeError(new Error('guarantees are in the future'))
-      }
-
-      // validate the guarantee signatures
-      const [error] = verifyBlockExtrinsicGuaranteeSignature(
-        guarantees[i],
-        validatorSetManagerService,
-      )
-      if (error) {
-        return safeError(error)
-      }
-      // if no error, the guarantee is valid
-    }
-
-    return safeResult(undefined)
-  }
-
-  validateAssuranceSignature(
-    assurance: Assurance,
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<boolean> {
-    // Get validator's Ed25519 public key
-    const [publicKeyError, publicKeys] =
-      validatorSetManagerService.getValidatorAtIndex(assurance.validator_index)
-    if (publicKeyError) {
-      return safeError(
-        new Error(
-          `failed to get validator at index ${assurance.validator_index}`,
-        ),
-      )
-    }
-
-    // Use assurance package to verify signature
-    // Gray Paper: reporting_assurance.tex, Equation 159-160
-    return verifyAssuranceSignature(
-      assurance,
-      assurance.anchor,
-      hexToBytes(publicKeys.ed25519),
-    )
   }
 
   /**
@@ -442,100 +392,6 @@ export class BlockImporterService extends BaseServiceClass {
 
     if (!isValid) {
       return safeError(new Error('VRF signature is invalid'))
-    }
-
-    return safeResult(undefined)
-  }
-
-  /**
-   * Validate verdicts according to Gray Paper specifications
-   *
-   * @param verdicts Array of verdicts to validate
-   * @param validatorSetManagerService Validator set manager service
-   * @returns Validation result
-   */
-  validateVerdicts(
-    verdicts: Verdict[],
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<void> {
-    for (const verdict of verdicts) {
-      // Validate that verdict has at least 2/3 + 1 judgments
-      const requiredJudgments =
-        Math.floor((2 * this.configService.numValidators) / 3) + 1
-      if (verdict.votes.length < requiredJudgments) {
-        return safeError(
-          new Error(
-            `verdict has insufficient judgments: ${verdict.votes.length} < ${requiredJudgments}`,
-          ),
-        )
-      }
-
-      // Validate each judgment in the verdict
-      for (const judgment of verdict.votes) {
-        const [error] = this.validateJudgmentSignature(
-          judgment,
-          verdict.target,
-          validatorSetManagerService,
-        )
-        if (error) {
-          return safeError(error)
-        }
-      }
-    }
-
-    return safeResult(undefined)
-  }
-
-  /**
-   * Validate judgment signature according to Gray Paper specifications
-   *
-   * Gray Paper equation (47):
-   * XVJ_signature ∈ edsignature{𝐤[XVJ_judgeindex]_vk_ed}{𝖷_v || XV_reporthash}
-   * where 𝖷_valid ≡ "$jam_valid", 𝖷_invalid ≡ "$jam_invalid"
-   *
-   * @param judgment The judgment to validate
-   * @param reportHash The work report hash being judged
-   * @param validatorSetManagerService Validator set manager service
-   * @returns Validation result
-   */
-  validateJudgmentSignature(
-    judgment: Judgment,
-    reportHash: Hex,
-    validatorSetManagerService: IValidatorSetManager,
-  ): Safe<void> {
-    // Step 1: Get validator's Ed25519 public key
-    const [publicKeyError, publicKeys] =
-      validatorSetManagerService.getValidatorAtIndex(Number(judgment.index))
-    if (publicKeyError) {
-      return safeError(
-        new Error(`failed to get validator at index ${judgment.index}`),
-      )
-    }
-
-    // Step 2: Construct the message according to Gray Paper
-    // Message = "$jam_valid" || report_hash OR "$jam_invalid" || report_hash
-    const contextString = judgment.vote ? 'jam_valid' : 'jam_invalid'
-    const contextBytes = new TextEncoder().encode(contextString)
-    const reportHashBytes = hexToBytes(reportHash)
-    const message = new Uint8Array(contextBytes.length + reportHashBytes.length)
-    message.set(contextBytes, 0)
-    message.set(reportHashBytes, contextBytes.length)
-
-    // Step 3: Verify the Ed25519 signature
-    const publicKey = publicKeys.ed25519
-    const signatureBytes = hexToBytes(judgment.signature)
-    const isValid = verifySignature(
-      hexToBytes(publicKey),
-      message,
-      signatureBytes,
-    )
-
-    if (!isValid) {
-      return safeError(
-        new Error(
-          `judgment signature is invalid for validator ${judgment.index}`,
-        ),
-      )
     }
 
     return safeResult(undefined)

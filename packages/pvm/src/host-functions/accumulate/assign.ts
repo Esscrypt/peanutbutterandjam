@@ -1,5 +1,6 @@
 import type {
   HostFunctionResult,
+  IConfigService,
   ImplicationsPair,
   RAM,
   RegisterState,
@@ -33,6 +34,10 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'assign'
   readonly gasCost = 10n
 
+  constructor(private readonly configService: IConfigService) {
+    super()
+  }
+
   execute(
     gasCounter: bigint,
     registers: RegisterState,
@@ -52,11 +57,17 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
       // Gray Paper constants
       const C_AUTH_QUEUE_SIZE = 80n // Cauthqueuesize
-      const C_CORE_COUNT = 341n // Ccorecount
+      const C_CORE_COUNT = this.configService.numCores // Ccorecount
 
       // Read auth queue from memory (80 entries * 32 bytes each)
       const authQueueLength = C_AUTH_QUEUE_SIZE * 32n
-      const authQueueData = ram.readOctets(o, authQueueLength)
+      const [authQueueData, faultAddress] = ram.readOctets(o, authQueueLength)
+      if (faultAddress) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
       if (!authQueueData) {
         this.setAccumulateError(registers, 'WHAT')
         return {

@@ -34,15 +34,14 @@
  * the entire system's data remains accessible.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { Assurance, DecodingResult, IConfigService } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type {
+  Assurance,
+  DecodingResult,
+  IConfigService,
+  Safe,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
@@ -280,7 +279,7 @@ export function decodeAssurances(
   }
 
   // Then decode the sequence with the known count
-  const [sequenceError, sequenceResult] = decodeSequenceGeneric(
+  const [sequenceError, sequenceResult] = decodeSequenceGeneric<Assurance>(
     lengthResult.remaining,
     (data) => decodeAssurance(data, config),
     count,

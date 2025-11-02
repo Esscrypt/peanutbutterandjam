@@ -13,23 +13,22 @@ import {
   type Hex,
   hexToBytes,
   logger,
-  type Safe,
-  safeError,
-  safeResult,
   type ValidatorSetChangeEvent,
   zeroHash,
 } from '@pbnj/core'
-import { getAssignedCore } from '@pbnj/guarantor'
 import { isSafroleTicket } from '@pbnj/safrole'
 import {
   BaseService,
   type ConnectionEndpoint,
   type IValidatorSetManager,
+  type Safe,
+  safeError,
+  safeResult,
   type ValidatorPublicKeys,
 } from '@pbnj/types'
-import type { ClockService } from './clock-service'
+// import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
-import type { EntropyService } from './entropy'
+// import type { EntropyService } from './entropy'
 import type { KeyPairService } from './keypair-service'
 import type { SealKeyService } from './seal-key'
 import type { TicketService } from './ticket-service'
@@ -47,8 +46,8 @@ export class ValidatorSetManager
   private ticketService: TicketService | null
   private readonly ringProver: RingVRFProver | null
   private readonly configService: ConfigService
-  private readonly entropyService: EntropyService | null
-  private readonly clockService: ClockService
+  // private entropyService: EntropyService | null
+  // private clockService: ClockService | null
 
   // Gray Paper validator set definitions (preamble.tex lines 763-765)
   private activeSet: Map<number, ValidatorPublicKeys> = new Map() // κ - currently active validators
@@ -67,8 +66,6 @@ export class ValidatorSetManager
     ringProver: RingVRFProver | null
     ticketService: TicketService | null
     configService: ConfigService
-    entropyService: EntropyService | null
-    clockService: ClockService
     initialValidators: Map<number, ValidatorPublicKeys> | null
   }) {
     super('validator-set-manager')
@@ -78,11 +75,13 @@ export class ValidatorSetManager
     this.ticketService = options.ticketService
     this.ringProver = options.ringProver
     this.configService = options.configService
-    this.entropyService = options.entropyService
-    this.clockService = options.clockService
+    // this.entropyService = options.entropyService
+    // this.clockService = options.clockService
 
-    if(options.initialValidators) {
+    if (options.initialValidators) {
       this.activeSet = options.initialValidators
+      // Populate publicKeysToValidatorIndex map for offender lookups
+      this.updatePublicKeysToValidatorIndex(this.activeSet)
     }
 
     this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
@@ -270,12 +269,22 @@ export class ValidatorSetManager
     this.activeSet = new Map(
       validatorSet.map((validator, index) => [index, validator]),
     )
+    // Populate publicKeysToValidatorIndex map for offender lookups
+    this.updatePublicKeysToValidatorIndex(this.activeSet)
   }
 
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void {
     this.previousSet = new Map(
       validatorSet.map((validator, index) => [index, validator]),
     )
+    // Populate publicKeysToValidatorIndex for previous validators
+    // Only add entries that don't already exist (prioritize active set)
+    // This ensures offenders are mapped to the correct index from the active set
+    for (const [index, validator] of this.previousSet) {
+      if (!this.publicKeysToValidatorIndex.has(validator.ed25519)) {
+        this.publicKeysToValidatorIndex.set(validator.ed25519, index)
+      }
+    }
   }
 
   getPreviousValidators(): Map<number, ValidatorPublicKeys> {
@@ -294,6 +303,18 @@ export class ValidatorSetManager
       count: validatorIndices.length,
       totalStaging: this.stagingSet.size,
     })
+  }
+
+  /**
+   * Update the publicKeysToValidatorIndex map from a validator set
+   * This is needed for offender lookups by Ed25519 public key
+   */
+  private updatePublicKeysToValidatorIndex(
+    validators: Map<number, ValidatorPublicKeys>,
+  ): void {
+    for (const [index, validator] of validators) {
+      this.publicKeysToValidatorIndex.set(validator.ed25519, index)
+    }
   }
 
   /**
@@ -317,6 +338,13 @@ export class ValidatorSetManager
       count: validatorPublicKeys.length,
       totalOffenders: this.offenders.size,
     })
+  }
+
+  /**
+   * Check if a validator index is in the offenders set
+   */
+  isOffender(validatorIndex: number): boolean {
+    return this.offenders.has(validatorIndex)
   }
 
   /**
@@ -703,41 +731,5 @@ export class ValidatorSetManager
       port: Number.parseInt(port.toString()),
       publicKey: hexToBytes(validator.ed25519),
     })
-  }
-
-  /**
-   * Get assigned core for this validator
-   *
-   * Gray Paper Reference: reporting_assurance.tex (Equations 210-218)
-   *
-   * Algorithm:
-   * 1. Create initial core assignments: [floor(C_corecount × i / C_valcount) for i in valindex]
-   * 2. Shuffle using Fisher-Yates with entropy_2: fyshuffle(assignments, entropy_2)
-   * 3. Calculate rotation: floor((thetime % C_epochlen) / C_rotationperiod)
-   * 4. Apply rotation: (core + rotation) % C_corecount
-   * 5. Return core for validatorIndex
-   */
-  getAssignedCore(validatorIndex: number): Safe<number> {
-    if (!this.entropyService) {
-      return safeError(new Error('Entropy service not found'))
-    }
-    if (!this.clockService) {
-      return safeError(new Error('Clock service not found'))
-    }
-    if (!this.configService) {
-      return safeError(new Error('Config service not found'))
-    }
-    // Get values from services
-    const entropy2 = this.entropyService.getEntropy2()
-    const currentSlot = this.clockService.getCurrentSlot()
-    const config = {
-      numValidators: this.configService.numValidators,
-      numCores: this.configService.numCores,
-      epochDuration: this.configService.epochDuration,
-      rotationPeriod: this.configService.rotationPeriod,
-    }
-
-    // Use the guarantor package helper function
-    return getAssignedCore(validatorIndex, entropy2, currentSlot, config)
   }
 }

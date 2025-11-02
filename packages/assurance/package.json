@@ -8,7 +8,6 @@
   "dependencies": {
     "@pbnj/core": "workspace:*",
     "@pbnj/types": "workspace:*",
-    "@noble/curves": "^1.7.0",
-    "viem": "^2.21.54"
+    "@noble/curves": "catalog:"
   }
 }

@@ -25,16 +25,14 @@ import {
   type AssuranceDistributionEvent,
   type EventBusService,
   hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import type {
   Assurance,
   AssuranceDistributionRequest,
   IConfigService,
+  Safe,
 } from '@pbnj/types'
-import { BaseService, TIME_CONSTANTS } from '@pbnj/types'
+import { BaseService, safeError, safeResult, TIME_CONSTANTS } from '@pbnj/types'
 import type { Hex } from 'viem'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
@@ -52,24 +50,23 @@ export class AssuranceService extends BaseService {
   private readonly sealKeyService: SealKeyService | null
   private readonly recentHistoryService: RecentHistoryService | null
   // map header hash to core index to assurance count
-  private readonly assuranceCountByCoreIndex: Map<number, number> =
-    new Map()
+  private readonly assuranceCountByCoreIndex: Map<number, number> = new Map()
 
-  constructor(
-    configService: IConfigService,
-    workReportService: WorkReportService,
-    validatorSetManager: ValidatorSetManager,
-    eventBusService: EventBusService,
-    sealKeyService: SealKeyService | null,
-    recentHistoryService: RecentHistoryService | null,
-  ) {
+  constructor(options: {
+    configService: IConfigService
+    workReportService: WorkReportService
+    validatorSetManager: ValidatorSetManager
+    eventBusService: EventBusService
+    sealKeyService: SealKeyService | null
+    recentHistoryService: RecentHistoryService | null
+  }) {
     super('assurance-service')
-    this.configService = configService
-    this.workReportService = workReportService
-    this.validatorSetManager = validatorSetManager
-    this.eventBusService = eventBusService
-    this.sealKeyService = sealKeyService
-    this.recentHistoryService = recentHistoryService
+    this.configService = options.configService
+    this.workReportService = options.workReportService
+    this.validatorSetManager = options.validatorSetManager
+    this.eventBusService = options.eventBusService
+    this.sealKeyService = options.sealKeyService
+    this.recentHistoryService = options.recentHistoryService
     this.eventBusService.addAssuranceReceivedCallback(
       this.handleAssuranceReceived.bind(this),
     )
@@ -126,16 +123,16 @@ export class AssuranceService extends BaseService {
       return safeError(new Error('bad_signature'))
     }
 
-    if(!this.recentHistoryService) {
+    if (!this.recentHistoryService) {
       return safeError(new Error('Recent history service not found'))
     }
     // get parent hash from recent history
     const recentHistory = this.recentHistoryService.getRecentHistory()
-    if(!recentHistory) {
+    if (!recentHistory) {
       return safeError(new Error('Recent history not found'))
     }
     const parentHash = recentHistory[recentHistory.length - 1].headerHash
-    if(parentHash !== assurance.anchor) {
+    if (parentHash !== assurance.anchor) {
       return safeError(new Error('Parent hash mismatch'))
     }
 
@@ -155,7 +152,10 @@ export class AssuranceService extends BaseService {
         const isSet = (bitfield[byteIndex] & (1 << bitIndex)) !== 0
 
         if (isSet) {
-          this.assuranceCountByCoreIndex.set(coreIndex, (this.assuranceCountByCoreIndex.get(coreIndex) || 0) + 1)
+          this.assuranceCountByCoreIndex.set(
+            coreIndex,
+            (this.assuranceCountByCoreIndex.get(coreIndex) || 0) + 1,
+          )
         }
       }
     }
@@ -195,7 +195,7 @@ export class AssuranceService extends BaseService {
   ): Safe<void> {
     // Reset assurance counts for this transition (counts are per-transition, not cumulative)
     this.assuranceCountByCoreIndex.clear()
-    
+
     // Get pending reports first to check for engaged cores
     const pendingReports = this.workReportService.getPendingReports()
 
@@ -210,7 +210,10 @@ export class AssuranceService extends BaseService {
       ) {
         return safeError(new Error('bad_validator_index'))
       }
-      if (i > 0 && assurances[i - 1].validator_index >= assurance.validator_index) {
+      if (
+        i > 0 &&
+        assurances[i - 1].validator_index >= assurance.validator_index
+      ) {
         return safeError(new Error('not_sorted_or_unique_assurers'))
       }
       if (assurance.anchor !== parentHash) {
@@ -263,7 +266,10 @@ export class AssuranceService extends BaseService {
             if (!pendingReports.coreReports[coreIndex]) {
               return safeError(new Error('core_not_engaged'))
             }
-            this.assuranceCountByCoreIndex.set(coreIndex, (this.assuranceCountByCoreIndex.get(coreIndex) || 0) + 1)
+            this.assuranceCountByCoreIndex.set(
+              coreIndex,
+              (this.assuranceCountByCoreIndex.get(coreIndex) || 0) + 1,
+            )
           }
         }
       }

@@ -13,7 +13,6 @@ import type {
   GenesisJson,
   Hex,
 } from '@pbnj/core'
-import { type Safe, safeError, safeResult } from '@pbnj/core'
 import {
   loadChainSpec,
   loadGenesisHeaderAndComputeHash,
@@ -26,7 +25,7 @@ import type {
   ParsedBootnode,
   ValidatorKeyPair,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import { BaseService, type Safe, safeError, safeResult } from '@pbnj/types'
 
 /**
  * Node Genesis Manager Service

@@ -5,10 +5,11 @@
  * This is a Common Ephemeral (CE) stream for requesting preimages.
  */
 
-import type { EventBusService, Hex, Safe, SafePromise } from '@pbnj/core'
-import { bytesToHex, hexToBytes, safeError, safeResult } from '@pbnj/core'
+import type { EventBusService, Hex } from '@pbnj/core'
+import { bytesToHex, hexToBytes } from '@pbnj/core'
 import { decodePreimage, encodePreimage } from '@pbnj/serialization'
-import type { Preimage, PreimageRequest } from '@pbnj/types'
+import type { Preimage, PreimageRequest, Safe, SafePromise } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

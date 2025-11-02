@@ -9,14 +9,13 @@
  * local_tranche_0 = {wrc for wrc in p[0:10] if wr != None}
  */
 
-import { jamShuffle, logger } from '@pbnj/core'
+import { type Hex, jamShuffle, logger } from '@pbnj/core'
 import type {
   AuditTrancheSelection,
   CoreWorkReport,
   NegativeJudgment,
   PreviousTrancheAnnouncement,
 } from '@pbnj/types'
-import type { Hex } from 'viem'
 
 export const MAX_AUDIT_CORES = 10 // First 10 cores from shuffled sequence
 

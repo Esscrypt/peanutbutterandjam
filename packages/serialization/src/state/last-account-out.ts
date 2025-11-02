@@ -44,15 +44,9 @@
  * This is critical for JAM's accumulation output tracking and audit trail.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { DecodingResult, LastAccountOut } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, LastAccountOut, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,
@@ -103,7 +97,7 @@ export function decodeLastAccountOut(
   try {
     // Gray Paper: decode var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
     // Variable-length sequence of tuples
-    const [error, decodedData] = decodeVariableSequence(
+    const [error, decodedData] = decodeVariableSequence<LastAccountOut>(
       data,
       (itemData: Uint8Array) => {
         // Gray Paper: decode tuple{encode[4]{s}, encode{h}}

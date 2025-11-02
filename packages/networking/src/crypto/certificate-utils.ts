@@ -1,4 +1,4 @@
-import type { JsonWebKey } from 'node:crypto'
+import type { webcrypto as NodeWebCrypto } from 'node:crypto'
 import type {
   QUICClient,
   QUICServer,
@@ -20,7 +20,13 @@ type BufferSource = ArrayBuffer | ArrayBufferView
  */
 const webcrypto = new peculiarWebcrypto.Crypto()
 
-x509.cryptoProvider.set(webcrypto)
+// Use Web Crypto API's JsonWebKey type (what @peculiar/webcrypto actually returns)
+// This matches the Web Crypto standard that @peculiar/webcrypto implements
+type JsonWebKey = NodeWebCrypto.JsonWebKey
+
+// Type assertion: @peculiar/webcrypto.Crypto is compatible with @peculiar/x509's expected type
+// The x509 library expects a Web Crypto API compatible Crypto interface
+x509.cryptoProvider.set(webcrypto as unknown as globalThis.Crypto)
 
 async function sleep(ms: number): Promise<void> {
   return await new Promise<void>((r) => setTimeout(r, ms))

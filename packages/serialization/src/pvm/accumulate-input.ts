@@ -37,13 +37,15 @@
  * data flows while maintaining type safety and execution ordering.
  */
 
-import { concatBytes, type Safe, safeError, safeResult } from '@pbnj/core'
+import { concatBytes } from '@pbnj/core'
 import type {
   AccumulateInput,
   DecodingResult,
   DeferredTransfer,
   OperandTuple,
+  Safe,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,

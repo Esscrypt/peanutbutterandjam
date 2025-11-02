@@ -9,14 +9,11 @@ import {
   generateVRFSignature,
   getTicketsForExtrinsic,
 } from '@pbnj/block-authoring'
-import type { Safe, SafePromise } from '@pbnj/core'
 import {
   bytesToHex,
   type EventBusService,
   logger,
   type SlotChangeEvent,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import {
   generateFallbackSealSignature,
@@ -29,7 +26,13 @@ import type {
   Extrinsic,
   UnsignedBlockHeader,
 } from '@pbnj/types'
-import { BaseService } from '@pbnj/types'
+import {
+  BaseService,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnj/types'
 // import type { WorkPackageProcessor } from './work-package-processor'
 import type { BlockHeaderService } from './block-header-service'
 import type { ClockService } from './clock-service'

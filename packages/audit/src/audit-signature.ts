@@ -54,12 +54,15 @@ import {
   hexToBytes,
   jamShuffle,
   logger,
-  type Safe,
-  safeError,
-  safeResult,
 } from '@pbnj/core'
 import { encodeWorkReport } from '@pbnj/serialization'
-import type { AuditAnnouncement, IConfigService, WorkReport } from '@pbnj/types'
+import type {
+  AuditAnnouncement,
+  IConfigService,
+  Safe,
+  WorkReport,
+} from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 
 /**
  * Gray Paper hardcoded context string for audit VRF
@@ -525,30 +528,22 @@ export function verifyWorkReportSelection(
   configService: IConfigService,
   previousTrancheAnnouncements?: AuditAnnouncement[],
 ): Safe<boolean> {
-  try {
-    if (announcement.tranche === 0n) {
-      // Verify tranche 0 selection using Fisher-Yates shuffle
-      return verifyTranche0WorkReportSelection(
-        announcement,
-        availableCoreWorkReports,
-        bandersnatchVrfOutput,
-      )
-    } else {
-      // Verify tranche N selection using no-show logic
-      // For tranche N, we only need previous announcements, not all available work reports
-      return verifyTrancheNWorkReportSelection(
-        announcement,
-        bandersnatchVrfOutput,
-        configService,
-        previousTrancheAnnouncements || [],
-      )
-    }
-  } catch (error) {
-    logger.error('Error verifying work report selection', {
-      error: error instanceof Error ? error.message : String(error),
-      tranche: announcement.tranche.toString(),
-    })
-    return safeError(error as Error)
+  if (announcement.tranche === 0n) {
+    // Verify tranche 0 selection using Fisher-Yates shuffle
+    return verifyTranche0WorkReportSelection(
+      announcement,
+      availableCoreWorkReports,
+      bandersnatchVrfOutput,
+    )
+  } else {
+    // Verify tranche N selection using no-show logic
+    // For tranche N, we only need previous announcements, not all available work reports
+    return verifyTrancheNWorkReportSelection(
+      announcement,
+      bandersnatchVrfOutput,
+      configService,
+      previousTrancheAnnouncements || [],
+    )
   }
 }
 
@@ -630,71 +625,60 @@ function verifyTrancheNWorkReportSelection(
   announcement: AuditAnnouncement,
   bandersnatchVrfOutput: Hex,
   configService: IConfigService,
-  previousTrancheAnnouncements: AuditAnnouncement[],
+  _previousTrancheAnnouncements: AuditAnnouncement[],
 ): Safe<boolean> {
-  try {
-    // Gray Paper Equation 105-108:
-    // local_tranche_n ≡ {wr for (Cvalcount/256*Cauditbiasfactor)*banderout{local_seed_n(wr)}_0 < m_n, wr ∈ local_reports, wr ≠ None}
-    // where m_n = len{A_{n-1}(wr) \ J_top(wr)}
+  // Gray Paper Equation 105-108:
+  // local_tranche_n ≡ {wr for (Cvalcount/256*Cauditbiasfactor)*banderout{local_seed_n(wr)}_0 < m_n, wr ∈ local_reports, wr ≠ None}
+  // where m_n = len{A_{n-1}(wr) \ J_top(wr)}
 
-    // Constants from Gray Paper
-    const CAUDITBIASFACTOR = 2 // Audit bias factor
+  // Constants from Gray Paper
+  const CAUDITBIASFACTOR = 2 // Audit bias factor
 
-    // Calculate the bias threshold: Cvalcount / (256 * Cauditbiasfactor)
-    const biasThreshold = configService.numValidators / (256 * CAUDITBIASFACTOR)
+  // Calculate the bias threshold: Cvalcount / (256 * Cauditbiasfactor)
+  const biasThreshold = configService.numValidators / (256 * CAUDITBIASFACTOR)
 
-    // For each announced work report, verify it was selected correctly
-    for (const announcedWorkReport of announcement.announcement.workReports) {
-      // Step 1: Calculate m_n for this work report
-      // m_n = len{A_{n-1}(wr) \ J_top(wr)}
-      // This is the number of validators who announced intent to audit this work report
-      // in the previous tranche but haven't provided a judgment yet
+  // For each announced work report, verify it was selected correctly
+  for (const announcedWorkReport of announcement.announcement.workReports) {
+    // Step 1: Calculate m_n for this work report
+    // m_n = len{A_{n-1}(wr) \ J_top(wr)}
+    // This is the number of validators who announced intent to audit this work report
+    // in the previous tranche but haven't provided a judgment yet
 
-      const previousAnnouncers = new Set<bigint>()
-      for (const prevAnnouncement of previousTrancheAnnouncements) {
-        // Check if this validator announced intent to audit this work report
-        const announcedThisWorkReport =
-          prevAnnouncement.announcement.workReports.some(
-            (wr) =>
-              wr.coreIndex === announcedWorkReport.coreIndex &&
-              wr.workReportHash === announcedWorkReport.workReportHash,
-          )
+    const previousAnnouncers = new Set<bigint>()
+    //TODO: implement this
+    // for (const prevAnnouncement of previousTrancheAnnouncements) {
+    //   // Check if this validator announced intent to audit this work report
+    //   const announcedThisWorkReport =
+    //     prevAnnouncement.announcement.workReports.some(
+    //       (wr) =>
+    //         wr.coreIndex === announcedWorkReport.coreIndex &&
+    //         wr.workReportHash === announcedWorkReport.workReportHash,
+    //     )
 
-        if (announcedThisWorkReport) {
-          previousAnnouncers.add(prevAnnouncement.announcement.validatorIndex)
-        }
-      }
+    //   if (announcedThisWorkReport) {
+    //     previousAnnouncers.add(prevAnnouncement.validator)
+    //   }
+    // }
 
-      // TODO: Calculate J_top(wr) - validators who provided positive judgments
-      // For now, we'll assume no judgments have been received (worst case)
-      const positiveJudgments = new Set<bigint>() // Empty for now
+    // TODO: Calculate J_top(wr) - validators who provided positive judgments
+    // For now, we'll assume no judgments have been received (worst case)
+    const positiveJudgments = new Set<bigint>() // Empty for now
 
-      // Calculate m_n: number of no-shows
-      const m_n = previousAnnouncers.size - positiveJudgments.size
+    // Calculate m_n: number of no-shows
+    const m_n = previousAnnouncers.size - positiveJudgments.size
 
-      // Step 2: Verify the VRF output satisfies the bias condition
-      // (Cvalcount/256*Cauditbiasfactor)*banderout{local_seed_n(wr)}_0 < m_n
+    // Step 2: Verify the VRF output satisfies the bias condition
+    // (Cvalcount/256*Cauditbiasfactor)*banderout{local_seed_n(wr)}_0 < m_n
 
-      // Extract the first byte of the VRF output as banderout{local_seed_n(wr)}_0
-      const vrfFirstByte = hexToBytes(bandersnatchVrfOutput)[0]
+    // Extract the first byte of the VRF output as banderout{local_seed_n(wr)}_0
+    const vrfFirstByte = hexToBytes(bandersnatchVrfOutput)[0]
 
-      // Calculate the left side of the inequality
-      const leftSide = (biasThreshold * vrfFirstByte) / 256
+    // Calculate the left side of the inequality
+    const leftSide = (biasThreshold * vrfFirstByte) / 256
 
-      // Check if the bias condition is satisfied
-      if (leftSide >= m_n) {
-        logger.debug('Work report selection bias condition not satisfied', {
-          workReportHash: announcedWorkReport.workReportHash,
-          coreIndex: announcedWorkReport.coreIndex.toString(),
-          leftSide: leftSide.toString(),
-          m_n: m_n.toString(),
-          vrfFirstByte,
-          biasThreshold: biasThreshold.toString(),
-        })
-        return safeResult(false)
-      }
-
-      logger.debug('Work report selection bias condition satisfied', {
+    // Check if the bias condition is satisfied
+    if (leftSide >= m_n) {
+      logger.debug('Work report selection bias condition not satisfied', {
         workReportHash: announcedWorkReport.workReportHash,
         coreIndex: announcedWorkReport.coreIndex.toString(),
         leftSide: leftSide.toString(),
@@ -702,16 +686,23 @@ function verifyTrancheNWorkReportSelection(
         vrfFirstByte,
         biasThreshold: biasThreshold.toString(),
       })
+      return safeResult(false)
     }
 
-    logger.debug('Tranche N work report selection verified successfully', {
-      tranche: announcement.tranche.toString(),
-      workReportsCount: announcement.announcement.workReports.length,
+    logger.debug('Work report selection bias condition satisfied', {
+      workReportHash: announcedWorkReport.workReportHash,
+      coreIndex: announcedWorkReport.coreIndex.toString(),
+      leftSide: leftSide.toString(),
+      m_n: m_n.toString(),
+      vrfFirstByte,
+      biasThreshold: biasThreshold.toString(),
     })
-
-    return safeResult(true)
-  } catch (error) {
-    logger.error('Error verifying tranche N work report selection', { error })
-    return safeError(error as Error)
   }
+
+  logger.debug('Tranche N work report selection verified successfully', {
+    tranche: announcement.tranche.toString(),
+    workReportsCount: announcement.announcement.workReports.length,
+  })
+
+  return safeResult(true)
 }

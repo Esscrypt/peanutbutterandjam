@@ -26,17 +26,14 @@
  * ✅ CORRECT: Uses coreCount from config service for proper structure
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  type Hex,
-  hexToBytes,
-  type Safe,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
-import type { AuthPool, DecodingResult, IConfigService } from '@pbnj/types'
-import { AUTHORIZATION_CONSTANTS } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import type {
+  AuthPool,
+  DecodingResult,
+  IConfigService,
+  Safe,
+} from '@pbnj/types'
+import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnj/types'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
 
 /**
@@ -110,7 +107,7 @@ export function decodeAuthpool(
     const AUTH_POOL_SIZE = AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE
 
     // Decode as fixed-length sequence of cores
-    const [error, result] = decodeSequenceGeneric(
+    const [error, result] = decodeSequenceGeneric<Hex[]>(
       data,
       (data) => {
         // Decode each core as a fixed-length sequence of exactly C_authpoolsize authorization hashes

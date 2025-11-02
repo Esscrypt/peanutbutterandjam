@@ -1,10 +1,11 @@
-import { type Safe, safeError, safeResult } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   PVMGuest,
   RefineInvocationContext,
+  Safe,
 } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,

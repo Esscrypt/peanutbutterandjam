@@ -1,11 +1,13 @@
-import { blake2bHash, type Hex, type Safe, safeError } from '@pbnj/core'
+import { blake2bHash, type Hex } from '@pbnj/core'
 import type {
   Block,
   BlockHeader,
   IConfigService,
+  Safe,
   WorkPackage,
   WorkReport,
 } from '@pbnj/types'
+import { safeError } from '@pbnj/types'
 import { encodeHeader } from './block/header'
 import { encodeWorkPackage } from './work-package/package'
 import { encodeWorkReport } from './work-package/work-report'

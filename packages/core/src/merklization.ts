@@ -7,8 +7,8 @@
 
 import { keccak_256 } from '@noble/hashes/sha3'
 import { encodeVariableSequence } from '@pbnj/serialization'
-import type { Encoder } from '@pbnj/types'
-import { type Safe, safeError, safeResult } from './safe'
+import type { Encoder, Safe } from '@pbnj/types'
+import { safeError, safeResult } from '@pbnj/types'
 import { blake2bHash, bytesToHex, hexToBytes } from './utils/crypto'
 import { validateHexString } from './utils/validation'
 

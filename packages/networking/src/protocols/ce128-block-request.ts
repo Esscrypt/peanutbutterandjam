@@ -5,14 +5,8 @@
  * This is a Common Ephemeral (CE) stream for requesting sequences of blocks.
  */
 
-import type { EventBusService, Hex, Safe, SafePromise } from '@pbnj/core'
-import {
-  bytesToHex,
-  concatBytes,
-  hexToBytes,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import type { EventBusService, Hex } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
 import {
   decodeBlock,
   decodeFixedLength,
@@ -26,8 +20,10 @@ import type {
   BlockRequest,
   BlockResponse,
   IConfigService,
+  Safe,
+  SafePromise,
 } from '@pbnj/types'
-import { BlockRequestDirection } from '@pbnj/types'
+import { BlockRequestDirection, safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'
 /**
  * Block request protocol handler

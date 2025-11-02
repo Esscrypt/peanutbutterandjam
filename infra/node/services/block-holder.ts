@@ -5,15 +5,7 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import {
-  type EventBusService,
-  type Hex,
-  logger,
-  type Safe,
-  type SafePromise,
-  safeError,
-  safeResult,
-} from '@pbnj/core'
+import { type EventBusService, type Hex, logger } from '@pbnj/core'
 import type { BlockRequestProtocol } from '@pbnj/networking'
 import { calculateBlockHash } from '@pbnj/serialization'
 import type { BlockStore } from '@pbnj/state'
@@ -22,6 +14,10 @@ import {
   type Block,
   type BlockRequest,
   BlockRequestDirection,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
 } from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { NetworkingService } from './networking-service'
