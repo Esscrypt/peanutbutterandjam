@@ -94,8 +94,16 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
 }
 
 /**
- * MUL_IMM_32 instruction (opcode 0x12F)
- * Multiply 32-bit register by immediate as specified in Gray Paper
+ * MUL_IMM_32 instruction (opcode 0x12F / 135)
+ * Multiply 32-bit register by immediate
+ *
+ * Gray Paper pvm.tex §7.4.9 line 494:
+ * reg'_A = sext{4}((reg_B · immed_X) mod 2^32)
+ *
+ * Operand format (lines 462-469):
+ * - operands[0]: r_A (low 4 bits) + r_B (high 4 bits)
+ * - operands[1:1+l_X]: immed_X (sign-extended)
+ * Where: l_X = min(4, max(0, ℓ - 1))
  */
 export class MUL_IMM_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_IMM_32
@@ -131,18 +139,20 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }
 
 /**
- * ADD_IMM_64 instruction (opcode 0x13D)
- * Add immediate to 64-bit register as specified in Gray Paper
+ * ADD_IMM_64 instruction (opcode 0x13D / 149)
+ * Add immediate to 64-bit register
+ *
+ * Gray Paper pvm.tex §7.4.9 line 514:
+ * reg'_A = (reg_B + immed_X) mod 2^64
+ *
+ * Operand format (lines 462-469):
+ * - operands[0]: r_A (low 4 bits) + r_B (high 4 bits)
+ * - operands[1:1+l_X]: immed_X (sign-extended)
+ * Where: l_X = min(4, max(0, ℓ - 1))
+ * Note: For 64-bit instructions, immediate is typically 8 bytes
  */
 export class ADD_IMM_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ADD_IMM_64
@@ -150,11 +160,6 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
   readonly description = 'Add immediate to 64-bit register'
 
   execute(context: InstructionContext): InstructionResult {
-    console.log('ADD_IMM_64: Starting execution', {
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
-
     // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
@@ -162,68 +167,47 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
         context.fskip,
       )
 
-    console.log('ADD_IMM_64: Parsed operands', {
-      registerA,
-      registerB,
-      immediateX,
-    })
-
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerB,
     )
 
-    console.log('ADD_IMM_64: Register values before operation', {
+    const addition = registerValue + immediateX
+    const result = addition & 0xffffffffffffffffn // mod 2^64
+
+    logger.debug('Executing ADD_IMM_64 instruction', {
+      operands: Array.from(context.instruction.operands),
       registerA,
       registerB,
       registerAValue: context.registers[registerA],
       registerBValue: context.registers[registerB],
-      registerValue,
       immediateX,
-    })
-
-    const addition = registerValue + immediateX
-    const result = addition & 0xffffffffffffffffn // mod 2^64
-
-    console.log('ADD_IMM_64: Calculation steps', {
       registerValue,
-      immediateX,
+      signedImmediateX: this.toSigned64(immediateX),
+      result,
       addition,
-      result,
-      masked: result,
-    })
-
-    logger.debug('Executing ADD_IMM_64 instruction', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      result,
+      pc: context.pc,
     })
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
-
-    console.log('ADD_IMM_64: After setting register', {
-      registerA,
-      result,
-      finalRegisterValue: context.registers[registerA],
-    })
 
     // Mutate context directly
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }
 
 /**
- * MUL_IMM_64 instruction (opcode 0x13E)
- * Multiply 64-bit register by immediate as specified in Gray Paper
+ * MUL_IMM_64 instruction (opcode 0x13E / 150)
+ * Multiply 64-bit register by immediate
+ *
+ * Gray Paper pvm.tex §7.4.9 line 515:
+ * reg'_A = (reg_B · immed_X) mod 2^64
+ *
+ * Operand format (lines 462-469):
+ * - operands[0]: r_A (low 4 bits) + r_B (high 4 bits)
+ * - operands[1:1+l_X]: immed_X (sign-extended)
+ * Where: l_X = min(4, max(0, ℓ - 1))
+ * Note: For 64-bit instructions, immediate is typically 8 bytes
  */
 export class MUL_IMM_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_IMM_64
@@ -253,12 +237,5 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
     // Mutate context directly
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }

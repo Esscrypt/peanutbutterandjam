@@ -16,38 +16,16 @@
  */
 
 import { logger } from '@pbnj/core'
-import { BaseService, type IConfigService } from '@pbnj/types'
+import { BaseService } from '@pbnj/types'
 import type { Hex } from 'viem'
-
-/**
- * LastAccout Service Interface
- */
-export interface ILastAccoutService {
-  getLastAccout(): Hex
-  setLastAccout(hash: Hex): void
-
-  // Hash operations
-  updateLastAccout(hash: Hex): void
-  clearLastAccout(): void
-  isValidHash(hash: Hex): boolean
-
-  // Statistics
-  getStats(): {
-    hasLastAccout: boolean
-    lastAccoutLength: number
-  }
-}
 
 /**
  * LastAccout Service Implementation
  */
-export class LastAccoutService
-  extends BaseService
-  implements ILastAccoutService
-{
+export class LastAccoutService extends BaseService {
   private lastAccout: Hex
 
-  constructor(_configService: IConfigService) {
+  constructor() {
     super('lastaccout-service')
     // Initialize with zero hash
     this.lastAccout =
@@ -76,67 +54,5 @@ export class LastAccoutService
       hash,
       hashLength: hash.length,
     })
-  }
-
-  /**
-   * Update last accumulation output hash
-   *
-   * This is called when new accumulation occurs and produces output
-   */
-  updateLastAccout(hash: Hex): void {
-    this.setLastAccout(hash)
-    logger.info('Last accumulation output updated', {
-      previousHash: this.lastAccout,
-      newHash: hash,
-    })
-  }
-
-  /**
-   * Clear last accumulation output hash
-   *
-   * Resets to zero hash (used during state resets)
-   */
-  clearLastAccout(): void {
-    this.lastAccout =
-      '0x0000000000000000000000000000000000000000000000000000000000000000'
-    logger.debug('Last accumulation output cleared')
-  }
-
-  /**
-   * Validate if hash is properly formatted
-   *
-   * Checks if hash is a valid 32-byte hex string
-   */
-  isValidHash(hash: Hex): boolean {
-    // Check if it's a valid hex string with 0x prefix
-    if (!hash.startsWith('0x')) {
-      return false
-    }
-
-    // Check if it's exactly 64 hex characters (32 bytes)
-    const hexContent = hash.slice(2)
-    if (hexContent.length !== 64) {
-      return false
-    }
-
-    // Check if all characters are valid hex
-    return /^[0-9a-fA-F]+$/.test(hexContent)
-  }
-
-  /**
-   * Get service statistics
-   */
-  getStats(): {
-    hasLastAccout: boolean
-    lastAccoutLength: number
-  } {
-    const isZeroHash =
-      this.lastAccout ===
-      '0x0000000000000000000000000000000000000000000000000000000000000000'
-
-    return {
-      hasLastAccout: !isZeroHash,
-      lastAccoutLength: this.lastAccout.length,
-    }
   }
 }

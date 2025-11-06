@@ -29,20 +29,15 @@ export class ECALLIInstruction extends BaseInstruction {
   readonly description = 'Host call with immediate value'
 
   execute(context: InstructionContext): InstructionResult {
-    // Read variable-length immediate (0-4 bytes)
-    const length = Math.min(4, context.instruction.operands.length)
-    const hostCallId = this.getImmediateValue(
-      context.instruction.operands,
-      0,
-      length,
-    )
-
-    logger.debug('Executing ECALLI instruction', { hostCallId })
+    logger.debug('Executing ECALLI instruction', {
+      operands: Array.from(context.instruction.operands),
+      fskip: context.fskip,
+      currentPC: context.pc,
+    })
 
     // Consume gas
-    
 
-    context.registers[0] = hostCallId
+    context.registers[0] = BigInt(context.instruction.operands[0])
 
     const result = {
       resultCode: RESULT_CODES.HOST,
@@ -50,10 +45,5 @@ export class ECALLIInstruction extends BaseInstruction {
 
     console.log('ECALLI returning result:', result)
     return result
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const hostCallId = this.getImmediateValue(operands, 0)
-    return `${this.name} ${hostCallId}`
   }
 }

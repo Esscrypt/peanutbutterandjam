@@ -247,11 +247,6 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
   readonly name = 'STORE_IND_U64'
   readonly description = 'Store to register + immediate address (64-bit)'
   execute(context: InstructionContext): InstructionResult {
-    console.log('STORE_IND_U64: Starting execution', {
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
-
     // Gray Paper: some gas is always charged whenever execution is attempted
     // This is the case even if no instruction is effectively executed
 
@@ -260,12 +255,6 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
         context.instruction.operands,
         context.fskip,
       )
-
-    console.log('STORE_IND_U64: Parsed operands', {
-      registerA,
-      registerB,
-      immediateX,
-    })
 
     const registerBValue = this.getRegisterValueAs64(
       context.registers,
@@ -276,23 +265,6 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
       registerA,
     )
     const address = registerBValue + immediateX
-
-    console.log('STORE_IND_U64: Register values before operation', {
-      registerA,
-      registerB,
-      registerAValue: registerAValue.toString(),
-      registerBValue: registerBValue.toString(),
-      immediateX: immediateX.toString(),
-    })
-
-    console.log('STORE_IND_U64: Address calculation', {
-      registerA,
-      registerB,
-      immediateX,
-      registerAValue: registerAValue.toString(),
-      registerBValue: registerBValue.toString(),
-      address: address.toString(),
-    })
 
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < 65536n) {
@@ -305,20 +277,9 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
 
     const value = registerAValue & 0xffffffffffffffffn
 
-    console.log('STORE_IND_U64: Value preparation', {
-      registerAValue: registerAValue.toString(),
-      value: value.toString(),
-      masked: value.toString(),
-    })
-
     // Write 64-bit value to memory (little-endian)
     // Gray Paper: memwr[reg_B + immed_X:8] = encode[8]{reg_A}
     const encodedValue = this.bigIntToBytesLE(value, 8)
-    console.log('STORE_IND_U64: Memory write', {
-      address: address.toString(),
-      value: value.toString(),
-      encodedValue: Array.from(encodedValue),
-    })
 
     const faultAddress = context.ram.writeOctets(address, encodedValue)
     if (faultAddress) {
@@ -335,9 +296,19 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
       }
     }
 
-    console.log('STORE_IND_U64: Successfully completed', {
+    console.log('STORE_IND_U64: Executing', {
+      operands: Array.from(context.instruction.operands),
+      registerA,
+      registerB,
+      immediateX,
+      registers: context.registers,
+      registerAValue: registerAValue.toString(),
+      registerBValue: registerBValue.toString(),
       address: address.toString(),
       value: value.toString(),
+      encodedValue: Array.from(encodedValue),
+      faultAddress: faultAddress?.toString(),
+      pc: context.pc,
     })
 
     return { resultCode: null }
@@ -399,13 +370,6 @@ export class LOAD_IND_U8Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -498,14 +462,6 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
     )
     const address = registerBValue + immediateX
 
-    console.log('Executing LOAD_IND_U16 instruction', {
-      registerB,
-      registerA,
-      immediateX,
-      address,
-      registerBValue,
-    })
-
     // Load 16-bit unsigned value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 2n)
     if (faultAddress) {
@@ -532,6 +488,18 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
+    console.log('Executing LOAD_IND_U16 instruction', {
+      operands: Array.from(context.instruction.operands),
+      registerB,
+      registerA,
+      immediateX,
+      registerBValue,
+      address,
+      value,
+      bytesReadFromMemory: bytes,
+      registers: context.registers,
+      pc: context.pc,
+    })
     return { resultCode: null }
   }
 }
@@ -740,13 +708,6 @@ export class LOAD_IND_U64Instruction extends BaseInstruction {
     )
     const address = registerBValue + immediateX
 
-    console.log('Executing LOAD_IND_U64 instruction', {
-      registerA,
-      registerB,
-      immediateX,
-      address,
-    })
-
     // Load 64-bit unsigned value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 8n)
     if (faultAddress) {
@@ -772,6 +733,16 @@ export class LOAD_IND_U64Instruction extends BaseInstruction {
     const value = this.bytesToBigIntLE(bytes)
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
+    console.log('Executing LOAD_IND_U64 instruction', {
+      registerA,
+      registerB,
+      registerBValue,
+      immediateX,
+      address,
+      storedValueInRegisterA: value,
+      bytesReadFromMemory: bytes,
+      pc: context.pc,
+    })
     return { resultCode: null }
   }
 }

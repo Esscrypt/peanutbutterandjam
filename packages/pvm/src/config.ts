@@ -14,17 +14,17 @@ export const GAS_CONFIG = {
 
 // Memory configuration
 export const MEMORY_CONFIG = {
-  RESERVED_MEMORY_START: 65_536n, // 64KB (2^16)
-  MAX_MEMORY_ADDRESS: 2_147_483_647n, // 2^31 - 1
-  INITIAL_ZONE_SIZE: 65_536n, // 64KB (2^16) - Gray Paper Cpvminitzonesize
-  PAGE_SIZE: 4_096n, // 4KB (2^12) - Gray Paper Cpvmpagesize
+  RESERVED_MEMORY_START: 65_536, // 64KB (2^16)
+  MAX_MEMORY_ADDRESS: 2_147_483_647, // 2^31 - 1
+  INITIAL_ZONE_SIZE: 65_536, // 64KB (2^16) - Gray Paper Cpvminitzonesize
+  PAGE_SIZE: 4096, // 4KB (2^12) - Gray Paper Cpvmpagesize
   DYNAMIC_ADDRESS_ALIGNMENT: 2, // Gray Paper Cpvmdynaddralign
 } as const
 
 // Program initialization configuration
 export const INIT_CONFIG = {
-  INIT_ZONE_SIZE: 65_536n, // 64KB (2^16) - Gray Paper Cpvminitzonesize
-  INIT_INPUT_SIZE: 16_777_216n, // 16MB (2^24) - Gray Paper Cpvminitinputsize
+  INIT_ZONE_SIZE: 65_536, // 64KB (2^16) - Gray Paper Cpvminitzonesize
+  INIT_INPUT_SIZE: 16_777_216, // 16MB (2^24) - Gray Paper Cpvminitinputsize
 } as const
 
 // Register configuration
@@ -255,7 +255,7 @@ export const REFINE_CONFIG = {
 // Gray Paper Accumulate Invocation constants
 export const ACCUMULATE_INVOCATION_CONFIG = {
   MAX_SERVICE_CODE_SIZE: 4_000_000n, // Cmaxservicecodesize = 4,000,000
-  MIN_PUBLIC_INDEX: 1_000_000n, // Cminpublicindex = 1,000,000
+  MIN_PUBLIC_INDEX: 65536n, // Cminpublicindex = 2^16
   ENTROPY_ACCUMULATOR: 'entropy', // Placeholder for entropy accumulator
 } as const
 
@@ -464,6 +464,7 @@ export const GENERAL_FUNCTIONS = {
   PAGES: 11n,
   INVOKE: 12n,
   EXPUNGE: 13n,
+  LOG: 100n,
 } as const
 
 // Accumulate function identifiers from Gray Paper Appendix B.7

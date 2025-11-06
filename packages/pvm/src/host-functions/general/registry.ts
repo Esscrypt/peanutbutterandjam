@@ -7,6 +7,7 @@ import { GasHostFunction } from './gas'
 import { HistoricalLookupHostFunction } from './historical-lookup'
 import { InfoHostFunction } from './info'
 import { InvokeHostFunction } from './invoke'
+import { LogHostFunction } from './log'
 import { LookupHostFunction } from './lookup'
 import { MachineHostFunction } from './machine'
 import { PagesHostFunction } from './pages'
@@ -47,6 +48,7 @@ export class HostFunctionRegistry {
     this.register(new PagesHostFunction())
     this.register(new InvokeHostFunction())
     this.register(new ExpungeHostFunction())
+    this.register(new LogHostFunction())
   }
 
   register(hostFunction: BaseHostFunction): void {

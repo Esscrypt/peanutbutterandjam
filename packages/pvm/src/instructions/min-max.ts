@@ -32,20 +32,8 @@ export class MINInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
-
-  private toSigned64(value: bigint): bigint {
-    return value > 2n ** 63n - 1n ? value - 2n ** 64n : value
   }
 }
 
@@ -72,7 +60,6 @@ export class MIN_UInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -114,20 +101,8 @@ export class MAXInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
-
-  private toSigned64(value: bigint): bigint {
-    return value > 2n ** 63n - 1n ? value - 2n ** 64n : value
   }
 }
 
@@ -153,16 +128,6 @@ export class MAX_UInstruction extends BaseInstruction {
     })
     this.setRegisterValue(context.registers, registerD, result)
 
-    // Mutate context directly
-    
-
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 }

@@ -2,7 +2,7 @@ import type {
   IClockService,
   IConfigService,
   ITicketService,
-  SafroleTicket,
+  SafroleTicketWithoutProof,
 } from '@pbnj/types'
 import { type SafePromise, safeResult } from '@pbnj/types'
 
@@ -10,7 +10,7 @@ export async function getTicketsForExtrinsic(
   clockService: IClockService,
   configService: IConfigService,
   ticketHolderService: ITicketService,
-): SafePromise<SafroleTicket[]> {
+): SafePromise<SafroleTicketWithoutProof[]> {
   const currentPhase = clockService.getCurrentPhase()
 
   // Gray Paper Eq. 295-298: No tickets during epoch tail
@@ -43,12 +43,12 @@ export async function getTicketsForExtrinsic(
 }
 
 export function filterTicketsForAccumulator(
-  receivedTickets: SafroleTicket[],
-  currentAccumulator: SafroleTicket[],
+  receivedTickets: SafroleTicketWithoutProof[],
+  currentAccumulator: SafroleTicketWithoutProof[],
   currentAccumulatorSize: number,
   configService: IConfigService,
-): SafroleTicket[] {
-  const validTickets: SafroleTicket[] = []
+): SafroleTicketWithoutProof[] {
+  const validTickets: SafroleTicketWithoutProof[] = []
 
   for (const ticket of receivedTickets) {
     // Gray Paper Eq. 316: No duplicate ticket IDs
@@ -78,8 +78,8 @@ export function filterTicketsForAccumulator(
 }
 
 export function wouldTicketMakeItToAccumulator(
-  ticket: SafroleTicket,
-  currentAccumulator: SafroleTicket[],
+  ticket: SafroleTicketWithoutProof,
+  currentAccumulator: SafroleTicketWithoutProof[],
   currentAccumulatorSize: number,
   configService: IConfigService,
 ): boolean {

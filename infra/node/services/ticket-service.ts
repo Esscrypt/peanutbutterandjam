@@ -28,6 +28,7 @@ import {
   type Safe,
   type SafePromise,
   type SafroleTicket,
+  type SafroleTicketWithoutProof,
   type StreamKind,
   safeError,
   safeResult,
@@ -47,18 +48,18 @@ import type { ValidatorSetManager } from './validator-set'
  * ticketaccumulator' = sort_by(x_st_id, n ∪ {ticketaccumulator | e' = e, ∅ | e' > e})^Cepochlen
  */
 export class TicketService extends BaseService implements ITicketService {
-  private ticketAccumulator: SafroleTicket[] = []
+  private ticketAccumulator: SafroleTicketWithoutProof[] = []
   private ticketToHolderPublicKey: Map<Hex, Hex> = new Map()
   private proxyValidatorTickets: SafroleTicket[] = []
 
   private configService: ConfigService
   private eventBusService: EventBusService
-  private keyPairService: KeyPairService
+  private keyPairService: KeyPairService | null
   private entropyService: EntropyService
   private validatorSetManager: ValidatorSetManager | null = null
-  private networkingService: NetworkingService
-  private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol
-  private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol
+  private networkingService: NetworkingService | null
+  private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null
+  private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
   private clockService: ClockService
   private prover: RingVRFProver
   private localValidatorIndex: number | null = null
@@ -66,11 +67,11 @@ export class TicketService extends BaseService implements ITicketService {
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
-    keyPairService: KeyPairService
+    keyPairService: KeyPairService | null
     entropyService: EntropyService
-    networkingService: NetworkingService
-    ce131TicketDistributionProtocol: CE131TicketDistributionProtocol
-    ce132TicketDistributionProtocol: CE132TicketDistributionProtocol
+    networkingService: NetworkingService | null
+    ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null
+    ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
     clockService: ClockService
     prover: RingVRFProver
   }) {
@@ -99,6 +100,9 @@ export class TicketService extends BaseService implements ITicketService {
   }
 
   start(): Safe<boolean> {
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not set'))
+    }
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
@@ -140,6 +144,9 @@ export class TicketService extends BaseService implements ITicketService {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not set'))
+    }
     const safroleTicket: SafroleTicket = {
       id: getTicketIdFromProof(request.ticket.proof),
       entryIndex: request.ticket.entryIndex,
@@ -178,11 +185,11 @@ export class TicketService extends BaseService implements ITicketService {
     return safeResult(undefined)
   }
 
-  getTicketAccumulator(): SafroleTicket[] {
-    return this.ticketAccumulator.slice(0, this.configService.epochDuration)
+  setTicketAccumulator(ticketAccumulator: SafroleTicketWithoutProof[]): void {
+    this.ticketAccumulator = ticketAccumulator
   }
 
-  getFullTicketAccumulator(): SafroleTicket[] {
+  getTicketAccumulator(): SafroleTicketWithoutProof[] {
     return this.ticketAccumulator
   }
 
@@ -195,7 +202,7 @@ export class TicketService extends BaseService implements ITicketService {
    *
    * @returns Array of received tickets sorted by ID
    */
-  getReceivedTickets(): SafroleTicket[] {
+  getReceivedTickets(): SafroleTicketWithoutProof[] {
     // Return tickets sorted by ID for consistent ordering
     return this.sortTicketsByID(this.ticketAccumulator)
   }
@@ -263,51 +270,47 @@ export class TicketService extends BaseService implements ITicketService {
    * @returns Updated ticket accumulator
    */
   addTicketsToAccumulator(
-    newTickets: SafroleTicket[],
+    newTickets: SafroleTicketWithoutProof[],
     isNewEpoch = false,
-  ): Safe<SafroleTicket[]> {
-    try {
-      // Gray Paper Eq. 315: Remove duplicates from new tickets
-      const uniqueNewTickets = this.removeDuplicateTickets(newTickets)
+  ): Safe<SafroleTicketWithoutProof[]> {
+    // Gray Paper Eq. 315: Remove duplicates from new tickets
+    const uniqueNewTickets = this.removeDuplicateTickets(newTickets)
 
-      // Gray Paper Eq. 316: Check for duplicates between new and existing tickets
-      const [duplicateError, validNewTickets] = this.filterDuplicateTickets(
-        uniqueNewTickets,
-        this.ticketAccumulator,
-      )
+    // Gray Paper Eq. 316: Check for duplicates between new and existing tickets
+    const [duplicateError, validNewTickets] = this.filterDuplicateTickets(
+      uniqueNewTickets,
+      this.ticketAccumulator,
+    )
 
-      if (duplicateError) {
-        return safeError(duplicateError)
-      }
-
-      // Gray Paper Eq. 322: Create union of new tickets and existing accumulator
-      const existingAccumulator = isNewEpoch
-        ? [] // Gray Paper Eq. 322: ∅ when e' > e (new epoch)
-        : this.ticketAccumulator // Gray Paper Eq. 322: ticketaccumulator when e' = e (same epoch)
-
-      // Gray Paper Eq. 322: Union of new tickets and existing accumulator
-      const unionTickets = [...validNewTickets, ...existingAccumulator]
-
-      // Gray Paper Eq. 322: Sort by ticket ID (ascending order)
-      const sortedTickets = this.sortTicketsByID(unionTickets)
-
-      // Gray Paper Eq. 322: Truncate to Cepochlen (600 tickets)
-      const truncatedTickets = sortedTickets.slice(
-        0,
-        this.configService.epochDuration,
-      )
-
-      // Update the accumulator
-      this.ticketAccumulator = truncatedTickets
-
-      // Update ticket holder mapping for new tickets
-      // Note: We don't have the public key here, so we'll need to handle this differently
-      // This might need to be passed as a parameter or handled elsewhere
-
-      return safeResult(truncatedTickets)
-    } catch (error) {
-      return safeError(error as Error)
+    if (duplicateError) {
+      return safeError(duplicateError)
     }
+
+    // Gray Paper Eq. 322: Create union of new tickets and existing accumulator
+    const existingAccumulator = isNewEpoch
+      ? [] // Gray Paper Eq. 322: ∅ when e' > e (new epoch)
+      : this.ticketAccumulator // Gray Paper Eq. 322: ticketaccumulator when e' = e (same epoch)
+
+    // Gray Paper Eq. 322: Union of new tickets and existing accumulator
+    const unionTickets = [...validNewTickets, ...existingAccumulator]
+
+    // Gray Paper Eq. 322: Sort by ticket ID (ascending order)
+    const sortedTickets = this.sortTicketsByID(unionTickets)
+
+    // Gray Paper Eq. 322: Truncate to Cepochlen (600 tickets)
+    const truncatedTickets = sortedTickets.slice(
+      0,
+      this.configService.epochDuration,
+    )
+
+    // Update the accumulator
+    this.ticketAccumulator = truncatedTickets
+
+    // Update ticket holder mapping for new tickets
+    // Note: We don't have the public key here, so we'll need to handle this differently
+    // This might need to be passed as a parameter or handled elsewhere
+
+    return safeResult(truncatedTickets)
   }
 
   /**
@@ -316,9 +319,11 @@ export class TicketService extends BaseService implements ITicketService {
    * @param tickets - List of tickets to deduplicate
    * @returns List of unique tickets
    */
-  private removeDuplicateTickets(tickets: SafroleTicket[]): SafroleTicket[] {
+  private removeDuplicateTickets(
+    tickets: SafroleTicketWithoutProof[],
+  ): SafroleTicketWithoutProof[] {
     const seen = new Set<string>()
-    const uniqueTickets: SafroleTicket[] = []
+    const uniqueTickets: SafroleTicketWithoutProof[] = []
 
     for (const ticket of tickets) {
       if (!seen.has(ticket.id)) {
@@ -338,11 +343,11 @@ export class TicketService extends BaseService implements ITicketService {
    * @returns Valid new tickets (no duplicates)
    */
   private filterDuplicateTickets(
-    newTickets: SafroleTicket[],
-    existingAccumulator: SafroleTicket[],
-  ): Safe<SafroleTicket[]> {
+    newTickets: SafroleTicketWithoutProof[],
+    existingAccumulator: SafroleTicketWithoutProof[],
+  ): Safe<SafroleTicketWithoutProof[]> {
     const existingIds = new Set(existingAccumulator.map((t) => t.id))
-    const validTickets: SafroleTicket[] = []
+    const validTickets: SafroleTicketWithoutProof[] = []
 
     for (const ticket of newTickets) {
       if (existingIds.has(ticket.id)) {
@@ -360,7 +365,9 @@ export class TicketService extends BaseService implements ITicketService {
    * @param tickets - Tickets to sort
    * @returns Sorted tickets
    */
-  private sortTicketsByID(tickets: SafroleTicket[]): SafroleTicket[] {
+  private sortTicketsByID(
+    tickets: SafroleTicketWithoutProof[],
+  ): SafroleTicketWithoutProof[] {
     return [...tickets].sort((a, b) => {
       // Sort by ticket ID (ascending order)
       // Lower ID = higher score = better ticket
@@ -401,6 +408,19 @@ export class TicketService extends BaseService implements ITicketService {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not set'))
+    }
+    if (!this.ce131TicketDistributionProtocol) {
+      return safeError(new Error('CE 131 ticket distribution protocol not set'))
+    }
+    if (!this.networkingService) {
+      return safeError(new Error('Networking service not set'))
+    }
+    if (!this.ce132TicketDistributionProtocol) {
+      return safeError(new Error('CE 132 ticket distribution protocol not set'))
+    }
+
     const [generateTicketsError, tickets] = generateTicketsForEpoch(
       this.validatorSetManager,
       this.keyPairService,
@@ -463,6 +483,12 @@ export class TicketService extends BaseService implements ITicketService {
   private async handleSecondPhaseTicketDistribution(): SafePromise<void> {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
+    }
+    if (!this.ce132TicketDistributionProtocol) {
+      return safeError(new Error('CE 132 ticket distribution protocol not set'))
+    }
+    if (!this.networkingService) {
+      return safeError(new Error('Networking service not set'))
     }
     // Get current validator set
     const validators = this.validatorSetManager.getActiveValidators()

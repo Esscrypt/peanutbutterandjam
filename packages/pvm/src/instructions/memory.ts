@@ -239,12 +239,11 @@ export class LOAD_IMMInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, immediateX)
 
     console.log('LOAD_IMM Executing', {
+      operands: Array.from(context.instruction.operands),
       registerA,
       immediateX,
-      pc: context.pc,
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
       registers: context.registers,
+      pc: context.pc,
     })
 
     // Mutate context directly
@@ -1089,6 +1088,7 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
       value,
       bytes: Array.from(bytes),
       faultAddress: faultAddress?.toString(),
+      pc: context.pc,
     })
     if (faultAddress) {
       return {

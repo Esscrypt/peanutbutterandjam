@@ -7,6 +7,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "build:bin": "bun build ./services/main-service.ts --compile --outfile ./bin --sourcemap",
     "check": "tsc --pretty --noEmit",
     "test": "vitest run",
     "test:watch": "vitest run --watch",

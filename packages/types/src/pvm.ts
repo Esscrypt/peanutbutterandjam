@@ -41,6 +41,10 @@ export type MemoryAccessType = 'none' | 'read' | 'write'
  * Implements Gray Paper RAM specification with proper access control
  */
 export interface RAM {
+  /** Memory data
+   * do not use directly unless its for initializing the memory layout*/
+  memoryData: Map<bigint, number>
+
   /** Read multiple consecutive bytes from memory */
   readOctets(address: bigint, count: bigint): [Uint8Array | null, bigint | null]
 
@@ -65,10 +69,31 @@ export interface RAM {
     address: bigint,
     length: number,
     accessType: MemoryAccessType,
+    isPadding?: boolean,
   ): void
 
   /** Get memory page access type */
   getPageAccessType(address: bigint): MemoryAccessType
+
+  /** Get page map as JSON-serializable format (for logging/verification) */
+  getPageMapJSON(): Array<{
+    address: string
+    length: number
+    'is-writable': boolean
+    accessType: MemoryAccessType
+  }>
+
+  /** Get memory contents for a specific address range */
+  getMemoryContents(address: bigint, length: number): number[]
+
+  /** Get page map with contents as JSON-serializable format (for verification) */
+  getPageMapWithContentsJSON(): Array<{
+    address: string
+    length: number
+    'is-writable': boolean
+    accessType: MemoryAccessType
+    contents: number[]
+  }>
 }
 
 // Result codes as specified in PVM

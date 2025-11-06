@@ -28,6 +28,7 @@ import {
   type AccumulateInput,
   type AccumulateInvocationResult,
   BaseService,
+  type DeferredTransfer,
   type PartialState,
   type Ready,
   type ReadyItem,
@@ -61,6 +62,10 @@ export class AccumulationService extends BaseService {
   private readonly accumulatePVM: AccumulatePVM | null
   private readonly authQueueService: AuthQueueService
   private readonly readyService: ReadyService | null
+  // Track which slot we've shifted for (only shift once per slot)
+  private lastShiftedSlot: bigint | null = null
+  // Track last processed slot for ready queue shifting
+  private lastProcessedSlot: bigint | null = null
   // private readonly statisticsService: StatisticsService | null
   // private readonly entropyService: EntropyService | null
   constructor(options: {
@@ -111,12 +116,20 @@ export class AccumulationService extends BaseService {
       throw new Error('Ready service not initialized')
     }
     this.readyService.setReady(ready)
-    logger.debug('Ready state updated', {
+    const totalItems = ready.epochSlots.reduce(
+      (sum, items) => sum + items.length,
+      0,
+    )
+    const itemsPerSlot = new Map<number, number>()
+    for (let i = 0; i < ready.epochSlots.length; i++) {
+      if (ready.epochSlots[i].length > 0) {
+        itemsPerSlot.set(i, ready.epochSlots[i].length)
+      }
+    }
+    logger.info('Ready state updated', {
       totalSlots: ready.epochSlots.length,
-      totalItems: ready.epochSlots.reduce(
-        (sum, items) => sum + items.length,
-        0,
-      ),
+      totalItems,
+      itemsPerSlot: Object.fromEntries(itemsPerSlot),
     })
   }
 
@@ -175,110 +188,383 @@ export class AccumulationService extends BaseService {
     if (!this.readyService) {
       throw new Error('Ready service not initialized')
     }
-    const readyItemsForSlot =
-      this.readyService.getReadyItemsForSlot(currentSlot)
+    // Convert absolute slot to epoch slot index
+    // Gray Paper: ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
+    // The ready queue uses epoch slot indices (0 to C_epochlen-1), not absolute slot numbers
+    const epochSlotIndex = BigInt(
+      Number(currentSlot) % this.configService.epochDuration,
+    )
+
     console.info('Starting accumulation process', {
       slot: currentSlot.toString(),
-      readyItemsCount: readyItemsForSlot.length || 0,
-      accumulatedCount: this.accumulated.packages[Number(currentSlot)].size,
+      epochSlotIndex: epochSlotIndex.toString(),
+      accumulatedCount:
+        this.accumulated.packages[Number(epochSlotIndex)]?.size ?? 0,
     })
 
-    // Step 1: Get ready work-reports for current slot
-    const readyItems = readyItemsForSlot
-    if (readyItems.length === 0) {
-      console.info('No ready work-reports for current slot')
-      return
-    }
+    // Iteratively process items until no more become eligible
+    // This breaks dependency chains: as items are processed and accumulated,
+    // their dependents become eligible and are processed in the next iteration
+    let iterationCount = 0
+    const maxIterations = 100 // Safety limit to prevent infinite loops
+    let foundNewItems = true
 
-    // Step 2: Resolve dependencies - find work-reports that can be processed
-    const eligibleItems = this.resolveDependencies(readyItems, this.accumulated)
-    console.info('Dependency resolution complete', {
-      totalReady: readyItems.length,
-      eligibleForProcessing: eligibleItems.length,
-    })
+    while (foundNewItems && iterationCount < maxIterations) {
+      iterationCount++
+      foundNewItems = false
 
-    if (eligibleItems.length === 0) {
-      console.info(
-        'No work-reports eligible for processing (dependencies not fulfilled)',
-      )
-      return
-    }
+      // Step 1: Collect all ready items from ALL slots
+      const epochLength = this.configService.epochDuration
+      const allReadyItems: ReadyItem[] = []
+      const slotCounts = new Map<number, number>()
 
-    // Step 3: Convert to accumulate inputs
-    const accumulateInputs = this.createAccumulateInputs(eligibleItems)
-    console.info('Created accumulate inputs', {
-      inputCount: accumulateInputs.length,
-    })
-
-    // Step 4: Execute PVM accumulate invocations
-    const results: AccumulateInvocationResult[] = []
-    const processedWorkReports: WorkReport[] = []
-
-    for (let i = 0; i < accumulateInputs.length; i++) {
-      const input = accumulateInputs[i]
-      const workReport = eligibleItems[i].workReport
-
-      // Extract service ID from work report results
-      const serviceId = workReport.results[0]?.service_id || 0n
-      const gasLimit = workReport.results[0]?.accumulate_gas || 100000n
-
-      // Convert global state to partial state for PVM
-      // Gray Paper equation (133-144): partialstate includes components that are
-      // "both needed and mutable by the accumulation process"
-      // Even if services are null (test vectors), we must provide defaults
-      // because the PVM requires a complete PartialState structure
-      const partialState: PartialState = {
-        accounts: this.serviceAccountsService.getServiceAccounts().accounts,
-        stagingset: this.validatorSetManager
-          ? this.validatorSetManager
-              .getStagingValidators()
-              .values()
-              .toArray()
-              .map(encodeValidatorPublicKeys)
-          : [], // Default: empty sequence[Cvalcount]{valkey}
-        authqueue: this.authQueueService
-          ? this.authQueueService
-              .getAuthQueue()
-              .map((queue) => queue.map((item) => hexToBytes(item)))
-          : new Array(this.configService.numCores).fill([]), // Default: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}}
-        manager: this.privilegesService?.getManager() ?? 0n, // Default: service ID 0
-        assigners:
-          this.privilegesService?.getAssigners() ??
-          new Array(this.configService.numCores).fill(0n), // Default: sequence[Ccorecount]{serviceid}
-        delegator: this.privilegesService?.getDelegator() ?? 0n, // Default: service ID 0
-        registrar: this.privilegesService?.getRegistrar() ?? 0n, // Default: service ID 0
-        alwaysaccers:
-          this.privilegesService?.getAlwaysAccers() ??
-          new Map<bigint, bigint>(), // Default: empty dictionary
+      for (let slotIdx = 0; slotIdx < epochLength; slotIdx++) {
+        const slotItems = this.readyService.getReadyItemsForSlot(
+          BigInt(slotIdx),
+        )
+        if (slotItems.length > 0) {
+          slotCounts.set(slotIdx, slotItems.length)
+        }
+        allReadyItems.push(...slotItems)
       }
 
-      // Execute accumulate invocation
-      const result = await this.executeAccumulateInvocation(
-        partialState,
-        currentSlot,
-        serviceId,
-        gasLimit,
-        [input], // Process one input at a time
+      logger.debug(
+        '[AccumulationService] Collected ready items from all slots',
+        {
+          slot: currentSlot.toString(),
+          iteration: iterationCount,
+          totalItems: allReadyItems.length,
+          itemsPerSlot: Object.fromEntries(slotCounts),
+          itemPackages: allReadyItems.map((item) => ({
+            package: item.workReport.package_spec.hash.slice(0, 40),
+            deps: Array.from(item.dependencies).map((d) => d.slice(0, 20)),
+          })),
+        },
       )
 
-      results.push(result)
-      processedWorkReports.push(workReport)
-      // this.statisticsService.updateServiceStatisticsFromReports([workReport])
-      console.info('Accumulate invocation completed', {
-        serviceId: serviceId.toString(),
-        success: result.ok,
-        gasUsed: result.ok ? result.value.gasused.toString() : 'N/A',
+      if (allReadyItems.length === 0) {
+        logger.debug('[AccumulationService] No ready items in any slot', {
+          slot: currentSlot.toString(),
+          iteration: iterationCount,
+        })
+        break
+      }
+
+      // Step 2: Resolve dependencies - find work-reports that can be processed
+      logger.debug('[AccumulationService] Resolving dependencies', {
+        slot: currentSlot.toString(),
+        iteration: iterationCount,
+        readyItemsCount: allReadyItems.length,
+        readyItems: allReadyItems.map((item) => ({
+          packageHash: item.workReport.package_spec.hash,
+          dependenciesCount: item.dependencies.size,
+          dependencies: Array.from(item.dependencies),
+        })),
+        accumulatedPackagesCount: this.accumulated.packages.reduce(
+          (sum, pkgSet) => sum + pkgSet.size,
+          0,
+        ),
+      })
+
+      // Filter to only items whose dependencies are satisfied
+      const eligibleItems = this.resolveDependencies(
+        allReadyItems,
+        this.accumulated,
+      )
+
+      if (eligibleItems.length === 0) {
+        logger.debug(
+          '[AccumulationService] No items with satisfied dependencies',
+          {
+            slot: currentSlot.toString(),
+            iteration: iterationCount,
+          },
+        )
+        break
+      }
+
+      // Detect and filter out circular dependencies
+      const itemsToProcess = this.filterCircularDependencies(eligibleItems)
+
+      if (itemsToProcess.length === 0) {
+        logger.warn(
+          '[AccumulationService] All eligible items have circular dependencies',
+          {
+            slot: currentSlot.toString(),
+            iteration: iterationCount,
+            eligibleCount: eligibleItems.length,
+          },
+        )
+        break
+      }
+
+      if (itemsToProcess.length < eligibleItems.length) {
+        logger.warn(
+          '[AccumulationService] Filtered out items with circular dependencies',
+          {
+            slot: currentSlot.toString(),
+            iteration: iterationCount,
+            eligibleCount: eligibleItems.length,
+            processedCount: itemsToProcess.length,
+            filteredCount: eligibleItems.length - itemsToProcess.length,
+          },
+        )
+      }
+
+      foundNewItems = true // We found items to process
+
+      logger.info('[AccumulationService] Found eligible items for processing', {
+        slot: currentSlot.toString(),
+        iteration: iterationCount,
+        totalReady: allReadyItems.length,
+        eligibleForProcessing: itemsToProcess.length,
+        eligiblePackages: itemsToProcess.map(
+          (item) => item.workReport.package_spec.hash,
+        ),
+      })
+
+      // Step 3: Track defxfers from previous accumulations
+      // Gray Paper: defxfers from earlier services/iterations are available
+      // TODO: Track defxfers from previous slots/iterations for cross-slot transfers
+      // For now, start with empty (within-iteration defxfers handled below)
+      const pendingDefxfers: DeferredTransfer[] = []
+
+      // Step 4: Group items by service ID
+      // Gray Paper: accumulate each service once with all its inputs
+      const serviceToItems = new Map<bigint, ReadyItem[]>()
+      for (const item of itemsToProcess) {
+        const serviceId = item.workReport.results[0]?.service_id || 0n
+        if (!serviceToItems.has(serviceId)) {
+          serviceToItems.set(serviceId, [])
+        }
+        serviceToItems.get(serviceId)!.push(item)
+      }
+
+      // Step 5: Execute PVM accumulate invocations sequentially
+      // Gray Paper: process services sequentially, defxfers from earlier services
+      // are available to later ones in the same iteration
+      const results: AccumulateInvocationResult[] = []
+      const processedWorkReports: WorkReport[] = []
+      const partialStateAccountsPerInvocation: Map<
+        number,
+        Set<bigint>
+      > = new Map()
+
+      let invocationIndex = 0
+      // Process each service with all its inputs
+      for (const [serviceId, serviceItems] of serviceToItems) {
+        // Create inputs for this service (defxfers + operand tuples)
+        // Gray Paper equation 311-322: i = i^T concat i^U
+        const inputs =
+          this.createAccumulateInputs(serviceItems, pendingDefxfers).get(
+            serviceId,
+          ) || []
+        // Get work reports for this service (for tracking)
+        const serviceWorkReports = serviceItems.map((item) => item.workReport)
+
+        // Use the first work report's gas limit (or combine them according to Gray Paper)
+        // Gray Paper equation 315-317: gas = f[s] + sum(defxfer gas) + sum(work report gas)
+        const firstWorkReport = serviceWorkReports[0]
+        const baseGasLimit =
+          firstWorkReport?.results[0]?.accumulate_gas || 100000n
+        // Calculate total gas: base + sum of defxfer gas for this service
+        const defxferGas = inputs
+          .filter((i) => i.type === 1n)
+          .reduce(
+            (sum, i) => sum + ((i.value as DeferredTransfer).gas || 0n),
+            0n,
+          )
+        const gasLimit = baseGasLimit + defxferGas
+
+        // Convert global state to partial state for PVM
+        const partialState: PartialState = {
+          accounts: this.serviceAccountsService.getServiceAccounts().accounts,
+          stagingset: this.validatorSetManager
+            ? this.validatorSetManager
+                .getStagingValidators()
+                .values()
+                .toArray()
+                .map(encodeValidatorPublicKeys)
+            : [],
+          authqueue: this.authQueueService
+            ? this.authQueueService
+                .getAuthQueue()
+                .map((queue) => queue.map((item) => hexToBytes(item)))
+            : new Array(this.configService.numCores).fill([]),
+          manager: this.privilegesService?.getManager() ?? 0n,
+          assigners:
+            this.privilegesService?.getAssigners() ??
+            new Array(this.configService.numCores).fill(0n),
+          delegator: this.privilegesService?.getDelegator() ?? 0n,
+          registrar: this.privilegesService?.getRegistrar() ?? 0n,
+          alwaysaccers:
+            this.privilegesService?.getAlwaysAccers() ??
+            new Map<bigint, bigint>(),
+        }
+
+        // Track which services were in partial state before this invocation
+        // This allows us to detect ejected services after accumulation
+        const partialStateServiceIds = new Set<bigint>()
+        for (const [sid] of partialState.accounts) {
+          partialStateServiceIds.add(sid)
+        }
+        partialStateAccountsPerInvocation.set(
+          invocationIndex,
+          partialStateServiceIds,
+        )
+
+        // Execute accumulate invocation with all inputs for this service
+        // Gray Paper: Ψ_A(psX, thetime', s, g, i^T concat i^U)
+        const result = await this.executeAccumulateInvocation(
+          partialState,
+          currentSlot,
+          serviceId,
+          gasLimit,
+          inputs, // All inputs for this service (defxfers + operand tuples)
+        )
+
+        results.push(result)
+        // Track all work reports processed for this service
+        processedWorkReports.push(...serviceWorkReports)
+
+        // Collect defxfers from this accumulation for next services
+        // Gray Paper: defxfers from earlier accumulations are available to later ones
+        if (result.ok) {
+          // Add defxfers to pending for subsequent services in this iteration
+          pendingDefxfers.push(...result.value.defxfers)
+        }
+
+        invocationIndex++
+      }
+
+      // Step 5: Update global state with results (removes items from ready queue and updates accumulated)
+      // This makes items that depended on the processed items eligible in the next iteration
+      this.updateGlobalState(
+        results,
+        processedWorkReports,
+        currentSlot,
+        epochSlotIndex,
+        partialStateAccountsPerInvocation,
+      )
+
+      logger.info('[AccumulationService] Iteration completed', {
+        slot: currentSlot.toString(),
+        iteration: iterationCount,
+        processedCount: processedWorkReports.length,
+        successfulCount: results.filter((r) => r.ok).length,
+        processedPackages: processedWorkReports.map((r) =>
+          r.package_spec.hash.slice(0, 40),
+        ),
       })
     }
 
-    // Step 5: Update global state with results
-    this.updateGlobalState(results, processedWorkReports, currentSlot)
+    if (iterationCount >= maxIterations) {
+      logger.warn('[AccumulationService] Reached max iterations limit', {
+        slot: currentSlot.toString(),
+        iterations: iterationCount,
+      })
+    }
 
-    console.info('Accumulation process completed', {
-      processedWorkReports: processedWorkReports.length,
-      successfulInvocations: results.filter((r) => r.ok).length,
-      failedInvocations: results.filter((r) => !r.ok).length,
+    logger.info('[AccumulationService] Accumulation process completed', {
+      slot: currentSlot.toString(),
+      totalIterations: iterationCount,
     })
+  }
+
+  /**
+   * Filter out items that are part of circular dependencies
+   *
+   * Detects cycles in the dependency graph among eligible items and filters them out.
+   * A circular dependency exists when:
+   * - Item A depends on Item B's package hash
+   * - Item B depends on Item A's package hash
+   *
+   * @param eligibleItems - Items whose dependencies are satisfied
+   * @returns Items that are not part of circular dependencies
+   */
+  filterCircularDependencies(eligibleItems: ReadyItem[]): ReadyItem[] {
+    if (eligibleItems.length === 0) {
+      return []
+    }
+
+    // Build a map from package hash to item
+    const packageToItem = new Map<Hex, ReadyItem>()
+    for (const item of eligibleItems) {
+      packageToItem.set(item.workReport.package_spec.hash, item)
+    }
+
+    // Build dependency graph: package -> set of packages it depends on (within eligible items)
+    const graph = new Map<Hex, Set<Hex>>()
+    for (const item of eligibleItems) {
+      const packageHash = item.workReport.package_spec.hash
+      const deps = new Set<Hex>()
+      for (const dep of item.dependencies) {
+        // Only include dependencies that are also in the eligible items set
+        if (packageToItem.has(dep)) {
+          deps.add(dep)
+        }
+      }
+      graph.set(packageHash, deps)
+    }
+
+    // Detect cycles using DFS
+    const visited = new Set<Hex>()
+    const recStack = new Set<Hex>()
+    const inCycle = new Set<Hex>()
+
+    const hasCycle = (pkg: Hex): boolean => {
+      if (recStack.has(pkg)) {
+        // Found a cycle - mark this node and all nodes in recursion stack as in cycle
+        inCycle.add(pkg)
+        for (const node of recStack) {
+          inCycle.add(node)
+        }
+        return true
+      }
+      if (visited.has(pkg)) {
+        return false
+      }
+
+      visited.add(pkg)
+      recStack.add(pkg)
+
+      const deps = graph.get(pkg)
+      if (deps) {
+        for (const dep of deps) {
+          if (hasCycle(dep)) {
+            // If a cycle was found downstream, mark current node as in cycle
+            inCycle.add(pkg)
+            return true
+          }
+        }
+      }
+
+      recStack.delete(pkg)
+      return false
+    }
+
+    // Check all packages for cycles
+    for (const item of eligibleItems) {
+      const pkg = item.workReport.package_spec.hash
+      if (!visited.has(pkg)) {
+        hasCycle(pkg)
+      }
+    }
+
+    // Filter out items that are part of cycles
+    const filtered = eligibleItems.filter(
+      (item) => !inCycle.has(item.workReport.package_spec.hash),
+    )
+
+    if (inCycle.size > 0) {
+      logger.warn('[AccumulationService] Detected circular dependencies', {
+        circularPackages: Array.from(inCycle),
+        filteredCount: filtered.length,
+        totalCount: eligibleItems.length,
+      })
+    }
+
+    return filtered
   }
 
   /**
@@ -302,17 +588,36 @@ export class AccumulationService extends BaseService {
       const prerequisites = Array.from(item.dependencies)
       const accumulatedHashSets = accumulated.packages
 
+      logger.debug('[AccumulationService] Checking dependencies for item', {
+        packageHash: item.workReport.package_spec.hash,
+        prerequisitesCount: prerequisites.length,
+        prerequisites,
+        accumulatedSlotsCount: accumulatedHashSets.length,
+      })
+
       // Check if all prerequisites are fulfilled
       let satisfiedDependencies = 0
+      const satisfiedPrerequisites: Hex[] = []
       for (const accumulatedHashSet of accumulatedHashSets) {
         for (const dependency of prerequisites) {
           if (accumulatedHashSet.has(dependency)) {
             satisfiedDependencies++
+            satisfiedPrerequisites.push(dependency)
             break
           }
         }
       }
-      if (satisfiedDependencies === prerequisites.length) {
+
+      const allSatisfied = satisfiedDependencies === prerequisites.length
+      logger.debug('[AccumulationService] Dependency check result', {
+        packageHash: item.workReport.package_spec.hash,
+        prerequisitesCount: prerequisites.length,
+        satisfiedCount: satisfiedDependencies,
+        satisfiedPrerequisites,
+        allSatisfied,
+      })
+
+      if (allSatisfied) {
         eligibleItems.push(item)
       }
     }
@@ -363,19 +668,50 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Create accumulate inputs from ready items
+   * Create accumulate inputs from ready items and pending defxfers
+   *
+   * Gray Paper equation 311-322:
+   * - i^T = sequence of defxfers from t where dest = s (service being accumulated)
+   * - i^U = sequence of operand tuples from work reports where service_id = s
+   * - i = i^T concat i^U (defxfers first, then operand tuples)
    *
    * This method transforms work-reports into the format expected by the PVM
-   * accumulate invocation. Each work-report becomes an OperandTuple.
+   * accumulate invocation according to Gray Paper specifications.
+   *
+   * @param readyItems - Work reports to process
+   * @param pendingDefxfers - Defxfers from previous accumulations (Gray Paper: t)
+   * @returns Map from serviceId to AccumulateInput[] (i^T concat i^U for each service)
    */
-  createAccumulateInputs(readyItems: ReadyItem[]): AccumulateInput[] {
-    const inputs: AccumulateInput[] = []
+  createAccumulateInputs(
+    readyItems: ReadyItem[],
+    pendingDefxfers: DeferredTransfer[] = [],
+  ): Map<bigint, AccumulateInput[]> {
+    // Group inputs by service ID (Gray Paper: inputs per service s)
+    const inputsByService = new Map<bigint, AccumulateInput[]>()
 
+    // Step 1: Add defxfers (i^T) - Gray Paper equation 318-322
+    // i^T = sequence of defxfers where dest = s
+    for (const defxfer of pendingDefxfers) {
+      const serviceId = defxfer.dest
+      if (!inputsByService.has(serviceId)) {
+        inputsByService.set(serviceId, [])
+      }
+      inputsByService.get(serviceId)!.push({
+        type: 1n, // DeferredTransfer type
+        value: defxfer,
+      })
+    }
+
+    // Step 2: Add operand tuples (i^U) - Gray Paper equation 323-338
+    // i^U = sequence of operand tuples from work reports where service_id = s
     for (const item of readyItems) {
       const workReport = item.workReport
       if (!workReport.results[0]) {
         throw new Error('No results found for work report')
       }
+
+      // Extract service ID from work report
+      const serviceId = workReport.results[0]?.service_id || 0n
 
       // Convert WorkExecResultValue to WorkExecutionResult
       const executionResult = this.convertWorkResultToExecutionResult(
@@ -393,13 +729,31 @@ export class AccumulationService extends BaseService {
         authTrace: hexToBytes(workReport.auth_output),
       }
 
-      inputs.push({
+      if (!inputsByService.has(serviceId)) {
+        inputsByService.set(serviceId, [])
+      }
+      inputsByService.get(serviceId)!.push({
         type: 0n, // OperandTuple type
         value: operandTuple,
       })
     }
 
-    return inputs
+    // Gray Paper: i = i^T concat i^U (defxfers first, then operand tuples)
+    // This is already the order since we added defxfers first, then operand tuples
+    logger.debug('[AccumulationService] Created accumulate inputs by service', {
+      servicesCount: inputsByService.size,
+      inputsPerService: Array.from(inputsByService.entries()).map(
+        ([serviceId, inputs]) => ({
+          serviceId: serviceId.toString(),
+          totalInputs: inputs.length,
+          defxferCount: inputs.filter((i) => i.type === 1n).length,
+          operandTupleCount: inputs.filter((i) => i.type === 0n).length,
+        }),
+      ),
+      pendingDefxfersCount: pendingDefxfers.length,
+    })
+
+    return inputsByService
   }
 
   /**
@@ -462,19 +816,181 @@ export class AccumulationService extends BaseService {
       throw new Error('Ready service not initialized')
     }
     try {
-      // Step 1: Add reports to ready queue with dependencies
-      const slotIndex = Number(slot) % this.configService.epochDuration
+      // Step 0: Store old ready queue state before processing (needed for shift after accumulation)
+      // Gray Paper equation 419-423 requires shifting using old ready queue and new accumulated packages
+      // Store current ready queue state BEFORE adding new reports
+      const currentReadyBeforeReports = this.readyService.getReady()
+      const oldReadyQueue: Ready = {
+        epochSlots: currentReadyBeforeReports.epochSlots.map((slotItems) =>
+          slotItems.map((item) => ({
+            workReport: item.workReport,
+            dependencies: new Set<Hex>(item.dependencies),
+          })),
+        ),
+      }
+
+      // Determine if we need to shift based on slot advancement
+      const needsShift =
+        this.lastProcessedSlot !== null && slot !== this.lastProcessedSlot
+
+      // Step 1: Store new reports separately (will be added to i=0 slot after shift)
+      // Gray Paper: justbecameavailable^Q goes to cyclic{ready'}[m] where m = thetime'
+      const newReportsSlot = Number(slot) % this.configService.epochDuration
+      const newReportsItems: ReadyItem[] = []
       for (const report of reports) {
         const dependencies = new Set<Hex>(report.context.prerequisites)
         const readyItem: ReadyItem = {
           workReport: report,
           dependencies,
         }
-        this.readyService.addReadyItemToSlot(BigInt(slotIndex), readyItem)
+        newReportsItems.push(readyItem)
+        // Also add to current ready queue for accumulation processing
+        this.readyService.addReadyItemToSlot(BigInt(newReportsSlot), readyItem)
       }
 
       // Step 2: Process accumulation
       await this.processAccumulation(slot)
+
+      // Step 3: Shift ready queue if slots advanced (Gray Paper equation 419-423)
+      // This must happen AFTER accumulation so we can use accumulated'[C_epochlen - 1] for E function
+      if (needsShift && this.lastProcessedSlot !== null) {
+        const slotDelta = Number(slot - this.lastProcessedSlot)
+        if (slotDelta > 0) {
+          const epochDuration = this.configService.epochDuration
+          const oldEpochSlot = Number(this.lastProcessedSlot) % epochDuration
+          const newEpochSlot = Number(slot) % epochDuration
+          const epochDelta =
+            (newEpochSlot - oldEpochSlot + epochDuration) % epochDuration
+
+          if (epochDelta > 0) {
+            // Cyclically shift ready queue forward by epochDelta positions
+            // Gray Paper: cyclic{ready'}[m - i] where m = thetime'
+            logger.debug('[AccumulationService] Shifting ready queue', {
+              lastSlot: this.lastProcessedSlot.toString(),
+              currentSlot: slot.toString(),
+              oldEpochSlot,
+              newEpochSlot,
+              epochDelta,
+            })
+
+            // Use old ready queue for shifting (before new reports were added)
+            // Gray Paper equation 419-423: E(cyclic{ready}[thetime - i], accumulated')
+            const shiftedReady: ReadyItem[][] = new Array(epochDuration)
+              .fill(null)
+              .map(() => [])
+
+            // Get new accumulated packages from the rightmost slot (accumulated'[C_epochlen - 1])
+            const newAccumulatedPackages =
+              this.accumulated.packages[epochDuration - 1] || new Set<Hex>()
+
+            // Shift items according to Gray Paper equation 419-423
+            // cyclic{ready'}[m - i] where m = thetime' (current slot)
+            for (
+              let newEpochSlot = 0;
+              newEpochSlot < epochDuration;
+              newEpochSlot++
+            ) {
+              // Gray Paper: cyclic{ready'}[m - i] where m = thetime'
+              // Find i such that (thetime' - i) % epochDuration = newEpochSlot
+              const currentEpochSlot = Number(slot) % epochDuration
+              let i: number
+              if (newEpochSlot === currentEpochSlot) {
+                i = 0
+              } else if (newEpochSlot < currentEpochSlot) {
+                i = currentEpochSlot - newEpochSlot
+              } else {
+                i = epochDuration - (newEpochSlot - currentEpochSlot)
+              }
+
+              if (i === 0) {
+                // Gray Paper: new items from justbecameavailable^Q
+                // Apply E function to new reports: remove accumulated dependencies
+                const editedNewItems: ReadyItem[] = []
+                for (const item of newReportsItems) {
+                  // Remove satisfied dependencies
+                  const remainingDeps = new Set<Hex>()
+                  for (const dep of item.dependencies) {
+                    if (!newAccumulatedPackages.has(dep)) {
+                      remainingDeps.add(dep)
+                    }
+                  }
+
+                  // Only include if it has dependencies or if it's a valid report
+                  // (reports without dependencies should have been accumulated immediately)
+                  editedNewItems.push({
+                    workReport: item.workReport,
+                    dependencies: remainingDeps,
+                  })
+                }
+                shiftedReady[newEpochSlot] = editedNewItems
+              } else if (i < slotDelta) {
+                // Gray Paper: [] when 1 ≤ i < thetime' - thetime
+                shiftedReady[newEpochSlot] = []
+              } else {
+                // Gray Paper: E(cyclic{ready}[thetime - i], accumulated')
+                // Items from old ready queue, shifted and with E applied
+                const oldSlotValue = Number(this.lastProcessedSlot) - i
+                const oldEpochSlot = oldSlotValue % epochDuration
+                const oldSlotItems =
+                  oldReadyQueue.epochSlots[oldEpochSlot] || []
+
+                // Apply queue-editing function E:
+                // 1. Remove items whose package hash is in newAccumulatedPackages
+                // 2. Remove dependencies that are in newAccumulatedPackages
+                const editedItems: ReadyItem[] = []
+                for (const item of oldSlotItems) {
+                  const packageHash = item.workReport.package_spec.hash
+                  // Remove if package was accumulated
+                  if (newAccumulatedPackages.has(packageHash)) {
+                    continue
+                  }
+
+                  // Remove satisfied dependencies
+                  const remainingDeps = new Set<Hex>()
+                  for (const dep of item.dependencies) {
+                    if (!newAccumulatedPackages.has(dep)) {
+                      remainingDeps.add(dep)
+                    }
+                  }
+
+                  editedItems.push({
+                    workReport: item.workReport,
+                    dependencies: remainingDeps,
+                  })
+                }
+
+                shiftedReady[newEpochSlot] = editedItems
+              }
+            }
+
+            // Debug: Log what's being shifted
+            logger.debug('[AccumulationService] Ready queue shift details', {
+              epochDelta,
+              oldEpochSlot,
+              newEpochSlot,
+              slotDelta,
+              shiftedSlots: shiftedReady.map((slot, idx) => ({
+                slot: idx,
+                itemCount: slot.length,
+                packages: slot.map((item) =>
+                  item.workReport.package_spec.hash.slice(0, 40),
+                ),
+              })),
+            })
+
+            this.readyService.setReady({ epochSlots: shiftedReady })
+            logger.debug('[AccumulationService] Ready queue shifted', {
+              epochDelta,
+            })
+          }
+        }
+      }
+
+      // Step 4: Process accumulation (already done above)
+      // await this.processAccumulation(slot) - already called before shift
+
+      // Update last processed slot
+      this.lastProcessedSlot = slot
 
       return { ok: true }
     } catch (error) {
@@ -500,6 +1016,8 @@ export class AccumulationService extends BaseService {
     results: AccumulateInvocationResult[],
     processedWorkReports: WorkReport[],
     currentSlot: bigint,
+    epochSlotIndex: bigint,
+    partialStateAccountsPerInvocation?: Map<number, Set<bigint>>,
   ): void {
     if (!this.readyService) {
       throw new Error('Ready service not initialized')
@@ -522,14 +1040,14 @@ export class AccumulationService extends BaseService {
     // P: protoset{workreport} → protoset{hash}
     // P(r) = {(r_avspec)_packagehash : r ∈ r}
 
+    // Get the epoch duration (C_epochlen)
+    const epochLength = this.configService.epochDuration
+
     const newPackages = new Set<Hex>()
     for (const workReport of processedWorkReports) {
       // Extract package hash from work report (Gray Paper P function)
       newPackages.add(workReport.package_spec.hash)
     }
-
-    // Get the epoch duration (C_epochlen)
-    const epochLength = this.configService.epochDuration
 
     // Ensure accumulated.packages is properly sized
     if (this.accumulated.packages.length !== epochLength) {
@@ -541,21 +1059,166 @@ export class AccumulationService extends BaseService {
     // Shift accumulated history (Gray Paper equation 418)
     // Left shift: accumulated'[i] = accumulated[i + 1] for i ∈ [0, C_epochlen - 2]
     // New data goes to the rightmost slot: accumulated'[C_epochlen - 1] = new packages
-    for (let i = 0; i < epochLength - 1; i++) {
-      this.accumulated.packages[i] = this.accumulated.packages[i + 1]
+    // Note: We only shift once per slot, not per iteration
+    // Multiple iterations accumulate packages in the same slot
+    if (this.lastShiftedSlot !== currentSlot) {
+      for (let i = 0; i < epochLength - 1; i++) {
+        this.accumulated.packages[i] = this.accumulated.packages[i + 1]
+      }
+      // Clear the rightmost slot for new packages from this slot
+      const rightmostSlot = epochLength - 1
+      this.accumulated.packages[rightmostSlot] = new Set<Hex>()
+      this.lastShiftedSlot = currentSlot
     }
 
-    // Insert new packages at the rightmost slot (Gray Paper equation 417)
-    this.accumulated.packages[epochLength - 1] = newPackages
+    // Add new packages to the rightmost slot (Gray Paper equation 417)
+    // Multiple iterations add to the same slot
+    const rightmostSlot = epochLength - 1
+    for (const pkg of newPackages) {
+      this.accumulated.packages[rightmostSlot].add(pkg)
+    }
 
     // Step 2: Update service accounts
-    for (const result of results) {
+    // Gray Paper: When a service is accumulated at slot s, update its lastacc to s
+    // Track services that were in partial state but ejected (removed from poststate)
+    // Store initial account set before any updates to detect ejected services
+    const initialAccounts = new Set<bigint>()
+    for (const [serviceId] of this.serviceAccountsService.getServiceAccounts()
+      .accounts) {
+      initialAccounts.add(serviceId)
+    }
+    const ejectedServices = new Set<bigint>()
+    // Track which accounts have been updated to prevent overwriting with stale data
+    const updatedAccounts = new Set<bigint>()
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      const workReport = processedWorkReports[i]
+      const accumulatedServiceId = workReport.results[0]?.service_id || 0n
+
+      // Update lastacc for ALL accumulated services, even if accumulation failed
+      // Gray Paper: sa_lastacc = s when accumulated at slot s
+      // This records that we attempted accumulation at this slot, regardless of success/failure
+      const [accountError, existingAccount] =
+        this.serviceAccountsService.getServiceAccount(accumulatedServiceId)
+      if (!accountError && existingAccount) {
+        existingAccount.lastacc = currentSlot
+        this.serviceAccountsService.setServiceAccount(
+          accumulatedServiceId,
+          existingAccount,
+        )
+        logger.debug(
+          '[AccumulationService] Updated lastacc for accumulated service',
+          {
+            serviceId: accumulatedServiceId.toString(),
+            slot: currentSlot.toString(),
+            accumulationSuccess: result.ok,
+          },
+        )
+      }
+
       if (result.ok) {
         const { poststate } = result.value
 
         // Update service accounts with new state
+        logger.debug(
+          '[AccumulationService] Updating service accounts from poststate',
+          {
+            invocationIndex: i,
+            accumulatedServiceId: accumulatedServiceId.toString(),
+            poststateAccountCount: poststate.accounts.size,
+            poststateServiceIds: Array.from(poststate.accounts.keys()).map(
+              (id) => id.toString(),
+            ),
+            poststateBalances: Array.from(poststate.accounts.entries()).map(
+              ([id, account]) => ({
+                serviceId: id.toString(),
+                balance: account.balance.toString(),
+              }),
+            ),
+          },
+        )
         for (const [serviceId, account] of poststate.accounts) {
-          this.serviceAccountsService.setServiceAccount(serviceId, account)
+          // Only update accounts that:
+          // 1. Are the accumulated service for this invocation (always update, even if updated before)
+          // 2. Haven't been updated by an earlier invocation (to avoid overwriting with stale data)
+          // This prevents overwriting accounts with stale data from partial state
+          const isAccumulatedService = serviceId === accumulatedServiceId
+          const notYetUpdated = !updatedAccounts.has(serviceId)
+
+          if (isAccumulatedService || notYetUpdated) {
+            // Update lastacc to current slot only for the accumulated service
+            // Gray Paper: sa_lastacc = s when accumulated at slot s
+            // Newly created services keep lastacc = 0 (they're created, not accumulated)
+            if (isAccumulatedService) {
+              account.lastacc = currentSlot
+            }
+            this.serviceAccountsService.setServiceAccount(serviceId, account)
+            updatedAccounts.add(serviceId)
+          } else {
+            // Account was already updated by an earlier invocation, skip to avoid overwriting
+            logger.debug(
+              '[AccumulationService] Skipping account already updated by earlier invocation',
+              {
+                serviceId: serviceId.toString(),
+                accumulatedServiceId: accumulatedServiceId.toString(),
+                invocationIndex: i,
+              },
+            )
+          }
+        }
+
+        // Special case: Detect and delete ejected services
+        // If a service was in partial state but is not in poststate.accounts, it was ejected
+        // Gray Paper: EJECT host function removes services from accounts
+        // Use the tracked partial state accounts for this specific invocation
+        const partialStateServicesForThisInvocation =
+          partialStateAccountsPerInvocation?.get(i)
+        if (partialStateServicesForThisInvocation) {
+          logger.debug('[AccumulationService] Checking for ejected services', {
+            invocationIndex: i,
+            partialStateServices: Array.from(
+              partialStateServicesForThisInvocation,
+            ).map((id) => id.toString()),
+            poststateServices: Array.from(poststate.accounts.keys()).map((id) =>
+              id.toString(),
+            ),
+          })
+          for (const serviceId of partialStateServicesForThisInvocation) {
+            if (!poststate.accounts.has(serviceId)) {
+              ejectedServices.add(serviceId)
+              logger.debug('[AccumulationService] Detected ejected service', {
+                invocationIndex: i,
+                serviceId: serviceId.toString(),
+              })
+            }
+          }
+        }
+
+        // Special case: If the accumulated service is not in poststate.accounts
+        // (e.g., it was ejected during accumulation), we still need to update
+        // its lastacc if it exists in the global service accounts
+        // This handles "work_for_ejected_service" cases where a service may have
+        // been ejected but still needs its lastacc updated
+        if (!poststate.accounts.has(accumulatedServiceId)) {
+          const [accountError, existingAccount] =
+            this.serviceAccountsService.getServiceAccount(accumulatedServiceId)
+          if (!accountError && existingAccount) {
+            // Service exists but wasn't in poststate (may have been ejected)
+            // Still update lastacc to record that accumulation was attempted
+            existingAccount.lastacc = currentSlot
+            this.serviceAccountsService.setServiceAccount(
+              accumulatedServiceId,
+              existingAccount,
+            )
+            logger.debug(
+              '[AccumulationService] Updated lastacc for service not in poststate',
+              {
+                serviceId: accumulatedServiceId.toString(),
+                slot: currentSlot.toString(),
+              },
+            )
+          }
         }
 
         this.privilegesService.setManager(poststate.manager)
@@ -566,12 +1229,201 @@ export class AccumulationService extends BaseService {
       }
     }
 
-    // Step 3: Remove processed work-reports from ready queue
+    // Additional check: Compare initial accounts with final state
+    // If a service was in initial accounts but not in any poststate after all updates,
+    // it was ejected (unless it was deleted between invocations, which shouldn't happen)
+    const finalAccounts = new Set<bigint>()
+    for (const [serviceId] of this.serviceAccountsService.getServiceAccounts()
+      .accounts) {
+      finalAccounts.add(serviceId)
+    }
+    // Collect all services that appeared in any poststate
+    const allPoststateServices = new Set<bigint>()
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (result.ok) {
+        for (const serviceId of result.value.poststate.accounts.keys()) {
+          allPoststateServices.add(serviceId)
+        }
+      }
+    }
+    // Services in initial but not in any poststate were ejected
+    for (const serviceId of initialAccounts) {
+      if (
+        !allPoststateServices.has(serviceId) &&
+        finalAccounts.has(serviceId)
+      ) {
+        // Service was in initial state, not in any poststate, but still exists in final
+        // This shouldn't happen normally, but if it does, treat as ejected
+        ejectedServices.add(serviceId)
+        logger.debug(
+          '[AccumulationService] Detected ejected service (final check)',
+          {
+            serviceId: serviceId.toString(),
+          },
+        )
+      }
+    }
+
+    // Delete ejected services from global accounts
+    // Gray Paper: EJECT removes services from accounts dictionary
+    logger.info('[AccumulationService] Ejected services to delete', {
+      ejectedServiceIds: Array.from(ejectedServices).map((id) => id.toString()),
+      count: ejectedServices.size,
+    })
+    for (const ejectedServiceId of ejectedServices) {
+      const [deleteError] =
+        this.serviceAccountsService.deleteServiceAccount(ejectedServiceId)
+      if (deleteError) {
+        logger.warn('[AccumulationService] Failed to delete ejected service', {
+          serviceId: ejectedServiceId.toString(),
+          error: deleteError.message,
+        })
+      } else {
+        logger.info('[AccumulationService] Deleted ejected service', {
+          serviceId: ejectedServiceId.toString(),
+        })
+      }
+    }
+
+    // Step 3: Process deferred transfers (defxfers) globally
+    // Gray Paper equation 208-212: Collect defxfers from all invocations and apply them
+    // Transfers to ejected services should be ignored (not applied)
+    const allDefxfers: DeferredTransfer[] = []
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]
+      if (result.ok) {
+        allDefxfers.push(...result.value.defxfers)
+      }
+    }
+
+    if (allDefxfers.length > 0) {
+      logger.debug('[AccumulationService] Processing deferred transfers', {
+        defxferCount: allDefxfers.length,
+        defxfers: allDefxfers.map((t) => ({
+          source: t.source.toString(),
+          dest: t.dest.toString(),
+          amount: t.amount.toString(),
+        })),
+      })
+
+      for (const transfer of allDefxfers) {
+        // Skip transfers to ejected services
+        if (ejectedServices.has(transfer.dest)) {
+          logger.debug(
+            '[AccumulationService] Skipping transfer to ejected service',
+            {
+              source: transfer.source.toString(),
+              dest: transfer.dest.toString(),
+              amount: transfer.amount.toString(),
+            },
+          )
+          continue
+        }
+
+        // Apply transfer: add amount to destination service
+        // Note: Source balance was already deducted in the PVM poststate
+        const [destError, destAccount] =
+          this.serviceAccountsService.getServiceAccount(transfer.dest)
+        if (!destError && destAccount) {
+          destAccount.balance += transfer.amount
+          this.serviceAccountsService.setServiceAccount(
+            transfer.dest,
+            destAccount,
+          )
+          logger.debug('[AccumulationService] Applied deferred transfer', {
+            source: transfer.source.toString(),
+            dest: transfer.dest.toString(),
+            amount: transfer.amount.toString(),
+            newBalance: destAccount.balance.toString(),
+          })
+        } else {
+          logger.warn(
+            '[AccumulationService] Cannot apply transfer to non-existent service',
+            {
+              dest: transfer.dest.toString(),
+              amount: transfer.amount.toString(),
+            },
+          )
+        }
+      }
+    }
+
+    // Step 3: Apply queue-editing function E (Gray Paper equation 48-61)
+    // E removes entries whose package hash is accumulated, and removes satisfied
+    // dependencies from remaining entries
+    logger.debug('[AccumulationService] Applying queue-editing function E', {
+      slot: currentSlot.toString(),
+      processedReportsCount: processedWorkReports.length,
+    })
+
+    // Build set of accumulated package hashes
+    const accumulatedPackageHashes = new Set<Hex>()
+    for (const processedReport of processedWorkReports) {
+      accumulatedPackageHashes.add(processedReport.package_spec.hash)
+    }
+
+    // First, remove entries whose package hash was accumulated
     for (const processedReport of processedWorkReports) {
       const [hashError, workReportHash] =
         calculateWorkReportHash(processedReport)
-      if (!hashError) {
-        this.readyService.removeReadyItemFromSlot(currentSlot, workReportHash)
+      if (hashError) {
+        logger.error(
+          '[AccumulationService] Failed to calculate work report hash',
+          {
+            packageHash: processedReport.package_spec.hash,
+            error: hashError.message,
+          },
+        )
+      } else {
+        // Remove from any slot (items may be in different slots)
+        this.readyService.removeReadyItem(workReportHash)
+        logger.debug(
+          '[AccumulationService] Removed accumulated work report from ready queue',
+          {
+            slot: currentSlot.toString(),
+            workReportHash,
+            packageHash: processedReport.package_spec.hash,
+          },
+        )
+      }
+    }
+
+    // Second, remove satisfied dependencies from ALL remaining ready items
+    // Gray Paper equation 48-61: E(r, x) removes dependencies that appear in x
+    // Note: Items whose dependencies become satisfied will be processed in the next
+    // iteration of processAccumulation - we just remove the dependencies here
+    for (let slotIdx = 0; slotIdx < epochLength; slotIdx++) {
+      const slotItems = this.readyService.getReadyItemsForSlot(BigInt(slotIdx))
+      for (const item of slotItems) {
+        const [hashError, workReportHash] = calculateWorkReportHash(
+          item.workReport,
+        )
+        if (hashError) {
+          continue
+        }
+
+        // Remove dependencies that are now accumulated
+        let removedDepsCount = 0
+        for (const dep of accumulatedPackageHashes) {
+          if (item.dependencies.has(dep)) {
+            this.readyService.removeDependency(workReportHash, dep)
+            removedDepsCount++
+          }
+        }
+
+        if (removedDepsCount > 0) {
+          logger.debug(
+            '[AccumulationService] Removed satisfied dependencies from ready item',
+            {
+              slot: currentSlot.toString(),
+              slotIndex: slotIdx,
+              workReportHash,
+              removedDepsCount,
+              remainingDepsCount: item.dependencies.size,
+            },
+          )
+        }
       }
     }
 

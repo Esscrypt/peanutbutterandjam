@@ -151,7 +151,10 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
   // where maybe{x} = 0 when x = none, tuple{1, x} otherwise
   const [error2, beltData] = encodeSequenceGeneric(
     recent.accoutBelt.peaks,
-    (peak: Hex) => {
+    (peak: Hex | null) => {
+      if (peak === null) {
+        return safeResult(new Uint8Array([0])) // None discriminator
+      }
       // Gray Paper: maybe{x} discriminator pattern
       // For now, we assume all peaks are Some (not None)
       // In a full implementation, peaks could be optional

@@ -1,11 +1,10 @@
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import { logger } from '@pbnj/core'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * TRANSFER accumulation host function (Ω_T)
@@ -35,110 +34,105 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'transfer'
   readonly gasCost = 10n // Base cost, actual cost is 10 + amount
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    try {
-      // Extract parameters from registers
-      const [dest, amount, l, o] = registers.slice(7, 11)
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications, gasCounter } = context
+    // Extract parameters from registers
+    const [destinationServiceId, amount, gasLimit, memoOffset] =
+      registers.slice(7, 11)
 
-      // Read memo from memory (128 bytes - Gray Paper Cmemosize)
-      const C_MEMO_SIZE = 128n
-      const [memoData, faultAddress] = ram.readOctets(o, C_MEMO_SIZE)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!memoData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Calculate actual gas cost (10 + amount)
-      const actualGasCost = 10n + amount
-
-      // Validate execution
-      if (gasCounter < actualGasCost) {
-        return {
-          resultCode: RESULT_CODES.OOG,
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Get current service account
-      const currentService = imX.state.accounts.get(imX.id)
-      if (!currentService) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Check if destination service exists
-      const destService = imX.state.accounts.get(dest)
-      if (!destService) {
-        this.setAccumulateError(registers, 'WHO')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Check if gas limit is sufficient for destination
-      // Gray Paper: l < destService.sa_minmemogas
-      if (l < destService.minmemogas) {
-        this.setAccumulateError(registers, 'LOW')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Check if sender has sufficient balance after transfer
-      // Gray Paper: b = currentService.sa_balance - amount
-      const balanceAfterTransfer = currentService.balance - amount
-      const C_MIN_BALANCE = 1000000n // Gray Paper constant for minimum balance
-
-      if (balanceAfterTransfer < C_MIN_BALANCE) {
-        this.setAccumulateError(registers, 'CASH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Create deferred transfer entry
-      // Gray Paper: t = {source: imX.id, dest, amount, memo, gas: l}
-      const deferredTransfer = {
-        source: imX.id,
-        dest,
-        amount,
-        memo: memoData,
-        gas: l,
-      }
-
-      // Add transfer to xfers list
-      imX.xfers.push(deferredTransfer)
-
-      // Deduct amount from sender's balance
-      currentService.balance = balanceAfterTransfer
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
+    // Read memo from memory (128 bytes - Gray Paper Cmemosize)
+    const C_MEMO_SIZE = 128n
+    const [memoData, faultAddress] = ram.readOctets(memoOffset, C_MEMO_SIZE)
+    if (faultAddress || !memoData) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+
+    // Calculate actual gas cost (10 + amount)
+    const actualGasCost = 10n + amount
+
+    // Validate execution
+    if (gasCounter < actualGasCost) {
+      return {
+        resultCode: RESULT_CODES.OOG,
+      }
+    }
+
+    // Get the current implications context
+    const [imX] = implications
+
+    // Get current service account
+    const currentService = imX.state.accounts.get(imX.id)
+    if (!currentService) {
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Check if destination service exists
+    const destService = imX.state.accounts.get(destinationServiceId)
+    if (!destService) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Check if gas limit is sufficient for destination
+    // Gray Paper: l < destService.sa_minmemogas
+    if (gasLimit < destService.minmemogas) {
+      this.setAccumulateError(registers, 'LOW')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Check if sender has sufficient balance after transfer
+    // Gray Paper: b = currentService.sa_balance - amount
+    const balanceAfterTransfer = currentService.balance - amount
+    const C_MIN_BALANCE = 1000000n // Gray Paper constant for minimum balance
+
+    if (balanceAfterTransfer < C_MIN_BALANCE) {
+      this.setAccumulateError(registers, 'CASH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Create deferred transfer entry
+    // Gray Paper: t = {source: imX.id, dest, amount, memo, gas: l}
+    const deferredTransfer = {
+      source: imX.id,
+      dest: destinationServiceId,
+      amount,
+      memo: memoData,
+      gas: gasLimit,
+    }
+
+    // Add transfer to xfers list
+    imX.xfers.push(deferredTransfer)
+
+    // Deduct amount from sender's balance
+    const balanceBefore = currentService.balance
+    currentService.balance = balanceAfterTransfer
+
+    // Verify the balance was actually updated in the state
+    const verifyService = imX.state.accounts.get(imX.id)
+    logger.debug('[TransferHostFunction] Balance deduction', {
+      serviceId: imX.id.toString(),
+      balanceBefore: balanceBefore.toString(),
+      balanceAfter: balanceAfterTransfer.toString(),
+      verifiedBalance: verifyService?.balance.toString(),
+      balanceMatches: verifyService?.balance === balanceAfterTransfer,
+    })
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

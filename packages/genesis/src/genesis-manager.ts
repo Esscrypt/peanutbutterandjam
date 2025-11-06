@@ -21,6 +21,7 @@ import type {
   IConfigService,
   ParsedBootnode,
   Safe,
+  ValidatorKeyTuple,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 
@@ -112,10 +113,12 @@ export function createGenesisHeader(genesisState: GenesisState): BlockHeader {
     epochMark: {
       entropyAccumulator: zeroHash,
       entropy1: zeroHash,
-      validators: genesisState.activeset.map((validator) => ({
-        bandersnatch: validator.bandersnatch,
-        ed25519: validator.ed25519,
-      })),
+      validators: genesisState.activeset.map(
+        (validator: ValidatorKeyTuple) => ({
+          bandersnatch: validator.bandersnatch,
+          ed25519: validator.ed25519,
+        }),
+      ),
     },
     winnersMark: null,
     offendersMark: [],

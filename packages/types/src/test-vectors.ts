@@ -5,53 +5,18 @@ import type { Assurance, WorkReport } from './serialization'
 export interface AccumulateTestVector {
   input: {
     slot: number
-    reports: Array<{
-      package_spec: {
-        hash: string
-        length: number
-        erasure_root: string
-        exports_root: string
-        exports_count: number
-      }
-      context: {
-        anchor: string
-        state_root: string
-        beefy_root: string
-        lookup_anchor: string
-        lookup_anchor_slot: number
-        prerequisites: any[]
-      }
-      core_index: number
-      authorizer_hash: string
-      auth_gas_used: number
-      auth_output: string
-      segment_root_lookup: any[]
-      results: Array<{
-        service_id: number
-        code_hash: string
-        payload_hash: string
-        accumulate_gas: number
-        result: {
-          ok?: string
-          err?: null
-        }
-        refine_load: {
-          gas_used: number
-          imports: number
-          extrinsic_count: number
-          extrinsic_size: number
-          exports: number
-          accumulate_count: number
-          accumulate_gas_used: number
-        }
-      }>
-    }>
+    reports: WorkReport[]
   }
   pre_state: {
     slot: number
     entropy: string
-    ready_queue: any[][]
-    accumulated: any[][]
+    ready_queue: Array<
+      Array<{
+        report: WorkReport
+        dependencies: Hex[]
+      }>
+    >
+    accumulated: Hex[][]
     privileges: {
       bless: number
       assign: number[]
@@ -59,7 +24,21 @@ export interface AccumulateTestVector {
       register: number
       always_acc: number[]
     }
-    statistics: any[]
+    statistics: Array<{
+      id: number
+      record: {
+        provided_count: number
+        provided_size: number
+        refinement_count: number
+        refinement_gas_used: number
+        imports: number
+        extrinsic_count: number
+        extrinsic_size: number
+        exports: number
+        accumulate_count: number
+        accumulate_gas_used: number
+      }
+    }>
     accounts: Array<{
       id: number
       data: {
@@ -95,7 +74,69 @@ export interface AccumulateTestVector {
     ok?: string
     err?: null
   }
-  post_state: any
+  post_state: {
+    slot: number
+    entropy: string
+    ready_queue: Array<
+      Array<{
+        report: WorkReport
+        dependencies: Hex[]
+      }>
+    >
+    accumulated: Hex[][]
+    privileges: {
+      bless: number
+      assign: number[]
+      designate: number
+      register: number
+      always_acc: number[]
+    }
+    statistics: Array<{
+      id: number
+      record: {
+        provided_count: number
+        provided_size: number
+        refinement_count: number
+        refinement_gas_used: number
+        imports: number
+        extrinsic_count: number
+        extrinsic_size: number
+        exports: number
+        accumulate_count: number
+        accumulate_gas_used: number
+      }
+    }>
+    accounts: Array<{
+      id: number
+      data: {
+        service: {
+          version: number
+          code_hash: string
+          balance: number
+          min_item_gas: number
+          min_memo_gas: number
+          bytes: number
+          deposit_offset: number
+          items: number
+          creation_slot: number
+          last_accumulation_slot: number
+          parent_service: number
+        }
+        storage: Array<{
+          key: string
+          value: string
+        }>
+        preimages_blob: Array<{
+          hash: string
+          blob: string
+        }>
+        preimages_status: Array<{
+          hash: string
+          status: number[]
+        }>
+      }
+    }>
+  }
 }
 
 /**
@@ -120,16 +161,16 @@ export interface RecentHistoryTestVector {
   pre_state: {
     beta: {
       history: {
-        header_hash: string
-        beefy_root: string
-        state_root: string | null
+        header_hash: Hex
+        beefy_root: Hex
+        state_root: Hex | null
         reported: {
-          hash: string
-          exports_root: string
+          hash: Hex
+          exports_root: Hex
         }[]
       }[]
       mmr: {
-        peaks: (string | null)[]
+        peaks: (Hex | null)[]
       }
     }
   }
@@ -137,16 +178,16 @@ export interface RecentHistoryTestVector {
   post_state: {
     beta: {
       history: {
-        header_hash: string
-        beefy_root: string
-        state_root: string | null
+        header_hash: Hex
+        beefy_root: Hex
+        state_root: Hex | null
         reported: {
-          hash: string
-          exports_root: string
+          hash: Hex
+          exports_root: Hex
         }[]
       }[]
       mmr: {
-        peaks: (string | null)[]
+        peaks: (Hex | null)[]
       }
     }
   }
@@ -591,6 +632,98 @@ export interface StatisticsTestVector {
       ed25519: Hex
       bls: Hex
       metadata: Hex
+    }>
+  }
+}
+
+/**
+ * Block trace test vector interface
+ * Based on traces/fallback/00000001.json structure
+ * Used for testing complete block processing and state transitions
+ */
+export interface BlockTraceTestVector {
+  pre_state: {
+    state_root: Hex
+    keyvals: Array<{
+      key: Hex
+      value: Hex
+    }>
+  }
+  block: {
+    header: {
+      parent: Hex
+      parent_state_root: Hex
+      extrinsic_hash: Hex
+      slot: number
+      epoch_mark: {
+        entropy: Hex
+        tickets_entropy: Hex
+        validators: Array<{
+          bandersnatch: Hex
+          ed25519: Hex
+        }>
+      } | null
+      tickets_mark: Array<{
+        id: Hex
+        entry_index: number
+      }> | null
+      author_index: number
+      entropy_source: Hex
+      offenders_mark: Hex[]
+      seal: Hex
+    }
+    extrinsic: {
+      tickets: Array<{
+        attempt: number
+        signature: Hex
+      }>
+      preimages: Array<{
+        requester: number
+        blob: Hex
+      }>
+      guarantees: Array<{
+        report: WorkReport
+        slot: number
+        signatures: Array<{
+          validator_index: number
+          signature: Hex
+        }>
+      }>
+      assurances: Array<{
+        anchor: Hex
+        bitfield: Hex
+        validator_index: number
+        signature: Hex
+      }>
+      disputes: {
+        verdicts: Array<{
+          target: Hex
+          age: number
+          votes: Array<{
+            vote: boolean
+            index: number
+            signature: Hex
+          }>
+        }>
+        culprits: Array<{
+          target: Hex
+          key: Hex
+          signature: Hex
+        }>
+        faults: Array<{
+          target: Hex
+          vote: boolean
+          key: Hex
+          signature: Hex
+        }>
+      }
+    }
+  }
+  post_state: {
+    state_root: Hex
+    keyvals: Array<{
+      key: Hex
+      value: Hex
     }>
   }
 }

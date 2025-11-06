@@ -11,8 +11,8 @@
 import type { GenesisHeaderState } from '@pbnj/core'
 import { bytesToHex, hexToBytes, logger, merklizeState } from '@pbnj/core'
 import {
-  createServicePreimageKey,
-  createServiceRequestKey,
+  // createServicePreimageKey,
+  // createServiceRequestKey,
   createServiceStorageKey,
   createStateTrie,
   decodeAccumulated,
@@ -40,15 +40,15 @@ import type {
   Disputes,
   EntropyState,
   GlobalState,
-  IConfigService,
   Privileges,
   Ready,
   Recent,
   Reports,
   Safe,
   SafroleState,
-  SafroleTicketWithoutProof,
+  SafroleTicket,
   ServiceAccounts,
+  StateComponent,
   StateTrie,
   ValidatorPublicKeys,
 } from '@pbnj/types'
@@ -59,6 +59,7 @@ import type { ActivityService } from './activity-service'
 import type { AuthPoolService } from './auth-pool-service'
 import type { AuthQueueService } from './auth-queue-service'
 import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
 import type { DisputesService } from './disputes-service'
 import type { EntropyService } from './entropy'
 import type { NodeGenesisManager } from './genesis-manager'
@@ -73,98 +74,24 @@ import type { ValidatorSetManager } from './validator-set'
 import type { WorkReportService } from './work-report-service'
 
 /**
- * State component update reasons
- */
-export type StateUpdateReason =
-  | 'block_processing'
-  | 'epoch_transition'
-  | 'accumulation'
-  | 'authorization'
-  | 'dispute_resolution'
-  | 'work_report_processing'
-  | 'validator_rotation'
-  | 'entropy_update'
-  | 'time_slot_advance'
-
-/**
- * State transition dependency tracking
- */
-export interface StateDependency {
-  component: keyof GlobalState
-  dependsOn: (keyof GlobalState)[]
-  updateReason: StateUpdateReason[]
-  description: string
-}
-
-/**
- * State update event
- */
-export interface StateUpdateEvent {
-  component: keyof GlobalState
-  reason: StateUpdateReason
-  timestamp: number
-  blockNumber?: bigint
-  details?: Record<string, unknown>
-}
-
-/**
- * State transition validation result
- */
-export interface StateValidationResult {
-  isValid: boolean
-  errors: string[]
-  warnings: string[]
-}
-
-/**
- * State mapping type alias for internal use
- */
-type StateMapping = Map<keyof GlobalState, GlobalState[keyof GlobalState]>
-
-/**
- * State service manager interface
- */
-export interface IStateServiceManager {
-  getStateComponent<K extends keyof GlobalState>(
-    component: K,
-  ): GlobalState[K] | undefined
-  setStateComponent<K extends keyof GlobalState>(
-    component: K,
-    value: GlobalState[K],
-  ): void
-  initializeState(initialState: GenesisHeaderState): void
-  getStateRangeWithBoundaries(
-    headerHash: Hex,
-    startKey: Uint8Array,
-    endKey: Uint8Array,
-    maxSize: number,
-  ): Safe<{
-    boundaryNodes: Uint8Array[]
-    keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>
-  }>
-}
-
-/**
  * JAM State Service
  *
  * Manages the complete JAM global state according to Gray Paper specifications.
  * Implements the state transition dependency graph and ensures proper update ordering.
  * Delegates state management to specialized services for better modularity.
  */
-export class StateService implements IStateServiceManager {
-  private state: StateMapping
-  private updateHistory: StateUpdateEvent[] = []
-  private readonly maxHistorySize = 1000
-  private readonly configService: IConfigService
+export class StateService {
   private readonly stateTypeRegistry = new Map<
     number,
     (data: Uint8Array) => Safe<DecodingResult<unknown>>
   >()
 
   // Service delegates for state components
+
+  private readonly configService: ConfigService
   private validatorSetManager: ValidatorSetManager
   private entropyService: EntropyService
-  private ticketHolderService: TicketService
+  private ticketService: TicketService
   private authQueueService: AuthQueueService
   private authPoolService: AuthPoolService
   private activityService: ActivityService
@@ -180,10 +107,11 @@ export class StateService implements IStateServiceManager {
   private genesisManagerService: NodeGenesisManager
   private sealKeyService: SealKeyService
   private clockService: ClockService
+
   constructor(options: {
     validatorSetManager: ValidatorSetManager
     entropyService: EntropyService
-    ticketHolderService: TicketService
+    ticketService: TicketService
     authQueueService: AuthQueueService
     authPoolService: AuthPoolService
     activityService: ActivityService
@@ -195,13 +123,12 @@ export class StateService implements IStateServiceManager {
     privilegesService: PrivilegesService
     serviceAccountsService: ServiceAccountService
     recentHistoryService: RecentHistoryService
-    configService: IConfigService
+    configService: ConfigService
     genesisManagerService: NodeGenesisManager
     sealKeyService: SealKeyService
     clockService: ClockService
   }) {
-    this.state = new Map<keyof GlobalState, GlobalState[keyof GlobalState]>()
-    logger.info('StateService initialized (uninitialized state)')
+    this.configService = options.configService
     // Map chapter indices to decoders (hardcoded according to Gray Paper)
     this.stateTypeRegistry.set(0, (data) =>
       decodeAuthpool(data, this.configService),
@@ -240,7 +167,7 @@ export class StateService implements IStateServiceManager {
 
     this.validatorSetManager = options.validatorSetManager
     this.entropyService = options.entropyService
-    this.ticketHolderService = options.ticketHolderService
+    this.ticketService = options.ticketService
     this.authQueueService = options.authQueueService
     this.authPoolService = options.authPoolService
     this.activityService = options.activityService
@@ -252,7 +179,6 @@ export class StateService implements IStateServiceManager {
     this.privilegesService = options.privilegesService
     this.serviceAccountsService = options.serviceAccountsService
     this.recentHistoryService = options.recentHistoryService
-    this.configService = options.configService
     this.genesisManagerService = options.genesisManagerService
     this.sealKeyService = options.sealKeyService
     this.clockService = options.clockService
@@ -262,36 +188,9 @@ export class StateService implements IStateServiceManager {
     if (genesisHeaderError) {
       throw new Error('Failed to get genesis header')
     }
-    this.initializeState(genesisHeader)
+    this.setState(genesisHeader.keyvals)
   }
 
-  /**
-   * Initialize state from genesis data
-   */
-  initializeState(initialState: GenesisHeaderState): void {
-    const stateMapping = this.convertToMapping(initialState)
-
-    // Set state components and delegate to services
-    for (const [component, value] of stateMapping) {
-      this.setStateComponent(component, value)
-    }
-
-    logger.info('State initialized from genesis data', {
-      componentCount: stateMapping.size,
-    })
-  }
-
-  /**
-   * Get current state mapping
-   */
-  getState(): StateMapping {
-    return this.state
-  }
-
-  constructState(): Safe<GenesisHeaderState> {
-    // TODO: Implement state construction from current state
-    return safeError(new Error('constructState not implemented'))
-  }
   /**
    * Get specific state component
    * Delegates to appropriate service if available, otherwise returns from local state
@@ -299,162 +198,83 @@ export class StateService implements IStateServiceManager {
    * Ordered by Gray Paper equation (34): thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy,
    * stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
    */
-  getStateComponent<K extends keyof GlobalState>(
-    component: K,
-  ): GlobalState[K] | undefined {
-    switch (component) {
+  getStateComponent(chapterIndex: number): StateComponent {
+    switch (chapterIndex) {
       // 1. authpool (α) - Core authorization requirements
-      case 'authpool':
-        if (this.authPoolService) {
-          return this.authPoolService.getAuthPool() as GlobalState[K]
-        }
-        break
+      case 1:
+        return this.authPoolService.getAuthPool()
 
       // 2. recent (β) - Recent blocks and accumulation outputs
-      case 'recent':
-        if (this.recentHistoryService) {
-          return this.recentHistoryService.getRecent() as GlobalState[K]
-        }
-        break
+      case 2:
+        return this.recentHistoryService.getRecent()
 
       // 3. lastaccout (θ) - Most recent accumulation result
-      case 'lastaccout':
-        if (this.lastAccoutService) {
-          return this.lastAccoutService.getLastAccout() as GlobalState[K]
-        }
-        break
+      case 3:
+        return this.lastAccoutService.getLastAccout()
 
       // 4. safrole (γ) - Consensus protocol internal state
-      case 'safrole':
-        if (this.ticketHolderService && this.validatorSetManager) {
-          // Construct SafroleState from available services according to Gray Paper Eq. 50
-          // safrole ≡ (pendingset, epochroot, sealtickets, ticketaccumulator)
-
-          const pendingSetMap = this.validatorSetManager.getPendingValidators()
-          const pendingSet = Array.from(pendingSetMap.values())
-          const [epochRootError, epochRoot] =
-            this.validatorSetManager.getEpochRoot()
-          const ticketAccumulator =
-            this.ticketHolderService.getTicketAccumulator()
-
-          if (epochRootError) {
-            logger.error('Failed to get epoch root for safrole state', {
-              error: epochRootError,
-            })
-            return undefined
-          }
-
-          // TODO: Get sealTickets from SealKeyService (not currently available)
-          // For now, use empty array as placeholder
-          const sealTickets: (SafroleTicketWithoutProof | Uint8Array)[] =
-            this.sealKeyService.getSealKeys()
-
-          const safroleState: SafroleState = {
-            pendingSet: Array.from(pendingSet.values()),
-            epochRoot: bytesToHex(epochRoot),
-            sealTickets,
-            ticketAccumulator: ticketAccumulator.map((ticket) => ({
-              id: ticket.id,
-              entryIndex: ticket.entryIndex,
-            })),
-          }
-
-          return safroleState as GlobalState[K]
+      case 4:
+        return {
+          pendingSet: Array.from(
+            this.validatorSetManager.getPendingValidators().values(),
+          ),
+          epochRoot: this.validatorSetManager.getEpochRoot(),
+          sealTickets: this.sealKeyService.getSealKeys(),
+          ticketAccumulator: this.ticketService.getTicketAccumulator(),
         }
-        break
 
       // 5. accounts (δ) - All service (smart contract) state
-      case 'accounts':
-        if (this.serviceAccountsService) {
-          return this.serviceAccountsService.getServiceAccounts() as GlobalState[K]
-        }
-        break
+      case 5:
+        return this.serviceAccountsService.getServiceAccounts()
 
       // 6. entropy (ε) - On-chain randomness accumulator
-      case 'entropy':
-        if (this.entropyService) {
-          return this.entropyService.getEntropy() as GlobalState[K]
-        }
-        return undefined
+      case 6:
+        return this.entropyService.getEntropy()
 
       // 7. stagingset (ι) - Validators queued for next epoch
-      case 'stagingset':
+      case 7:
         return Array.from(
-          this.validatorSetManager?.getStagingValidators().values() || [],
-        ) as GlobalState[K]
+          this.validatorSetManager.getStagingValidators().values(),
+        )
 
       // 8. activeset (κ) - Currently active validators
-      case 'activeset':
+      case 8:
         return Array.from(
-          this.validatorSetManager?.getActiveValidators().values() || [],
-        ) as GlobalState[K]
-
-      // 9. previousset (λ) - Previous epoch validators
-      case 'previousset':
-        return Array.from(
-          this.validatorSetManager?.getPreviousValidators().values() || [],
-        ) as GlobalState[K]
+          this.validatorSetManager.getActiveValidators().values(),
+        )
 
       // 10. reports (ρ) - Work reports awaiting availability assurance
-      case 'reports':
-        if (this.workReportService) {
-          return this.workReportService.getPendingReports() as GlobalState[K]
-        }
-        break
-
+      case 10:
+        return this.workReportService.getPendingReports()
       // 11. thetime (τ) - Most recent block's timeslot index
-      case 'thetime':
-        if (this.clockService) {
-          return this.clockService.getCurrentSlot() as GlobalState[K]
-        }
-        // TODO: Implement thetime service
-        break
-
+      case 11:
+        return this.clockService.getCurrentSlot()
       // 12. authqueue (φ) - Queued core authorizations
-      case 'authqueue':
-        if (this.authQueueService) {
-          return this.authQueueService.getAuthQueue() as GlobalState[K]
-        }
-        break
+      case 12:
+        return this.authQueueService.getAuthQueue()
 
       // 13. privileges - Services with special privileges
-      case 'privileges':
-        if (this.privilegesService) {
-          return this.privilegesService.getPrivileges() as GlobalState[K]
-        }
-        break
+      case 13:
+        return this.privilegesService.getPrivileges()
 
       // 14. disputes (ψ) - Judgments on work-reports and validators
-      case 'disputes':
-        if (this.disputesService) {
-          return this.disputesService.getDisputesState() as GlobalState[K]
-        }
-        break
+      case 14:
+        return this.disputesService.getDisputesState()
 
       // 15. activity (π) - Validator performance statistics
-      case 'activity':
-        if (this.activityService) {
-          return this.activityService.getActivity() as GlobalState[K]
-        }
-        break
+      case 15:
+        return this.activityService.getActivity()
 
       // 16. ready (ω) - Reports ready for accumulation
-      case 'ready':
-        if (this.readyService) {
-          return this.readyService.getReady() as GlobalState[K]
-        }
-        break
+      case 16:
+        return this.readyService.getReady()
 
       // 17. accumulated (ξ) - Recently accumulated work-packages
-      case 'accumulated':
-        if (this.accumulatedService) {
-          return this.accumulatedService.getAccumulated() as GlobalState[K]
-        }
-        break
+      case 17:
+        return this.accumulatedService.getAccumulated()
     }
 
-    // Fallback to local state
-    return this.state.get(component) as GlobalState[K] | undefined
+    throw new Error(`State component ${chapterIndex} not found`)
   }
 
   /**
@@ -464,217 +284,137 @@ export class StateService implements IStateServiceManager {
    * Ordered by Gray Paper equation (34): thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy,
    * stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
    */
-  setStateComponent<K extends keyof GlobalState>(
-    component: K,
-    value: GlobalState[K],
-  ): void {
-    switch (component) {
+  setStateComponent(chapterIndex: number, value: StateComponent): void {
+    switch (chapterIndex) {
       // 1. authpool (α) - Core authorization requirements
-      case 'authpool':
-        if (this.authPoolService) {
-          this.authPoolService.setAuthPool(value as AuthPool)
-          return
-        }
+      case 1:
+        this.authPoolService.setAuthPool(value as AuthPool)
         break
 
       // 2. recent (β) - Recent blocks and accumulation outputs
-      case 'recent':
-        if (this.recentHistoryService) {
-          // TODO: RecentHistoryService doesn't have a setRecent method
-          // The service updates its state through event handling instead of direct setters
-          logger.warn(
-            'RecentHistoryService setter not implemented - service updates through events',
-          )
-          return
-        }
+      case 2:
+        this.recentHistoryService.setRecent(value as Recent)
         break
 
       // 3. lastaccout (θ) - Most recent accumulation result
-      case 'lastaccout':
-        if (this.lastAccoutService) {
-          this.lastAccoutService.setLastAccout(value as Hex)
-          return
-        }
+      case 3:
+        this.lastAccoutService.setLastAccout(value as Hex)
         break
 
       // 4. safrole (γ) - Consensus protocol internal state
-      case 'safrole':
-        // TODO: Safrole state is constructed from multiple services
-        // Individual components are managed by their respective services:
-        // - pendingSet: ValidatorSetManager
-        // - epochRoot: ValidatorSetManager (computed from pendingSet)
-        // - sealTickets: SealKeyService (not currently integrated)
-        // - ticketAccumulator: TicketService
-        logger.warn(
-          'Safrole state setter not implemented - state is constructed from multiple services',
-        )
+      case 4:
+        {
+          const safroleState = value as SafroleState
+          this.validatorSetManager.setPendingSet(safroleState.pendingSet)
+          this.validatorSetManager.setEpochRoot(safroleState.epochRoot)
+          this.ticketService.setTicketAccumulator(
+            safroleState.ticketAccumulator,
+          )
+          this.sealKeyService.setSealKeys(
+            safroleState.sealTickets as SafroleTicket[],
+          )
+        }
         break
 
       // 5. accounts (δ) - All service (smart contract) state
-      case 'accounts':
-        if (this.serviceAccountsService) {
-          for (const [serviceId, serviceAccount] of (
-            value as ServiceAccounts
-          ).accounts.entries()) {
-            this.serviceAccountsService.setServiceAccount(
-              serviceId,
-              serviceAccount,
-            )
-          }
-          return
+      case 5:
+        for (const [serviceId, serviceAccount] of (
+          value as ServiceAccounts
+        ).accounts.entries()) {
+          this.serviceAccountsService.setServiceAccount(
+            serviceId,
+            serviceAccount,
+          )
         }
         break
 
       // 6. entropy (ε) - On-chain randomness accumulator
-      case 'entropy':
-        if (this.entropyService) {
-          this.entropyService.setEntropy(value as EntropyState)
-          return
-        }
+      case 6:
+        this.entropyService.setEntropy(value as EntropyState)
         break
 
       // 7. stagingset (ι) - Validators queued for next epoch
-      case 'stagingset':
-        if (this.validatorSetManager) {
-          this.validatorSetManager.setStagingSet(value as ValidatorPublicKeys[])
-          return
-        }
+      case 7:
+        this.validatorSetManager.setStagingSet(value as ValidatorPublicKeys[])
         break
 
       // 8. activeset (κ) - Currently active validators
-      case 'activeset':
-        if (this.validatorSetManager) {
-          this.validatorSetManager.setActiveSet(value as ValidatorPublicKeys[])
-          return
-        }
+      case 8:
+        this.validatorSetManager.setActiveSet(value as ValidatorPublicKeys[])
         break
 
       // 9. previousset (λ) - Previous epoch validators
-      case 'previousset':
-        if (this.validatorSetManager) {
-          this.validatorSetManager.setPreviousSet(
-            value as ValidatorPublicKeys[],
-          )
-          return
-        }
+      case 9:
+        this.validatorSetManager.setPreviousSet(value as ValidatorPublicKeys[])
         break
 
       // 10. reports (ρ) - Work reports awaiting availability assurance
-      case 'reports':
-        if (this.workReportService) {
-          // Note: setReports is async but we don't await here for backward compatibility
-          // The WorkReportService will handle the state reconstruction internally
-          // this.workReportService.setPendingWorkReports(value as PendingReport[])
-          return
-        }
+      case 10:
+        this.workReportService.setPendingReports(value as Reports)
         break
 
       // 11. thetime (τ) - Most recent block's timeslot index
-      case 'thetime':
-        // TODO: Implement thetime service setter
+      case 11:
+        this.clockService.setLatestReportedBlockTimeslot(value as bigint)
         break
 
       // 12. authqueue (φ) - Queued core authorizations
-      case 'authqueue':
-        if (this.authQueueService) {
-          this.authQueueService.setAuthQueue(value as AuthQueue)
-          return
-        }
+      case 12:
+        this.authQueueService.setAuthQueue(value as AuthQueue)
         break
 
       // 13. privileges - Services with special privileges
-      case 'privileges':
-        if (this.privilegesService) {
-          this.privilegesService.setPrivileges(value as Privileges)
-          return
-        }
+      case 13:
+        this.privilegesService.setPrivileges(value as Privileges)
         break
 
       // 14. disputes (ψ) - Judgments on work-reports and validators
-      case 'disputes':
-        if (this.disputesService) {
-          this.disputesService.setDisputesState(value as Disputes)
-          return
-        }
+      case 14:
+        this.disputesService.setDisputesState(value as Disputes)
         break
 
       // 15. activity (π) - Validator performance statistics
-      case 'activity':
-        if (this.activityService) {
-          this.activityService.setActivity(value as Activity)
-          return
-        }
+      case 15:
+        this.activityService.setActivity(value as Activity)
         break
 
       // 16. ready (ω) - Reports ready for accumulation
-      case 'ready':
-        if (this.readyService) {
-          this.readyService.setReady(value as Ready)
-          return
-        }
+      case 16:
+        this.readyService.setReady(value as Ready)
         break
 
       // 17. accumulated (ξ) - Recently accumulated work-packages
-      case 'accumulated':
-        if (this.accumulatedService) {
-          this.accumulatedService.setAccumulated(value as Accumulated)
-          return
-        }
+      case 17:
+        this.accumulatedService.setAccumulated(value as Accumulated)
+        break
+      default:
+        logger.warn(`State component ${chapterIndex} not found`)
         break
     }
-
-    // Fallback to local state
-    this.state.set(component, value)
   }
 
-  /**
-   * Update a single state component
-   *
-   * @param component - State component to update
-   * @param value - New value for the component
-   * @param reason - Reason for the update
-   * @param blockNumber - Block number (if applicable)
-   * @param details - Additional update details
-   */
-  updateStateComponent<K extends keyof GlobalState>(
-    component: K,
-    value: GlobalState[K],
-    reason: StateUpdateReason,
-    blockNumber?: bigint,
-    details?: Record<string, unknown>,
-  ): Safe<void> {
-    // Validate the update is allowed
-    const validation = this.validateStateUpdate(component, reason)
-    if (!validation.isValid) {
-      return safeError(
-        new Error(`Invalid state update: ${validation.errors.join(', ')}`),
+  setState(keyvals: { key: Hex; value: Hex }[]): Safe<void> {
+    // store the stateRoot here and in recentHistoryService
+    for (const keyval of keyvals) {
+      const [stateKeyError, stateKeyResult] = this.parseStateKey(keyval.key)
+      if (stateKeyError) {
+        return safeError(stateKeyError)
+      }
+      const parsedValue = this.parseStateValue(
+        stateKeyResult.chapterIndex,
+        keyval.value,
       )
+      if (parsedValue) {
+        this.setStateComponent(
+          stateKeyResult.chapterIndex,
+          parsedValue as StateComponent,
+        )
+      } else {
+        return safeError(
+          new Error(`Failed to parse state value for key ${keyval.key}`),
+        )
+      }
     }
-
-    // Check dependencies
-    const dependencyCheck = this.checkDependencies(component, reason)
-    if (dependencyCheck[0]) {
-      return dependencyCheck
-    }
-
-    // Update the state
-    this.state.set(component, value)
-
-    // Record the update
-    this.recordUpdate({
-      component,
-      reason,
-      timestamp: Date.now(),
-      blockNumber,
-      details,
-    })
-
-    logger.debug(`State component updated: ${component}`, {
-      reason,
-      blockNumber: blockNumber?.toString(),
-      details,
-    })
-
     return safeResult(undefined)
   }
 
@@ -689,7 +429,38 @@ export class StateService implements IStateServiceManager {
    * - Block header commitment
    */
   generateStateTrie(): Safe<StateTrie> {
-    const globalState = this.convertToGlobalState()
+    const globalState: GlobalState = {
+      authpool: this.authPoolService.getAuthPool(),
+      recent: this.recentHistoryService.getRecent(),
+      lastaccout: this.lastAccoutService.getLastAccout(),
+      safrole: {
+        pendingSet: Array.from(
+          this.validatorSetManager.getPendingValidators().values(),
+        ),
+        epochRoot: this.validatorSetManager.getEpochRoot(),
+        sealTickets: this.sealKeyService.getSealKeys(),
+        ticketAccumulator: this.ticketService.getTicketAccumulator(),
+      },
+      accounts: this.serviceAccountsService.getServiceAccounts(),
+      entropy: this.entropyService.getEntropy(),
+      stagingset: Array.from(
+        this.validatorSetManager.getStagingValidators().values(),
+      ),
+      activeset: Array.from(
+        this.validatorSetManager.getActiveValidators().values(),
+      ),
+      previousset: Array.from(
+        this.validatorSetManager.getPreviousValidators().values(),
+      ),
+      reports: this.workReportService.getPendingReports(),
+      thetime: this.clockService.getCurrentSlot(),
+      authqueue: this.authQueueService.getAuthQueue(),
+      privileges: this.privilegesService.getPrivileges(),
+      disputes: this.disputesService.getDisputesState(),
+      activity: this.activityService.getActivity(),
+      ready: this.readyService.getReady(),
+      accumulated: this.accumulatedService.getAccumulated(),
+    }
     return createStateTrie(globalState, this.configService)
   }
 
@@ -769,107 +540,6 @@ export class StateService implements IStateServiceManager {
     // Convert hex value back to Uint8Array
     const valueBytes = hexToBytes(value)
     return safeResult(valueBytes)
-  }
-
-  /**
-   * Query service account preimage
-   *
-   * Gray Paper merklization.tex (lines 105-106):
-   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
-   * C(s, encode[4]{2³²-2} ∥ h) ↦ p
-   *
-   * @param serviceId - Service account ID
-   * @param preimageHash - Preimage hash
-   * @returns Preimage data if found, undefined if not found
-   */
-  getServicePreimage(
-    serviceId: bigint,
-    preimageHash: Hex,
-  ): Safe<Uint8Array | undefined> {
-    const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
-    const stateKeyHex = bytesToHex(preimageStateKey)
-
-    const [error, value] = this.getStateTrieValue(stateKeyHex)
-    if (error) {
-      return safeError(error)
-    }
-
-    if (!value) {
-      return safeResult(undefined)
-    }
-
-    // Convert hex value back to Uint8Array
-    const valueBytes = hexToBytes(value)
-    return safeResult(valueBytes)
-  }
-
-  /**
-   * Query service account request status
-   *
-   * Gray Paper merklization.tex (lines 107-110):
-   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨⟨h, l⟩, t⟩ ∈ sa_requests:
-   * C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
-   *
-   * @param serviceId - Service account ID
-   * @param requestHash - Request hash
-   * @param length - Blob length
-   * @returns Request status sequence if found, undefined if not found
-   */
-  getServiceRequest(
-    serviceId: bigint,
-    requestHash: Hex,
-    length: bigint,
-  ): Safe<bigint[] | undefined> {
-    const requestStateKey = createServiceRequestKey(
-      serviceId,
-      requestHash,
-      length,
-    )
-    const stateKeyHex = bytesToHex(requestStateKey)
-
-    const [error, value] = this.getStateTrieValue(stateKeyHex)
-    if (error) {
-      return safeError(error)
-    }
-
-    if (!value) {
-      return safeResult(undefined)
-    }
-
-    // TODO: Decode the request status sequence from the hex value
-    // The value should be: encode{var{sequence{encode[4]{x} | x ∈ t}}}
-    // For now, return undefined as we need to implement the decoder
-    logger.warn('Service request decoding not yet implemented', {
-      serviceId: serviceId.toString(),
-      requestHash,
-      length: length.toString(),
-      value,
-    })
-
-    return safeResult(undefined)
-  }
-
-  /**
-   * Get state trie for specific components
-   *
-   * Generates a partial state trie containing only the specified components.
-   * Useful for:
-   * - Partial state synchronization
-   * - Component-specific Merkle proofs
-   * - Incremental state updates
-   */
-  getPartialStateTrie(components: (keyof GlobalState)[]): Safe<StateTrie> {
-    const globalState = this.convertToGlobalState()
-
-    // Create a partial state with only the requested components
-    const partialState: Partial<GlobalState> = {}
-    for (const component of components) {
-      ;(partialState as Record<string, unknown>)[component] =
-        globalState[component]
-    }
-
-    // Generate trie for partial state
-    return createStateTrie(partialState as GlobalState, this.configService)
   }
 
   /**
@@ -1111,65 +781,6 @@ export class StateService implements IStateServiceManager {
     }
 
     return result.value as GlobalState[keyof GlobalState]
-  }
-
-  /**
-   * Validate state update is allowed
-   */
-  private validateStateUpdate(
-    _component: keyof GlobalState,
-    _reason: StateUpdateReason,
-  ): StateValidationResult {
-    // TODO: Implement state validation
-    return { isValid: true, errors: [], warnings: [] }
-  }
-
-  /**
-   * Check if dependencies are satisfied for a single update
-   */
-  private checkDependencies(
-    _component: keyof GlobalState,
-    _reason: StateUpdateReason,
-  ): Safe<void> {
-    // TODO: Implement dependency checking
-    return safeResult(undefined)
-  }
-
-  /**
-   * Record state update event
-   */
-  private recordUpdate(event: StateUpdateEvent): void {
-    this.updateHistory.push(event)
-
-    // Maintain history size limit
-    if (this.updateHistory.length > this.maxHistorySize) {
-      this.updateHistory = this.updateHistory.slice(-this.maxHistorySize)
-    }
-  }
-
-  /**
-   * Convert StateMapping back to GlobalState
-   */
-  private convertToGlobalState(): GlobalState {
-    return {
-      authpool: this.state.get('authpool') as AuthPool,
-      recent: this.state.get('recent') as Recent,
-      lastaccout: this.state.get('lastaccout') as Hex,
-      safrole: this.state.get('safrole') as SafroleState,
-      accounts: this.state.get('accounts') as ServiceAccounts,
-      entropy: this.state.get('entropy') as EntropyState,
-      stagingset: this.state.get('stagingset') as ValidatorPublicKeys[],
-      activeset: this.state.get('activeset') as ValidatorPublicKeys[],
-      previousset: this.state.get('previousset') as ValidatorPublicKeys[],
-      reports: this.state.get('reports') as Reports,
-      thetime: this.state.get('thetime') as bigint,
-      authqueue: this.state.get('authqueue') as AuthQueue,
-      privileges: this.state.get('privileges') as Privileges,
-      disputes: this.state.get('disputes') as Disputes,
-      activity: this.state.get('activity') as Activity,
-      ready: this.state.get('ready') as Ready,
-      accumulated: this.state.get('accumulated') as Accumulated,
-    }
   }
 
   /**

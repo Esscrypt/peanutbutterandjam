@@ -1,12 +1,10 @@
 import { bytesToHex } from '@pbnj/core'
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * UPGRADE accumulation host function (Ω_U)
@@ -33,66 +31,51 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'upgrade'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications } = context
+    // Extract parameters from registers
+    const [codeHashOffset, newMinimumAccumulationGas, newMinimumMemoryGas] =
+      registers.slice(7, 10)
 
-    try {
-      // Extract parameters from registers
-      const [o, g, m] = registers.slice(7, 10)
-
-      // Read code hash from memory (32 bytes)
-      const [codeHashData, faultAddress] = ram.readOctets(o, 32n)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!codeHashData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Get current service account
-      const serviceAccount = imX.state.accounts.get(imX.id)
-      if (!serviceAccount) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Update service account with new code hash and gas limits
-      // Gray Paper: imX.self.codehash = c, imX.self.minaccgas = g, imX.self.minmemogas = m
-      serviceAccount.codehash = bytesToHex(codeHashData)
-      serviceAccount.minaccgas = g
-      serviceAccount.minmemogas = m
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
+    // Read code hash from memory (32 bytes)
+    const [codeHashData, faultAddress] = ram.readOctets(codeHashOffset, 32n)
+    if (faultAddress) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+    if (!codeHashData) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    // Get the current implications context
+    const [imX] = implications
+
+    // Get current service account
+    const serviceAccount = imX.state.accounts.get(imX.id)
+    if (!serviceAccount) {
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Update service account with new code hash and gas limits
+    // Gray Paper: imX.self.codehash = c, imX.self.minaccgas = g, imX.self.minmemogas = m
+    serviceAccount.codehash = bytesToHex(codeHashData)
+    serviceAccount.minaccgas = newMinimumAccumulationGas
+    serviceAccount.minmemogas = newMinimumMemoryGas
+
+    imX.state.accounts.set(imX.id, serviceAccount)
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

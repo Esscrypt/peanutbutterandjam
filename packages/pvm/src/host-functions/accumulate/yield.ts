@@ -1,11 +1,9 @@
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * YIELD accumulation host function (Ω_♉)
@@ -30,55 +28,37 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'yield'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications } = context
+    // Extract parameters from registers
+    const hashOffset = registers[7]
 
-    try {
-      // Extract parameters from registers
-      const o = registers[7]
-
-      // Read hash from memory (32 bytes)
-      const [hashData, faultAddress] = ram.readOctets(o, 32n)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!hashData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Set the yield hash in the accumulation context
-      // Gray Paper: imX.yield = h
-      imX.yield = hashData
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
+    // Read hash from memory (32 bytes)
+    const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
+    if (faultAddress) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+    if (!hashData) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    // Get the current implications context
+    const [imX] = implications
+
+    // Set the yield hash in the accumulation context
+    // Gray Paper: imX.yield = h
+    imX.yield = hashData
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

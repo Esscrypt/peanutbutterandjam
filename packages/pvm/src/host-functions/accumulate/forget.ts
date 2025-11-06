@@ -1,12 +1,10 @@
 import { bytesToHex } from '@pbnj/core'
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * FORGET accumulation host function (Ω_F)
@@ -36,138 +34,117 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'forget'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-    timeslot?: bigint,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications, timeslot } = context
+    // Gray Paper line 204: Ω_F receives H_timeslot (block header's timeslot)
+    // This is the current block's timeslot passed from the Accumulate invocation
 
-    if (!timeslot) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Extract parameters from registers
+    const [hashOffset, preimageLength] = registers.slice(7, 9)
+
+    // Read hash from memory (32 bytes)
+    // Gray Paper line 924-927: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
+    const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
+    // Gray Paper line 941: panic when h = error, registers[7] unchanged
+    if (faultAddress || !hashData) {
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
 
-    try {
-      // Extract parameters from registers
-      const [o, z] = registers.slice(7, 9)
+    // Get the current implications context
+    const [imX] = implications
 
-      // Read hash from memory (32 bytes)
-      const [hashData, faultAddress] = ram.readOctets(o, 32n)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
+    // Get current service account (imX.self)
+    // Gray Paper line 928-939: a = imX.self except modifications based on request state
+    const serviceAccount = imX.state.accounts.get(imX.id)
+    if (!serviceAccount) {
+      // Gray Paper line 942: HUH when a = error
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
       }
-      if (!hashData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
+    }
+
+    // Convert hash to hex and get request
+    const hashHex = bytesToHex(hashData)
+    const requestMap = serviceAccount.requests.get(hashHex)
+    if (!requestMap) {
+      // Gray Paper line 942: HUH when a = error (request doesn't exist)
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
       }
+    }
 
-      // Get the current implications context
-      const [imX] = context
-
-      // Get current service account
-      const serviceAccount = imX.state.accounts.get(imX.id)
-      if (!serviceAccount) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
+    const request = requestMap.get(preimageLength)
+    if (!request) {
+      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
       }
+    }
 
-      // Convert hash to hex and get request
-      const hashHex = bytesToHex(hashData)
-      const requestMap = serviceAccount.requests.get(hashHex)
-      if (!requestMap) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
+    const C_EXPUNGE_PERIOD = 19200n // Gray Paper constant
+
+    // Apply Gray Paper logic for different request states (line 935-938)
+    if (request.length === 0) {
+      // Case 1 (line 935): [] (empty) - Remove request and preimage completely
+      // keys(a.sa_requests) = keys(imX.self.sa_requests) \ {(h, z)}
+      // keys(a.sa_preimages) = keys(imX.self.sa_preimages) \ {h}
+      requestMap.delete(preimageLength)
+      if (requestMap.size === 0) {
+        serviceAccount.requests.delete(hashHex)
       }
-
-      const request = requestMap.get(z)
-      if (!request) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      const C_EXPUNGE_PERIOD = 19200n // Gray Paper constant
-
-      // Apply Gray Paper logic for different request states
-      if (request.length === 0) {
-        // Case 1: [] (empty) - Remove request and preimage completely
-        requestMap.delete(z)
+      serviceAccount.preimages.delete(hashHex)
+    } else if (request.length === 2) {
+      // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
+      const [, y] = request
+      if (y < timeslot - C_EXPUNGE_PERIOD) {
+        // Remove request and preimage completely
+        requestMap.delete(preimageLength)
         if (requestMap.size === 0) {
           serviceAccount.requests.delete(hashHex)
         }
         serviceAccount.preimages.delete(hashHex)
-      } else if (request.length === 2) {
-        // Case 2: [x, y] - Check if y < t - Cexpungeperiod
-        const [, y] = request
-        if (y < timeslot - C_EXPUNGE_PERIOD) {
-          // Remove request and preimage completely
-          requestMap.delete(z)
-          if (requestMap.size === 0) {
-            serviceAccount.requests.delete(hashHex)
-          }
-          serviceAccount.preimages.delete(hashHex)
-        } else {
-          // Cannot forget - not expired
-          this.setAccumulateError(registers, 'HUH')
-          return {
-            resultCode: null, // continue execution
-          }
-        }
-      } else if (request.length === 1) {
-        // Case 3: [x] - Update to [x, t] (mark as unavailable)
-        const [x] = request
-        requestMap.set(z, [x, timeslot])
-      } else if (request.length === 3) {
-        // Case 4: [x, y, w] - Check if y < t - Cexpungeperiod
-        const [, y, w] = request
-        if (y < timeslot - C_EXPUNGE_PERIOD) {
-          // Update to [w, t] (mark as unavailable again)
-          requestMap.set(z, [w, timeslot])
-        } else {
-          // Cannot forget - not expired
-          this.setAccumulateError(registers, 'HUH')
-          return {
-            resultCode: null, // continue execution
-          }
-        }
       } else {
-        // Invalid request state
+        // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, 'HUH')
         return {
           resultCode: null, // continue execution
         }
       }
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
+    } else if (request.length === 1) {
+      // Case 3 (line 936): [x] - Update to [x, t] (mark as unavailable)
+      const [x] = request
+      requestMap.set(preimageLength, [x, timeslot])
+    } else if (request.length === 3) {
+      // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
+      const [, y, w] = request
+      if (y < timeslot - C_EXPUNGE_PERIOD) {
+        // Update to [w, t] (mark as unavailable again)
+        requestMap.set(preimageLength, [w, timeslot])
+      } else {
+        // Gray Paper line 938: otherwise → error (HUH)
+        this.setAccumulateError(registers, 'HUH')
+        return {
+          resultCode: null, // continue execution
+        }
+      }
+    } else {
+      // Gray Paper line 938: otherwise → error (HUH)
+      this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
       }
-    } catch {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
+    }
+
+    // Set success result
+    // Gray Paper line 943: OK when otherwise
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

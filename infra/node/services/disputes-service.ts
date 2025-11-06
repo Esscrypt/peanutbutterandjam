@@ -35,11 +35,11 @@ import {
   BaseService,
   type Dispute,
   type Disputes,
-  type IConfigService,
   type Safe,
   safeError,
   safeResult,
 } from '@pbnj/types'
+import type { ConfigService } from './config-service'
 import type { ValidatorSetManager } from './validator-set'
 
 // ============================================================================
@@ -63,17 +63,17 @@ export class DisputesService extends BaseService {
   private readonly offenders = new Set<Hex>()
 
   private readonly validatorSetManagerService: ValidatorSetManager
-  private readonly configService: IConfigService | null
+  private readonly configService: ConfigService
 
-  constructor(
-    eventBusService: EventBusService,
-    validatorSetManagerService: ValidatorSetManager,
-    configService?: IConfigService,
-  ) {
+  constructor(options: {
+    eventBusService: EventBusService
+    validatorSetManagerService: ValidatorSetManager
+    configService: ConfigService
+  }) {
     super('disputes-service')
-    this.eventBusService = eventBusService
-    this.validatorSetManagerService = validatorSetManagerService
-    this.configService = configService || null
+    this.eventBusService = options.eventBusService
+    this.validatorSetManagerService = options.validatorSetManagerService
+    this.configService = options.configService
   }
 
   override start(): Safe<boolean> {
@@ -117,7 +117,7 @@ export class DisputesService extends BaseService {
    * @param currentTimeslot - Current timeslot (tau) for age validation
    * @returns Safe result containing offenders_mark (Ed25519 keys of offenders)
    */
-  public processDisputes(
+  public applyDisputes(
     disputes: Dispute[],
     currentTimeslot: bigint,
   ): Safe<Hex[]> {
@@ -374,7 +374,7 @@ export class DisputesService extends BaseService {
     })
 
     // Process disputes from block
-    const [processError, offendersMark] = this.processDisputes(
+    const [processError, offendersMark] = this.applyDisputes(
       event.body.disputes,
       event.header.timeslot,
     )

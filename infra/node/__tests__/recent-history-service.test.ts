@@ -8,8 +8,8 @@ import { describe, it, expect} from 'bun:test'
 import { 
   RecentHistoryService, 
 } from '../services/recent-history-service'
-import { BlockProcessedEvent, EventBusService, Hex } from '@pbnj/core'
-import type { RecentHistoryTestVector } from '@pbnj/types'
+import { BlockProcessedEvent, EventBusService, Hex, hexToBytes } from '@pbnj/core'
+import type { Recent, RecentHistoryTestVector } from '@pbnj/types'
 import { ConfigService } from '../services/config-service'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -68,7 +68,10 @@ describe('RecentHistoryService - JAM Test Vectors', () => {
         emittedEvents.push(event)
       }
   
-      const recentHistoryService = new RecentHistoryService(eventBusService, configService)
+      const recentHistoryService = new RecentHistoryService({
+        eventBusService,
+        configService,
+      })
       recentHistoryService.start()
 
       // Ensure we loaded test vectors
@@ -83,7 +86,19 @@ describe('RecentHistoryService - JAM Test Vectors', () => {
 
       
       // Set pre-state (empty for test vector 1)
-      recentHistoryService.setRecentHistoryFromPreState(vector.pre_state)
+      const recent: Recent = {
+        history: vector.pre_state.beta.history.map((entry) => ({
+          headerHash: entry.header_hash as Hex,
+          stateRoot: entry.state_root as Hex,
+          accoutLogSuperPeak: entry.beefy_root as Hex,
+          reportedPackageHashes: new Map(entry.reported.map((pkg) => [pkg.hash as Hex, pkg.exports_root as Hex])),
+        })),
+        accoutBelt: {
+          peaks: vector.pre_state.beta.mmr.peaks,
+          totalCount: BigInt(vector.pre_state.beta.mmr.peaks.length),
+        },
+      }
+      recentHistoryService.setRecent(recent)
       
       // Step 1: Update accoutBelt with accumulate_root
       // Gray Paper: accoutBelt' = mmrappend(accoutBelt, accumulate_root, keccak)

@@ -59,6 +59,8 @@ export class ValidatorSetManager
   // Map of public keys to validator indices
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
 
+  private epochRoot: Hex = zeroHash
+
   constructor(options: {
     eventBusService: EventBusService
     sealKeyService: SealKeyService | null
@@ -66,7 +68,7 @@ export class ValidatorSetManager
     ringProver: RingVRFProver | null
     ticketService: TicketService | null
     configService: ConfigService
-    initialValidators: Map<number, ValidatorPublicKeys> | null
+    initialValidators: ValidatorPublicKeys[] | null
   }) {
     super('validator-set-manager')
     this.eventBusService = options.eventBusService
@@ -79,7 +81,9 @@ export class ValidatorSetManager
     // this.clockService = options.clockService
 
     if (options.initialValidators) {
-      this.activeSet = options.initialValidators
+      this.activeSet = new Map(
+        options.initialValidators.map((validator, index) => [index, validator]),
+      )
       // Populate publicKeysToValidatorIndex map for offender lookups
       this.updatePublicKeysToValidatorIndex(this.activeSet)
     }
@@ -127,11 +131,7 @@ export class ValidatorSetManager
     this.offenders.clear()
 
     // Step 6: Calculate new epoch root - Gray Paper equation (118)
-    const [epochRootError, epochRoot] = this.getEpochRoot()
-    if (epochRootError) {
-      logger.error('Failed to calculate epoch root', { error: epochRootError })
-      return safeError(epochRootError)
-    }
+    this.epochRoot = this.getEpochRoot()
 
     // Step 7: Emit validator set change event
     const validatorSetChangeEvent: ValidatorSetChangeEvent = {
@@ -146,9 +146,7 @@ export class ValidatorSetManager
       activeValidatorCount: this.activeSet.size,
       pendingValidatorCount: this.pendingSet.size,
       previousValidatorCount: this.previousSet.size,
-      epochRoot: Array.from(epochRoot)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join(''),
+      epochRoot: this.epochRoot,
     })
 
     return safeResult(undefined)
@@ -263,6 +261,17 @@ export class ValidatorSetManager
     this.stagingSet = new Map(
       validatorSet.map((validator, index) => [index, validator]),
     )
+
+    // Populate publicKeysToValidatorIndex map for offender lookups
+    this.updatePublicKeysToValidatorIndex(this.stagingSet)
+  }
+
+  setPendingSet(validatorSet: ValidatorPublicKeys[]): void {
+    this.pendingSet = new Map(
+      validatorSet.map((validator, index) => [index, validator]),
+    )
+    // Populate publicKeysToValidatorIndex map for offender lookups
+    this.updatePublicKeysToValidatorIndex(this.pendingSet)
   }
 
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void {
@@ -477,7 +486,7 @@ export class ValidatorSetManager
       return safeResult(ticketHolderPublicKey === publicKey)
     } else {
       // fallback -> check public key match
-      return safeResult(bytesToHex(sealKey) === publicKey)
+      return safeResult(bytesToHex(sealKey as Uint8Array) === publicKey)
     }
   }
 
@@ -493,12 +502,12 @@ export class ValidatorSetManager
    *
    * @returns The epoch root as a 32-byte hash
    */
-  getEpochRoot(): Safe<Uint8Array> {
+  getEpochRoot(): Hex {
     if (!this.keyPairService) {
-      return safeError(new Error('Key pair service not found'))
+      throw new Error('Key pair service not found')
     }
     if (!this.ringProver) {
-      return safeError(new Error('Ring VRF prover not found'))
+      throw new Error('Ring VRF prover not found')
     }
     // Extract Bandersnatch keys from pending validators
     const bandersnatchKeys: Uint8Array[] = this.pendingSet
@@ -509,12 +518,21 @@ export class ValidatorSetManager
       .map((key) => hexToBytes(key))
 
     // Calculate ring root using Bandersnatch VRF with secret key parameter
-    return getRingRoot(
+    const [epochRootError, epochRoot] = getRingRoot(
       bandersnatchKeys,
       this.keyPairService,
       this,
       this.ringProver,
     )
+    if (epochRootError) {
+      logger.error('Failed to get epoch root', { error: epochRootError })
+      return zeroHash
+    }
+    return bytesToHex(epochRoot)
+  }
+
+  setEpochRoot(epochRoot: Hex): void {
+    this.epochRoot = epochRoot
   }
 
   /**

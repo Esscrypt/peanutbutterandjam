@@ -123,20 +123,4 @@ export class SHAR_R_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  private toSigned64(value: bigint): bigint {
-    // Convert 64-bit unsigned to signed
-    if (value >= 2n ** 63n) {
-      return value - 2n ** 64n
-    }
-    return value
-  }
-
-  private toUnsigned64(value: bigint): bigint {
-    // Convert signed back to unsigned
-    if (value < 0n) {
-      return value + 2n ** 64n
-    }
-    return value
-  }
 }

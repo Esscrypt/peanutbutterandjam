@@ -38,6 +38,7 @@ export class ClockService extends BaseService implements IClockService {
   private auditTimer: NodeJS.Timeout | null = null
   private currentSlot = 0n
   private currentEpoch = 0n
+  private latestReportedBlockTimeslot = 0n
 
   constructor(options: {
     eventBusService: EventBusService
@@ -453,26 +454,11 @@ export class ClockService extends BaseService implements IClockService {
     }
   }
 
-  /**
-   * Get clock service status
-   */
-  getStatus(): {
-    currentSlot: bigint
-    currentEpoch: bigint
-    currentPhase: bigint
-    isRunning: boolean
-    slotDuration: number
-    epochLength: number
-    jamCommonEraStartTime: number
-  } {
-    return {
-      currentSlot: this.currentSlot,
-      currentEpoch: this.currentEpoch,
-      currentPhase: this.getCurrentPhase(),
-      isRunning: this.running,
-      slotDuration: this.configService.slotDuration,
-      epochLength: this.configService.epochDuration,
-      jamCommonEraStartTime: JAM_COMMON_ERA_START_TIME,
-    }
+  setLatestReportedBlockTimeslot(timeslot: bigint): void {
+    this.latestReportedBlockTimeslot = timeslot
+  }
+
+  getLatestReportedBlockTimeslot(): bigint {
+    return this.latestReportedBlockTimeslot
   }
 }

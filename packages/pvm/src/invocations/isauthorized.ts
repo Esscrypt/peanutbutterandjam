@@ -97,7 +97,7 @@ export class IsAuthorizedPVM extends PVM {
       this.createIsAuthorizedContextMutator(workPackage)
 
     // Execute Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
-    await this.executeMarshallingInvocation(
+    const [error, marshallingResult] = await this.executeMarshallingInvocation(
       authCode,
       0n, // Initial PC = 0 (Gray Paper)
       IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS,
@@ -106,26 +106,31 @@ export class IsAuthorizedPVM extends PVM {
       null, // Context is none for Is-Authorized
     )
 
-    if (this.state.resultCode === RESULT_CODES.PANIC) {
+    if (error) {
       return {
-        gasUsed: this.state.gasCounter,
-        result: 'PANIC',
+        gasUsed: 0n,
+        result: 'BAD',
       }
     }
 
-    if (this.state.resultCode === RESULT_CODES.OOG) {
-      return {
-        gasUsed: this.state.gasCounter,
-        result: 'OOG',
-      }
+    // Extract values from Ψ_M return: (gas consumed, result, updated context)
+    const { gasConsumed, result: marshallingResultValue } = marshallingResult
+
+    // Handle result based on marshalling result
+    let result: Uint8Array | 'PANIC' | 'OOG' | 'BAD'
+    if (marshallingResultValue === 'PANIC') {
+      result = 'PANIC'
+    } else if (marshallingResultValue === 'OOG') {
+      result = 'OOG'
+    } else {
+      // Valid blob result or empty
+      result =
+        marshallingResultValue.length === 0 ? 'BAD' : marshallingResultValue
     }
 
     return {
-      gasUsed: this.state.gasCounter,
-      result:
-        this.state.resultCode === RESULT_CODES.HALT
-          ? this.extractResultFromMemory()
-          : 'BAD',
+      gasUsed: gasConsumed,
+      result,
     }
   }
 

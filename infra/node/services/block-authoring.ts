@@ -5,10 +5,7 @@
  * Reference: Gray Paper block authoring specifications
  */
 
-import {
-  generateVRFSignature,
-  getTicketsForExtrinsic,
-} from '@pbnj/block-authoring'
+import { generateVRFSignature } from '@pbnj/block-authoring'
 import {
   bytesToHex,
   type EventBusService,
@@ -171,22 +168,22 @@ export class BlockAuthoringService extends BaseService {
         sealSig: bytesToHex(sealSignature),
       }
 
-      const [ticketError, ticketsToInclude] = await getTicketsForExtrinsic(
-        this.clockService,
-        this.configService,
-        this.ticketHolderService,
-      )
-      if (ticketError) {
-        logger.warn('Failed to get tickets for extrinsic', {
-          error: ticketError,
-        })
-      }
+      // const [ticketError, ticketsToInclude] = await getTicketsForExtrinsic(
+      //   this.clockService,
+      //   this.configService,
+      //   this.ticketHolderService,
+      // )
+      // if (ticketError) {
+      //   logger.warn('Failed to get tickets for extrinsic', {
+      //     error: ticketError,
+      //   })
+      // }
 
       // Step 7: Create complete block
       const block: Block = {
         header: completeHeader,
         body: {
-          tickets: ticketsToInclude ?? [],
+          tickets: [],
           preimages: [],
           guarantees: [],
           assurances: [],

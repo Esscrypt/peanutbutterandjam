@@ -11,7 +11,7 @@ import { generateFallbackKeySequence } from '@pbnj/safrole'
 import {
   BaseService,
   type Safe,
-  type SafroleTicket,
+  type SafroleTicketWithoutProof,
   safeError,
   safeResult,
 } from '@pbnj/types'
@@ -27,26 +27,27 @@ import type { ValidatorSetManager } from './validator-set'
  * Implements the slot key sequence logic, fallback function F(), and outside-in sequencer Z().
  */
 export class SealKeyService extends BaseService {
-  private readonly sealTicketForPhase: Map<bigint, SafroleTicket> = new Map()
+  private readonly sealTicketForPhase: Map<bigint, SafroleTicketWithoutProof> =
+    new Map()
   private readonly fallbackKeyForPhase: Map<bigint, Uint8Array> = new Map()
 
   // Dependencies
   private readonly eventBusService: EventBusService
   private readonly entropyService: EntropyService
   private validatorSetManager!: ValidatorSetManager // Initialized in init method
-  private readonly ticketHolderService: TicketService
+  private readonly ticketService: TicketService
   private readonly configService: ConfigService
-  constructor(
-    eventBusService: EventBusService,
-    entropyService: EntropyService,
-    ticketHolderService: TicketService,
-    configService: ConfigService,
-  ) {
+  constructor(options: {
+    eventBusService: EventBusService
+    entropyService: EntropyService
+    ticketService: TicketService
+    configService: ConfigService
+  }) {
     super('seal-key-service')
-    this.eventBusService = eventBusService
-    this.entropyService = entropyService
-    this.ticketHolderService = ticketHolderService
-    this.configService = configService
+    this.eventBusService = options.eventBusService
+    this.entropyService = options.entropyService
+    this.ticketService = options.ticketService
+    this.configService = options.configService
     // Register for epoch transition events
     this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
   }
@@ -61,7 +62,7 @@ export class SealKeyService extends BaseService {
     this.calculateNewSealKeySequence()
 
     // after calculating the sequence for the new epoch, clear the ticket accumulator
-    this.ticketHolderService.clearTicketAccumulator()
+    this.ticketService.clearTicketAccumulator()
 
     return safeResult(undefined)
   }
@@ -88,16 +89,16 @@ export class SealKeyService extends BaseService {
    * }
    */
   private calculateNewSealKeySequence() {
-    if (this.ticketHolderService.isAccumulatorFull()) {
+    if (this.ticketService.isAccumulatorFull()) {
       const [error, reorderedTickets] = this.applyOutsideInSequencer(
-        this.ticketHolderService.getTicketAccumulator(),
+        this.ticketService.getTicketAccumulator(),
       )
       if (error) {
         return safeError(error)
       }
 
       // Generate seal keys for ALL 600 slots in the epoch
-      const sealKeys: SafroleTicket[] = []
+      const sealKeys: SafroleTicketWithoutProof[] = []
       for (let phase = 0; phase < this.configService.epochDuration; phase++) {
         const ticket = reorderedTickets[phase]
         this.sealTicketForPhase.set(BigInt(phase), ticket)
@@ -136,9 +137,9 @@ export class SealKeyService extends BaseService {
    * - And so on...
    */
   private applyOutsideInSequencer(
-    tickets: SafroleTicket[],
-  ): Safe<SafroleTicket[]> {
-    const result: SafroleTicket[] = []
+    tickets: SafroleTicketWithoutProof[],
+  ): Safe<SafroleTicketWithoutProof[]> {
+    const result: SafroleTicketWithoutProof[] = []
     const length = tickets.length
 
     // Handle edge cases
@@ -165,7 +166,9 @@ export class SealKeyService extends BaseService {
    * Get seal key for a specific slot
    * Returns the seal key (ticket or Bandersnatch key) for the given slot
    */
-  getSealKeyForSlot(slot: bigint): Safe<SafroleTicket | Uint8Array> {
+  getSealKeyForSlot(
+    slot: bigint,
+  ): Safe<SafroleTicketWithoutProof | Uint8Array> {
     const phase = slot % BigInt(this.configService.epochDuration)
 
     const ticket = this.sealTicketForPhase.get(phase)
@@ -180,8 +183,8 @@ export class SealKeyService extends BaseService {
     return safeError(new Error('No ticket or Bandersnatch key found for slot'))
   }
 
-  getSealKeys(): (SafroleTicket | Uint8Array)[] {
-    const sealKeys: (SafroleTicket | Uint8Array)[] = []
+  getSealKeys(): (SafroleTicketWithoutProof | Uint8Array)[] {
+    const sealKeys: (SafroleTicketWithoutProof | Uint8Array)[] = []
     for (let phase = 0; phase < this.configService.epochDuration; phase++) {
       const ticket = this.sealTicketForPhase.get(BigInt(phase))
       if (ticket) {
@@ -201,5 +204,12 @@ export class SealKeyService extends BaseService {
    */
   setValidatorSetManager(validatorSetManager: ValidatorSetManager): void {
     this.validatorSetManager = validatorSetManager
+  }
+
+  setSealKeys(sealKeys: SafroleTicketWithoutProof[]): void {
+    for (let phase = 0; phase < this.configService.epochDuration; phase++) {
+      const sealKey = sealKeys[phase]
+      this.sealTicketForPhase.set(BigInt(phase), sealKey)
+    }
   }
 }

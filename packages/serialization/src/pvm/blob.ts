@@ -57,6 +57,28 @@ export interface StandardProgram {
  * @param isTestVector - If true, use simplified test vector format (no bitmask)
  * @returns Decoded blob components or null if invalid
  */
+/**
+ * Decode service code from preimage (strips metadata) then decode as deblob
+ *
+ * This is a convenience function that handles the full service code format:
+ * metadata_prefix || deblob_format
+ *
+ * @param preimageBlob - The preimage blob bytes
+ * @returns Decoded blob components (code, bitmask, jump table)
+ */
+export function decodeServiceCode(
+  preimageBlob: Uint8Array,
+): Safe<DecodingResult<DecodedBlob>> {
+  // First, strip metadata prefix
+  const [error, preimageResult] = decodeServiceCodeFromPreimage(preimageBlob)
+  if (error) {
+    return safeError(error)
+  }
+
+  // Then decode the code blob as deblob format
+  return decodeBlob(preimageResult.value.codeBlob)
+}
+
 export function decodeBlob(
   programBlob: Uint8Array,
 ): Safe<DecodingResult<DecodedBlob>> {
@@ -171,38 +193,107 @@ export function decodeBlob(
 }
 
 /**
+ * Decode service code from preimage blob according to Gray Paper accounts.tex
+ *
+ * Gray Paper accounts.tex equation 42-43:
+ * \encode{\var{\mathbf{m}}, \mathbf{c}} = \mathbf{a}_\sa¬preimages[\mathbf{a}_\sa¬codehash]
+ *
+ * Format: encode(len(m)) || encode(m) || encode(code_blob)
+ *
+ * Where:
+ * - encode(len(m)): Variable-length natural number encoding of metadata length
+ * - encode(m): Metadata blob
+ * - encode(code_blob): Code blob (could be Y function format or deblob format)
+ *
+ * @param preimageBlob - The preimage blob bytes (includes metadata prefix)
+ * @returns Decoded code blob, metadata, and remaining data
+ */
+export function decodeServiceCodeFromPreimage(preimageBlob: Uint8Array): Safe<
+  DecodingResult<{
+    metadata: Uint8Array
+    codeBlob: Uint8Array
+  }>
+> {
+  let offset = 0
+
+  // 1. Decode metadata length
+  const [error, metadataLengthResult] = decodeNatural(
+    preimageBlob.slice(offset),
+  )
+  if (error) {
+    return safeError(
+      new Error(`Failed to decode metadata length: ${error.message}`),
+    )
+  }
+  const metadataLength = Number(metadataLengthResult.value)
+  offset += metadataLengthResult.consumed
+
+  // 2. Extract metadata blob
+  if (offset + metadataLength > preimageBlob.length) {
+    return safeError(
+      new Error(
+        `Missing metadata: need ${metadataLength} bytes, have ${preimageBlob.length - offset}`,
+      ),
+    )
+  }
+  const metadata = preimageBlob.slice(offset, offset + metadataLength)
+  offset += metadataLength
+
+  // 3. Remaining data is the code blob (in deblob format)
+  const codeBlob = preimageBlob.slice(offset)
+
+  return safeResult({
+    value: {
+      metadata,
+      codeBlob,
+    },
+    remaining: new Uint8Array(0), // All consumed
+    consumed: preimageBlob.length,
+  })
+}
+
+/**
  * Decodes a PVM program blob according to Gray Paper Y function specification
  *
  * Gray Paper pvm.tex: Y function (Standard Program Initialization)
+ * Gray Paper serialization.tex: Fixed-length encodings use little-endian
  *
  * Format: E₃(|o|) || E₃(|w|) || E₂(z) || E₃(s) || o || w || E₄(|c|) || c
  *
  * Where:
- * - E₃(|o|): Read-only data length (3 bytes, big-endian)
- * - E₃(|w|): Read-write data length (3 bytes, big-endian)
- * - E₂(z): Jump table entry size (2 bytes, big-endian)
- * - E₃(s): Stack size (3 bytes, big-endian)
+ * - E₃(|o|): Read-only data length (3 bytes, little-endian)
+ * - E₃(|w|): Read-write data length (3 bytes, little-endian)
+ * - E₂(z): Jump table entry size (2 bytes, little-endian)
+ * - E₃(s): Stack size (3 bytes, little-endian)
  * - o: Read-only data section
  * - w: Read-write data section
- * - E₄(|c|): Instruction data length (4 bytes, big-endian)
+ * - E₄(|c|): Instruction data length (4 bytes, little-endian)
  * - c: Instruction data
+ *
+ * Gray Paper serialization.tex line 100: "Values are encoded in a regular
+ * little-endian fashion. This is utilized for almost all integer encoding
+ * across the protocol."
  *
  * @param programBlob - The program blob bytes
  * @returns Decoded program components or error if invalid
  */
 export function decodeProgram(programBlob: Uint8Array): Safe<
   DecodingResult<{
-    code: Uint8Array
+    roDataLength: number
+    rwDataLength: number
+    jumpTableEntrySize: number
+    stackSize: number
     roData: Uint8Array
     rwData: Uint8Array
-    stackSize: number
-    jumpTableEntrySize: number
+    codeSize: number
+    code: Uint8Array
   }>
 > {
   let offset = 0
 
-  // Helper function to read big-endian numbers
-  const readBE = (bytes: number): number => {
+  // Helper function to read little-endian numbers
+  // Gray Paper serialization.tex eq. 102-108: encode[l](x) = x mod 256 || encode[l-1](floor(x/256))
+  const readLE = (bytes: number): number => {
     if (offset + bytes > programBlob.length) {
       throw new Error(
         `Insufficient data: need ${bytes} bytes, have ${programBlob.length - offset}`,
@@ -210,69 +301,126 @@ export function decodeProgram(programBlob: Uint8Array): Safe<
     }
     let value = 0
     for (let i = 0; i < bytes; i++) {
-      value = (value << 8) | programBlob[offset + i]
+      value |= programBlob[offset + i] << (i * 8)
     }
     offset += bytes
     return value
   }
 
-  try {
-    // 1. Decode E₃(|o|) - read-only data length (3 bytes)
-    const roDataLength = readBE(3)
+  // 1. Decode E₃(|o|) - read-only data length (3 bytes, little-endian)
+  const roDataLength = readLE(3)
 
-    // 2. Decode E₃(|w|) - read-write data length (3 bytes)
-    const rwDataLength = readBE(3)
+  // 2. Decode E₃(|w|) - read-write data length (3 bytes, little-endian)
+  const rwDataLength = readLE(3)
 
-    // 3. Decode E₂(z) - jump table entry size (2 bytes)
-    const jumpTableEntrySize = readBE(2)
+  // 3. Decode E₂(z) - jump table entry size (2 bytes, little-endian)
+  const jumpTableEntrySize = readLE(2)
 
-    // 4. Decode E₃(s) - stack size (3 bytes)
-    const stackSize = readBE(3)
+  // 4. Decode E₃(s) - stack size (3 bytes, little-endian)
+  const stackSize = readLE(3)
 
-    // 5. Extract read-only data section (o)
-    if (offset + roDataLength > programBlob.length) {
-      return safeError(
-        new Error(`Missing read-only data: need ${roDataLength} bytes`),
-      )
-    }
-    const roData = programBlob.slice(offset, offset + roDataLength)
-    offset += roDataLength
-
-    // 6. Extract read-write data section (w)
-    if (offset + rwDataLength > programBlob.length) {
-      return safeError(
-        new Error(`Missing read-write data: need ${rwDataLength} bytes`),
-      )
-    }
-    const rwData = programBlob.slice(offset, offset + rwDataLength)
-    offset += rwDataLength
-
-    // 7. Decode E₄(|c|) - instruction data length (4 bytes)
-    const codeLength = readBE(4)
-
-    // 8. Extract instruction data (c)
-    if (offset + codeLength > programBlob.length) {
-      return safeError(
-        new Error(`Missing instruction data: need ${codeLength} bytes`),
-      )
-    }
-    const code = programBlob.slice(offset, offset + codeLength)
-    offset += codeLength
-
-    return safeResult({
-      value: {
-        code,
-        roData,
-        rwData,
-        stackSize,
-        jumpTableEntrySize,
-      },
-      remaining: programBlob.slice(offset),
-      consumed: offset,
-    })
-  } catch (error) {
+  // 5. Extract read-only data section (o)
+  if (offset + roDataLength > programBlob.length) {
     return safeError(
-      error instanceof Error ? error : new Error('Unknown error'),
+      new Error(`Missing read-only data: need ${roDataLength} bytes`),
     )
   }
+  const roData = programBlob.slice(offset, offset + roDataLength)
+  offset += roDataLength
+
+  // 6. Extract read-write data section (w)
+  if (offset + rwDataLength > programBlob.length) {
+    return safeError(
+      new Error(`Missing read-write data: need ${rwDataLength} bytes`),
+    )
+  }
+  const rwData = programBlob.slice(offset, offset + rwDataLength)
+  offset += rwDataLength
+
+  // 7. Decode E₄(|c|) - instruction data length (4 bytes, little-endian)
+  const codeLength = readLE(4)
+
+  // 8. Extract instruction data (c)
+  if (offset + codeLength > programBlob.length) {
+    return safeError(
+      new Error(`Missing instruction data: need ${codeLength} bytes`),
+    )
+  }
+  const code = programBlob.slice(offset, offset + codeLength)
+  offset += codeLength
+
+  return safeResult({
+    value: {
+      roDataLength: roDataLength,
+      rwDataLength: rwDataLength,
+      jumpTableEntrySize: jumpTableEntrySize,
+      stackSize: stackSize,
+      roData,
+      rwData,
+      codeSize: codeLength,
+      code,
+    },
+    remaining: programBlob.slice(offset),
+    consumed: offset,
+  })
+}
+
+/**
+ * Decode service code from preimage blob as Y function format
+ *
+ * Gray Paper accounts.tex equation 42-43:
+ * \encode{\var{\mathbf{m}}, \mathbf{c}} = \mathbf{a}_\sa¬preimages[\mathbf{a}_\sa¬codehash]
+ *
+ * After extracting metadata, the code blob c should be in Y function format:
+ * E₃(|o|) || E₃(|w|) || E₂(z) || E₃(s) || o || w || E₄(|c|) || c
+ *
+ * @param preimageBlob - The preimage blob bytes (includes metadata prefix)
+ * @returns Decoded metadata and Y function program components
+ */
+export function decodeProgramFromPreimage(preimageBlob: Uint8Array): Safe<
+  DecodingResult<{
+    metadata: Uint8Array
+    roDataLength: number
+    rwDataLength: number
+    jumpTableEntrySize: number
+    stackSize: number
+    roData: Uint8Array
+    rwData: Uint8Array
+    codeSize: number
+    code: Uint8Array
+  }>
+> {
+  // First, extract metadata
+  const [error, preimageResult] = decodeServiceCodeFromPreimage(preimageBlob)
+  if (error) {
+    return safeError(error)
+  }
+
+  // Then decode the code blob as Y function format
+  const [programError, programResult] = decodeProgram(
+    preimageResult.value.codeBlob,
+  )
+  if (programError) {
+    return safeError(programError)
+  }
+
+  // Combine metadata and program results
+  return safeResult({
+    value: {
+      metadata: preimageResult.value.metadata,
+      roDataLength: programResult.value.roDataLength,
+      rwDataLength: programResult.value.rwDataLength,
+      jumpTableEntrySize: programResult.value.jumpTableEntrySize,
+      stackSize: programResult.value.stackSize,
+      roData: programResult.value.roData,
+      rwData: programResult.value.rwData,
+      codeSize: programResult.value.codeSize,
+      code: programResult.value.code,
+    },
+    remaining: programResult.remaining,
+    consumed:
+      preimageResult.consumed -
+      preimageResult.value.codeBlob.length +
+      programResult.consumed,
+  })
 }

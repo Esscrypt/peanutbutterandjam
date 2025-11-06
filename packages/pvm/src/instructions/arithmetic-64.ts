@@ -27,7 +27,6 @@ export class ADD_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -63,7 +62,6 @@ export class SUB_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -99,7 +97,6 @@ export class MUL_64Instruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -137,7 +134,6 @@ export class DIV_U_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
@@ -162,8 +158,8 @@ export class DIV_S_64Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
 
     // Convert to signed values
-    const signedA = valueA > 2n ** 63n - 1n ? valueA - 2n ** 64n : valueA
-    const signedB = valueB > 2n ** 63n - 1n ? valueB - 2n ** 64n : valueB
+    const signedA = this.toSigned64(valueA)
+    const signedB = this.toSigned64(valueB)
 
     // Gray Paper: handle special cases
     let result: bigint
@@ -190,7 +186,6 @@ export class DIV_S_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
@@ -228,7 +223,6 @@ export class REM_U_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
@@ -284,7 +278,6 @@ export class REM_S_64Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }

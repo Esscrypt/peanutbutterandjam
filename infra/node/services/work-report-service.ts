@@ -73,7 +73,8 @@ export class WorkReportService extends BaseService {
 
   // Index: pending work reports by core
   // Gray Paper: only one report may be assigned to a core at any given time
-  private readonly pendingWorkReports: Map<bigint, PendingReport> = new Map()
+  private readonly pendingWorkReports: Map<bigint, PendingReport | null> =
+    new Map()
 
   private readonly workStore: WorkStore | null
   private readonly eventBus: EventBusService
@@ -115,6 +116,11 @@ export class WorkReportService extends BaseService {
     this.eventBus.addWorkReportDistributionRequestCallback(
       this.handleWorkReportDistributionRequest.bind(this),
     )
+
+    this.pendingWorkReports = new Map<bigint, PendingReport | null>()
+    for (let i = 0; i < this.configService.numCores; i++) {
+      this.pendingWorkReports.set(BigInt(i), null)
+    }
   }
 
   // ===== State Component Operations =====
@@ -293,6 +299,23 @@ export class WorkReportService extends BaseService {
   getCoreReport(coreIndex: bigint): PendingReport | null {
     // Get all work reports in 'reported' state for this core
     return this.pendingWorkReports.get(coreIndex) || null
+  }
+
+  setPendingReports(reports: Reports): void {
+    for (const [coreIndex, report] of reports.coreReports.entries()) {
+      if (report) {
+        this.addPendingWorkReport(
+          BigInt(coreIndex),
+          report.workReport,
+          report.timeslot,
+        )
+      } else {
+        // clear the pending work report for this core if it exists
+        if (this.pendingWorkReports.has(BigInt(coreIndex))) {
+          this.pendingWorkReports.delete(BigInt(coreIndex))
+        }
+      }
+    }
   }
 
   addPendingWorkReport(

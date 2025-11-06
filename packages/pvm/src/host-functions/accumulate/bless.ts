@@ -1,12 +1,9 @@
-import type {
-  HostFunctionResult,
-  IConfigService,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult, IConfigService } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * BLESS accumulation host function (Ω_B)
@@ -42,114 +39,113 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     this.configService = configService
   }
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications } = context
+    // Extract parameters from registers
+    const [
+      managerServiceId,
+      assignersOffset,
+      delegatorServiceId,
+      registrarServiceId,
+      alwaysAccessorsOffset,
+      numberOfAlwaysAccessors,
+    ] = registers.slice(7, 13)
 
-    try {
-      // Extract parameters from registers
-      const [m, a, v, r, o, n] = registers.slice(7, 13)
-
-      // Read assigners array from memory (341 cores * 4 bytes each)
-      const assignersLength = BigInt(this.configService.numCores) * 4n
-      const [assignersData, faultAddress] = ram.readOctets(a, assignersLength)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!assignersData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Read always accessors array from memory (n entries * 12 bytes each)
-      const accessorsLength = n * 12n
-      const [accessorsData, accessorsFaultAddress] = ram.readOctets(
-        o,
-        accessorsLength,
-      )
-      if (!accessorsData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (accessorsFaultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Parse assigners array (4 bytes per core ID)
-      const assigners: bigint[] = []
-      for (let i = 0; i < this.configService.numCores; i++) {
-        const coreId = new DataView(assignersData.buffer, i * 4, 4).getUint32(
-          0,
-          true,
-        )
-        assigners.push(BigInt(coreId))
-      }
-
-      // Parse always accessors array (12 bytes per accessor: 4 bytes service ID + 8 bytes gas)
-      const alwaysAccessors: Map<bigint, bigint> = new Map()
-      for (let i = 0; i < Number(n); i++) {
-        const serviceId = new DataView(
-          accessorsData.buffer,
-          i * 12,
-          4,
-        ).getUint32(0, true)
-        const gas = new DataView(
-          accessorsData.buffer,
-          i * 12 + 4,
-          8,
-        ).getBigUint64(0, true)
-        alwaysAccessors.set(BigInt(serviceId), gas)
-      }
-
-      // Validate service IDs
-      // Gray Paper: (m, v, r) not in serviceid^3
-      if (m < 0n || v < 0n || r < 0n) {
-        this.setAccumulateError(registers, 'WHO')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Update state with new privileges
-      // Gray Paper: imX.state = {manager: m, assigners: a, delegator: v, registrar: r, alwaysaccers: z}
-      imX.state.manager = m
-      imX.state.assigners = assigners
-      imX.state.delegator = v
-      imX.state.registrar = r
-      imX.state.alwaysaccers = alwaysAccessors
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
+    // Read assigners array from memory (341 cores * 4 bytes each)
+    const assignersLength = BigInt(this.configService.numCores) * 4n
+    const [assignersData, faultAddress] = ram.readOctets(
+      assignersOffset,
+      assignersLength,
+    )
+    if (faultAddress) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+    if (!assignersData) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    // Read always accessors array from memory (n entries * 12 bytes each)
+    const accessorsLength = numberOfAlwaysAccessors * 12n
+    const [accessorsData, accessorsFaultAddress] = ram.readOctets(
+      alwaysAccessorsOffset,
+      accessorsLength,
+    )
+    if (!accessorsData) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+    if (accessorsFaultAddress) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    // Parse assigners array (4 bytes per core ID)
+    const assigners: bigint[] = []
+    for (let i = 0; i < this.configService.numCores; i++) {
+      const coreId = new DataView(assignersData.buffer, i * 4, 4).getUint32(
+        0,
+        true,
+      )
+      assigners.push(BigInt(coreId))
+    }
+
+    // Parse always accessors array (12 bytes per accessor: 4 bytes service ID + 8 bytes gas)
+    const alwaysAccessors: Map<bigint, bigint> = new Map()
+    for (let i = 0; i < Number(numberOfAlwaysAccessors); i++) {
+      const serviceId = new DataView(accessorsData.buffer, i * 12, 4).getUint32(
+        0,
+        true,
+      )
+      const gas = new DataView(
+        accessorsData.buffer,
+        i * 12 + 4,
+        8,
+      ).getBigUint64(0, true)
+      alwaysAccessors.set(BigInt(serviceId), gas)
+    }
+
+    // Validate service IDs
+    // Gray Paper line 706: (m, v, r) not in serviceid^3 → return WHO
+    // serviceid ≡ Nbits{32} (Gray Paper definitions.tex line 15, accounts.tex line 7)
+    // So each service ID must be: 0 ≤ id < 2^32
+    const MAX_SERVICE_ID = 2n ** 32n // 2^32 = 4294967296
+    const isValidServiceId = (id: bigint): boolean => {
+      return id >= 0n && id < MAX_SERVICE_ID
+    }
+
+    if (
+      !isValidServiceId(managerServiceId) ||
+      !isValidServiceId(delegatorServiceId) ||
+      !isValidServiceId(registrarServiceId)
+    ) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Update state with new privileges
+    // Gray Paper: imX.state = {manager: m, assigners: a, delegator: v, registrar: r, alwaysaccers: z}
+    implications[0].state.manager = managerServiceId
+    implications[0].state.assigners = assigners
+    implications[0].state.delegator = delegatorServiceId
+    implications[0].state.registrar = registrarServiceId
+    implications[0].state.alwaysaccers = alwaysAccessors
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

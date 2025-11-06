@@ -124,6 +124,16 @@ export class NodeGenesisManager extends BaseService {
   }
 
   /**
+   * Get full genesis JSON (header + state)
+   */
+  getGenesisJson(): Safe<GenesisJson> {
+    if (!this.genesisJson) {
+      return safeError(new Error('Genesis JSON not found'))
+    }
+    return safeResult(this.genesisJson)
+  }
+
+  /**
    * Get genesis header hash
    */
   getGenesisHeaderHash(): Safe<Hex> {

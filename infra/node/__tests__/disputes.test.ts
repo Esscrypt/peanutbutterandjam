@@ -13,7 +13,6 @@ import type { DisputesTestVector, WorkReport } from '@pbnj/types'
 import { DisputesService } from '../services/disputes-service'
 import { ConfigService } from '../services/config-service'
 import { ValidatorSetManager } from '../services/validator-set'
-import { ClockService } from '../services/clock-service'
 
 // Helper function to convert JSON numbers to bigints for WorkReport
 function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
@@ -128,12 +127,12 @@ describe('Disputes Service - JAM Test Vectors', () => {
               ringProver: null,
               ticketService: null,
               configService: configService,
-              initialValidators: new Map(vector.pre_state.kappa.map((validator, index) => [index, {
+              initialValidators: vector.pre_state.kappa.map((validator) => ({
                 bandersnatch: validator.bandersnatch,
                 ed25519: validator.ed25519,
                 bls: validator.bls,
                 metadata: validator.metadata,
-              }])),
+              })),
             })
 
             // Set previous epoch validators (lambda) - required for Gray Paper validator set checks
@@ -148,9 +147,11 @@ describe('Disputes Service - JAM Test Vectors', () => {
 
             // Step 2: Initialize DisputesService
             const disputesService = new DisputesService(
-              eventBusService,
-              validatorSetManager,
-              configService,
+              {
+                eventBusService: eventBusService,
+                validatorSetManagerService: validatorSetManager,
+                configService: configService,
+              }
             )
 
             disputesService.start()
@@ -188,10 +189,10 @@ describe('Disputes Service - JAM Test Vectors', () => {
               })),
             }]
 
-            // Step 4: Process disputes using the new processDisputes method
+            // Step 4: Process disputes using the new applyDisputes method
             // Pass current timeslot (tau) from pre_state for age validation
             const currentTimeslot = BigInt(vector.pre_state.tau)
-            const [processError, offendersMark] = disputesService.processDisputes(disputeInput, currentTimeslot)
+            const [processError, offendersMark] = disputesService.applyDisputes(disputeInput, currentTimeslot)
 
             // Step 5: Check expected outcome
             if (vector.output.err !== undefined) {

@@ -84,15 +84,18 @@ export class RecentHistoryService extends BaseServiceClass {
   private mmrPeaks: MMRRange = []
   private currentBlockNumber = 0n
   private readonly configService: IConfigService
-  constructor(eventBusService: EventBusService, configService: IConfigService) {
+  constructor(options: {
+    eventBusService: EventBusService
+    configService: IConfigService
+  }) {
     super('recent-history-service')
-    this.eventBusService = eventBusService
+    this.eventBusService = options.eventBusService
     this.accoutBelt = {
       peaks: [],
       totalCount: 0n,
     }
     this.mmrPeaks = []
-    this.configService = configService
+    this.configService = options.configService
   }
 
   override start(): Safe<boolean> {
@@ -230,33 +233,24 @@ export class RecentHistoryService extends BaseServiceClass {
    *
    * Sets both recentHistory and accoutBelt from pre_state.beta
    */
-  setRecentHistoryFromPreState(preState: {
-    beta: {
-      history: Array<{
-        header_hash: string
-        beefy_root: string
-        state_root: string | null
-        reported: Array<{ hash: string; exports_root: string }>
-      }>
-      mmr: { peaks: Array<string | null> }
-    }
-  }): void {
+  setRecent(recent: Recent): void {
     this.clearHistory()
 
     // Set history entries
-    if (preState?.beta?.history) {
-      for (const entry of preState.beta.history) {
+    if (recent.history) {
+      for (const entry of recent.history) {
         const reportedPackageHashes = new Map<Hex, Hex>()
-        if (entry.reported) {
-          for (const pkg of entry.reported) {
-            reportedPackageHashes.set(pkg.hash as Hex, pkg.exports_root as Hex)
-          }
+        for (const [
+          packageHash,
+          exportsRoot,
+        ] of entry.reportedPackageHashes.entries()) {
+          reportedPackageHashes.set(packageHash, exportsRoot)
         }
 
         this.recentHistory.push({
-          headerHash: entry.header_hash as Hex,
-          stateRoot: entry.state_root as Hex,
-          accoutLogSuperPeak: entry.beefy_root as Hex,
+          headerHash: entry.headerHash,
+          stateRoot: entry.stateRoot,
+          accoutLogSuperPeak: entry.accoutLogSuperPeak,
           reportedPackageHashes,
         })
       }
@@ -264,15 +258,15 @@ export class RecentHistoryService extends BaseServiceClass {
 
     // Set MMR belt from pre_state.beta.mmr.peaks
     // NOTE: MMR peaks can include null values, so we must preserve them
-    if (preState?.beta?.mmr?.peaks) {
+    if (recent.accoutBelt.peaks) {
       // Store full MMR range with nulls as mmrPeaks (Uint8Array[])
-      this.mmrPeaks = preState.beta.mmr.peaks.map((p: string | null) =>
-        p !== null ? hexToBytes(p as Hex) : null,
+      this.mmrPeaks = recent.accoutBelt.peaks.map((p: Hex | null) =>
+        p !== null ? hexToBytes(p) : null,
       )
 
       // Update accoutBelt for compatibility (non-null peaks only)
-      this.accoutBelt.peaks = preState.beta.mmr.peaks
-        .map((p: string | null) => (p !== null ? (p as Hex) : null))
+      this.accoutBelt.peaks = recent.accoutBelt.peaks
+        .map((p: Hex | null) => (p !== null ? p : null))
         .filter((p): p is Hex => p !== null)
 
       this.accoutBelt.totalCount = BigInt(this.mmrPeaks.length)
@@ -499,7 +493,7 @@ export class RecentHistoryService extends BaseServiceClass {
 
     // Step 4: Convert accoutBelt.peaks to MMRRange (nullable array)
     const mmrRange: MMRRange = this.accoutBelt.peaks.map((peak) =>
-      hexToBytes(peak),
+      peak !== null ? hexToBytes(peak) : null,
     )
 
     // Step 5: Append to MMR belt

@@ -12,7 +12,11 @@
 
 import type { Hex } from '@pbnj/core'
 import type { BlockBody } from './block-authoring'
-import type { SafroleState, ValidatorPublicKeys } from './consensus'
+import type {
+  SafroleState,
+  ValidatorKeyPair,
+  ValidatorPublicKeys,
+} from './consensus'
 import type { SafroleTicket, ServiceAccount, WorkReport } from './serialization'
 
 // ============================================================================
@@ -86,7 +90,7 @@ export interface RecentHistoryEntry {
  */
 export interface AccoutBelt {
   /** Mountain range peaks (without nulls, for serialization) */
-  peaks: Hex[]
+  peaks: (Hex | null)[]
   /** Total accumulated count */
   totalCount: bigint
 }
@@ -423,56 +427,74 @@ export interface AccumulationMetadata {
  * - All fields are  to enforce immutability
  * - State transitions create new instances rather than mutating existing state
  */
-export interface GlobalState {
+export type StateComponent =
   /** Authorization pool (α) - Core authorization requirements */
-  authpool: AuthPool
-
+  | AuthPool
   /** Recent activity (β) - Recent blocks and accumulation outputs */
-  recent: Recent
-
+  | Recent
   /** Last accumulation output (θ) - Most recent accumulation result */
-  lastaccout: Hex
-
+  | Hex
   /** Safrole state (γ) - Consensus protocol internal state */
-  safrole: SafroleState
-
+  | SafroleState
   /** Service accounts (δ) - All service (smart contract) state */
-  accounts: ServiceAccounts
-
+  | ServiceAccounts
   /** Entropy (ε) - On-chain randomness accumulator */
-  entropy: EntropyState
-
+  | EntropyState
   /** Staging validator set (ι) - Validators queued for next epoch */
-  stagingset: ValidatorPublicKeys[]
-
   /** Active validator set (κ) - Currently active validators */
-  activeset: ValidatorPublicKeys[]
-
   /** Previous validator set (λ) - Previous epoch validators */
-  previousset: ValidatorPublicKeys[]
-
+  | ValidatorPublicKeys[]
   /** Pending reports (ρ) - Work reports awaiting availability assurance */
-  reports: Reports
-
+  | Reports
   /** Current time slot (τ) - Most recent block's timeslot index */
-  thetime: bigint
-
+  | bigint
   /** Authorization queue (φ) - Queued core authorizations */
-  authqueue: AuthQueue
-
+  | AuthQueue
   /** Privileges - Services with special privileges */
-  privileges: Privileges
-
+  | Privileges
   /** Disputes (ψ) - Judgments on work-reports and validators */
-  disputes: Disputes
-
+  | Disputes
   /** Activity (π) - Validator performance statistics */
-  activity: Activity
-
+  | Activity
   /** Ready work-reports (ω) - Reports ready for accumulation */
-  ready: Ready
-
+  | Ready
   /** Accumulated packages (ξ) - Recently accumulated work-packages */
+  | Accumulated
+
+export interface GlobalState {
+  /** 1. Authorization pool (α) - Core authorization requirements */
+  authpool: AuthPool
+  /** 2. Recent activity (β) - Chapter C(3): Recent blocks and accumulation outputs */
+  recent: Recent
+  /** 3. Last accumulation output (θ) - Chapter C(16): Most recent accumulation result */
+  lastaccout: Hex
+  /** 4. Safrole state (γ) - Chapter C(4): Consensus protocol internal state */
+  safrole: SafroleState
+  /** 5. Service accounts (δ) - Chapter C(255): All service (smart contract) state */
+  accounts: ServiceAccounts
+  /** 6. Entropy (ε) - Chapter C(6): On-chain randomness accumulator */
+  entropy: EntropyState
+  /** 7. Staging validator set (ι) - Chapter C(7): Validators queued for next epoch */
+  stagingset: ValidatorPublicKeys[]
+  /** 8. Active validator set (κ) - Chapter C(8): Currently active validators */
+  activeset: ValidatorPublicKeys[]
+  /** 9. Previous validator set (λ) - Chapter C(9): Previous epoch validators */
+  previousset: ValidatorPublicKeys[]
+  /** 10. Pending reports (ρ) - Chapter C(10): Work reports awaiting availability assurance */
+  reports: Reports
+  /** 11. Current time slot (τ) - Chapter C(11): Most recent block's timeslot index */
+  thetime: bigint
+  /** 12. Authorization queue (χ) - Chapter C(2): Queued core authorizations */
+  authqueue: AuthQueue
+  /** 13. Privileges - Chapter C(12): Services with special privileges */
+  privileges: Privileges
+  /** 14. Disputes (ψ) - Chapter C(5): Judgments on work-reports and validators */
+  disputes: Disputes
+  /** 15. Activity (π) - Chapter C(13): Validator performance statistics */
+  activity: Activity
+  /** 16. Ready work-reports (ω) - Chapter C(14): Reports ready for accumulation */
+  ready: Ready
+  /** 17. Accumulated packages (ξ) - Chapter C(15): Recently accumulated work-packages */
   accumulated: Accumulated
 }
 
@@ -525,14 +547,6 @@ export interface EpochMark {
   entropyAccumulator: Hex
   entropy1: Hex
   validators: ValidatorKeyPair[]
-}
-
-/**
- * Validator key pair (for epoch marks - only bs + ed25519)
- */
-export interface ValidatorKeyPair {
-  bandersnatch: Hex
-  ed25519: Hex
 }
 
 /**

@@ -1,12 +1,10 @@
 import { bytesToHex } from '@pbnj/core'
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * SOLICIT accumulation host function (Ω_S)
@@ -35,33 +33,14 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'solicit'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-    timeslot?: bigint,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    if (!timeslot) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications, timeslot } = context
     try {
       // Extract parameters from registers
-      const [o, z] = registers.slice(7, 9)
+      const [hashOffset, preimageLength] = registers.slice(7, 9)
 
       // Read hash from memory (32 bytes)
-      const [hashData, faultAddress] = ram.readOctets(o, 32n)
+      const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
       if (faultAddress) {
         this.setAccumulateError(registers, 'WHAT')
         return {
@@ -76,7 +55,7 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       }
 
       // Get the current implications context
-      const [imX] = context
+      const [imX] = implications
 
       // Get current service account
       const serviceAccount = imX.state.accounts.get(imX.id)
@@ -90,7 +69,7 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       // Convert hash to hex and look up existing request
       const hashHex = bytesToHex(hashData)
       const requestMap = serviceAccount.requests.get(hashHex)
-      const existingRequest = requestMap?.get(z)
+      const existingRequest = requestMap?.get(preimageLength)
 
       // Determine new request state based on Gray Paper logic
       let newRequest: bigint[]
@@ -123,10 +102,13 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       // Update the service account with the new request
       if (requestMap) {
         // Update existing request map
-        requestMap.set(z, newRequest)
+        requestMap.set(preimageLength, newRequest)
       } else {
         // Create new request map for this hash
-        serviceAccount.requests.set(hashHex, new Map([[z, newRequest]]))
+        serviceAccount.requests.set(
+          hashHex,
+          new Map([[preimageLength, newRequest]]),
+        )
       }
 
       // Set success result

@@ -103,29 +103,45 @@ export class RefinePVM extends PVM {
         this.createRefineContextMutator(refineContext)
 
       // Execute Ψ_M(serviceCode, 0, Cpackagerefgas, encodedArgs, F, refineContext)
-      const [error] = await this.executeMarshallingInvocation(
-        serviceCode,
-        0n, // Initial PC = 0 (Gray Paper)
-        ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE, // Use accumulate config for now
-        encodedArgs,
-        refineContextMutator,
-        refineContext,
-      )
+      const [error, marshallingResult] =
+        await this.executeMarshallingInvocation(
+          serviceCode,
+          0n, // Initial PC = 0 (Gray Paper)
+          ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE, // Use accumulate config for now
+          encodedArgs,
+          refineContextMutator,
+          refineContext,
+        )
       if (error) {
         return { result: 'BAD', exportSegments: [], gasUsed: 0n }
       }
 
-      // Extract export segments from context
-      const exportSegments = refineContext.exportSegments
+      // Extract values from Ψ_M return: (gas consumed, result, updated context)
+      const {
+        gasConsumed,
+        result: marshallingResultValue,
+        context: updatedRefineContext,
+      } = marshallingResult
+
+      // Extract export segments from updated context
+      const exportSegments = updatedRefineContext.exportSegments
 
       // Return result, export segments, and gas used
+      // marshallingResultValue is already Uint8Array | 'PANIC' | 'OOG'
+      let result: Uint8Array | 'BAD'
+      if (
+        marshallingResultValue === 'PANIC' ||
+        marshallingResultValue === 'OOG'
+      ) {
+        result = 'BAD'
+      } else {
+        result = marshallingResultValue
+      }
+
       return {
-        result:
-          this.state.resultCode === RESULT_CODES.HALT
-            ? this.extractResultFromMemory()
-            : 'BAD',
+        result,
         exportSegments,
-        gasUsed: this.state.gasCounter,
+        gasUsed: gasConsumed,
       }
     } catch (error) {
       logger.error('Refine invocation failed', {

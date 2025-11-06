@@ -230,10 +230,10 @@ export class MainService extends BaseService {
     })
 
     // Initialize recent history service
-    this.recentHistoryService = new RecentHistoryService(
-      this.eventBusService,
-      this.configService,
-    )
+    this.recentHistoryService = new RecentHistoryService({
+      eventBusService: this.eventBusService,
+      configService: this.configService,
+    })
 
     this.networkingService = new NetworkingService({
       listenAddress: this.config.networking.listenAddress,
@@ -259,12 +259,12 @@ export class MainService extends BaseService {
       prover: this.ringProver,
     })
 
-    this.sealKeyService = new SealKeyService(
-      this.eventBusService,
-      this.entropyService,
-      this.ticketService,
-      this.configService,
-    )
+    this.sealKeyService = new SealKeyService({
+      eventBusService: this.eventBusService,
+      entropyService: this.entropyService,
+      ticketService: this.ticketService,
+      configService: this.configService,
+    })
 
     // const [initialValidatorsError, initialValidators] =
     //   this.genesisManagerService.getInitialValidatorsFromChainSpec()
@@ -298,10 +298,11 @@ export class MainService extends BaseService {
       preimageRequestProtocol: this.ce143PreimageRequestProtocol!,
     })
 
-    this.disputesService = new DisputesService(
-      this.eventBusService,
-      this.validatorSetManagerService,
-    )
+    this.disputesService = new DisputesService({
+      eventBusService: this.eventBusService,
+      validatorSetManagerService: this.validatorSetManagerService,
+      configService: this.configService,
+    })
 
     this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.clockService.setValidatorSetManager(this.validatorSetManagerService)
@@ -412,6 +413,7 @@ export class MainService extends BaseService {
       hostFunctionRegistry: this.hostFunctionRegistry,
       accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
       configService: this.configService,
+      entropyService: this.entropyService,
       pvmOptions: { gasCounter: PVM_CONSTANTS.DEFAULT_GAS_LIMIT },
     })
 

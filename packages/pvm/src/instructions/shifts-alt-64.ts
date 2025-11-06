@@ -120,27 +120,4 @@ export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
-
-  private toSigned64(value: bigint): bigint {
-    // Convert 64-bit unsigned to signed
-    if (value >= 2n ** 63n) {
-      return value - 2n ** 64n
-    }
-    return value
-  }
-
-  private toUnsigned64(value: bigint): bigint {
-    // Convert signed back to unsigned
-    if (value < 0n) {
-      return value + 2n ** 64n
-    }
-    return value
-  }
 }

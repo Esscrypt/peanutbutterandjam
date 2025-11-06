@@ -26,7 +26,6 @@ import type { BlockStore } from '@pbnj/state'
 import type {
   Block,
   BlockHeader,
-  IClockService,
   IEntropyService,
   IValidatorSetManager,
 } from '@pbnj/types'
@@ -38,6 +37,7 @@ import {
   safeResult,
 } from '@pbnj/types'
 import type { AssuranceService } from './assurance-service'
+import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { DisputesService } from './disputes-service'
 import type { GuarantorService } from './guarantor-service'
@@ -65,7 +65,7 @@ export interface BlockImportResult {
  */
 export class BlockImporterService extends BaseService {
   private readonly eventBusService: EventBusService
-  private readonly clockService: IClockService
+  private readonly clockService: ClockService
   // private readonly recentHistoryService: RecentHistoryService
   private readonly serviceAccountService: ServiceAccountService
   private readonly configService: ConfigService
@@ -73,12 +73,13 @@ export class BlockImporterService extends BaseService {
   private readonly validatorSetManagerService: IValidatorSetManager
   private readonly entropyService: IEntropyService
   private readonly sealKeyService: SealKeyService
-  private readonly blockStore: BlockStore
   private readonly assuranceService: AssuranceService
   private readonly guarantorService: GuarantorService
+  private readonly recentHistoryService: RecentHistoryService
+
   constructor(options: {
     eventBusService: EventBusService
-    clockService: IClockService
+    clockService: ClockService
     recentHistoryService: RecentHistoryService
     serviceAccountService: ServiceAccountService
     configService: ConfigService
@@ -86,21 +87,20 @@ export class BlockImporterService extends BaseService {
     validatorSetManagerService: IValidatorSetManager
     entropyService: IEntropyService
     sealKeyService: SealKeyService
-    blockStore: BlockStore
+    blockStore: BlockStore | null
     assuranceService: AssuranceService
     guarantorService: GuarantorService
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
     this.clockService = options.clockService
-    // this.recentHistoryService = options.recentHistoryService
+    this.recentHistoryService = options.recentHistoryService
     this.serviceAccountService = options.serviceAccountService
     this.configService = options.configService
     this.disputesService = options.disputesService
     this.validatorSetManagerService = options.validatorSetManagerService
     this.entropyService = options.entropyService
     this.sealKeyService = options.sealKeyService
-    this.blockStore = options.blockStore
     this.assuranceService = options.assuranceService
     this.guarantorService = options.guarantorService
   }
@@ -140,13 +140,12 @@ export class BlockImporterService extends BaseService {
     }
 
     // validate the assurances
-    const [assuranceValidationError] =
-      this.assuranceService.applyAssuranceTransition(
-        block.body.assurances,
-        Number(block.header.timeslot),
-        block.header.parent,
-        this.configService,
-      )
+    const [assuranceValidationError] = this.assuranceService.applyAssurances(
+      block.body.assurances,
+      Number(block.header.timeslot),
+      block.header.parent,
+      this.configService,
+    )
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
     }
@@ -161,7 +160,7 @@ export class BlockImporterService extends BaseService {
       return safeError(serviceAccountValidationError)
     }
     //apply disputes
-    const [disputeValidationError] = this.disputesService.processDisputes(
+    const [disputeValidationError] = this.disputesService.applyDisputes(
       block.body.disputes,
       block.header.timeslot,
     )
@@ -182,31 +181,27 @@ export class BlockImporterService extends BaseService {
     // Block is valid, emit BlockProcessedEvent
     this.eventBusService.emitBlockProcessed(event)
 
-    //TODO: emit events to update the epoch mark and winners mark when they are present
-
     return safeResult(undefined)
   }
 
   // TODO: add VRF signature validation, seal signature validation, and block header validations according to GP
   async validateBlockHeader(
     header: BlockHeader,
-    clockService: IClockService,
+    clockService: ClockService,
     configService: ConfigService,
   ): SafePromise<void> {
-    const currentSlot = clockService.getCurrentSlot()
+    const wallClockSlot = clockService.getSlotFromWallClock()
 
     // according to the gray paper, the block header timeslot should be in the past
-    if (header.timeslot > currentSlot) {
+    if (header.timeslot > wallClockSlot) {
       return safeError(new Error('Block slot is in the future'))
     }
 
     // validate the parent hash exists in the block store
-    const [parentHashError, parentHeader] =
-      await this.blockStore.getBlockHeader(header.parent)
-    if (parentHashError) {
-      return safeError(parentHashError)
-    }
-    if (!parentHeader) {
+    const recentBlock = this.recentHistoryService.getRecentHistoryForBlock(
+      header.parent,
+    )
+    if (!recentBlock) {
       return safeError(new Error('Parent block not found'))
     }
 

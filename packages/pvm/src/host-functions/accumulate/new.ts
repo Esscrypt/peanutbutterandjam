@@ -1,13 +1,10 @@
 import { bytesToHex } from '@pbnj/core'
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-  ServiceAccount,
-} from '@pbnj/types'
+import type { HostFunctionResult, ServiceAccount } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * NEW accumulation host function (Ω_N)
@@ -39,159 +36,180 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'new'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-    timeslot?: bigint,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications, timeslot } = context
+    // Gray Paper line 204: Ω_F receives H_timeslot (block header's timeslot)
+    // This is the current block's timeslot passed from the Accumulate invocation
+
+    // Extract parameters from registers
+    const [
+      codeHashOffset,
+      codeHashLength,
+      minAccGas,
+      minMemoGas,
+      gratis,
+      desiredId,
+    ] = registers.slice(7, 13)
+
+    // Read code hash from memory (32 bytes)
+    const [codeHashData, faultAddress] = ram.readOctets(
+      codeHashOffset,
+      codeHashLength,
+    )
+    if (faultAddress) {
+      this.setAccumulateError(registers, 'WHAT')
       return {
-        resultCode: RESULT_CODES.OOG,
+        resultCode: RESULT_CODES.PANIC,
       }
     }
-
-    if (!timeslot) {
+    if (!codeHashData) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
 
-    try {
-      // Extract parameters from registers
-      const [o, l, minAccGas, minMemoGas, gratis, desiredId] = registers.slice(
-        7,
-        13,
-      )
+    // Get the current implications context
+    const [imX] = implications
 
-      // Read code hash from memory (32 bytes)
-      const [codeHashData, faultAddress] = ram.readOctets(o, l)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!codeHashData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Get current service account
-      const currentService = imX.state.accounts.get(imX.id)
-      if (!currentService) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Check if gratis is set and validate permissions
-      if (gratis === 0n && imX.id !== imX.state.registrar) {
-        // Only registrar can create paid services
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Calculate minimum balance required
-      const C_MIN_BALANCE = 1000000n // Gray Paper constant for minimum balance
-      const minBalance = C_MIN_BALANCE
-
-      // Check if current service has sufficient balance
-      if (currentService.balance < minBalance) {
-        this.setAccumulateError(registers, 'CASH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Determine new service ID
-      let newServiceId: bigint
-      const C_MIN_PUBLIC_INDEX = 65536n // 2^16
-
-      if (gratis === 0n) {
-        // Paid service - use desired ID if valid
-        if (desiredId < C_MIN_PUBLIC_INDEX) {
-          // Check if desired ID is already taken
-          if (imX.state.accounts.has(desiredId)) {
-            this.setAccumulateError(registers, 'FULL')
-            return {
-              resultCode: null, // continue execution
-            }
-          }
-          newServiceId = desiredId
-        } else {
-          // Use next free ID
-          newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
-        }
-      } else {
-        // Free service - use next free ID
-        newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
-      }
-
-      // Create new service account
-      const codeHashHex = bytesToHex(codeHashData)
-      const newServiceAccount: ServiceAccount = {
-        codehash: codeHashHex,
-        balance: minBalance,
-        minaccgas: minAccGas,
-        minmemogas: minMemoGas,
-        octets: 0n, // Will be calculated
-        gratis: gratis,
-        items: 0n, // Will be calculated
-        created: timeslot,
-        lastacc: 0n,
-        parent: imX.id,
-        storage: new Map(),
-        preimages: new Map(),
-        requests: new Map([[codeHashHex, new Map([[0n, []]])]]), // Initial request for code
-      }
-
-      // Deduct balance from current service
-      currentService.balance -= minBalance
-
-      // Add new service to accounts
-      imX.state.accounts.set(newServiceId, newServiceAccount)
-
-      // Update next free ID
-      imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
-
-      // Set success result with new service ID
-      this.setAccumulateSuccess(registers, newServiceId)
+    // Get current service account
+    const currentService = imX.state.accounts.get(imX.id)
+    if (!currentService) {
+      this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
       }
-    } catch {
-      this.setAccumulateError(registers, 'WHAT')
+    }
+
+    // Check if gratis is set and validate permissions
+    if (gratis === 0n && imX.id !== imX.state.registrar) {
+      // Only registrar can create paid services
+      this.setAccumulateError(registers, 'HUH')
       return {
-        resultCode: RESULT_CODES.PANIC,
+        resultCode: null, // continue execution
       }
+    }
+
+    // Calculate minimum balance required
+    const C_MIN_BALANCE = 1000000n // Gray Paper constant for minimum balance
+    const minBalance = C_MIN_BALANCE
+
+    // Check if current service has sufficient balance
+    if (currentService.balance < minBalance) {
+      this.setAccumulateError(registers, 'CASH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Determine new service ID
+    let newServiceId: bigint
+    const C_MIN_PUBLIC_INDEX = 65536n // 2^16
+
+    if (gratis === 0n) {
+      // Paid service - use desired ID if valid
+      if (desiredId < C_MIN_PUBLIC_INDEX) {
+        // Check if desired ID is already taken
+        if (imX.state.accounts.has(desiredId)) {
+          this.setAccumulateError(registers, 'FULL')
+          return {
+            resultCode: null, // continue execution
+          }
+        }
+        newServiceId = desiredId
+      } else {
+        // Use next free ID
+        newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+      }
+    } else {
+      // Free service - use next free ID
+      newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    }
+
+    // Create new service account
+    const codeHashHex = bytesToHex(codeHashData)
+    const newServiceAccount: ServiceAccount = {
+      codehash: codeHashHex,
+      balance: minBalance,
+      minaccgas: minAccGas,
+      minmemogas: minMemoGas,
+      octets: 0n, // Will be calculated
+      gratis: gratis,
+      items: 0n, // Will be calculated
+      created: timeslot,
+      lastacc: 0n,
+      parent: imX.id,
+      storage: new Map(),
+      preimages: new Map(),
+      requests: new Map([[codeHashHex, new Map([[0n, []]])]]), // Initial request for code
+    }
+
+    // Deduct balance from current service
+    currentService.balance -= minBalance
+
+    // Add new service to accounts
+    imX.state.accounts.set(newServiceId, newServiceAccount)
+
+    // Update next free ID
+    imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+
+    // Set success result with new service ID
+    this.setAccumulateSuccess(registers, newServiceId)
+    return {
+      resultCode: null, // continue execution
     }
   }
 
+  /**
+   * Get next free ID according to Gray Paper specification
+   *
+   * Gray Paper line 791: i* = check(Cminpublicindex + (im_nextfreeid - Cminpublicindex + 42) mod (2^32 - Cminpublicindex - 2^8))
+   *
+   * The check function (Gray Paper line 252-255) ensures the ID is not already in use:
+   * - If ID is available, return it
+   * - Otherwise, recursively check the next candidate (increment by 1, wrapped)
+   */
   private getNextFreeId(
     currentId: bigint,
     accounts: Map<bigint, ServiceAccount>,
   ): bigint {
-    const C_MIN_PUBLIC_INDEX = 65536n // 2^16
-    const MAX_ID = 2n ** 32n - 256n // 2^32 - 2^8
+    const C_MIN_PUBLIC_INDEX = 65536n // 2^16 = Cminpublicindex
+    const MODULUS = 2n ** 32n - C_MIN_PUBLIC_INDEX - 2n ** 8n // 2^32 - Cminpublicindex - 2^8
 
-    let id = currentId
-    while (accounts.has(id)) {
-      id =
-        C_MIN_PUBLIC_INDEX +
-        ((id - C_MIN_PUBLIC_INDEX + 1n) % (MAX_ID - C_MIN_PUBLIC_INDEX))
+    // Gray Paper line 791: Calculate candidate ID
+    // i* = Cminpublicindex + (im_nextfreeid - Cminpublicindex + 42) mod (2^32 - Cminpublicindex - 2^8)
+    const candidateId =
+      C_MIN_PUBLIC_INDEX + ((currentId - C_MIN_PUBLIC_INDEX + 42n) % MODULUS)
+
+    // Gray Paper line 252-255: Apply check function to ensure ID is available
+    return this.checkServiceId(candidateId, accounts)
+  }
+
+  /**
+   * Check function from Gray Paper line 252-255
+   *
+   * check(i ∈ serviceid) = {
+   *   i                          if i ∉ keys(accounts)
+   *   check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)  otherwise
+   * }
+   */
+  private checkServiceId(
+    id: bigint,
+    accounts: Map<bigint, ServiceAccount>,
+  ): bigint {
+    const C_MIN_PUBLIC_INDEX = 65536n // 2^16 = Cminpublicindex
+    const MODULUS = 2n ** 32n - 2n ** 8n - C_MIN_PUBLIC_INDEX // 2^32 - 2^8 - Cminpublicindex
+
+    // If ID is not in accounts, return it
+    if (!accounts.has(id)) {
+      return id
     }
-    return id
+
+    // Otherwise, recursively check the next candidate
+    // (i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex
+    const nextCandidate =
+      C_MIN_PUBLIC_INDEX + ((id - C_MIN_PUBLIC_INDEX + 1n) % MODULUS)
+
+    return this.checkServiceId(nextCandidate, accounts)
   }
 }

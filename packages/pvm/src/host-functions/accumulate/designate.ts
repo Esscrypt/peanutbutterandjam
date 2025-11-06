@@ -5,13 +5,13 @@ import {
 import type {
   HostFunctionResult,
   IConfigService,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
   ValidatorPublicKeys,
 } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * DESIGNATE accumulation host function (Ω_D)
@@ -42,89 +42,71 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     this.configService = configService
   }
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications } = context
+    // Extract parameters from registers
+    const validatorsOffset = registers[7]
 
-    try {
-      // Extract parameters from registers
-      const o = registers[7]
+    // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
+    // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
+    const C_VALCOUNT = this.configService.numValidators // 1023 validators
+    const VALIDATOR_SIZE = 336 // bytes per validator
+    const totalSize = VALIDATOR_SIZE * C_VALCOUNT
 
-      // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
-      // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
-      const C_VALCOUNT = this.configService.numValidators // 1023 validators
-      const VALIDATOR_SIZE = 336 // bytes per validator
-      const totalSize = VALIDATOR_SIZE * C_VALCOUNT
-
-      const [validatorsData, faultAddress] = ram.readOctets(
-        o,
-        BigInt(totalSize),
-      )
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!validatorsData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Parse validators array (336 bytes per validator)
-      const validators: ValidatorPublicKeys[] = []
-      for (let i = 0; i < C_VALCOUNT; i++) {
-        const validatorData = validatorsData.slice(
-          i * VALIDATOR_SIZE,
-          (i + 1) * VALIDATOR_SIZE,
-        )
-        const [error, validator] = decodeValidatorPublicKeys(validatorData)
-        if (error) {
-          this.setAccumulateError(registers, 'WHAT')
-          return {
-            resultCode: RESULT_CODES.PANIC,
-          }
-        }
-        validators.push(validator.value)
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Check if current service is the delegator
-      // Gray Paper: imX.id !== imX.state.ps_delegator
-      if (imX.id !== imX.state.delegator) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Update staging set with new validators
-      // Gray Paper: (imX'.state).ps_stagingset = v
-      imX.state.stagingset = validators.map(encodeValidatorPublicKeys)
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
+    const [validatorsData, faultAddress] = ram.readOctets(
+      validatorsOffset,
+      BigInt(totalSize),
+    )
+    if (faultAddress) {
       this.setAccumulateError(registers, 'WHAT')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+    if (!validatorsData) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    // Parse validators array (336 bytes per validator)
+    const validators: ValidatorPublicKeys[] = []
+    for (let i = 0; i < C_VALCOUNT; i++) {
+      const validatorData = validatorsData.slice(
+        i * VALIDATOR_SIZE,
+        (i + 1) * VALIDATOR_SIZE,
+      )
+      const [error, validator] = decodeValidatorPublicKeys(validatorData)
+      if (error) {
+        this.setAccumulateError(registers, 'WHAT')
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      validators.push(validator.value)
+    }
+
+    // Get the current implications context
+    const [imX] = implications
+
+    // Check if current service is the delegator
+    // Gray Paper: imX.id !== imX.state.ps_delegator
+    if (imX.id !== imX.state.delegator) {
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Update staging set with new validators
+    // Gray Paper: (imX'.state).ps_stagingset = v
+    imX.state.stagingset = validators.map(encodeValidatorPublicKeys)
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 }

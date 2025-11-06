@@ -1,4 +1,4 @@
-import { hexToBytes } from '@pbnj/core'
+import { hexToBytes, logger } from '@pbnj/core'
 import {
   calculateWorkPackageHash,
   encodeWorkItem,
@@ -63,6 +63,8 @@ export class FetchHostFunction extends BaseHostFunction {
     const outputOffset = context.registers[7]
     const fromOffset = context.registers[8]
     const length = context.registers[9]
+
+    logger.info('Fetching data', { selector, outputOffset, fromOffset, length })
 
     // Fetch data based on selector according to Gray Paper specification
     const fetchedData = this.fetchData(selector, context, refineContext)

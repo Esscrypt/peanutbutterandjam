@@ -11,6 +11,7 @@ import type {
   Judgment,
   Preimage,
   SafroleTicket,
+  SafroleTicketWithoutProof,
   ServiceAccount,
   ValidatorKeyTuple,
   WorkPackage,
@@ -71,11 +72,11 @@ export interface IEntropyService extends BaseService {
 }
 
 export interface ITicketService extends BaseService {
-  getTicketAccumulator(): SafroleTicket[]
+  getTicketAccumulator(): SafroleTicketWithoutProof[]
   addReceivedTicket(ticket: SafroleTicket, publicKey: Hex): void
   addProxyValidatorTicket(ticket: SafroleTicket): void
   getProxyValidatorTickets(): SafroleTicket[]
-  getReceivedTickets(): SafroleTicket[]
+  getReceivedTickets(): SafroleTicketWithoutProof[]
 }
 
 export interface IJudgmentHolderService extends BaseService {

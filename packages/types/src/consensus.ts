@@ -415,6 +415,14 @@ export interface ConsensusError {
 }
 
 /**
+ * Validator key pair (for epoch marks - only bs + ed25519)
+ */
+export interface ValidatorKeyPair {
+  bandersnatch: Hex
+  ed25519: Hex
+}
+
+/**
  * Validator key structure
  * @param bandersnatch - Bandersnatch public key (32 bytes)
  * @param ed25519 - Ed25519 public key (32 bytes)
@@ -425,11 +433,7 @@ export interface ConsensusError {
  *   with the first 16 bytes being the IPv6 address
  *   and the latter 2 being a little endian representation of the port.
  */
-export interface ValidatorPublicKeys {
-  /** Bandersnatch key (first 32 Uint8Array) */
-  bandersnatch: Hex
-  /** Ed25519 key (next 32 Uint8Array) */
-  ed25519: Hex
+export interface ValidatorPublicKeys extends ValidatorKeyPair {
   /** BLS key (next 144 Uint8Array) */
   bls: Hex
   /** Metadata (last 128 Uint8Array) */

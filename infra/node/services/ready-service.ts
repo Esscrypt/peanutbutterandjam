@@ -34,7 +34,7 @@ export interface IReadyService {
   // Epoch slot operations
   getReadyItemsForSlot(slotIndex: bigint): ReadyItem[]
   addReadyItemToSlot(slotIndex: bigint, readyItem: ReadyItem): void
-  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): void
+  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): boolean
   clearSlot(slotIndex: bigint): void
 
   // Ready item operations
@@ -115,16 +115,52 @@ export class ReadyService extends BaseService implements IReadyService {
   /**
    * Remove ready item from a specific epoch slot
    */
-  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): void {
-    const slotItems = this.ready.epochSlots[Number(slotIndex)]
-    if (!slotItems) throw new Error('Slot items not found')
+  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): boolean {
+    const slotIndexNum = Number(slotIndex)
+    const slotItems = this.ready.epochSlots[slotIndexNum]
+    if (!slotItems) {
+      logger.warn('[ReadyService] Slot items not found', {
+        slotIndex: slotIndex.toString(),
+        epochDuration: this.configService.epochDuration,
+      })
+      return false
+    }
+
+    logger.debug('[ReadyService] Searching for ready item to remove', {
+      slotIndex: slotIndex.toString(),
+      workReportHash,
+      currentSlotItemsCount: slotItems.length,
+      currentSlotItems: slotItems.map((item) => {
+        const [hashError, hash] = calculateWorkReportHash(item.workReport)
+        return {
+          hash: hashError ? 'unknown' : hash,
+          packageHash: item.workReport.package_spec.hash,
+        }
+      }),
+    })
 
     const index = slotItems.findIndex((item) => {
       const [hashError, hash] = calculateWorkReportHash(item.workReport)
       return !hashError && hash === workReportHash
     })
-    if (index === -1) throw new Error('Ready item not found')
+    if (index === -1) {
+      logger.warn('[ReadyService] Ready item not found in slot', {
+        slotIndex: slotIndex.toString(),
+        workReportHash,
+        slotItemsCount: slotItems.length,
+      })
+      return false
+    }
+
+    const removedItem = slotItems[index]
     slotItems.splice(index, 1)
+    logger.debug('[ReadyService] Removed ready item from slot', {
+      slotIndex: slotIndex.toString(),
+      workReportHash,
+      removedPackageHash: removedItem.workReport.package_spec.hash,
+      remainingSlotItemsCount: slotItems.length,
+    })
+    return true
   }
 
   /**

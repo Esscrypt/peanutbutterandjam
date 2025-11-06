@@ -128,6 +128,7 @@ describe('Accumulate Test Vector Execution', () => {
               hostFunctionRegistry: new HostFunctionRegistry(serviceAccountService, configService),
               accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
               configService: configService,
+              entropyService: entropyService,
               pvmOptions: { gasCounter: 1_000_000n },
             })
             const privilegesService = new PrivilegesService({
@@ -207,10 +208,18 @@ describe('Accumulate Test Vector Execution', () => {
               return
             }
 
+            if (!result.ok) {
+              const errorMessage =
+                result.err instanceof Error ? result.err.message : String(result.err)
+              console.error('applyTransition failed:', errorMessage)
+              if (result.err instanceof Error && result.err.stack) {
+                console.error('Stack trace:', result.err.stack)
+              }
+            }
             expect(result.ok).toBe(true)
 
             // Verify post_state
-            // 1. Verify ready_queue
+            // 1. Verify ready_queue - exact match
             const postReady = accumulationService.getReady()
             const expectedReady = convertToReady(
               vector.post_state.ready_queue,
@@ -219,7 +228,43 @@ describe('Accumulate Test Vector Execution', () => {
             )
             expect(postReady.epochSlots.length).toBe(expectedReady.epochSlots.length)
             for (let i = 0; i < postReady.epochSlots.length; i++) {
-              expect(postReady.epochSlots[i].length).toBe(expectedReady.epochSlots[i].length)
+              const postSlot = postReady.epochSlots[i]
+              const expectedSlot = expectedReady.epochSlots[i]
+              if (postSlot.length !== expectedSlot.length) {
+                console.error(`Slot ${i} mismatch: expected ${expectedSlot.length}, got ${postSlot.length}`)
+                console.error(`Expected slot ${i}:`, expectedSlot.map(item => ({
+                  package: item.workReport.package_spec.hash.slice(0, 40),
+                  deps: Array.from(item.dependencies).map(d => d.slice(0, 20))
+                })))
+                console.error(`Actual slot ${i}:`, postSlot.map(item => ({
+                  package: item.workReport.package_spec.hash.slice(0, 40),
+                  deps: Array.from(item.dependencies).map(d => d.slice(0, 20))
+                })))
+              }
+              expect(postSlot.length).toBe(expectedSlot.length)
+              
+              // Sort items by package hash for comparison
+              const hashComparator = (a: ReadyItem, b: ReadyItem): number =>
+                a.workReport.package_spec.hash.localeCompare(b.workReport.package_spec.hash)
+              
+              const postSorted = [...postSlot].sort(hashComparator)
+              const expectedSorted = [...expectedSlot].sort(hashComparator)
+              
+              // Compare each item exactly
+              for (let j = 0; j < postSorted.length; j++) {
+                const postItem = postSorted[j]
+                const expectedItem = expectedSorted[j]
+                
+                // Compare package hash
+                expect(postItem.workReport.package_spec.hash).toBe(
+                  expectedItem.workReport.package_spec.hash
+                )
+                
+                // Compare dependencies (as sorted arrays)
+                const postDeps = Array.from(postItem.dependencies).sort()
+                const expectedDeps = Array.from(expectedItem.dependencies).sort()
+                expect(postDeps).toEqual(expectedDeps)
+              }
             }
 
             // 2. Verify accumulated

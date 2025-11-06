@@ -1,12 +1,10 @@
 import { bytesToHex } from '@pbnj/core'
-import type {
-  HostFunctionResult,
-  ImplicationsPair,
-  RAM,
-  RegisterState,
-} from '@pbnj/types'
+import type { HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
-import { BaseAccumulateHostFunction } from './base'
+import {
+  type AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+} from './base'
 
 /**
  * PROVIDE accumulation host function (Ω_♈)
@@ -35,105 +33,91 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
   readonly name = 'provide'
   readonly gasCost = 10n
 
-  execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-  ): HostFunctionResult {
-    // Validate execution
-    if (gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const { registers, ram, implications } = context
+    // Gray Paper line 204: Ω_F receives H_timeslot (block header's timeslot)
+    // This is the current block's timeslot passed from the Accumulate invocation
 
-    try {
-      // Extract parameters from registers
-      const [s, o, z] = registers.slice(7, 10)
+    // Extract parameters from registers
+    const [targetServiceId, preimageOffset, preimageLength] = registers.slice(
+      7,
+      10,
+    )
 
-      // Determine target service ID
-      // Gray Paper: s = imX.id when registers[7] = 2^64-1, otherwise registers[7]
-      const serviceId = s === 2n ** 64n - 1n ? context[0].id : s
+    // Determine target service ID
+    // Gray Paper: s = imX.id when registers[7] = 2^64-1, otherwise registers[7]
+    const serviceId =
+      targetServiceId === 2n ** 64n - 1n ? implications[0].id : targetServiceId
 
-      // Read preimage data from memory
-      const [preimageData, faultAddress] = ram.readOctets(o, z)
-      if (faultAddress) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      if (!preimageData) {
-        this.setAccumulateError(registers, 'WHAT')
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-
-      // Get the current implications context
-      const [imX] = context
-
-      // Check if service account exists
-      const serviceAccount = imX.state.accounts.get(serviceId)
-      if (!serviceAccount) {
-        this.setAccumulateError(registers, 'WHO')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Compute hash of the preimage data
-      const preimageHash = bytesToHex(preimageData)
-
-      // Check if there's a matching request for this hash and size
-      // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
-      const requestMap = serviceAccount.requests.get(preimageHash)
-      if (!requestMap) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      const request = requestMap.get(z)
-      if (!request || request.length !== 0) {
-        // Request doesn't exist or is not empty (already provided)
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Check if the preimage hasn't already been provided
-      // Gray Paper: (s, i) ∈ imX.provisions
-      // Note: We use a simple approach here - in practice, provisions would be a set of tuples
-      // For now, we'll use the service ID as the key and check if the data matches
-      const existingProvision = imX.provisions.get(serviceId)
-      if (
-        existingProvision &&
-        this.arraysEqual(existingProvision, preimageData)
-      ) {
-        this.setAccumulateError(registers, 'HUH')
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Add the preimage to provisions
-      // Gray Paper: imX.provisions ∪ {(s, i)}
-      imX.provisions.set(serviceId, preimageData)
-
-      // Set success result
-      this.setAccumulateSuccess(registers)
-      return {
-        resultCode: null, // continue execution
-      }
-    } catch {
-      this.setAccumulateError(registers, 'WHAT')
+    // Read preimage data from memory
+    const [preimageData, faultAddress] = ram.readOctets(
+      preimageOffset,
+      preimageLength,
+    )
+    if (faultAddress || !preimageData) {
       return {
         resultCode: RESULT_CODES.PANIC,
       }
+    }
+
+    // Get the current implications context
+    const [imX] = implications
+
+    // Check if service account exists
+    const serviceAccount = imX.state.accounts.get(serviceId)
+    if (!serviceAccount) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Compute hash of the preimage data
+    const preimageHash = bytesToHex(preimageData)
+
+    // Check if there's a matching request for this hash and size
+    // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
+    const requestMap = serviceAccount.requests.get(preimageHash)
+    if (!requestMap) {
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    const request = requestMap.get(preimageLength)
+    if (!request) {
+      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Check if the preimage hasn't already been provided
+    // Gray Paper: (s, i) ∈ imX.provisions
+    // Note: We use a simple approach here - in practice, provisions would be a set of tuples
+    // For now, we'll use the service ID as the key and check if the data matches
+    const existingProvision = imX.provisions.get(serviceId)
+    if (
+      existingProvision &&
+      this.arraysEqual(existingProvision, preimageData)
+    ) {
+      // Gray Paper line 942: HUH when a = error (preimage already provided)
+      this.setAccumulateError(registers, 'HUH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Add the preimage to provisions
+    // Gray Paper: imX.provisions ∪ {(s, i)}
+    imX.provisions.set(serviceId, preimageData)
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return {
+      resultCode: null, // continue execution
     }
   }
 

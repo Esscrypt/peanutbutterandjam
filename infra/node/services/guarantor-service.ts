@@ -84,7 +84,7 @@ export class GuarantorService extends BaseService {
   private readonly authPoolService: AuthPoolService
   private readonly networkService: NetworkingService | null
   private readonly ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol | null
-  private readonly keyPairService: KeyPairService
+  private readonly keyPairService: KeyPairService | null
   private readonly workReportService: WorkReportService
   private readonly eventBusService: EventBusService
   private readonly validatorSetManager: ValidatorSetManager
@@ -101,7 +101,7 @@ export class GuarantorService extends BaseService {
     authPoolService: AuthPoolService
     networkService: NetworkingService | null
     ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol | null
-    keyPairService: KeyPairService
+    keyPairService: KeyPairService | null
     workReportService: WorkReportService
     eventBusService: EventBusService
     validatorSetManager: ValidatorSetManager
@@ -143,6 +143,9 @@ export class GuarantorService extends BaseService {
   }
 
   start(): Safe<boolean> | SafePromise<boolean> {
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not found'))
+    }
     const publicKey =
       this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
     const [validatorIndexError, validatorIndex] =
@@ -1243,6 +1246,9 @@ export class GuarantorService extends BaseService {
   private async finalizeAndDistributeWorkReport(
     workReportHash: Hex,
   ): Promise<void> {
+    if (!this.keyPairService) {
+      return
+    }
     const pending = this.pendingSignatures.get(workReportHash)
     if (!pending) {
       return

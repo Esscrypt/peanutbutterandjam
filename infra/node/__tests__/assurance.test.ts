@@ -17,7 +17,6 @@ import { AssuranceService } from '../services/assurance-service'
 import { ConfigService } from '../services/config-service'
 import { ValidatorSetManager } from '../services/validator-set'
 import { WorkReportService } from '../services/work-report-service'
-import { ClockService } from '../services/clock-service'
 
 // Helper function to convert JSON numbers to bigints for WorkReport
 function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
@@ -135,12 +134,12 @@ describe('Assurance Service - JAM Test Vectors', () => {
               ringProver: null,
               ticketService: null,
               configService: configService,
-              initialValidators: new Map(vector.pre_state.curr_validators.map((validator, index) => [index, {
+              initialValidators: vector.pre_state.curr_validators.map((validator) => ({
                 bandersnatch: validator.bandersnatch,
                 ed25519: validator.ed25519,
                 bls: validator.bls,
                 metadata: validator.metadata,
-              }])),
+              })),
             })
             const workReportService = new WorkReportService({
               workStore: null,
@@ -187,7 +186,7 @@ describe('Assurance Service - JAM Test Vectors', () => {
 
             // Step 3: Validate assurances
               // If validation didn't fail, try state transition (error might come from transition)
-              const [transitionError] = assuranceService.applyAssuranceTransition(
+              const [transitionError] = assuranceService.applyAssurances(
                 vector.input.assurances,
                 vector.input.slot,
                 vector.input.parent,

@@ -187,7 +187,7 @@ export class AssuranceService extends BaseService {
    * 1. Just became available (reached 2/3 supermajority)
    * 2. Timed out (exceeded assurance timeout period)
    */
-  applyAssuranceTransition(
+  applyAssurances(
     assurances: Assurance[],
     currentSlot: number,
     parentHash: Hex,

@@ -6,6 +6,14 @@ import type {
 } from '@pbnj/types'
 import { ACCUMULATE_ERROR_CODES } from '../../config'
 
+export interface AccumulateHostFunctionContext {
+  gasCounter: bigint
+  registers: RegisterState
+  ram: RAM
+  implications: ImplicationsPair
+  timeslot: bigint
+}
+
 /**
  * Base abstract class for all accumulation host functions
  *
@@ -20,11 +28,7 @@ export abstract class BaseAccumulateHostFunction {
   public abstract readonly gasCost: bigint
 
   public abstract execute(
-    gasCounter: bigint,
-    registers: RegisterState,
-    ram: RAM,
-    context: ImplicationsPair,
-    timeslot?: bigint,
+    context: AccumulateHostFunctionContext,
   ): HostFunctionResult
 
   // Helper methods for accumulation-specific operations

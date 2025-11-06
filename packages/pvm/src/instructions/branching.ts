@@ -28,7 +28,7 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
       registerA,
     )
 
-    console.log('Executing BRANCH_EQ_IMM instruction', {
+    logger.debug('Executing BRANCH_EQ_IMM instruction', {
       bitmask: context.bitmask,
       opcode: this.opcode,
       name: this.name,
@@ -60,13 +60,6 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
-  }
 }
 
 /**
@@ -97,6 +90,9 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
       }
 
       logger.debug('BRANCH_NE_IMM: Branching to valid basic block start', {
+        registerA,
+        immediateX,
+        registerValue,
         targetAddress,
         currentPC: context.pc,
       })

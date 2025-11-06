@@ -382,16 +382,8 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     return value
   }
   protected signedCompare(a: bigint, b: bigint): number {
-    // Convert to signed by checking MSB
-    const toSigned = (val: bigint): bigint => {
-      if (val >= 2n ** 63n) {
-        return val - 2n ** 64n
-      }
-      return val
-    }
-
-    const signedA = toSigned(a)
-    const signedB = toSigned(b)
+    const signedA = this.toSigned64(a)
+    const signedB = this.toSigned64(b)
 
     if (signedA < signedB) return -1
     if (signedA > signedB) return 1
@@ -485,21 +477,6 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     const signBit = (rawOffset >> signBitPosition) & 1n
     const offset =
       signBit === 0n ? rawOffset : rawOffset - 2n ** BigInt(8 * lengthX)
-
-    // Debug logging for problematic cases
-    if (rawOffset > 1000n || offset !== rawOffset) {
-      console.log('parseOneOffset: Sign function applied', {
-        operands: Array.from(operands),
-        fskip,
-        lengthX,
-        currentPC: currentPC.toString(),
-        rawOffset: rawOffset.toString(),
-        signBitPosition: signBitPosition.toString(),
-        signBit: signBit.toString(),
-        offset: offset.toString(),
-        targetAddress: (currentPC + offset).toString(),
-      })
-    }
 
     // Calculate target address: immed_X = ι + signfunc{l_X}(offset)
     const targetAddress = currentPC + offset
@@ -619,6 +596,33 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected signExtend32(value: bigint): bigint {
     return this.signExtend(value & 0xffffffffn, 4)
+  }
+
+  /**
+   * Convert a sign-extended value to a signed offset for relative addressing
+   * If the sign-extended value has the high bit set (>= 2^63), interpret as negative
+   * This allows PC + signedOffset to effectively subtract when the offset is negative
+   *
+   * The sign extension already creates the correct two's complement representation,
+   * but we need to convert it from unsigned bigint to signed interpretation.
+   *
+   * @param signExtendedValue The sign-extended value (64-bit bigint)
+   * @param originalLength The original length in bytes of the encoded value (for debugging)
+   * @returns Signed offset that can be added to PC (negative if high bit is set)
+   */
+  protected toSigned64(signExtendedValue: bigint): bigint {
+    // Convert unsigned 64-bit value to signed 64-bit interpretation
+    return signExtendedValue >= 2n ** 63n
+      ? signExtendedValue - 2n ** 64n
+      : signExtendedValue
+  }
+
+  protected toUnsigned64(value: bigint): bigint {
+    // Convert signed back to unsigned
+    if (value < 0n) {
+      return value + 2n ** 64n
+    }
+    return value
   }
 
   /**

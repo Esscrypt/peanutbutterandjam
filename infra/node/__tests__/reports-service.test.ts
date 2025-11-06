@@ -125,18 +125,13 @@ describe('Reports - JAM Test Vectors', () => {
             keyPairService: null,
             ringProver: null,
             ticketService: null,
-            configService,
-            initialValidators: new Map(
-              vector.pre_state.curr_validators.map((validator, index) => [
-                index,
-                {
-                  bandersnatch: validator.bandersnatch,
-                  ed25519: validator.ed25519,
-                  bls: validator.bls,
-                  metadata: validator.metadata,
-                },
-              ]),
-            ),
+            configService: configService,
+            initialValidators: vector.pre_state.curr_validators.map((validator, index) => ({
+              bandersnatch: validator.bandersnatch,
+              ed25519: validator.ed25519,
+              bls: validator.bls,
+              metadata: validator.metadata,
+            })),
           })
 
           // Set previous epoch validators (prev_validators from pre_state)
@@ -166,18 +161,21 @@ describe('Reports - JAM Test Vectors', () => {
 
           // Step 3: Initialize RecentHistoryService and set recent_blocks from pre_state
           const recentHistoryService = new RecentHistoryService(
-            eventBusService,
-            configService,
+            {
+              eventBusService: eventBusService,
+              configService: configService,
+            },
           )
-          recentHistoryService.setRecentHistoryFromPreState({
-            beta: {
-              history: vector.pre_state.recent_blocks.history.map((entry) => ({
-                header_hash: entry.header_hash,
-                beefy_root: entry.beefy_root,
-                state_root: entry.state_root,
-                reported: entry.reported,
-              })),
-              mmr: vector.pre_state.recent_blocks.mmr,
+          recentHistoryService.setRecent({
+            history: vector.pre_state.recent_blocks.history.map((entry) => ({
+              headerHash: entry.header_hash,
+              stateRoot: entry.state_root,
+              accoutLogSuperPeak: entry.beefy_root,
+              reportedPackageHashes: new Map(entry.reported.map((pkg) => [pkg.hash, pkg.exports_root])),
+            })),
+            accoutBelt: {
+              peaks: vector.pre_state.recent_blocks.mmr.peaks,
+              totalCount: BigInt(vector.pre_state.recent_blocks.mmr.peaks.length),
             },
           })
           recentHistoryService.start()
