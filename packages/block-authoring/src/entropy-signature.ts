@@ -1,4 +1,4 @@
-import { generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
+import { banderout, generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
 import {
   type IKeyPairService,
   type SafePromise,
@@ -12,7 +12,9 @@ import {
  * Gray Paper Eq. 158: H_vrfsig ∈ bssignature(H_authorbskey, Xentropy ∥ banderout(H_sealsig), [])
  * Where Xentropy = "$jam_entropy"
  *
- * Note: sealSignature parameter should be the VRF output hash from the seal signature (banderout result)
+ * @param sealSignature - Full 96-byte seal signature (H_sealsig)
+ * @param keyPairService - Key pair service for author's Bandersnatch key
+ * @returns 96-byte VRF signature (H_vrfsig)
  */
 export async function generateVRFSignature(
   sealSignature: Uint8Array,
@@ -27,11 +29,18 @@ export async function generateVRFSignature(
     )
   }
 
+  // Extract banderout{H_sealsig} from the seal signature
+  // Gray Paper: banderout{s ∈ bssignature{k}{c}{m}} ∈ hash ≡ text{output}(x | x ∈ bssignature{k}{c}{m})[:32]
+  const [extractError, sealOutput] = banderout(sealSignature)
+  if (extractError) {
+    return safeError(extractError)
+  }
+
   // Use safrole helper function for entropy VRF signature generation
   // Gray Paper Eq. 158: H_vrfsig ∈ bssignature(H_authorbskey, Xentropy ∥ banderout(H_sealsig), [])
   const [vrfError, vrfResult] = generateEntropyVRFSignature(
     authorBandersnatchKey,
-    sealSignature, // This should be the VRF output hash from seal signature (banderout result)
+    sealOutput, // banderout{H_sealsig} - 32-byte VRF output hash
   )
   if (vrfError) {
     return safeError(vrfError)

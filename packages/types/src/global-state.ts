@@ -17,7 +17,13 @@ import type {
   ValidatorKeyPair,
   ValidatorPublicKeys,
 } from './consensus'
-import type { SafroleTicket, ServiceAccount, WorkReport } from './serialization'
+import type {
+  SafroleTicket,
+  SafroleTicketWithoutProof,
+  ServiceAccount,
+  ServiceAccountCore,
+  WorkReport,
+} from './serialization'
 
 // ============================================================================
 // State Component Types
@@ -433,11 +439,11 @@ export type StateComponent =
   /** Recent activity (β) - Recent blocks and accumulation outputs */
   | Recent
   /** Last accumulation output (θ) - Most recent accumulation result */
-  | Hex
+  | Map<bigint, Hex>
   /** Safrole state (γ) - Consensus protocol internal state */
   | SafroleState
   /** Service accounts (δ) - All service (smart contract) state */
-  | ServiceAccounts
+  | ServiceAccountCore // ServiceAccountCore is a single service account core, not a map of service account cores, since we handle the state in separate key/val pairs
   /** Entropy (ε) - On-chain randomness accumulator */
   | EntropyState
   /** Staging validator set (ι) - Validators queued for next epoch */
@@ -467,7 +473,8 @@ export interface GlobalState {
   /** 2. Recent activity (β) - Chapter C(3): Recent blocks and accumulation outputs */
   recent: Recent
   /** 3. Last accumulation output (θ) - Chapter C(16): Most recent accumulation result */
-  lastaccout: Hex
+  //lastaccout ∈ sequence{tuple{serviceid, hash}}
+  lastAccumulationOutput: Map<bigint, Hex>
   /** 4. Safrole state (γ) - Chapter C(4): Consensus protocol internal state */
   safrole: SafroleState
   /** 5. Service accounts (δ) - Chapter C(255): All service (smart contract) state */
@@ -531,7 +538,7 @@ export interface BlockHeader {
   extrinsicHash: Hex // ✅ H_extrinsichash
   timeslot: bigint // ✅ H_timeslot
   epochMark: EpochMark | null // ✅ H_epochmark
-  winnersMark: SafroleTicket[] | null // ✅ H_winnersmark
+  winnersMark: SafroleTicketWithoutProof[] | null // ✅ H_winnersmark (Gray Paper: tuple{st_id, st_entryindex} - no proof)
   offendersMark: Hex[] // ✅ H_offendersmark
   authorIndex: bigint // ✅ H_authorindex
   vrfSig: Hex // ✅ H_vrfsig

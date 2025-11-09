@@ -53,7 +53,12 @@
  */
 
 import { concatBytes } from '@pbnj/core'
-import type { DecodingResult, Privileges, Safe } from '@pbnj/types'
+import type {
+  DecodingResult,
+  IConfigService,
+  Privileges,
+  Safe,
+} from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import {
   type DictionaryEntry,
@@ -61,6 +66,7 @@ import {
   encodeDictionary,
 } from '../core/dictionary'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
+import { encodeSequenceGeneric } from '../core/sequence'
 
 /**
  * Encode privileges according to Gray Paper specification.
@@ -106,30 +112,54 @@ import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
  * @param configService - Configuration service for core count
  * @returns Encoded octet sequence
  */
-export function encodePrivileges(privileges: Privileges): Safe<Uint8Array> {
+export function encodePrivileges(
+  privileges: Privileges,
+  configService: IConfigService,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Gray Paper: encode[4]{manager, assigners, delegator, registrar}
-  // This is a 16-byte fixed sequence: 4 bytes each for manager, assigners, delegator, registrar
-  const privilegeBytes = new Uint8Array(16)
-  const view = new DataView(privilegeBytes.buffer)
+  // manager: encode[4]{serviceid} = 4 bytes
+  // assigners: sequence[Ccorecount]{encode[4]{serviceid}} = 4 * Ccorecount bytes (fixed-length sequence, no length prefix)
+  // delegator: encode[4]{serviceid} = 4 bytes
+  // registrar: encode[4]{serviceid} = 4 bytes
 
   // Manager (4 bytes)
-  view.setUint32(0, Number(privileges.manager), true)
+  const [managerError, managerBytes] = encodeFixedLength(privileges.manager, 4n)
+  if (managerError) return safeError(managerError)
+  parts.push(managerBytes)
 
-  // Assigners (4 bytes) - Note: This appears to be a single value in the Gray Paper formula
-  // but the interface has assigners as an array. We'll encode the first assigner or 0
-  const firstAssigner =
-    privileges.assigners.length > 0 ? privileges.assigners[0] : 0n
-  view.setUint32(4, Number(firstAssigner), true)
+  // Assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
+  const coreCount = configService.numCores
+  const paddedAssigners = Array.from(privileges.assigners)
+  // Pad to Ccorecount if needed
+  while (paddedAssigners.length < coreCount) {
+    paddedAssigners.push(0n)
+  }
+  // Truncate to Ccorecount if needed
+  const assignersToEncode = paddedAssigners.slice(0, coreCount)
+  const [assignersError, assignersBytes] = encodeSequenceGeneric(
+    assignersToEncode,
+    (serviceId) => encodeFixedLength(serviceId, 4n),
+  )
+  if (assignersError) return safeError(assignersError)
+  parts.push(assignersBytes)
 
   // Delegator (4 bytes)
-  view.setUint32(8, Number(privileges.delegator), true)
+  const [delegatorError, delegatorBytes] = encodeFixedLength(
+    privileges.delegator,
+    4n,
+  )
+  if (delegatorError) return safeError(delegatorError)
+  parts.push(delegatorBytes)
 
   // Registrar (4 bytes)
-  view.setUint32(12, Number(privileges.registrar), true)
-
-  parts.push(privilegeBytes)
+  const [registrarError, registrarBytes] = encodeFixedLength(
+    privileges.registrar,
+    4n,
+  )
+  if (registrarError) return safeError(registrarError)
+  parts.push(registrarBytes)
 
   // Gray Paper: alwaysaccers - dictionary{serviceid}{gas}
   // Convert Map to DictionaryEntry array for proper dictionary encoding
@@ -183,24 +213,68 @@ export function encodePrivileges(privileges: Privileges): Safe<Uint8Array> {
  */
 export function decodePrivileges(
   data: Uint8Array,
+  configService: IConfigService,
 ): Safe<DecodingResult<Privileges>> {
   let currentData = data
 
-  // Gray Paper: decode[4]{manager, assigners, delegator, registrar}
-  if (currentData.length < 16) {
-    return safeError(new Error('Insufficient data for privileges header'))
+  // Gray Paper: encode[4]{manager, assigners, delegator, registrar}
+  // manager: encode[4]{serviceid} = 4 bytes
+  // assigners: sequence[Ccorecount]{encode[4]{serviceid}} = 4 * Ccorecount bytes (fixed-length sequence, no length prefix)
+  // delegator: encode[4]{serviceid} = 4 bytes
+  // registrar: encode[4]{serviceid} = 4 bytes
+
+  // Decode manager (4 bytes)
+  if (currentData.length < 4) {
+    return safeError(new Error('Insufficient data for manager'))
+  }
+  const [managerError, managerResult] = decodeFixedLength(
+    currentData.slice(0, 4),
+    4n,
+  )
+  if (managerError) return safeError(managerError)
+  const manager = managerResult.value
+  currentData = currentData.slice(4)
+
+  // Decode assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
+  const coreCount = configService.numCores
+  const assigners: bigint[] = []
+  for (let i = 0; i < coreCount; i++) {
+    if (currentData.length < 4) {
+      return safeError(
+        new Error(
+          `Insufficient data for assigner service ID at index ${i} (expected ${coreCount} total)`,
+        ),
+      )
+    }
+    const [error, result] = decodeFixedLength(currentData.slice(0, 4), 4n)
+    if (error) return safeError(error)
+    assigners.push(result.value)
+    currentData = currentData.slice(4)
   }
 
-  const privilegeBytes = currentData.slice(0, 16)
-  const view = new DataView(privilegeBytes.buffer)
+  // Decode delegator (4 bytes)
+  if (currentData.length < 4) {
+    return safeError(new Error('Insufficient data for delegator'))
+  }
+  const [delegatorError, delegatorResult] = decodeFixedLength(
+    currentData.slice(0, 4),
+    4n,
+  )
+  if (delegatorError) return safeError(delegatorError)
+  const delegator = delegatorResult.value
+  currentData = currentData.slice(4)
 
-  // Decode manager, assigners, delegator, registrar (4 bytes each)
-  const manager = BigInt(view.getUint32(0, true))
-  const assigners = BigInt(view.getUint32(4, true)) // Single value from Gray Paper
-  const delegator = BigInt(view.getUint32(8, true))
-  const registrar = BigInt(view.getUint32(12, true))
-
-  currentData = currentData.slice(16)
+  // Decode registrar (4 bytes)
+  if (currentData.length < 4) {
+    return safeError(new Error('Insufficient data for registrar'))
+  }
+  const [registrarError, registrarResult] = decodeFixedLength(
+    currentData.slice(0, 4),
+    4n,
+  )
+  if (registrarError) return safeError(registrarError)
+  const registrar = registrarResult.value
+  currentData = currentData.slice(4)
 
   // Gray Paper: alwaysaccers - dictionary{serviceid}{gas}
   const [error, decoded] = decodeDictionary(currentData, 4, 4) // 4 bytes for serviceId, 4 bytes for gas
@@ -235,7 +309,7 @@ export function decodePrivileges(
       manager,
       delegator,
       registrar,
-      assigners: [assigners], // Convert single value to array for interface compatibility
+      assigners,
       alwaysaccers: alwaysAccers,
     },
     remaining: currentData,

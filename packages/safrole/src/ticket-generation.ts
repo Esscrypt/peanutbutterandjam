@@ -206,7 +206,6 @@ export function generateTicketsForEpoch(
  */
 export function verifyTicket(
   ticket: SafroleTicket,
-  keyPairService: IKeyPairService,
   entropyService: IEntropyService,
   validatorSetManager: IValidatorSetManager,
 ): Safe<boolean> {
@@ -256,21 +255,15 @@ export function verifyTicket(
     return safeError(new Error('No valid ring keys found'))
   }
 
-  const localKeyPair = keyPairService.getLocalKeyPair()
-
-  const [proverIndexError, proverIndex] = validatorSetManager.getValidatorIndex(
-    bytesToHex(localKeyPair.ed25519KeyPair.publicKey),
-  )
-  if (proverIndexError) {
-    return safeError(proverIndexError)
-  }
-
+  // Gray Paper: Ring VRF proofs are anonymous - we don't need to know which validator
+  // created the proof. The verification only needs the ring keys, proof, and context.
+  // The proverIndex is not used during verification (it's only needed during proof generation).
   // Step 2: Create Ring VRF input for verification
   const ringVRFInput = {
     input: vrfContext,
     auxData: vrfMessage,
     ringKeys: sortedRingKeys,
-    proverIndex: Number(proverIndex), // Will be determined during verification
+    proverIndex: 0, // Not used during verification - Ring VRF is anonymous
   }
 
   // Step 3: Serialize the Ring VRF result for verification

@@ -292,15 +292,6 @@ describe('Hash Function Compatibility', () => {
     expect(result?.length).toBe(32)
   })
 
-  it('should produce different results with different hash functions', () => {
-    const values = [hexToBytes('0x1234567890abcdef')]
-    const [blakeError, blakeResult] = merklizewb(values)
-    const [keccakError, keccakResult] = merklizewb(values)
-    expect(blakeError).toBeUndefined()
-    expect(keccakError).toBeUndefined()
-    // Now that we have proper Keccak implementation, they should be different
-    expect(blakeResult).not.toEqual(keccakResult)
-  })
 })
 
 describe('Gray Paper Compliance Examples', () => {

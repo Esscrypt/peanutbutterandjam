@@ -726,6 +726,83 @@ export class ServiceAccountService
     return safeResult(undefined)
   }
 
+  setServiceAccountCore(
+    serviceId: bigint,
+    serviceAccountCore: ServiceAccountCore,
+  ): Safe<void> {
+    this.coreServiceAccounts.set(serviceId, serviceAccountCore)
+    this.serviceStorage.set(serviceId, new Map<Hex, Uint8Array>())
+    this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
+    this.serviceRequests.set(
+      serviceId,
+      new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
+    )
+    return safeResult(undefined)
+  }
+
+  setStorage(serviceId: bigint, key: Hex, value: Uint8Array): Safe<void> {
+    const storage = this.serviceStorage.get(serviceId)
+    if (!storage) {
+      return safeError(new Error('Storage not found'))
+    }
+    storage.set(key, value)
+    return safeResult(undefined)
+  }
+
+  setPreimage(
+    serviceId: bigint,
+    preimageHash: Hex,
+    blob: Uint8Array,
+  ): Safe<void> {
+    const preimage = this.servicePreimages.get(serviceId)
+    if (!preimage) {
+      return safeError(new Error('Preimage not found'))
+    }
+    preimage.set(preimageHash, blob)
+    return safeResult(undefined)
+  }
+
+  setPreimageRequest(
+    serviceId: bigint,
+    preimageHash: Hex,
+    timeslots: bigint[],
+  ): Safe<void> {
+    // Ensure preimages map exists
+    if (!this.servicePreimages.has(serviceId)) {
+      this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
+    }
+    // Ensure requests map exists
+    if (!this.serviceRequests.has(serviceId)) {
+      this.serviceRequests.set(
+        serviceId,
+        new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
+      )
+    }
+
+    // get blob length from preimage hash
+    const preimage = this.servicePreimages.get(serviceId)?.get(preimageHash)
+    if (!preimage) {
+      // If preimage doesn't exist, we can't determine the blob length
+      // This is a limitation when decoding from test vectors
+      // For now, use 0 as a placeholder length
+      const blobLength = 0n
+      const requestMap = this.serviceRequests.get(serviceId)!
+      if (!requestMap.has(preimageHash)) {
+        requestMap.set(preimageHash, new Map<bigint, PreimageRequestStatus>())
+      }
+      const request = requestMap.get(preimageHash)!
+      request.set(blobLength, timeslots)
+      return safeResult(undefined)
+    }
+    const blobLength = BigInt(preimage.length)
+    const requestMap = this.serviceRequests.get(serviceId)!
+    if (!requestMap.has(preimageHash)) {
+      requestMap.set(preimageHash, new Map<bigint, PreimageRequestStatus>())
+    }
+    const request = requestMap.get(preimageHash)!
+    request.set(blobLength, timeslots)
+    return safeResult(undefined)
+  }
   /**
    * Update service account
    */
@@ -771,6 +848,14 @@ export class ServiceAccountService
     return safeResult({ ...accountCore, storage, preimages, requests })
   }
 
+  getServiceAccountCore(serviceId: bigint): Safe<ServiceAccountCore> {
+    const accountCore = this.coreServiceAccounts.get(serviceId)
+    if (!accountCore) {
+      return safeError(new Error('Service account not found'))
+    }
+    return safeResult(accountCore)
+  }
+
   /**
    * Create new service account
    *
@@ -782,6 +867,16 @@ export class ServiceAccountService
   ): void {
     this.coreServiceAccounts.set(serviceId, accountCore)
     this.serviceStorage.set(serviceId, new Map<Hex, Uint8Array>())
+    // Initialize preimages and requests maps if they don't exist
+    if (!this.servicePreimages.has(serviceId)) {
+      this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
+    }
+    if (!this.serviceRequests.has(serviceId)) {
+      this.serviceRequests.set(
+        serviceId,
+        new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
+      )
+    }
   }
 
   /**

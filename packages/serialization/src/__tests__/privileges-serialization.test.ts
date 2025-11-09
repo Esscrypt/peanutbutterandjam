@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { encodePrivileges, decodePrivileges } from '../state/privileges'
 import type { Privileges } from '@pbnj/types'
+import { ConfigService } from '../../../infra/node/services/config-service'
 
 describe('Privileges Serialization', () => {
+  const configService = new ConfigService('tiny')
   const mockPrivileges: Privileges = {
     manager: 1n,
     delegator: 2n,
@@ -23,17 +25,23 @@ describe('Privileges Serialization', () => {
   }
 
   it('should encode and decode privileges with all fields', () => {
-    const [encodeError, encodedData] = encodePrivileges(mockPrivileges)
+    const [encodeError, encodedData] = encodePrivileges(
+      mockPrivileges,
+      configService,
+    )
     expect(encodeError).toBeUndefined()
     expect(encodedData).toBeDefined()
 
-    const [decodeError, decoded] = decodePrivileges(encodedData!)
+    const [decodeError, decoded] = decodePrivileges(encodedData!, configService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
     expect(decoded!.value.manager).toBe(1n)
     expect(decoded!.value.delegator).toBe(2n)
     expect(decoded!.value.registrar).toBe(3n)
-    expect(decoded!.value.assigners).toEqual([4n]) // Only first assigner is encoded
+    expect(decoded!.value.assigners.length).toBe(configService.numCores)
+    expect(decoded!.value.assigners[0]).toBe(4n)
+    expect(decoded!.value.assigners[1]).toBe(5n)
+    expect(decoded!.value.assigners[2]).toBe(6n)
     expect(decoded!.value.alwaysaccers.size).toBe(2)
     expect(decoded!.value.alwaysaccers.get(10n)).toBe(1000n)
     expect(decoded!.value.alwaysaccers.get(11n)).toBe(2000n)
@@ -44,13 +52,14 @@ describe('Privileges Serialization', () => {
     expect(encodeError).toBeUndefined()
     expect(encodedData).toBeDefined()
 
-    const [decodeError, decoded] = decodePrivileges(encodedData!)
+    const [decodeError, decoded] = decodePrivileges(encodedData!, configService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
     expect(decoded!.value.manager).toBe(0n)
     expect(decoded!.value.delegator).toBe(0n)
     expect(decoded!.value.registrar).toBe(0n)
-    expect(decoded!.value.assigners).toEqual([0n])
+    expect(decoded!.value.assigners.length).toBe(configService.numCores)
+    expect(decoded!.value.assigners.every((a) => a === 0n)).toBe(true)
     expect(decoded!.value.alwaysaccers.size).toBe(0)
   })
 
@@ -71,13 +80,16 @@ describe('Privileges Serialization', () => {
     expect(encodeError).toBeUndefined()
     expect(encodedData).toBeDefined()
 
-    const [decodeError, decoded] = decodePrivileges(encodedData!)
+    const [decodeError, decoded] = decodePrivileges(encodedData!, configService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
     expect(decoded!.value.manager).toBe(100n)
     expect(decoded!.value.delegator).toBe(200n)
     expect(decoded!.value.registrar).toBe(300n)
-    expect(decoded!.value.assigners).toEqual([400n])
+    expect(decoded!.value.assigners.length).toBe(configService.numCores)
+    expect(decoded!.value.assigners[0]).toBe(400n)
+    expect(decoded!.value.assigners[1]).toBe(500n)
+    expect(decoded!.value.assigners[2]).toBe(600n)
     expect(decoded!.value.alwaysaccers.size).toBe(3)
     expect(decoded!.value.alwaysaccers.get(1000n)).toBe(50000n)
     expect(decoded!.value.alwaysaccers.get(1001n)).toBe(75000n)
@@ -87,7 +99,10 @@ describe('Privileges Serialization', () => {
   it('should fail with insufficient data for privileges header', () => {
     const insufficientData = new Uint8Array([1, 2, 3]) // Only 3 bytes, need 16
 
-    const [decodeError, decoded] = decodePrivileges(insufficientData)
+    const [decodeError, decoded] = decodePrivileges(
+      insufficientData,
+      configService,
+    )
     expect(decodeError).toBeDefined()
     expect(decoded).toBeUndefined()
   })
@@ -105,7 +120,10 @@ describe('Privileges Serialization', () => {
   })
 
   it('should preserve remaining data after decoding', () => {
-    const [encodeError, encodedData] = encodePrivileges(mockPrivileges)
+    const [encodeError, encodedData] = encodePrivileges(
+      mockPrivileges,
+      configService,
+    )
     expect(encodeError).toBeUndefined()
 
     // Add extra data after the encoded privileges
@@ -136,13 +154,16 @@ describe('Privileges Serialization', () => {
     expect(encodeError).toBeUndefined()
     expect(encodedData).toBeDefined()
 
-    const [decodeError, decoded] = decodePrivileges(encodedData!)
+    const [decodeError, decoded] = decodePrivileges(encodedData!, configService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
     expect(decoded!.value.manager).toBe(4294967295n)
     expect(decoded!.value.delegator).toBe(4294967294n)
     expect(decoded!.value.registrar).toBe(4294967293n)
-    expect(decoded!.value.assigners).toEqual([4294967292n])
+    expect(decoded!.value.assigners.length).toBe(configService.numCores)
+    expect(decoded!.value.assigners[0]).toBe(4294967292n)
+    expect(decoded!.value.assigners[1]).toBe(4294967291n)
+    expect(decoded!.value.assigners[2]).toBe(4294967290n)
     expect(decoded!.value.alwaysaccers.get(4294967295n)).toBe(4294967295n)
   })
 })

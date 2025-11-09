@@ -1829,17 +1829,7 @@ export class GuarantorService extends BaseService {
     // Update statistics from successfully processed guarantees
     // This updates validator, core, and service statistics based on the guarantees
     if (this.statisticsService) {
-      this.statisticsService.applyBlockDeltas(
-        {
-          tickets: [],
-          preimages: [],
-          guarantees,
-          assurances: [],
-          disputes: [],
-        },
-        currentSlot,
-        0, // authorIndex not used for reports STF
-      )
+      this.statisticsService.updateGuarantees(guarantees)
     }
 
     // Convert Set to array for return (reporters should be unique)

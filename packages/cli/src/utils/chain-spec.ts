@@ -180,7 +180,7 @@ export function generateChainSpec(
         totalCount: 0n,
       },
     },
-    lastaccout: zeroHash,
+    lastAccumulationOutput: new Map(),
     entropy: {
       accumulator: zeroHash,
       entropy1: zeroHash,

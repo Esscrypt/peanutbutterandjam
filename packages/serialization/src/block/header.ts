@@ -41,14 +41,14 @@
  * complete header contents while including the signature in the commitment.
  */
 
-import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
 import type {
   BlockHeader,
   DecodingResult,
   EpochMark,
   IConfigService,
   Safe,
-  SafroleTicket,
+  SafroleTicketWithoutProof,
   UnsignedBlockHeader,
   ValidatorKeyPair,
   ValidatorKeyTuple,
@@ -108,30 +108,16 @@ function encodeEpochMark(
 
   // Encode validators - FIXED-LENGTH sequence of exactly C_valcount (1023) validators
   // No length prefix needed since it's sequence[C_valcount] not var{sequence}
-  for (let i = 0; i < config.numValidators; i++) {
-    if (i < epochMark.validators.length) {
-      parts.push(encodeValidatorKeyPair(epochMark.validators[i]))
-    } else {
-      // Pad with zero validators if we have fewer than C_VALCOUNT
-      parts.push(
-        encodeValidatorKeyPair({
-          bandersnatch:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-          ed25519:
-            '0x0000000000000000000000000000000000000000000000000000000000000000',
-        }),
-      )
-    }
+  if (epochMark.validators.length !== config.numValidators) {
+    return safeError(
+      new Error('Epoch mark validators length must be equal to numValidators'),
+    )
+  }
+  for (const validator of epochMark.validators) {
+    parts.push(encodeValidatorKeyPair(validator))
   }
 
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-  return safeResult(result)
+  return safeResult(concatBytes(parts))
 }
 
 /**
@@ -216,13 +202,17 @@ function decodeEpochMark(
  * ✅ CORRECT: Safrole ticket encoding (st_id, st_entryindex)
  */
 function encodeWinnersMark(
-  winnersMark: SafroleTicket[] | null,
+  winnersMark: SafroleTicketWithoutProof[] | null,
+  config: IConfigService,
 ): Safe<Uint8Array> {
   if (winnersMark === null) {
     // Encode as None (1 byte with value 0)
     return safeResult(new Uint8Array([0]))
   }
 
+  if (winnersMark.length !== config.epochDuration) {
+    return safeError(new Error('Winners mark length must be equal to epoch duration'))
+  }
   const parts: Uint8Array[] = []
   // Encode as Some (1 byte with value 1)
   parts.push(new Uint8Array([1]))
@@ -232,6 +222,7 @@ function encodeWinnersMark(
     // Encode safroleticket as (st_id, st_entryindex)
     parts.push(hexToBytes(ticket.id)) // st_id (32 bytes)
 
+    // Gray Paper: st_entryindex is either 0 or 1
     const [error, encoded] = encodeNatural(BigInt(ticket.entryIndex)) // st_entryindex (natural encoding)
     if (error) {
       return safeError(error)
@@ -239,14 +230,7 @@ function encodeWinnersMark(
     parts.push(encoded)
   }
 
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-  return safeResult(result)
+  return safeResult(concatBytes(parts))
 }
 
 /**
@@ -268,7 +252,8 @@ function encodeWinnersMark(
  */
 function decodeWinnersMark(
   data: Uint8Array,
-): Safe<DecodingResult<SafroleTicket[] | null>> {
+  config: IConfigService,
+): Safe<DecodingResult<SafroleTicketWithoutProof[] | null>> {
   let currentData = data
 
   const optionTag = currentData[0]
@@ -282,13 +267,13 @@ function decodeWinnersMark(
     })
   }
 
-  const C_EPOCHLEN = 600 // Gray Paper constant
   // Don't validate length upfront since entryIndex is variable length
   // We'll validate by counting actual tickets decoded
 
   // Fixed sequence of C_epochlen (600) tickets - no length prefix needed
-  const tickets: SafroleTicket[] = []
-  for (let i = 0; i < C_EPOCHLEN; i++) {
+  // Gray Paper: safroleticket = tuple{st_id, st_entryindex} - no proof
+  const tickets: SafroleTicketWithoutProof[] = []
+  for (let i = 0; i < config.epochDuration; i++) {
     // C_epochlen = 600
     // Decode ticket: (st_id, st_entryindex)
     const id = bytesToHex(currentData.slice(0, 32)) // st_id (32 bytes)
@@ -300,16 +285,15 @@ function decodeWinnersMark(
     tickets.push({
       id,
       entryIndex: entryIndexResult.value,
-      proof: '0x',
     })
     currentData = entryIndexResult.remaining
   }
 
   // Validate we decoded exactly 600 tickets
-  if (tickets.length !== C_EPOCHLEN) {
+  if (tickets.length !== config.epochDuration) {
     return safeError(
       new Error(
-        `Winners mark must contain exactly ${C_EPOCHLEN} tickets, got ${tickets.length} tickets`,
+        `Winners mark must contain exactly ${config.epochDuration} tickets, got ${tickets.length} tickets`,
       ),
     )
   }
@@ -337,14 +321,7 @@ function encodeOffendersMark(offendersMark: Hex[]): Safe<Uint8Array> {
     parts.push(hexToBytes(key))
   }
 
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-  return safeResult(result)
+  return safeResult(concatBytes(parts))
 }
 
 /**
@@ -433,7 +410,7 @@ export function encodeUnsignedHeader(
   parts.push(encoded2)
 
   // winners_mark (optional)
-  const [error3, encoded3] = encodeWinnersMark(header.winnersMark)
+  const [error3, encoded3] = encodeWinnersMark(header.winnersMark, config)
   if (error3) {
     return safeError(error3)
   }
@@ -456,16 +433,7 @@ export function encodeUnsignedHeader(
   }
   parts.push(encoded5)
 
-  // Concatenate all parts
-  const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-  for (const part of parts) {
-    result.set(part, offset)
-    offset += part.length
-  }
-
-  return safeResult(result)
+  return safeResult(concatBytes(parts))
 }
 
 /**
@@ -484,6 +452,7 @@ export function encodeUnsignedHeader(
  */
 export function decodeUnsignedHeader(
   data: Uint8Array,
+  config: IConfigService,
 ): Safe<DecodingResult<UnsignedBlockHeader>> {
   let currentData = data
 
@@ -516,7 +485,7 @@ export function decodeUnsignedHeader(
   currentData = epochMarkResult.remaining
 
   // winners_mark (optional)
-  const [error3, winnersMarkResult] = decodeWinnersMark(currentData)
+  const [error3, winnersMarkResult] = decodeWinnersMark(currentData, config)
   if (error3) {
     return safeError(error3)
   }
@@ -580,10 +549,7 @@ export function encodeHeader(
   config: IConfigService,
 ): Safe<Uint8Array> {
   // Encode unsigned header first
-  const [error, unsignedHeader] = encodeUnsignedHeader(
-    header as UnsignedBlockHeader,
-    config,
-  )
+  const [error, unsignedHeader] = encodeUnsignedHeader(header, config)
   if (error) {
     return safeError(error)
   }
@@ -591,13 +557,7 @@ export function encodeHeader(
   // Add seal signature
   const sealSig = hexToBytes(header.sealSig)
 
-  // Concatenate unsigned header + seal signature
-  const totalLength = unsignedHeader.length + sealSig.length
-  const result = new Uint8Array(totalLength)
-  result.set(unsignedHeader, 0)
-  result.set(sealSig, unsignedHeader.length)
-
-  return safeResult(result)
+  return safeResult(concatBytes([unsignedHeader, sealSig]))
 }
 
 /**
@@ -617,9 +577,10 @@ export function encodeHeader(
  */
 export function decodeHeader(
   data: Uint8Array,
+  config: IConfigService,
 ): Safe<DecodingResult<BlockHeader>> {
   // Decode unsigned header first
-  const [error, unsignedHeaderResult] = decodeUnsignedHeader(data)
+  const [error, unsignedHeaderResult] = decodeUnsignedHeader(data, config)
   if (error) {
     return safeError(error)
   }

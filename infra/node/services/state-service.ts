@@ -8,20 +8,46 @@
  * State Definition: Equation (34) - thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy, stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
  */
 
-import type { GenesisHeaderState } from '@pbnj/core'
-import { bytesToHex, hexToBytes, logger, merklizeState } from '@pbnj/core'
+/**
+ * Parsed state key result with type-safe discriminated union
+ *
+ * Note: For C(s, h) keys, we can only extract the Blake hash of the combined key.
+ * The original storage key, preimage hash, or request hash cannot be extracted
+ * from the Blake hash (it's a one-way function). The keyType must be determined
+ * by context when querying, or by attempting to match against known keys.
+ */
+type ParsedStateKey =
+  | {
+      chapterIndex: number
+    }
+  | {
+      chapterIndex: 255
+      serviceId: bigint
+    }
+  | {
+      serviceId: bigint
+      hash: Hex // storage key
+    }
+
+import {
+  blake2bHash,
+  bytesToHex,
+  hexToBytes,
+  logger,
+  merklizeState,
+} from '@pbnj/core'
 import {
   // createServicePreimageKey,
   // createServiceRequestKey,
   createServiceStorageKey,
-  createStateTrie,
+  createStateTrieWithRawKeys,
   decodeAccumulated,
   decodeActivity,
   decodeAuthpool,
   decodeAuthqueue,
   decodeDisputeState,
   decodeEntropy,
-  decodeLastAccountOut,
+  decodeLastAccumulationOutputs,
   decodePrivileges,
   decodeReady,
   decodeRecent,
@@ -30,6 +56,7 @@ import {
   decodeStateWorkReports,
   decodeTheTime,
   decodeValidatorSet,
+  decodeVariableSequence,
 } from '@pbnj/serialization'
 import type {
   Accumulated,
@@ -46,8 +73,7 @@ import type {
   Reports,
   Safe,
   SafroleState,
-  SafroleTicket,
-  ServiceAccounts,
+  ServiceAccountCore,
   StateComponent,
   StateTrie,
   ValidatorPublicKeys,
@@ -63,7 +89,6 @@ import type { ConfigService } from './config-service'
 import type { DisputesService } from './disputes-service'
 import type { EntropyService } from './entropy'
 import type { NodeGenesisManager } from './genesis-manager'
-import type { LastAccoutService } from './lastaccout-service'
 import type { PrivilegesService } from './privileges-service'
 import type { ReadyService } from './ready-service'
 import type { RecentHistoryService } from './recent-history-service'
@@ -77,7 +102,6 @@ import type { WorkReportService } from './work-report-service'
  * JAM State Service
  *
  * Manages the complete JAM global state according to Gray Paper specifications.
- * Implements the state transition dependency graph and ensures proper update ordering.
  * Delegates state management to specialized services for better modularity.
  */
 export class StateService {
@@ -85,6 +109,10 @@ export class StateService {
     number,
     (data: Uint8Array) => Safe<DecodingResult<unknown>>
   >()
+  // Cache for raw C(s, h) keys decoded from test vectors
+  // These are stored separately because we can't reverse the Blake hash
+  // to get the original storage key or request hash
+  private readonly rawCshKeys = new Map<Hex, Hex>()
 
   // Service delegates for state components
 
@@ -97,8 +125,7 @@ export class StateService {
   private activityService: ActivityService
   private disputesService: DisputesService
   private readyService: ReadyService
-  private accumulatedService: AccumulationService
-  private lastAccoutService: LastAccoutService
+  private accumulationService: AccumulationService
   private workReportService: WorkReportService
   private privilegesService: PrivilegesService
   private serviceAccountsService: ServiceAccountService
@@ -117,8 +144,7 @@ export class StateService {
     activityService: ActivityService
     disputesService: DisputesService
     readyService: ReadyService
-    accumulatedService: AccumulationService
-    lastAccoutService: LastAccoutService
+    accumulationService: AccumulationService
     workReportService: WorkReportService
     privilegesService: PrivilegesService
     serviceAccountsService: ServiceAccountService
@@ -130,40 +156,45 @@ export class StateService {
   }) {
     this.configService = options.configService
     // Map chapter indices to decoders (hardcoded according to Gray Paper)
-    this.stateTypeRegistry.set(0, (data) =>
+    this.stateTypeRegistry.set(1, (data) =>
       decodeAuthpool(data, this.configService),
-    ) // Chapter 0 - AuthPool
-    this.stateTypeRegistry.set(1, (data) => decodeRecent(data)) // Chapter 1 - Recent
-    this.stateTypeRegistry.set(2, (data) => decodeLastAccountOut(data)) // Chapter 2 - LastAccout
-    this.stateTypeRegistry.set(3, (data) =>
+    ) // Chapter 1 - AuthPool (C(1))
+    this.stateTypeRegistry.set(2, (data) =>
+      decodeAuthqueue(data, this.configService),
+    ) // Chapter 2 - AuthQueue (C(2))
+    this.stateTypeRegistry.set(3, (data) => decodeRecent(data)) // Chapter 3 - Recent (C(3))
+    this.stateTypeRegistry.set(4, (data) =>
       decodeSafrole(data, this.configService),
-    ) // Chapter 3 - Safrole
-    this.stateTypeRegistry.set(4, (data) => decodeServiceAccount(data)) // Chapter 4 - Accounts
-    this.stateTypeRegistry.set(5, (data) => decodeEntropy(data)) // Chapter 5 - Entropy
-    this.stateTypeRegistry.set(6, (data) =>
-      decodeValidatorSet(data, this.configService),
-    ) // Chapter 6 - StagingSet
+    ) // Chapter 4 - Safrole (C(4))
+    this.stateTypeRegistry.set(5, (data) => decodeDisputeState(data)) // Chapter 5 - Disputes (C(5))
+    this.stateTypeRegistry.set(6, (data) => decodeEntropy(data)) // Chapter 6 - Entropy (C(6))
     this.stateTypeRegistry.set(7, (data) =>
       decodeValidatorSet(data, this.configService),
-    ) // Chapter 7 - ActiveSet
+    ) // Chapter 7 - StagingSet (C(7))
     this.stateTypeRegistry.set(8, (data) =>
       decodeValidatorSet(data, this.configService),
-    ) // Chapter 8 - PreviousSet
+    ) // Chapter 8 - ActiveSet (C(8))
     this.stateTypeRegistry.set(9, (data) =>
+      decodeValidatorSet(data, this.configService),
+    ) // Chapter 9 - PreviousSet (C(9))
+    this.stateTypeRegistry.set(10, (data) =>
       decodeStateWorkReports(data, this.configService),
-    ) // Chapter 9 - Reports
-    this.stateTypeRegistry.set(10, (data) => decodeTheTime(data)) // Chapter 10 - TheTime
-    this.stateTypeRegistry.set(11, (data) =>
-      decodeAuthqueue(data, this.configService),
-    ) // Chapter 11 - AuthQueue
-    this.stateTypeRegistry.set(12, (data) => decodePrivileges(data)) // Chapter 12 - Privileges
-    this.stateTypeRegistry.set(13, (data) => decodeDisputeState(data)) // Chapter 13 - Disputes
-    this.stateTypeRegistry.set(14, (data) => decodeActivity(data)) // Chapter 14 - Activity
-    this.stateTypeRegistry.set(15, (data) =>
+    ) // Chapter 10 - Reports (C(10))
+    this.stateTypeRegistry.set(11, (data) => decodeTheTime(data)) // Chapter 11 - TheTime (C(11))
+    this.stateTypeRegistry.set(12, (data) =>
+      decodePrivileges(data, this.configService),
+    ) // Chapter 12 - Privileges (C(12))
+    this.stateTypeRegistry.set(13, (data) =>
+      decodeActivity(data, this.configService),
+    ) // Chapter 13 - Activity (C(13))
+    this.stateTypeRegistry.set(14, (data) =>
       decodeReady(data, this.configService),
-    ) // Chapter 15 - Ready
-    this.stateTypeRegistry.set(16, decodeAccumulated) // Chapter 16 - Accumulated
-    this.stateTypeRegistry.set(255, (data) => decodeServiceAccount(data)) // Chapter 255 - Service Accounts
+    ) // Chapter 14 - Ready (C(14))
+    this.stateTypeRegistry.set(15, (data) => decodeAccumulated(data)) // Chapter 15 - Accumulated (C(15))
+    this.stateTypeRegistry.set(16, (data) =>
+      decodeLastAccumulationOutputs(data),
+    ) // Chapter 16 - LastAccout (C(16))
+    this.stateTypeRegistry.set(255, (data) => decodeServiceAccount(data)) // Chapter 255 - Service Accounts (C(255, s))
 
     this.validatorSetManager = options.validatorSetManager
     this.entropyService = options.entropyService
@@ -173,8 +204,7 @@ export class StateService {
     this.activityService = options.activityService
     this.disputesService = options.disputesService
     this.readyService = options.readyService
-    this.accumulatedService = options.accumulatedService
-    this.lastAccoutService = options.lastAccoutService
+    this.accumulationService = options.accumulationService
     this.workReportService = options.workReportService
     this.privilegesService = options.privilegesService
     this.serviceAccountsService = options.serviceAccountsService
@@ -192,27 +222,73 @@ export class StateService {
   }
 
   /**
-   * Get specific state component
+   * Get genesis manager service
+   */
+  getGenesisManager(): NodeGenesisManager {
+    return this.genesisManagerService
+  }
+
+  /**
+   * Get specific state component by merklization chapter index
    * Delegates to appropriate service if available, otherwise returns from local state
    *
-   * Ordered by Gray Paper equation (34): thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy,
-   * stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
+   * Gray Paper merklization.tex - State serialization T(σ):
+   * T(σ) ≡ {
+   *   C(1) ↦ encode{authpool},
+   *   C(2) ↦ encode{authqueue},
+   *   C(3) ↦ encode{recenthistory, mmrencode{accoutbelt}},
+   *   C(4) ↦ encode{pendingset, epochroot, discriminator, sealtickets, var{ticketaccumulator}},
+   *   C(5) ↦ encode{var{goodset}, var{badset}, var{wonkyset}, var{offenders}},
+   *   C(6) ↦ encode{entropy},
+   *   C(7) ↦ encode{stagingset},
+   *   C(8) ↦ encode{activeset},
+   *   C(9) ↦ encode{previousset},
+   *   C(10) ↦ encode{sequence of maybe{(workreport, encode[4]{timestamp})}},
+   *   C(11) ↦ encode[4]{thetime},
+   *   C(12) ↦ encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers},
+   *   C(13) ↦ encode{encode[4]{valstatsaccumulator, valstatsprevious}, corestats, servicestats},
+   *   C(14) ↦ encode{ready work reports with nested structure},
+   *   C(15) ↦ encode{sequence of var{accumulated}},
+   *   C(16) ↦ encode{var{sequence of (encode[4]{s}, encode{h})}},
+   *   C(255, s) ↦ encode{service account data for service s}
+   * }
+   *
+   * Reference: graypaper/text/merklization.tex equation (21-112)
+   *
+   * This function uses merklization chapter indices (C(1) through C(16) and C(255)):
+   * C(1) = authpool (α)
+   * C(2) = authqueue (χ)
+   * C(3) = recent (β) - recenthistory + accoutbelt
+   * C(4) = safrole (γ) - pendingset, epochroot, discriminator, sealtickets, ticketaccumulator
+   * C(5) = disputes (ψ) - goodset, badset, wonkyset, offenders
+   * C(6) = entropy (ε)
+   * C(7) = stagingset (ι)
+   * C(8) = activeset (κ)
+   * C(9) = previousset (λ)
+   * C(10) = reports (ρ)
+   * C(11) = thetime (τ)
+   * C(12) = privileges
+   * C(13) = activity (π)
+   * C(14) = ready (ω)
+   * C(15) = accumulated (ξ)
+   * C(16) = lastaccout (θ)
+   * C(255, s) = accounts (δ) - service-specific, handled separately
    */
-  getStateComponent(chapterIndex: number): StateComponent {
+  getStateComponent(chapterIndex: number, serviceId?: bigint): StateComponent {
     switch (chapterIndex) {
-      // 1. authpool (α) - Core authorization requirements
+      // C(1) = authpool (α) - Core authorization requirements
       case 1:
         return this.authPoolService.getAuthPool()
 
-      // 2. recent (β) - Recent blocks and accumulation outputs
+      // C(2) = authqueue (χ) - Queued core authorizations
       case 2:
+        return this.authQueueService.getAuthQueue()
+
+      // C(3) = recent (β) - Recent blocks and accumulation outputs
+      case 3:
         return this.recentHistoryService.getRecent()
 
-      // 3. lastaccout (θ) - Most recent accumulation result
-      case 3:
-        return this.lastAccoutService.getLastAccout()
-
-      // 4. safrole (γ) - Consensus protocol internal state
+      // C(4) = safrole (γ) - Consensus protocol internal state
       case 4:
         return {
           pendingSet: Array.from(
@@ -223,85 +299,145 @@ export class StateService {
           ticketAccumulator: this.ticketService.getTicketAccumulator(),
         }
 
-      // 5. accounts (δ) - All service (smart contract) state
+      // C(5) = disputes (ψ) - Judgments on work-reports and validators
       case 5:
-        return this.serviceAccountsService.getServiceAccounts()
+        return this.disputesService.getDisputesState()
 
-      // 6. entropy (ε) - On-chain randomness accumulator
+      // C(6) = entropy (ε) - On-chain randomness accumulator
       case 6:
         return this.entropyService.getEntropy()
 
-      // 7. stagingset (ι) - Validators queued for next epoch
+      // C(7) = stagingset (ι) - Validators queued for next epoch
       case 7:
         return Array.from(
           this.validatorSetManager.getStagingValidators().values(),
         )
 
-      // 8. activeset (κ) - Currently active validators
+      // C(8) = activeset (κ) - Currently active validators
       case 8:
         return Array.from(
           this.validatorSetManager.getActiveValidators().values(),
         )
 
-      // 10. reports (ρ) - Work reports awaiting availability assurance
+      // C(9) = previousset (λ) - Previous epoch validators
+      case 9:
+        return Array.from(
+          this.validatorSetManager.getPreviousValidators().values(),
+        )
+
+      // C(10) = reports (ρ) - Work reports awaiting availability assurance
       case 10:
         return this.workReportService.getPendingReports()
-      // 11. thetime (τ) - Most recent block's timeslot index
-      case 11:
-        return this.clockService.getCurrentSlot()
-      // 12. authqueue (φ) - Queued core authorizations
-      case 12:
-        return this.authQueueService.getAuthQueue()
 
-      // 13. privileges - Services with special privileges
-      case 13:
+      // C(11) = thetime (τ) - Most recent block's timeslot index
+      case 11:
+        return this.clockService.getLatestReportedBlockTimeslot()
+
+      // C(12) = privileges - Services with special privileges
+      case 12:
         return this.privilegesService.getPrivileges()
 
-      // 14. disputes (ψ) - Judgments on work-reports and validators
-      case 14:
-        return this.disputesService.getDisputesState()
-
-      // 15. activity (π) - Validator performance statistics
-      case 15:
+      // C(13) = activity (π) - Validator performance statistics
+      case 13:
         return this.activityService.getActivity()
 
-      // 16. ready (ω) - Reports ready for accumulation
-      case 16:
+      // C(14) = ready (ω) - Reports ready for accumulation
+      case 14:
         return this.readyService.getReady()
 
-      // 17. accumulated (ξ) - Recently accumulated work-packages
-      case 17:
-        return this.accumulatedService.getAccumulated()
+      // C(15) = accumulated (ξ) - Recently accumulated work-packages
+      case 15:
+        return this.accumulationService.getAccumulated()
+
+      // C(16) = lastaccout (θ) - Most recent accumulation result
+      case 16:
+        return this.accumulationService.getLastAccumulationOutputs()
+
+      // C(255, s) = accounts (δ) - Service accounts (handled separately per service)
+      case 255: {
+        if (!serviceId) {
+          throw new Error('Service ID is required for chapter 255')
+        }
+        const [error, accountCore] =
+          this.serviceAccountsService.getServiceAccountCore(serviceId)
+        if (error) {
+          throw new Error('Failed to get service account core')
+        }
+        return accountCore
+      }
     }
 
     throw new Error(`State component ${chapterIndex} not found`)
   }
 
   /**
-   * Set state component
+   * Set state component by merklization chapter index
    * Delegates to appropriate service if available, otherwise stores in local state
    *
-   * Ordered by Gray Paper equation (34): thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy,
-   * stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
+   * Gray Paper merklization.tex - State serialization T(σ):
+   * T(σ) ≡ {
+   *   C(1) ↦ encode{authpool},
+   *   C(2) ↦ encode{authqueue},
+   *   C(3) ↦ encode{recenthistory, mmrencode{accoutbelt}},
+   *   C(4) ↦ encode{pendingset, epochroot, discriminator, sealtickets, var{ticketaccumulator}},
+   *   C(5) ↦ encode{var{goodset}, var{badset}, var{wonkyset}, var{offenders}},
+   *   C(6) ↦ encode{entropy},
+   *   C(7) ↦ encode{stagingset},
+   *   C(8) ↦ encode{activeset},
+   *   C(9) ↦ encode{previousset},
+   *   C(10) ↦ encode{sequence of maybe{(workreport, encode[4]{timestamp})}},
+   *   C(11) ↦ encode[4]{thetime},
+   *   C(12) ↦ encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers},
+   *   C(13) ↦ encode{encode[4]{valstatsaccumulator, valstatsprevious}, corestats, servicestats},
+   *   C(14) ↦ encode{ready work reports with nested structure},
+   *   C(15) ↦ encode{sequence of var{accumulated}},
+   *   C(16) ↦ encode{var{sequence of (encode[4]{s}, encode{h})}},
+   *   C(255, s) ↦ encode{service account data for service s}
+   * }
+   *
+   * Reference: graypaper/text/merklization.tex equation (21-112)
+   *
+   * This function uses merklization chapter indices (C(1) through C(16) and C(255)):
+   * C(1) = authpool (α)
+   * C(2) = authqueue (χ)
+   * C(3) = recent (β) - recenthistory + accoutbelt
+   * C(4) = safrole (γ) - pendingset, epochroot, discriminator, sealtickets, ticketaccumulator
+   * C(5) = disputes (ψ) - goodset, badset, wonkyset, offenders
+   * C(6) = entropy (ε)
+   * C(7) = stagingset (ι)
+   * C(8) = activeset (κ)
+   * C(9) = previousset (λ)
+   * C(10) = reports (ρ)
+   * C(11) = thetime (τ)
+   * C(12) = privileges
+   * C(13) = activity (π)
+   * C(14) = ready (ω)
+   * C(15) = accumulated (ξ)
+   * C(16) = lastaccout (θ)
+   * C(255, s) = accounts (δ) - service-specific, handled separately
    */
-  setStateComponent(chapterIndex: number, value: StateComponent): void {
+  setStateComponent(
+    chapterIndex: number,
+    value: StateComponent,
+    serviceId: bigint | undefined,
+  ): void {
     switch (chapterIndex) {
-      // 1. authpool (α) - Core authorization requirements
+      // C(1) = authpool (α) - Core authorization requirements
       case 1:
         this.authPoolService.setAuthPool(value as AuthPool)
         break
 
-      // 2. recent (β) - Recent blocks and accumulation outputs
+      // C(2) = authqueue (χ) - Queued core authorizations
       case 2:
+        this.authQueueService.setAuthQueue(value as AuthQueue)
+        break
+
+      // C(3) = recent (β) - Recent blocks and accumulation outputs
+      case 3:
         this.recentHistoryService.setRecent(value as Recent)
         break
 
-      // 3. lastaccout (θ) - Most recent accumulation result
-      case 3:
-        this.lastAccoutService.setLastAccout(value as Hex)
-        break
-
-      // 4. safrole (γ) - Consensus protocol internal state
+      // C(4) = safrole (γ) - Consensus protocol internal state
       case 4:
         {
           const safroleState = value as SafroleState
@@ -310,83 +446,84 @@ export class StateService {
           this.ticketService.setTicketAccumulator(
             safroleState.ticketAccumulator,
           )
-          this.sealKeyService.setSealKeys(
-            safroleState.sealTickets as SafroleTicket[],
-          )
+          this.sealKeyService.setSealKeys(safroleState.sealTickets)
         }
         break
 
-      // 5. accounts (δ) - All service (smart contract) state
+      // C(5) = disputes (ψ) - Judgments on work-reports and validators
       case 5:
-        for (const [serviceId, serviceAccount] of (
-          value as ServiceAccounts
-        ).accounts.entries()) {
-          this.serviceAccountsService.setServiceAccount(
-            serviceId,
-            serviceAccount,
-          )
-        }
+        this.disputesService.setDisputesState(value as Disputes)
         break
 
-      // 6. entropy (ε) - On-chain randomness accumulator
+      // C(6) = entropy (ε) - On-chain randomness accumulator
       case 6:
         this.entropyService.setEntropy(value as EntropyState)
         break
 
-      // 7. stagingset (ι) - Validators queued for next epoch
+      // C(7) = stagingset (ι) - Validators queued for next epoch
       case 7:
         this.validatorSetManager.setStagingSet(value as ValidatorPublicKeys[])
         break
 
-      // 8. activeset (κ) - Currently active validators
+      // C(8) = activeset (κ) - Currently active validators
       case 8:
         this.validatorSetManager.setActiveSet(value as ValidatorPublicKeys[])
         break
 
-      // 9. previousset (λ) - Previous epoch validators
+      // C(9) = previousset (λ) - Previous epoch validators
       case 9:
         this.validatorSetManager.setPreviousSet(value as ValidatorPublicKeys[])
         break
 
-      // 10. reports (ρ) - Work reports awaiting availability assurance
+      // C(10) = reports (ρ) - Work reports awaiting availability assurance
       case 10:
         this.workReportService.setPendingReports(value as Reports)
         break
 
-      // 11. thetime (τ) - Most recent block's timeslot index
+      // C(11) = thetime (τ) - Most recent block's timeslot index
       case 11:
         this.clockService.setLatestReportedBlockTimeslot(value as bigint)
         break
 
-      // 12. authqueue (φ) - Queued core authorizations
+      // C(12) = privileges - Services with special privileges
       case 12:
-        this.authQueueService.setAuthQueue(value as AuthQueue)
-        break
-
-      // 13. privileges - Services with special privileges
-      case 13:
         this.privilegesService.setPrivileges(value as Privileges)
         break
 
-      // 14. disputes (ψ) - Judgments on work-reports and validators
-      case 14:
-        this.disputesService.setDisputesState(value as Disputes)
-        break
-
-      // 15. activity (π) - Validator performance statistics
-      case 15:
+      // C(13) = activity (π) - Validator performance statistics
+      case 13:
         this.activityService.setActivity(value as Activity)
         break
 
-      // 16. ready (ω) - Reports ready for accumulation
-      case 16:
+      // C(14) = ready (ω) - Reports ready for accumulation
+      case 14:
         this.readyService.setReady(value as Ready)
         break
 
-      // 17. accumulated (ξ) - Recently accumulated work-packages
-      case 17:
-        this.accumulatedService.setAccumulated(value as Accumulated)
+      // C(15) = accumulated (ξ) - Recently accumulated work-packages
+      case 15:
+        this.accumulationService.setAccumulated(value as Accumulated)
         break
+
+      // C(16) = lastaccout (θ) - Most recent accumulation result
+      case 16:
+        this.accumulationService.setLastAccumulationOutputs(
+          value as Map<bigint, Hex>,
+        )
+        break
+
+      // C(255, s) = accounts (δ) - Service accounts (handled separately per service)
+      case 255: {
+        if (serviceId === undefined) {
+          throw new Error('Service ID is required for chapter 255')
+        }
+        this.serviceAccountsService.setServiceAccountCore(
+          serviceId,
+          value as ServiceAccountCore,
+        )
+        break
+      }
+
       default:
         logger.warn(`State component ${chapterIndex} not found`)
         break
@@ -396,23 +533,151 @@ export class StateService {
   setState(keyvals: { key: Hex; value: Hex }[]): Safe<void> {
     // store the stateRoot here and in recentHistoryService
     for (const keyval of keyvals) {
-      const [stateKeyError, stateKeyResult] = this.parseStateKey(keyval.key)
+      const [stateKeyError, parsedStateKey] = this.parseStateKey(keyval.key)
       if (stateKeyError) {
         return safeError(stateKeyError)
       }
-      const parsedValue = this.parseStateValue(
-        stateKeyResult.chapterIndex,
-        keyval.value,
-      )
-      if (parsedValue) {
-        this.setStateComponent(
-          stateKeyResult.chapterIndex,
-          parsedValue as StateComponent,
-        )
-      } else {
-        return safeError(
-          new Error(`Failed to parse state value for key ${keyval.key}`),
-        )
+
+      if ('chapterIndex' in parsedStateKey) {
+        const parsedValue = this.parseStateValue(keyval.value, parsedStateKey)
+        if (parsedValue) {
+          // For C(255, s) keys, serviceId is required and should be present
+          const serviceId =
+            parsedStateKey.chapterIndex === 255 && 'serviceId' in parsedStateKey
+              ? parsedStateKey.serviceId
+              : undefined
+          this.setStateComponent(
+            parsedStateKey.chapterIndex,
+            parsedValue,
+            serviceId,
+          )
+
+          logger.debug('Parsed state', {
+            parsedStateKey,
+            key: keyval.key,
+            value: parsedValue,
+          })
+        }
+      } else if ('serviceId' in parsedStateKey && 'hash' in parsedStateKey) {
+        // C(s, h) key - service storage/preimage/request
+        // Store the raw key-value pair for later inclusion in state trie
+        // This is necessary because we can't reverse the Blake hash to get the original keys
+        this.rawCshKeys.set(keyval.key, keyval.value)
+
+        // Determine the type from the value format
+        const valueBytes = hexToBytes(keyval.value)
+        const serviceId = parsedStateKey.serviceId
+        const blakeHashFromKey = parsedStateKey.hash
+
+        const response = this.determineKeyType(valueBytes, blakeHashFromKey)
+
+        switch (response.keyType) {
+          case 'storage': {
+            // Ensure service account exists before setting storage
+            const [storageAccountError, storageAccount] =
+              this.serviceAccountsService.getServiceAccount(serviceId)
+            if (storageAccountError || !storageAccount) {
+              // Create service account if it doesn't exist
+              this.serviceAccountsService.createServiceAccount(serviceId, {
+                codehash:
+                  '0x0000000000000000000000000000000000000000000000000000000000000000',
+                balance: 0n,
+                gratis: 0n,
+                minaccgas: 0n,
+                minmemogas: 0n,
+                octets: 0n,
+                items: 0n,
+                created: 0n,
+                lastacc: 0n,
+                parent: 0n,
+              })
+            }
+            const [storageError] = this.serviceAccountsService.setStorage(
+              serviceId,
+              response.key,
+              response.value,
+            )
+            if (storageError) {
+              logger.warn('Failed to set storage', {
+                serviceId: serviceId.toString(),
+                error: storageError.message,
+              })
+            }
+            break
+          }
+          case 'preimage': {
+            // Ensure service account exists before setting preimage
+            const [preimageAccountError, preimageAccount] =
+              this.serviceAccountsService.getServiceAccount(serviceId)
+            if (preimageAccountError || !preimageAccount) {
+              // Create service account if it doesn't exist
+              this.serviceAccountsService.createServiceAccount(serviceId, {
+                codehash:
+                  '0x0000000000000000000000000000000000000000000000000000000000000000',
+                balance: 0n,
+                gratis: 0n,
+                minaccgas: 0n,
+                minmemogas: 0n,
+                octets: 0n,
+                items: 0n,
+                created: 0n,
+                lastacc: 0n,
+                parent: 0n,
+              })
+            }
+            const [preimageError] = this.serviceAccountsService.setPreimage(
+              serviceId,
+              blakeHashFromKey,
+              valueBytes,
+            )
+            if (preimageError) {
+              logger.warn('Failed to set preimage', {
+                serviceId: serviceId.toString(),
+                error: preimageError.message,
+              })
+            }
+            break
+          }
+          case 'request':
+            {
+              // Ensure service account exists before setting request
+              const [requestAccountError, requestAccount] =
+                this.serviceAccountsService.getServiceAccount(serviceId)
+              if (requestAccountError || !requestAccount) {
+                // Create service account if it doesn't exist
+                this.serviceAccountsService.createServiceAccount(serviceId, {
+                  codehash:
+                    '0x0000000000000000000000000000000000000000000000000000000000000000',
+                  balance: 0n,
+                  gratis: 0n,
+                  minaccgas: 0n,
+                  minmemogas: 0n,
+                  octets: 0n,
+                  items: 0n,
+                  created: 0n,
+                  lastacc: 0n,
+                  parent: 0n,
+                })
+              }
+              const [requestError] =
+                this.serviceAccountsService.setPreimageRequest(
+                  serviceId,
+                  blakeHashFromKey,
+                  response.timeslots,
+                )
+              if (requestError) {
+                logger.warn('Failed to set preimage request', {
+                  serviceId: serviceId.toString(),
+                  error: requestError.message,
+                })
+              }
+            }
+            break
+        }
+        logger.error('Unknown state key', {
+          key: keyval.key,
+        })
+        // return safeError(new Error('Unknown state key'))
       }
     }
     return safeResult(undefined)
@@ -432,7 +697,8 @@ export class StateService {
     const globalState: GlobalState = {
       authpool: this.authPoolService.getAuthPool(),
       recent: this.recentHistoryService.getRecent(),
-      lastaccout: this.lastAccoutService.getLastAccout(),
+      lastAccumulationOutput:
+        this.accumulationService.getLastAccumulationOutputs(),
       safrole: {
         pendingSet: Array.from(
           this.validatorSetManager.getPendingValidators().values(),
@@ -453,15 +719,21 @@ export class StateService {
         this.validatorSetManager.getPreviousValidators().values(),
       ),
       reports: this.workReportService.getPendingReports(),
-      thetime: this.clockService.getCurrentSlot(),
+      thetime: this.clockService.getLatestReportedBlockTimeslot(),
       authqueue: this.authQueueService.getAuthQueue(),
       privileges: this.privilegesService.getPrivileges(),
       disputes: this.disputesService.getDisputesState(),
       activity: this.activityService.getActivity(),
       ready: this.readyService.getReady(),
-      accumulated: this.accumulatedService.getAccumulated(),
+      accumulated: this.accumulationService.getAccumulated(),
     }
-    return createStateTrie(globalState, this.configService)
+    // Include raw C(s, h) keys that were decoded from test vectors
+    // but can't be reverse-engineered to get the original keys
+    return createStateTrieWithRawKeys(
+      globalState,
+      this.configService,
+      this.rawCshKeys,
+    )
   }
 
   /**
@@ -554,165 +826,85 @@ export class StateService {
    * @param maxSize - Maximum response size in bytes
    * @returns State range with boundary nodes
    */
-  getStateRangeWithBoundaries(
-    _headerHash: Hex,
-    startKey: Uint8Array,
-    endKey: Uint8Array,
-    maxSize: number,
-  ): Safe<{
-    boundaryNodes: Uint8Array[]
-    keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>
-  }> {
-    try {
-      // Generate current state trie
-      const [trieError, stateTrie] = this.generateStateTrie()
-      if (trieError) {
-        return safeError(trieError)
-      }
+  // getStateRangeWithBoundaries(
+  //   _headerHash: Hex,
+  //   startKey: Uint8Array,
+  //   endKey: Uint8Array,
+  //   maxSize: number,
+  // ): Safe<
+  //   boundaryNodes: Uint8Array[]
+  //   keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>> {
+  //     // Generate current state trie
+  //     const [trieError, stateTrie] = this.generateStateTrie()
+  //     if (trieError) {
+  //       return safeError(trieError)
+  //     }
 
-      // Convert to sorted key-value pairs
-      const keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }> = []
-      const sortedKeys = Object.keys(stateTrie).sort()
+  //     // Convert to sorted key-value pairs
+  //     const keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }> = []
+  //     const sortedKeys = Object.keys(stateTrie).sort()
 
-      // Find range within sorted keys
-      for (const keyHex of sortedKeys) {
-        const key = hexToBytes(
-          keyHex.startsWith('0x') ? (keyHex as `0x${string}`) : `0x${keyHex}`,
-        )
-        const key31 = key.slice(0, 31) // Only first 31 bytes matter
+  //     // Find range within sorted keys
+  //     for (const keyHex of sortedKeys) {
+  //       const key = hexToBytes(
+  //         keyHex.startsWith('0x') ? (keyHex as `0x${string}`) : `0x${keyHex}`,
+  //       )
+  //       const key31 = key.slice(0, 31) // Only first 31 bytes matter
 
-        // Check if key is in range
-        if (
-          this.compareKeys(key31, startKey) >= 0 &&
-          this.compareKeys(key31, endKey) <= 0
-        ) {
-          const value = hexToBytes(stateTrie[keyHex as `0x${string}`])
-          keyValuePairs.push({ key: key31, value })
-        }
-      }
+  //       // Check if key is in range
+  //       if (
+  //         this.compareKeys(key31, startKey) >= 0 &&
+  //         this.compareKeys(key31, endKey) <= 0
+  //       ) {
+  //         const value = hexToBytes(stateTrie[keyHex as `0x${string}`])
+  //         keyValuePairs.push({ key: key31, value })
+  //       }
+  //     }
 
-      // Build boundary nodes for the range
-      const boundaryNodes = this.buildBoundaryNodes(stateTrie, startKey, endKey)
+  //     // Build boundary nodes for the range
+  //     const boundaryNodes = this.buildBoundaryNodes(stateTrie, startKey, endKey)
 
-      // Check size limit (unless only one key/value pair)
-      // const responseSize = this.estimateResponseSize(
-      //   boundaryNodes,
-      //   keyValuePairs,
-      // )
-      // TEMPORARY HACK
-      const responseSize = maxSize - 1
-      if (responseSize > maxSize && keyValuePairs.length > 1) {
-        // Truncate to fit maxSize
-        const truncatedPairs = this.truncateToSize(
-          keyValuePairs,
-          maxSize,
-          boundaryNodes.length,
-        )
-        return safeResult({
-          boundaryNodes,
-          keyValuePairs: truncatedPairs,
-        })
-      }
+  //     // Check size limit (unless only one key/value pair)
+  //     // const responseSize = this.estimateResponseSize(
+  //     //   boundaryNodes,
+  //     //   keyValuePairs,
+  //     // )
+  //     // TEMPORARY HACK
+  //     const responseSize = maxSize - 1
+  //     if (responseSize > maxSize && keyValuePairs.length > 1) {
+  //       // Truncate to fit maxSize
+  //       const truncatedPairs = this.truncateToSize(
+  //         keyValuePairs,
+  //         maxSize,
+  //         boundaryNodes.length,
+  //       )
+  //       return safeResult({
+  //         boundaryNodes,
+  //         keyValuePairs: truncatedPairs,
+  //       })
+  //     }
 
-      return safeResult({ boundaryNodes, keyValuePairs })
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
-
-  /**
-   * Validate state trie consistency
-   *
-   * Checks that the current state can be properly serialized into a state trie
-   * and that all components are valid according to Gray Paper specifications.
-   */
-
-  /**
-   * Convert GenesisHeaderState keyvals to StateMapping
-   *
-   * Parses the keyvals array from genesis.json and maps each key to the correct
-   * state component according to Gray Paper state key specifications.
-   *
-   * Gray Paper Reference: merklization.tex equation (10-16)
-   * State keys are 31-byte identifiers created using the C() function
-   *
-   * @param state - Genesis header state with keyvals array
-   * @returns Map of state component names to their parsed values
-   */
-  private convertToMapping(
-    state: GenesisHeaderState,
-  ): Map<keyof GlobalState, GlobalState[keyof GlobalState]> {
-    const stateMapping = new Map<
-      keyof GlobalState,
-      GlobalState[keyof GlobalState]
-    >()
-
-    // Parse keyvals array and map to state components
-    for (const keyval of state.keyvals) {
-      const [stateKeyError, stateKeyResult] = this.parseStateKey(keyval.key)
-      if (stateKeyError) {
-        logger.warn('Failed to parse state key', {
-          keyHex: keyval.key,
-          error: stateKeyError.message,
-        })
-        continue
-      }
-
-      const parsedValue = this.parseStateValue(
-        stateKeyResult.chapterIndex,
-        keyval.value,
-      )
-      if (parsedValue) {
-        // Map chapter index to component name for storage
-        const componentMap: Record<number, keyof GlobalState> = {
-          0: 'authpool',
-          1: 'recent',
-          2: 'lastaccout',
-          3: 'safrole',
-          4: 'accounts',
-          5: 'entropy',
-          6: 'stagingset',
-          7: 'activeset',
-          8: 'previousset',
-          9: 'reports',
-          10: 'thetime',
-          11: 'authqueue',
-          12: 'privileges',
-          13: 'disputes',
-          14: 'activity',
-          15: 'ready',
-          16: 'accumulated',
-          255: 'accounts', // Service accounts map to accounts component
-        }
-        const component = componentMap[stateKeyResult.chapterIndex]
-        if (component) {
-          stateMapping.set(component, parsedValue)
-        }
-      } else {
-        logger.warn('Failed to parse state value', {
-          chapterIndex: stateKeyResult.chapterIndex,
-          valueHex: keyval.value,
-        })
-      }
-    }
-
-    return stateMapping
-  }
-
+  //     return safeResult({ boundaryNodes, keyValuePairs })
+  // }
   /**
    * Parse a state key to determine which state component it represents
    *
    * Gray Paper Reference: merklization.tex equation (10-16)
    * C(i) = ⟨i, 0, 0, ...⟩ for simple chapter indices
    * C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩ where n = encode[4](s)
-   * C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, ...⟩ where n = encode[4](s), a = encode[4](h)
+   * C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, ...⟩ where n = encode[4](s), a = blake(h)
+   *
+   * For C(s, h) keys, the key type cannot be determined from the key alone.
+   * Use determineKeyTypeFromValue() or determineKeyTypeWithCandidate() to determine the type.
    *
    * @param keyHex - Hex string representing the state key
-   * @returns Object with component name and metadata, or null if unrecognized
+   * @returns Parsed state key with type-safe discriminated union
    */
-  private parseStateKey(
-    keyHex: Hex,
-  ): Safe<{ chapterIndex: number; metadata?: unknown }> {
+  /**
+   * Parse state key to extract chapter index and other information
+   * Public method for debugging and testing
+   */
+  public parseStateKey(keyHex: Hex): Safe<ParsedStateKey> {
     // Remove 0x prefix and convert to bytes
     const keyBytes = hexToBytes(keyHex)
 
@@ -720,17 +912,195 @@ export class StateService {
       return safeError(new Error('Invalid state key length'))
     }
 
-    // Extract first byte as chapter index
-    const chapterIndex = keyBytes[0]
+    const firstByte = keyBytes[0]
 
-    if (chapterIndex === 0xff) {
-      // Chapter 255 - Service Accounts
-      // Service account keys: C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
-      const serviceId = this.parseServiceId(keyBytes)
-      return safeResult({ chapterIndex: 255, metadata: { serviceId } })
+    // Check if this is a C(i) key (simple chapter index)
+    // Gray Paper: C(i) = ⟨i, 0, 0, ...⟩ where i ∈ {1, 2, ..., 16}
+    // Valid chapter indices are 1-16 (and 255, already handled above)
+    if (firstByte >= 1 && firstByte <= 16) {
+      // Check if remaining bytes are all zeros (C(i) pattern)
+      let allZeros = true
+      for (let i = 1; i < keyBytes.length; i++) {
+        if (keyBytes[i] !== 0) {
+          allZeros = false
+          break
+        }
+      }
+      if (allZeros) {
+        return safeResult({ chapterIndex: firstByte })
+      }
     }
 
-    return safeResult({ chapterIndex })
+    if (firstByte === 0xff) {
+      // Chapter 255 - Service Accounts
+      // Gray Paper: C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
+      // where n = encode[4](s), service ID in bytes 1, 3, 5, 7
+      const serviceId = this.parseServiceId(keyBytes)
+      return safeResult({ chapterIndex: 255, serviceId })
+    }
+
+    // Otherwise, this is a C(s, h) key (service storage/preimage/request)
+    // Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+    // where n = encode[4](s), a = blake(h)
+    // Bytes are INTERLEAVED: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, then a₄...a₂₆
+    //
+    // Gray Paper formulas:
+    // - Storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v where k is storage key
+    // - Preimage: C(s, encode[4]{2³²-2} ∥ h) ↦ p where h is preimage hash
+    // - Request: C(s, encode[4]{l} ∥ h) ↦ encode{...} where l is length, h is request hash
+    //
+    // Extract service ID from interleaved bytes: n₀, n₁, n₂, n₃ at positions 0, 2, 4, 6
+    const serviceIdBytes = new Uint8Array(4)
+    serviceIdBytes[0] = keyBytes[0] // n₀
+    serviceIdBytes[1] = keyBytes[2] // n₁
+    serviceIdBytes[2] = keyBytes[4] // n₂
+    serviceIdBytes[3] = keyBytes[6] // n₃
+    const view = new DataView(serviceIdBytes.buffer)
+    const serviceId = BigInt(view.getUint32(0, true)) // little-endian
+
+    // Extract Blake hash from interleaved bytes: a₀, a₁, a₂, a₃ at positions 1, 3, 5, 7, then a₄...a₂₆ at positions 8-30
+    const blakeHashBytes = new Uint8Array(27)
+    blakeHashBytes[0] = keyBytes[1] // a₀
+    blakeHashBytes[1] = keyBytes[3] // a₁
+    blakeHashBytes[2] = keyBytes[5] // a₂
+    blakeHashBytes[3] = keyBytes[7] // a₃
+    blakeHashBytes.set(keyBytes.slice(8, 31), 4) // a₄...a₂₆
+
+    // The Blake hash is of the combined key: prefix (4 bytes) + key/hash (variable length)
+    // - Storage: encode[4]{0xFFFFFFFF} ∥ storage_key
+    // - Preimage: encode[4]{0xFFFFFFFE} ∥ preimage_hash
+    // - Request: encode[4]{length} ∥ request_hash
+    //
+    // We cannot directly extract the prefix from the Blake hash, but we can reconstruct
+    // the combined key by trying different prefixes when we know the key type.
+    // However, for parsing purposes, we store the Blake hash bytes.
+
+    // Store the Blake hash bytes (this is what we can extract from the state key)
+    const blakeHash = bytesToHex(blakeHashBytes)
+
+    return safeResult({ serviceId, hash: blakeHash })
+  }
+
+  /**
+   * Determine the type of a C(s, h) key from its value
+   *
+   * Gray Paper formulas:
+   * - Storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v (raw blob)
+   * - Preimage: C(s, encode[4]{2³²-2} ∥ h) ↦ p (raw blob, where h = blake(p))
+   * - Request: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}} (variable-length sequence of up to 3 timeslots)
+   *
+   * Strategy:
+   * 1. Try to decode as request (variable-length sequence of 4-byte timeslots, max 3)
+   * 2. If that fails, try to determine if it's a preimage by:
+   *    - Computing h = blake(value)
+   *    - Computing blake(encode[4]{0xFFFFFFFE} ∥ h)
+   *    - Comparing first 27 bytes with the Blake hash from the key
+   * 3. Otherwise, it's storage
+   *
+   * @param valueBytes - The value bytes from the state
+   * @param blakeHashFromKey - The Blake hash extracted from the state key (first 27 bytes)
+   * @returns The determined key type: 'storage', 'preimage', or 'request'
+   */
+  private determineKeyType(
+    valueBytes: Uint8Array,
+    blakeHashFromKey: Hex,
+  ):
+    | { keyType: 'storage'; key: Hex; value: Uint8Array }
+    | { keyType: 'preimage'; preimageHash: Hex; blob: Uint8Array }
+    | { keyType: 'request'; timeslots: bigint[] } {
+    // Not a request or preimage - verify it's storage
+    // For storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v (raw blob)
+    // State key contains: blake(encode[4]{0xFFFFFFFF} ∥ k)
+    // We need to verify that blake(encode[4]{0xFFFFFFFF} ∥ h) matches the state key
+    // Try using blake(value) as h (similar to preimage check)
+    if (valueBytes.length === 0) {
+      throw new Error(
+        'C(s, h) key value is empty - cannot be storage (storage values must be non-empty raw blobs)',
+      )
+    }
+    // Try to decode as request first (variable-length sequence of 4-byte timeslots)
+    // Gray Paper: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
+    // Request values are sequences of up to 3 timeslots (4-byte each)
+    const [requestError, requestResult] = decodeVariableSequence<bigint>(
+      valueBytes,
+      (data: Uint8Array) => {
+        if (data.length < 4) {
+          return safeError(new Error('Insufficient data for timeslot'))
+        }
+        const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+        const timeslot = BigInt(view.getUint32(0, true)) // little-endian
+        return safeResult({
+          value: timeslot,
+          remaining: data.slice(4),
+          consumed: 4,
+        })
+      },
+    )
+
+    // If decoding succeeds and has 0-3 timeslots, it's a request
+    if (!requestError && requestResult.value.length <= 3) {
+      return { keyType: 'request', timeslots: requestResult.value }
+    }
+
+    // Not a request - try to determine if it's a preimage
+    // For preimage: value is p, and h = blake(p)
+    // State key contains: blake(encode[4]{0xFFFFFFFE} ∥ h)
+    const [preimageHashError, preimageHash] = blake2bHash(valueBytes)
+    if (!preimageHashError && preimageHash) {
+      // Try to match against preimage prefix
+      const prefix = new Uint8Array(4)
+      const prefixView = new DataView(prefix.buffer)
+      prefixView.setUint32(0, 0xfffffffe, true) // little-endian
+      // preimageHash is already Hex type from blake2bHash
+      const preimageHashBytes = hexToBytes(preimageHash)
+      const combinedKey = new Uint8Array(
+        prefix.length + preimageHashBytes.length,
+      )
+      combinedKey.set(prefix, 0)
+      combinedKey.set(preimageHashBytes, prefix.length)
+      const [combinedHashError, combinedHash] = blake2bHash(combinedKey)
+      if (!combinedHashError && combinedHash) {
+        // combinedHash is Hex (string), extract first 27 bytes
+        const combinedHashBytes = hexToBytes(combinedHash)
+        const combinedHashHex = bytesToHex(combinedHashBytes.slice(0, 27)) // First 27 bytes
+        if (combinedHashHex === blakeHashFromKey) {
+          // It's a preimage!
+          return {
+            keyType: 'preimage',
+            preimageHash: preimageHash,
+            blob: valueBytes,
+          }
+        }
+      }
+    }
+
+    // Try to verify storage by computing blake(encode[4]{0xFFFFFFFF} ∥ blake(value))
+    const [valueHashError, valueHash] = blake2bHash(valueBytes)
+    if (!valueHashError && valueHash) {
+      const storagePrefix = new Uint8Array(4)
+      const storagePrefixView = new DataView(storagePrefix.buffer)
+      storagePrefixView.setUint32(0, 0xffffffff, true) // little-endian
+      const valueHashBytes = hexToBytes(valueHash)
+      const storageCombinedKey = new Uint8Array(
+        storagePrefix.length + valueHashBytes.length,
+      )
+      storageCombinedKey.set(storagePrefix, 0)
+      storageCombinedKey.set(valueHashBytes, storagePrefix.length)
+      const [storageHashError, storageHash] = blake2bHash(storageCombinedKey)
+      if (!storageHashError && storageHash) {
+        const storageHashBytes = hexToBytes(storageHash)
+        const storageHashHex = bytesToHex(storageHashBytes.slice(0, 27)) // First 27 bytes
+        if (storageHashHex === blakeHashFromKey) {
+          // It's storage (matched using blake(value) as h)
+          return { keyType: 'storage', key: storageHashHex, value: valueBytes }
+        }
+      }
+    }
+
+    // If we can't verify it's storage by matching the hash, throw an error
+    throw new Error(
+      'C(s, h) key does not match any known type: not request, not preimage, and storage verification failed (blake(encode[4]{0xFFFFFFFF} ∥ blake(value)) did not match)',
+    )
   }
 
   /**
@@ -741,15 +1111,17 @@ export class StateService {
    */
   private parseServiceId(keyBytes: Uint8Array): bigint {
     // Service ID is encoded in bytes 1, 3, 5, 7 (every other byte starting from 1)
+    // Gray Paper: C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
+    // where n = encode[4](s) in little-endian format
     const serviceIdBytes = new Uint8Array(4)
-    serviceIdBytes[0] = keyBytes[1]
-    serviceIdBytes[1] = keyBytes[3]
-    serviceIdBytes[2] = keyBytes[5]
-    serviceIdBytes[3] = keyBytes[7]
+    serviceIdBytes[0] = keyBytes[1] // n₀
+    serviceIdBytes[1] = keyBytes[3] // n₁
+    serviceIdBytes[2] = keyBytes[5] // n₂
+    serviceIdBytes[3] = keyBytes[7] // n₃
 
-    // Convert to bigint (big-endian)
+    // Convert to bigint (little-endian, matching createStateKey encoding)
     const view = new DataView(serviceIdBytes.buffer)
-    return BigInt(view.getUint32(0, false))
+    return BigInt(view.getUint32(0, true))
   }
 
   /**
@@ -760,62 +1132,57 @@ export class StateService {
    * @returns Parsed value or null if parsing fails
    */
   private parseStateValue(
-    chapterIndex: number,
     valueHex: Hex,
-  ): GlobalState[keyof GlobalState] | null {
-    const decoder = this.stateTypeRegistry.get(chapterIndex)
+    parsedStateKey: Extract<ParsedStateKey, { chapterIndex: number }>,
+  ): StateComponent {
+    const decoder = this.stateTypeRegistry.get(parsedStateKey.chapterIndex)
+
     if (!decoder) {
-      return null
+      logger.warn('No decoder found for chapter index', {
+        chapterIndex: parsedStateKey.chapterIndex,
+        availableIndices: Array.from(this.stateTypeRegistry.keys()),
+      })
+      throw new Error('No decoder found for chapter index')
     }
 
     const data = hexToBytes(valueHex)
     const [error, result] = decoder(data)
 
     if (error) {
-      logger.warn('Failed to decode state value', {
-        chapterIndex,
-        valueHex,
+      logger.error('Failed to decode state value', {
+        chapterIndex: parsedStateKey.chapterIndex,
+        valueHexLength: valueHex.length,
+        dataLength: data.length,
         error: error.message,
+        firstBytes: bytesToHex(data.slice(0, Math.min(128, data.length))),
       })
-      return null
+      throw new Error('Failed to decode state value')
     }
 
-    return result.value as GlobalState[keyof GlobalState]
+    return result.value as StateComponent
   }
 
   /**
-   * Compare two 31-byte keys lexicographically
-   */
-  private compareKeys(key1: Uint8Array, key2: Uint8Array): number {
-    for (let i = 0; i < 31; i++) {
-      if (key1[i] < key2[i]) return -1
-      if (key1[i] > key2[i]) return 1
-    }
-    return 0
-  }
+   * Build b*/
+  // private buildBoundaryNodes(
+  //   stateTrie: StateTrie,
+  //   startKey: Uint8Array,
+  //   endKey: Uint8Array,
+  // ): Uint8Array[] {
+  //   // Simplified implementation - in practice, this would traverse the trie
+  //   // and collect nodes on paths from root to start/end keys
+  //   const boundaryNodes: Uint8Array[] = []
 
-  /**
-   * Build boundary nodes for state range
-   */
-  private buildBoundaryNodes(
-    stateTrie: StateTrie,
-    startKey: Uint8Array,
-    endKey: Uint8Array,
-  ): Uint8Array[] {
-    // Simplified implementation - in practice, this would traverse the trie
-    // and collect nodes on paths from root to start/end keys
-    const boundaryNodes: Uint8Array[] = []
+  //   // For now, return empty array as full trie traversal implementation
+  //   // would be quite complex and require the actual trie structure
+  //   logger.debug('Building boundary nodes for state range', {
+  //     startKey: bytesToHex(startKey),
+  //     endKey: bytesToHex(endKey),
+  //     trieSize: Object.keys(stateTrie).length,
+  //   })
 
-    // For now, return empty array as full trie traversal implementation
-    // would be quite complex and require the actual trie structure
-    logger.debug('Building boundary nodes for state range', {
-      startKey: bytesToHex(startKey),
-      endKey: bytesToHex(endKey),
-      trieSize: Object.keys(stateTrie).length,
-    })
-
-    return boundaryNodes
-  }
+  //   return boundaryNodes
+  // }
 
   /**
    * Estimate response size in bytes
@@ -841,27 +1208,64 @@ export class StateService {
   /**
    * Truncate key-value pairs to fit within size limit
    */
-  private truncateToSize(
-    keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>,
-    maxSize: number,
-    boundaryNodeCount: number,
-  ): Array<{ key: Uint8Array; value: Uint8Array }> {
-    const boundaryNodeSize = boundaryNodeCount * 64
-    const availableSize = maxSize - boundaryNodeSize
+  // private truncateToSize(
+  //   keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>,
+  //   maxSize: number,
+  //   boundaryNodeCount: number,
+  // ): Array<{ key: Uint8Array; value: Uint8Array }> {
+  //   const boundaryNodeSize = boundaryNodeCount * 64
+  //   const availableSize = maxSize - boundaryNodeSize
 
-    const truncated: Array<{ key: Uint8Array; value: Uint8Array }> = []
-    let currentSize = 0
+  //   const truncated: Array<{ key: Uint8Array; value: Uint8Array }> = []
+  //   let currentSize = 0
 
-    for (const { key, value } of keyValuePairs) {
-      const itemSize = 31 + 4 + value.length
-      if (currentSize + itemSize > availableSize) {
-        break
-      }
-      truncated.push({ key, value })
-      currentSize += itemSize
+  //   for (const { key, value } of keyValuePairs) {
+  //     const itemSize = 31 + 4 + value.length
+  //     if (currentSize + itemSize > availableSize) {
+  //       break
+  //     }
+  //     truncated.push({ key, value })
+  //     currentSize += itemSize
+  //   }
+
+  //   return truncated
+  // }
+
+  /**
+   * Calculate Merkle root from raw keyvals (for test vectors)
+   *
+   * This bypasses decode/encode and uses the raw values directly from test vectors.
+   * Useful when the test vector state root should match exactly.
+   */
+  public calculateStateRootFromKeyvals(
+    keyvals: { key: Hex; value: Hex }[],
+  ): Safe<Hex> {
+    const hexKeyValues: Record<string, string> = {}
+
+    for (const keyval of keyvals) {
+      const normalizedKey = keyval.key.startsWith('0x')
+        ? keyval.key
+        : `0x${keyval.key}`
+      const normalizedValue = keyval.value.startsWith('0x')
+        ? keyval.value
+        : `0x${keyval.value}`
+      hexKeyValues[normalizedKey] = normalizedValue
     }
 
-    return truncated
+    // Use Gray Paper merklization implementation
+    const [error, merkleRoot] = merklizeState(hexKeyValues)
+    if (error) {
+      return safeError(
+        new Error(
+          `Failed to calculate Merkle root from keyvals: ${error.message}`,
+        ),
+      )
+    }
+
+    // Convert Uint8Array to Hex
+    const rootHex = bytesToHex(merkleRoot)
+
+    return safeResult(rootHex)
   }
 
   /**
@@ -900,11 +1304,6 @@ export class StateService {
 
     // Convert Uint8Array to Hex
     const rootHex = bytesToHex(merkleRoot)
-
-    logger.debug('Merkle root calculated using Gray Paper algorithm', {
-      rootHex,
-      keyCount: Object.keys(hexKeyValues).length,
-    })
 
     return rootHex
   }

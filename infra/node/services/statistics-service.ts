@@ -37,6 +37,7 @@ import type {
   ServiceStats,
   ValidatorStats,
   WorkReport,
+  Guarantee,
 } from '@pbnj/types'
 import { BaseService, SEGMENT_CONSTANTS, safeResult } from '@pbnj/types'
 import type { ClockService } from './clock-service'
@@ -320,6 +321,24 @@ export class StatisticsService extends BaseService {
   // Private Implementation - Validator Statistics
   // ============================================================================
 
+  public updateGuarantees(guarantees: Guarantee[]): void {
+    // Track guarantees per validator: each guarantee has signatures from multiple validators
+    // Each validator who signs a guarantee gets credit for that guarantee
+    for (const guarantee of guarantees) {
+      if (guarantee.signatures) {
+        for (const signature of guarantee.signatures) {
+          const validatorIdx = signature.validator_index
+          let validatorStats =
+            this.activity.validatorStatsAccumulator[validatorIdx]
+          if (!validatorStats) {
+            validatorStats = this.createEmptyValidatorStat()
+          }
+          validatorStats.guarantees += 1
+          this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
+        }
+      }
+    }
+  }
   /**
    * Update validator statistics based on block processing
    *
@@ -354,14 +373,10 @@ export class StatisticsService extends BaseService {
     stats.blocks += 1
 
     // Derive per-block deltas from the actual block body content
-    const ticketsDelta = body?.tickets?.length ?? 0
-    const preimageCountDelta = body?.preimages?.length ?? 0
-    const preimageSizeDelta = (body?.preimages ?? []).reduce((sum, p) => {
-      try {
-        return sum + hexToBytes(p.blob).length
-      } catch {
-        return sum
-      }
+    const ticketsDelta = body.tickets.length
+    const preimageCountDelta = body.preimages.length
+    const preimageSizeDelta = body.preimages.reduce((sum, p) => {
+      return sum + hexToBytes(p.blob).length
     }, 0)
 
     stats.tickets += ticketsDelta
@@ -370,67 +385,31 @@ export class StatisticsService extends BaseService {
 
     //insert back the item into the accumulator
     this.activity.validatorStatsAccumulator[authorIndex] = stats
-
-    // Track guarantees per validator: each guarantee has signatures from multiple validators
-    // Each validator who signs a guarantee gets credit for that guarantee
-    if (body?.guarantees) {
-      for (const guarantee of body.guarantees) {
-        if (guarantee.signatures) {
-          for (const signature of guarantee.signatures) {
-            const validatorIdx = signature.validator_index
-            let validatorStats =
-              this.activity.validatorStatsAccumulator[validatorIdx]
-            if (!validatorStats) {
-              validatorStats = this.createEmptyValidatorStat()
-            }
-            validatorStats.guarantees += 1
-            this.activity.validatorStatsAccumulator[validatorIdx] =
-              validatorStats
-          }
-        }
-      }
-    }
-
     // Track assurances per validator: each assurance is issued by a specific validator
-    if (body?.assurances) {
-      for (const assurance of body.assurances) {
-        const validatorIdx = assurance.validator_index
-        let validatorStats =
-          this.activity.validatorStatsAccumulator[validatorIdx]
-        if (!validatorStats) {
-          validatorStats = this.createEmptyValidatorStat()
-        }
-        validatorStats.assurances += 1
-        this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
+    for (const assurance of body.assurances) {
+      const validatorIdx = assurance.validator_index
+      let validatorStats = this.activity.validatorStatsAccumulator[validatorIdx]
+      if (!validatorStats) {
+        validatorStats = this.createEmptyValidatorStat()
       }
+      validatorStats.assurances += 1
+      this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
     }
-
-    logger.debug('StatisticsService updated validator statistics', {
-      validatorIndex: authorIndex,
-      blocks: stats.blocks.toString(),
-      tickets: stats.tickets.toString(),
-      preimages: stats.preimageCount.toString(),
-      preimageSize: stats.preimageSize.toString(),
-      guarantees: stats.guarantees.toString(),
-      assurances: stats.assurances.toString(),
-    })
 
     // Extract work reports from guarantees for core/service statistics
     const incomingReports: WorkReport[] = []
-    if (body?.guarantees) {
-      for (const guarantee of body.guarantees) {
-        incomingReports.push(guarantee.report)
-      }
+    for (const guarantee of body.guarantees) {
+      incomingReports.push(guarantee.report)
     }
 
     // Update core statistics: popularity from assurances
-    this.updateCoreStatistics(body?.assurances || [])
+    this.updateCoreStatistics(body.assurances)
 
     // Update core statistics: other metrics from work reports
     this.updateCoreStatisticsFromReports(incomingReports, [])
 
     // Update service statistics: from preimages
-    this.updateServiceStatistics(body?.preimages || [])
+    this.updateServiceStatistics(body.preimages)
 
     // Update service statistics: from work reports
     this.updateServiceStatisticsFromReports(incomingReports)
@@ -592,10 +571,6 @@ export class StatisticsService extends BaseService {
       coreStats.daLoad += bundleLen + segLoad
     }
 
-    logger.debug('Updated core statistics from work reports', {
-      incomingCount: incomingReports.length,
-      availableCount: availableReports.length,
-    })
   }
 
   // ============================================================================

@@ -1,8 +1,6 @@
 import type { RingVRFProver } from '@pbnj/bandersnatch-vrf'
 import { bytesToHex, type Hex, hexToBytes, logger, zeroHash } from '@pbnj/core'
 import type {
-  IKeyPairService,
-  IValidatorSetManager,
   Safe,
   ValidatorPublicKeys,
 } from '@pbnj/types'
@@ -52,109 +50,89 @@ import {
  * ============================================================================
  *
  * @param bandersnatchKeys - Sequence of Bandersnatch public keys (32 bytes each)
- * @param secretKey - Secret key for generating the ring commitment (32 bytes)
+ * @param keyPairService - Not needed (kept for backward compatibility, can be null)
+ * @param validatorSetManager - Not needed (kept for backward compatibility, can be null)
+ * @param prover - RingVRFProver instance for computing ring commitment
  * @returns 144-byte ring root commitment with proper metadata
  */
 export function getRingRoot(
   bandersnatchKeys: Uint8Array[],
-  keyPairService: IKeyPairService,
-  validatorSetManager: IValidatorSetManager,
   prover: RingVRFProver,
 ): Safe<Uint8Array> {
-  try {
-    if (bandersnatchKeys.length === 0) {
-      return safeError(new Error('Cannot create ring root from empty key set'))
-    }
-
-    // Sort keys for deterministic ordering (Gray Paper requirement)
-    const sortedKeys = [...bandersnatchKeys].sort((a, b) => {
-      for (let i = 0; i < Math.min(a.length, b.length); i++) {
-        if (a[i] < b[i]) return -1
-        if (a[i] > b[i]) return 1
-      }
-      return a.length - b.length
-    })
-
-    const localKeyPair = keyPairService.getLocalKeyPair()
-    const localValidatorSecretKey = localKeyPair.bandersnatchKeyPair.privateKey
-
-    // 3. Get prover index (this validator's index in the ring)
-    const [proverIndexError, proverIndex] =
-      validatorSetManager.getValidatorIndex(
-        bytesToHex(localKeyPair.ed25519KeyPair.publicKey),
-      )
-    if (proverIndexError) {
-      return safeError(proverIndexError)
-    }
-
-    // Use the passed Ring VRF prover instance
-
-    // Generate ring commitment using real secret key
-    const emptyInput = new Uint8Array(0) // Gray Paper: getRingRoot takes NO input
-    const ringVRFInput = {
-      input: emptyInput, // Empty - getRingRoot is pure commitment, no input needed
-      auxData: new Uint8Array(0), // Empty - no auxiliary data
-      ringKeys: sortedKeys,
-      proverIndex: Number(proverIndex),
-    }
-
-    // Generate proof to get the ring commitment
-    const proofResult = prover.prove(localValidatorSecretKey, ringVRFInput)
-
-    const ringCommitment = proofResult.proof.ringCommitment
-
-    if (!ringCommitment || ringCommitment.length === 0) {
-      return safeError(new Error('Failed to generate ring commitment'))
-    }
-
-    // Construct the full 144-byte ring root structure according to bandersnatch-vrf-spec
-    const ringRoot = new Uint8Array(BANDERSNATCH_VRF_CONFIG.RING_ROOT_SIZE)
-
-    // 1. KZG Polynomial Commitment (48 bytes) - BLS12-381 G1 point
-    ringRoot.set(ringCommitment, RING_ROOT_OFFSETS.KZG_COMMITMENT)
-
-    // 2. Accumulator Seed Point (32 bytes) - from bandersnatch-vrf-spec
-    const accumulatorSeedPoint = hexToBytes(
-      BANDERSNATCH_VRF_CONFIG.ACCUMULATOR_SEED_POINT,
-    )
-    ringRoot.set(accumulatorSeedPoint, RING_ROOT_OFFSETS.ACCUMULATOR_SEED_POINT)
-
-    // 3. Padding Point (32 bytes) - from bandersnatch-vrf-spec
-    const paddingPoint = hexToBytes(BANDERSNATCH_VRF_CONFIG.PADDING_POINT)
-    ringRoot.set(paddingPoint, RING_ROOT_OFFSETS.PADDING_POINT)
-
-    // 4. Domain Information (32 bytes) - polynomial domain generator and size
-    const domainGenerator = hexToBytes(BANDERSNATCH_VRF_CONFIG.DOMAIN_GENERATOR)
-
-    const domainSize = new Uint8Array(BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE_BYTES)
-
-    new DataView(domainSize.buffer).setUint32(
-      0,
-      BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE,
-      true,
-    ) // Little-endian
-
-    ringRoot.set(
-      domainGenerator.slice(0, BANDERSNATCH_VRF_CONFIG.DOMAIN_GENERATOR_SIZE),
-      RING_ROOT_OFFSETS.DOMAIN_GENERATOR,
-    )
-
-    ringRoot.set(domainSize, RING_ROOT_OFFSETS.DOMAIN_SIZE)
-
-    logger.debug('Generated ring root with bandersnatch-vrf-spec compliance', {
-      ringSize: sortedKeys.length,
-      ringCommitmentLength: ringCommitment.length,
-      ringRootLength: ringRoot.length,
-      accumulatorSeedPoint: bytesToHex(accumulatorSeedPoint),
-      paddingPoint: bytesToHex(paddingPoint),
-      domainSize: BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE,
-    })
-
-    return safeResult(ringRoot)
-  } catch (error) {
-    logger.error('Failed to generate ring root', { error })
-    return safeError(error as Error)
+  if (bandersnatchKeys.length === 0) {
+    return safeError(new Error('Cannot create ring root from empty key set'))
   }
+
+  // Sort keys for deterministic ordering (Gray Paper requirement)
+  const sortedKeys = [...bandersnatchKeys].sort((a, b) => {
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      if (a[i] < b[i]) return -1
+      if (a[i] > b[i]) return 1
+    }
+    return a.length - b.length
+  })
+
+  // Gray Paper compliant: compute ring commitment from public keys only
+  // No private key needed - this is deterministic and can be computed by any node
+  let ringCommitment: Uint8Array
+  try {
+    ringCommitment = prover.computeRingCommitment(sortedKeys)
+  } catch (error) {
+    return safeError(
+      error instanceof Error
+        ? error
+        : new Error(`Failed to compute ring commitment: ${String(error)}`),
+    )
+  }
+
+  if (!ringCommitment || ringCommitment.length === 0) {
+    return safeError(new Error('Failed to compute ring commitment'))
+  }
+
+  // Construct the full 144-byte ring root structure according to bandersnatch-vrf-spec
+  const ringRoot = new Uint8Array(BANDERSNATCH_VRF_CONFIG.RING_ROOT_SIZE)
+
+  // 1. KZG Polynomial Commitment (48 bytes) - BLS12-381 G1 point
+  ringRoot.set(ringCommitment, RING_ROOT_OFFSETS.KZG_COMMITMENT)
+
+  // 2. Accumulator Seed Point (32 bytes) - from bandersnatch-vrf-spec
+  const accumulatorSeedPoint = hexToBytes(
+    BANDERSNATCH_VRF_CONFIG.ACCUMULATOR_SEED_POINT,
+  )
+  ringRoot.set(accumulatorSeedPoint, RING_ROOT_OFFSETS.ACCUMULATOR_SEED_POINT)
+
+  // 3. Padding Point (32 bytes) - from bandersnatch-vrf-spec
+  const paddingPoint = hexToBytes(BANDERSNATCH_VRF_CONFIG.PADDING_POINT)
+  ringRoot.set(paddingPoint, RING_ROOT_OFFSETS.PADDING_POINT)
+
+  // 4. Domain Information (32 bytes) - polynomial domain generator and size
+  const domainGenerator = hexToBytes(BANDERSNATCH_VRF_CONFIG.DOMAIN_GENERATOR)
+
+  const domainSize = new Uint8Array(BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE_BYTES)
+
+  new DataView(domainSize.buffer).setUint32(
+    0,
+    BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE,
+    true,
+  ) // Little-endian
+
+  ringRoot.set(
+    domainGenerator.slice(0, BANDERSNATCH_VRF_CONFIG.DOMAIN_GENERATOR_SIZE),
+    RING_ROOT_OFFSETS.DOMAIN_GENERATOR,
+  )
+
+  ringRoot.set(domainSize, RING_ROOT_OFFSETS.DOMAIN_SIZE)
+
+  // logger.debug('Generated ring root with bandersnatch-vrf-spec compliance', {
+  //   ringSize: sortedKeys.length,
+  //   ringCommitmentLength: ringCommitment.length,
+  //   ringRootLength: ringRoot.length,
+  //   accumulatorSeedPoint: bytesToHex(accumulatorSeedPoint),
+  //   paddingPoint: bytesToHex(paddingPoint),
+  //   domainSize: BANDERSNATCH_VRF_CONFIG.DOMAIN_SIZE,
+  // })
+
+  return safeResult(ringRoot)
 }
 
 /**

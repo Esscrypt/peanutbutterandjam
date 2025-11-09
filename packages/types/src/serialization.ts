@@ -836,7 +836,7 @@ export interface AccumulatedItem {
 /**
  * Last account out structure
  */
-export interface LastAccountOut {
+export interface LastAccumulationOutput {
   /** Service ID */
   serviceId: bigint
   /** Account hash */

@@ -36,13 +36,14 @@ export class EntropyService extends BaseService {
   constructor(eventBusService: EventBusService) {
     super('entropy-service')
     this.eventBusService = eventBusService
-    this.eventBusService.addBlockProcessedCallback(this.handleBlockProcessing)
-    this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
-    this.eventBusService.addBestBlockChangedCallback(
-      this.handleBestBlockChanged,
+    this.eventBusService.addBlockProcessedCallback(
+      this.handleBlockProcessing.bind(this),
     )
-    this.eventBusService.addFinalizedBlockChangedCallback(
-      this.handleFinalizedBlockChanged,
+    this.eventBusService.addEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.addBestBlockChangedCallback(
+      this.handleBestBlockChanged.bind(this),
     )
   }
 
@@ -98,31 +99,6 @@ export class EntropyService extends BaseService {
       return safeError(updateError)
     }
     return safeResult(undefined)
-  }
-
-  /**
-   * Handle finalized block changes (secondary processing)
-   * Finalization doesn't directly update entropy, but may trigger additional processing
-   */
-  private handleFinalizedBlockChanged(blockHeader: BlockHeader): Safe<void> {
-    try {
-      logger.debug('Finalized block changed', {
-        slot: blockHeader.timeslot,
-        authorIndex: blockHeader.authorIndex,
-        parent: blockHeader.parent,
-      })
-
-      // TODO: Additional processing for finalized blocks if needed
-      // For now, entropy is updated on best block changes, not finalization
-
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error(
-        'Failed to handle finalized block change in entropy service',
-        { error },
-      )
-      return safeError(error as Error)
-    }
   }
 
   /**

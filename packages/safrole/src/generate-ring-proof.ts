@@ -101,21 +101,6 @@ export function generateRingVRFProof(
   offset += entropy2.length
   context.set(entryIndexBytes, offset)
 
-  // Debug: Log VRF context construction
-  console.log('Prover VRF context bytes:', {
-    Xticket: Array.from(Xticket)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join(''),
-    entropy2: Array.from(entropy2)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join(''),
-    entryIndexBytes: Array.from(entryIndexBytes)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join(''),
-    context: Array.from(context)
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join(''),
-  })
 
   // Create Ring VRF input according to Gray Paper specification
   const ringVRFInput = {

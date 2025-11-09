@@ -7,8 +7,11 @@
 import { describe, it, expect } from 'vitest'
 import type { Activity, ValidatorStats, CoreStats, ServiceStats } from '@pbnj/types'
 import { encodeActivity, decodeActivity } from '../state/activity'
+import { ConfigService } from '../../../infra/node/services/config-service'
 
 describe('Activity Serialization', () => {
+  const configService = new ConfigService('tiny')
+
   it('should encode and decode activity with empty sequences', () => {
     const activity: Activity = {
       validatorStatsAccumulator: [],
@@ -17,12 +20,12 @@ describe('Activity Serialization', () => {
       serviceStats: new Map(),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }
@@ -50,12 +53,12 @@ describe('Activity Serialization', () => {
       serviceStats: new Map(),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }
@@ -85,12 +88,12 @@ describe('Activity Serialization', () => {
       serviceStats: new Map(),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }
@@ -118,12 +121,12 @@ describe('Activity Serialization', () => {
       serviceStats: new Map([[1n, serviceStats]]),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }
@@ -171,12 +174,12 @@ describe('Activity Serialization', () => {
       serviceStats: new Map([[1n, serviceStats], [2n, serviceStats]]),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }
@@ -246,12 +249,12 @@ describe('Activity Serialization', () => {
       ]),
     }
 
-    const [encodeError, encoded] = encodeActivity(activity)
+    const [encodeError, encoded] = encodeActivity(activity, configService)
     if (encodeError) {
       throw encodeError
     }
 
-    const [decodeError, decoded] = decodeActivity(encoded)
+    const [decodeError, decoded] = decodeActivity(encoded, configService)
     if (decodeError) {
       throw decodeError
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LastAccountOut } from '@pbnj/types'
-import { decodeLastAccountOut, encodeLastAccountOut } from '../state/last-account-out'
+import { decodeLastAccumulationOutputs, encodeLastAccumulationOutputs } from '../state/last-accumulation-outputs'
 
 describe('LastAccountOut Serialization', () => {
   const mockLastAccountOut: LastAccountOut[] = [
@@ -28,11 +28,11 @@ describe('LastAccountOut Serialization', () => {
   ]
 
   it('should encode and decode last account out with multiple entries', () => {
-    const [encodeError, encoded] = encodeLastAccountOut(mockLastAccountOut)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(mockLastAccountOut)
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -53,11 +53,11 @@ describe('LastAccountOut Serialization', () => {
   })
 
   it('should encode and decode empty last account out', () => {
-    const [encodeError, encoded] = encodeLastAccountOut(mockLastAccountOutEmpty)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(mockLastAccountOutEmpty)
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -65,11 +65,11 @@ describe('LastAccountOut Serialization', () => {
   })
 
   it('should encode and decode single entry', () => {
-    const [encodeError, encoded] = encodeLastAccountOut(mockLastAccountOutSingle)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(mockLastAccountOutSingle)
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -90,10 +90,10 @@ describe('LastAccountOut Serialization', () => {
       },
     ]
 
-    const [encodeError, encoded] = encodeLastAccountOut(realisticLastAccountOut)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(realisticLastAccountOut)
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
 
     expect(decoded!.value.length).toBe(2)
@@ -104,7 +104,7 @@ describe('LastAccountOut Serialization', () => {
   it('should fail with insufficient data for entry', () => {
     const insufficientData = new Uint8Array([1, 2, 3]) // Less than 36 bytes
 
-    const [decodeError, decoded] = decodeLastAccountOut(insufficientData)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(insufficientData)
     expect(decodeError).toBeDefined()
     expect(decoded).toBeUndefined()
   })
@@ -117,10 +117,10 @@ describe('LastAccountOut Serialization', () => {
       },
     ]
 
-    const [encodeError, encoded] = encodeLastAccountOut(largeServiceIdOut)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(largeServiceIdOut)
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
 
     expect(decoded!.value.length).toBe(1)
@@ -134,10 +134,10 @@ describe('LastAccountOut Serialization', () => {
       { serviceId: 3n, hash: '0x3333333333333333333333333333333333333333333333333333333333333333' },
     ]
 
-    const [encodeError, encoded] = encodeLastAccountOut(originalData)
+    const [encodeError, encoded] = encodeLastAccumulationOutputs(originalData)
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeLastAccountOut(encoded!)
+    const [decodeError, decoded] = decodeLastAccumulationOutputs(encoded!)
     expect(decodeError).toBeUndefined()
 
     // Verify exact round-trip match

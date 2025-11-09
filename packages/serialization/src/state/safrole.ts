@@ -13,7 +13,7 @@
  *
  * Field order per Gray Paper (Section 12.2.1):
  * 1. pendingset - validator keys for next epoch (encoded as ValidatorPublicKeys sequence)
- * 2. epochroot - Bandersnatch ring root (32-byte hash)
+ * 2. epochroot - Bandersnatch ring root (144-byte blob, Gray Paper: \ringroot \subset \blob[144])
  * 3. discriminator - 0 for tickets, 1 for Bandersnatch keys (natural encoding)
  * 4. sealtickets - current epoch's slot-sealer sequence (C_epochlen items)
  * 5. var{ticketaccumulator} - variable-length sequence of highest-scoring tickets
@@ -32,7 +32,7 @@
  * ✅ CORRECT: Variable-length ticketaccumulator with proper encoding
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes, logger } from '@pbnj/core'
 import { isSafroleTicket } from '@pbnj/safrole'
 import type {
   DecodingResult,
@@ -44,7 +44,11 @@ import type {
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
-import { decodeVariableSequence, encodeSequenceGeneric } from '../core/sequence'
+import {
+  decodeVariableSequence,
+  encodeSequenceGeneric,
+  encodeVariableSequence,
+} from '../core/sequence'
 
 /**
  * Encode Gray Paper compliant safrole ticket for state serialization.
@@ -90,23 +94,57 @@ function encodeStateTicket(
  */
 function decodeStateTicket(
   data: Uint8Array,
+  context?: string,
 ): Safe<DecodingResult<SafroleTicketWithoutProof>> {
   let currentData = data
 
+  logger.debug('[decodeStateTicket] Starting decode', {
+    context: context || 'unknown',
+    dataLength: data.length,
+    firstBytes: bytesToHex(data.slice(0, Math.min(64, data.length))),
+  })
+
   // Decode ST_id - ticket identifier (32-byte hash)
   if (currentData.length < 32) {
+    logger.error('[decodeStateTicket] Insufficient data for ticket ID', {
+      context: context || 'unknown',
+      dataLength: currentData.length,
+      required: 32,
+      availableBytes: bytesToHex(currentData),
+    })
     return safeError(new Error('Insufficient data for ticket ID'))
   }
   const idBytes = currentData.slice(0, 32)
   const id = bytesToHex(idBytes)
   currentData = currentData.slice(32)
 
+  logger.debug('[decodeStateTicket] Decoded ticket ID', {
+    context: context || 'unknown',
+    id,
+    remainingLength: currentData.length,
+  })
+
   // Decode ST_entryindex - entry index (natural encoding)
   const [error, entryIndexResult] = decodeNatural(currentData)
   if (error) {
+    logger.error('[decodeStateTicket] Failed to decode entry index', {
+      context: context || 'unknown',
+      error: error.message,
+      remainingData: bytesToHex(
+        currentData.slice(0, Math.min(32, currentData.length)),
+      ),
+    })
     return safeError(error)
   }
   currentData = entryIndexResult.remaining
+
+  logger.debug('[decodeStateTicket] Successfully decoded ticket', {
+    context: context || 'unknown',
+    id,
+    entryIndex: entryIndexResult.value,
+    consumed: data.length - currentData.length,
+    remainingLength: currentData.length,
+  })
 
   return safeResult({
     value: {
@@ -227,8 +265,18 @@ export function encodeSafrole(safrole: SafroleState): Safe<Uint8Array> {
   }
   parts.push(pendingEncoded)
 
-  // 2. epochroot - 32-byte Bandersnatch ring root
-  parts.push(hexToBytes(safrole.epochRoot))
+  // 2. epochroot - 144-byte Bandersnatch ring root
+  // Gray Paper: \ringroot \subset \blob[144] (notation.tex line 169)
+  // Gray Paper: \epochroot \in \ringroot (safrole.tex line 62)
+  const epochRootBytes = hexToBytes(safrole.epochRoot)
+  if (epochRootBytes.length !== 144) {
+    return safeError(
+      new Error(
+        `Epoch root must be 144 bytes (Gray Paper \ringroot), got ${epochRootBytes.length}`,
+      ),
+    )
+  }
+  parts.push(epochRootBytes)
 
   // 3. discriminator - 0 for tickets, 1 for Bandersnatch keys
   const hasTickets = safrole.sealTickets.every((ticket) =>
@@ -270,17 +318,10 @@ export function encodeSafrole(safrole: SafroleState): Safe<Uint8Array> {
   }
 
   // 5. var{ticketaccumulator} - variable-length sequence with length prefix
-  const accumTickets: Uint8Array[] = []
-  for (const ticket of safrole.ticketAccumulator) {
-    const [error, encoded] = encodeStateTicket(ticket)
-    if (error) {
-      return safeError(error)
-    }
-    accumTickets.push(encoded)
-  }
-  const [accumError, accumEncoded] = encodeSequenceGeneric(
-    accumTickets,
-    (bytes: Uint8Array) => safeResult(bytes),
+  // Gray Paper: \var{\ticketaccumulator} means variable-length with length prefix
+  const [accumError, accumEncoded] = encodeVariableSequence(
+    safrole.ticketAccumulator,
+    (ticket) => encodeStateTicket(ticket),
   )
   if (accumError) {
     return safeError(accumError)
@@ -304,28 +345,47 @@ export function decodeSafrole(
 ): Safe<DecodingResult<SafroleState>> {
   let currentData = data
 
-  // 1. Decode pendingset - ValidatorPublicKeys sequence
-  const [pendingError, pendingResult] =
-    decodeVariableSequence<ValidatorPublicKeys>(currentData, (data) =>
-      decodeValidatorPublicKeys(data),
-    )
-  if (pendingError) {
-    return safeError(pendingError)
+  // 1. Decode pendingset - Fixed-length sequence of Cvalcount validators
+  // Gray Paper: pendingset ∈ sequence[Cvalcount]{valkey}
+  // This is a FIXED-LENGTH sequence (no length prefix)
+  const validatorCount = configService.numValidators
+  const pendingSet: ValidatorPublicKeys[] = []
+  for (let i = 0; i < validatorCount; i++) {
+    const [validatorError, validatorResult] =
+      decodeValidatorPublicKeys(currentData)
+    if (validatorError) {
+      logger.error('[decodeSafrole] Failed to decode validator', {
+        index: i,
+        error: validatorError.message,
+        remainingLength: currentData.length,
+      })
+      return safeError(validatorError)
+    }
+    currentData = validatorResult.remaining
+    pendingSet.push(validatorResult.value)
   }
-  currentData = pendingResult.remaining
-  const pendingSet = pendingResult.value
 
-  // 2. Decode epochroot - 32-byte Bandersnatch ring root
-  if (currentData.length < 32) {
+  // 2. Decode epochroot - 144-byte Bandersnatch ring root
+  // Gray Paper: \ringroot \subset \blob[144] (notation.tex line 169)
+  // Gray Paper: \epochroot \in \ringroot (safrole.tex line 62)
+  if (currentData.length < 144) {
+    logger.error('[decodeSafrole] Insufficient data for epoch root', {
+      remainingLength: currentData.length,
+      required: 144,
+    })
     return safeError(new Error('Insufficient data for epoch root'))
   }
-  const epochRootBytes = currentData.slice(0, 32)
+  const epochRootBytes = currentData.slice(0, 144)
   const epochRoot = bytesToHex(epochRootBytes)
-  currentData = currentData.slice(32)
+  currentData = currentData.slice(144)
 
   // 3. Decode discriminator - 0 for tickets, 1 for Bandersnatch keys
   const [discError, discResult] = decodeNatural(currentData)
   if (discError) {
+    logger.error('[decodeSafrole] Failed to decode discriminator', {
+      error: discError.message,
+      remainingLength: currentData.length,
+    })
     return safeError(discError)
   }
   currentData = discResult.remaining
@@ -337,8 +397,19 @@ export function decodeSafrole(
   if (discriminator === 0n) {
     // Decode as safrole tickets
     for (let i = 0; i < configService.epochDuration; i++) {
-      const [ticketError, ticketResult] = decodeStateTicket(currentData)
+      const [ticketError, ticketResult] = decodeStateTicket(
+        currentData,
+        `sealTicket[${i}]`,
+      )
       if (ticketError) {
+        logger.error('[decodeSafrole] Failed to decode seal ticket', {
+          index: i,
+          error: ticketError.message,
+          remainingLength: currentData.length,
+          remainingBytes: bytesToHex(
+            currentData.slice(0, Math.min(64, currentData.length)),
+          ),
+        })
         return safeError(ticketError)
       }
       currentData = ticketResult.remaining
@@ -348,6 +419,11 @@ export function decodeSafrole(
     // Decode as Bandersnatch keys (fallback mode)
     for (let i = 0; i < configService.epochDuration; i++) {
       if (currentData.length < 32) {
+        logger.error('[decodeSafrole] Insufficient data for Bandersnatch key', {
+          index: i,
+          remainingLength: currentData.length,
+          required: 32,
+        })
         return safeError(new Error('Insufficient data for Bandersnatch key'))
       }
       const keyBytes = currentData.slice(0, 32)
@@ -356,16 +432,49 @@ export function decodeSafrole(
     }
   }
 
-  // 5. Decode var{ticketaccumulator} - variable-length sequence with length prefix
+  // Decode length prefix first to see what we're expecting
+  const [lengthError, lengthResult] = decodeNatural(currentData)
+  if (lengthError) {
+    logger.error('[decodeSafrole] Failed to decode ticket accumulator length', {
+      error: lengthError.message,
+      remainingLength: currentData.length,
+    })
+    return safeError(lengthError)
+  }
+  const expectedCount = Number(lengthResult.value)
+
   const [accumError, accumResult] =
     decodeVariableSequence<SafroleTicketWithoutProof>(currentData, (data) =>
-      decodeStateTicket(data),
+      decodeStateTicket(data, 'ticketAccumulator'),
     )
   if (accumError) {
+    logger.error('[decodeSafrole] Failed to decode ticket accumulator', {
+      error: accumError.message,
+      expectedCount,
+      remainingLength: currentData.length,
+      remainingBytes: bytesToHex(
+        currentData.slice(0, Math.min(128, currentData.length)),
+      ),
+    })
     return safeError(accumError)
   }
+
+  logger.debug('[decodeSafrole] Successfully decoded ticket accumulator', {
+    expectedCount,
+    actualCount: accumResult.value.length,
+    consumed: accumResult.consumed,
+    remaining: accumResult.remaining.length,
+  })
   currentData = accumResult.remaining
   const ticketAccumulator = accumResult.value
+
+  logger.debug('[decodeSafrole] Successfully decoded safrole state', {
+    pendingSetCount: pendingSet.length,
+    sealTicketsCount: sealTickets.length,
+    ticketAccumulatorCount: ticketAccumulator.length,
+    totalConsumed: data.length - currentData.length,
+    remainingLength: currentData.length,
+  })
 
   return safeResult({
     value: {

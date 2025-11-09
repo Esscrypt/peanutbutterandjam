@@ -164,6 +164,7 @@ describe('Reports - JAM Test Vectors', () => {
             {
               eventBusService: eventBusService,
               configService: configService,
+              accumulationService: null,
             },
           )
           recentHistoryService.setRecent({
@@ -333,6 +334,7 @@ describe('Reports - JAM Test Vectors', () => {
             guarantees,
             BigInt(vector.input.slot)
           )
+
 
           // Check if error case is expected
           if (applyError) {

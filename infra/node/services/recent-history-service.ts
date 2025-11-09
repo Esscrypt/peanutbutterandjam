@@ -44,29 +44,14 @@ import type {
   RecentHistoryEntry,
   Safe,
 } from '@pbnj/types'
-
 import {
   BaseService as BaseServiceClass,
   HISTORY_CONSTANTS,
   safeError,
   safeResult,
 } from '@pbnj/types'
-
-// ============================================================================
-// Recent History Service
-// ============================================================================
-
-/**
- * Recent history service configuration
- */
-export interface RecentHistoryConfig {
-  /** Maximum number of recent blocks to track (default: 8) */
-  maxHistoryLength: number
-  /** Whether to persist to database (default: true) */
-  enablePersistence: boolean
-  /** Database persistence interval in blocks (default: 1) */
-  persistenceInterval: number
-}
+import type { AccumulationService } from './accumulation-service'
+import type { ConfigService } from './config-service'
 
 /**
  * Recent History Service
@@ -83,10 +68,12 @@ export class RecentHistoryService extends BaseServiceClass {
   /** Full MMR range including null positions (for mmrappend/mmrsuperpeak operations) */
   private mmrPeaks: MMRRange = []
   private currentBlockNumber = 0n
-  private readonly configService: IConfigService
+  private readonly configService: ConfigService
+  private accumulationService: AccumulationService | null
   constructor(options: {
     eventBusService: EventBusService
-    configService: IConfigService
+    configService: ConfigService
+    accumulationService: AccumulationService | null
   }) {
     super('recent-history-service')
     this.eventBusService = options.eventBusService
@@ -96,6 +83,7 @@ export class RecentHistoryService extends BaseServiceClass {
     }
     this.mmrPeaks = []
     this.configService = options.configService
+    this.accumulationService = options.accumulationService
   }
 
   override start(): Safe<boolean> {
@@ -145,8 +133,18 @@ export class RecentHistoryService extends BaseServiceClass {
     // Add to circular buffer
     this.addToHistory(newEntry)
 
-    // Update accumulation belt (simplified for now)
-    this.updateAccoutBelt(event.body)
+    // Update accumulation belt using accumulation outputs from AccumulationService
+    // Gray Paper: lastaccout' comes from local_fnservouts (accumulation output pairings)
+    if (this.accumulationService) {
+      const accumulationOutputs =
+        this.accumulationService.getLastAccumulationOutputs()
+      this.updateAccoutBelt(accumulationOutputs)
+    } else {
+      // Fallback: extract from block body (legacy behavior, not Gray Paper compliant)
+      logger.warn(
+        'RecentHistoryService: AccumulationService not provided, falling back to block body extraction',
+      )
+    }
 
     // Increment block counter
     this.currentBlockNumber++
@@ -284,33 +282,29 @@ export class RecentHistoryService extends BaseServiceClass {
    * Gray Paper: accoutBelt' = mmrappend(accoutBelt, accumulate_root, keccak)
    */
   updateAccoutBeltWithRoot(accumulateRoot: Hex): Safe<void> {
-    try {
-      const accumulateRootBytes = hexToBytes(accumulateRoot)
+    const accumulateRootBytes = hexToBytes(accumulateRoot)
 
-      // Append to MMR (uses mmrPeaks which preserves null positions)
-      const [mmrError, updatedRange] = mmrappend(
-        this.mmrPeaks,
-        accumulateRootBytes,
-      )
+    // Append to MMR (uses mmrPeaks which preserves null positions)
+    const [mmrError, updatedRange] = mmrappend(
+      this.mmrPeaks,
+      accumulateRootBytes,
+    )
 
-      if (mmrError) {
-        return safeError(mmrError)
-      }
-
-      // Update internal MMR peaks (preserves null positions)
-      this.mmrPeaks = updatedRange
-
-      // Update accoutBelt for compatibility (non-null peaks only)
-      this.accoutBelt.peaks = updatedRange
-        .map((peak) => (peak !== null ? bytesToHex(peak) : null))
-        .filter((peak): peak is Hex => peak !== null)
-
-      this.accoutBelt.totalCount = BigInt(updatedRange.length)
-
-      return safeResult(undefined)
-    } catch (error) {
-      return safeError(error as Error)
+    if (mmrError) {
+      return safeError(mmrError)
     }
+
+    // Update internal MMR peaks (preserves null positions)
+    this.mmrPeaks = updatedRange
+
+    // Update accoutBelt for compatibility (non-null peaks only)
+    this.accoutBelt.peaks = updatedRange
+      .map((peak) => (peak !== null ? bytesToHex(peak) : null))
+      .filter((peak): peak is Hex => peak !== null)
+
+    this.accoutBelt.totalCount = BigInt(updatedRange.length)
+
+    return safeResult(undefined)
   }
 
   // ============================================================================
@@ -421,7 +415,7 @@ export class RecentHistoryService extends BaseServiceClass {
    * Gray Paper: recent_history.tex, equations 28-32
    *
    * Process:
-   * 1. Get lastaccout' (accumulation output sequence) from block body
+   * 1. Get lastaccout' (accumulation output sequence) from AccumulationService
    * 2. Encode: s = [encode[4](serviceId) concat encode(hash) for each (serviceId, hash)]
    * 3. Merklize: merklizewb(s, keccak)
    * 4. Append to belt: mmrappend(accoutBelt, merklize_result, keccak)
@@ -434,39 +428,20 @@ export class RecentHistoryService extends BaseServiceClass {
    * Note: lastaccout' is defined in accumulation.tex eq 370:
    * lastaccout' ≡ [tuple{s, h} ∈ b] where b is local_fnservouts (accumulation output pairings)
    * Each tuple represents a service that was accumulated in this block.
+   *
+   * @param lastaccout - Accumulation output pairings from AccumulationService
    */
-  private updateAccoutBelt(body: BlockBody): Safe<void> {
-    // Step 1: Extract lastaccout' from block body
-    // According to accumulation.tex eq 370, lastaccout' comes from accumulation outputs
-    // The guarantees extrinsic references work reports that were accumulated.
-    // Each guarantee.report.results contains WorkResult with service_id.
-    // The hash comes from the accumulation output (poststate hash or code_hash).
-    //
+  private updateAccoutBelt(
+    lastaccout:Map<bigint, Hex>,
+  ): Safe<void> {
+    // Step 1: lastaccout' is provided directly from AccumulationService
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
-    // Extract from guarantees' work reports:
-    const lastaccout: Array<{ serviceId: bigint; hash: Uint8Array }> = []
-
-    // Extract from guarantees: each guarantee references an accumulated work report
-    for (const guarantee of body.guarantees) {
-      const workReport = guarantee.report
-      // Each work report can have multiple results (one per service accumulated)
-      for (const result of workReport.results) {
-        // service_id from the result
-        const serviceId = result.service_id
-
-        // Hash: use code_hash from the result as it represents the service state
-        // Gray Paper accumulation.tex: the hash is the accumulation output hash
-        // Using code_hash as it uniquely identifies the service code at accumulation time
-        const hash = hexToBytes(result.code_hash)
-
-        lastaccout.push({ serviceId, hash })
-      }
-    }
+    // This comes from local_fnservouts tracked during accumulation
 
     // Step 2: Encode the sequence per Gray Paper equation 29
     // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
-    const encodedSequence: Uint8Array[] = lastaccout.map(
-      ({ serviceId, hash }) => {
+    const encodedSequence: Uint8Array[] = Array.from(lastaccout.entries()).map(
+      ([serviceId, hash]) => {
         // encode[4](serviceId) - 4-byte encoding
         const serviceIdBytes = new Uint8Array(4)
         const view = new DataView(serviceIdBytes.buffer)
@@ -475,7 +450,7 @@ export class RecentHistoryService extends BaseServiceClass {
         // Concatenate serviceId + hash
         const combined = new Uint8Array(4 + hash.length)
         combined.set(serviceIdBytes, 0)
-        combined.set(hash, 4)
+        combined.set(hexToBytes(hash), 4)
 
         return combined
       },

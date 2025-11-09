@@ -7,7 +7,7 @@
  */
 
 import type { EpochTransitionEvent, EventBusService } from '@pbnj/core'
-import { generateFallbackKeySequence } from '@pbnj/safrole'
+import { generateFallbackKeySequence, isSafroleTicket } from '@pbnj/safrole'
 import {
   BaseService,
   type Safe,
@@ -206,10 +206,14 @@ export class SealKeyService extends BaseService {
     this.validatorSetManager = validatorSetManager
   }
 
-  setSealKeys(sealKeys: SafroleTicketWithoutProof[]): void {
+  setSealKeys(sealKeys: (SafroleTicketWithoutProof | Uint8Array)[]): void {
     for (let phase = 0; phase < this.configService.epochDuration; phase++) {
       const sealKey = sealKeys[phase]
-      this.sealTicketForPhase.set(BigInt(phase), sealKey)
+      if (isSafroleTicket(sealKey)) {
+        this.sealTicketForPhase.set(BigInt(phase), sealKey as SafroleTicketWithoutProof)
+      } else {
+        this.fallbackKeyForPhase.set(BigInt(phase), sealKey as Uint8Array)
+      }
     }
   }
 }

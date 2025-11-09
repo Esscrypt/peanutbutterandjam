@@ -17,7 +17,7 @@
  * - Service account updated with new storage and metadata
  */
 
-import { hexToBytes, logger } from '@pbnj/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
 import type { AccumulatePVM } from '@pbnj/pvm'
 import {
   calculateWorkReportHash,
@@ -66,6 +66,11 @@ export class AccumulationService extends BaseService {
   private lastShiftedSlot: bigint | null = null
   // Track last processed slot for ready queue shifting
   private lastProcessedSlot: bigint | null = null
+  // Track local_fnservouts (accumulation output pairings) for the latest accumulation
+  // Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
+  // This is used to construct lastaccout' for the accoutBelt
+  // Only tracks the most recent accumulation (cleared at start of each processAccumulation)
+  private accumulationOutputs: Map<bigint, Hex> = new Map()
   // private readonly statisticsService: StatisticsService | null
   // private readonly entropyService: EntropyService | null
   constructor(options: {
@@ -96,6 +101,25 @@ export class AccumulationService extends BaseService {
     this.readyService = options.readyService
     // this.statisticsService = options.statisticsService
     // this.entropyService = options.entropyService
+  }
+
+  /**
+   * Get last accumulation outputs
+   *
+   * Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
+   * Returns the accumulation output pairings (lastaccout') from the most recent accumulation.
+   *
+   * @returns Map of serviceId -> hash from the latest accumulation
+   */
+  getLastAccumulationOutputs(): Map<bigint, Hex> {
+    return new Map(this.accumulationOutputs) // Return copy to prevent mutation
+  }
+
+  /**
+   * Clear accumulation outputs (for cleanup)
+   */
+  clearAccumulationOutputs(): void {
+    this.accumulationOutputs.clear()
   }
 
   /**
@@ -147,6 +171,10 @@ export class AccumulationService extends BaseService {
     this.accumulated = accumulated
   }
 
+  setLastAccumulationOutputs(lastAccumulationOutputs: Map<bigint, Hex>): void {
+    this.accumulationOutputs = new Map(lastAccumulationOutputs)
+  }
+
   getReadyItem(workReportHash: Hex): ReadyItem | undefined {
     if (!this.readyService) {
       throw new Error('Ready service not initialized')
@@ -188,6 +216,9 @@ export class AccumulationService extends BaseService {
     if (!this.readyService) {
       throw new Error('Ready service not initialized')
     }
+    // Clear accumulation outputs at start to track only the latest accumulation
+    this.accumulationOutputs.clear()
+
     // Convert absolute slot to epoch slot index
     // Gray Paper: ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
     // The ready queue uses epoch slot indices (0 to C_epochlen-1), not absolute slot numbers
@@ -426,6 +457,38 @@ export class AccumulationService extends BaseService {
         results.push(result)
         // Track all work reports processed for this service
         processedWorkReports.push(...serviceWorkReports)
+
+        // Track accumulation output for local_fnservouts
+        // Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
+        // The hash is the accumulation output hash (yield if present, otherwise codehash)
+        if (result.ok) {
+          const { yield: yieldHash } = result.value
+          // Get the service account to access codehash as fallback
+          const [accountError, account] =
+            this.serviceAccountsService.getServiceAccount(serviceId)
+          let outputHash: Uint8Array
+
+          if (yieldHash && yieldHash.length > 0) {
+            // Use yield hash if present (accumulation result hash)
+            outputHash = yieldHash
+          } else if (!accountError && account) {
+            // Fallback to codehash from service account
+            outputHash = hexToBytes(account.codehash)
+          } else {
+            // Last resort: use zero hash (shouldn't happen in normal operation)
+            logger.warn(
+              '[AccumulationService] No hash available for accumulation output',
+              {
+                serviceId: serviceId.toString(),
+                slot: currentSlot.toString(),
+              },
+            )
+            outputHash = new Uint8Array(32) // Zero hash
+          }
+
+          // Store in accumulation outputs for the latest accumulation
+          this.accumulationOutputs.set(serviceId, bytesToHex(outputHash))
+        }
 
         // Collect defxfers from this accumulation for next services
         // Gray Paper: defxfers from earlier accumulations are available to later ones

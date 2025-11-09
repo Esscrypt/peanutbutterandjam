@@ -40,7 +40,7 @@ import {
   IETFVRFProver,
   IETFVRFVerifier,
 } from '@pbnj/bandersnatch-vrf'
-import { blake2bHash, hexToBytes, logger } from '@pbnj/core'
+import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnj/core'
 import { encodeUnsignedHeader } from '@pbnj/serialization'
 import type {
   IConfigService,
@@ -193,6 +193,7 @@ export function verifyFallbackSealSignature(
   offset += XFALLBACK_SEAL.length
   context.set(entropy3, offset)
 
+
   // Verify IETF VRF signature using IETFVRFVerifier
   // Gray Paper equation 154: bssignature{k}{c}{m} where:
   // k = validatorPublicKey, c = context, m = unsignedHeader
@@ -200,9 +201,9 @@ export function verifyFallbackSealSignature(
   // where input = message and auxData = context per IETF VRF specification
   const isValid = IETFVRFVerifier.verify(
     validatorPublicKey,
-    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
+    context, // Xfallback ∥ entropy'_3 (context) - goes to _input parameter
     proof,
-    context, // Xfallback ∥ entropy'_3 (context) - goes to _auxData parameter
+    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _auxData parameter
   )
 
   return safeResult(isValid)

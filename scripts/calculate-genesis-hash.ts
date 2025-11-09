@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs'
 import { blake2bHash, type GenesisHeader, parseGenesisHeader } from '@pbnj/core'
 import { encodeHeader } from '@pbnj/serialization'
 import type { BlockHeader, EpochMark, ValidatorKeyTuple } from '@pbnj/types'
+import { ConfigService } from '../infra/node/services/config-service'
 
 // Expected hash from JAM documentation
 const EXPECTED_HASH =
@@ -54,16 +55,19 @@ function main() {
     // Load and validate genesis header from JSON file
     console.log('📁 Loading genesis header from config/genesis-header.json...')
     const genesisHeaderJson = readFileSync(
-      './config/genesis-header.json',
+      '../config/genesis-header.json',
       'utf8',
     )
-    const parseResult = parseGenesisHeader(genesisHeaderJson)
-
-    if (!parseResult.success) {
-      throw new Error(`Failed to parse genesis header: ${parseResult.error}`)
+    const [parseResultError, parseResult] = parseGenesisHeader(genesisHeaderJson)
+    if (parseResultError) {
+      throw new Error(`Failed to parse genesis header: ${parseResultError}`)
     }
 
-    const genesisHeader = parseResult.data
+    if (!parseResult) {
+      throw new Error(`Failed to parse genesis header`)
+    }
+
+    const genesisHeader = parseResult
     console.log('✅ Genesis header loaded and validated successfully\n')
 
     // Convert to serialization format
@@ -72,8 +76,9 @@ function main() {
     console.log('✅ Conversion completed\n')
 
     // Encode the genesis header
+    const configService = new ConfigService('tiny')
     console.log('🔧 Encoding genesis header...')
-    const [encodedHeaderError, encodedHeader] = encodeHeader(blockHeader)
+    const [encodedHeaderError, encodedHeader] = encodeHeader(blockHeader, configService)
     if (encodedHeaderError) {
       throw new Error(`Failed to encode genesis header: ${encodedHeaderError}`)
     }

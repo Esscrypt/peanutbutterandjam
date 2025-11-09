@@ -6,53 +6,40 @@
  */
 
 import { describe, expect, test } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { IETFVRFProver } from '../prover/ietf'
 import { IETFVRFVerifier } from '../verifier/ietf'
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex, mod } from '@pbnj/core'
 import { getCommitmentFromGamma } from '../utils/gamma'
+import {
+  bytesToBigIntLittleEndian,
+  curvePointToNoble,
+  elligator2HashToCurve,
+} from '../crypto/elligator2'
+import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import { generateChallengeRfc9381 } from '../crypto/rfc9381'
 
-// Test vectors from bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_ietf.json
-const IETF_TEST_VECTORS = [
-  {
-    comment: "bandersnatch_sha-512_ell2_ietf - vector-1",
-    sk: "3d6406500d4009fdf2604546093665911e753f2213570a29521fd88bc30ede18",
-    pk: "a1b1da71cc4682e159b7da23050d8b6261eb11a3247c89b07ef56ccd002fd38b",
-    alpha: "",
-    salt: "",
-    ad: "",
-    h: "c5eaf38334836d4b10e05d2c1021959a917e08eaf4eb46a8c4c8d1bec04e2c00",
-    gamma: "e7aa5154103450f0a0525a36a441f827296ee489ef30ed8787cff8df1bef223f",
-    beta: "fdeb377a4ffd7f95ebe48e5b43a88d069ce62188e49493500315ad55ee04d7442b93c4c91d5475370e9380496f4bc0b838c2483bce4e133c6f18b0adbb9e4722",
-    proof_c: "439fd9495643314fa623f2581f4b3d7d6037394468084f4ad7d8031479d9d101",
-    proof_s: "828bedd2ad95380b11f67a05ea0a76f0c3fef2bee9f043f4dffdddde09f55c01"
-  },
-  {
-    comment: "bandersnatch_sha-512_ell2_ietf - vector-2",
-    sk: "8b9063872331dda4c3c282f7d813fb3c13e7339b7dc9635fdc764e32cc57cb15",
-    pk: "5ebfe047f421e1a3e1d9bbb163839812657bbb3e4ffe9856a725b2b405844cf3",
-    alpha: "0a",
-    salt: "",
-    ad: "",
-    h: "8c1d1425374f01d86b23bfeab770c60b58d2eeb9afc5900c8b8a918d09a6086b",
-    gamma: "60f32f5ad3e9694b82ccc0a735edb2f940f757ab333cc5f7b0a41158b80f574f",
-    beta: "44f3728bc5ad550aeeb89f8db340b2fceffc946be3e2d8c5d99b47c1fce344b3c7fcee223a9b29a64fe4a86a9994784bc165bb0fba03ca0a493f75bee89a0946",
-    proof_c: "8aa1c755a00a6a25bdecda197ee1b60a01e50787bd10aa976133f4c39179330e",
-    proof_s: "18c74ffd67e6abc658e2d05ecd3101ddc0c33623823f2395538cf8d39e654f12"
-  },
-  {
-    comment: "bandersnatch_sha-512_ell2_ietf - vector-3",
-    sk: "6db187202f69e627e432296ae1d0f166ae6ac3c1222585b6ceae80ea07670b14",
-    pk: "9d97151298a5339866ddd3539d16696e19e6b68ac731562c807fe63a1ca49506",
-    alpha: "",
-    salt: "",
-    ad: "0b8c",
-    h: "c5eaf38334836d4b10e05d2c1021959a917e08eaf4eb46a8c4c8d1bec04e2c00",
-    gamma: "67a348e256d908eb695d15ee0d869efef2bcf9f0fea646e788f967abbc0464dd",
-    beta: "edde0178045133eb03ef4d1ad8b978a56ee80ec4eab8830d6bc6c080031388416657d3c449d9398cc4385d1c8a2bb19bcf61ff086e5a6c477a0302ce270d1abf",
-    proof_c: "56e1b620c96e9a23ddd8ab83a6ae80b6be29d6faf0b5b3a8f1b8f1d9e9c8d7f0",
-    proof_s: "3a1b2c3d4e5f60718293a4b5c6d7e8f9012345678901234567890123456789ab"
-  }
-] as const
+// Load test vectors from bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_ietf.json
+const testVectorsPath = join(
+  __dirname,
+  '../../../../submodules/bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_ietf.json',
+)
+const IETF_TEST_VECTORS = JSON.parse(
+  readFileSync(testVectorsPath, 'utf-8'),
+) as Array<{
+  comment: string
+  sk: string
+  pk: string
+  alpha: string
+  salt: string
+  ad: string
+  h: string
+  gamma: string
+  beta: string
+  proof_c: string
+  proof_s: string
+}>
 
 // Hex parsing function that handles missing leading zeros
 function hexToBytes(hex: string): Uint8Array {
@@ -68,7 +55,7 @@ function hexToBytes(hex: string): Uint8Array {
   
   const bytes = new Uint8Array(hex.length / 2)
   for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
+    bytes[i / 2] = Number.parseInt(hex.substring(i, i + 2), 16)
   }
   return bytes
 }
@@ -248,6 +235,84 @@ describe('IETF VRF End-to-End Tests', () => {
     })
   })
 
+  describe('Challenge Matching', () => {
+    test('Prover and verifier should compute the same challenge', () => {
+      const secretKey = hexToBytes('3d6406500d4009fdf2604546093665911e753f2213570a29521fd88bc30ede18')
+      const publicKey = hexToBytes('a1b1da71cc4682e159b7da23050d8b6261eb11a3247c89b07ef56ccd002fd38b')
+      const input = new TextEncoder().encode('test message')
+      const auxData = new TextEncoder().encode('aux data')
+
+      // Generate proof
+      const proofResult = IETFVRFProver.prove(secretKey, input, auxData)
+
+      // Extract challenge from proof (bytes 32-64)
+      const cFromProofBytes = proofResult.proof.slice(32, 64)
+      const cFromProof = bytesToBigIntLittleEndian(cFromProofBytes)
+
+      // Verify proof (this will recompute the challenge internally)
+      const isValid = IETFVRFVerifier.verify(
+        publicKey,
+        input,
+        proofResult.proof,
+        auxData
+      )
+
+      // The verification should succeed, which means the challenges match
+      expect(isValid).toBe(true)
+
+      // Additionally, we can manually recompute the challenge to verify
+      // Parse proof components
+      const gammaFromProof = proofResult.proof.slice(0, 32)
+      const sFromProof = proofResult.proof.slice(64, 96)
+      const s = bytesToBigIntLittleEndian(sFromProof)
+
+      // Hash input to curve (same as verifier does)
+      const salt = new Uint8Array(0)
+      const h2cData = new Uint8Array(salt.length + input.length)
+      h2cData.set(salt, 0)
+      h2cData.set(input, salt.length)
+      const alphaPoint = elligator2HashToCurve(h2cData)
+      const alphaBytes = BandersnatchCurveNoble.pointToBytes(curvePointToNoble(alphaPoint))
+
+      const alphaPoint2 = BandersnatchCurveNoble.bytesToPoint(alphaBytes)
+      const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gammaFromProof)
+      const publicKeyPoint = BandersnatchCurveNoble.bytesToPoint(publicKey)
+
+      // Reconstruct U and V
+      const c = mod(cFromProof, BandersnatchCurveNoble.CURVE_ORDER)
+      const gToS = BandersnatchCurveNoble.scalarMultiply(
+        BandersnatchCurveNoble.GENERATOR,
+        s,
+      )
+      const yToC = BandersnatchCurveNoble.scalarMultiply(publicKeyPoint, c)
+      const u = BandersnatchCurveNoble.add(
+        gToS,
+        BandersnatchCurveNoble.negate(yToC),
+      )
+
+      const hToS = BandersnatchCurveNoble.scalarMultiply(alphaPoint2, s)
+      const gammaToC = BandersnatchCurveNoble.scalarMultiply(gammaPoint, c)
+      const v = BandersnatchCurveNoble.add(
+        hToS,
+        BandersnatchCurveNoble.negate(gammaToC),
+      )
+
+      // Recompute challenge as verifier does
+      const challengePoints = [
+        BandersnatchCurveNoble.pointToBytes(publicKeyPoint), // Y
+        BandersnatchCurveNoble.pointToBytes(alphaPoint2), // I
+        BandersnatchCurveNoble.pointToBytes(gammaPoint), // O
+        BandersnatchCurveNoble.pointToBytes(u), // U
+        BandersnatchCurveNoble.pointToBytes(v), // V
+      ]
+      const expectedC = generateChallengeRfc9381(challengePoints, auxData)
+
+      // Challenges should match
+      expect(c.toString(16)).toBe(expectedC.toString(16))
+      expect(c).toBe(expectedC)
+    })
+  })
+
   describe('Edge Cases', () => {
     test('Empty input should work correctly', () => {
       const secretKey = hexToBytes('3d6406500d4009fdf2604546093665911e753f2213570a29521fd88bc30ede18')
@@ -302,6 +367,179 @@ describe('IETF VRF End-to-End Tests', () => {
       
       // Proofs should be different
       expect(bytesToHex(proof1.proof)).not.toBe(bytesToHex(proof2.proof))
+    })
+  })
+
+  describe('Proof Serialization and Deserialization', () => {
+    test('Should handle round-trip serialization for generated proof', () => {
+      const vector = IETF_TEST_VECTORS[0]
+      const secretKey = hexToBytes(vector.sk)
+      const input = hexToBytes(vector.alpha)
+      const auxData = hexToBytes(vector.ad)
+      
+      // Generate proof
+      const proofResult = IETFVRFProver.prove(secretKey, input, auxData)
+      
+      // Deserialize the generated proof
+      const gammaFromProof = proofResult.proof.slice(0, 32)
+      const cFromProof = proofResult.proof.slice(32, 64)
+      const sFromProof = proofResult.proof.slice(64, 96)
+      
+      // Re-serialize
+      const reserializedProof = new Uint8Array([
+        ...gammaFromProof,
+        ...cFromProof,
+        ...sFromProof,
+      ])
+      
+      // Verify round-trip
+      expect(reserializedProof).toEqual(proofResult.proof)
+      expect(reserializedProof.length).toBe(96)
+      
+      // Verify the re-serialized proof still verifies
+      const publicKey = hexToBytes(vector.pk)
+      const isValid = IETFVRFVerifier.verify(
+        publicKey,
+        input,
+        reserializedProof,
+        auxData,
+      )
+      
+      expect(isValid).toBe(true)
+    })
+
+    test('Should correctly deserialize and re-serialize proof components', () => {
+      const vector = IETF_TEST_VECTORS[0]
+      const secretKey = hexToBytes(vector.sk)
+      const input = hexToBytes(vector.alpha)
+      const auxData = hexToBytes(vector.ad)
+      
+      // Generate proof
+      const proofResult = IETFVRFProver.prove(secretKey, input, auxData)
+      
+      // Deserialize proof components
+      const gammaFromProof = proofResult.proof.slice(0, 32)
+      const cFromProof = proofResult.proof.slice(32, 64)
+      const sFromProof = proofResult.proof.slice(64, 96)
+      
+      // Verify component lengths
+      expect(gammaFromProof.length).toBe(32)
+      expect(cFromProof.length).toBe(32)
+      expect(sFromProof.length).toBe(32)
+      
+      // Parse scalars to verify they're valid
+      const c = bytesToBigIntLittleEndian(cFromProof)
+      const s = bytesToBigIntLittleEndian(sFromProof)
+      
+      expect(c).toBeGreaterThan(0n)
+      expect(s).toBeGreaterThan(0n)
+      
+      // Re-serialize proof
+      const reserializedProof = new Uint8Array([
+        ...gammaFromProof,
+        ...cFromProof,
+        ...sFromProof,
+      ])
+      
+      // Verify round-trip
+      expect(reserializedProof.length).toBe(96)
+      expect(reserializedProof).toEqual(proofResult.proof)
+      
+      // Verify the re-serialized proof still verifies
+      const publicKey = hexToBytes(vector.pk)
+      const isValid = IETFVRFVerifier.verify(
+        publicKey,
+        input,
+        reserializedProof,
+        auxData,
+      )
+      
+      expect(isValid).toBe(true)
+      
+      // Verify individual components match
+      expect(bytesToHex(gammaFromProof)).toBe(bytesToHex(proofResult.gamma))
+    })
+
+    test('Should correctly round-trip pointToBytes and bytesToPoint', () => {
+      const vector = IETF_TEST_VECTORS[0]
+      
+      // Test 1: Round-trip gamma (VRF output point) from test vector
+      const gammaBytes = hexToBytes(vector.gamma)
+      expect(gammaBytes.length).toBe(32)
+      
+      // Deserialize gamma point
+      const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gammaBytes)
+      
+      // Re-serialize gamma point
+      const gammaBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(gammaPoint)
+      
+      // Verify round-trip
+      expect(gammaBytesRoundTrip).toEqual(gammaBytes)
+      expect(bytesToHex(gammaBytesRoundTrip)).toBe(bytesToHex(gammaBytes))
+      
+      // Test 2: Round-trip public key from test vector
+      const publicKeyBytes = hexToBytes(vector.pk)
+      expect(publicKeyBytes.length).toBe(32)
+      
+      const publicKeyPoint = BandersnatchCurveNoble.bytesToPoint(publicKeyBytes)
+      const publicKeyBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(publicKeyPoint)
+      
+      expect(publicKeyBytesRoundTrip).toEqual(publicKeyBytes)
+      expect(bytesToHex(publicKeyBytesRoundTrip)).toBe(bytesToHex(publicKeyBytes))
+      
+      // Test 3: Round-trip h (VRF input point) from test vector
+      const hBytes = hexToBytes(vector.h)
+      expect(hBytes.length).toBe(32)
+      
+      const hPoint = BandersnatchCurveNoble.bytesToPoint(hBytes)
+      const hBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(hPoint)
+      
+      expect(hBytesRoundTrip).toEqual(hBytes)
+      expect(bytesToHex(hBytesRoundTrip)).toBe(bytesToHex(hBytes))
+      
+      // Test 4: Round-trip generator point
+      const generatorPoint = BandersnatchCurveNoble.GENERATOR
+      const generatorBytes = BandersnatchCurveNoble.pointToBytes(generatorPoint)
+      expect(generatorBytes.length).toBe(32)
+      
+      const generatorPointRoundTrip = BandersnatchCurveNoble.bytesToPoint(generatorBytes)
+      const generatorBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(generatorPointRoundTrip)
+      
+      expect(generatorBytesRoundTrip).toEqual(generatorBytes)
+      
+      // Verify points are equal (using point comparison)
+      expect(generatorPointRoundTrip.x).toBe(generatorPoint.x)
+      expect(generatorPointRoundTrip.y).toBe(generatorPoint.y)
+      
+      // Test 5: Verify all points are on curve after round-trip
+      expect(BandersnatchCurveNoble.isOnCurve(gammaPoint)).toBe(true)
+      expect(BandersnatchCurveNoble.isOnCurve(publicKeyPoint)).toBe(true)
+      expect(BandersnatchCurveNoble.isOnCurve(hPoint)).toBe(true)
+      expect(BandersnatchCurveNoble.isOnCurve(generatorPointRoundTrip)).toBe(true)
+      
+      // Test 6: Round-trip all test vectors' points
+      for (const testVector of IETF_TEST_VECTORS) {
+        // Gamma
+        const tvGammaBytes = hexToBytes(testVector.gamma)
+        const tvGammaPoint = BandersnatchCurveNoble.bytesToPoint(tvGammaBytes)
+        const tvGammaBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(tvGammaPoint)
+        expect(tvGammaBytesRoundTrip).toEqual(tvGammaBytes)
+        expect(BandersnatchCurveNoble.isOnCurve(tvGammaPoint)).toBe(true)
+        
+        // Public key
+        const tvPkBytes = hexToBytes(testVector.pk)
+        const tvPkPoint = BandersnatchCurveNoble.bytesToPoint(tvPkBytes)
+        const tvPkBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(tvPkPoint)
+        expect(tvPkBytesRoundTrip).toEqual(tvPkBytes)
+        expect(BandersnatchCurveNoble.isOnCurve(tvPkPoint)).toBe(true)
+        
+        // h (VRF input point)
+        const tvHBytes = hexToBytes(testVector.h)
+        const tvHPoint = BandersnatchCurveNoble.bytesToPoint(tvHBytes)
+        const tvHBytesRoundTrip = BandersnatchCurveNoble.pointToBytes(tvHPoint)
+        expect(tvHBytesRoundTrip).toEqual(tvHBytes)
+        expect(BandersnatchCurveNoble.isOnCurve(tvHPoint)).toBe(true)
+      }
     })
   })
 })

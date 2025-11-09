@@ -26,7 +26,7 @@
  * ✅ CORRECT: Uses coreCount from config service for proper structure
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
 import type {
   AuthPool,
   DecodingResult,
@@ -34,7 +34,12 @@ import type {
   Safe,
 } from '@pbnj/types'
 import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnj/types'
-import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
+import {
+  decodeSequenceGeneric,
+  decodeVariableSequence,
+  encodeSequenceGeneric,
+  encodeVariableSequence,
+} from '../core/sequence'
 
 /**
  * Encode authpool according to Gray Paper C(1):
@@ -44,54 +49,67 @@ export function encodeAuthpool(
   authpool: AuthPool,
   configService: IConfigService,
 ): Safe<Uint8Array> {
-  try {
-    // Gray Paper: sequence[C_corecount]{sequence[:C_authpoolsize]{hash}}
-    const coreCount = configService.numCores
+  // Gray Paper: sequence[C_corecount]{sequence[:C_authpoolsize]{hash}}
+  const coreCount = configService.numCores
 
-    // Create array for all cores, initialized with exactly C_authpoolsize slots each
-    const coreAuthorizations: Hex[][] = []
-    const AUTH_POOL_SIZE = AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE
+  // Create array for all cores, initialized with exactly C_authpoolsize slots each
+  const coreAuthorizations: Hex[][] = []
+  const AUTH_POOL_SIZE = AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE
 
-    // Initialize all cores with exactly C_authpoolsize authorization slots
-    for (let i = 0; i < coreCount; i++) {
-      coreAuthorizations.push(
-        new Array(AUTH_POOL_SIZE).fill(
-          '0x0000000000000000000000000000000000000000000000000000000000000000',
-        ),
-      )
-    }
-
-    // Copy authorizations from authpool (2D array structure)
-    for (
-      let coreIndex = 0;
-      coreIndex < Math.min(authpool.length, coreCount);
-      coreIndex++
-    ) {
-      const corePool = authpool[coreIndex] || []
-      // Copy up to AUTH_POOL_SIZE authorizations, pad with zeros if needed
-      for (let authIndex = 0; authIndex < AUTH_POOL_SIZE; authIndex++) {
-        if (authIndex < corePool.length) {
-          coreAuthorizations[coreIndex][authIndex] = corePool[authIndex]
-        }
-        // Else: already initialized with zero hash
-      }
-    }
-
-    // Encode as fixed-length sequence of cores
-    const [error, encodedData] = encodeSequenceGeneric(
-      coreAuthorizations,
-      (coreAuths) => {
-        // Encode each core as a fixed-length sequence of exactly C_authpoolsize authorization hashes
-        const encodedCoreAuths = coreAuths.map((hex) => hexToBytes(hex))
-        return safeResult(concatBytes(encodedCoreAuths))
-      },
+  // Initialize all cores with exactly C_authpoolsize authorization slots
+  for (let i = 0; i < coreCount; i++) {
+    coreAuthorizations.push(
+      new Array(AUTH_POOL_SIZE).fill(
+        '0x0000000000000000000000000000000000000000000000000000000000000000',
+      ),
     )
-    if (error) return safeError(error)
-
-    return safeResult(encodedData)
-  } catch (error) {
-    return safeError(error as Error)
   }
+
+  // Copy authorizations from authpool (2D array structure)
+  for (
+    let coreIndex = 0;
+    coreIndex < Math.min(authpool.length, coreCount);
+    coreIndex++
+  ) {
+    const corePool = authpool[coreIndex] || []
+    // Copy up to AUTH_POOL_SIZE authorizations, pad with zeros if needed
+    for (let authIndex = 0; authIndex < AUTH_POOL_SIZE; authIndex++) {
+      if (authIndex < corePool.length) {
+        coreAuthorizations[coreIndex][authIndex] = corePool[authIndex]
+      }
+      // Else: already initialized with zero hash
+    }
+  }
+
+  // Encode as fixed-length sequence of cores
+  // Gray Paper: C(1) ↦ encode{sq{build{var{x}}{x ∈ authpool}}}
+  // This means each authorization hash should be encoded with var{x} (variable-length with length prefix)
+  const [error, encodedData] = encodeSequenceGeneric(
+    coreAuthorizations,
+    (coreAuths) => {
+      // Encode each core as a variable-length sequence of authorization hashes
+      // Gray Paper: sequence[:C_authpoolsize]{hash} - variable-length sequence with length prefix
+      // Filter out zero hashes (empty slots) before encoding
+      const nonZeroAuths = coreAuths.filter(
+        (auth) =>
+          auth !==
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
+      )
+      const [seqError, encodedSeq] = encodeVariableSequence(
+        nonZeroAuths,
+        (hex) => {
+          // Each hash is a fixed 32-byte value (no length prefix per hash)
+          const hashBytes = hexToBytes(hex)
+          return safeResult(hashBytes)
+        },
+      )
+      if (seqError) return safeError(seqError)
+      return safeResult(encodedSeq)
+    },
+  )
+  if (error) return safeError(error)
+
+  return safeResult(encodedData)
 }
 
 /**
@@ -107,25 +125,49 @@ export function decodeAuthpool(
     const AUTH_POOL_SIZE = AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE
 
     // Decode as fixed-length sequence of cores
+    // Gray Paper: C(1) ↦ encode{sq{build{var{x}}{x ∈ authpool}}}
+    // This means each authorization hash is encoded with var{x} (variable-length with length prefix)
     const [error, result] = decodeSequenceGeneric<Hex[]>(
       data,
       (data) => {
-        // Decode each core as a fixed-length sequence of exactly C_authpoolsize authorization hashes
-        if (data.length < AUTH_POOL_SIZE * 32) {
-          return safeError(new Error('Insufficient data for core decoding'))
-        }
+        // Decode each core as a variable-length sequence of authorization hashes
+        // Gray Paper: sequence[:C_authpoolsize]{hash} - variable-length sequence with length prefix
+        // Each hash is a fixed 32-byte value (no length prefix per hash)
+        const [seqError, decodedSeq] = decodeVariableSequence<Hex>(
+          data,
+          (data) => {
+            // Each hash is a fixed 32-byte value
+            if (data.length < 32) {
+              return safeError(
+                new Error(
+                  `Insufficient data for hash decoding (expected 32 bytes, got ${data.length})`,
+                ),
+              )
+            }
+            const hashBytes = data.slice(0, 32)
+            const hashHex = bytesToHex(hashBytes)
 
-        const coreAuths: Hex[] = []
-        for (let i = 0; i < AUTH_POOL_SIZE; i++) {
-          const hashBytes = data.slice(i * 32, (i + 1) * 32)
-          const hashHex = bytesToHex(hashBytes)
-          coreAuths.push(hashHex)
+            return safeResult({
+              value: hashHex,
+              remaining: data.slice(32),
+              consumed: 32,
+            })
+          },
+        )
+        if (seqError) return safeError(seqError)
+
+        // Pad with zero hashes to C_authpoolsize
+        const coreAuths: Hex[] = [...decodedSeq.value]
+        while (coreAuths.length < AUTH_POOL_SIZE) {
+          coreAuths.push(
+            '0x0000000000000000000000000000000000000000000000000000000000000000',
+          )
         }
 
         return safeResult({
           value: coreAuths,
-          remaining: data.slice(AUTH_POOL_SIZE * 32),
-          consumed: AUTH_POOL_SIZE * 32,
+          remaining: decodedSeq.remaining,
+          consumed: decodedSeq.consumed,
         })
       },
       coreCount, // Fixed length: C_corecount

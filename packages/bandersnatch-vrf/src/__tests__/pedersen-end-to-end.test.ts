@@ -6,6 +6,8 @@
  */
 
 import { describe, expect, test } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { PedersenVRFProver, type PedersenVRFInput } from '../prover/pedersen'
 import { PedersenVRFVerifier } from '../verifier/pedersen'
 
@@ -15,60 +17,30 @@ function bytesToHex(bytes: Uint8Array): string {
   return '0x' + Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-// Test vectors from bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_pedersen.json
-const PEDERSEN_TEST_VECTORS = [
-  {
-    comment: "bandersnatch_sha-512_ell2_pedersen - vector-1",
-    sk: "3d6406500d4009fdf2604546093665911e753f2213570a29521fd88bc30ede18",
-    pk: "a1b1da71cc4682e159b7da23050d8b6261eb11a3247c89b07ef56ccd002fd38b",
-    alpha: "",
-    salt: "",
-    ad: "",
-    h: "c5eaf38334836d4b10e05d2c1021959a917e08eaf4eb46a8c4c8d1bec04e2c00",
-    gamma: "e7aa5154103450f0a0525a36a441f827296ee489ef30ed8787cff8df1bef223f",
-    beta: "fdeb377a4ffd7f95ebe48e5b43a88d069ce62188e49493500315ad55ee04d7442b93c4c91d5475370e9380496f4bc0b838c2483bce4e133c6f18b0adbb9e4722",
-    blinding: "01371ac62e04d1faaadbebaa686aaf122143e2cda23aacbaa4796d206779a501",
-    proof_pk_com: "3b21abd58807bb6d93797001adaacd7113ec320dcf32d1226494e18a57931fc4",
-    proof_r: "8123054bfdb6918e0aa25c3337e6509eea262282fd26853bf7cd6db234583f5e",
-    proof_ok: "ac57ce6a53a887fc59b6aa73d8ff0e718b49bd9407a627ae0e9b9e7c5d0d175b",
-    proof_s: "0d379b65fb1e6b2adcbf80618c08e31fd526f06c2defa159158f5de146104c0f",
-    proof_sb: "e2ca83136143e0cac3f7ee863edd3879ed753b995b1ff8d58305d3b1f323630b"
-  },
-  {
-    comment: "bandersnatch_sha-512_ell2_pedersen - vector-2",
-    sk: "8b9063872331dda4c3c282f7d813fb3c13e7339b7dc9635fdc764e32cc57cb15",
-    pk: "5ebfe047f421e1a3e1d9bbb163839812657bbb3e4ffe9856a725b2b405844cf3",
-    alpha: "0a",
-    salt: "",
-    ad: "",
-    h: "8c1d1425374f01d86b23bfeab770c60b58d2eeb9afc5900c8b8a918d09a6086b",
-    gamma: "60f32f5ad3e9694b82ccc0a735edb2f940f757ab333cc5f7b0a41158b80f574f",
-    beta: "44f3728bc5ad550aeeb89f8db340b2fceffc946be3e2d8c5d99b47c1fce344b3c7fcee223a9b29a64fe4a86a9994784bc165bb0fba03ca0a493f75bee89a0946",
-    blinding: "99ff52abf49d67c4303ac4a8a00984d04c06388f5f836ebd37031f0e76245815",
-    proof_pk_com: "c1322e7a65b83996c25e37a84e36598333b0d417619242c0cb3d9d972edde848",
-    proof_r: "7a4363e0bf9cd18317287d681ab05704982b0088ce373f696dbdf3909a902b36",
-    proof_ok: "fc8770c209212640742d53e2f40e5c30fffae574f90fdc670ff11a1127586c03",
-    proof_s: "93f7c9d73eec05e500b758f645a2967e62b2206e57eff5f9b99bfc71812e620d",
-    proof_sb: "c864de36e0b428f6fb4ef470f94ec9601716cb26ad96f3359e4a1ec110794a0b"
-  },
-  {
-    comment: "bandersnatch_sha-512_ell2_pedersen - vector-3",
-    sk: "6db187202f69e627e432296ae1d0f166ae6ac3c1222585b6ceae80ea07670b14",
-    pk: "9d97151298a5339866ddd3539d16696e19e6b68ac731562c807fe63a1ca49506",
-    alpha: "",
-    salt: "",
-    ad: "0b8c",
-    h: "c5eaf38334836d4b10e05d2c1021959a917e08eaf4eb46a8c4c8d1bec04e2c00",
-    gamma: "67a348e256d908eb695d15ee0d869efef2bcf9f0fea646e788f967abbc0464dd",
-    beta: "edde0178045133eb03ef4d1ad8b978a56ee80ec4eab8830d6bc6c080031388416657d3c449d9398cc4385d1c8a2bb19bcf61ff086e5a6c477a0302ce270d1abf",
-    blinding: "e22ec3e4a2a4132237eb8a62bcc5ed864593cfde08e53b1632ecd3245761c808",
-    proof_pk_com: "54c04f259f9e40ee086031d29960b12b6b6407e9de14985001c7265587941831",
-    proof_r: "60b0b4b6efe3b5a4b8c3f3a8d4e50ab8e774de0b2da2e1ca4ffa7bef8e2c3f19",
-    proof_ok: "a42bc2a3e2edbf4af89e67b5a8f85e64e6ad8f24bc2e4c2c9f91b8e43d3a2d7f",
-    proof_s: "5b1c1e60a40d83e5b57ef8a7fe3c542f7a0f4cdf2d95ab5b9e7a5f8e3c4a5f6e",
-    proof_sb: "ffa54b924e4e3be634d4c3e6f4b5a7a8c9e1f2b5c7e8d9f5a3b2c1e4f6a7b8d9"
-  }
-] as const
+// Load test vectors from bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_pedersen.json
+const testVectorsPath = join(
+  __dirname,
+  '../../../../submodules/bandersnatch-vrf-spec/assets/vectors/bandersnatch_sha-512_ell2_pedersen.json',
+)
+const PEDERSEN_TEST_VECTORS = JSON.parse(
+  readFileSync(testVectorsPath, 'utf-8'),
+) as Array<{
+  comment: string
+  sk: string
+  pk: string
+  alpha: string
+  salt: string
+  ad: string
+  h: string
+  gamma: string
+  beta: string
+  blinding: string
+  proof_pk_com: string
+  proof_r: string
+  proof_ok: string
+  proof_s: string
+  proof_sb: string
+}>
 
 // Hex parsing function that handles missing leading zeros
 function hexToBytes(hex: string): Uint8Array {
@@ -84,14 +56,14 @@ function hexToBytes(hex: string): Uint8Array {
   
   const bytes = new Uint8Array(hex.length / 2)
   for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
+    bytes[i / 2] = Number.parseInt(hex.substring(i, i + 2), 16)
   }
   return bytes
 }
 
 describe('Pedersen VRF End-to-End Tests', () => {
   describe('Proof Generation and Verification', () => {
-    PEDERSEN_TEST_VECTORS.slice(0, 2).forEach((vector, index) => {
+    for (const [index, vector] of PEDERSEN_TEST_VECTORS.entries()) {
       test(`Vector ${index + 1}: ${vector.comment} - Complete workflow`, async () => {
         // Parse input data
         const secretKey = hexToBytes(vector.sk)
@@ -159,12 +131,12 @@ describe('Pedersen VRF End-to-End Tests', () => {
         expect(deserializedProof.s.length).toBe(32) // Scalar
         expect(deserializedProof.s_b.length).toBe(32) // Scalar
       })
-    })
+    }
   })
 
   describe('Value Matching Against Test Vectors', () => {
     // Test exact value matching for first two vectors
-    PEDERSEN_TEST_VECTORS.slice(0, 2).forEach((vector, index) => {
+    for (const [index, vector] of PEDERSEN_TEST_VECTORS.slice(0, 2).entries()) {
       test(`Vector ${index + 1}: Exact value matching`, async () => {
         const secretKey = hexToBytes(vector.sk)
         const inputBytes = hexToBytes(vector.alpha)
@@ -239,7 +211,7 @@ describe('Pedersen VRF End-to-End Tests', () => {
         expect(deserializedProof.s.length).toBe(32)
         expect(deserializedProof.s_b.length).toBe(32)
       })
-    })
+    }
   })
 
   describe('Basic Functionality Tests', () => {

@@ -50,17 +50,21 @@ export class BandersnatchCurveNoble {
   /**
    * Convert Noble EdwardsPoint to arkworks-compatible compressed bytes
    *
-   * This implements the exact arkworks Twisted Edwards point compression algorithm:
+   * This implements the exact arkworks Twisted Edwards point compression algorithm
+   * (Compress::Yes mode):
    * 1. Extract affine coordinates (x, y) from the point
    * 2. Determine x-coordinate sign using TEFlags::from_x_coordinate logic
-   * 3. Serialize y-coordinate in little-endian format
+   * 3. Serialize y-coordinate in little-endian format (32 bytes)
    * 4. Encode x-coordinate sign in the MSB (bit 7) of the last byte
+   *
+   * This always uses compressed form (32 bytes) as required by the Bandersnatch VRF spec
+   * section 2.1 for `point_to_string` function. This matches arkworks' `Compress::Yes` mode.
    *
    * Reference: arkworks-algebra/ec/src/models/twisted_edwards/serialization_flags.rs
    * Reference: arkworks-algebra/ec/src/models/twisted_edwards/mod.rs (serialize_with_mode)
    *
    * @param noblePoint - Noble EdwardsPoint to compress
-   * @returns Compressed point bytes (arkworks-compatible)
+   * @returns Compressed point bytes (32 bytes, arkworks-compatible, compressed format)
    */
   static pointToBytes(noblePoint: EdwardsPoint): Uint8Array {
     const { x, y } = noblePoint.toAffine()
@@ -130,22 +134,75 @@ export class BandersnatchCurveNoble {
       throw new Error('Point is not on curve: no square root exists')
     }
 
-    // Apply arkworks sign bit logic: signBit = (x > -x)
+    // Apply arkworks sign bit logic
+    // Rust: if flags.is_negative() { (neg_x, y) } else { (x, y) }
+    // The flag is set (signBit = true) when the original x satisfied x > -x (XIsNegative)
+    // We computed x from y, but we need to determine which of the two possible x values
+    // matches the flag. The flag tells us which x was originally used.
     const negX = mod(p - x, p)
-    const xIsNegative = x > negX
+    const xIsNegative = x > negX // Check if computed x satisfies x > -x
 
     // Choose correct x based on sign bit
+    // If signBit matches xIsNegative, use x; otherwise use negX
     const finalX = signBit === xIsNegative ? x : negX
 
     // Create Noble point from affine coordinates
-    return BandersnatchNoble.fromAffine({ x: finalX, y })
+    const point = BandersnatchNoble.fromAffine({ x: finalX, y })
+
+    // Validate point is in prime subgroup as required by bandersnatch-vrf-spec section 2.1:
+    // "This function MUST outputs 'INVALID' if the octet-string does not decode
+    // to a point on the prime subgroup G"
+    // A point is in the prime subgroup if and only if multiplying by the curve order
+    // gives the identity point (infinity)
+    // Since @noble/curves requires 1 <= scalar < curve.n, we use CURVE_ORDER - 1
+    // and then add the point once more: point * CURVE_ORDER = point * (CURVE_ORDER - 1) + point
+    const curveOrderMinusOne = BANDERSNATCH_PARAMS.CURVE_ORDER - 1n
+    const pointTimesOrderMinusOne = this.scalarMultiply(
+      point,
+      curveOrderMinusOne,
+    )
+    const pointTimesOrder = this.add(pointTimesOrderMinusOne, point)
+    const isInPrimeSubgroup = pointTimesOrder.equals(BandersnatchNoble.ZERO)
+
+    if (!isInPrimeSubgroup) {
+      throw new Error(
+        'Point is not in prime subgroup: decoded point is not in G',
+      )
+    }
+
+    return point
   }
 
   /**
    * Scalar multiplication
+   * Handles edge cases: scalar 0, negative scalars, and scalars >= curve order
    */
   static scalarMultiply(point: EdwardsPoint, scalar: bigint): EdwardsPoint {
-    return point.multiply(scalar)
+    // Handle scalar 0: return identity point
+    if (scalar === 0n) {
+      return BandersnatchNoble.ZERO
+    }
+
+    // Handle negative scalars: negate point and use positive scalar
+    if (scalar < 0n) {
+      const negPoint = point.negate()
+      const positiveScalar = -scalar
+      // Reduce modulo curve order
+      const reducedScalar = positiveScalar % BANDERSNATCH_PARAMS.CURVE_ORDER
+      if (reducedScalar === 0n) {
+        return BandersnatchNoble.ZERO
+      }
+      return negPoint.multiply(reducedScalar)
+    }
+
+    // Reduce scalar modulo curve order if it's >= curve order
+    // @noble/curves requires 1 <= scalar < curve.n
+    const reducedScalar = scalar % BANDERSNATCH_PARAMS.CURVE_ORDER
+    if (reducedScalar === 0n) {
+      return BandersnatchNoble.ZERO
+    }
+
+    return point.multiply(reducedScalar)
   }
 
   /**

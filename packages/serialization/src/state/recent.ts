@@ -60,7 +60,6 @@ import type {
 import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeVariableSequence,
-  encodeSequenceGeneric,
   encodeVariableSequence,
 } from '../core/sequence'
 
@@ -149,7 +148,8 @@ export function encodeRecent(recent: Recent): Safe<Uint8Array> {
   // mmrencode: sequence{optional{hash}} → blob
   // b ↦ encode{var{sq{build{maybe{x}}{x ∈ b}}}}
   // where maybe{x} = 0 when x = none, tuple{1, x} otherwise
-  const [error2, beltData] = encodeSequenceGeneric(
+  // Note: var{sq{...}} means variable-length sequence with length prefix
+  const [error2, beltData] = encodeVariableSequence(
     recent.accoutBelt.peaks,
     (peak: Hex | null) => {
       if (peak === null) {

@@ -177,9 +177,14 @@ describe('BandersnatchCurveNoble Operations', () => {
   test('Modular arithmetic consistency', () => {
     const P = BandersnatchCurveNoble.GENERATOR
     // Use a large scalar to test modular arithmetic
+    // Reduce modulo curve order since @noble/curves requires 1 <= scalar < curve.n
     const largeScalar = BigInt('0x10000000000000000000000000000000000000000000000000000000000000000')
+    const curveOrder = BandersnatchCurveNoble.CURVE_ORDER
+    const reducedScalar = largeScalar % curveOrder
+    // Ensure scalar is in valid range [1, curve.n) for @noble/curves
+    const validScalar = reducedScalar === 0n ? 1n : reducedScalar
     
-    const nP = BandersnatchCurveNoble.scalarMultiply(P, largeScalar)
+    const nP = BandersnatchCurveNoble.scalarMultiply(P, validScalar)
     
     // The result should be a valid point on the curve
     expect(BandersnatchCurveNoble.isOnCurve(nP)).toBe(true)

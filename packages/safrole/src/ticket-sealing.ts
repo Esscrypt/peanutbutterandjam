@@ -139,102 +139,90 @@ export function verifyTicketBasedSealSignature(
   ticket: SafroleTicket,
   config: IConfigService,
 ): Safe<boolean> {
-  try {
-    // Validate inputs
-    if (validatorPublicKey.length !== 32) {
-      return safeError(new Error('Validator public key must be 32 bytes'))
-    }
+  // Validate inputs
+  if (validatorPublicKey.length !== 32) {
+    return safeError(new Error('Validator public key must be 32 bytes'))
+  }
 
-    if (signature.length !== 96) {
-      return safeError(new Error('IETF VRF signature must be 96 bytes'))
-    }
+  if (signature.length !== 96) {
+    return safeError(new Error('IETF VRF signature must be 96 bytes'))
+  }
 
-    if (entropy3.length !== 32) {
-      return safeError(new Error('entropy_3 must be 32 bytes'))
-    }
+  if (entropy3.length !== 32) {
+    return safeError(new Error('entropy_3 must be 32 bytes'))
+  }
 
-    // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
-    const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
+  // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
+  const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
-    // Gray Paper Eq. 148: Build VRF context
-    // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
-    const entryIndexBytes = new Uint8Array(8)
-    new DataView(entryIndexBytes.buffer).setBigUint64(
-      0,
-      ticket.entryIndex,
-      true,
-    ) // Little-endian
+  // Gray Paper Eq. 148: Build VRF context
+  // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
+  const entryIndexBytes = new Uint8Array(8)
+  new DataView(entryIndexBytes.buffer).setBigUint64(0, ticket.entryIndex, true) // Little-endian
 
-    const context = new Uint8Array(
-      XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
-    )
-    let offset = 0
-    context.set(XTICKET_SEAL, offset)
-    offset += XTICKET_SEAL.length
-    context.set(entropy3, offset)
-    offset += entropy3.length
-    context.set(entryIndexBytes, offset)
+  const context = new Uint8Array(
+    XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
+  )
+  let offset = 0
+  context.set(XTICKET_SEAL, offset)
+  offset += XTICKET_SEAL.length
+  context.set(entropy3, offset)
+  offset += entropy3.length
+  context.set(entryIndexBytes, offset)
 
-    // Encode unsigned header for VRF message
-    const [encodeError, encodedUnsignedHeader] = encodeUnsignedHeader(
-      unsignedHeader,
-      config,
-    )
-    if (encodeError) {
-      return safeError(encodeError)
-    }
+  // Encode unsigned header for VRF message
+  const [encodeError, encodedUnsignedHeader] = encodeUnsignedHeader(
+    unsignedHeader,
+    config,
+  )
+  if (encodeError) {
+    return safeError(encodeError)
+  }
 
-    // Verify IETF VRF signature using IETFVRFVerifier
-    // Gray Paper Eq. 148: bssignature{k}{c}{m} where:
-    // k = validatorPublicKey, c = context, m = encodedUnsignedHeader
-    // NOTE: IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
-    // where input = message and auxData = context per IETF VRF specification
-    const isValid = IETFVRFVerifier.verify(
-      validatorPublicKey,
-      encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
-      signature,
-      context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (context) - goes to _auxData parameter
-    )
+  // Verify IETF VRF signature using IETFVRFVerifier
+  // Gray Paper Eq. 148: bssignature{k}{c}{m} where:
+  // k = validatorPublicKey, c = context, m = encodedUnsignedHeader
+  // NOTE: IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
+  // where input = message and auxData = context per IETF VRF specification
+  const isValid = IETFVRFVerifier.verify(
+    validatorPublicKey,
+    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
+    signature,
+    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (context) - goes to _auxData parameter
+  )
 
-    if (!isValid) {
-      logger.debug('Ticket-based seal signature verification failed', {
-        ticketId: ticket.id,
-        entryIndex: ticket.entryIndex.toString(),
-        entropy3Length: entropy3.length,
-        signatureLength: signature.length,
-      })
-      return safeResult(false)
-    }
-
-    // Gray Paper Eq. 147: Validate ticket ID matches VRF output
-    // i_st_id = banderout{H_sealsig}
-    const vrfOutput = getBanderoutFromGamma(signature.slice(0, 32)) // First 32 bytes are gamma
-    const expectedTicketId = bytesToHex(vrfOutput)
-
-    if (ticket.id !== expectedTicketId) {
-      logger.debug('Ticket ID mismatch in seal signature verification', {
-        expectedTicketId,
-        actualTicketId: ticket.id,
-        entryIndex: ticket.entryIndex.toString(),
-      })
-      return safeResult(false)
-    }
-
-    logger.debug('Ticket-based seal signature verification successful', {
+  if (!isValid) {
+    logger.debug('Ticket-based seal signature verification failed', {
       ticketId: ticket.id,
       entryIndex: ticket.entryIndex.toString(),
       entropy3Length: entropy3.length,
       signatureLength: signature.length,
-      vrfOutputLength: vrfOutput.length,
-      sealingType: 'ticket-based', // Gray Paper: isticketed = 1
     })
-
-    return safeResult(true)
-  } catch (error) {
-    logger.error('Failed to verify ticket-based seal signature', {
-      error,
-      ticketId: ticket.id,
-    })
-    return safeError(error as Error)
+    return safeResult(false)
   }
+
+  // Gray Paper Eq. 147: Validate ticket ID matches VRF output
+  // i_st_id = banderout{H_sealsig}
+  const vrfOutput = getBanderoutFromGamma(signature.slice(0, 32)) // First 32 bytes are gamma
+  const expectedTicketId = bytesToHex(vrfOutput)
+
+  if (ticket.id !== expectedTicketId) {
+    logger.debug('Ticket ID mismatch in seal signature verification', {
+      expectedTicketId,
+      actualTicketId: ticket.id,
+      entryIndex: ticket.entryIndex.toString(),
+    })
+    return safeResult(false)
+  }
+
+  logger.debug('Ticket-based seal signature verification successful', {
+    ticketId: ticket.id,
+    entryIndex: ticket.entryIndex.toString(),
+    entropy3Length: entropy3.length,
+    signatureLength: signature.length,
+    vrfOutputLength: vrfOutput.length,
+    sealingType: 'ticket-based', // Gray Paper: isticketed = 1
+  })
+
+  return safeResult(true)
 }

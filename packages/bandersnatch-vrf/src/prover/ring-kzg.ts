@@ -7,7 +7,7 @@
  */
 
 import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
-import { bytesToHex, logger, mod } from '@pbnj/core'
+import { bytesToHex, hexToBytes, logger, mod } from '@pbnj/core'
 import {
   BYTES_PER_BLOB,
   blobToKzgCommitment,
@@ -15,6 +15,7 @@ import {
   loadTrustedSetup,
   verifyBlobKzgProof,
 } from 'c-kzg'
+import { BANDERSNATCH_VRF_CONFIG } from '../config/bandersnatch-vrf-config'
 import { PedersenVRFProver } from './pedersen'
 
 export interface RingVRFInput {
@@ -153,6 +154,32 @@ export class RingVRFProver {
   }
 
   /**
+   * Compute ring commitment from public keys only (Gray Paper compliant)
+   *
+   * Gray Paper bandersnatch.tex equation 15:
+   * getRingRoot{sequence{bskey}} ∈ ringroot ≡ commit(sequence{bskey})
+   *
+   * This method computes the KZG commitment to the ring polynomial without
+   * requiring any private keys. It's deterministic and can be computed by
+   * any node from just the public keys.
+   *
+   * @param ringKeys - Array of Bandersnatch public keys (32 bytes each)
+   * @returns KZG commitment to the ring polynomial (48 bytes)
+   */
+  computeRingCommitment(ringKeys: Uint8Array[]): Uint8Array {
+    // Step 1: Create ring polynomial from public keys
+    const ringPolynomial = this.createRingPolynomial(ringKeys)
+
+    // Step 2: Convert polynomial to blob format
+    const ringBlob = this.polynomialToBlob(ringPolynomial)
+
+    // Step 3: Generate KZG commitment to ring polynomial
+    const ringCommitment = blobToKzgCommitment(ringBlob)
+
+    return ringCommitment
+  }
+
+  /**
    * Verify Ring VRF proof
    */
   verify(input: RingVRFInput, result: RingVRFResult): boolean {
@@ -189,6 +216,11 @@ export class RingVRFProver {
   /**
    * Create polynomial from ring of public keys
    * Maps each public key to a coefficient in the polynomial
+   *
+   * Gray Paper bandersnatch.tex line 20:
+   * "Note that in the case a key has no corresponding Bandersnatch point when
+   * constructing the ring, then the Bandersnatch padding point as stated by
+   * [hosseini2024bandersnatch] should be substituted."
    */
   private createRingPolynomial(ringKeys: Uint8Array[]): bigint[] {
     const maxRingSize = BANDERSNATCH_PARAMS.KZG_CONFIG.MAX_RING_SIZE
@@ -203,12 +235,20 @@ export class RingVRFProver {
     const domainSize = BANDERSNATCH_PARAMS.KZG_CONFIG.DOMAIN_SIZE
     const polynomial: bigint[] = new Array(domainSize).fill(0n)
 
+    // Padding point for null/invalid keys (Gray Paper bandersnatch.tex line 20)
+    const paddingPoint = hexToBytes(BANDERSNATCH_VRF_CONFIG.PADDING_POINT)
+
     // Convert each public key to a polynomial coefficient
     ringKeys.forEach((key, index) => {
       if (index >= domainSize) return
 
+      // Gray Paper: Substitute null/invalid keys with padding point
+      // A null key is all zeros (32 bytes of 0x00)
+      const isNullKey = key.every((byte) => byte === 0)
+      const keyToUse = isNullKey ? paddingPoint : key
+
       // Use the first 31 bytes of the key as a coefficient to stay within BLS12-381 scalar field
-      const keyPrefix = key.slice(0, 31)
+      const keyPrefix = keyToUse.slice(0, 31)
       let coeff = 0n
 
       // Convert bytes to scalar in little-endian format (arkworks compatible)

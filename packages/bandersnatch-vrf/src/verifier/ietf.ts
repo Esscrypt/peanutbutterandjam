@@ -4,10 +4,11 @@
  * Implements verification for IETF VRF scheme
  */
 
-import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
-import { bytesToBigInt, logger } from '@pbnj/core'
-import { compressPoint, elligator2HashToCurve } from '../crypto/elligator2'
+import { BANDERSNATCH_PARAMS, BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import { bytesToHex, logger, mod } from '@pbnj/core'
+import { bytesToBigIntLittleEndian } from '../crypto/elligator2'
 import { generateChallengeRfc9381 } from '../crypto/rfc9381'
+import { IETFVRFProver } from '../prover/ietf'
 
 /**
  * IETF VRF Verifier
@@ -16,6 +17,12 @@ import { generateChallengeRfc9381 } from '../crypto/rfc9381'
 export class IETFVRFVerifier {
   /**
    * Verify VRF proof
+   *
+   * @param publicKey - Public key point (32 bytes, compressed)
+   * @param input - VRF input data
+   * @param proof - VRF proof (96 bytes: gamma, c, s)
+   * @param auxData - Additional data (optional)
+   * @returns true if proof is valid, false otherwise
    */
   static verify(
     publicKey: Uint8Array,
@@ -23,33 +30,31 @@ export class IETFVRFVerifier {
     proof: Uint8Array,
     auxData?: Uint8Array,
   ): boolean {
-    try {
-      // 1. Hash input to curve point (H1)
-      const alphaPoint = elligator2HashToCurve(input)
-      const alphaBytes = new Uint8Array(
-        Buffer.from(compressPoint(alphaPoint), 'hex'),
-      )
+    // 1. Hash input to curve point (H1)
+    // According to RFC-9381: ECVRF_encode_to_curve receives salt || alpha
+    // Even though encode_to_curve_salt is empty, we concatenate for consistency
+    const salt = new Uint8Array(0) // Empty salt as per spec section 2.1
+    const h2cData = new Uint8Array(salt.length + input.length)
+    h2cData.set(salt, 0)
+    h2cData.set(input, salt.length)
 
-      // 2. Verify proof
-      const isValid = this.verifyProof(publicKey, alphaBytes, proof, auxData)
+    // Use the same hashToCurve method as the prover for consistency
+    const alphaBytes = IETFVRFProver.hashToCurve(h2cData)
 
-      if (!isValid) {
-        logger.error('IETF VRF proof verification failed')
-      } else {
-        logger.debug('IETF VRF proof verified successfully', {})
-      }
+    // 2. Verify proof
+    const isValid = this.verifyProof(publicKey, alphaBytes, proof, auxData)
 
-      return isValid
-    } catch (error) {
-      logger.error('IETF VRF proof verification failed', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      return false
-    }
+    return isValid
   }
 
   /**
    * Verify VRF proof
+   *
+   * @param publicKey - Public key point (32 bytes, compressed)
+   * @param alpha - VRF input point (32 bytes, compressed)
+   * @param proof - VRF proof (96 bytes: gamma, c, s)
+   * @param auxData - Additional data (optional)
+   * @returns true if proof is valid, false otherwise
    */
   private static verifyProof(
     publicKey: Uint8Array,
@@ -69,16 +74,25 @@ export class IETFVRFVerifier {
     const cUint8Array = proof.slice(32, 64) // Challenge scalar
     const sUint8Array = proof.slice(64, 96) // Response scalar
 
-    const c = bytesToBigInt(cUint8Array)
-    const s = bytesToBigInt(sUint8Array)
+    // Parse scalars from proof
+    // Rust reference: ArkworksCodec uses from_le_bytes_mod_order for scalar_decode (line 71 in codec.rs)
+    // So proof bytes are always in little-endian format
+    const cOriginal = bytesToBigIntLittleEndian(cUint8Array) // Always little-endian (matches ArkworksCodec)
+    const sOriginal = bytesToBigIntLittleEndian(sUint8Array) // Always little-endian (matches ArkworksCodec)
+
+    // Reduce scalars modulo curve order as per spec: string_to_int reduces modulo prime field order
+    const c = mod(cOriginal, BANDERSNATCH_PARAMS.CURVE_ORDER)
+    const s = mod(sOriginal, BANDERSNATCH_PARAMS.CURVE_ORDER)
 
     // Convert inputs to curve points
     const alphaPoint = BandersnatchCurveNoble.bytesToPoint(alpha)
     const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gammaFromProof) // Use gamma from proof
-    const publicKeyPoint = BandersnatchCurveNoble.bytesToPoint(publicKey)
+    const publicKeyPoint = BandersnatchCurveNoble.bytesToPoint(publicKey) // Y = public key point
 
     // Calculate u and v (reconstructed R points from proof)
-    // Based on IETF VRF: u = g^s - y^c, v = h^s - gamma^c
+    // Based on IETF VRF spec section 2.3 Verify:
+    // U ← s · G - c · Y  (where G is generator, Y is public key)
+    // V ← s · I - c · O  (where I is input point alpha, O is output point gamma)
     const gToS = BandersnatchCurveNoble.scalarMultiply(
       BandersnatchCurveNoble.GENERATOR,
       s,
@@ -96,18 +110,46 @@ export class IETFVRFVerifier {
       BandersnatchCurveNoble.negate(gammaToC),
     )
 
-    // Recreate challenge c from u, v, and other components
-    const challengePoints = [
-      BandersnatchCurveNoble.pointToBytes(gammaPoint),
-      BandersnatchCurveNoble.pointToBytes(u),
-      BandersnatchCurveNoble.pointToBytes(v),
-    ]
+    // Recreate challenge c according to bandersnatch-vrf-spec section 2.3 Verify step 4:
+    // c' ← challenge(Y, I, O, U, V, ad)
+    // where Y = publicKey, I = alpha (input point), O = gamma (output point), U = u, V = v
+    const yBytes = BandersnatchCurveNoble.pointToBytes(publicKeyPoint) // Y -> public key point
+    const iBytes = BandersnatchCurveNoble.pointToBytes(alphaPoint) // I -> input point
+    const oBytes = BandersnatchCurveNoble.pointToBytes(gammaPoint) // O -> output point
+    const uBytes = BandersnatchCurveNoble.pointToBytes(u) // U -> calculated
+    const vBytes = BandersnatchCurveNoble.pointToBytes(v) // V -> calculated
 
+    const challengePoints = [yBytes, iBytes, oBytes, uBytes, vBytes]
+    // Rust reference: challenge_rfc_9381 uses from_be_bytes_mod_order (line 160 in common.rs)
+    // So challenge computation always uses big-endian
     const expectedC = this.hashToScalar(
       challengePoints,
       auxData || new Uint8Array(0),
     )
-    return c === expectedC
+
+    // Compare c with expectedC (both are already reduced modulo curve order)
+    // expectedC is already reduced by hashToScalar, and c is reduced above
+    const isValid = c === expectedC
+
+    if (!isValid) {
+      logger.debug('IETF VRF challenge mismatch', {
+        yHex: bytesToHex(yBytes),
+        iHex: bytesToHex(iBytes),
+        oHex: bytesToHex(oBytes),
+        uHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(u)),
+        vHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(v)),
+        auxDataHex: bytesToHex(auxData || new Uint8Array(0)),
+        auxDataLength: auxData?.length || 0,
+        cFromProof: c.toString(16),
+        cOriginal: cOriginal.toString(16),
+        cReduced: c.toString(16),
+        expectedC: expectedC.toString(16),
+        cMatches: c === expectedC,
+        gammaHex: bytesToHex(gammaFromProof),
+      })
+    }
+
+    return isValid
   }
 
   /**
@@ -119,6 +161,7 @@ export class IETFVRFVerifier {
     auxData: Uint8Array = new Uint8Array(0),
   ): bigint {
     // Use RFC-9381 challenge generation which implements proper hash-to-scalar
+    // Rust reference: challenge_rfc_9381 uses from_be_bytes_mod_order (big-endian)
     return generateChallengeRfc9381(points, auxData)
   }
 }

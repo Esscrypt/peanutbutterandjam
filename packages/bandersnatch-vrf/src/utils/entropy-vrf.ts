@@ -35,13 +35,14 @@
  * @fileoverview Entropy VRF signature generation and verification using IETF VRF on Bandersnatch curve
  */
 
+import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
 import {
   getBanderoutFromGamma,
   IETFVRFProver,
   IETFVRFVerifier,
   pointToHashRfc9381,
 } from '@pbnj/bandersnatch-vrf'
-import { logger } from '@pbnj/core'
+import { bytesToHex, logger } from '@pbnj/core'
 import type { Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 
@@ -93,12 +94,13 @@ export function generateEntropyVRFSignature(
   // Generate IETF VRF signature using IETFVRFProver
   // Gray Paper equation 158: bssignature{k}{c}{m} where:
   // k = validatorSecretKey, c = context, m = [] (empty message)
-  // NOTE: IETFVRFProver.prove parameter order is (secretKey, input, auxData)
-  // where input = message and auxData = context per IETF VRF specification
+  // NOTE: When m = [] (empty), the context c becomes the input (hashed to curve point)
+  // This matches the pattern used in audit signatures (bssignature{k}{c}{[]})
+  // IETFVRFProver.prove parameter order is (secretKey, input, auxData)
   const vrfResult = IETFVRFProver.prove(
     validatorSecretKey,
-    new Uint8Array(0), // [] (empty message blob)
-    context, // Xentropy ∥ banderout{H_sealsig} (context)
+    context, // Xentropy ∥ banderout{H_sealsig} (context) - becomes input when m = []
+    new Uint8Array(0), // [] (empty auxData)
   )
 
   // Verify the signature is the correct length (96 bytes per Gray Paper)
@@ -165,14 +167,23 @@ export function verifyEntropyVRFSignature(
   // Verify IETF VRF signature using IETFVRFVerifier
   // Gray Paper equation 158: bssignature{k}{c}{m} where:
   // k = validatorPublicKey, c = context, m = [] (empty message)
-  // NOTE: IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
-  // where input = message and auxData = context per IETF VRF specification
+  // NOTE: When m = [] (empty), the context c becomes the input (hashed to curve point)
+  // This matches the pattern used in audit signatures (bssignature{k}{c}{[]})
+  // IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
   const isValid = IETFVRFVerifier.verify(
     validatorPublicKey,
-    new Uint8Array(0), // [] (empty message blob)
+    context, // Xentropy ∥ banderout{H_sealsig} (context) - becomes input when m = []
     signature,
-    context, // Xentropy ∥ banderout{H_sealsig} (context)
+    new Uint8Array(0), // [] (empty auxData)
   )
+
+  if (!isValid) {
+    logger.error('Entropy VRF signature verification failed', {
+      publicKeyHex: bytesToHex(validatorPublicKey),
+      contextHex: bytesToHex(context),
+      signatureHex: bytesToHex(signature),
+    })
+  }
 
   return safeResult(isValid)
 }
@@ -183,6 +194,12 @@ export function verifyEntropyVRFSignature(
  * Gray Paper bandersnatch.tex line 8:
  * banderout{s ∈ bssignature{k}{c}{m}} ∈ hash ≡ text{output}(x | x ∈ bssignature{k}{c}{m})[:32]
  *
+ * Bandersnatch VRF spec section 1.6:
+ * VRF output is produced using output-to-hash procedure, which is proof-to-hash method
+ * from RFC-9381 Section 5.2, but with a specific focus on the output point component
+ * (referred to as Gamma in RFC-9381). This is implemented using point-to-hash from
+ * RFC-9381 Section 5.4.2.3, which hashes a single point (gamma).
+ *
  * @param sealSignature - IETF VRF seal signature (96 bytes)
  * @returns First 32 bytes of VRF output hash
  */
@@ -191,14 +208,25 @@ export function banderout(sealSignature: Uint8Array): Safe<Uint8Array> {
     return safeError(new Error('Seal signature must be 96 bytes'))
   }
 
-  // Extract gamma from the proof (first 32 bytes)
-  const gamma = sealSignature.slice(0, 32)
+  // Extract gamma (VRF output point) from the proof (first 32 bytes)
+  // Gray Paper: gamma is the first component of bssignature{k}{c}{m} = (gamma, c, s)
+  const gammaFromProof = sealSignature.slice(0, 32)
 
-  // According to Gray Paper, banderout should return the first 32 bytes of the VRF output hash
-  // Gray Paper: banderout{s ∈ bssignature{k}{c}{m}} ∈ hash ≡ text{output}(x | x ∈ bssignature{k}{c}{m})[:32]
-  // The VRF output hash is derived from gamma using pointToHashRfc9381
+  // Normalize gamma to ensure canonical compressed format (consistent with verifier)
+  // RFC-9381: point_to_string(P) should produce canonical compressed encoding
+  // We normalize by: bytes → point → bytes to ensure consistency
+  const gammaPoint = BandersnatchCurveNoble.bytesToPoint(gammaFromProof)
+  const gamma = BandersnatchCurveNoble.pointToBytes(gammaPoint) // point_to_string(P)
+
+  // Hash gamma using point-to-hash procedure from RFC-9381 Section 5.4.2.3
+  // Bandersnatch VRF spec section 1.6: o ← output_to_hash(O) where O is the VRF output point
+  // This implements the "proof-to-hash with focus on output point component" as specified
+  // RFC-9381 Section 5.4.2.3: str_1 = str_0 || point_to_string(P)
   const vrfOutputHash = pointToHashRfc9381(gamma, false)
-  const banderoutResult = vrfOutputHash.slice(0, 32) // First 32 bytes as per Gray Paper
+
+  // Gray Paper: banderout returns first 32 bytes of the VRF output hash
+  // Bandersnatch VRF spec: The output is a fixed-length octet string (we take first 32 bytes)
+  const banderoutResult = vrfOutputHash.slice(0, 32)
 
   return safeResult(banderoutResult)
 }

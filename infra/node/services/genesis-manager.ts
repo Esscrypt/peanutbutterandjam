@@ -14,11 +14,14 @@ import type {
   Hex,
 } from '@pbnj/core'
 import {
+  computeGenesisHeaderHash,
+  convertGenesisToBlockHeader,
   loadChainSpec,
   loadGenesisHeaderAndComputeHash,
   loadGenesisJson,
   parseBootnode,
 } from '@pbnj/genesis'
+import { calculateBlockHashFromHeader } from '@pbnj/serialization'
 import type {
   BlockHeader,
   IConfigService,
@@ -135,12 +138,61 @@ export class NodeGenesisManager extends BaseService {
 
   /**
    * Get genesis header hash
+   * Calculates from genesis header if available, otherwise from genesis JSON
    */
   getGenesisHeaderHash(): Safe<Hex> {
-    if (!this.genesisBlockHeaderHash) {
-      return safeError(new Error('Genesis header hash not found'))
+    // If already computed, return it
+    if (this.genesisBlockHeaderHash) {
+      return safeResult(this.genesisBlockHeaderHash)
     }
-    return safeResult(this.genesisBlockHeaderHash)
+
+    // Try to compute from genesis header if available
+    if (this.genesisBlockHeader) {
+      try {
+        const hash = computeGenesisHeaderHash(
+          this.genesisBlockHeader,
+          this.config,
+        )
+        this.genesisBlockHeaderHash = hash
+        return safeResult(hash)
+      } catch (error) {
+        return safeError(
+          new Error(
+            `Failed to compute genesis hash from header: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        )
+      }
+    }
+
+    // Try to compute from genesis JSON if available
+    if (this.genesisJson) {
+      try {
+        const genesisHeader = convertGenesisToBlockHeader(this.genesisJson)
+        const [hashError, hash] = calculateBlockHashFromHeader(
+          genesisHeader,
+          this.config,
+        )
+        if (hashError || !hash) {
+          return safeError(
+            new Error(
+              `Failed to calculate genesis hash from JSON: ${hashError?.message || 'Unknown error'}`,
+            ),
+          )
+        }
+        this.genesisBlockHeaderHash = hash
+        return safeResult(hash)
+      } catch (error) {
+        return safeError(
+          new Error(
+            `Failed to compute genesis hash from JSON: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        )
+      }
+    }
+
+    return safeError(
+      new Error('Genesis header hash not found and cannot be computed'),
+    )
   }
 
   /**

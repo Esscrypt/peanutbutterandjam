@@ -33,6 +33,7 @@ import type {
   Activity,
   CoreStats,
   DecodingResult,
+  IConfigService,
   Safe,
   ServiceStats,
   ValidatorStats,
@@ -40,7 +41,9 @@ import type {
 import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
+  decodeSequenceGeneric,
   decodeVariableSequence,
+  encodeSequenceGeneric,
   encodeVariableSequence,
 } from '../core/sequence'
 
@@ -393,32 +396,97 @@ function decodeServiceStats(
 /**
  * Encode activity according to Gray Paper equation 11:
  * activity ≡ ⟨valstatsaccumulator, valstatsprevious, corestats, servicestats⟩
+ *
+ * Gray Paper: C(13) ↦ encode{encode[4]{valstatsaccumulator, valstatsprevious}, corestats, servicestats}
+ * Gray Paper: tuple{valstatsaccumulator, valstatsprevious} ∈ sequence[Cvalcount]{tuple{...}}^2
+ *
+ * This means valstatsaccumulator and valstatsprevious are FIXED-LENGTH sequences of Cvalcount elements
+ * (no length prefix), not variable-length sequences.
  */
-export function encodeActivity(activity: Activity): Safe<Uint8Array> {
+export function encodeActivity(
+  activity: Activity,
+  configService: IConfigService,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
-  // valstatsaccumulator: variable-length sequence of validator statistics
-  const [error1, validatorStatsAccumulatorData] = encodeVariableSequence(
-    activity.validatorStatsAccumulator,
+  // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+  // This means both sequences together have a single 4-byte length prefix (total byte length)
+  const validatorCount = configService.numValidators
+
+  // valstatsaccumulator: fixed-length sequence of Cvalcount validator statistics
+  // Gray Paper: sequence[Cvalcount]{tuple{...}} - fixed-length sequence
+  const paddedAccumulator = Array.from(activity.validatorStatsAccumulator)
+  // Pad to Cvalcount if needed
+  while (paddedAccumulator.length < validatorCount) {
+    paddedAccumulator.push({
+      blocks: 0,
+      tickets: 0,
+      preimageCount: 0,
+      preimageSize: 0,
+      guarantees: 0,
+      assurances: 0,
+    })
+  }
+  // Truncate to Cvalcount if needed
+  const accumulatorToEncode = paddedAccumulator.slice(0, validatorCount)
+  const [error1, validatorStatsAccumulatorData] = encodeSequenceGeneric(
+    accumulatorToEncode,
     encodeValidatorStats,
   )
   if (error1) return safeError(error1)
-  parts.push(validatorStatsAccumulatorData)
 
-  // valstatsprevious: variable-length sequence of validator statistics
-  const [error2, validatorStatsPreviousData] = encodeVariableSequence(
-    activity.validatorStatsPrevious,
+  // valstatsprevious: fixed-length sequence of Cvalcount validator statistics
+  // Gray Paper: sequence[Cvalcount]{tuple{...}} - fixed-length sequence
+  const paddedPrevious = Array.from(activity.validatorStatsPrevious)
+  // Pad to Cvalcount if needed
+  while (paddedPrevious.length < validatorCount) {
+    paddedPrevious.push({
+      blocks: 0,
+      tickets: 0,
+      preimageCount: 0,
+      preimageSize: 0,
+      guarantees: 0,
+      assurances: 0,
+    })
+  }
+  // Truncate to Cvalcount if needed
+  const previousToEncode = paddedPrevious.slice(0, validatorCount)
+  const [error2, validatorStatsPreviousData] = encodeSequenceGeneric(
+    previousToEncode,
     encodeValidatorStats,
   )
   if (error2) return safeError(error2)
+
+  // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+  // The sequences are fixed-length (Cvalcount elements each), so we encode them directly
+  // The 4-byte notation refers to the encoding format, not a length prefix
+  parts.push(validatorStatsAccumulatorData)
   parts.push(validatorStatsPreviousData)
 
-  // corestats: variable-length sequence of core statistics
-  const [error3, coreStatsData] = encodeVariableSequence(
-    activity.coreStats,
+  // corestats: fixed-length sequence of Ccorecount core statistics
+  // Gray Paper: sequence[Ccorecount]{tuple{...}} - fixed-length sequence, no length prefix
+  const coreCount = configService.numCores
+  const paddedCoreStats = Array.from(activity.coreStats)
+  // Pad to Ccorecount if needed
+  while (paddedCoreStats.length < coreCount) {
+    paddedCoreStats.push({
+      daLoad: 0,
+      popularity: 0,
+      importCount: 0,
+      extrinsicCount: 0,
+      extrinsicSize: 0,
+      exportCount: 0,
+      bundleLength: 0,
+      gasUsed: 0,
+    })
+  }
+  // Truncate to Ccorecount if needed
+  const coreStatsToEncode = paddedCoreStats.slice(0, coreCount)
+  const [error4, coreStatsData] = encodeSequenceGeneric(
+    coreStatsToEncode,
     encodeCoreStats,
   )
-  if (error3) return safeError(error3)
+  if (error4) return safeError(error4)
   parts.push(coreStatsData)
 
   // servicestats: variable-length sequence of (serviceId, serviceStats) tuples
@@ -428,25 +496,25 @@ export function encodeActivity(activity: Activity): Safe<Uint8Array> {
     serviceStatsTuples.push({ serviceId, stats: serviceStat })
   }
 
-  const [error4, serviceStatsData] = encodeVariableSequence(
+  const [error5, serviceStatsData] = encodeVariableSequence(
     serviceStatsTuples,
     (tuple) => {
       const tupleParts: Uint8Array[] = []
 
       // Encode service ID
-      const [error5, serviceIdData] = encodeNatural(tuple.serviceId)
-      if (error5) return safeError(error5)
+      const [error6, serviceIdData] = encodeNatural(tuple.serviceId)
+      if (error6) return safeError(error6)
       tupleParts.push(serviceIdData)
 
       // Encode service stats
-      const [error6, serviceStatsData] = encodeServiceStats(tuple.stats)
-      if (error6) return safeError(error6)
+      const [error7, serviceStatsData] = encodeServiceStats(tuple.stats)
+      if (error7) return safeError(error7)
       tupleParts.push(serviceStatsData)
 
       return safeResult(concatBytes(tupleParts))
     },
   )
-  if (error4) return safeError(error4)
+  if (error5) return safeError(error5)
   parts.push(serviceStatsData)
 
   return safeResult(concatBytes(parts))
@@ -455,28 +523,50 @@ export function encodeActivity(activity: Activity): Safe<Uint8Array> {
 /**
  * Decode activity according to Gray Paper equation 11:
  * activity ≡ ⟨valstatsaccumulator, valstatsprevious, corestats, servicestats⟩
+ *
+ * Gray Paper: C(13) ↦ encode{encode[4]{valstatsaccumulator, valstatsprevious}, corestats, servicestats}
+ * Gray Paper: tuple{valstatsaccumulator, valstatsprevious} ∈ sequence[Cvalcount]{tuple{...}}^2
+ *
+ * This means valstatsaccumulator and valstatsprevious are FIXED-LENGTH sequences of Cvalcount elements
+ * (no length prefix), not variable-length sequences.
  */
 export function decodeActivity(
   data: Uint8Array,
+  configService: IConfigService,
 ): Safe<DecodingResult<Activity>> {
   let currentData = data
 
-  // valstatsaccumulator: variable-length sequence of validator statistics
-  const [error1, validatorStatsAccumulatorResult] =
-    decodeVariableSequence<ValidatorStats>(currentData, decodeValidatorStats)
+  // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+  // The sequences are fixed-length (Cvalcount elements each), so we decode them directly
+  // The 4-byte length prefix in the encoding is for the combined byte length
+  // But when decoding, we can decode the sequences directly since they're fixed-length
+  const validatorCount = configService.numValidators
+
+  // Decode valstatsaccumulator: fixed-length sequence of Cvalcount validator statistics
+  const [error1, validatorStatsAccumulatorResult] = decodeSequenceGeneric(
+    currentData,
+    decodeValidatorStats,
+    validatorCount,
+  )
   if (error1) return safeError(error1)
   currentData = validatorStatsAccumulatorResult.remaining
 
-  // valstatsprevious: variable-length sequence of validator statistics
-  const [error2, validatorStatsPreviousResult] =
-    decodeVariableSequence<ValidatorStats>(currentData, decodeValidatorStats)
+  // valstatsprevious: fixed-length sequence of Cvalcount validator statistics
+  const [error2, validatorStatsPreviousResult] = decodeSequenceGeneric(
+    currentData,
+    decodeValidatorStats,
+    validatorCount,
+  )
   if (error2) return safeError(error2)
   currentData = validatorStatsPreviousResult.remaining
 
-  // corestats: variable-length sequence of core statistics
-  const [error3, coreStatsResult] = decodeVariableSequence<CoreStats>(
+  // corestats: fixed-length sequence of Ccorecount core statistics
+  // Gray Paper: sequence[Ccorecount]{tuple{...}} - fixed-length sequence, no length prefix
+  const coreCount = configService.numCores
+  const [error3, coreStatsResult] = decodeSequenceGeneric(
     currentData,
     decodeCoreStats,
+    coreCount,
   )
   if (error3) return safeError(error3)
   currentData = coreStatsResult.remaining

@@ -81,8 +81,31 @@ export class ValidatorSetManager
     // this.clockService = options.clockService
 
     if (options.initialValidators) {
+      // Gray Paper: Validator sets must have exactly Cvalcount elements
+      // Pad with null keys if we have fewer validators than Cvalcount
+      const validatorCount = this.configService.numValidators
+      const paddedValidators = this.padValidatorSet(
+        options.initialValidators,
+        validatorCount,
+      )
+
       this.activeSet = new Map(
-        options.initialValidators.map((validator, index) => [index, validator]),
+        paddedValidators.map((validator, index) => [index, validator]),
+      )
+      // At genesis, pendingSet should also be initialized from initialValidators
+      // Gray Paper: pendingSet' is set during epoch transitions, but at genesis
+      // we need to initialize it from the initial validators
+      this.pendingSet = new Map(
+        paddedValidators.map((validator, index) => [index, validator]),
+      )
+      // Staging set and previous set should be initialized with null keys at genesis
+      // They will be populated during epoch transitions
+      const nullValidators = this.createNullValidatorSet(validatorCount)
+      this.stagingSet = new Map(
+        nullValidators.map((validator, index) => [index, validator]),
+      )
+      this.previousSet = new Map(
+        nullValidators.map((validator, index) => [index, validator]),
       )
       // Populate publicKeysToValidatorIndex map for offender lookups
       this.updatePublicKeysToValidatorIndex(this.activeSet)
@@ -503,25 +526,29 @@ export class ValidatorSetManager
    * @returns The epoch root as a 32-byte hash
    */
   getEpochRoot(): Hex {
-    if (!this.keyPairService) {
-      throw new Error('Key pair service not found')
-    }
     if (!this.ringProver) {
       throw new Error('Ring VRF prover not found')
     }
     // Extract Bandersnatch keys from pending validators
+    // Gray Paper: z = getRingRoot({k_vk_bs | k ∈ pendingSet'})
+    // Includes ALL keys in pendingSet', including null keys (which replace offenders)
+    // Null/invalid keys will be substituted with padding point in createRingPolynomial
     const bandersnatchKeys: Uint8Array[] = this.pendingSet
       .values()
       .toArray()
-      .map((validator) => validator.bandersnatch)
-      .filter((key) => !this.isNullKey(hexToBytes(key)))
-      .map((key) => hexToBytes(key))
+      .map((validator) => hexToBytes(validator.bandersnatch))
 
-    // Calculate ring root using Bandersnatch VRF with secret key parameter
+    // Handle empty pendingSet (e.g., at genesis before state is loaded)
+    // Return zeroHash if no validators in pendingSet
+    if (bandersnatchKeys.length === 0) {
+      logger.warn('Cannot compute epoch root: pendingSet is empty')
+      return zeroHash
+    }
+
+    // Calculate ring root from public keys only (Gray Paper compliant)
+    // No private key needed - this is deterministic
     const [epochRootError, epochRoot] = getRingRoot(
       bandersnatchKeys,
-      this.keyPairService,
-      this,
       this.ringProver,
     )
     if (epochRootError) {
@@ -571,6 +598,47 @@ export class ValidatorSetManager
    */
   private isNullKey(key: Uint8Array): boolean {
     return key.every((byte) => byte === 0)
+  }
+
+  /**
+   * Create a null validator key (all zeros)
+   * Gray Paper equation (122-123): null keys replace blacklisted validators
+   * Gray Paper: vk_bls ∈ blskey ≡ vk[64:144] - BLS key must be 144 bytes
+   */
+  private createNullValidator(): ValidatorPublicKeys {
+    return {
+      bandersnatch: zeroHash, // 32 bytes
+      ed25519: zeroHash, // 32 bytes
+      bls: ('0x' + '00'.repeat(144)) as Hex, // 144 bytes (not 32!)
+      metadata: ('0x' + '00'.repeat(128)) as Hex, // 128 bytes
+    }
+  }
+
+  /**
+   * Create a set of null validators of the specified length
+   * Used to pad validator sets to Cvalcount
+   */
+  private createNullValidatorSet(count: number): ValidatorPublicKeys[] {
+    return Array.from({ length: count }, () => this.createNullValidator())
+  }
+
+  /**
+   * Pad validator set to exactly Cvalcount elements with null keys
+   * Gray Paper: Validator sets must have fixed length Cvalcount
+   */
+  private padValidatorSet(
+    validators: ValidatorPublicKeys[],
+    targetCount: number,
+  ): ValidatorPublicKeys[] {
+    if (validators.length >= targetCount) {
+      return validators.slice(0, targetCount)
+    }
+    const padded = [...validators]
+    const nullValidators = this.createNullValidatorSet(
+      targetCount - validators.length,
+    )
+    padded.push(...nullValidators)
+    return padded
   }
 
   /**

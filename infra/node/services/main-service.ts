@@ -72,6 +72,8 @@ import { StatisticsService } from './statistics-service'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 import { WorkReportService } from './work-report-service'
+import { StateService } from './state-service'
+import { ReadyService } from './ready-service'
 /**
  * Main service configuration
  */
@@ -115,6 +117,8 @@ export class MainService extends BaseService {
   private readonly authQueueService: AuthQueueService
   private readonly authPoolService: AuthPoolService
   private readonly guarantorService: GuarantorService
+  private readonly readyService: ReadyService
+  private readonly stateService: StateService
   private readonly blockImporterService: BlockImporterService
   // private readonly workPackageProcessorService: WorkPackageProcessor
   // private readonly telemetryService: TelemetryEventEmitterService
@@ -229,12 +233,6 @@ export class MainService extends BaseService {
       clockService: this.clockService,
     })
 
-    // Initialize recent history service
-    this.recentHistoryService = new RecentHistoryService({
-      eventBusService: this.eventBusService,
-      configService: this.configService,
-    })
-
     this.networkingService = new NetworkingService({
       listenAddress: this.config.networking.listenAddress,
       listenPort: Number(this.config.networking.listenPort),
@@ -257,6 +255,7 @@ export class MainService extends BaseService {
       ce132TicketDistributionProtocol: this.ce132TicketDistributionProtocol!,
       clockService: this.clockService,
       prover: this.ringProver,
+      validatorSetManager: null // will be set later
     })
 
     this.sealKeyService = new SealKeyService({
@@ -283,7 +282,6 @@ export class MainService extends BaseService {
       // clockService: this.clockService,
       initialValidators: null,
     })
-
     this.ticketService.setValidatorSetManager(this.validatorSetManagerService)
     this.networkingService.setValidatorSetManager(
       this.validatorSetManagerService,
@@ -296,6 +294,50 @@ export class MainService extends BaseService {
       clockService: this.clockService,
       networkingService: this.networkingService,
       preimageRequestProtocol: this.ce143PreimageRequestProtocol!,
+    })
+
+    this.readyService = new ReadyService({
+      configService: this.configService,
+    })
+    this.authQueueService = new AuthQueueService({
+      configService: this.configService,
+    })
+    this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
+      this.configService,
+    )
+    this.hostFunctionRegistry = new HostFunctionRegistry(
+      this.serviceAccountService,
+      this.configService,
+    )
+    this.accumulatePVM = new AccumulatePVM({
+      hostFunctionRegistry: this.hostFunctionRegistry,
+      accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
+      configService: this.configService,
+      entropyService: this.entropyService,
+      pvmOptions: { gasCounter: PVM_CONSTANTS.DEFAULT_GAS_LIMIT },
+    })
+    this.privilegesService = new PrivilegesService({
+      configService: this.configService,
+    })
+    this.accumulationService = new AccumulationService({
+      configService: this.configService,
+      clockService: this.clockService,
+      serviceAccountsService: this.serviceAccountService,
+      privilegesService: this.privilegesService,
+      validatorSetManager: this.validatorSetManagerService,
+      authQueueService: this.authQueueService,
+      accumulatePVM: this.accumulatePVM,
+      readyService: this.readyService,
+      // statisticsService: this.statisticsService,
+      // entropyService: this.entropyService,
+    })
+
+    // Initialize recent history service
+    // Note: accumulationService is created later, so we'll update it after initialization
+    this.recentHistoryService = new RecentHistoryService({
+      eventBusService: this.eventBusService,
+      configService: this.configService,
+      accumulationService: this.accumulationService, // Will be set after accumulationService is created
     })
 
     this.disputesService = new DisputesService({
@@ -379,10 +421,6 @@ export class MainService extends BaseService {
       recentHistoryService: this.recentHistoryService,
     })
 
-    this.authQueueService = new AuthQueueService({
-      configService: this.configService,
-    })
-
     this.authPoolService = new AuthPoolService({
       configService: this.configService,
       workReportService: this.workReportService,
@@ -401,41 +439,8 @@ export class MainService extends BaseService {
       erasureCodingService: this.erasureCodingService,
     })
 
-    this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
-      this.configService,
-    )
-    this.hostFunctionRegistry = new HostFunctionRegistry(
-      this.serviceAccountService,
-      this.configService,
-    )
-
-    this.accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry: this.hostFunctionRegistry,
-      accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
-      configService: this.configService,
-      entropyService: this.entropyService,
-      pvmOptions: { gasCounter: PVM_CONSTANTS.DEFAULT_GAS_LIMIT },
-    })
-
     this.activityService = new ActivityService({
       configService: this.configService,
-    })
-
-    this.privilegesService = new PrivilegesService({
-      configService: this.configService,
-    })
-
-    this.accumulationService = new AccumulationService({
-      configService: this.configService,
-      clockService: this.clockService,
-      serviceAccountsService: this.serviceAccountService,
-      privilegesService: this.privilegesService,
-      validatorSetManager: this.validatorSetManagerService,
-      authQueueService: this.authQueueService,
-      accumulatePVM: this.accumulatePVM,
-      readyService: null,
-      // statisticsService: this.statisticsService,
-      // entropyService: this.entropyService,
     })
 
     this.guarantorService = new GuarantorService({
@@ -457,11 +462,33 @@ export class MainService extends BaseService {
       accumulationService: this.accumulationService,
     })
 
+
+    this.stateService = new StateService({
+      configService: this.configService,
+      genesisManagerService: this.genesisManagerService,
+      validatorSetManager: this.validatorSetManagerService,
+      entropyService: this.entropyService,
+      ticketService: this.ticketService,
+      authQueueService: this.authQueueService,
+      authPoolService: this.authPoolService,
+      activityService: this.activityService,
+      disputesService: this.disputesService,
+      readyService: this.readyService,
+      accumulationService: this.accumulationService,
+      workReportService: this.workReportService,
+      privilegesService: this.privilegesService,
+      serviceAccountsService: this.serviceAccountService,
+      recentHistoryService: this.recentHistoryService,
+      sealKeyService: this.sealKeyService,
+      clockService: this.clockService,
+    })
+
     // Initialize block importer service
     this.blockImporterService = new BlockImporterService({
       eventBusService: this.eventBusService,
       clockService: this.clockService,
       recentHistoryService: this.recentHistoryService,
+      stateService: this.stateService,
       configService: this.configService,
       validatorSetManagerService: this.validatorSetManagerService,
       entropyService: this.entropyService,
@@ -471,6 +498,9 @@ export class MainService extends BaseService {
       guarantorService: this.guarantorService,
       disputesService: this.disputesService,
       serviceAccountService: this.serviceAccountService,
+      ticketService: this.ticketService,
+      statisticsService: this.statisticsService,
+      authPoolService: this.authPoolService,
     })
 
     // Register created services with the registry

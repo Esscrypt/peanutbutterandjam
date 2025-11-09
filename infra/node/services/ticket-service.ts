@@ -72,6 +72,7 @@ export class TicketService extends BaseService implements ITicketService {
     networkingService: NetworkingService | null
     ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null
     ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
+    validatorSetManager: ValidatorSetManager | null
     clockService: ClockService
     prover: RingVRFProver
   }) {
@@ -87,7 +88,9 @@ export class TicketService extends BaseService implements ITicketService {
       options.ce132TicketDistributionProtocol
     this.clockService = options.clockService
     this.prover = options.prover
+    this.validatorSetManager = options.validatorSetManager
 
+    
     this.eventBusService.addFirstPhaseTicketDistributionCallback(
       this.handleFirstPhaseTicketDistribution.bind(this),
     )
@@ -154,12 +157,14 @@ export class TicketService extends BaseService implements ITicketService {
     }
 
     // check if the ticket is valid against the proof
-    const isValid = verifyTicket(
+    const [verifyError, isValid] = verifyTicket(
       safroleTicket,
-      this.keyPairService,
       this.entropyService,
       this.validatorSetManager,
     )
+    if (verifyError) {
+      return safeError(verifyError)
+    }
     if (!isValid) {
       return safeError(new Error('Invalid ticket'))
     }
@@ -269,10 +274,27 @@ export class TicketService extends BaseService implements ITicketService {
    * @param isNewEpoch - Whether this is a new epoch (e' > e)
    * @returns Updated ticket accumulator
    */
-  addTicketsToAccumulator(
-    newTickets: SafroleTicketWithoutProof[],
+  applyTickets(
+    newTickets: SafroleTicket[],
     isNewEpoch = false,
   ): Safe<SafroleTicketWithoutProof[]> {
+    if(!this.validatorSetManager) {
+      return safeError(new Error('Validator set manager not set'))
+    }
+    // for each new ticket, verify the proof
+    for (const ticket of newTickets) {
+      const [verifyError, isValid] = verifyTicket(
+        ticket,
+        this.entropyService,
+        this.validatorSetManager,
+      )
+      if (verifyError) {
+        return safeError(verifyError)
+      }
+      if (!isValid) {
+        return safeError(new Error('Invalid ticket'))
+      }
+    }
     // Gray Paper Eq. 315: Remove duplicates from new tickets
     const uniqueNewTickets = this.removeDuplicateTickets(newTickets)
 

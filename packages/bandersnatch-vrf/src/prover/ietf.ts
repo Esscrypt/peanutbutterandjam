@@ -5,7 +5,7 @@
  */
 
 import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
-import { logger, mod, numberToBytes } from '@pbnj/core'
+import { bytesToHex, logger, mod, numberToBytesLittleEndian } from '@pbnj/core'
 import {
   bytesToBigIntLittleEndian,
   curvePointToNoble,
@@ -105,7 +105,7 @@ export class IETFVRFProver {
   ): Uint8Array {
     // IETF VRF proof generation (RFC-9381)
     // Proof = (c, s) where:
-    // c = challenge_rfc_9381(gamma, g^s, h^c, auxData)
+    // c ← challenge(Y, I, O, k · G, k · I, ad)  (per spec section 2.2 step 4)
     // s = k + c * x (mod q)
 
     // Convert alpha and gamma to curve points
@@ -114,29 +114,50 @@ export class IETFVRFProver {
 
     // Generate nonce k using RFC-8032
     const kBytes = generateNonceRfc8032(secretKey, alpha)
-    const k = mod(
-      bytesToBigIntLittleEndian(kBytes),
-      BandersnatchCurveNoble.CURVE_ORDER,
-    )
+    const k = bytesToBigIntLittleEndian(kBytes)
 
-    // Calculate g^s (where g is the generator)
+    // Calculate k · G (where G is the generator)
     const gToS = BandersnatchCurveNoble.scalarMultiply(
       BandersnatchCurveNoble.GENERATOR,
       k,
     )
 
-    // Calculate h^c (where h is alpha)
+    // Calculate k · I (where I is alpha, the input point)
     const hToC = BandersnatchCurveNoble.scalarMultiply(alphaPoint, k)
 
-    // Calculate challenge c using RFC-9381
-    // Use arkworks-compatible compression for all challenge points
+    // Calculate challenge c according to bandersnatch-vrf-spec section 2.2 Prove step 4:
+    // c ← challenge(Y, I, O, k · G, k · I, ad)
+    // where Y = publicKey, I = alpha, O = gamma, k·G = gToS, k·I = hToC
+    const publicKeyPoint = BandersnatchCurveNoble.scalarMultiply(
+      BandersnatchCurveNoble.GENERATOR,
+      mod(
+        bytesToBigIntLittleEndian(secretKey),
+        BandersnatchCurveNoble.CURVE_ORDER,
+      ),
+    )
     const challengePoints = [
-      BandersnatchCurveNoble.pointToBytes(gammaPoint),
-      BandersnatchCurveNoble.pointToBytes(gToS),
-      BandersnatchCurveNoble.pointToBytes(hToC),
+      BandersnatchCurveNoble.pointToBytes(publicKeyPoint), // Y
+      BandersnatchCurveNoble.pointToBytes(alphaPoint), // I
+      BandersnatchCurveNoble.pointToBytes(gammaPoint), // O
+      BandersnatchCurveNoble.pointToBytes(gToS), // k · G
+      BandersnatchCurveNoble.pointToBytes(hToC), // k · I
     ]
 
+    // Rust reference: challenge_rfc_9381 uses from_be_bytes_mod_order (line 160 in common.rs)
+    // So challenge computation always uses big-endian
     const c = generateChallengeRfc9381(challengePoints, auxData)
+
+    // Log challenge computation for debugging
+    logger.debug('IETF VRF prover challenge computation', {
+      yHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(publicKeyPoint)),
+      iHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(alphaPoint)),
+      oHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(gammaPoint)),
+      kGHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(gToS)),
+      kIHex: bytesToHex(BandersnatchCurveNoble.pointToBytes(hToC)),
+      auxDataHex: bytesToHex(auxData || new Uint8Array(0)),
+      auxDataLength: auxData?.length || 0,
+      challengeC: c.toString(16),
+    })
 
     // Calculate s = k + c * x (mod q)
     const x = mod(
@@ -147,16 +168,13 @@ export class IETFVRFProver {
 
     // Serialize proof as (gamma, c, s) - each field element must be exactly 32 bytes
     // Gray Paper: bssignature{k}{c}{m} ⊂ blob[96] = 32 + 32 + 32 bytes
-    const padTo32Bytes = (bytes: Uint8Array): Uint8Array => {
-      if (bytes.length >= 32) return bytes.slice(-32) // Take last 32 bytes if longer
-      const padded = new Uint8Array(32)
-      padded.set(bytes, 32 - bytes.length) // Right-pad with zeros
-      return padded
-    }
-
-    const gammaBytes = padTo32Bytes(gamma) // VRF output point (32 bytes)
-    const cBytes = padTo32Bytes(numberToBytes(c)) // Challenge scalar (32 bytes)
-    const sBytes = padTo32Bytes(numberToBytes(s)) // Response scalar (32 bytes)
+    // gamma is already 32 bytes (compressed point from pointToBytes)
+    // numberToBytesLittleEndian always returns exactly 32 bytes
+    const gammaBytes = gamma // VRF output point (32 bytes)
+    // Use little-endian encoding per bandersnatch-vrf-spec section 2.1:
+    // "The int_to_string function encodes into the 32 octets little endian representation"
+    const cBytes = numberToBytesLittleEndian(c) // Challenge scalar (32 bytes)
+    const sBytes = numberToBytesLittleEndian(s) // Response scalar (32 bytes)
 
     const proofUint8Array = new Uint8Array([
       ...gammaBytes,

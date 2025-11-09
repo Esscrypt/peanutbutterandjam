@@ -195,8 +195,8 @@ export function convertGenesisToBlockHeader(genesis: GenesisJson): BlockHeader {
     extrinsicHash: header.extrinsic_hash,
     timeslot: BigInt(header.slot),
     epochMark: {
-      entropy1: header.epoch_mark.entropy,
-      entropyAccumulator: header.epoch_mark.tickets_entropy,
+      entropyAccumulator: header.epoch_mark.entropy,
+      entropy1: header.epoch_mark.tickets_entropy,
       validators: header.epoch_mark.validators,
     },
     winnersMark: null,

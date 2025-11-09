@@ -8,7 +8,7 @@ import { describe, it, expect} from 'bun:test'
 import { 
   RecentHistoryService, 
 } from '../services/recent-history-service'
-import { BlockProcessedEvent, EventBusService, Hex, hexToBytes } from '@pbnj/core'
+import { BlockProcessedEvent, EventBusService, Hex } from '@pbnj/core'
 import type { Recent, RecentHistoryTestVector } from '@pbnj/types'
 import { ConfigService } from '../services/config-service'
 import * as fs from 'fs'
@@ -71,6 +71,7 @@ describe('RecentHistoryService - JAM Test Vectors', () => {
       const recentHistoryService = new RecentHistoryService({
         eventBusService,
         configService,
+        accumulationService: null,
       })
       recentHistoryService.start()
 

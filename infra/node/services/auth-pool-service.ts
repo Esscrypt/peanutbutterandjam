@@ -26,6 +26,7 @@ import {
   AUTHORIZATION_CONSTANTS,
   type AuthPool,
   BaseService,
+  type Guarantee,
   type IConfigService,
   type Safe,
   safeError,
@@ -72,6 +73,40 @@ export class AuthPoolService extends BaseService {
   }
 
   /**
+   * Apply block transition to auth pool
+   * Public method that can be called directly or from event handler
+   *
+   * Gray Paper Eq. 26-27: authpool'[c] ≡ tail(F(c)) + [authqueue'[c][H_timeslot]]^C_authpoolsize
+   * This MUST happen for EVERY block, even empty ones, as authpool is part of the state
+   *
+   * @param timeslot - Current timeslot (H_timeslot)
+   * @param guarantees - Block body guarantees (optional, for setting authorizer hashes)
+   * @returns Result of the transition operation
+   */
+  applyBlockTransition(
+    timeslot: bigint,
+    guarantees: Guarantee[],
+  ): Safe<void> {
+    if (!this.authQueueService) {
+      return safeError(new Error('Auth queue service not found'))
+    }
+    if (!this.workReportService) {
+      return safeError(new Error('Work report service not found'))
+    }
+
+    // Extract guaranteed work reports from block body and set authorizer hashes
+    // This is needed for authpool transition to remove used authorizers
+    for (const guarantee of guarantees) {
+      const coreIndex = Number(guarantee.report.core_index)
+      const authorizer = guarantee.report.authorizer_hash
+      this.workReportService.setAuthorizerHashByCore(coreIndex, authorizer)
+    }
+
+    // Trigger the block transition
+    return this.onBlockTransition(timeslot)
+  }
+
+  /**
    * Handle block processed event from event bus
    * Automatically triggers auth pool state transition
    *
@@ -80,41 +115,7 @@ export class AuthPoolService extends BaseService {
   private readonly handleBlockProcessed = async (
     event: BlockProcessedEvent,
   ): Promise<Safe<void>> => {
-    if (!this.authQueueService) {
-      logger.warn('Auth queue cache not set, skipping auth pool transition', {
-        slot: event.slot.toString(),
-      })
-      return safeResult(undefined)
-    }
-    if (!this.workReportService) {
-      logger.warn(
-        'Work report service not found, skipping auth pool transition',
-        {
-          slot: event.slot.toString(),
-        },
-      )
-      return safeResult(undefined)
-    }
-
-    // Extract guaranteed work reports from block body
-    for (const guarantee of event.body.guarantees) {
-      const coreIndex = Number(guarantee.report.core_index)
-      const authorizer = guarantee.report.authorizer_hash
-      this.workReportService.setAuthorizerHashByCore(coreIndex, authorizer)
-    }
-
-    // Trigger the block transition
-    const [error] = this.onBlockTransition(event.slot)
-
-    if (error) {
-      logger.error('Auth pool block transition failed', {
-        slot: event.slot.toString(),
-        error: error.message,
-      })
-      return safeError(error)
-    }
-
-    return safeResult(undefined)
+    return this.applyBlockTransition(event.slot, event.body.guarantees)
   }
 
   /**

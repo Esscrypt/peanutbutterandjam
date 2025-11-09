@@ -60,7 +60,7 @@
  */
 
 import {
-  bytesToBigInt,
+  blake2bHash,
   bytesToHex,
   concatBytes,
   type Hex,
@@ -74,13 +74,15 @@ import type {
   StateTrie,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
+import { encodeFixedLength } from '../core/fixed-length'
+import { encodeVariableSequence } from '../core/sequence'
 import { encodeAccumulated } from './accumulated'
 import { encodeActivity } from './activity'
 import { encodeAuthpool } from './authpool'
 import { encodeAuthqueue } from './authqueue'
 import { encodeDisputeState } from './disputes'
 import { encodeEntropy } from './entropy'
-import { encodeLastAccountOut } from './last-account-out'
+import { encodeLastAccumulationOutputs } from './last-accumulation-outputs'
 import { encodePrivileges } from './privileges'
 import { encodeReady } from './ready'
 import { encodeRecent } from './recent'
@@ -104,15 +106,33 @@ export function createStateKey(
   if (serviceId !== undefined && hash !== undefined) {
     // C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
     // where n = encode[4](s), a = blake(h)
+    // Bytes are INTERLEAVED: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, then a₄...a₂₆
     const serviceUint8Array = new Uint8Array(4)
     const view = new DataView(serviceUint8Array.buffer)
     view.setUint32(0, Number(serviceId), true) // little-endian
 
-    const hashBytes = hexToBytes(hash)
-    const blakeHash = hashBytes.slice(0, 27) // Take first 27 Uint8Array
+    // Gray Paper: a = blake(h)
+    // The hash parameter is the combined key (e.g., encode[4]{0xFFFFFFFF} ∥ k for storage)
+    // We need to compute the Blake hash of it, then take the first 27 bytes
+    const combinedKeyBytes = hexToBytes(hash)
+    const [blakeError, blakeHashHex] = blake2bHash(combinedKeyBytes)
+    if (blakeError) {
+      throw new Error(`Failed to compute Blake hash: ${blakeError.message}`)
+    }
+    const blakeHashFull = hexToBytes(blakeHashHex)
+    const blakeHash = blakeHashFull.slice(0, 27) // Take first 27 bytes of Blake hash
 
-    key.set(serviceUint8Array, 0) // n₀, n₁, n₂, n₃
-    key.set(blakeHash, 4) // a₀, a₁, ..., a₂₆
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = blakeHash[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = blakeHash[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = blakeHash[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = blakeHash[3] // a₃
+    // Remaining bytes: a₄, a₅, ..., a₂₆ (23 bytes)
+    key.set(blakeHash.slice(4), 8) // a₄...a₂₆
   } else if (serviceId !== undefined) {
     // C(i, s) = ⟨i, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
     // where n = encode[4](s)
@@ -443,7 +463,10 @@ export function createStateTrie(
 
   // Chapter 12: privileges - Gray Paper specifies encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
   const privilegesKey = createStateKey(12)
-  const [error12, privilegesData] = encodePrivileges(globalState.privileges)
+  const [error12, privilegesData] = encodePrivileges(
+    globalState.privileges,
+    configService,
+  )
   if (error12) {
     return safeError(error12)
   }
@@ -451,7 +474,10 @@ export function createStateTrie(
 
   // Chapter 13: activity
   const activityKey = createStateKey(13)
-  const [error13, activityData] = encodeActivity(globalState.activity)
+  const [error13, activityData] = encodeActivity(
+    globalState.activity,
+    configService,
+  )
   if (error13) {
     return safeError(error13)
   }
@@ -475,14 +501,17 @@ export function createStateTrie(
   // Each element i is a set of hashes
   // var{i} encodes the set as: var{sq{hash, hash, ...}} = length + sequence of hashes
   const accumulatedKey = createStateKey(15)
-  const accumulatedItems: AccumulatedItem[] =
-    globalState.accumulated.packages.map((hashSet) => {
+  // Ensure accumulated is initialized (default to empty array if undefined)
+  const accumulatedPackages = globalState.accumulated?.packages ?? []
+  const accumulatedItems: AccumulatedItem[] = accumulatedPackages.map(
+    (hashSet) => {
       // Convert set of hashes to a sequence of hashes
       const hashBytes = Array.from(hashSet).map((hash) => hexToBytes(hash))
       // Concatenate all hashes
       const setData = concatBytes(hashBytes)
       return { data: setData }
-    })
+    },
+  )
 
   const [error15, accumulatedData] = encodeAccumulated(accumulatedItems)
   if (error15) {
@@ -492,11 +521,11 @@ export function createStateTrie(
     stateTrie[bytesToHex(accumulatedKey)] = bytesToHex(accumulatedData)
   }
 
-  // Chapter 16: last account out
+  // Chapter 16: last accumulation output
   const lastAccountKey = createStateKey(16)
-  const [error16, lastAccountData] = encodeLastAccountOut([
-    { serviceId: 0n, hash: globalState.lastaccout },
-  ])
+  const [error16, lastAccountData] = encodeLastAccumulationOutputs(
+    globalState.lastAccumulationOutput,
+  )
   if (error16) {
     return safeError(error16)
   }
@@ -505,8 +534,8 @@ export function createStateTrie(
   }
 
   // Chapter 255: accounts
-  for (const [address, account] of Object.entries(globalState.accounts)) {
-    const serviceId = bytesToBigInt(hexToBytes(address as `0x${string}`))
+  // ServiceAccounts.accounts is a Map<bigint, ServiceAccount>, not a plain object
+  for (const [serviceId, account] of globalState.accounts.accounts) {
     const accountKey = createStateKey(255, serviceId)
     const [error17, accountData] = encodeServiceAccount(account)
     if (error17) {
@@ -532,6 +561,8 @@ export function createStateTrie(
 
     // Service request mappings: C(s, encode[4]{length} ∥ request_hash) ↦ request_status
     // Gray Paper merklization.tex (lines 107-110)
+    // encode{var{sequence{encode[4]{x} | x ∈ t}}}
+    // where t is the sequence of timeslots (up to 3)
     for (const [requestHash, lengthMap] of account.requests) {
       for (const [length, requestStatus] of lengthMap) {
         const requestStateKey = createServiceRequestKey(
@@ -539,16 +570,52 @@ export function createStateTrie(
           requestHash,
           length,
         )
-        // TODO: Encode request status sequence according to Gray Paper
-        // encode{var{sequence{encode[4]{x} | x ∈ t}}}
-        // For now, encode as simple hex string
-        const requestStatusHex = bytesToHex(
-          new Uint8Array(requestStatus.map(Number)),
+        // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
+        // var{...} = length prefix (natural number)
+        // sequence{encode[4]{x}} = sequence of 4-byte timeslots
+        const [error18, requestStatusData] = encodeVariableSequence(
+          requestStatus,
+          (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
         )
-        stateTrie[bytesToHex(requestStateKey)] = requestStatusHex
+        if (error18) {
+          return safeError(error18)
+        }
+        stateTrie[bytesToHex(requestStateKey)] = bytesToHex(requestStatusData)
       }
     }
   }
 
   return safeResult(stateTrie)
+}
+
+/**
+ * Create state trie with raw C(s, h) keys included
+ *
+ * This variant includes raw C(s, h) keys that were decoded from test vectors
+ * but can't be reverse-engineered to get the original storage key or request hash.
+ *
+ * @param globalState - Current global state
+ * @param configService - Configuration service
+ * @param rawCshKeys - Map of raw C(s, h) key-value pairs from test vectors
+ * @returns State trie with all keys including raw C(s, h) keys
+ */
+export function createStateTrieWithRawKeys(
+  globalState: GlobalState,
+  configService: IConfigService,
+  rawCshKeys: Map<Hex, Hex>,
+): Safe<StateTrie> {
+  const [error, baseTrie] = createStateTrie(globalState, configService)
+  if (error) {
+    return safeError(error)
+  }
+
+  // Add raw C(s, h) keys that couldn't be reverse-engineered
+  for (const [key, value] of rawCshKeys.entries()) {
+    // Only add if not already in the trie (to avoid overwriting correctly generated keys)
+    if (!baseTrie[key]) {
+      baseTrie[key] = value
+    }
+  }
+
+  return safeResult(baseTrie)
 }

@@ -44,8 +44,8 @@
  * This is critical for JAM's accumulation output tracking and audit trail.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, LastAccountOut, Safe } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import type { DecodingResult, LastAccumulationOutput, Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import {
   decodeVariableSequence,
@@ -56,15 +56,18 @@ import {
  * Encode last account out according to Gray Paper C(16):
  * var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
  */
-export function encodeLastAccountOut(
-  lastAccountOut: LastAccountOut[],
+export function encodeLastAccumulationOutputs(
+  lastAccumulationOutput: Map<bigint, Hex>,
 ): Safe<Uint8Array> {
   try {
     // Gray Paper: var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
     // Variable-length sequence of tuples
     const [error, encodedData] = encodeVariableSequence(
-      lastAccountOut,
-      (item: LastAccountOut) => {
+      Array.from(lastAccumulationOutput.entries()).map(([serviceId, hash]) => ({
+        serviceId,
+        hash,
+      })),
+      (item: LastAccumulationOutput) => {
         const parts: Uint8Array[] = []
 
         // Gray Paper: encode[4]{s} - 4-byte fixed-length service ID
@@ -91,20 +94,20 @@ export function encodeLastAccountOut(
  * Decode last account out according to Gray Paper C(16):
  * var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
  */
-export function decodeLastAccountOut(
+export function decodeLastAccumulationOutputs(
   data: Uint8Array,
-): Safe<DecodingResult<LastAccountOut[]>> {
+): Safe<DecodingResult<LastAccumulationOutput[]>> {
   try {
     // Gray Paper: decode var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
     // Variable-length sequence of tuples
-    const [error, decodedData] = decodeVariableSequence<LastAccountOut>(
+    const [error, decodedData] = decodeVariableSequence<LastAccumulationOutput>(
       data,
       (itemData: Uint8Array) => {
         // Gray Paper: decode tuple{encode[4]{s}, encode{h}}
         if (itemData.length < 36) {
           // 4 bytes serviceId + 32 bytes hash
           return safeError(
-            new Error('Insufficient data for last account out entry'),
+            new Error('Insufficient data for last accumulation output entry'),
           )
         }
 
