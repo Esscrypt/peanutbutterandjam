@@ -58,6 +58,8 @@ export interface PedersenVRFResult {
   hash: Uint8Array
   /** Serialized proof */
   proof: Uint8Array
+  /** Blinding factor (b) used in Pedersen commitment - needed for ring proof */
+  blindingFactor: Uint8Array
 }
 
 /**
@@ -207,6 +209,7 @@ export class PedersenVRFProver {
           s,
           s_b,
         }),
+        blindingFactor, // Return blinding factor for ring proof generation
       }
     } catch (error) {
       logger.error('Pedersen VRF proof generation failed', {

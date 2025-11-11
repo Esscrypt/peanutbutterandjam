@@ -432,17 +432,9 @@ export function decodeSafrole(
     }
   }
 
-  // Decode length prefix first to see what we're expecting
-  const [lengthError, lengthResult] = decodeNatural(currentData)
-  if (lengthError) {
-    logger.error('[decodeSafrole] Failed to decode ticket accumulator length', {
-      error: lengthError.message,
-      remainingLength: currentData.length,
-    })
-    return safeError(lengthError)
-  }
-  const expectedCount = Number(lengthResult.value)
-
+  // 5. Decode var{ticketaccumulator} - variable-length sequence with length prefix
+  // Gray Paper: \var{\ticketaccumulator} means variable-length with length prefix
+  // decodeVariableSequence already handles the length prefix decoding
   const [accumError, accumResult] =
     decodeVariableSequence<SafroleTicketWithoutProof>(currentData, (data) =>
       decodeStateTicket(data, 'ticketAccumulator'),
@@ -450,7 +442,6 @@ export function decodeSafrole(
   if (accumError) {
     logger.error('[decodeSafrole] Failed to decode ticket accumulator', {
       error: accumError.message,
-      expectedCount,
       remainingLength: currentData.length,
       remainingBytes: bytesToHex(
         currentData.slice(0, Math.min(128, currentData.length)),
@@ -459,22 +450,8 @@ export function decodeSafrole(
     return safeError(accumError)
   }
 
-  logger.debug('[decodeSafrole] Successfully decoded ticket accumulator', {
-    expectedCount,
-    actualCount: accumResult.value.length,
-    consumed: accumResult.consumed,
-    remaining: accumResult.remaining.length,
-  })
   currentData = accumResult.remaining
   const ticketAccumulator = accumResult.value
-
-  logger.debug('[decodeSafrole] Successfully decoded safrole state', {
-    pendingSetCount: pendingSet.length,
-    sealTicketsCount: sealTickets.length,
-    ticketAccumulatorCount: ticketAccumulator.length,
-    totalConsumed: data.length - currentData.length,
-    remainingLength: currentData.length,
-  })
 
   return safeResult({
     value: {

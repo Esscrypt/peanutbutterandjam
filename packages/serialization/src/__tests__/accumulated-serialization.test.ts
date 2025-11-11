@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { AccumulatedItem } from '@pbnj/types'
+import type { AccumulatedItem, IConfigService } from '@pbnj/types'
 import { decodeAccumulated, encodeAccumulated } from '../state/accumulated'
+
+// Mock config service with epochDuration = 12 for testing (matches 'tiny' config)
+const mockConfigService: IConfigService = {
+  epochDuration: 12,
+  numValidators: 6,
+  numCores: 2,
+} as IConfigService
 
 describe('Accumulated Serialization', () => {
   const mockAccumulated: AccumulatedItem[] = [
@@ -16,11 +23,17 @@ describe('Accumulated Serialization', () => {
   ]
 
   it('should encode and decode accumulated with multiple items', () => {
-    const [encodeError, encoded] = encodeAccumulated(mockAccumulated)
+    const [encodeError, encoded] = encodeAccumulated(
+      mockAccumulated,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -38,11 +51,17 @@ describe('Accumulated Serialization', () => {
   })
 
   it('should encode and decode empty accumulated', () => {
-    const [encodeError, encoded] = encodeAccumulated(mockAccumulatedEmpty)
+    const [encodeError, encoded] = encodeAccumulated(
+      mockAccumulatedEmpty,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -50,11 +69,17 @@ describe('Accumulated Serialization', () => {
   })
 
   it('should encode and decode single item', () => {
-    const [encodeError, encoded] = encodeAccumulated(mockAccumulatedSingle)
+    const [encodeError, encoded] = encodeAccumulated(
+      mockAccumulatedSingle,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
     expect(encoded).toBeDefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
 
@@ -77,10 +102,16 @@ describe('Accumulated Serialization', () => {
       },
     ]
 
-    const [encodeError, encoded] = encodeAccumulated(realisticAccumulated)
+    const [encodeError, encoded] = encodeAccumulated(
+      realisticAccumulated,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
 
     expect(decoded!.value.length).toBe(2)
@@ -91,7 +122,10 @@ describe('Accumulated Serialization', () => {
   it('should fail with insufficient data for natural number length prefix', () => {
     const insufficientData = new Uint8Array([]) // Empty data for natural number length
 
-    const [decodeError, decoded] = decodeAccumulated(insufficientData)
+    const [decodeError, decoded] = decodeAccumulated(
+      insufficientData,
+      mockConfigService,
+    )
     expect(decodeError).toBeDefined()
     expect(decoded).toBeUndefined()
   })
@@ -103,7 +137,10 @@ describe('Accumulated Serialization', () => {
       1, 2, 3, 4, 5, // Only 5 bytes available
     ])
 
-    const [decodeError, decoded] = decodeAccumulated(insufficientData)
+    const [decodeError, decoded] = decodeAccumulated(
+      insufficientData,
+      mockConfigService,
+    )
     expect(decodeError).toBeDefined()
     expect(decoded).toBeUndefined()
   })
@@ -119,10 +156,16 @@ describe('Accumulated Serialization', () => {
       { data: new Uint8Array([1, 2, 3]) },
     ]
 
-    const [encodeError, encoded] = encodeAccumulated(largeAccumulated)
+    const [encodeError, encoded] = encodeAccumulated(
+      largeAccumulated,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
 
     expect(decoded!.value.length).toBe(2)
@@ -142,10 +185,16 @@ describe('Accumulated Serialization', () => {
       { data: new Uint8Array([]) },
     ]
 
-    const [encodeError, encoded] = encodeAccumulated(zeroLengthAccumulated)
+    const [encodeError, encoded] = encodeAccumulated(
+      zeroLengthAccumulated,
+      mockConfigService,
+    )
     expect(encodeError).toBeUndefined()
 
-    const [decodeError, decoded] = decodeAccumulated(encoded!)
+    const [decodeError, decoded] = decodeAccumulated(
+      encoded!,
+      mockConfigService,
+    )
     expect(decodeError).toBeUndefined()
 
     expect(decoded!.value.length).toBe(3)

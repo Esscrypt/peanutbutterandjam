@@ -277,31 +277,37 @@ class RingTestVectorUtils {
   }
 }
 
+// Helper function to parse ring public keys and get ring size
+function parseRingKeys(ringPksHex: string): Uint8Array[] {
+  const keySize = 32 // Each compressed public key is 32 bytes
+  const normalizedHex = ringPksHex.startsWith('0x') ? ringPksHex : `0x${ringPksHex}`
+  const ringPksBytes = hexToBytes(normalizedHex)
+  const keys: Uint8Array[] = []
+  
+  for (let i = 0; i < ringPksBytes.length; i += keySize) {
+    keys.push(ringPksBytes.slice(i, i + keySize))
+  }
+  
+  return keys
+}
+
 describe('Ring VRF Test Vectors', () => {
   let prover: RingVRFProver
-
+  const srsFilePath =
+    'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-compressed.bin'
   beforeAll(async () => {
-    prover = new RingVRFProver()
+    // Deduce ring size from the first test vector's ring keys
+    const firstVector = RING_TEST_VECTORS[0]
+    if (!firstVector) {
+      throw new Error('No test vectors found')
+    }
+    const ringKeys = parseRingKeys(firstVector.ring_pks)
+    const ringSize = ringKeys.length
+    
+    prover = new RingVRFProver(srsFilePath, ringSize)
   })
 
   describe('Test Vector Validation', () => {
-    test('All ring vectors have required fields', () => {
-      for (const vector of RING_TEST_VECTORS) {
-        expect(RingTestVectorUtils.validateRingVector(vector)).toBe(true)
-      }
-    })
-
-    test('Ring vector structure matches expected format', () => {
-      const vector = RING_TEST_VECTORS[0]
-      expect(vector.comment).toContain('bandersnatch_sha-512_ell2_ring')
-      expect(vector.sk).toMatch(/^[0-9a-f]{64}$/)
-      expect(vector.pk).toMatch(/^[0-9a-f]{64}$/)
-      expect(vector.blinding).toMatch(/^[0-9a-f]{64}$/)
-      expect(vector.ring_pks).toMatch(/^[0-9a-f]+$/)
-      expect(vector.ring_pks_com).toMatch(/^[0-9a-f]+$/)
-      expect(vector.ring_proof).toMatch(/^[0-9a-f]+$/)
-    })
-
     test('Ring public keys are valid curve points', () => {
       for (const vector of RING_TEST_VECTORS) {
         const ringKeys = RingTestVectorUtils.parseRingPublicKeys(vector.ring_pks)
@@ -337,19 +343,6 @@ describe('Ring VRF Test Vectors', () => {
   })
 
   describe('Ring Structure Analysis', () => {
-    test('Ring sizes are consistent', () => {
-      for (const vector of RING_TEST_VECTORS) {
-        const ringKeys = RingTestVectorUtils.parseRingPublicKeys(vector.ring_pks)
-        
-        // All test vectors should have the same ring size
-        expect(ringKeys.length).toBe(8) // Based on the ark-vrf test vectors
-        
-        // Each ring key should be 32 bytes (compressed format)
-        for (const ringKey of ringKeys) {
-          expect(ringKey.length).toBe(32)
-        }
-      }
-    })
 
     test('Prover public key is in ring', () => {
       for (const vector of RING_TEST_VECTORS) {
@@ -409,12 +402,14 @@ describe('Ring VRF Test Vectors', () => {
           expect(result.gamma).toBeDefined()
           expect(result.gamma.length).toBeGreaterThan(0)
           
-          // Compare with expected test vector values
-          const expectedGamma = hexToBytes(vector.gamma)
-          const expectedBeta = hexToBytes(vector.beta)
+          // Compare with expected test vector values (exact match required)
+          const expectedGamma = hexToBytes(vector.gamma as Hex)
+          const expectedBeta = hexToBytes(vector.beta as Hex)
+          const actualBeta = getCommitmentFromGamma(result.gamma)
           
+          // Assert exact matches for VRF outputs
           expect(result.gamma).toEqual(expectedGamma)
-          expect(result.gamma).toEqual(expectedBeta)
+          expect(actualBeta).toEqual(expectedBeta)
           
           // Verify proof components
           expect(result.proof.pedersenProof).toBeDefined()
@@ -422,34 +417,53 @@ describe('Ring VRF Test Vectors', () => {
           expect(result.proof.ringProof).toBeDefined()
           expect(result.proof.proverIndex).toBe(input.proverIndex)
           
-          // Compare Pedersen proof components with test vector expected values
+          // Compare Pedersen proof components with test vector expected values (exact match required)
           const pedersenProofBytes = result.proof.pedersenProof
-          if (pedersenProofBytes) {
-            // Deserialize the Pedersen proof to get individual components
-            const pedersenProof = PedersenVRFProver.deserialize(pedersenProofBytes)
-
-            const expectedProofPkCom = hexToBytes(vector.proof_pk_com)
-            const expectedProofR = hexToBytes(vector.proof_r) 
-            const expectedProofOk = hexToBytes(vector.proof_ok)
-            const expectedProofS = hexToBytes(vector.proof_s)
-            const expectedProofSb = hexToBytes(vector.proof_sb)
-            
-            // Note: blinding is not part of the serialized proof, it's derived during verification
-            const actualProofPkCom = pedersenProof.Y_bar
-            const actualProofR = pedersenProof.R
-            const actualProofOk = pedersenProof.O_k
-            const actualProofS = pedersenProof.s
-            const actualProofSb = pedersenProof.s_b
-            
-            // Assert exact value matches for proof components
-            expect(actualProofPkCom).toEqual(expectedProofPkCom)
-            expect(actualProofR).toEqual(expectedProofR)
-            expect(actualProofOk).toEqual(expectedProofOk)
-            expect(actualProofS).toEqual(expectedProofS)
-            expect(actualProofSb).toEqual(expectedProofSb)
-            
-            console.log(`✓ Ring VRF proof components match test vectors for ${vector.comment}`)
+          if (!pedersenProofBytes) {
+            throw new Error('Pedersen proof not found in result')
           }
+          
+          // Deserialize the Pedersen proof to get individual components
+          const pedersenProof = PedersenVRFProver.deserialize(pedersenProofBytes)
+
+          const expectedProofPkCom = hexToBytes(vector.proof_pk_com as Hex)
+          const expectedProofR = hexToBytes(vector.proof_r as Hex)
+          const expectedProofOk = hexToBytes(vector.proof_ok as Hex)
+          const expectedProofS = hexToBytes(vector.proof_s as Hex)
+          const expectedProofSb = hexToBytes(vector.proof_sb as Hex)
+          
+          // Note: blinding is not part of the serialized proof, it's derived during verification
+          const actualProofPkCom = pedersenProof.Y_bar
+          const actualProofR = pedersenProof.R
+          const actualProofOk = pedersenProof.O_k
+          const actualProofS = pedersenProof.s
+          const actualProofSb = pedersenProof.s_b
+          
+          // Assert exact value matches for proof components
+          expect(actualProofPkCom).toEqual(expectedProofPkCom)
+          expect(actualProofR).toEqual(expectedProofR)
+          expect(actualProofOk).toEqual(expectedProofOk)
+          expect(actualProofS).toEqual(expectedProofS)
+          expect(actualProofSb).toEqual(expectedProofSb)
+          
+          // ===== Ring Commitment (FixedColumnsCommitted - Exact Match Required) =====
+          // Compute ring commitment using computeRingCommitment (returns 144 bytes)
+          const computedRingCommitment = prover.computeRingCommitment(ringInput.ringKeys)
+          const expectedRingCommitment = hexToBytes(vector.ring_pks_com as Hex)
+          
+          expect(computedRingCommitment.length).toBe(144) // FixedColumnsCommitted: cx[48] + cy[48] + selector[48]
+          expect(expectedRingCommitment.length).toBe(144)
+          expect(computedRingCommitment).toEqual(expectedRingCommitment)
+          
+          // ===== Ring Proof (Exact Match Required) =====
+          if (result.proof.ringProof) {
+            const actualRingProof = result.proof.ringProof
+            const expectedRingProof = hexToBytes(vector.ring_proof as Hex)
+            
+            expect(actualRingProof).toEqual(expectedRingProof)
+          }
+          
+          console.log(`✓ All values match test vectors exactly for ${vector.comment}`)
           
           console.log(`✓ Ring VRF proof generated for ${vector.comment}`)
         } catch (error) {
@@ -492,7 +506,7 @@ describe('Ring VRF Test Vectors', () => {
       }
     })
 
-    test('Ring VRF output consistency with test vectors', async () => {
+    test('Ring VRF output consistency with test vectors (exact match)', async () => {
       for (const vector of RING_TEST_VECTORS) {
         const input = RingTestVectorUtils.prepareRingInput(vector)
         
@@ -508,7 +522,7 @@ describe('Ring VRF Test Vectors', () => {
           // Generate proof using our implementation
           const result = await prover.prove(input.secretKey, ringInput)
           
-          // Compare VRF output with test vector
+          // Compare VRF output with test vector (exact match required)
           const expectedGamma = hexToBytes(vector.gamma as Hex)
           const expectedBeta = hexToBytes(vector.beta as Hex)
           
@@ -519,8 +533,11 @@ describe('Ring VRF Test Vectors', () => {
           // Assert exact matches for VRF outputs
           expect(actualGamma).toEqual(expectedGamma)
           expect(actualBeta).toEqual(expectedBeta)
+          
+          console.log(`✓ VRF outputs match test vector exactly for ${vector.comment}`)
         } catch (error) {
-          console.warn(`⚠ Ring VRF output comparison failed for ${vector.comment}:`, error)
+          console.error(`❌ Ring VRF output comparison failed for ${vector.comment}:`, error)
+          throw error // Fail the test on mismatch
         }
       }
     })

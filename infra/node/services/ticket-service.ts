@@ -4,7 +4,7 @@
  * Handles ticket accumulation and clearing according to Gray Paper Eq. 321-329
  */
 
-import type { RingVRFProver } from '@pbnj/bandersnatch-vrf'
+import type { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
 import {
   bytesToHex,
   type EventBusService,
@@ -61,9 +61,9 @@ export class TicketService extends BaseService implements ITicketService {
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
   private clockService: ClockService
-  private prover: RingVRFProver
+  private prover: RingVRFProverWasm
   private localValidatorIndex: number | null = null
-
+  private ringVerifier: RingVRFVerifierWasm
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
@@ -74,7 +74,8 @@ export class TicketService extends BaseService implements ITicketService {
     ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
     validatorSetManager: ValidatorSetManager | null
     clockService: ClockService
-    prover: RingVRFProver
+    prover: RingVRFProverWasm
+    ringVerifier: RingVRFVerifierWasm
   }) {
     super('ticket-holder-service')
     this.configService = options.configService
@@ -89,8 +90,7 @@ export class TicketService extends BaseService implements ITicketService {
     this.clockService = options.clockService
     this.prover = options.prover
     this.validatorSetManager = options.validatorSetManager
-
-    
+    this.ringVerifier = options.ringVerifier
     this.eventBusService.addFirstPhaseTicketDistributionCallback(
       this.handleFirstPhaseTicketDistribution.bind(this),
     )
@@ -140,10 +140,10 @@ export class TicketService extends BaseService implements ITicketService {
     return safeResult(true)
   }
 
-  private handleTicketDistributionRequest(
+  private async handleTicketDistributionRequest(
     request: TicketDistributionRequest,
     peerPublicKey: Hex,
-  ): Safe<void> {
+  ): SafePromise<void> {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
@@ -161,6 +161,7 @@ export class TicketService extends BaseService implements ITicketService {
       safroleTicket,
       this.entropyService,
       this.validatorSetManager,
+      this.ringVerifier,
     )
     if (verifyError) {
       return safeError(verifyError)
@@ -278,7 +279,7 @@ export class TicketService extends BaseService implements ITicketService {
     newTickets: SafroleTicket[],
     isNewEpoch = false,
   ): Safe<SafroleTicketWithoutProof[]> {
-    if(!this.validatorSetManager) {
+    if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
     // for each new ticket, verify the proof
@@ -287,6 +288,7 @@ export class TicketService extends BaseService implements ITicketService {
         ticket,
         this.entropyService,
         this.validatorSetManager,
+        this.ringVerifier,
       )
       if (verifyError) {
         return safeError(verifyError)
@@ -426,7 +428,7 @@ export class TicketService extends BaseService implements ITicketService {
   /**
    * Execute first step ticket distribution (CE 131)
    */
-  private async handleFirstPhaseTicketDistribution(): SafePromise<void> {
+  private handleFirstPhaseTicketDistribution(): Safe<void> {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }

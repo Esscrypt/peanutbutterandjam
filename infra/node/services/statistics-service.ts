@@ -32,12 +32,12 @@ import type {
   Assurance,
   BlockBody,
   CoreStats,
+  Guarantee,
   Preimage,
   Safe,
   ServiceStats,
   ValidatorStats,
   WorkReport,
-  Guarantee,
 } from '@pbnj/types'
 import { BaseService, SEGMENT_CONSTANTS, safeResult } from '@pbnj/types'
 import type { ClockService } from './clock-service'
@@ -151,6 +151,13 @@ export class StatisticsService extends BaseService {
    */
   getActivity(): Activity {
     return this.activity
+  }
+
+  /**
+   * Set activity state (for pre-state initialization)
+   */
+  setActivity(activity: Activity): void {
+    this.activity = activity
   }
 
   /**
@@ -570,7 +577,6 @@ export class StatisticsService extends BaseService {
       const segLoad = Math.ceil((segCount * 65) / 64) * C_SEGMENTSIZE
       coreStats.daLoad += bundleLen + segLoad
     }
-
   }
 
   // ============================================================================

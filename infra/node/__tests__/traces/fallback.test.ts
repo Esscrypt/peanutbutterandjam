@@ -15,7 +15,6 @@ import { EntropyService } from '../../services/entropy'
 import { TicketService } from '../../services/ticket-service'
 import { AuthQueueService } from '../../services/auth-queue-service'
 import { AuthPoolService } from '../../services/auth-pool-service'
-import { ActivityService } from '../../services/activity-service'
 import { DisputesService } from '../../services/disputes-service'
 import { ReadyService } from '../../services/ready-service'
 import { AccumulationService } from '../../services/accumulation-service'
@@ -70,7 +69,11 @@ describe('Genesis Parse Tests', () => {
         genesisJsonPath,
       })
 
-      const ringProver = new RingVRFProver()
+      const srsFilePath = path.join(
+        WORKSPACE_ROOT,
+        'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-compressed.bin',
+      )
+      const ringProver = new RingVRFProver(srsFilePath, configService.numValidators)
 
 
       // Verify genesis JSON was loaded
@@ -131,9 +134,6 @@ describe('Genesis Parse Tests', () => {
         configService,
       })
 
-      const activityService = new ActivityService({
-        configService
-      })
       const disputesService = new DisputesService({
         eventBusService: eventBusService,
         configService: configService,
@@ -202,6 +202,13 @@ describe('Genesis Parse Tests', () => {
         accumulationService: accumulatedService,
       })
 
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
+        configService: configService,
+        clockService: clockService,
+      })
+
+
       const stateService = new StateService({
         configService,
         genesisManagerService: genesisManager,
@@ -210,7 +217,7 @@ describe('Genesis Parse Tests', () => {
         ticketService: ticketService,
         authQueueService: authQueueService,
         authPoolService: authPoolService,
-        activityService: activityService,
+        statisticsService: statisticsService,
         disputesService: disputesService,
         readyService: readyService,
         accumulationService: accumulatedService,
@@ -229,12 +236,6 @@ describe('Genesis Parse Tests', () => {
         eventBusService: eventBusService,
         sealKeyService: sealKeyService,
         recentHistoryService: recentHistoryService,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
       })
 
       const guarantorService = new GuarantorService({
@@ -271,6 +272,7 @@ describe('Genesis Parse Tests', () => {
         ticketService: ticketService,
         statisticsService: statisticsService,
         authPoolService: authPoolService,
+        accumulationService: accumulatedService,
       })
 
       // Load block test vector first to get the parent hash and pre_state
@@ -331,6 +333,63 @@ describe('Genesis Parse Tests', () => {
         console.warn(
           'This indicates decode/encode round-trip issues or state components not being set correctly.',
         )
+
+        // Compare generated state trie with pre-state keyvals
+        const [trieError, generatedTrie] = stateService.generateStateTrie()
+        if (!trieError && generatedTrie) {
+          const preStateKeyvals = blockJsonData.pre_state?.keyvals || []
+          const mismatches: Array<{
+            key: Hex
+            chapter: number
+            expected: Hex
+            actual: Hex
+            expectedLength: number
+            actualLength: number
+          }> = []
+
+          for (const keyval of preStateKeyvals) {
+            const generatedValue = generatedTrie[keyval.key]
+            if (!generatedValue) {
+              console.error(`❌ Missing key in generated trie: ${keyval.key}`)
+              continue
+            }
+            if (generatedValue !== keyval.value) {
+              const chapter = parseInt(keyval.key.slice(2, 4), 16)
+              mismatches.push({
+                key: keyval.key,
+                chapter,
+                expected: keyval.value,
+                actual: generatedValue,
+                expectedLength: keyval.value.length / 2 - 1,
+                actualLength: generatedValue.length / 2 - 1,
+              })
+            }
+          }
+
+          if (mismatches.length > 0) {
+            console.error(`\n❌ Found ${mismatches.length} value mismatches:\n`)
+            for (const mismatch of mismatches.slice(0, 10)) {
+              console.error(`  Chapter ${mismatch.chapter}:`)
+              console.error(`    Key: ${mismatch.key.slice(0, 50)}...`)
+              console.error(`    Expected length: ${mismatch.expectedLength} bytes`)
+              console.error(`    Actual length: ${mismatch.actualLength} bytes`)
+              if (mismatch.expectedLength === mismatch.actualLength) {
+                // Same length, show first differing byte
+                const expectedBytes = hexToBytes(mismatch.expected)
+                const actualBytes = hexToBytes(mismatch.actual)
+                for (let i = 0; i < Math.min(expectedBytes.length, actualBytes.length); i++) {
+                  if (expectedBytes[i] !== actualBytes[i]) {
+                    console.error(`    First difference at byte ${i}: expected 0x${expectedBytes[i]?.toString(16).padStart(2, '0')}, got 0x${actualBytes[i]?.toString(16).padStart(2, '0')}`)
+                    break
+                  }
+                }
+              }
+            }
+            if (mismatches.length > 10) {
+              console.error(`  ... and ${mismatches.length - 10} more mismatches`)
+            }
+          }
+        }
       }
 
       // Verify re-encoded state root matches block header's priorStateRoot
@@ -342,38 +401,6 @@ describe('Genesis Parse Tests', () => {
         console.warn(
           'The block importer will validate this and may fail if they don\'t match.',
         )
-      }
-
-      // Gray Paper: recent history tracks "the most recent Crecenthistorylen blocks"
-      // At genesis, recent history should be empty (no blocks imported yet)
-      // The block importer will validate the parent against genesis hash if recent history is empty
-      // After importing block 1, recent history should contain only [block1], not [genesis, block1]
-      //
-      // Note: The test vector's pre_state may include genesis in recent history for test setup,
-      // but according to GP, recent history should be empty at genesis. Clear it if it only contains genesis.
-      const recentHistory = recentHistoryService.getRecentHistory()
-      const firstBlockParent = blockJsonData.block.header.parent
-
-      // If recent history contains only genesis (the first block's parent), clear it
-      // According to GP, recent history should be empty at genesis
-      if (
-        recentHistory.length === 1 &&
-        recentHistory[0]?.headerHash === firstBlockParent
-      ) {
-        logger.debug(
-          'Clearing genesis from recent history (should be empty at genesis per GP)',
-          {
-            genesisHash: firstBlockParent,
-            recentHistoryLength: recentHistory.length,
-            entries: recentHistory.map((e) => e.headerHash),
-          },
-        )
-        recentHistoryService.clearHistory()
-      } else {
-        logger.debug('Pre-state recent history', {
-          length: recentHistory.length,
-          entries: recentHistory.map((e) => e.headerHash),
-        })
       }
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
@@ -576,17 +603,45 @@ describe('Genesis Parse Tests', () => {
         if (keyval.value !== expectedValue) {
           // Parse the state key to get chapter information
           const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
-          let decodedState = null
+          let decodedExpected = null
+          let decodedActual = null
 
-          // Try to get decoded state component if it's a chapter key
+          // Try to decode both expected and actual values if it's a chapter key
           if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            const chapterIndex = keyInfo.chapterIndex
             try {
-              decodedState = stateService.getStateComponent(
-                keyInfo.chapterIndex,
+              // Decode expected value from test vector using the same decoder as StateService
+              const expectedBytes = hexToBytes(keyval.value as Hex)
+              // Access private stateTypeRegistry to get the decoder
+              const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
+              if (decoder) {
+                const [decodeError, decoded] = decoder(expectedBytes)
+                if (!decodeError && decoded) {
+                  decodedExpected = decoded.value
+                } else {
+                  decodedExpected = { 
+                    error: decodeError?.message || 'Decode failed',
+                    decodeError: decodeError ? String(decodeError) : undefined
+                  }
+                }
+              } else {
+                decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
+              }
+
+              // Get decoded actual state component
+              decodedActual = stateService.getStateComponent(
+                chapterIndex,
                 'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
               )
             } catch (error) {
-              decodedState = { error: error instanceof Error ? error.message : String(error) }
+              decodedExpected = decodedExpected || { 
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+              }
+              decodedActual = decodedActual || { 
+                error: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined
+              }
             }
           }
 
@@ -609,10 +664,15 @@ describe('Genesis Parse Tests', () => {
           } else {
             console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
           }
-          console.error(`Expected Value: ${keyval.value}`)
-          console.error(`Actual Value: ${expectedValue}`)
-          if (decodedState) {
-            console.error(`Decoded State Component:`, JSON.stringify(decodedState, (_, v) =>
+          console.error(`Expected Value (hex): ${keyval.value}`)
+          console.error(`Actual Value (hex): ${expectedValue}`)
+          if (decodedExpected) {
+            console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, (_, v) =>
+              typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+              2))
+          }
+          if (decodedActual) {
+            console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, (_, v) =>
               typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
               2))
           }

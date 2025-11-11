@@ -35,18 +35,14 @@ export function generateTicketBasedSealSignature(
   slot: bigint,
   config: IConfigService,
 ): Safe<Uint8Array> {
-  try {
     // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
     const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
     // Gray Paper Eq. 148: Build VRF context
     // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
-    const entryIndexBytes = new Uint8Array(8)
-    new DataView(entryIndexBytes.buffer).setBigUint64(
-      0,
-      ticket.entryIndex,
-      true,
-    ) // Little-endian
+    // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
+    const entryIndexBytes = new Uint8Array(1)
+    entryIndexBytes[0] = Number(ticket.entryIndex)
 
     const context = new Uint8Array(
       XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
@@ -101,14 +97,7 @@ export function generateTicketBasedSealSignature(
 
     // Return the VRF output hash (banderout result) for entropy generation
     return safeResult(vrfOutput)
-  } catch (error) {
-    logger.error('Failed to generate ticket-based seal signature', {
-      error,
-      slot,
-      ticketId: ticket.id,
-    })
-    return safeError(error as Error)
-  }
+
 }
 
 /**
@@ -157,8 +146,9 @@ export function verifyTicketBasedSealSignature(
 
   // Gray Paper Eq. 148: Build VRF context
   // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
-  const entryIndexBytes = new Uint8Array(8)
-  new DataView(entryIndexBytes.buffer).setBigUint64(0, ticket.entryIndex, true) // Little-endian
+  // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
+  const entryIndexBytes = new Uint8Array(1)
+  entryIndexBytes[0] = Number(ticket.entryIndex)
 
   const context = new Uint8Array(
     XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
@@ -186,9 +176,9 @@ export function verifyTicketBasedSealSignature(
   // where input = message and auxData = context per IETF VRF specification
   const isValid = IETFVRFVerifier.verify(
     validatorPublicKey,
-    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
+    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (message) - goes to _input parameter
     signature,
-    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (context) - goes to _auxData parameter
+    encodedUnsignedHeader, // encodeunsignedheader{H} (context) - goes to _auxData parameter
   )
 
   if (!isValid) {

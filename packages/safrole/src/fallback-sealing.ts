@@ -193,7 +193,6 @@ export function verifyFallbackSealSignature(
   offset += XFALLBACK_SEAL.length
   context.set(entropy3, offset)
 
-
   // Verify IETF VRF signature using IETFVRFVerifier
   // Gray Paper equation 154: bssignature{k}{c}{m} where:
   // k = validatorPublicKey, c = context, m = unsignedHeader
@@ -225,8 +224,9 @@ export function generateFallbackKeySequence(
 
   for (let i = 0; i < epochLength; i++) {
     // Gray Paper: encode[4]{i} - Encode index as 4 bytes
+    // Gray Paper serialization.tex line 100: "Values are encoded in a regular little-endian fashion"
     const indexBytes = new Uint8Array(4)
-    new DataView(indexBytes.buffer).setUint32(0, i, false) // Big-endian
+    new DataView(indexBytes.buffer).setUint32(0, i, true) // true = little-endian
 
     // Gray Paper: blake(r ∥ encode[4]{i})
     const combined = new Uint8Array(entropy2.length + indexBytes.length) // r ∥ encode[4]{i}
@@ -239,9 +239,10 @@ export function generateFallbackKeySequence(
     }
 
     // Gray Paper: decode[4]{hash}_4 - Take first 4 bytes of hash as a 32-bit integer
+    // Gray Paper serialization.tex line 100: "Values are encoded in a regular little-endian fashion"
     const hashBytes = hexToBytes(hashData)
     const dataView = new DataView(hashBytes.buffer.slice(0, 4))
-    const decodedIndex = dataView.getUint32(0, false) // false = big-endian, which is standard for network protocols
+    const decodedIndex = dataView.getUint32(0, true) // true = little-endian
 
     const activeValidatorSize = validatorSetManager.getActiveValidators().size
     // Use the decoded index to select a validator (cyclic indexing)
@@ -260,6 +261,20 @@ export function generateFallbackKeySequence(
     // Ensure index is within bounds (should always be true with modulo)
     const safeIndex = validatorIndex % activeValidatorSize
 
+    // Log phase 0 calculation for debugging
+    if (i === 0) {
+      logger.debug('[generateFallbackKeySequence] Phase 0 calculation', {
+        phase: i,
+        entropy2: bytesToHex(entropy2),
+        indexBytes: Array.from(indexBytes),
+        combinedInput: bytesToHex(combined),
+        hashData,
+        decodedIndex: decodedIndex.toString(),
+        activeValidatorSize,
+        validatorIndex: safeIndex,
+      })
+    }
+
     // Get the validator's Bandersnatch key
     const [bandersnatchKeyError, publicKeys] =
       validatorSetManager.getValidatorAtIndex(safeIndex)
@@ -270,6 +285,15 @@ export function generateFallbackKeySequence(
     // Add the Bandersnatch key to the sequence
     const bandersnatchKey = publicKeys.bandersnatch
     fallbackKeys.push(hexToBytes(bandersnatchKey))
+
+    // Log phase 0 result
+    if (i === 0) {
+      logger.debug('[generateFallbackKeySequence] Phase 0 result', {
+        phase: i,
+        selectedValidatorIndex: safeIndex,
+        sealKey: bandersnatchKey,
+      })
+    }
   }
 
   return safeResult(fallbackKeys)

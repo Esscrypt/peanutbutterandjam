@@ -1,7 +1,8 @@
 import {
   getBanderoutFromGamma,
   RingVRFProver,
-  RingVRFVerifier,
+  type RingVRFProverWasm,
+  type RingVRFVerifierWasm,
 } from '@pbnj/bandersnatch-vrf'
 import { bytesToHex, type Hex, hexToBytes, logger } from '@pbnj/core'
 import type {
@@ -57,7 +58,7 @@ function generateTickets(
   ringKeys: Uint8Array[],
   proverIndex: number,
   entropy2: Uint8Array,
-  prover: RingVRFProver,
+  prover: RingVRFProverWasm,
   configService: IConfigService,
 ): Safe<SafroleTicket[]> {
   const maxTickets = configService.ticketsPerValidator
@@ -155,7 +156,7 @@ export function generateTicketsForEpoch(
   validatorSetManager: IValidatorSetManager,
   keyPairService: IKeyPairService,
   entropyService: IEntropyService,
-  prover: RingVRFProver,
+  prover: RingVRFProverWasm,
   configService: IConfigService,
 ): Safe<SafroleTicket[]> {
   // 1. Get validator secret key
@@ -208,11 +209,12 @@ export function verifyTicket(
   ticket: SafroleTicket,
   entropyService: IEntropyService,
   validatorSetManager: IValidatorSetManager,
+  ringVerifier: RingVRFVerifierWasm,
 ): Safe<boolean> {
   // Gray Paper Eq. 292: Validate proof format - must be 288 bytes per bandersnatch-vrf-spec
   const proofBytes = hexToBytes(ticket.proof)
-  if (proofBytes.length !== 288) {
-    return safeError(new Error('Invalid Ring VRF proof size'))
+  if (proofBytes.length !== 784) {
+    return safeError(new Error('Invalid Ring VRF proof size, expected 784 bytes, got ' + proofBytes.length + ' bytes'))
   }
 
   const entropy2 = entropyService.getEntropy2()
@@ -222,16 +224,22 @@ export function verifyTicket(
 
   // Gray Paper Eq. 292: Create VRF context: Xticket ∥ entropy'_2 ∥ xt_entryindex
   // Use the same encoding as generateRingVRFProof for consistency
+  // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
 
-  const entryIndexBytes = new Uint8Array(4)
-  const view = new DataView(entryIndexBytes.buffer)
-  view.setUint32(0, Number(ticket.entryIndex), true) // true = little-endian
+  const entryIndexBytes = new Uint8Array(1)
+  entryIndexBytes[0] = Number(ticket.entryIndex)
 
-  const vrfContext = new Uint8Array([
-    ...XTICKET_SEAL, // Xticket (hardcoded string)
-    ...entropy2, // entropy'_2 (32 bytes)
-    ...entryIndexBytes, // xt_entryindex (4 bytes, little-endian)
-  ])
+  // Gray Paper Eq. 292: context = Xticket ∥ entropy'_2 ∥ xt_entryindex
+  // Construct vrfContext by concatenating bytes (spread operator doesn't work on Uint8Array)
+  const vrfContext = new Uint8Array(
+    XTICKET_SEAL.length + entropy2.length + entryIndexBytes.length,
+  )
+  let offset = 0
+  vrfContext.set(XTICKET_SEAL, offset)
+  offset += XTICKET_SEAL.length
+  vrfContext.set(entropy2, offset)
+  offset += entropy2.length
+  vrfContext.set(entryIndexBytes, offset)
 
   // Gray Paper Eq. 292: Empty message for tickets: m = []
   const vrfMessage = new Uint8Array(0)
@@ -241,19 +249,19 @@ export function verifyTicket(
 
   // RingVRFVerifier will handle all proof structure validation internally
   // Use the same active validator keys that were used during generation
-  const activeSet = validatorSetManager.getActiveValidatorKeys()
+  const ringKeys = validatorSetManager.getActiveValidatorKeys()
 
-  const sortedRingKeys = [...activeSet].sort((a, b) => {
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      if (a[i] < b[i]) return -1
-      if (a[i] > b[i]) return 1
-    }
-    return a.length - b.length
-  })
+  // // const sortedRingKeys = [...activeSet].sort((a, b) => {
+  // //   for (let i = 0; i < Math.min(a.length, b.length); i++) {
+  // //     if (a[i] < b[i]) return -1
+  // //     if (a[i] > b[i]) return 1
+  // //   }
+  // //   return a.length - b.length
+  // // })
 
-  if (sortedRingKeys.length === 0) {
-    return safeError(new Error('No valid ring keys found'))
-  }
+  // if (sortedRingKeys.length === 0) {
+  //   return safeError(new Error('No valid ring keys found'))
+  // }
 
   // Gray Paper: Ring VRF proofs are anonymous - we don't need to know which validator
   // created the proof. The verification only needs the ring keys, proof, and context.
@@ -262,19 +270,17 @@ export function verifyTicket(
   const ringVRFInput = {
     input: vrfContext,
     auxData: vrfMessage,
-    ringKeys: sortedRingKeys,
+    ringKeys: ringKeys,
     proverIndex: 0, // Not used during verification - Ring VRF is anonymous
   }
 
-  // Step 3: Serialize the Ring VRF result for verification
-  const serializedResult = RingVRFProver.serialize(ringVRFResult)
 
   // Step 4: Perform Ring VRF verification using RingVRFVerifier
   // The verifier now internally deserializes gamma and proofs from the serialized result
-  const isValid = RingVRFVerifier.verify(
-    sortedRingKeys,
+  const isValid = ringVerifier.verify(
+    ringKeys,
     ringVRFInput,
-    serializedResult,
+    ringVRFResult,
     vrfMessage,
   )
 
@@ -326,7 +332,31 @@ export function getTicketIdFromProof(proof: Uint8Array): Hex {
 /**
  * Type guard for SafroleTicket
  * Checks if a SealKey is a ticket or a fallback key
+ *
+ * SealKey can be:
+ * - SafroleTicket (with id, entryIndex, proof)
+ * - SafroleTicketWithoutProof (with id, entryIndex, no proof)
+ * - Uint8Array (32-byte Bandersnatch key in fallback mode)
+ *
+ * Returns true if key is a ticket object (has id and entryIndex properties),
+ * false if it's a Uint8Array (fallback key) or null/undefined
  */
 export function isSafroleTicket(key: SealKey): key is SafroleTicket {
-  return typeof key === 'object' && 'id' in key && 'entryIndex' in key
+  // Check for null/undefined first (typeof null === 'object' in JavaScript)
+  if (key === null || key === undefined) {
+    return false
+  }
+  // Uint8Array is an object but won't have 'id' or 'entryIndex' properties
+  // Check if it's a Uint8Array instance
+  if (key instanceof Uint8Array) {
+    return false
+  }
+  // Check if it's an object with ticket properties
+  return (
+    typeof key === 'object' &&
+    'id' in key &&
+    'entryIndex' in key &&
+    typeof key.id === 'string' &&
+    typeof key.entryIndex === 'bigint'
+  )
 }

@@ -4,7 +4,7 @@
  * Defines slot-based events that services can subscribe to
  */
 
-/**
+  /**
  * Base slot event interface
  */
 export interface SlotEvent {
@@ -23,22 +23,6 @@ export interface SlotChangeEvent extends SlotEvent {
 }
 
 /**
- * Epoch transition event - emitted when transitioning to a new epoch
- */
-export interface EpochTransitionEvent extends SlotEvent {
-  previousEpoch: bigint
-  newEpoch: bigint
-  validatorSetChanged: boolean
-}
-
-/**
  * Slot callback function type
  */
 export type SlotCallback = (event: SlotChangeEvent) => void | Promise<void>
-
-/**
- * Epoch transition callback function type
- */
-export type EpochTransitionCallback = (
-  event: EpochTransitionEvent,
-) => void | Promise<void>

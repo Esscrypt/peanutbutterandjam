@@ -39,6 +39,7 @@ import type {
   ValidatorStats,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
+import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
   decodeSequenceGeneric,
@@ -50,44 +51,61 @@ import {
 /**
  * Encode validator statistics according to Gray Paper equation 12-20
  * Each validator stat contains: blocks, tickets, preimagecount, preimagesize, guarantees, assurances
+ *
+ * Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+ * According to serialization.tex line 114:
+ * encode[l]{tuple{a, b, ...}} ≡ encode[l]{a} ∥ encode[l]{b} ∥ ...
+ * This means each field in the tuple should be encoded as encode[4] (4-byte fixed-length)
  */
 function encodeValidatorStats(validatorStat: ValidatorStats): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
-  // blocks: N
-  const [error1, blocksData] = encodeNatural(BigInt(validatorStat.blocks))
+  // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+  // Each field in the validator stats tuple should be encode[4] (4-byte fixed-length)
+  // blocks: encode[4]{N}
+  const [error1, blocksData] = encodeFixedLength(
+    BigInt(validatorStat.blocks),
+    4n,
+  )
   if (error1) return safeError(error1)
   parts.push(blocksData)
 
-  // tickets: N
-  const [error2, ticketsData] = encodeNatural(BigInt(validatorStat.tickets))
+  // tickets: encode[4]{N}
+  const [error2, ticketsData] = encodeFixedLength(
+    BigInt(validatorStat.tickets),
+    4n,
+  )
   if (error2) return safeError(error2)
   parts.push(ticketsData)
 
-  // preimagecount: N
-  const [error3, preimageCountData] = encodeNatural(
+  // preimagecount: encode[4]{N}
+  const [error3, preimageCountData] = encodeFixedLength(
     BigInt(validatorStat.preimageCount),
+    4n,
   )
   if (error3) return safeError(error3)
   parts.push(preimageCountData)
 
-  // preimagesize: N
-  const [error4, preimageSizeData] = encodeNatural(
+  // preimagesize: encode[4]{N}
+  const [error4, preimageSizeData] = encodeFixedLength(
     BigInt(validatorStat.preimageSize),
+    4n,
   )
   if (error4) return safeError(error4)
   parts.push(preimageSizeData)
 
-  // guarantees: N
-  const [error5, guaranteesData] = encodeNatural(
+  // guarantees: encode[4]{N}
+  const [error5, guaranteesData] = encodeFixedLength(
     BigInt(validatorStat.guarantees),
+    4n,
   )
   if (error5) return safeError(error5)
   parts.push(guaranteesData)
 
-  // assurances: N
-  const [error6, assurancesData] = encodeNatural(
+  // assurances: encode[4]{N}
+  const [error6, assurancesData] = encodeFixedLength(
     BigInt(validatorStat.assurances),
+    4n,
   )
   if (error6) return safeError(error6)
   parts.push(assurancesData)
@@ -97,39 +115,44 @@ function encodeValidatorStats(validatorStat: ValidatorStats): Safe<Uint8Array> {
 
 /**
  * Decode validator statistics according to Gray Paper equation 12-20
+ *
+ * Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+ * Each field in the validator stats tuple should be decode[4] (4-byte fixed-length)
  */
 function decodeValidatorStats(
   data: Uint8Array,
 ): Safe<DecodingResult<ValidatorStats>> {
   let currentData = data
 
-  // blocks: N
-  const [error1, blocksResult] = decodeNatural(currentData)
+  // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
+  // Each field in the validator stats tuple should be decode[4] (4-byte fixed-length)
+  // blocks: decode[4]{N}
+  const [error1, blocksResult] = decodeFixedLength(currentData, 4n)
   if (error1) return safeError(error1)
   currentData = blocksResult.remaining
 
-  // tickets: N
-  const [error2, ticketsResult] = decodeNatural(currentData)
+  // tickets: decode[4]{N}
+  const [error2, ticketsResult] = decodeFixedLength(currentData, 4n)
   if (error2) return safeError(error2)
   currentData = ticketsResult.remaining
 
-  // preimagecount: N
-  const [error3, preimageCountResult] = decodeNatural(currentData)
+  // preimagecount: decode[4]{N}
+  const [error3, preimageCountResult] = decodeFixedLength(currentData, 4n)
   if (error3) return safeError(error3)
   currentData = preimageCountResult.remaining
 
-  // preimagesize: N
-  const [error4, preimageSizeResult] = decodeNatural(currentData)
+  // preimagesize: decode[4]{N}
+  const [error4, preimageSizeResult] = decodeFixedLength(currentData, 4n)
   if (error4) return safeError(error4)
   currentData = preimageSizeResult.remaining
 
-  // guarantees: N
-  const [error5, guaranteesResult] = decodeNatural(currentData)
+  // guarantees: decode[4]{N}
+  const [error5, guaranteesResult] = decodeFixedLength(currentData, 4n)
   if (error5) return safeError(error5)
   currentData = guaranteesResult.remaining
 
-  // assurances: N
-  const [error6, assurancesResult] = decodeNatural(currentData)
+  // assurances: decode[4]{N}
+  const [error6, assurancesResult] = decodeFixedLength(currentData, 4n)
   if (error6) return safeError(error6)
   currentData = assurancesResult.remaining
 
@@ -410,7 +433,10 @@ export function encodeActivity(
   const parts: Uint8Array[] = []
 
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
-  // This means both sequences together have a single 4-byte length prefix (total byte length)
+  // According to Gray Paper statistics.tex line 12:
+  // tuple{valstatsaccumulator, valstatsprevious} ∈ sequence[Cvalcount]{tuple{...}}^2
+  // This means we have 2 fixed-length sequences, each of Cvalcount validator stats
+  // The encode[4]{...} notation is ambiguous, but test vectors show no length prefix is used
   const validatorCount = configService.numValidators
 
   // valstatsaccumulator: fixed-length sequence of Cvalcount validator statistics
@@ -458,8 +484,13 @@ export function encodeActivity(
   if (error2) return safeError(error2)
 
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
-  // The sequences are fixed-length (Cvalcount elements each), so we encode them directly
-  // The 4-byte notation refers to the encoding format, not a length prefix
+  // According to Gray Paper merklization.tex line 64-65:
+  // C(13) ↦ encode{encode[4]{valstatsaccumulator, valstatsprevious}, corestats, servicestats}
+  // According to serialization.tex line 114:
+  // encode[l]{tuple{a, b, ...}} ≡ encode[l]{a} ∥ encode[l]{b} ∥ ...
+  // This means encode[4]{valstatsaccumulator, valstatsprevious} means each field
+  // in the validator stats tuples should be encoded as encode[4] (4-byte fixed-length)
+  // The sequences are fixed-length (Cvalcount elements each), encoded directly without a length prefix
   parts.push(validatorStatsAccumulatorData)
   parts.push(validatorStatsPreviousData)
 
@@ -537,9 +568,11 @@ export function decodeActivity(
   let currentData = data
 
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
-  // The sequences are fixed-length (Cvalcount elements each), so we decode them directly
-  // The 4-byte length prefix in the encoding is for the combined byte length
-  // But when decoding, we can decode the sequences directly since they're fixed-length
+  // According to serialization.tex line 114:
+  // encode[l]{tuple{a, b, ...}} ≡ encode[l]{a} ∥ encode[l]{b} ∥ ...
+  // This means encode[4]{valstatsaccumulator, valstatsprevious} means each field
+  // in the validator stats tuples should be decoded as decode[4] (4-byte fixed-length)
+  // The sequences are fixed-length (Cvalcount elements each), decoded directly without a length prefix
   const validatorCount = configService.numValidators
 
   // Decode valstatsaccumulator: fixed-length sequence of Cvalcount validator statistics

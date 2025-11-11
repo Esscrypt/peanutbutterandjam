@@ -33,38 +33,29 @@ export class PedersenVRFVerifier {
     proof: Uint8Array,
     auxData?: Uint8Array,
   ): boolean {
-    const startTime = Date.now()
-
-    logger.debug('Verifying Pedersen VRF proof', {
-      inputLength: input.length,
-      hasAuxData: !!auxData,
-    })
-
-    try {
-      // Step 1: Deserialize proof components
-      const pedersenProof = PedersenVRFProver.deserialize(proof)
-
-      // Step 2: Hash input to curve point (H1) using Elligator2
-      const I = this.hashToCurve(input)
-
-      // Step 3: Verify proof using the provided gamma
-      const isValid = this.verifyProof(I, gamma, pedersenProof, auxData)
-
-      if (!isValid) {
-        logger.error('Pedersen VRF proof verification failed', {})
-      } else {
-        logger.debug('Pedersen VRF proof verified successfully', {})
-      }
-
-      return isValid
-    } catch (error) {
-      const verificationTime = Date.now() - startTime
-      logger.error('Pedersen VRF proof verification failed', {
-        error: error instanceof Error ? error.message : String(error),
-        verificationTime,
-      })
-      return false
+    if (proof.length !== 160) {
+      throw new Error(
+        'Invalid Pedersen VRF proof size, expected 160 bytes, got ' +
+          proof.length +
+          ' bytes',
+      )
     }
+    // Step 1: Deserialize proof components
+    const pedersenProof = PedersenVRFProver.deserialize(proof)
+
+    // Step 2: Hash input to curve point (H1) using Elligator2
+    const I = this.hashToCurve(input)
+
+    // Step 3: Verify proof using the provided gamma
+    const isValid = this.verifyProof(I, gamma, pedersenProof, auxData)
+
+    if (!isValid) {
+      logger.error('Pedersen VRF proof verification failed', {})
+    } else {
+      logger.debug('Pedersen VRF proof verified successfully', {})
+    }
+
+    return isValid
   }
 
   /**

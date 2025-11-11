@@ -83,10 +83,7 @@ export class AuthPoolService extends BaseService {
    * @param guarantees - Block body guarantees (optional, for setting authorizer hashes)
    * @returns Result of the transition operation
    */
-  applyBlockTransition(
-    timeslot: bigint,
-    guarantees: Guarantee[],
-  ): Safe<void> {
+  applyBlockTransition(timeslot: bigint, guarantees: Guarantee[]): Safe<void> {
     if (!this.authQueueService) {
       return safeError(new Error('Auth queue service not found'))
     }

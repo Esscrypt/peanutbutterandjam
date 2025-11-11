@@ -40,7 +40,7 @@ import {
   // createServicePreimageKey,
   // createServiceRequestKey,
   createServiceStorageKey,
-  createStateTrieWithRawKeys,
+  createStateTrie,
   decodeAccumulated,
   decodeActivity,
   decodeAuthpool,
@@ -81,7 +81,6 @@ import type {
 import { safeError, safeResult } from '@pbnj/types'
 import type { Hex } from 'viem'
 import type { AccumulationService } from './accumulation-service'
-import type { ActivityService } from './activity-service'
 import type { AuthPoolService } from './auth-pool-service'
 import type { AuthQueueService } from './auth-queue-service'
 import type { ClockService } from './clock-service'
@@ -94,6 +93,7 @@ import type { ReadyService } from './ready-service'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
 import type { ServiceAccountService } from './service-account-service'
+import type { StatisticsService } from './statistics-service'
 import type { TicketService } from './ticket-service'
 import type { ValidatorSetManager } from './validator-set'
 import type { WorkReportService } from './work-report-service'
@@ -122,7 +122,7 @@ export class StateService {
   private ticketService: TicketService
   private authQueueService: AuthQueueService
   private authPoolService: AuthPoolService
-  private activityService: ActivityService
+  private statisticsService: StatisticsService
   private disputesService: DisputesService
   private readyService: ReadyService
   private accumulationService: AccumulationService
@@ -141,7 +141,6 @@ export class StateService {
     ticketService: TicketService
     authQueueService: AuthQueueService
     authPoolService: AuthPoolService
-    activityService: ActivityService
     disputesService: DisputesService
     readyService: ReadyService
     accumulationService: AccumulationService
@@ -153,6 +152,7 @@ export class StateService {
     genesisManagerService: NodeGenesisManager
     sealKeyService: SealKeyService
     clockService: ClockService
+    statisticsService: StatisticsService
   }) {
     this.configService = options.configService
     // Map chapter indices to decoders (hardcoded according to Gray Paper)
@@ -190,7 +190,9 @@ export class StateService {
     this.stateTypeRegistry.set(14, (data) =>
       decodeReady(data, this.configService),
     ) // Chapter 14 - Ready (C(14))
-    this.stateTypeRegistry.set(15, (data) => decodeAccumulated(data)) // Chapter 15 - Accumulated (C(15))
+    this.stateTypeRegistry.set(15, (data) =>
+      decodeAccumulated(data, this.configService),
+    ) // Chapter 15 - Accumulated (C(15))
     this.stateTypeRegistry.set(16, (data) =>
       decodeLastAccumulationOutputs(data),
     ) // Chapter 16 - LastAccout (C(16))
@@ -201,7 +203,7 @@ export class StateService {
     this.ticketService = options.ticketService
     this.authQueueService = options.authQueueService
     this.authPoolService = options.authPoolService
-    this.activityService = options.activityService
+    this.statisticsService = options.statisticsService
     this.disputesService = options.disputesService
     this.readyService = options.readyService
     this.accumulationService = options.accumulationService
@@ -339,7 +341,7 @@ export class StateService {
 
       // C(13) = activity (π) - Validator performance statistics
       case 13:
-        return this.activityService.getActivity()
+        return this.statisticsService.getActivity()
 
       // C(14) = ready (ω) - Reports ready for accumulation
       case 14:
@@ -446,7 +448,7 @@ export class StateService {
           this.ticketService.setTicketAccumulator(
             safroleState.ticketAccumulator,
           )
-          this.sealKeyService.setSealKeys(safroleState.sealTickets)
+          this.sealKeyService.setSealKeys(safroleState.sealTickets ?? [])
         }
         break
 
@@ -492,7 +494,7 @@ export class StateService {
 
       // C(13) = activity (π) - Validator performance statistics
       case 13:
-        this.activityService.setActivity(value as Activity)
+        this.statisticsService.setActivity(value as Activity)
         break
 
       // C(14) = ready (ω) - Reports ready for accumulation
@@ -703,14 +705,16 @@ export class StateService {
         pendingSet: Array.from(
           this.validatorSetManager.getPendingValidators().values(),
         ),
-        epochRoot: this.validatorSetManager.getEpochRoot(),
+        // Use stored epochRoot from test vector if available, otherwise compute it
+        // This ensures we match the test vector's pre-state root
+        epochRoot: this.validatorSetManager.getStoredEpochRoot() ?? this.validatorSetManager.getEpochRoot(),
         sealTickets: this.sealKeyService.getSealKeys(),
         ticketAccumulator: this.ticketService.getTicketAccumulator(),
       },
       accounts: this.serviceAccountsService.getServiceAccounts(),
       entropy: this.entropyService.getEntropy(),
       stagingset: Array.from(
-        this.validatorSetManager.getStagingValidators().values(),
+        this.validatorSetManager.getStagingValidators().values().toArray(),
       ),
       activeset: Array.from(
         this.validatorSetManager.getActiveValidators().values(),
@@ -723,17 +727,15 @@ export class StateService {
       authqueue: this.authQueueService.getAuthQueue(),
       privileges: this.privilegesService.getPrivileges(),
       disputes: this.disputesService.getDisputesState(),
-      activity: this.activityService.getActivity(),
+      activity: this.statisticsService.getActivity(),
       ready: this.readyService.getReady(),
       accumulated: this.accumulationService.getAccumulated(),
     }
+
     // Include raw C(s, h) keys that were decoded from test vectors
-    // but can't be reverse-engineered to get the original keys
-    return createStateTrieWithRawKeys(
-      globalState,
-      this.configService,
-      this.rawCshKeys,
-    )
+    // These are stored because the original storage/request keys cannot be recovered
+    // from their Blake hashes, so we preserve the raw key-value pairs
+    return createStateTrie(globalState, this.configService, this.rawCshKeys)
   }
 
   /**

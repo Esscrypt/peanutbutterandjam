@@ -29,6 +29,7 @@ export interface IValidatorSetManager extends BaseService {
 
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
+  setPendingSet(validatorSet: ValidatorPublicKeys[]): void
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void
 }
 

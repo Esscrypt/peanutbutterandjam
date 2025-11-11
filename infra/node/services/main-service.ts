@@ -4,7 +4,7 @@
  * Serves as the main entry point and orchestrates all other services
  * Manages the service registry and provides the application lifecycle
  */
-import { RingVRFProver } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
 import { bytesToHex, EventBusService, type Hex, logger } from '@pbnj/core'
 import {
   AuditAnnouncementProtocol,
@@ -41,7 +41,6 @@ import {
 import { db } from '../db'
 // import { WorkPackageProcessor } from './work-package-processor'
 import { AccumulationService } from './accumulation-service'
-import { ActivityService } from './activity-service'
 import { AssuranceService } from './assurance-service'
 import { AuthPoolService } from './auth-pool-service'
 import { AuthQueueService } from './auth-queue-service'
@@ -61,19 +60,20 @@ import { KeyPairService } from './keypair-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
 import { PrivilegesService } from './privileges-service'
+import { ReadyService } from './ready-service'
 import { RecentHistoryService } from './recent-history-service'
 import { ServiceRegistry } from './registry'
 // import { SafroleConsensusService } from './safrole-consensus-service'
 import { SealKeyService } from './seal-key'
 import { ServiceAccountService } from './service-account-service'
 import { ShardService } from './shard-service'
+import { StateService } from './state-service'
 import { StatisticsService } from './statistics-service'
 // import { TelemetryEventEmitterService } from './telemetry'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 import { WorkReportService } from './work-report-service'
-import { StateService } from './state-service'
-import { ReadyService } from './ready-service'
+import path from 'node:path'
 /**
  * Main service configuration
  */
@@ -151,7 +151,8 @@ export class MainService extends BaseService {
     null
   private ce143PreimageRequestProtocol: PreimageRequestProtocol | null = null
 
-  private readonly ringProver: RingVRFProver
+  private readonly ringProver: RingVRFProverWasm
+  private readonly ringVerifier: RingVRFVerifierWasm
   private readonly protocolRegistry: Map<
     StreamKind,
     NetworkingProtocol<unknown, unknown>
@@ -163,7 +164,6 @@ export class MainService extends BaseService {
   private readonly workReportService: WorkReportService
   private readonly assuranceService: AssuranceService
   private readonly accumulationService: AccumulationService
-  private readonly activityService: ActivityService
   private readonly privilegesService: PrivilegesService
   constructor(config: MainServiceConfig) {
     super('main-service')
@@ -172,8 +172,13 @@ export class MainService extends BaseService {
     this.configService = new ConfigService('tiny')
 
     this.registry = new ServiceRegistry()
-    this.ringProver = new RingVRFProver()
-
+    const srsFilePath = path.join(
+      __dirname,
+      '../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-compressed.bin',
+    )
+    this.ringProver = new RingVRFProverWasm(srsFilePath)
+    this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)
+    
     this.initStores()
     this.initNetworkingProtocols()
     this.initProtocolRegistry()
@@ -255,7 +260,8 @@ export class MainService extends BaseService {
       ce132TicketDistributionProtocol: this.ce132TicketDistributionProtocol!,
       clockService: this.clockService,
       prover: this.ringProver,
-      validatorSetManager: null // will be set later
+      ringVerifier: this.ringVerifier,
+      validatorSetManager: null, // will be set later
     })
 
     this.sealKeyService = new SealKeyService({
@@ -282,6 +288,11 @@ export class MainService extends BaseService {
       // clockService: this.clockService,
       initialValidators: null,
     })
+    // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
+    // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
+    // before SealKeyService calculates the new seal key sequence
+    this.sealKeyService.registerEpochTransitionCallback()
+    this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.ticketService.setValidatorSetManager(this.validatorSetManagerService)
     this.networkingService.setValidatorSetManager(
       this.validatorSetManagerService,
@@ -439,10 +450,6 @@ export class MainService extends BaseService {
       erasureCodingService: this.erasureCodingService,
     })
 
-    this.activityService = new ActivityService({
-      configService: this.configService,
-    })
-
     this.guarantorService = new GuarantorService({
       eventBusService: this.eventBusService,
       configService: this.configService,
@@ -462,7 +469,6 @@ export class MainService extends BaseService {
       accumulationService: this.accumulationService,
     })
 
-
     this.stateService = new StateService({
       configService: this.configService,
       genesisManagerService: this.genesisManagerService,
@@ -471,7 +477,7 @@ export class MainService extends BaseService {
       ticketService: this.ticketService,
       authQueueService: this.authQueueService,
       authPoolService: this.authPoolService,
-      activityService: this.activityService,
+      statisticsService: this.statisticsService,
       disputesService: this.disputesService,
       readyService: this.readyService,
       accumulationService: this.accumulationService,
@@ -501,6 +507,7 @@ export class MainService extends BaseService {
       ticketService: this.ticketService,
       statisticsService: this.statisticsService,
       authPoolService: this.authPoolService,
+      accumulationService: this.accumulationService,
     })
 
     // Register created services with the registry
@@ -530,7 +537,6 @@ export class MainService extends BaseService {
     this.registry.register(this.authQueueService)
     this.registry.register(this.authPoolService)
     this.registry.register(this.guarantorService)
-    this.registry.register(this.activityService)
     this.registry.register(this.privilegesService)
     // Register this service as the main service
     this.registry.registerMain(this)
@@ -540,6 +546,9 @@ export class MainService extends BaseService {
    * Initialize the main service
    */
   async init(): SafePromise<boolean> {
+    await this.ringProver.init()
+    await this.ringVerifier.init()
+    
     logger.info('Initializing main service...')
 
     // Block authoring service is already configured in constructor

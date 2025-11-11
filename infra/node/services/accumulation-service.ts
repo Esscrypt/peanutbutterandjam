@@ -226,6 +226,18 @@ export class AccumulationService extends BaseService {
       Number(currentSlot) % this.configService.epochDuration,
     )
 
+    // Ensure accumulated.packages array is initialized
+    if (!this.accumulated.packages) {
+      this.accumulated.packages = new Array(this.configService.epochDuration)
+        .fill(null)
+        .map(() => new Set<Hex>())
+    }
+
+    // Ensure the specific slot index is initialized
+    if (!this.accumulated.packages[Number(epochSlotIndex)]) {
+      this.accumulated.packages[Number(epochSlotIndex)] = new Set()
+    }
+
     console.info('Starting accumulation process', {
       slot: currentSlot.toString(),
       epochSlotIndex: epochSlotIndex.toString(),

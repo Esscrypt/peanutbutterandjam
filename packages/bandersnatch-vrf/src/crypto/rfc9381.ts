@@ -91,7 +91,6 @@ export function pointToHashRfc9381(
   point: Uint8Array,
   _mulByCofactor = false,
 ): Uint8Array {
-
   // Step 1: str_0 = suite_string || 0x03
   const suiteString = 'Bandersnatch_SHA-512_ELL2'
   const str0 = new Uint8Array(suiteString.length + 1)

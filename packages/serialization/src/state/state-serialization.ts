@@ -332,6 +332,7 @@ export function createServiceRequestKey(
 export function createStateTrie(
   globalState: GlobalState,
   configService: IConfigService,
+  rawCshKeys?: Map<Hex, Hex>,
 ): Safe<StateTrie> {
   const stateTrie: StateTrie = {}
 
@@ -513,7 +514,10 @@ export function createStateTrie(
     },
   )
 
-  const [error15, accumulatedData] = encodeAccumulated(accumulatedItems)
+  const [error15, accumulatedData] = encodeAccumulated(
+    accumulatedItems,
+    configService,
+  )
   if (error15) {
     return safeError(error15)
   }
@@ -585,37 +589,17 @@ export function createStateTrie(
     }
   }
 
-  return safeResult(stateTrie)
-}
-
-/**
- * Create state trie with raw C(s, h) keys included
- *
- * This variant includes raw C(s, h) keys that were decoded from test vectors
- * but can't be reverse-engineered to get the original storage key or request hash.
- *
- * @param globalState - Current global state
- * @param configService - Configuration service
- * @param rawCshKeys - Map of raw C(s, h) key-value pairs from test vectors
- * @returns State trie with all keys including raw C(s, h) keys
- */
-export function createStateTrieWithRawKeys(
-  globalState: GlobalState,
-  configService: IConfigService,
-  rawCshKeys: Map<Hex, Hex>,
-): Safe<StateTrie> {
-  const [error, baseTrie] = createStateTrie(globalState, configService)
-  if (error) {
-    return safeError(error)
-  }
-
-  // Add raw C(s, h) keys that couldn't be reverse-engineered
-  for (const [key, value] of rawCshKeys.entries()) {
-    // Only add if not already in the trie (to avoid overwriting correctly generated keys)
-    if (!baseTrie[key]) {
-      baseTrie[key] = value
+  // Add raw C(s, h) keys that were decoded from test vectors
+  // These are stored because the original storage/request keys cannot be recovered
+  // from their Blake hashes, so we preserve the raw key-value pairs
+  if (rawCshKeys) {
+    for (const [key, value] of rawCshKeys.entries()) {
+      // Only add if not already in the trie (to avoid overwriting correctly generated keys)
+      if (!stateTrie[key]) {
+        stateTrie[key] = value
+      }
     }
   }
 
-  return safeResult(baseTrie)
+  return safeResult(stateTrie)
 }

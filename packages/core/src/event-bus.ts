@@ -14,6 +14,7 @@ import type {
   BlockBody,
   BlockHeader,
   BlockRequest,
+  EpochMark,
   GuaranteeDiscardReason,
   GuaranteedWorkReport,
   GuaranteeOutline,
@@ -50,14 +51,7 @@ import { logger } from './logger'
 
 // Event types
 export interface ConectivityChangeEvent {
-  timestamp: number
   slot: bigint
-  epoch: bigint
-  phase: bigint
-  previousEpoch: bigint
-  newEpoch: bigint
-  previousSlotPhase: bigint
-  validatorSetChanged: boolean
 }
 
 export interface SlotChangeEvent {
@@ -70,14 +64,8 @@ export interface SlotChangeEvent {
 }
 
 export interface EpochTransitionEvent {
-  timestamp: number
   slot: bigint
-  epoch: bigint
-  phase: bigint
-  previousEpoch: bigint
-  newEpoch: bigint
-  previousSlotPhase: bigint
-  validatorSetChanged: boolean
+  epochMark: EpochMark | null
 }
 
 export interface ValidatorSetChangeEvent {

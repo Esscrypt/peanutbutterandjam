@@ -49,26 +49,44 @@
  */
 
 import { concatBytes } from '@pbnj/core'
-import type { AccumulatedItem, DecodingResult, Safe } from '@pbnj/types'
+import type {
+  AccumulatedItem,
+  DecodingResult,
+  IConfigService,
+  Safe,
+} from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
-import {
-  decodeVariableSequence,
-  encodeVariableSequence,
-} from '../core/sequence'
+import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
 
 /**
  * Encode accumulated according to Gray Paper C(15):
  * sq{build{var{i}}{i ∈ accumulated}}
+ *
+ * Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+ * This is a FIXED-LENGTH sequence of C_epochlen elements (no sequence length prefix)
+ * Each element i is encoded as var{i} (variable-length with length prefix)
  */
 export function encodeAccumulated(
   accumulated: AccumulatedItem[],
+  configService: IConfigService,
 ): Safe<Uint8Array> {
   try {
+    // Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+    // This is a FIXED-LENGTH sequence, so we encode exactly C_epochlen elements
+    const epochLen = configService.epochDuration
+
+    // Pad or truncate to exactly C_epochlen elements
+    const paddedAccumulated = Array.from(accumulated)
+    while (paddedAccumulated.length < epochLen) {
+      paddedAccumulated.push({ data: new Uint8Array(0) })
+    }
+    const accumulatedToEncode = paddedAccumulated.slice(0, epochLen)
+
     // Gray Paper: sq{build{var{i}}{i ∈ accumulated}}
-    // Variable-length sequence of variable-length accumulated items
-    const [error, encodedData] = encodeVariableSequence(
-      accumulated,
+    // Fixed-length sequence (no length prefix), each element encoded as var{i}
+    const [error, encodedData] = encodeSequenceGeneric(
+      accumulatedToEncode,
       (item: AccumulatedItem) => {
         // Gray Paper: var{i} - variable-length blob with natural number length prefix
         // var{x} ≡ tuple{len{x}, x} thus encode{var{x}} ≡ encode{len{x}} ∥ encode{x}
@@ -93,14 +111,23 @@ export function encodeAccumulated(
 /**
  * Decode accumulated according to Gray Paper C(15):
  * sq{build{var{i}}{i ∈ accumulated}}
+ *
+ * Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+ * This is a FIXED-LENGTH sequence of C_epochlen elements (no sequence length prefix)
+ * Each element i is decoded as var{i} (variable-length with length prefix)
  */
 export function decodeAccumulated(
   data: Uint8Array,
+  configService: IConfigService,
 ): Safe<DecodingResult<AccumulatedItem[]>> {
   try {
+    // Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
+    // This is a FIXED-LENGTH sequence, so we decode exactly C_epochlen elements
+    const epochLen = configService.epochDuration
+
     // Gray Paper: decode sq{build{var{i}}{i ∈ accumulated}}
-    // Variable-length sequence of variable-length accumulated items
-    const [error, decodedData] = decodeVariableSequence<AccumulatedItem>(
+    // Fixed-length sequence (no length prefix), each element decoded as var{i}
+    const [error, decodedData] = decodeSequenceGeneric<AccumulatedItem>(
       data,
       (itemData: Uint8Array) => {
         // Gray Paper: decode var{i} - variable-length blob with natural number length prefix
@@ -126,6 +153,7 @@ export function decodeAccumulated(
           consumed: itemData.length - remaining.length,
         })
       },
+      epochLen,
     )
     if (error) return safeError(error)
 

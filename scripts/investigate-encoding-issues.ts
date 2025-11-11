@@ -546,7 +546,7 @@ function main() {
       console.log(`  Raw accumulated length: ${rawBytes.length} bytes`)
       console.log(`  First 20 bytes: ${bytesToHex(rawBytes.slice(0, 20))}`)
 
-      const [decodeError, decoded] = decodeAccumulated(rawBytes)
+      const [decodeError, decoded] = decodeAccumulated(rawBytes, configService)
       if (!decodeError && decoded) {
         console.log('  Decoded accumulated:', {
           itemsLength: decoded.value.length,
@@ -555,7 +555,10 @@ function main() {
             firstBytes: bytesToHex(item.data.slice(0, 10)),
           })),
         })
-        const [encodeError, encoded] = encodeAccumulated(decoded.value)
+        const [encodeError, encoded] = encodeAccumulated(
+          decoded.value,
+          configService,
+        )
         if (!encodeError && encoded) {
           console.log('  Re-encoded accumulated')
           compareBytes(rawBytes, encoded)

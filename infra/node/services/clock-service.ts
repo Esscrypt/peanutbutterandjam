@@ -311,7 +311,6 @@ export class ClockService extends BaseService implements IClockService {
     }
 
     const previousSlot = this.currentSlot
-    const previousEpoch = this.currentEpoch
 
     // Recalculate current slot and epoch from wall clock
     this.calculateCurrentSlotAndEpoch()
@@ -333,23 +332,11 @@ export class ClockService extends BaseService implements IClockService {
 
     // Emit epoch transition event if needed
     if (isEpochTransition) {
-      // Check if validator set change is pending
-      const validatorSetChanged =
-        this.validatorSetManager!.isValidatorSetChangePending()
-
-      // Calculate previous slot's phase within the previous epoch
-      // Gray Paper: m = previous slot's phase within epoch
-      const previousSlotPhase = this.getPhaseFromSlot(previousSlot)
-
+      // Emit epoch transition event with simplified structure
+      // Note: epochMark is not available in clock service, it's only in block headers
       const epochTransitionEvent = {
-        timestamp: Date.now(),
         slot: this.currentSlot,
-        epoch: this.currentEpoch,
-        phase,
-        previousEpoch,
-        newEpoch: this.currentEpoch,
-        previousSlotPhase, // Gray Paper: m - previous slot's phase within epoch
-        validatorSetChanged: validatorSetChanged ?? false,
+        epochMark: null, // Clock service doesn't have epoch mark, only block importer does
       }
 
       await this.eventBusService.emitEpochTransition(epochTransitionEvent)
@@ -371,12 +358,10 @@ export class ClockService extends BaseService implements IClockService {
       // Schedule the grid update with the required delay
       // This will emit the grid update event after the required delay has passed
       this.conectivityChangeTimer = setTimeout(() => {
-        const conectivityChangeEvent = {
-          ...epochTransitionEvent,
-          timestamp: Date.now(), // Update timestamp to current time
-        }
         // Emit the grid update event with the epoch transition event data
-        this.eventBusService.emitConectivityChange(conectivityChangeEvent)
+        this.eventBusService.emitConectivityChange({
+          slot: epochTransitionEvent.slot,
+        })
 
         this.conectivityChangeTimer = null
       }, requiredDelayMs)

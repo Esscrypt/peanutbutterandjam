@@ -18,7 +18,6 @@ import type {
   ValidatorPublicKeys,
 } from './consensus'
 import type {
-  SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
   ServiceAccountCore,

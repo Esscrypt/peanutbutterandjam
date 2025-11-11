@@ -1,4 +1,8 @@
-import { getBanderoutFromGamma, RingVRFProver } from '@pbnj/bandersnatch-vrf'
+import {
+  getBanderoutFromGamma,
+  RingVRFProver,
+  type RingVRFProverWasm,
+} from '@pbnj/bandersnatch-vrf'
 import type { Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 
@@ -64,7 +68,7 @@ export function generateRingVRFProof(
   message: Uint8Array,
   ringKeys: Uint8Array[],
   proverIndex: number,
-  prover: RingVRFProver,
+  prover: RingVRFProverWasm,
 ): Safe<{
   proof: Uint8Array
   banderoutResult: Uint8Array
@@ -101,7 +105,6 @@ export function generateRingVRFProof(
   offset += entropy2.length
   context.set(entryIndexBytes, offset)
 
-
   // Create Ring VRF input according to Gray Paper specification
   const ringVRFInput = {
     input: context, // VRF context: "$jam_ticket_seal" || entropy_2 || entryIndex
@@ -113,16 +116,19 @@ export function generateRingVRFProof(
   // Generate Ring VRF proof
   const proofResult = prover.prove(secretKey, ringVRFInput)
 
-  // Serialize the complete result (output + proof)
-  const serializedResult = RingVRFProver.serialize(proofResult)
-
   // Extract VRF output (banderout)
   // Gray Paper: banderout{p ∈ bsringproof{r}{x}{m}} ∈ hash
   // This is the first 32 bytes of the VRF output hash
   const vrfOutput = getBanderoutFromGamma(proofResult.gamma)
 
+  // Serialize the full Ring VRF result according to bandersnatch-vrf-spec
+  // Structure: gamma(32) || pedersen_proof(160) || ring_proof(592)
+  // Total: 784 bytes (for ring size 6: 32 + 160 + 592 = 784)
+  // NOTE: ring_commitment is NOT included - it's part of the epoch root (144 bytes)
+  const serializedProof = RingVRFProver.serialize(proofResult)
+
   return safeResult({
-    proof: serializedResult,
+    proof: serializedProof,
     banderoutResult: vrfOutput,
   })
 }

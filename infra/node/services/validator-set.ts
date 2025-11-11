@@ -5,7 +5,7 @@
  * Handles epoch transitions and validator metadata
  */
 
-import { getRingRoot, type RingVRFProver } from '@pbnj/bandersnatch-vrf'
+import { getRingRoot, type RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
 import {
   bytesToHex,
   type EpochTransitionEvent,
@@ -20,11 +20,12 @@ import { isSafroleTicket } from '@pbnj/safrole'
 import {
   BaseService,
   type ConnectionEndpoint,
+  type ValidatorPublicKeys,
   type IValidatorSetManager,
   type Safe,
+  type SafePromise,
   safeError,
   safeResult,
-  type ValidatorPublicKeys,
 } from '@pbnj/types'
 // import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
@@ -44,7 +45,7 @@ export class ValidatorSetManager
   private readonly sealKeyService: SealKeyService | null
   private readonly keyPairService: KeyPairService | null
   private ticketService: TicketService | null
-  private readonly ringProver: RingVRFProver | null
+  private readonly ringProver: RingVRFProverWasm
   private readonly configService: ConfigService
   // private entropyService: EntropyService | null
   // private clockService: ClockService | null
@@ -60,12 +61,16 @@ export class ValidatorSetManager
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
 
   private epochRoot: Hex = zeroHash
+  // Store bound callback for removal
+  private readonly boundHandleEpochTransition: (
+    event: EpochTransitionEvent,
+  ) => SafePromise<void>
 
   constructor(options: {
     eventBusService: EventBusService
     sealKeyService: SealKeyService | null
     keyPairService: KeyPairService | null
-    ringProver: RingVRFProver | null
+    ringProver: RingVRFProverWasm
     ticketService: TicketService | null
     configService: ConfigService
     initialValidators: ValidatorPublicKeys[] | null
@@ -111,7 +116,11 @@ export class ValidatorSetManager
       this.updatePublicKeysToValidatorIndex(this.activeSet)
     }
 
-    this.eventBusService.addEpochTransitionCallback(this.handleEpochTransition)
+    // Bind the callback and store it for later removal
+    this.boundHandleEpochTransition = this.handleEpochTransition.bind(this)
+    this.eventBusService.addEpochTransitionCallback(
+      this.boundHandleEpochTransition,
+    )
   }
 
   setTicketService(ticketService: TicketService): void {
@@ -120,7 +129,7 @@ export class ValidatorSetManager
 
   override stop(): Safe<boolean> {
     this.eventBusService.removeEpochTransitionCallback(
-      this.handleEpochTransition,
+      this.boundHandleEpochTransition,
     )
     return safeResult(true)
   }
@@ -129,48 +138,138 @@ export class ValidatorSetManager
    * Handle epoch transition events
    * Implements Gray Paper equations (115-118): Key rotation on epoch transition
    * ⟨pendingSet', activeSet', previousSet', epochRoot'⟩ ≡ (Φ(stagingSet), pendingSet, activeSet, z)
+   *
+   * Gray Paper Eq. 115-118:
+   * - pendingSet' = Φ(stagingSet) (from epoch mark, already filtered)
+   * - activeSet' = pendingSet (current pending becomes active)
+   * - previousSet' = activeSet (current active becomes previous)
+   * - epochRoot' = getRingRoot({k_bs | k ∈ pendingSet'})
+   *
+   * Gray Paper Eq. 248-257: epoch mark contains [(k_bs, k_ed) | k ∈ pendingSet']
+   * The epoch mark's pendingSet' is already Φ(stagingSet), so we use it directly.
    */
-  private handleEpochTransition(event: EpochTransitionEvent): Safe<void> {
-    // Step 1: Apply blacklist filter Φ(stagingSet) - Gray Paper equation (119-128)
-    const filteredStagingSet = this.applyBlacklistFilter(this.stagingSet)
+  private async handleEpochTransition(event: EpochTransitionEvent): SafePromise<void> {
+    if (!event.epochMark) {
+      return safeError(new Error('Epoch mark is not present'))
+    }
 
-    // Step 2: Rotate validator sets according to Gray Paper equations (115-117)
+    // Save current sets before rotation (Gray Paper Eq. 115-117)
+    const oldActiveSet = new Map(this.activeSet)
+    const oldPendingSet = new Map(this.pendingSet)
+    const oldStagingSet = new Map(this.stagingSet) // Save staging set to preserve BLS and metadata
+
+    logger.info(
+      '[ValidatorSetManager] Epoch transition - rotating validator sets',
+      {
+        slot: event.slot.toString(),
+        oldActiveSetSize: oldActiveSet.size,
+        oldPendingSetSize: oldPendingSet.size,
+        oldStagingSetSize: oldStagingSet.size,
+        epochMarkValidatorsCount: event.epochMark.validators.length,
+        oldActiveSetKeys: Array.from(oldActiveSet.keys()).slice(0, 10),
+        oldPendingSetKeys: Array.from(oldPendingSet.keys()).slice(0, 10),
+      },
+    )
+
+    // Extract pendingSet' from epoch mark
+    // Gray Paper Eq. 248-257: epoch mark contains [(k_vk_bs, k_vk_ed)] | k ∈ pendingset'
+    // The epoch mark's pendingSet' is already Φ(stagingSet) (blacklist filter applied)
+    // ValidatorKeyPair from epoch mark needs to be converted to ValidatorPublicKeys
+    // Note: Epoch mark only contains bandersnatch and ed25519 keys, not bls or metadata
+    // We need to look up validators from the old staging set to preserve BLS and metadata
+    const pendingSetPrime = event.epochMark.validators.map((v) => {
+      // Try to find the validator in the old staging set by bandersnatch or ed25519 key
+      // This preserves BLS and metadata for non-null validators
+      let foundValidator: ValidatorPublicKeys | undefined
+      for (const validator of oldStagingSet.values()) {
+        if (
+          validator.bandersnatch === v.bandersnatch ||
+          validator.ed25519 === v.ed25519
+        ) {
+          foundValidator = validator
+          break
+        }
+      }
+
+      // If found, use the full validator info; otherwise use null keys for BLS and metadata
+      // (This handles the case where the validator was replaced with a null key by blacklist filter)
+      if (foundValidator) {
+        return {
+          bandersnatch: v.bandersnatch,
+          ed25519: v.ed25519,
+          bls: foundValidator.bls,
+          metadata: foundValidator.metadata,
+        }
+      }
+
+      // Validator not found in staging set (was null key from blacklist filter)
+      // Use zero hash for BLS and metadata
+      return {
+        bandersnatch: v.bandersnatch,
+        ed25519: v.ed25519,
+        bls: ('0x' + '00'.repeat(144)) as Hex,
+        metadata: ('0x' + '00'.repeat(128)) as Hex,
+      }
+    })
+
+    // Rotate validator sets according to Gray Paper equations (115-117)
     // previousSet' = activeSet (current active becomes previous)
-    this.previousSet = new Map(this.activeSet)
+    this.previousSet = oldActiveSet
 
     // activeSet' = pendingSet (current pending becomes active)
-    this.activeSet = new Map(this.pendingSet)
+    // IMPORTANT: Re-index validators to be sequential starting from 0
+    // This ensures generateFallbackKeySequence can access validators by position (0 to size-1)
+    // Gray Paper: cyclic{k[index]}_bs requires sequential indexing
+    const activeSetArray = Array.from(oldPendingSet.values())
+    this.activeSet = new Map(
+      activeSetArray.map((validator, index) => [index, validator]),
+    )
+    // Update publicKeysToValidatorIndex map with new indices
+    this.updatePublicKeysToValidatorIndex(this.activeSet)
 
-    // pendingSet' = Φ(stagingSet) (filtered staging becomes pending)
-    this.pendingSet = new Map(filteredStagingSet)
+    logger.info(
+      '[ValidatorSetManager] Epoch transition - validator sets rotated',
+      {
+        slot: event.slot.toString(),
+        newActiveSetSize: this.activeSet.size,
+        newPendingSetSize: this.pendingSet.size,
+        newActiveSetKeys: Array.from(this.activeSet.keys()).slice(0, 10),
+        newActiveSetValidators: Array.from(this.activeSet.values())
+          .slice(0, 6)
+          .map((v, idx) => ({
+            index: idx,
+            bandersnatch: v.bandersnatch.substring(0, 20) + '...',
+          })),
+      },
+    )
 
-    // Step 3: Clear staging set (it's now been promoted to pending)
-    this.stagingSet.clear()
+    // pendingSet' = Φ(stagingSet) (from epoch mark, already filtered)
+    this.pendingSet = new Map(
+      pendingSetPrime.map((validator, index) => [index, validator]),
+    )
 
-    // Step 4: Increment epoch
-    // this.currentEpoch = event.newEpoch
+    // Staging set persists across epoch transitions
+    // Validators are added to staging set via accumulation outputs (designate host function)
+    // The staging set will be used to create the next pendingSet' on the next epoch transition
+    // We do NOT clear it to null validators - it should be populated from accumulation outputs
+    // If no validators have been added via accumulation, it will remain as it was
 
-    // Step 5: Clear offenders (they've been processed)
+    // Clear offenders (they've been processed during blacklist filter)
     this.offenders.clear()
 
-    // Step 6: Calculate new epoch root - Gray Paper equation (118)
-    this.epochRoot = this.getEpochRoot()
+    // Calculate new epoch root - Gray Paper equation (118)
+    // epochRoot' = getRingRoot({k_bs | k ∈ pendingSet'})
+    this.epochRoot = await this.getEpochRoot()
 
-    // Step 7: Emit validator set change event
+    // Emit validator set change event
+    // Calculate epoch from slot: epoch = slot / epochDuration
+    const newEpoch = event.slot / BigInt(this.configService.epochDuration)
     const validatorSetChangeEvent: ValidatorSetChangeEvent = {
       timestamp: Date.now(),
-      epoch: event.newEpoch,
+      epoch: newEpoch,
       validators: this.activeSet,
     }
     this.eventBusService.emitValidatorSetChange(validatorSetChangeEvent)
-
-    logger.info('Epoch transition completed successfully', {
-      newEpoch: event.newEpoch.toString(),
-      activeValidatorCount: this.activeSet.size,
-      pendingValidatorCount: this.pendingSet.size,
-      previousValidatorCount: this.previousSet.size,
-      epochRoot: this.epochRoot,
-    })
 
     return safeResult(undefined)
   }
@@ -179,37 +278,37 @@ export class ValidatorSetManager
    * Apply blacklist filter Φ(stagingSet) - Gray Paper equation (119-128)
    * Replaces offender keys with null keys (all zeros)
    */
-  private applyBlacklistFilter(
-    stagingSet: Map<number, ValidatorPublicKeys>,
-  ): Map<number, ValidatorPublicKeys> {
-    const filtered = new Map<number, ValidatorPublicKeys>()
+  // private applyBlacklistFilter(
+  //   stagingSet: Map<number, ValidatorPublicKeys>,
+  // ): Map<number, ValidatorPublicKeys> {
+  //   const filtered = new Map<number, ValidatorPublicKeys>()
 
-    for (const [validatorIndex, metadata] of stagingSet) {
-      // Check if this validator is in the offenders set
-      const isOffender = this.offenders.has(validatorIndex)
+  //   for (const [validatorIndex, metadata] of stagingSet) {
+  //     // Check if this validator is in the offenders set
+  //     const isOffender = this.offenders.has(validatorIndex)
 
-      if (isOffender) {
-        // Replace with null key (all zeros) - Gray Paper equation (122-123)
-        const nullMetadata: ValidatorPublicKeys = {
-          bandersnatch: zeroHash,
-          ed25519: zeroHash,
-          bls: zeroHash,
-          metadata: ('0x' + '00'.repeat(128)) as Hex,
-        }
-        filtered.set(validatorIndex, nullMetadata)
+  //     if (isOffender) {
+  //       // Replace with null key (all zeros) - Gray Paper equation (122-123)
+  //       const nullMetadata: ValidatorPublicKeys = {
+  //         bandersnatch: zeroHash,
+  //         ed25519: zeroHash,
+  //         bls: zeroHash,
+  //         metadata: ('0x' + '00'.repeat(128)) as Hex,
+  //       }
+  //       filtered.set(validatorIndex, nullMetadata)
 
-        logger.warn('Validator blacklisted during epoch transition', {
-          validatorIndex: validatorIndex.toString(),
-          publicKey: metadata.ed25519.toString(),
-        })
-      } else {
-        // Keep original validator
-        filtered.set(validatorIndex, metadata)
-      }
-    }
+  //       logger.warn('Validator blacklisted during epoch transition', {
+  //         validatorIndex: validatorIndex.toString(),
+  //         publicKey: metadata.ed25519.toString(),
+  //       })
+  //     } else {
+  //       // Keep original validator
+  //       filtered.set(validatorIndex, metadata)
+  //     }
+  //   }
 
-    return filtered
-  }
+  //   return filtered
+  // }
 
   /**
    * Get current validator set
@@ -526,36 +625,22 @@ export class ValidatorSetManager
    * @returns The epoch root as a 32-byte hash
    */
   getEpochRoot(): Hex {
-    if (!this.ringProver) {
-      throw new Error('Ring VRF prover not found')
-    }
-    // Extract Bandersnatch keys from pending validators
-    // Gray Paper: z = getRingRoot({k_vk_bs | k ∈ pendingSet'})
-    // Includes ALL keys in pendingSet', including null keys (which replace offenders)
-    // Null/invalid keys will be substituted with padding point in createRingPolynomial
-    const bandersnatchKeys: Uint8Array[] = this.pendingSet
-      .values()
-      .toArray()
-      .map((validator) => hexToBytes(validator.bandersnatch))
-
-    // Handle empty pendingSet (e.g., at genesis before state is loaded)
-    // Return zeroHash if no validators in pendingSet
-    if (bandersnatchKeys.length === 0) {
-      logger.warn('Cannot compute epoch root: pendingSet is empty')
-      return zeroHash
-    }
-
     // Calculate ring root from public keys only (Gray Paper compliant)
     // No private key needed - this is deterministic
-    const [epochRootError, epochRoot] = getRingRoot(
-      bandersnatchKeys,
-      this.ringProver,
+    // Extract keys in order (Map preserves insertion order)
+    // Convert to array of Bandersnatch keys for ring root computation
+    const bandersnatchKeys = Array.from(this.pendingSet.values()).map((validator) =>
+      hexToBytes(validator.bandersnatch),
     )
+    const [epochRootError, epochRoot] = getRingRoot(bandersnatchKeys, this.ringProver)
     if (epochRootError) {
       logger.error('Failed to get epoch root', { error: epochRootError })
       return zeroHash
     }
-    return bytesToHex(epochRoot)
+
+    const epochRootHex = bytesToHex(epochRoot)
+
+    return epochRootHex
   }
 
   setEpochRoot(epochRoot: Hex): void {
@@ -563,16 +648,32 @@ export class ValidatorSetManager
   }
 
   /**
+   * Get stored epoch root without recomputing
+   * This preserves the exact value from test vectors
+   */
+  getStoredEpochRoot(): Hex {
+    return this.epochRoot
+  }
+
+  /**
    * Get validator key by index
+   *
+   * IMPORTANT: For fallback key sequence generation, this must return validators
+   * from the active set by their position (0-indexed), not by Map key.
+   * Gray Paper: cyclic{k[index]}_bs requires sequential indexing starting from 0.
    */
   getValidatorAtIndex(validatorIndex: number): Safe<ValidatorPublicKeys> {
-    const keyPair = this.getAllConnectedValidators().get(validatorIndex)
-    if (!keyPair) {
+    // For fallback key sequence, we need validators from active set by position
+    // Convert active set to array and use array indexing
+    const activeSetArray = Array.from(this.activeSet.values())
+    if (validatorIndex < 0 || validatorIndex >= activeSetArray.length) {
       return safeError(
-        new Error(`Validator key pair not found for index ${validatorIndex}`),
+        new Error(
+          `Validator index ${validatorIndex} out of bounds (active set size: ${activeSetArray.length})`,
+        ),
       )
     }
-    return safeResult(keyPair)
+    return safeResult(activeSetArray[validatorIndex])
   }
 
   getValidatorByEd25519PublicKey(

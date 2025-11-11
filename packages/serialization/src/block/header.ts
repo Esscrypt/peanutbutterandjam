@@ -211,7 +211,9 @@ function encodeWinnersMark(
   }
 
   if (winnersMark.length !== config.epochDuration) {
-    return safeError(new Error('Winners mark length must be equal to epoch duration'))
+    return safeError(
+      new Error('Winners mark length must be equal to epoch duration'),
+    )
   }
   const parts: Uint8Array[] = []
   // Encode as Some (1 byte with value 1)

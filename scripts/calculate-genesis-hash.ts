@@ -58,7 +58,8 @@ function main() {
       '../config/genesis-header.json',
       'utf8',
     )
-    const [parseResultError, parseResult] = parseGenesisHeader(genesisHeaderJson)
+    const [parseResultError, parseResult] =
+      parseGenesisHeader(genesisHeaderJson)
     if (parseResultError) {
       throw new Error(`Failed to parse genesis header: ${parseResultError}`)
     }
@@ -78,7 +79,10 @@ function main() {
     // Encode the genesis header
     const configService = new ConfigService('tiny')
     console.log('🔧 Encoding genesis header...')
-    const [encodedHeaderError, encodedHeader] = encodeHeader(blockHeader, configService)
+    const [encodedHeaderError, encodedHeader] = encodeHeader(
+      blockHeader,
+      configService,
+    )
     if (encodedHeaderError) {
       throw new Error(`Failed to encode genesis header: ${encodedHeaderError}`)
     }

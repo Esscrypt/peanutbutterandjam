@@ -9,18 +9,33 @@
  */
 
 import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
-import { logger, mod } from '@pbnj/core'
-import { BYTES_PER_BLOB, verifyBlobKzgProof } from 'c-kzg'
+import { logger } from '@pbnj/core'
 import { PedersenVRFProver } from '../prover/pedersen'
-import type { RingVRFInput, RingVRFProof } from '../prover/ring-kzg'
-import { RingVRFProver } from '../prover/ring-kzg'
+import type { RingVRFInput } from '../prover/ring-kzg'
+import { loadSRSFromFile } from '../utils/srs-loader'
 import { PedersenVRFVerifier } from './pedersen'
-
+import { RingVRFProver } from '../prover/ring-kzg'
+import { createRingPolynomial, evaluatePolynomialAt, verifyKzgProof, bigintToBytes32BE } from '../utils/kzg-manual'
 /**
  * Ring VRF Verifier
  * Implements Ring VRF verification with anonymity
  */
 export class RingVRFVerifier {
+  private srsG1: Uint8Array
+  private srsG2: Uint8Array
+  private srsG2Tau: Uint8Array
+
+
+  constructor(srsFilePath: string) {
+    const [error, result] = loadSRSFromFile(srsFilePath)
+    if (error) {
+      throw new Error(`Failed to load SRS for verification: ${error.message}`)
+    }
+    this.srsG1 = result.g1
+    this.srsG2 = result.g2
+    this.srsG2Tau = result.g2Points[1]
+  }
+
   /**
    * Verify Ring VRF proof according to bandersnatch-vrf-spec section 4.3
    *
@@ -33,13 +48,12 @@ export class RingVRFVerifier {
    * 4. θ₁ = Ring.verify(V, π_r, Ȳ)
    * 5. θ ← θ₀ ∧ θ₁
    */
-  static verify(
+  verify(
     ringKeys: Uint8Array[],
     input: RingVRFInput,
     serializedResult: Uint8Array,
     auxData?: Uint8Array,
   ): boolean {
-    const startTime = Date.now()
 
     logger.debug('Verifying Ring VRF proof', {
       inputLength: input.input.length,
@@ -48,7 +62,6 @@ export class RingVRFVerifier {
       hasAuxData: !!auxData,
     })
 
-    try {
       // Step 1: Deserialize Ring VRF result to get gamma and proof components
       const result = RingVRFProver.deserialize(serializedResult)
       const { gamma, proof } = result
@@ -58,8 +71,14 @@ export class RingVRFVerifier {
 
       // Step 2: θ₀ = Pedersen.verify(I, ad, O, π_p)
       // Verify underlying Pedersen VRF proof using the provided gamma
-      const theta0 = this.verifyPedersenVRF(input, gamma, proof, auxData)
-      if (!theta0) {
+      // const theta0 = this.verifyPedersenVRF(input, gamma, proof, auxData)
+      const pedersenValid = PedersenVRFVerifier.verify(
+        input.input,
+        gamma,
+        proof.pedersenProof,
+        auxData,
+      )
+      if (!pedersenValid) {
         logger.error('Pedersen VRF verification failed (θ₀ = ⊥)')
         return false
       }
@@ -74,98 +93,68 @@ export class RingVRFVerifier {
 
       // Step 4: θ₁ = Ring.verify(V, π_r, Ȳ)
       // Verify ring proof using the blinded public key Ȳ
-      const theta1 = this.verifyRingProof(
+      const ringValid = this.verifyRingProof(
         ringKeys,
         ringCommitment,
         ringProof,
         pedersenComponents.Y_bar,
       )
-      if (!theta1) {
+      if (!ringValid) {
         logger.error('Ring proof verification failed (θ₁ = ⊥)')
         return false
       }
 
       // Step 5: θ ← θ₀ ∧ θ₁
       // Both verifications must pass
-      const theta = theta0 && theta1
+      return true
 
-      const verificationTime = Date.now() - startTime
-      logger.debug('Ring VRF proof verification completed', {
-        verificationTime,
-        theta0,
-        theta1,
-        theta,
-        result: theta ? '⊤' : '⊥',
-      })
-
-      return theta
-    } catch (error) {
-      const verificationTime = Date.now() - startTime
-      logger.error('Ring VRF proof verification failed', {
-        error: error instanceof Error ? error.message : String(error),
-        verificationTime,
-      })
-      return false
-    }
   }
 
-  /**
-   * Step 1: θ₀ = Pedersen.verify(I, ad, O, π_p)
-   * Verify underlying Pedersen VRF proof
-   */
-  private static verifyPedersenVRF(
-    input: RingVRFInput,
-    gamma: Uint8Array,
-    proof: RingVRFProof,
-    auxData?: Uint8Array,
-  ): boolean {
-    try {
-      // Verify using Pedersen verifier
-      const isValid = PedersenVRFVerifier.verify(
-        input.input,
-        gamma,
-        proof.pedersenProof,
-        auxData,
-      )
-
-      logger.debug('Pedersen VRF verification', {
-        inputLength: input.input.length,
-        outputPointLength: gamma.length,
-        proofLength: proof.pedersenProof.length,
-        hasAuxData: !!auxData,
-        isValid,
-      })
-
-      return isValid
-    } catch (error) {
-      logger.error('Pedersen VRF verification error', { error })
-      return false
-    }
-  }
 
   /**
    * Step 3: θ₁ = Ring.verify(V, π_r, Ȳ)
    * Verify ring proof using KZG commitments
    */
-  private static verifyRingProof(
+  private verifyRingProof(
     ringKeys: Uint8Array[],
     ringCommitment: Uint8Array,
     ringProof: Uint8Array,
     yBar: Uint8Array,
   ): boolean {
-    try {
+      // Check SRS is loaded
       // 1. Recreate ring polynomial from public keys (representing the ring verifier V)
-      const ringPolynomial = this.createRingPolynomial(ringKeys)
+      const ringPolynomial = createRingPolynomial(ringKeys)
 
-      // 2. Convert polynomial to KZG blob
-      const ringBlob = this.polynomialToBlob(ringPolynomial)
+      // 2. Evaluate polynomial at domain generator to get y = p(z)
+      const domainGenerator = BANDERSNATCH_PARAMS.KZG_CONFIG.DOMAIN_GENERATOR
+      const y = evaluatePolynomialAt(ringPolynomial, domainGenerator)
 
-      // 3. Verify the KZG commitment and proof (π_r verification)
-      const isValid = verifyBlobKzgProof(ringBlob, ringCommitment, ringProof)
+      // 3. Convert y to bytes (32 bytes, big-endian)
+      const yBytes = bigintToBytes32BE(y)
+
+      // 4. Convert domain generator to bytes (32 bytes, big-endian)
+      const zBytes = bigintToBytes32BE(domainGenerator)
+
+      // 5. Verify the KZG commitment and proof (π_r verification)
+      const [verifyError, isValid] = verifyKzgProof(
+        ringCommitment, // commitmentBytes (48 bytes)
+        zBytes, // zBytes - domain generator (32 bytes)
+        yBytes, // yBytes - evaluation result (32 bytes)
+        ringProof, // proofBytes (48 bytes)
+        this.srsG1, // srsG1 (48 bytes)
+        this.srsG2, // srsG2 (96 bytes)
+        this.srsG2Tau, // srsG2Tau (96 bytes)
+      )
+
+      if (verifyError) {
+        logger.error('KZG proof verification error', {
+          error: verifyError.message,
+        })
+        return false
+      }
 
       logger.debug('Ring proof verification', {
         ringSize: ringKeys.length,
-        blobSize: ringBlob.length,
         commitmentSize: ringCommitment.length,
         proofSize: ringProof.length,
         yBarLength: yBar.length,
@@ -176,84 +165,8 @@ export class RingVRFVerifier {
       // that the blinded public key Ȳ is properly committed in the ring proof.
       // For now, we focus on the KZG commitment verification.
 
-      return isValid
-    } catch (error) {
-      logger.error('Ring proof verification error', { error })
-      return false
-    }
+      return isValid ?? false
+
   }
 
-  /**
-   * Create ring polynomial from public keys (same as prover)
-   */
-  private static createRingPolynomial(ringKeys: Uint8Array[]): bigint[] {
-    const maxRingSize = BANDERSNATCH_PARAMS.KZG_CONFIG.MAX_RING_SIZE
-
-    if (ringKeys.length > maxRingSize) {
-      throw new Error(
-        `Ring size ${ringKeys.length} exceeds maximum ${maxRingSize}`,
-      )
-    }
-
-    // Pad to domain size for KZG
-    const domainSize = BANDERSNATCH_PARAMS.KZG_CONFIG.DOMAIN_SIZE
-    const polynomial: bigint[] = new Array(domainSize).fill(0n)
-
-    // Convert each public key to a polynomial coefficient
-    ringKeys.forEach((key, index) => {
-      if (index >= domainSize) return
-
-      // Use the first 31 bytes of the key as a coefficient to stay within BLS12-381 scalar field
-      const keyPrefix = key.slice(0, 31)
-      let coeff = 0n
-
-      // Convert bytes to scalar in little-endian format (arkworks compatible)
-      for (let i = 0; i < keyPrefix.length; i++) {
-        coeff += BigInt(keyPrefix[i]) * 256n ** BigInt(i)
-      }
-
-      // Store coefficient directly (will be reduced to BLS12-381 scalar field in polynomialToBlob)
-      polynomial[index] = coeff
-    })
-
-    return polynomial
-  }
-
-  /**
-   * Convert polynomial to KZG blob (same as prover)
-   */
-  private static polynomialToBlob(polynomial: bigint[]): Uint8Array {
-    const blob = new Uint8Array(BYTES_PER_BLOB)
-
-    // c-kzg expects 4096 field elements of 32 bytes each
-    const fieldElements = BYTES_PER_BLOB / 32 // 4096
-
-    polynomial.forEach((coeff, index) => {
-      if (index >= fieldElements) return
-
-      // Reduce coefficient to BLS12-381 scalar field
-      const reducedCoeff = mod(coeff, BANDERSNATCH_PARAMS.FIELD_MODULUS)
-
-      // Convert bigint to 32-byte big-endian representation (c-kzg format)
-      const coeffBytes = this.bigintToBytes32BE(reducedCoeff)
-      blob.set(coeffBytes, index * 32)
-    })
-
-    return blob
-  }
-
-  /**
-   * Convert bigint to 32-byte big-endian representation (c-kzg format)
-   */
-  private static bigintToBytes32BE(value: bigint): Uint8Array {
-    const bytes = new Uint8Array(32)
-    let temp = value
-
-    for (let i = 31; i >= 0; i--) {
-      bytes[i] = Number(temp & 0xffn)
-      temp = temp >> 8n
-    }
-
-    return bytes
-  }
 }

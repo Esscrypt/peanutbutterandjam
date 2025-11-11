@@ -2,16 +2,17 @@ import { banderout, generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
 import {
   type BlockProcessedEvent,
   blake2bHash,
+  type EpochTransitionEvent,
   type EventBusService,
   hexToBytes,
   logger,
   zeroHash,
 } from '@pbnj/core'
-import type { EpochTransitionEvent } from '@pbnj/events'
 import {
   BaseService,
   type BlockHeader,
   type EntropyState,
+  type EpochMark,
   type Safe,
   safeError,
   safeResult,
@@ -69,21 +70,34 @@ export class EntropyService extends BaseService {
    * Gray Paper: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2)
    */
   private handleEpochTransition(event: EpochTransitionEvent): Safe<void> {
-    try {
-      this.rotateEntropyHistory()
-      logger.info('Entropy history rotated on epoch transition', {
-        newEpoch: event.newEpoch,
-        entropy1Length: this.entropy.entropy1,
-        entropy2Length: this.entropy.entropy2.length,
-        entropy3Length: this.entropy.entropy3.length,
-      })
-      return safeResult(undefined)
-    } catch (error) {
-      logger.error('Failed to handle epoch transition in entropy service', {
-        error,
-      })
-      return safeError(error as Error)
-    }
+    const oldEntropy1 = this.entropy.entropy1
+    const oldEntropy2 = this.entropy.entropy2
+    const oldEntropy3 = this.entropy.entropy3
+    const oldAccumulator = this.entropy.accumulator
+
+    logger.info('[EntropyService] Epoch transition - rotating entropy', {
+      slot: event.slot.toString(),
+      before: {
+        accumulator: oldAccumulator,
+        entropy1: oldEntropy1,
+        entropy2: oldEntropy2,
+        entropy3: oldEntropy3,
+      },
+    })
+
+    this.rotateEntropyHistory(event.epochMark)
+
+    logger.info('[EntropyService] Epoch transition - entropy rotated', {
+      slot: event.slot.toString(),
+      after: {
+        accumulator: this.entropy.accumulator,
+        entropy1: this.entropy.entropy1,
+        entropy2: this.entropy.entropy2, // This is now old entropy1, used for F(entropy'_2, activeset')
+        entropy3: this.entropy.entropy3, // This is now old entropy2, used for seal verification
+      },
+    })
+
+    return safeResult(undefined)
   }
 
   /**
@@ -114,32 +128,71 @@ export class EntropyService extends BaseService {
       return safeError(new Error('Banderout result is undefined'))
     }
 
+    // accumulator is Hex string (32 bytes = 64 hex chars + "0x" = 66 chars)
+    // banderoutResult is 32 bytes
+    const accumulatorBytes = hexToBytes(this.entropy.accumulator)
     const combined = new Uint8Array(
-      this.entropy.accumulator.length + banderoutResult.length,
+      accumulatorBytes.length + banderoutResult.length,
     )
 
-    combined.set(hexToBytes(this.entropy.accumulator), 0)
-    combined.set(banderoutResult, 32) // 32 bytes of vrfOutput is already in banderoutResult
+    combined.set(accumulatorBytes, 0)
+    combined.set(banderoutResult, accumulatorBytes.length)
 
     const [hashError, hashData] = blake2bHash(combined)
     if (hashError) {
       return safeError(hashError)
-    } else {
-      this.entropy.accumulator = hashData
+    }
+    if (!hashData) {
+      return safeError(new Error('Hash data is undefined'))
     }
 
+    // hashData is already Hex string from blake2bHash
+    this.entropy.accumulator = hashData
+
+    // Return as bytes for compatibility with function signature
     return safeResult(hexToBytes(hashData))
   }
 
   /**
    * Rotate entropy history on epoch transition
-   * Gray Paper: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2)
+   * Gray Paper Eq. 179-181: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2) when e' > e
+   *
+   * Where:
+   * - entropy_0 = accumulator at end of previous epoch (from epoch mark's entropyAccumulator)
+   * - entropy_1 = entropy_1 at end of previous epoch (saved before rotation)
+   * - entropy_2 = entropy_2 at end of previous epoch (saved before rotation)
+   *
+   * Note: The epoch mark's entropy1 field contains tickets_entropy, which should equal
+   * the old entropy1. We use it as a validation check but rely on the saved old values for rotation.
    */
-  private rotateEntropyHistory(): void {
-    // Rotate: entropy_3 = entropy_2, entropy_2 = entropy_1, entropy_1 = entropy_0
-    this.entropy.entropy3 = this.entropy.entropy2
-    this.entropy.entropy2 = this.entropy.entropy1
-    this.entropy.entropy1 = this.entropy.accumulator
+  rotateEntropyHistory(epochMark: EpochMark | null): void {
+    if (epochMark) {
+      // Save old values before rotation (these are entropy_1, entropy_2 at end of previous epoch)
+      const oldEntropy1 = this.entropy.entropy1
+      const oldEntropy2 = this.entropy.entropy2
+
+      // Set accumulator from epoch mark (entropy_0 = accumulator at end of previous epoch)
+      this.entropy.accumulator = epochMark.entropyAccumulator
+
+      // Rotate according to Gray Paper: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2)
+      this.entropy.entropy1 = this.entropy.accumulator // entropy'_1 = entropy_0
+      this.entropy.entropy2 = oldEntropy1 // entropy'_2 = entropy_1 (old entropy1)
+      this.entropy.entropy3 = oldEntropy2 // entropy'_3 = entropy_2 (old entropy2)
+
+      // Validation: epoch mark's tickets_entropy should equal old entropy1
+      if (epochMark.entropy1 !== oldEntropy1) {
+        logger.warn('[EntropyService] tickets_entropy mismatch', {
+          ticketsEntropy: epochMark.entropy1,
+          oldEntropy1: oldEntropy1,
+        })
+      }
+    } else {
+      // No epoch mark: rotate using current accumulator
+      // Rotate: entropy_3 = entropy_2, entropy_2 = entropy_1, entropy_1 = entropy_0
+      this.entropy.entropy3 = this.entropy.entropy2
+      this.entropy.entropy2 = this.entropy.entropy1
+      this.entropy.entropy1 = this.entropy.accumulator
+    }
   }
 
   /**
