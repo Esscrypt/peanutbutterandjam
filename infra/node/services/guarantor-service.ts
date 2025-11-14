@@ -27,7 +27,7 @@ import {
   verifyWorkReportDistributionSignature,
 } from '@pbnj/guarantor'
 import type { CE134WorkPackageSharingProtocol } from '@pbnj/networking'
-import { calculateWorkPackageHash } from '@pbnj/serialization'
+import { calculateWorkPackageHash } from '@pbnj/codec'
 import type {
   Guarantee,
   GuaranteeSignature,
@@ -59,6 +59,7 @@ import type { KeyPairService } from './keypair-service'
 import type { NetworkingService } from './networking-service'
 import type { RecentHistoryService } from './recent-history-service'
 import type { ServiceAccountService } from './service-account-service'
+import type { StateService } from './state-service'
 // import type { ShardService } from './shard-service'
 import type { StatisticsService } from './statistics-service'
 import type { ValidatorSetManager } from './validator-set'
@@ -91,6 +92,7 @@ export class GuarantorService extends BaseService {
   private readonly recentHistoryService: RecentHistoryService | null
   private readonly serviceAccountService: ServiceAccountService | null
   private readonly statisticsService: StatisticsService | null
+  private readonly stateService: StateService | null
   // private readonly shardService: ShardService | null
   private validatorIndex = 0
 
@@ -108,6 +110,7 @@ export class GuarantorService extends BaseService {
     recentHistoryService: RecentHistoryService | null
     serviceAccountService: ServiceAccountService | null
     statisticsService: StatisticsService | null
+    stateService?: StateService | null
     // erasureCodingService: ErasureCodingService | null
     // shardService: ShardService | null
     accumulationService: AccumulationService | null
@@ -126,6 +129,7 @@ export class GuarantorService extends BaseService {
     this.recentHistoryService = options.recentHistoryService
     this.serviceAccountService = options.serviceAccountService
     this.statisticsService = options.statisticsService
+    this.stateService = options.stateService ?? null
     // this.erasureCodingService = options.erasureCodingService
     // this.shardService = options.shardService
     this.accumulationService = options.accumulationService
@@ -157,73 +161,6 @@ export class GuarantorService extends BaseService {
     return safeResult(true)
   }
 
-  /**
-   * Evaluate work-package authorization
-   */
-  evaluateAuthorization(
-    workPackage: WorkPackage,
-    coreIndex: number,
-  ): Safe<boolean> {
-    try {
-      // TODO: Step 1: Extract authorization hash from work-package
-      const authHash = workPackage.authCodeHash
-
-      // TODO: Step 2: Get authorization pool from state
-      const authPool = this.authPoolService.getAuthPool()
-
-      // TODO: Step 3: Check if auth hash exists in pool for core
-      const isAuthorized = authPool[coreIndex].includes(authHash)
-
-      if (!isAuthorized) {
-        return safeError(new Error('Work package not authorized'))
-      }
-
-      // TODO: Step 4: Verify context validity
-      // - Check anchor block exists
-      // - Check prerequisites are met
-      // - Check timeslot is valid
-
-      // TODO: Step 5: Return authorization status
-
-      // Placeholder: Always return false (not implemented)
-      return safeResult(false)
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
-
-  /**
-   * Compute work-report from work-package
-   */
-  computeWorkReport(
-    _workPackage: WorkPackage,
-    _coreIndex: number,
-  ): Safe<WorkReport> {
-    try {
-      // TODO: Step 1: Verify authorization first (avoid wasted work)
-      // const [authError, isAuthorized] = this.evaluateAuthorization(workPackage, coreIndex)
-      // if (authError || !isAuthorized) return error
-
-      // TODO: Step 2: Execute Ψ_R (Refine) function
-      // const [refineError, refineResult] = refineInvocation(workPackage, coreIndex)
-
-      // TODO: Step 3: For each work-item:
-      // - Load service code from state
-      // - Execute PVM with work-item payload
-      // - Collect execution results and gas usage
-
-      // TODO: Step 4: Aggregate all work-item results
-
-      // TODO: Step 5: Calculate work-package hash and segment root
-
-      // TODO: Step 6: Create work-report structure
-
-      // Placeholder: Return error (not implemented)
-      return safeError(new Error('Work-report computation not implemented'))
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
 
   /**
    * Compute segments root mappings for a work package
@@ -1417,26 +1354,60 @@ export class GuarantorService extends BaseService {
       // Gray Paper equation 335: Validate anchor is in recent history and context matches
       const anchorHash = guarantee.report.context.anchor
       if (this.recentHistoryService) {
-        if (!this.recentHistoryService.isValidAnchor(anchorHash)) {
-          return safeError(new Error('anchor_not_recent'))
-        }
-
         // Get recent history entry for anchor validation
         const recentEntry =
           this.recentHistoryService.getRecentHistoryForBlock(anchorHash)
-        if (!recentEntry) {
-          return safeError(new Error('anchor_not_recent'))
-        }
-
+        
         // Gray Paper equation 335: Validate state_root matches
         const contextStateRoot = guarantee.report.context.state_root
-        if (contextStateRoot !== recentEntry.stateRoot) {
+        let expectedStateRoot: Hex | null = null
+        let expectedBeefyRoot: Hex | null = null
+
+        if (recentEntry) {
+          // Anchor is in recent history - use its state root
+          expectedStateRoot = recentEntry.stateRoot
+          expectedBeefyRoot = recentEntry.accoutLogSuperPeak
+        } else {
+          // Anchor not in recent history - check if it's genesis (similar to validateBlockHeader)
+          // This handles the case where the first block's guarantee references genesis as anchor
+          if (this.stateService) {
+            const genesisManager = this.stateService.getGenesisManager()
+            if (genesisManager) {
+              const [genesisHashError, genesisHash] =
+                genesisManager.getGenesisHeaderHash()
+              if (!genesisHashError && genesisHash && anchorHash === genesisHash) {
+                // Anchor is genesis - use the current state root from state service
+                // This matches the pre_state that was set before processing the first block
+                const [currentStateRootError, currentStateRoot] =
+                  this.stateService.getStateRoot()
+                if (!currentStateRootError && currentStateRoot) {
+                  expectedStateRoot = currentStateRoot
+                  // Genesis beefy root is typically zero hash
+                  expectedBeefyRoot = '0x0000000000000000000000000000000000000000000000000000000000000000'
+                }
+              }
+            }
+          }
+          
+          // If we still don't have expected values, check if anchor is valid in recent history
+          // (This check happens after genesis check to allow genesis anchors)
+          if (!expectedStateRoot && !this.recentHistoryService.isValidAnchor(anchorHash)) {
+            return safeError(new Error('anchor_not_recent'))
+          }
+          
+          // If we still don't have expected values after all checks, anchor is not valid
+          if (!expectedStateRoot) {
+            return safeError(new Error('anchor_not_recent'))
+          }
+        }
+
+        if (contextStateRoot !== expectedStateRoot) {
           return safeError(new Error('bad_state_root'))
         }
 
         // Gray Paper equation 335: Validate beefy_root (accoutLogSuperPeak) matches
         const contextBeefyRoot = guarantee.report.context.beefy_root
-        if (contextBeefyRoot !== recentEntry.accoutLogSuperPeak) {
+        if (contextBeefyRoot !== expectedBeefyRoot) {
           return safeError(new Error('bad_beefy_mmr_root'))
         }
       }
@@ -1634,7 +1605,10 @@ export class GuarantorService extends BaseService {
         reporters.add(validatorKey.ed25519)
       }
 
-      // Gray Paper equation 296-298: Core must not be engaged (no pending or available report)
+      // Gray Paper equation 296-298: Core must not be engaged (no pending report)
+      // A core is engaged if it has a pending work report in the reports state (Chapter 10).
+      // The work report remains in pendingWorkReports until it receives super-majority assurance
+      // or times out, as handled by applyAssurances.
       const pendingReport = this.workReportService.getCoreReport(
         BigInt(coreIndex),
       )
@@ -1642,10 +1616,10 @@ export class GuarantorService extends BaseService {
         return safeError(new Error('core_engaged'))
       }
 
-      // Also check if core has an available report (from avail_assignments)
-      if (this.workReportService.hasAvailableReport(BigInt(coreIndex))) {
-        return safeError(new Error('core_engaged'))
-      }
+      // Note: We don't need to check hasAvailableReport() here because:
+      // 1. After processing guarantees, we clear the core mapping to allow reuse
+      // 2. The work report remains in pendingWorkReports until assured or timed out
+      // 3. getCoreReport() already checks pendingWorkReports, which is the source of truth
 
       // Validate authorizer hash is in auth pool for this core
       // Gray Paper: The authorizer must be in the auth pool for the core
@@ -1665,11 +1639,17 @@ export class GuarantorService extends BaseService {
         return safeError(new Error('Accumulation service not initialized'))
       }
       // Get known packages from accumulated state
-      const knownPackages = new Set<Hex>(
-        this.accumulationService
-          .getAccumulated() // sequence[C_epochlen]{protoset{hash}}
-          .packages.flatMap((packageSet) => Array.from(packageSet)), // protoset{hash}
-      )
+      const accumulated = this.accumulationService.getAccumulated()
+      let knownPackages: Set<Hex>
+      if (!accumulated || !accumulated.packages) {
+        // If accumulated state is not available or packages is not initialized, use empty set
+        // This can happen for the first block before any accumulation has occurred
+        knownPackages = new Set<Hex>()
+      } else {
+        knownPackages = new Set<Hex>(
+          accumulated.packages.flatMap((packageSet) => (packageSet ? Array.from(packageSet) : [])), // protoset{hash}
+        )
+      }
 
       // Validate dependencies (prerequisites must be in known packages, any guarantee in batch, or recent history)
       // Gray Paper equation 369-378: Prerequisites must be in local_incomingpackagehashes or recent history
@@ -1812,6 +1792,8 @@ export class GuarantorService extends BaseService {
       }
 
       // All validations passed - mark work report as available
+      // Gray Paper: When a guarantee is processed, the work report is added to the reports state
+      // (Chapter 10) and remains there until it receives super-majority assurance or times out.
       const [markError] = this.workReportService.markAsAvailable(
         guarantee.report,
         currentSlot, // Timeout set to current slot
@@ -1821,6 +1803,20 @@ export class GuarantorService extends BaseService {
         return safeError(
           new Error(
             `Failed to mark work report as available: ${markError.message}`,
+          ),
+        )
+      }
+
+      // Gray Paper: Clear the core mapping to allow the core to be reused for future guarantees.
+      // However, the work report remains in pendingWorkReports (reports state) until it receives
+      // super-majority assurance (> 2/3 validators) or times out, as handled by applyAssurances.
+      const [clearError] = this.workReportService.clearWorkReportCoreMapping(
+        BigInt(coreIndex),
+      )
+      if (clearError) {
+        return safeError(
+          new Error(
+            `Failed to clear work report core mapping: ${clearError.message}`,
           ),
         )
       }

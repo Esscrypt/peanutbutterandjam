@@ -20,15 +20,15 @@ import {
   bytesToHex,
   type EventBusService,
   hexToBytes,
-  logger
+  logger,
+  zeroHash
 } from '@pbnj/core'
 import {
   isSafroleTicket,
   verifyFallbackSealSignature,
   verifyTicketBasedSealSignature,
 } from '@pbnj/safrole'
-import { calculateBlockHashFromHeader } from '@pbnj/serialization'
-import type { BlockStore } from '@pbnj/state'
+import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import type { Block, BlockHeader, ValidatorPublicKeys } from '@pbnj/types'
 import {
   BaseService,
@@ -37,7 +37,6 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/types'
-import { zeroHash } from '../../../packages/core/src/utils/crypto'
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -88,7 +87,6 @@ export class BlockImporterService extends BaseService {
     validatorSetManagerService: ValidatorSetManager
     entropyService: EntropyService
     sealKeyService: SealKeyService
-    blockStore: BlockStore | null
     assuranceService: AssuranceService
     guarantorService: GuarantorService
     ticketService: TicketService
@@ -224,7 +222,35 @@ export class BlockImporterService extends BaseService {
       return safeError(blockHeaderValidationError)
     }
 
-    // read relevant GP sections first
+    // Update previous block's state root to parent_state_root BEFORE processing guarantees
+    // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
+    // This must happen before guarantee validation because guarantees may reference the parent block
+    // as an anchor, and the parent block's state root must be correct for validation to pass
+    if (this.recentHistoryService.getRecentHistory().length > 0) {
+      const previousEntry =
+        this.recentHistoryService.getRecentHistory()[
+          this.recentHistoryService.getRecentHistory().length - 1
+        ]
+      previousEntry.stateRoot = block.header.priorStateRoot
+    }
+
+    // Gray Paper: Process assurances FIRST, then guarantees
+    // From the perspective of a block's state-transition, the assurances are best processed first
+    // since each core may only have a single work-report pending its package becoming available at a time.
+    // This removes work reports that became available (super-majority) or timed out, freeing cores
+    // for new guarantees to be processed.
+    const [assuranceValidationError] = this.assuranceService.applyAssurances(
+      block.body.assurances,
+      Number(block.header.timeslot),
+      block.header.parent,
+      this.configService,
+    )
+    if (assuranceValidationError) {
+      return safeError(assuranceValidationError)
+    }
+
+    // Process guarantees AFTER assurances
+    // This allows new work reports to be added to cores that were freed by assurances
     const [guaranteeValidationError, reporters] =
       this.guarantorService.applyGuarantees(
         block.body.guarantees,
@@ -235,17 +261,6 @@ export class BlockImporterService extends BaseService {
     }
     if (!reporters) {
       return safeError(new Error('Guarantee validation failed'))
-    }
-
-    // validate the assurances
-    const [assuranceValidationError] = this.assuranceService.applyAssurances(
-      block.body.assurances,
-      Number(block.header.timeslot),
-      block.header.parent,
-      this.configService,
-    )
-    if (assuranceValidationError) {
-      return safeError(assuranceValidationError)
     }
 
     // Process winnersMark from block header if present
@@ -299,23 +314,15 @@ export class BlockImporterService extends BaseService {
     // Update entropy accumulator with VRF signature from block header
     // Gray Paper Eq. 174: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
     // This MUST happen for EVERY block, even empty ones, as entropy is part of the state
+    // Gray Paper pvm_invocations.tex Eq. 185: accumulation uses entropyaccumulator' (updated value)
+    // MUST await to ensure entropy is updated before accumulation uses it
     // Emit bestBlockChanged event to trigger entropy update (EntropyService listens to this)
-    this.eventBusService.emitBestBlockChanged(block.header)
+    await this.eventBusService.emitBestBlockChanged(block.header)
 
     // Update thetime (C(11)) to the block's timeslot
     // Gray Paper merklization.tex C(11): thetime is the most recent block's timeslot index
     // This MUST happen for EVERY block, even empty ones, as thetime is part of the state
     this.clockService.setLatestReportedBlockTimeslot(block.header.timeslot)
-
-    // Update statistics (activity) for this block
-    // Gray Paper Eq. 46: Increment block count for author, update validator/core/service stats
-    // This MUST happen for EVERY block, even empty ones, as activity is part of the state
-    // Note: We call applyBlockDeltas directly instead of emitting BlockProcessedEvent
-    this.statisticsService.applyBlockDeltas(
-      block.body,
-      block.header.timeslot,
-      Number(block.header.authorIndex),
-    )
 
     // Update authpool for this block
     // Gray Paper Eq. 26-27: authpool'[c] ≡ tail(F(c)) + [authqueue'[c][H_timeslot]]^C_authpoolsize
@@ -329,16 +336,26 @@ export class BlockImporterService extends BaseService {
     }
 
     // Process accumulations for this block
-    // Gray Paper: This processes ready work-reports and updates lastAccumulationOutput
+    // Gray Paper: This enqueues new work reports and processes ready work-reports
     // This MUST happen before updating recent history, as recent history uses accumulation outputs
-    await this.accumulationService.processAccumulation(block.header.timeslot)
+    // Extract work reports from guarantees
+    const workReports = block.body.guarantees.map((guarantee) => guarantee.report)
+    const accumulationResult = await this.accumulationService.applyTransition(
+      block.header.timeslot,
+      workReports,
+    )
+    if (!accumulationResult.ok) {
+      return safeError(accumulationResult.err)
+    }
 
     // Update accout belt before adding to recent history
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     // where s is the encoded accumulation outputs from this block
     // Note: merklizewb([]) returns zero hash, so we always update even with empty outputs
+// TODO: add last accumulation outputs to the accout belt
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
+
     const [beltError] = this.recentHistoryService.updateAccoutBelt(
       lastAccumulationOutputs,
     )
@@ -355,7 +372,8 @@ export class BlockImporterService extends BaseService {
     }
 
     // Add entry with temporary state root (will be updated after we calculate final state root)
-    // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
+    // Note: Previous entry's state_root was already updated above before processing guarantees
+    // Gray Paper eq 41: New entry's state_root should be 0x0 initially
     this.recentHistoryService.addBlockWithSuperPeak(
       {
         headerHash: headerHashForHistory,
@@ -367,7 +385,19 @@ export class BlockImporterService extends BaseService {
           ]),
         ),
       },
-      block.header.priorStateRoot,
+      block.header.priorStateRoot, // Still pass for consistency, but update already happened above
+    )
+
+    // Update statistics (activity) for this block at the end, after accumulation is processed
+    // Gray Paper Eq. 46: Increment block count for author, update validator/core/service stats
+    // This MUST happen for EVERY block, even empty ones, as activity is part of the state
+    // Note: Accumulation statistics are now updated directly by AccumulationService
+    // via updateServiceAccumulationStats(), so we don't pass them here
+    this.statisticsService.applyBlockDeltas(
+      block.body,
+      block.header.timeslot,
+      Number(block.header.authorIndex),
+      lastAccumulationOutputs,
     )
 
     return safeResult(undefined)
@@ -564,14 +594,6 @@ export class BlockImporterService extends BaseService {
     }
     const publicKeys = validatorKeys
 
-    logger.info('[BlockImporter] Validating seal signature', {
-      slot: header.timeslot.toString(),
-      authorIndex: header.authorIndex.toString(),
-      expectedSealKey: publicKeys.bandersnatch,
-      retrievedSealKey: sealKey ? bytesToHex(sealKey as Uint8Array) : 'null',
-      activeValidatorsSize: activeValidators.size,
-    })
-
     // Create unsigned header (header without seal signature)
     const unsignedHeader = {
       parent: header.parent,
@@ -590,18 +612,6 @@ export class BlockImporterService extends BaseService {
 
     // Determine sealing mode and validate accordingly
     const isTicketBased = sealKey && isSafroleTicket(sealKey)
-    let sealKeyDisplay: string
-    if (!sealKey) {
-      sealKeyDisplay = 'null'
-    } else if (isSafroleTicket(sealKey)) {
-      sealKeyDisplay = sealKey.id
-    } else {
-      sealKeyDisplay = bytesToHex(sealKey as Uint8Array)
-    }
-    logger.info('Sealing mode', {
-      isTicketBased,
-      sealKey: sealKeyDisplay,
-    })
     if (isTicketBased) {
       logger.info('Validating ticket-based seal signature', {
         slot: header.timeslot.toString(),
@@ -683,19 +693,8 @@ export class BlockImporterService extends BaseService {
     header: BlockHeader,
     validatorSetManagerService: ValidatorSetManager,
   ): Safe<boolean> {
-    logger.info('Validating VRF signature', {
-      authorIndex: Number(header.authorIndex),
-      timeslot: Number(header.timeslot),
-      vrfSigLength: header.vrfSig.length,
-      sealSigLength: header.sealSig.length,
-    })
-
     // Get validator's Bandersnatch public key from active set
     const activeValidators = validatorSetManagerService.getActiveValidators()
-    logger.debug('Active validators count', {
-      count: activeValidators.size,
-      authorIndex: Number(header.authorIndex),
-    })
 
     const validatorKeys = activeValidators.get(Number(header.authorIndex))
     if (!validatorKeys) {
@@ -711,10 +710,6 @@ export class BlockImporterService extends BaseService {
       )
     }
     const authorPublicKey = hexToBytes(validatorKeys.bandersnatch)
-    logger.debug('Retrieved validator public key', {
-      authorIndex: Number(header.authorIndex),
-      publicKeyHex: validatorKeys.bandersnatch.substring(0, 20) + '...',
-    })
 
     // Extract VRF output from seal signature using banderout function
     // Gray Paper: banderout{H_sealsig} - first 32 bytes of VRF output hash
@@ -727,9 +722,6 @@ export class BlockImporterService extends BaseService {
       })
       return safeError(extractError)
     }
-    logger.debug('Extracted seal output', {
-      sealOutputHex: bytesToHex(sealOutput).substring(0, 20) + '...',
-    })
 
     // Verify VRF signature using existing entropy VRF verification function
     // Gray Paper Eq. 158: H_vrfsig ∈ bssignature{H_authorbskey}{Xentropy ∥ banderout{H_sealsig}}{[]}
@@ -750,12 +742,7 @@ export class BlockImporterService extends BaseService {
       return safeError(verifyError)
     }
 
-    if (isValid) {
-      logger.debug('VRF signature is valid', {
-        authorIndex: Number(header.authorIndex),
-        timeslot: Number(header.timeslot),
-      })
-    } else {
+    if (!isValid) {
       logger.error('VRF signature is invalid', {
         authorIndex: Number(header.authorIndex),
         timeslot: Number(header.timeslot),

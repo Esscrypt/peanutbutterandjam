@@ -24,7 +24,7 @@ This document outlines the step-by-step implementation of the JAM Simple Network
   "dependencies": {
     "@pbnj/types": "workspace:*",
     "@pbnj/core": "workspace:*",
-    "@pbnj/serialization": "workspace:*",
+    "@pbnj/codec": "workspace:*",
     "@infisical/quic": "^1.0.0",
     "@stablelib/ed25519": "^2.0.1",
     "blakejs": "^1.2.1",

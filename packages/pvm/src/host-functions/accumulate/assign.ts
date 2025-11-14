@@ -47,6 +47,16 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     const C_AUTH_QUEUE_SIZE = 80n // Cauthqueuesize
     const C_CORE_COUNT = this.configService.numCores // Ccorecount
 
+    // Log all input parameters
+    context.log('ASSIGN host function invoked', {
+      coreIndex: coreIndex.toString(),
+      authQueueOffset: authQueueOffset.toString(),
+      serviceIdToAssign: serviceIdToAssign.toString(),
+      currentServiceId: implications[0].id.toString(),
+      manager: implications[0].state.manager.toString(),
+      numCores: C_CORE_COUNT.toString(),
+    })
+
     // Read auth queue from memory (80 entries * 32 bytes each)
     const authQueueLength = C_AUTH_QUEUE_SIZE * 32n
     const [authQueueData, faultAddress] = ram.readOctets(

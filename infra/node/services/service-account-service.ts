@@ -15,8 +15,6 @@ import {
   type SlotChangeEvent,
 } from '@pbnj/core'
 import type { PreimageRequestProtocol } from '@pbnj/networking'
-import { encodePreimage } from '@pbnj/serialization'
-import type { DbPreimage, PreimageStore } from '@pbnj/state'
 import {
   BaseService,
   type IServiceAccountService,
@@ -65,7 +63,6 @@ export class ServiceAccountService
     Map<Hex, Map<bigint, PreimageRequestStatus>>
   > = new Map()
 
-  private readonly preimageStore: PreimageStore | null
   private readonly configService: ConfigService
   private readonly eventBusService: EventBusService
   private readonly clockService: ClockService
@@ -73,7 +70,6 @@ export class ServiceAccountService
   private readonly preimageRequestProtocol: PreimageRequestProtocol | null
 
   constructor(options: {
-    preimageStore: PreimageStore | null
     configService: ConfigService
     eventBusService: EventBusService
     clockService: ClockService
@@ -82,7 +78,6 @@ export class ServiceAccountService
   }) {
     super('preimage-holder-service')
     this.networkingService = options.networkingService
-    this.preimageStore = options.preimageStore
     this.configService = options.configService
     this.eventBusService = options.eventBusService
     this.clockService = options.clockService
@@ -106,21 +101,6 @@ export class ServiceAccountService
   }
 
   async start(): SafePromise<boolean> {
-    if (this.preimageStore) {
-      const [error, preimages] = await this.preimageStore.getAllPreimages()
-      if (error) {
-        return safeError(error)
-      }
-      if (!preimages) {
-        return safeError(new Error('No preimages found'))
-      }
-      for (const preimage of preimages) {
-        this.preimageCache.set(preimage.hash, {
-          requester: preimage.serviceIndex,
-          blob: preimage.data,
-        })
-      }
-    }
     return safeResult(true)
   }
 
@@ -137,34 +117,6 @@ export class ServiceAccountService
     this.eventBusService.removeSlotChangeCallback(
       this.handleSlotChanged.bind(this),
     )
-
-    if (this.preimageStore) {
-      await Promise.all(
-        this.preimageCache.entries().map(([hash, preimage]) => {
-          const [encodeError, encodedPreimage] = encodePreimage(preimage)
-          if (encodeError) {
-            return safeError(encodeError)
-          }
-          const [error, creationSlot] = this.getPreimageCreationSlot(
-            preimage.requester,
-            hash,
-            BigInt(hexToBytes(preimage.blob).length),
-          )
-          if (error) {
-            return safeError(error)
-          }
-          if (!creationSlot) {
-            return safeError(new Error('Creation slot not found'))
-          }
-          return this.preimageStore!.storePreimage(
-            encodedPreimage,
-            preimage.requester,
-            hash,
-            creationSlot,
-          )
-        }),
-      )
-    }
 
     return safeResult(true)
   }
@@ -292,19 +244,6 @@ export class ServiceAccountService
       hashToBlobLength.set(blobLength, [creationSlot])
     }
 
-    if (this.preimageStore) {
-      const [encodeError, encodedPreimage] = encodePreimage(preimage)
-      if (encodeError) {
-        return safeError(encodeError)
-      }
-      this.preimageStore.storePreimage(
-        encodedPreimage,
-        preimage.requester,
-        hash,
-        creationSlot,
-      )
-    }
-
     return safeResult(hash)
   }
 
@@ -382,22 +321,6 @@ export class ServiceAccountService
     if (entry) {
       return safeResult(entry)
     }
-    if (!this.preimageStore) {
-      return safeError(new Error('Preimage store not found'))
-    }
-    this.preimageStore.getPreimage(hash).then((response: Safe<DbPreimage>) => {
-      if (response[0]) {
-        return safeError(response[0])
-      }
-      if (!response[1]) {
-        // TODO: request the preimage from peers
-        return safeResult(null)
-      }
-      return safeResult({
-        requester: response[1].serviceIndex,
-        blob: response[1],
-      })
-    })
     return safeResult(null)
   }
 
@@ -414,13 +337,7 @@ export class ServiceAccountService
    * @returns True if preimage was removed
    */
   async removePreimage(hash: Hex): SafePromise<boolean> {
-    const entry = this.preimageCache.get(hash)
-    if (!entry) {
-      return safeResult(false)
-    }
-    if (this.preimageStore) {
-      this.preimageStore.deletePreimage(hash)
-    }
+    this.preimageCache.delete(hash)
     return safeResult(true)
   }
 
@@ -433,25 +350,6 @@ export class ServiceAccountService
   async handleSlotChanged(slotChangeEvent: SlotChangeEvent): SafePromise<void> {
     const CEXPUNGE_PERIOD = BigInt(this.configService.preimageExpungePeriod) // Gray Paper constant
 
-    if (this.preimageStore) {
-      const [error, result] = await this.preimageStore.getAllPreimages()
-      if (error) {
-        return safeError(error)
-      }
-      if (!result) {
-        return safeError(new Error('No preimages found'))
-      }
-
-      for (const entry of result) {
-        // Calculate expiration timeslot
-
-        const expirationSlot = entry.creationSlot + CEXPUNGE_PERIOD
-
-        if (slotChangeEvent.slot > expirationSlot) {
-          await this.removePreimage(entry.hash)
-        }
-      }
-    }
 
     // update all requests (per service)
     for (const [_, hashMap] of this.serviceRequests.entries()) {

@@ -1,9 +1,9 @@
-import { hexToBytes, logger } from '@pbnj/core'
+import { hexToBytes } from '@pbnj/core'
 import {
   calculateWorkPackageHash,
   encodeWorkItem,
   encodeWorkPackage,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -60,49 +60,71 @@ export class FetchHostFunction extends BaseHostFunction {
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
     const selector = context.registers[10]
-    const outputOffset = context.registers[7]
-    const fromOffset = context.registers[8]
-    const length = context.registers[9]
+    const outputOffset = context.registers[7] // memory offset to write the data to
+    const fromOffset = context.registers[8] // start offset in the fetched data
+    const length = context.registers[9] // number of bytes to write to memory
 
-    logger.info('Fetching data', { selector, outputOffset, fromOffset, length })
+    context.log('Fetch host function: Executing', {
+      selector: selector.toString(),
+      outputOffset: outputOffset.toString(),
+      fromOffset: fromOffset.toString(),
+      length: length.toString(),
+    })
 
     // Fetch data based on selector according to Gray Paper specification
+    // Note: We always fetch to determine available length, even if requested length is 0
     const fetchedData = this.fetchData(selector, context, refineContext)
 
     // Write result to memory
     if (fetchedData === null) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      context.log('Fetch host function: Data not found', {
+        selector: selector.toString(),
+      })
     } else {
       // Write data to memory
-      const actualLength = Math.min(
-        Number(length),
-        fetchedData.length - Number(fromOffset),
-      )
+      // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
+      // First clamp fromOffset to available data length
+      const clampedFromOffset = Math.min(Number(fromOffset), fetchedData.length)
+      // Then calculate available length after fromOffset
+      const availableLength = fetchedData.length - clampedFromOffset
+      // Finally clamp requested length to available data
+      const actualLength = Math.min(Number(length), availableLength)
       const dataToWrite = fetchedData.slice(
-        Number(fromOffset),
-        Number(fromOffset) + actualLength,
+        clampedFromOffset,
+        clampedFromOffset + actualLength,
       )
 
-      const [writable, faultAddress] = context.ram.isWritableWithFault(
-        outputOffset,
-        BigInt(dataToWrite.length),
-      )
-      if (!writable) {
-        return {
-          resultCode: RESULT_CODES.PANIC,
-          faultInfo: {
-            type: 'memory_write',
-            address: faultAddress ?? 0n,
-            details: 'Memory is not writable',
-          },
+      // Gray Paper: Empty range (length = 0) is always writable
+      // An empty set is a subset of any set, so \Nrange{o}{0} ⊆ \writable{\memory} is always true
+      if (dataToWrite.length > 0) {
+        // Write data (may be empty if length was 0 or fromOffset beyond data)
+        const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
+        if (faultAddress) {
+          context.log('Fetch host function: Memory write fault', {
+            selector: selector.toString(),
+            outputOffset: outputOffset.toString(),
+            faultAddress: faultAddress.toString(),
+          })
+          return {
+            resultCode: RESULT_CODES.PANIC,
+            faultInfo: {
+              type: 'memory_write',
+              address: faultAddress,
+              details: 'Memory is not writable',
+            },
+          }
         }
       }
 
-      context.ram.writeOctets(outputOffset, dataToWrite)
-
       // Return length of fetched data
       context.registers[7] = BigInt(fetchedData.length)
+      context.log('Fetch host function: Data fetched successfully', {
+        selector: selector.toString(),
+        dataLength: fetchedData.length.toString(),
+        actualLength: actualLength.toString(),
+      })
     }
 
     return {

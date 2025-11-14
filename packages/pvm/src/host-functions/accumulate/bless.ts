@@ -51,6 +51,18 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       numberOfAlwaysAccessors,
     ] = registers.slice(7, 13)
 
+    // Log all input parameters
+    context.log('BLESS host function invoked', {
+      managerServiceId: managerServiceId.toString(),
+      assignersOffset: assignersOffset.toString(),
+      delegatorServiceId: delegatorServiceId.toString(),
+      registrarServiceId: registrarServiceId.toString(),
+      alwaysAccessorsOffset: alwaysAccessorsOffset.toString(),
+      numberOfAlwaysAccessors: numberOfAlwaysAccessors.toString(),
+      currentServiceId: implications[0].id.toString(),
+      numCores: this.configService.numCores.toString(),
+    })
+
     // Read assigners array from memory (341 cores * 4 bytes each)
     const assignersLength = BigInt(this.configService.numCores) * 4n
     const [assignersData, faultAddress] = ram.readOctets(

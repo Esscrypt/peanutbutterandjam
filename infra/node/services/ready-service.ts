@@ -14,7 +14,7 @@
  */
 
 import { logger } from '@pbnj/core'
-import { calculateWorkReportHash } from '@pbnj/serialization'
+import { calculateWorkReportHash } from '@pbnj/codec'
 import {
   BaseService,
   type IConfigService,

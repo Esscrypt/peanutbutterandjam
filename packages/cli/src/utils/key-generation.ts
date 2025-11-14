@@ -3,7 +3,7 @@ import {
   deriveSecretSeeds,
   generateAlternativeName,
 } from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength } from '@pbnj/codec'
 import type { Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 

@@ -19,7 +19,7 @@
   "dependencies": {
     "@pbnj/core": "workspace:*",
     "@pbnj/safrole": "workspace:*",
-    "@pbnj/serialization": "workspace:*",
+    "@pbnj/codec": "workspace:*",
     "@pbnj/pvm": "workspace:*",
     "@pbnj/bandersnatch-vrf": "workspace:*",
     "@pbnj/erasure-coding": "workspace:*",

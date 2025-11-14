@@ -7,7 +7,7 @@
 
 import crypto from 'node:crypto'
 import { generateAlternativeName, signEd25519 } from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength } from '@pbnj/codec'
 import type { AlternativeName, KeyPair, Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import * as asn1js from 'asn1js'

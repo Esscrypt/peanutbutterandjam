@@ -41,7 +41,7 @@ import {
   IETFVRFVerifier,
 } from '@pbnj/bandersnatch-vrf'
 import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnj/core'
-import { encodeUnsignedHeader } from '@pbnj/serialization'
+import { encodeUnsignedHeader } from '@pbnj/codec'
 import type {
   IConfigService,
   IValidatorSetManager,

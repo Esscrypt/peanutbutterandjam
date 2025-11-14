@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -15,7 +14,7 @@ export class ADD_64Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA + valueB
 
-    logger.debug('Executing ADD_64 instruction', {
+    context.log('ADD_64: Addition of registerA and registerB to registerD', {
       operands: Array.from(context.instruction.operands),
       registerD,
       registerA,
@@ -31,12 +30,6 @@ export class ADD_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class SUB_64Instruction extends BaseInstruction {
@@ -51,7 +44,7 @@ export class SUB_64Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA - valueB
 
-    logger.debug('Executing SUB_64 instruction', {
+    context.log('SUB_64: Subtraction of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -66,12 +59,6 @@ export class SUB_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class MUL_64Instruction extends BaseInstruction {
@@ -86,7 +73,7 @@ export class MUL_64Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA * valueB
 
-    logger.debug('Executing MUL_64 instruction', {
+    context.log('MUL_64: Multiplication of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -101,12 +88,6 @@ export class MUL_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class DIV_U_64Instruction extends BaseInstruction {
@@ -123,7 +104,7 @@ export class DIV_U_64Instruction extends BaseInstruction {
     // Gray Paper: division by zero results in 2^64 - 1
     const result = valueB === 0n ? 2n ** 64n - 1n : valueA / valueB
 
-    logger.debug('Executing DIV_U_64 instruction', {
+    context.log('DIV_U_64: Division of unsigned registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -138,12 +119,6 @@ export class DIV_U_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class DIV_S_64Instruction extends BaseInstruction {
@@ -175,7 +150,7 @@ export class DIV_S_64Instruction extends BaseInstruction {
       result = signedResult < 0n ? signedResult + 2n ** 64n : signedResult
     }
 
-    logger.debug('Executing DIV_S_64 instruction', {
+    context.log('DIV_S_64: Division of signed registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -212,7 +187,7 @@ export class REM_U_64Instruction extends BaseInstruction {
     // Gray Paper: when B = 0, result = A
     const result = valueB === 0n ? valueA : valueA % valueB
 
-    logger.debug('Executing REM_U_64 instruction', {
+    context.log('REM_U_64: Remainder of unsigned registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -227,12 +202,6 @@ export class REM_U_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class REM_S_64Instruction extends BaseInstruction {
@@ -267,7 +236,7 @@ export class REM_S_64Instruction extends BaseInstruction {
       result = signedResult < 0n ? signedResult + 2n ** 64n : signedResult
     }
 
-    logger.debug('Executing REM_S_64 instruction', {
+    context.log('REM_S_64: Remainder of signed registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -282,10 +251,4 @@ export class REM_S_64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }

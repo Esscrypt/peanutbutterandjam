@@ -11,7 +11,7 @@
   "dependencies": {
     "@pbnj/core": "workspace:*",
     "@pbnj/types": "workspace:*",
-    "@pbnj/serialization": "workspace:*",
+    "@pbnj/codec": "workspace:*",
     "@noble/ed25519": "^2.1.0",
     "viem": "^2.21.54"
   },

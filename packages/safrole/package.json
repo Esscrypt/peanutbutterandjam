@@ -15,7 +15,7 @@
     "@noble/hashes": "catalog:",
     "@pbnj/bandersnatch-vrf": "workspace:*",
     "@pbnj/core": "workspace:*",
-    "@pbnj/serialization": "workspace:*",
+    "@pbnj/codec": "workspace:*",
     "@pbnj/types": "workspace:*"
   },
   "devDependencies": {

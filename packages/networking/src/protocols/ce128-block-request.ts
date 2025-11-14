@@ -14,7 +14,7 @@ import {
   encodeBlock,
   encodeFixedLength,
   encodeNatural,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   Block,
   BlockRequest,

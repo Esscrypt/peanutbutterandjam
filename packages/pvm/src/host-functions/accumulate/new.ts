@@ -1,4 +1,4 @@
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex, logger } from '@pbnj/core'
 import type { HostFunctionResult, ServiceAccount } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -50,6 +50,20 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       gratis,
       desiredId,
     ] = registers.slice(7, 13)
+
+    // Log all input parameters
+    context.log('NEW host function invoked', {
+      codeHashOffset: codeHashOffset.toString(),
+      codeHashLength: codeHashLength.toString(),
+      minAccGas: minAccGas.toString(),
+      minMemoGas: minMemoGas.toString(),
+      gratis: gratis.toString(),
+      desiredId: desiredId.toString(),
+      timeslot: timeslot.toString(),
+      currentServiceId: implications[0].id.toString(),
+      registrar: implications[0].state.registrar.toString(),
+      nextFreeId: implications[0].nextfreeid.toString(),
+    })
 
     // Read code hash from memory (32 bytes)
     const [codeHashData, faultAddress] = ram.readOctets(
@@ -144,6 +158,19 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       requests: new Map([[codeHashHex, new Map([[0n, []]])]]), // Initial request for code
     }
 
+    logger.info('[NEW Host Function] Creating new service account', {
+      newServiceId: newServiceId.toString(),
+      parentServiceId: imX.id.toString(),
+      timeslot: timeslot.toString(),
+      codeHash: codeHashHex,
+      minAccGas: minAccGas.toString(),
+      minMemoGas: minMemoGas.toString(),
+      gratis: gratis.toString(),
+      desiredId: desiredId.toString(),
+      balance: minBalance.toString(),
+      currentServiceBalance: currentService.balance.toString(),
+    })
+
     // Deduct balance from current service
     currentService.balance -= minBalance
 
@@ -152,6 +179,12 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
 
     // Update next free ID
     imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+
+    logger.info('[NEW Host Function] New service account created successfully', {
+      newServiceId: newServiceId.toString(),
+      nextFreeId: imX.nextfreeid.toString(),
+      totalAccounts: imX.state.accounts.size,
+    })
 
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)

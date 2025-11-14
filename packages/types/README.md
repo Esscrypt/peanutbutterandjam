@@ -43,7 +43,7 @@ All packages have been updated to use this centralized types package. The follow
 - `@pbnj/bandersnatch-vrf`
 - `@pbnj/block-authoring`
 - `@pbnj/codec`
-- `@pbnj/serialization`
+- `@pbnj/codec`
 
 ## Development
 

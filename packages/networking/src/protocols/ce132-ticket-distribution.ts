@@ -6,7 +6,7 @@
  */
 
 import { concatBytes, type EventBusService, type Hex } from '@pbnj/core'
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
 import type { Safe, SafePromise, TicketDistributionRequest } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'

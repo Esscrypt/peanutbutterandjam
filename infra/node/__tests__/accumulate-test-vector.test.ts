@@ -25,6 +25,7 @@ import { StatisticsService } from '../services/statistics-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ValidatorSetManager } from '../services/validator-set'
 import { PrivilegesService } from '../services/privileges-service'
+import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -100,7 +101,9 @@ describe('Accumulate Test Vector Execution', () => {
       // Test each vector
       for (const { name, vector } of testVectors) {
         describe(`Test Vector: ${name}`, () => {
-          it('should correctly transition accumulation state', async () => {
+          it(
+            'should correctly transition accumulation state',
+            async () => {
             // Create services
             const eventBusService = new EventBusService()
             const clockService = new ClockService({
@@ -109,7 +112,6 @@ describe('Accumulate Test Vector Execution', () => {
             })
             const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
             const serviceAccountService = new ServiceAccountService({
-              preimageStore: null,
               configService: configService,
               eventBusService: eventBusService,
               clockService: clockService,
@@ -134,11 +136,20 @@ describe('Accumulate Test Vector Execution', () => {
             const privilegesService = new PrivilegesService({
               configService: configService,
             })
+
+            const srsFilePath = path.join(
+              WORKSPACE_ROOT,
+              'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
+            )
+            const ringProver = new RingVRFProverWasm(srsFilePath)
+            const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
+            await ringProver.init()
+            await ringVerifier.init()
             const validatorSetManager = new ValidatorSetManager({
               eventBusService: eventBusService,
               sealKeyService: null,
               keyPairService: null,
-              ringProver: null,
+              ringProver: ringProver,
               ticketService: null,
               initialValidators: null,
               configService: configService,
@@ -155,7 +166,7 @@ describe('Accumulate Test Vector Execution', () => {
               authQueueService: authQueueService,
               accumulatePVM: pvm,
               readyService: readyService,
-              // statisticsService: statisticsService,
+              statisticsService: statisticsService,
               // entropyService: entropyService,
             })
 
@@ -289,7 +300,9 @@ describe('Accumulate Test Vector Execution', () => {
                 expect(postAccount.lastacc).toBe(expectedAccount.lastacc)
               }
             }
-          })
+          },
+            { timeout: 30000 }
+          )
         })
       }
     })

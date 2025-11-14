@@ -7,7 +7,7 @@
 
 import type { EventBusService, Hex } from '@pbnj/core'
 import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
 import type {
   Safe,
   SafePromise,

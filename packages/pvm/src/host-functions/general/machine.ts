@@ -1,4 +1,4 @@
-import { decodeBlob } from '@pbnj/serialization'
+import { decodeBlob } from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -72,6 +72,10 @@ export class MachineHostFunction extends BaseHostFunction {
     if (error || !programBlob) {
       // Return HUH (2^64 - 9) if program is invalid
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+      context.log('Machine host function: Invalid program blob', {
+        programLength: programData.length.toString(),
+        error: error?.message ?? 'null',
+      })
       return {
         resultCode: null, // continue execution
       }
@@ -81,6 +85,7 @@ export class MachineHostFunction extends BaseHostFunction {
     if (!refineContext) {
       // If no refine context available, return HUH
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+      context.log('Machine host function: No refine context available')
       return {
         resultCode: null, // continue execution
       }
@@ -93,6 +98,12 @@ export class MachineHostFunction extends BaseHostFunction {
 
     // Return machine ID
     context.registers[7] = machineId
+
+    context.log('Machine host function: PVM machine created', {
+      machineId: machineId.toString(),
+      programLength: programData.length.toString(),
+      initialPC: initialPC.toString(),
+    })
 
     return {
       resultCode: null, // continue execution

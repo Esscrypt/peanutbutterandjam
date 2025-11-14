@@ -1,4 +1,4 @@
-import { decodeBlob } from '@pbnj/serialization'
+import { decodeBlob } from '@pbnj/codec'
 import type { PVMInstruction } from '@pbnj/types'
 /**
  * PVM Parser implementation

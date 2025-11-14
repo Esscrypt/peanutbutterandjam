@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -9,38 +8,33 @@ export class SET_LT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Set if less than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterA(context.instruction.operands) // Destination is low nibble of operands[0]
-    const registerA = this.getRegisterB(context.instruction.operands) // Source is high nibble of operands[0]
-    const immediate = this.getImmediateValueUnsigned(
-      context.instruction.operands,
-      1,
-    )
+    // Gray Paper pvm.tex line 495: set_lt_u_imm: reg'_A = reg_B < immed_X
+    // Format: Two Registers & One Immediate (lines 459-471)
+    // l_X = min(4, max(0, ℓ - 1)) where ℓ = fskip
+    // immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+    // The immediate is sign-extended according to Gray Paper, but comparison is unsigned
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
-      registerA,
+      registerB,
     )
-    const result = registerValue < immediate ? 1n : 0n
+    // Unsigned comparison: reg'_A = reg_B < immed_X
+    const result = registerValue < immediateX ? 1n : 0n
 
-    logger.debug('Executing SET_LT_U_IMM instruction', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
+    context.log('Executing SET_LT_U_IMM instruction', {
+      registerD: registerA,
+      registerA: registerB,
+      immediate: immediateX.toString(),
+      registerValue: registerValue.toString(),
+      result: result.toString(),
     })
-    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    // Mutate context directly
-    
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValueUnsigned(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -50,37 +44,33 @@ export class SET_LT_S_IMMInstruction extends BaseInstruction {
   readonly description = 'Set if less than immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterA(context.instruction.operands) // Destination is low nibble of operands[0]
-    const registerA = this.getRegisterB(context.instruction.operands) // Source is high nibble of operands[0]
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    // Gray Paper pvm.tex line 496: set_lt_s_imm: reg'_A = signed(reg_B) < signed(immed_X)
+    // Format: Two Registers & One Immediate (lines 459-471)
+    // l_X = min(4, max(0, ℓ - 1)) where ℓ = fskip
+    // immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
-      registerA,
+      registerB,
     )
 
-    // Use signedCompare helper for proper signed comparison
-    const result = this.signedCompare(registerValue, immediate) < 0 ? 1n : 0n
+    // Signed comparison: reg'_A = signed(reg_B) < signed(immed_X)
+    const result = this.signedCompare(registerValue, immediateX) < 0 ? 1n : 0n
 
-    logger.debug('Executing SET_LT_S_IMM instruction', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
+    context.log('Executing SET_LT_S_IMM instruction', {
+      registerD: registerA,
+      registerA: registerB,
+      immediate: immediateX.toString(),
+      registerValue: registerValue.toString(),
+      result: result.toString(),
     })
-    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    // Mutate context directly
-    
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -90,38 +80,33 @@ export class SET_GT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Set if greater than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterA(context.instruction.operands) // Destination is low nibble of operands[0]
-    const registerA = this.getRegisterB(context.instruction.operands) // Source is high nibble of operands[0]
-    const immediate = this.getImmediateValueUnsigned(
-      context.instruction.operands,
-      1,
-    )
+    // Gray Paper pvm.tex: set_gt_u_imm: reg'_A = reg_B > immed_X
+    // Format: Two Registers & One Immediate (lines 459-471)
+    // l_X = min(4, max(0, ℓ - 1)) where ℓ = fskip
+    // immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+    // The immediate is sign-extended according to Gray Paper, but comparison is unsigned
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
-      registerA,
+      registerB,
     )
-    const result = registerValue > immediate ? 1n : 0n
+    // Unsigned comparison: reg'_A = reg_B > immed_X
+    const result = registerValue > immediateX ? 1n : 0n
 
-    logger.debug('Executing SET_GT_U_IMM instruction', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
+    context.log('Executing SET_GT_U_IMM instruction', {
+      registerD: registerA,
+      registerA: registerB,
+      immediate: immediateX.toString(),
+      registerValue: registerValue.toString(),
+      result: result.toString(),
     })
-    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    // Mutate context directly
-    
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValueUnsigned(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }
 
@@ -131,36 +116,32 @@ export class SET_GT_S_IMMInstruction extends BaseInstruction {
   readonly description = 'Set if greater than immediate (signed)'
 
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterA(context.instruction.operands) // Destination is low nibble of operands[0]
-    const registerA = this.getRegisterB(context.instruction.operands) // Source is high nibble of operands[0]
-    const immediate = this.getImmediateValue(context.instruction.operands, 1)
+    // Gray Paper pvm.tex: set_gt_s_imm: reg'_A = signed(reg_B) > signed(immed_X)
+    // Format: Two Registers & One Immediate (lines 459-471)
+    // l_X = min(4, max(0, ℓ - 1)) where ℓ = fskip
+    // immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+    const { registerA, registerB, immediateX } =
+      this.parseTwoRegistersAndImmediate(
+        context.instruction.operands,
+        context.fskip,
+      )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
-      registerA,
+      registerB,
     )
 
-    // Use signedCompare helper for proper signed comparison
-    const result = this.signedCompare(registerValue, immediate) > 0 ? 1n : 0n
+    // Signed comparison: reg'_A = signed(reg_B) > signed(immed_X)
+    const result = this.signedCompare(registerValue, immediateX) > 0 ? 1n : 0n
 
-    logger.debug('Executing SET_GT_S_IMM instruction', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
+    context.log('Executing SET_GT_S_IMM instruction', {
+      registerD: registerA,
+      registerA: registerB,
+      immediate: immediateX.toString(),
+      registerValue: registerValue.toString(),
+      result: result.toString(),
     })
-    this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    // Mutate context directly
-    
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
   }
 }

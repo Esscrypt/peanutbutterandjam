@@ -20,8 +20,7 @@ import {
   verifyWorkReportDistributionSignature,
 } from '@pbnj/guarantor'
 import type { WorkReportRequestProtocol } from '@pbnj/networking'
-import { calculateWorkReportHash } from '@pbnj/serialization'
-import type { WorkStore } from '@pbnj/state'
+import { calculateWorkReportHash } from '@pbnj/codec'
 import {
   BaseService,
   type GuaranteedWorkReport,
@@ -76,7 +75,6 @@ export class WorkReportService extends BaseService {
   private readonly pendingWorkReports: Map<bigint, PendingReport | null> =
     new Map()
 
-  private readonly workStore: WorkStore | null
   private readonly eventBus: EventBusService
   private readonly networkingService: NetworkingService | null
   private readonly ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
@@ -85,7 +83,6 @@ export class WorkReportService extends BaseService {
   private readonly entropyService: EntropyService | null
   private readonly clockService: ClockService | null
   constructor(options: {
-    workStore: WorkStore | null
     eventBus: EventBusService
     networkingService: NetworkingService | null
     ce136WorkReportRequestProtocol: WorkReportRequestProtocol | null
@@ -95,7 +92,6 @@ export class WorkReportService extends BaseService {
     clockService: ClockService | null
   }) {
     super('work-report-service')
-    this.workStore = options.workStore
     this.eventBus = options.eventBus
     this.networkingService = options.networkingService
     this.ce136WorkReportRequestProtocol = options.ce136WorkReportRequestProtocol
@@ -339,12 +335,6 @@ export class WorkReportService extends BaseService {
       })
     }
 
-    // Persist to database
-    // not awaited on purpose
-    if (this.workStore) {
-      this.workStore.storeWorkReport(workReport, hash, 'pending')
-    }
-
     return safeResult(hash)
   }
 
@@ -371,12 +361,6 @@ export class WorkReportService extends BaseService {
     // remove from pending work reports
     this.pendingWorkReports.delete(coreIndex)
 
-    // Persist to database
-    // not awaited on purpose
-    if (this.workStore) {
-      this.workStore.storeWorkReport(workReport, hash, 'guaranteed')
-    }
-
     return safeResult(hash)
   }
 
@@ -399,6 +383,30 @@ export class WorkReportService extends BaseService {
     return safeResult(undefined)
   }
 
+  /**
+   * Clear work report core mapping to allow core reuse
+   * 
+   * Gray Paper: When a work report is included in a guarantee, we need to allow
+   * the core to be reused for future guarantees. However, the work report should
+   * remain in pendingWorkReports (reports state) until it receives super-majority
+   * assurance or times out.
+   * 
+   * This method only clears the core mapping, not the pending reports entry.
+   * The pending reports entry is cleared by applyAssurances when:
+   * 1. The work report receives super-majority assurance (> 2/3 validators)
+   * 2. The work report times out (exceeds C_assurancetimeoutperiod)
+   * 
+   * @param coreIndex - Core index to clear from mapping
+   */
+  clearWorkReportCoreMapping(coreIndex: bigint): Safe<void> {
+    // Remove from core mapping to allow core reuse
+    // Note: We do NOT remove from pendingWorkReports here - that's done by applyAssurances
+    // when the work report becomes available (super-majority) or times out
+    this.workReportHashByCore.delete(coreIndex)
+    
+    return safeResult(undefined)
+  }
+
   setAuthorizerHashByCore(coreIndex: number, authorizerHash: Hex): void {
     this.authorizerHashByCore.set(coreIndex, authorizerHash)
   }
@@ -410,18 +418,14 @@ export class WorkReportService extends BaseService {
   /**
    * Check if a core has an available work report
    * A core is engaged if it has either a pending or available report
+   * 
+   * Note: This checks the core mapping, not pendingWorkReports, because
+   * we clear the core mapping after processing guarantees to allow reuse,
+   * but keep the work report in pendingWorkReports until it's assured or times out.
    */
   hasAvailableReport(coreIndex: bigint): boolean {
-    const workReport = this.getWorkReportForCore(coreIndex)
-    if (!workReport) {
-      return false
-    }
-    const [hashError, hash] = calculateWorkReportHash(workReport)
-    if (hashError) {
-      return false
-    }
-    const state = this.workReportState.get(hash)
-    return state === 'available'
+    // Check if core mapping exists (core is engaged)
+    return this.workReportHashByCore.has(coreIndex)
   }
 
   /**
@@ -453,11 +457,13 @@ export class WorkReportService extends BaseService {
       // Update state to available
       this.workReportState.set(hash, 'available')
 
-      // Remove from pending reports (core is now available)
-      this.pendingWorkReports.delete(coreIndex)
-
-      // Store timeout for this core (for avail_assignments)
-      // TODO: Store timeout if needed for avail_assignments structure
+      // Gray Paper: Work reports in guarantees should be added to reports state (chapter 10)
+      // The reports state contains work reports that are "reported" but awaiting availability assurance
+      // Add to pending reports so it appears in the state (will be removed when it becomes available to super-majority or times out)
+      this.pendingWorkReports.set(coreIndex, {
+        workReport: workReport,
+        timeslot: Number(timeout),
+      })
 
       logger.debug('Work report marked as available', {
         hash,

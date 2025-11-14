@@ -1,9 +1,0 @@
-{
-  "extends": "@pbnj/typescript-config/base.json",
-  "compilerOptions": {
-    "baseUrl": "src",
-    "paths": {
-      "~/*": ["*"]
-    }
-  }
-}

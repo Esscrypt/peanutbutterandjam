@@ -14,7 +14,7 @@ import {
   logger,
   zeroHash,
 } from '@pbnj/core'
-import { encodeHeader, encodeUnsignedHeader } from '@pbnj/serialization'
+import { encodeHeader, encodeUnsignedHeader } from '@pbnj/codec'
 import type {
   BlockHeader,
   Extrinsic,

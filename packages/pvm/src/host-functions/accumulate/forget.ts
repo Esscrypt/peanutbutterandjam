@@ -42,6 +42,15 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const [hashOffset, preimageLength] = registers.slice(7, 9)
 
+    // Log all input parameters
+    context.log('FORGET host function invoked', {
+      hashOffset: hashOffset.toString(),
+      preimageLength: preimageLength.toString(),
+      timeslot: timeslot.toString(),
+      currentServiceId: implications[0].id.toString(),
+      expungePeriod: context.expungePeriod.toString(),
+    })
+
     // Read hash from memory (32 bytes)
     // Gray Paper line 924-927: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
     const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
@@ -86,7 +95,9 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    const C_EXPUNGE_PERIOD = 19200n // Gray Paper constant
+    // For test vectors, Cexpungeperiod = 32 (as per README)
+    // For production, Cexpungeperiod = 19200 (Gray Paper constant)
+    const expungePeriod = context.expungePeriod
 
     // Apply Gray Paper logic for different request states (line 935-938)
     if (request.length === 0) {
@@ -101,7 +112,7 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     } else if (request.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
       const [, y] = request
-      if (y < timeslot - C_EXPUNGE_PERIOD) {
+      if (y < timeslot - expungePeriod) {
         // Remove request and preimage completely
         requestMap.delete(preimageLength)
         if (requestMap.size === 0) {
@@ -122,7 +133,7 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     } else if (request.length === 3) {
       // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
       const [, y, w] = request
-      if (y < timeslot - C_EXPUNGE_PERIOD) {
+      if (y < timeslot - expungePeriod) {
         // Update to [w, t] (mark as unavailable again)
         requestMap.set(preimageLength, [w, timeslot])
       } else {

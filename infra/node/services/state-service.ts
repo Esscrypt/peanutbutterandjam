@@ -57,7 +57,7 @@ import {
   decodeTheTime,
   decodeValidatorSet,
   decodeVariableSequence,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   Accumulated,
   Activity,
@@ -113,6 +113,10 @@ export class StateService {
   // These are stored separately because we can't reverse the Blake hash
   // to get the original storage key or request hash
   private readonly rawCshKeys = new Map<Hex, Hex>()
+
+  // Store parsed preimage information for request key verification
+  // Map: serviceId -> Map: preimageHash -> blobLength
+  private readonly preimageInfo = new Map<bigint, Map<Hex, number>>()
 
   // Service delegates for state components
 
@@ -357,7 +361,7 @@ export class StateService {
 
       // C(255, s) = accounts (δ) - Service accounts (handled separately per service)
       case 255: {
-        if (!serviceId) {
+        if (serviceId === undefined) {
           throw new Error('Service ID is required for chapter 255')
         }
         const [error, accountCore] =
@@ -533,7 +537,11 @@ export class StateService {
   }
 
   setState(keyvals: { key: Hex; value: Hex }[]): Safe<void> {
-    // store the stateRoot here and in recentHistoryService
+    // First pass: Process all simple chapters (C(1) through C(16) and C(255, s))
+    // This ensures service accounts exist before processing C(s, h) keys
+    // Store C(s, h) keys in the order they appear to preserve insertion order
+    const cshKeys: Array<{ key: Hex; value: Hex; parsedStateKey: { serviceId: bigint; hash: Hex } }> = []
+
     for (const keyval of keyvals) {
       const [stateKeyError, parsedStateKey] = this.parseStateKey(keyval.key)
       if (stateKeyError) {
@@ -561,38 +569,52 @@ export class StateService {
           })
         }
       } else if ('serviceId' in parsedStateKey && 'hash' in parsedStateKey) {
-        // C(s, h) key - service storage/preimage/request
-        // Store the raw key-value pair for later inclusion in state trie
-        // This is necessary because we can't reverse the Blake hash to get the original keys
+        // C(s, h) key - defer processing until after all service accounts are set up
+        // Store immediately in rawCshKeys to preserve original order from test vectors
         this.rawCshKeys.set(keyval.key, keyval.value)
+        cshKeys.push({
+          key: keyval.key,
+          value: keyval.value,
+          parsedStateKey,
+        })
+      }
+    }
 
-        // Determine the type from the value format
-        const valueBytes = hexToBytes(keyval.value)
-        const serviceId = parsedStateKey.serviceId
-        const blakeHashFromKey = parsedStateKey.hash
+    // Second pass: Process all C(s, h) keys (storage, preimage, request)
+    // Service accounts should now exist
+    // Note: rawCshKeys was already populated in first pass to preserve order
+    for (const { key: keyvalKey, value: keyvalValue, parsedStateKey } of cshKeys) {
 
+      // Determine the type from the value format
+      const valueBytes = hexToBytes(keyvalValue)
+      const serviceId = parsedStateKey.serviceId
+      const blakeHashFromKey = parsedStateKey.hash
+
+      logger.debug('Parsed C(s, h) key', {
+        key: keyvalKey,
+        serviceId: serviceId.toString(),
+        hash: blakeHashFromKey,
+        valueLength: valueBytes.length,
+      })
+
+      try {
         const response = this.determineKeyType(valueBytes, blakeHashFromKey)
 
         switch (response.keyType) {
           case 'storage': {
-            // Ensure service account exists before setting storage
+            logger.debug('Determined C(s, h) key type: STORAGE', {
+              key: keyvalKey,
+              serviceId: serviceId.toString(),
+              storageKeyHash: response.key,
+              valueLength: response.value.length,
+            })
+            // Service account must already exist when parsing state
             const [storageAccountError, storageAccount] =
               this.serviceAccountsService.getServiceAccount(serviceId)
             if (storageAccountError || !storageAccount) {
-              // Create service account if it doesn't exist
-              this.serviceAccountsService.createServiceAccount(serviceId, {
-                codehash:
-                  '0x0000000000000000000000000000000000000000000000000000000000000000',
-                balance: 0n,
-                gratis: 0n,
-                minaccgas: 0n,
-                minmemogas: 0n,
-                octets: 0n,
-                items: 0n,
-                created: 0n,
-                lastacc: 0n,
-                parent: 0n,
-              })
+              throw new Error(
+                `Service account ${serviceId} does not exist when setting storage`,
+              )
             }
             const [storageError] = this.serviceAccountsService.setStorage(
               serviceId,
@@ -608,28 +630,30 @@ export class StateService {
             break
           }
           case 'preimage': {
-            // Ensure service account exists before setting preimage
+            logger.debug('Determined C(s, h) key type: PREIMAGE', {
+              key: keyvalKey,
+              serviceId: serviceId.toString(),
+              preimageHash: response.preimageHash,
+              blobLength: response.blob.length,
+            })
+            // Store preimage info for request key verification
+            if (!this.preimageInfo.has(serviceId)) {
+              this.preimageInfo.set(serviceId, new Map())
+            }
+            const servicePreimages = this.preimageInfo.get(serviceId)!
+            servicePreimages.set(response.preimageHash, response.blob.length)
+
+            // Service account must already exist when parsing state
             const [preimageAccountError, preimageAccount] =
               this.serviceAccountsService.getServiceAccount(serviceId)
             if (preimageAccountError || !preimageAccount) {
-              // Create service account if it doesn't exist
-              this.serviceAccountsService.createServiceAccount(serviceId, {
-                codehash:
-                  '0x0000000000000000000000000000000000000000000000000000000000000000',
-                balance: 0n,
-                gratis: 0n,
-                minaccgas: 0n,
-                minmemogas: 0n,
-                octets: 0n,
-                items: 0n,
-                created: 0n,
-                lastacc: 0n,
-                parent: 0n,
-              })
+              throw new Error(
+                `Service account ${serviceId} does not exist when setting preimage`,
+              )
             }
             const [preimageError] = this.serviceAccountsService.setPreimage(
               serviceId,
-              blakeHashFromKey,
+              response.preimageHash, // Use actual preimage hash, not blakeHashFromKey
               valueBytes,
             )
             if (preimageError) {
@@ -640,48 +664,111 @@ export class StateService {
             }
             break
           }
-          case 'request':
-            {
-              // Ensure service account exists before setting request
-              const [requestAccountError, requestAccount] =
-                this.serviceAccountsService.getServiceAccount(serviceId)
-              if (requestAccountError || !requestAccount) {
-                // Create service account if it doesn't exist
-                this.serviceAccountsService.createServiceAccount(serviceId, {
-                  codehash:
-                    '0x0000000000000000000000000000000000000000000000000000000000000000',
-                  balance: 0n,
-                  gratis: 0n,
-                  minaccgas: 0n,
-                  minmemogas: 0n,
-                  octets: 0n,
-                  items: 0n,
-                  created: 0n,
-                  lastacc: 0n,
-                  parent: 0n,
-                })
-              }
-              const [requestError] =
-                this.serviceAccountsService.setPreimageRequest(
-                  serviceId,
-                  blakeHashFromKey,
-                  response.timeslots,
+          case 'request': {
+            logger.debug('Determined C(s, h) key type: REQUEST', {
+              key: keyvalKey,
+              serviceId: serviceId.toString(),
+              timeslots: response.timeslots.map(t => t.toString()),
+            })
+
+            // Try to verify by matching against known preimages for this service
+            // Gray Paper: C(s, encode[4]{l} ∥ h) where l=blob_length, h=preimage_hash
+            const servicePreimages = this.preimageInfo.get(serviceId)
+            let matchedPreimageHash: Hex | undefined 
+
+            if (servicePreimages && servicePreimages.size > 0) {
+              // Try each known preimage for this service
+              for (const [preimageHash, blobLength] of servicePreimages.entries()) {
+                // Compute blake(encode[4]{l} ∥ h) where l=blobLength, h=preimageHash
+                const lengthPrefix = new Uint8Array(4)
+                const lengthView = new DataView(lengthPrefix.buffer)
+                lengthView.setUint32(0, blobLength, true) // little-endian
+
+                const preimageHashBytes = hexToBytes(preimageHash)
+                const combinedRequestKey = new Uint8Array(
+                  lengthPrefix.length + preimageHashBytes.length,
                 )
-              if (requestError) {
-                logger.warn('Failed to set preimage request', {
-                  serviceId: serviceId.toString(),
-                  error: requestError.message,
-                })
+                combinedRequestKey.set(lengthPrefix, 0)
+                combinedRequestKey.set(preimageHashBytes, lengthPrefix.length)
+
+                const [combinedRequestHashError, combinedRequestHash] =
+                  blake2bHash(combinedRequestKey)
+                if (!combinedRequestHashError && combinedRequestHash) {
+                  const combinedRequestHashBytes = hexToBytes(combinedRequestHash)
+                  const combinedRequestHashHex = bytesToHex(
+                    combinedRequestHashBytes.slice(0, 27),
+                  ) // First 27 bytes
+
+                  if (
+                    combinedRequestHashHex.toLowerCase() ===
+                    blakeHashFromKey.toLowerCase()
+                  ) {
+                    // Found matching preimage!
+                    matchedPreimageHash = preimageHash
+                    logger.debug('Request key verified against preimage', {
+                      key: keyvalKey,
+                      serviceId: serviceId.toString(),
+                      preimageHash: preimageHash,
+                      blobLength: blobLength,
+                    })
+                    break
+                  }
+                }
               }
             }
+
+            if (!matchedPreimageHash) {
+              logger.warn(
+                'Request key could not be matched to any known preimage',
+                {
+                  key: keyvalKey,
+                  serviceId: serviceId.toString(),
+                  stateKeyHash: blakeHashFromKey,
+                  checkedPreimages:
+                    servicePreimages?.size ?? 0,
+                  note: 'This may be a request for a preimage that has not been provided yet',
+                },
+              )
+              // Still set the request, but we can't determine the preimage hash
+              // Use blakeHashFromKey as a fallback (though it's not the actual preimage hash)
+              matchedPreimageHash = blakeHashFromKey
+            }
+
+            // Service account must already exist when parsing state
+            const [requestAccountError, requestAccount] =
+              this.serviceAccountsService.getServiceAccount(serviceId)
+            if (requestAccountError || !requestAccount) {
+              throw new Error(
+                `Service account ${serviceId} does not exist when setting preimage request`,
+              )
+            }
+            const [requestError] =
+              this.serviceAccountsService.setPreimageRequest(
+                serviceId,
+                matchedPreimageHash, // Use matched preimage hash, not blakeHashFromKey
+                response.timeslots,
+              )
+            if (requestError) {
+              logger.warn('Failed to set preimage request', {
+                serviceId: serviceId.toString(),
+                error: requestError.message,
+              })
+            }
             break
+          }
         }
-        logger.error('Unknown state key', {
-          key: keyval.key,
+      } catch (error) {
+        // Only log error if determineKeyType throws
+        logger.error('Failed to determine C(s, h) key type', {
+          key: keyvalKey,
+          serviceId: serviceId.toString(),
+          hash: blakeHashFromKey,
+          valueLength: valueBytes.length,
+          error: error instanceof Error ? error.message : String(error),
         })
-        // return safeError(new Error('Unknown state key'))
       }
     }
+
     return safeResult(undefined)
   }
 
@@ -753,11 +840,6 @@ export class StateService {
     // Calculate Merkle trie root from state trie
     // This is a simplified implementation - in production, use a proper Merkle trie library
     const stateRoot = this.calculateMerkleRoot(stateTrie)
-
-    logger.debug('State root calculated', {
-      stateRoot,
-      trieSize: Object.keys(stateTrie).length,
-    })
 
     return safeResult(stateRoot)
   }
@@ -1003,7 +1085,7 @@ export class StateService {
    * @param blakeHashFromKey - The Blake hash extracted from the state key (first 27 bytes)
    * @returns The determined key type: 'storage', 'preimage', or 'request'
    */
-  private determineKeyType(
+  public determineKeyType(
     valueBytes: Uint8Array,
     blakeHashFromKey: Hex,
   ):

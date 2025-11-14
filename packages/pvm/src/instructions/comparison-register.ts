@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -16,7 +15,7 @@ export class SET_LT_UInstruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA < valueB ? 1n : 0n
 
-    logger.debug('Executing SET_LT_U instruction', {
+    context.log('Executing SET_LT_U instruction', {
       registerD,
       registerA,
       registerB,
@@ -55,7 +54,7 @@ export class SET_LT_SInstruction extends BaseInstruction {
     // Use signedCompare helper for proper signed comparison
     const result = this.signedCompare(valueA, valueB) < 0 ? 1n : 0n
 
-    logger.debug('Executing SET_LT_S instruction', {
+    context.log('Executing SET_LT_S instruction', {
       registerD,
       registerA,
       registerB,

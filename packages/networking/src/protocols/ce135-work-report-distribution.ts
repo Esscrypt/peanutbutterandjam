@@ -21,7 +21,7 @@ import {
   encodeFixedLength,
   encodeNatural,
   encodeWorkReport,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   GuaranteedWorkReport,
   Safe,

@@ -124,7 +124,7 @@ describe('Disputes Service - JAM Test Vectors', () => {
               eventBusService: eventBusService,
               sealKeyService: null,
               keyPairService: null,
-              ringProver: null,
+              ringProver: null as unknown as any,
               ticketService: null,
               configService: configService,
               initialValidators: vector.pre_state.kappa.map((validator) => ({

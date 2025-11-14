@@ -44,6 +44,7 @@ export class PokeHostFunction extends BaseHostFunction {
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Poke host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -63,6 +64,11 @@ export class PokeHostFunction extends BaseHostFunction {
       length,
     )
     if (!data) {
+      context.log('Poke host function: Source memory read fault', {
+        sourceOffset: sourceOffset.toString(),
+        length: length.toString(),
+        faultAddress: readFaultAddress?.toString() ?? 'null',
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -77,6 +83,9 @@ export class PokeHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Poke host function: Machine not found', {
+        machineId: machineId.toString(),
+      })
       return {
         resultCode: null, // continue
       }

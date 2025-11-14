@@ -35,7 +35,7 @@ import {
   mmrsuperpeak,
   zeroHash,
 } from '@pbnj/core'
-import { calculateBlockHashFromHeader } from '@pbnj/serialization'
+import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import type {
   AccoutBelt,
   BlockBody,

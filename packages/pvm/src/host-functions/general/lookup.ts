@@ -71,6 +71,7 @@ export class LookupHostFunction extends BaseHostFunction {
     if (!refineContext) {
       // If no refine context available, return WHO
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Lookup host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -80,6 +81,10 @@ export class LookupHostFunction extends BaseHostFunction {
     const [serviceAccountError, serviceAccount] =
       this.serviceAccountService.getServiceAccount(serviceId)
     if (serviceAccountError) {
+      context.log('Lookup host function: Service account error', {
+        serviceId: serviceId.toString(),
+        error: serviceAccountError.message,
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -92,6 +97,9 @@ export class LookupHostFunction extends BaseHostFunction {
     if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      context.log('Lookup host function: Service account not found', {
+        serviceId: serviceId.toString(),
+      })
       return {
         resultCode: null, // continue execution
       }

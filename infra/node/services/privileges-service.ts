@@ -93,13 +93,6 @@ export class PrivilegesService
    */
   setPrivileges(privileges: Privileges): void {
     this.privileges = privileges
-    logger.debug('Privileges state updated', {
-      manager: privileges.manager.toString(),
-      delegator: privileges.delegator.toString(),
-      registrar: privileges.registrar.toString(),
-      assignerCount: privileges.assigners.length,
-      alwaysAccerCount: privileges.alwaysaccers.size,
-    })
   }
 
   /**
@@ -118,7 +111,6 @@ export class PrivilegesService
    */
   setManager(serviceId: bigint): void {
     this.privileges.manager = serviceId
-    logger.debug('Manager service updated', { serviceId: serviceId.toString() })
   }
 
   /**
@@ -137,9 +129,6 @@ export class PrivilegesService
    */
   setDelegator(serviceId: bigint): void {
     this.privileges.delegator = serviceId
-    logger.debug('Delegator service updated', {
-      serviceId: serviceId.toString(),
-    })
   }
 
   /**
@@ -158,9 +147,6 @@ export class PrivilegesService
    */
   setRegistrar(serviceId: bigint): void {
     this.privileges.registrar = serviceId
-    logger.debug('Registrar service updated', {
-      serviceId: serviceId.toString(),
-    })
   }
 
   /**
@@ -179,7 +165,6 @@ export class PrivilegesService
    */
   setAssigners(assigners: bigint[]): void {
     this.privileges.assigners = assigners
-    logger.debug('Assigners updated', { count: assigners.length })
   }
 
   /**
@@ -228,7 +213,6 @@ export class PrivilegesService
    */
   setAlwaysAccers(alwaysAccers: Map<bigint, bigint>): void {
     this.privileges.alwaysaccers = alwaysAccers
-    logger.debug('Always accers updated', { count: alwaysAccers.size })
   }
 
   /**
@@ -238,10 +222,6 @@ export class PrivilegesService
    */
   addAlwaysAccer(serviceId: bigint, gasLimit: bigint): void {
     this.privileges.alwaysaccers.set(serviceId, gasLimit)
-    logger.debug('Always accer added', {
-      serviceId: serviceId.toString(),
-      gasLimit: gasLimit.toString(),
-    })
   }
 
   /**
@@ -249,7 +229,6 @@ export class PrivilegesService
    */
   removeAlwaysAccer(serviceId: bigint): void {
     this.privileges.alwaysaccers.delete(serviceId)
-    logger.debug('Always accer removed', { serviceId: serviceId.toString() })
   }
 
   /**

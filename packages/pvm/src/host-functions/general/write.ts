@@ -63,6 +63,11 @@ export class WriteHostFunction extends BaseHostFunction {
     // Read key from memory
     const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
     if (!key) {
+      context.log('Write host function: Memory read fault for key', {
+        keyOffset: keyOffset.toString(),
+        keyLength: keyLength.toString(),
+        faultAddress: faultAddress?.toString() ?? 'null',
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -78,6 +83,10 @@ export class WriteHostFunction extends BaseHostFunction {
       // Delete the key
       const previousLength = this.deleteStorage(serviceAccount, key)
       context.registers[7] = previousLength
+      context.log('Write host function: Storage key deleted', {
+        keyLength: key.length.toString(),
+        previousLength: previousLength.toString(),
+      })
     } else {
       // Read value from memory
       const [value, _faultAddress] = context.ram.readOctets(
@@ -85,6 +94,11 @@ export class WriteHostFunction extends BaseHostFunction {
         valueLength,
       )
       if (!value) {
+        context.log('Write host function: Memory read fault for value', {
+          valueOffset: valueOffset.toString(),
+          valueLength: valueLength.toString(),
+          faultAddress: _faultAddress?.toString() ?? 'null',
+        })
         return {
           resultCode: RESULT_CODES.PANIC,
           faultInfo: {
@@ -108,6 +122,12 @@ export class WriteHostFunction extends BaseHostFunction {
       if (newMinBalance > serviceAccount.balance) {
         // Return FULL (2^64 - 5) for insufficient balance
         context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
+        context.log('Write host function: Insufficient balance', {
+          balance: serviceAccount.balance.toString(),
+          requiredBalance: newMinBalance.toString(),
+          newItems: newItems.toString(),
+          newOctets: newOctets.toString(),
+        })
         return {
           resultCode: null, // continue execution
         }
@@ -116,6 +136,11 @@ export class WriteHostFunction extends BaseHostFunction {
       // Write key-value pair to storage
       const previousLength = this.writeStorage(serviceAccount, key, value)
       context.registers[7] = previousLength
+      context.log('Write host function: Storage key-value written', {
+        keyLength: key.length.toString(),
+        valueLength: value.length.toString(),
+        previousLength: previousLength.toString(),
+      })
     }
 
     return {

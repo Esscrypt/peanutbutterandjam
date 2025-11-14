@@ -49,6 +49,15 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
     const serviceId =
       targetServiceId === 2n ** 64n - 1n ? implications[0].id : targetServiceId
 
+    // Log all input parameters
+    context.log('PROVIDE host function invoked', {
+      targetServiceId: targetServiceId.toString(),
+      resolvedServiceId: serviceId.toString(),
+      preimageOffset: preimageOffset.toString(),
+      preimageLength: preimageLength.toString(),
+      currentServiceId: implications[0].id.toString(),
+    })
+
     // Read preimage data from memory
     const [preimageData, faultAddress] = ram.readOctets(
       preimageOffset,

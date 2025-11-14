@@ -85,7 +85,6 @@ describe('AuthPool and AuthQueue Services - JAM Test Vectors', () => {
             // Step 1: Initialize services with pre-state
             const authQueueService = new AuthQueueService({configService: configService})
             const workReportService = new WorkReportService({
-              workStore: null,
               eventBus: new EventBusService(),
               networkingService: null,
               ce136WorkReportRequestProtocol: null,

@@ -31,10 +31,10 @@ export class InvokeHostFunction extends BaseHostFunction {
   readonly name = 'invoke'
   readonly gasCost = 10n
 
-  async execute(
+  execute(
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
-  ): Promise<HostFunctionResult> {
+  ): HostFunctionResult {
     const machineId = context.registers[7]
     const memoryOffset = context.registers[8]
 
@@ -42,6 +42,7 @@ export class InvokeHostFunction extends BaseHostFunction {
     if (!refineContext) {
       // If no refine context available, return WHO
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO // WHO
+      context.log('Invoke host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -54,6 +55,9 @@ export class InvokeHostFunction extends BaseHostFunction {
     if (!machine) {
       // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Invoke host function: Machine not found', {
+        machineId: machineId.toString(),
+      })
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -115,7 +119,7 @@ export class InvokeHostFunction extends BaseHostFunction {
     //   params.gasLimit,
     //   params.registers,
     // )
-    await machine.pvm.invoke(gasLimit, registers, machine.code)
+    machine.pvm.invoke(gasLimit, registers, machine.code)
 
     // Write results back to memory
     this.writeInvokeResults(context.ram, memoryOffset, machine.pvm.state)
@@ -130,6 +134,13 @@ export class InvokeHostFunction extends BaseHostFunction {
     } else if (machine.pvm.state.resultCode === RESULT_CODES.FAULT) {
       context.registers[8] = machine.pvm.state.faultAddress ?? 0n
     }
+
+    context.log('Invoke host function: PVM machine execution completed', {
+      machineId: machineId.toString(),
+      resultCode: machine.pvm.state.resultCode.toString(),
+      remainingGas: machine.pvm.state.gasCounter.toString(),
+      finalPC: machine.pvm.state.instructionPointer.toString(),
+    })
 
     return {
       resultCode: null, // continue execution

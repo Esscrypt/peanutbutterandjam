@@ -21,7 +21,7 @@ import {
   loadGenesisJson,
   parseBootnode,
 } from '@pbnj/genesis'
-import { calculateBlockHashFromHeader } from '@pbnj/serialization'
+import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import type {
   BlockHeader,
   IConfigService,

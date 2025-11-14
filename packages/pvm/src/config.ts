@@ -14,7 +14,7 @@ export const GAS_CONFIG = {
 
 // Memory configuration
 export const MEMORY_CONFIG = {
-  RESERVED_MEMORY_START: 65_536, // 64KB (2^16)
+  RESERVED_MEMORY_END: 65_536, // 64KB (2^16)
   MAX_MEMORY_ADDRESS: 2_147_483_647, // 2^31 - 1
   INITIAL_ZONE_SIZE: 65_536, // 64KB (2^16) - Gray Paper Cpvminitzonesize
   PAGE_SIZE: 4096, // 4KB (2^12) - Gray Paper Cpvmpagesize
@@ -23,7 +23,7 @@ export const MEMORY_CONFIG = {
 
 // Program initialization configuration
 export const INIT_CONFIG = {
-  INIT_ZONE_SIZE: 65_536, // 64KB (2^16) - Gray Paper Cpvminitzonesize
+  ZONE_SIZE: 65_536, // 64KB (2^16) - Gray Paper Cpvminitzonesize
   INIT_INPUT_SIZE: 16_777_216, // 16MB (2^24) - Gray Paper Cpvminitinputsize
 } as const
 
@@ -34,12 +34,28 @@ export const REGISTER_CONFIG = {
   TOTAL_COUNT: 13n,
 } as const
 
-// Instruction configuration
-export const INSTRUCTION_CONFIG = {
-  MAX_OPCODE: 255n,
-  MAX_OPERANDS: 8n,
-  DEFAULT_LENGTH: 4n,
+// Register initialization constants (Gray Paper equation 803-811)
+// Reference: https://graypaper.fluffylabs.dev/#/579bd12/2c7c012cb101
+export const REGISTER_INIT = {
+  // r0: HALT address - jumping to this address causes the PVM to halt
+  // Gray Paper: 2^32 - 2^16 = 0xffff0000
+  HALT_ADDRESS: 2 ** 32 - 2 ** 16, // 4294901760 = 0xffff0000
+
+  // r1: Stack segment end address (exclusive)
+  // Gray Paper: 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
+  // This is the end address of the stack region (STACK_SEGMENT)
+  STACK_SEGMENT_END: (): number => {
+    return 2 ** 32 - 2 * INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+  },
+
+  // r7: Arguments segment start address
+  // Gray Paper: 2^32 - Cpvminitzonesize - Cpvminitinputsize
+  // This is the start address of the arguments/output region (ARGS_SEGMENT)
+  ARGS_SEGMENT_START: (): number => {
+    return 2 ** 32 - INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+  },
 } as const
+
 
 // Result codes as specified in Gray Paper
 /**

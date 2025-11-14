@@ -12,7 +12,7 @@ import {
   type Hex,
   hexToBytes,
 } from '@pbnj/core'
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
 import type { AuditAnnouncement, Safe, SafePromise } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'

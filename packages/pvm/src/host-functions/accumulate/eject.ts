@@ -38,6 +38,15 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const [serviceIdToEject, hashOffset] = registers.slice(7, 9)
 
+    // Log all input parameters
+    context.log('EJECT host function invoked', {
+      serviceIdToEject: serviceIdToEject.toString(),
+      hashOffset: hashOffset.toString(),
+      timeslot: timeslot.toString(),
+      currentServiceId: implications[0].id.toString(),
+      expungePeriod: context.expungePeriod.toString(),
+    })
+
     // Read hash from memory (32 bytes)
     // Gray Paper line 851-854: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
     const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
@@ -111,8 +120,10 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Check if the ejection period has expired
     // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
-    const C_EXPUNGE_PERIOD = 19200n // Gray Paper constant
-    if (request.length < 2 || request[1] >= timeslot - C_EXPUNGE_PERIOD) {
+    // For test vectors, Cexpungeperiod = 32 (as per README)
+    // For production, Cexpungeperiod = 19200 (Gray Paper constant)
+    const expungePeriod = context.expungePeriod
+    if (request.length < 2 || request[1] >= timeslot - expungePeriod) {
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution

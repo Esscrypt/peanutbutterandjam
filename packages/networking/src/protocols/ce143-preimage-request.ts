@@ -7,7 +7,7 @@
 
 import type { EventBusService, Hex } from '@pbnj/core'
 import { bytesToHex, hexToBytes } from '@pbnj/core'
-import { decodePreimage, encodePreimage } from '@pbnj/serialization'
+import { decodePreimage, encodePreimage } from '@pbnj/codec'
 import type { Preimage, PreimageRequest, Safe, SafePromise } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { NetworkingProtocol } from './protocol'

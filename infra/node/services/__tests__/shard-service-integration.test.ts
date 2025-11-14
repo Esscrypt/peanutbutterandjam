@@ -12,7 +12,7 @@ import { logger, hexToBytes, bytesToHex } from '@pbnj/core'
 import {
   decodeWorkPackage,
   encodeWorkPackage,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnj/types'
 import { ConfigService } from '../config-service'
 import { ErasureCodingService } from '../erasure-coding-service'

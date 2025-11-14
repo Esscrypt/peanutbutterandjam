@@ -71,6 +71,7 @@ export class PagesHostFunction extends BaseHostFunction {
     // Check if refine context is available
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Pages host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -81,6 +82,9 @@ export class PagesHostFunction extends BaseHostFunction {
     if (!machine) {
       // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Pages host function: Machine not found', {
+        machineId: machineId.toString(),
+      })
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -94,6 +98,12 @@ export class PagesHostFunction extends BaseHostFunction {
     ) {
       // Return HUH (2^64 - 9) if invalid parameters
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+      context.log('Pages host function: Invalid parameters', {
+        machineId: machineId.toString(),
+        pageStart: pageStart.toString(),
+        pageCount: pageCount.toString(),
+        accessRights: accessRights.toString(),
+      })
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -108,6 +118,12 @@ export class PagesHostFunction extends BaseHostFunction {
       )
       if (hasInaccessiblePages) {
         context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+        context.log('Pages host function: Pages contain inaccessible access', {
+          machineId: machineId.toString(),
+          pageStart: pageStart.toString(),
+          pageCount: pageCount.toString(),
+          accessRights: accessRights.toString(),
+        })
         return {
           resultCode: RESULT_CODES.HALT,
         }
@@ -124,6 +140,12 @@ export class PagesHostFunction extends BaseHostFunction {
 
     if (!success) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+      context.log('Pages host function: Failed to set page access rights', {
+        machineId: machineId.toString(),
+        pageStart: pageStart.toString(),
+        pageCount: pageCount.toString(),
+        accessRights: accessRights.toString(),
+      })
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -131,6 +153,13 @@ export class PagesHostFunction extends BaseHostFunction {
 
     // Return OK (0) for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
+
+    context.log('Pages host function: Page access rights set successfully', {
+      machineId: machineId.toString(),
+      pageStart: pageStart.toString(),
+      pageCount: pageCount.toString(),
+      accessRights: accessRights.toString(),
+    })
 
     return {
       resultCode: null, // continue execution

@@ -186,10 +186,29 @@ export class IsAuthorizedPVM extends PVM {
             }
           }
 
+          // Create log function for is-authorized GAS host function context
+          const isAuthorizedGasHostFunctionLog = (
+            message: string,
+            data?: Record<string, unknown>,
+          ) => {
+            if (!this.executionLogs) {
+              this.executionLogs = []
+            }
+            this.executionLogs.push({
+              pc: this.state.instructionPointer,
+              instructionName: `HOST_${hostFunction.name}`,
+              opcode: `0x${hostCallId.toString(16)}`,
+              message,
+              data,
+              timestamp: Date.now(),
+            })
+          }
+
           const hostContext = {
             gasCounter,
             registers,
             ram: memory,
+            log: isAuthorizedGasHostFunctionLog,
           }
 
           const result = hostFunction.execute(hostContext, null)
@@ -239,10 +258,29 @@ export class IsAuthorizedPVM extends PVM {
             currentServiceId: 0n,
           }
 
+          // Create log function for is-authorized host function context
+          const isAuthorizedHostFunctionLog = (
+            message: string,
+            data?: Record<string, unknown>,
+          ) => {
+            if (!this.executionLogs) {
+              this.executionLogs = []
+            }
+            this.executionLogs.push({
+              pc: this.state.instructionPointer,
+              instructionName: `HOST_${hostFunction.name}`,
+              opcode: `0x${hostCallId.toString(16)}`,
+              message,
+              data,
+              timestamp: Date.now(),
+            })
+          }
+
           const hostContext = {
             gasCounter,
             registers,
             ram: memory,
+            log: isAuthorizedHostFunctionLog,
           }
 
           const result = hostFunction.execute(hostContext, refineContext)

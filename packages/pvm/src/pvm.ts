@@ -6,7 +6,7 @@
  */
 
 import { logger } from '@pbnj/core'
-import { decodeBlob, decodeProgramFromPreimage } from '@pbnj/serialization'
+import { decodeBlob, decodeProgramFromPreimage } from '@pbnj/codec'
 import type {
   ContextMutator,
   ImplicationsPair,
@@ -21,7 +21,14 @@ import type {
   WorkError,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
-import { GAS_CONFIG, INIT_CONFIG, MEMORY_CONFIG, RESULT_CODES } from './config'
+import { alignToZone } from './alignment-helpers'
+import {
+  GAS_CONFIG,
+  INIT_CONFIG,
+  MEMORY_CONFIG,
+  REGISTER_INIT,
+  RESULT_CODES,
+} from './config'
 import type { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMRAM } from './ram'
@@ -39,6 +46,25 @@ export class PVM implements IPVM {
   protected currentRefineContext: RefineInvocationContext | null = null
   protected currentContextMutator: ContextMutator<any> | null = null
   protected currentContext: any | null = null
+  /** Global log collection for instruction execution (per execution run) */
+  protected executionLogs: Array<{
+    pc: bigint
+    instructionName: string
+    opcode: string
+    message: string
+    data?: Record<string, unknown>
+    timestamp: number
+  }> = []
+
+  /** Global log collection for host function execution (per execution run) */
+  protected hostFunctionLogs: Array<{
+    functionName: string
+    functionId: bigint
+    message: string
+    data?: Record<string, unknown>
+    timestamp: number
+    pc: bigint | null
+  }> = []
 
   constructor(
     hostFunctionRegistry: HostFunctionRegistry,
@@ -82,35 +108,6 @@ export class PVM implements IPVM {
     await this.run(programBlob)
   }
 
-  /**
-   * Gray Paper equation 766: Page alignment function
-   * rnp(x ∈ ℕ) ≡ Cpvmpagesize * ceil(x / Cpvmpagesize)
-   *
-   * Aligns a size to the nearest page boundary (4096 bytes).
-   * Uses number arithmetic to avoid bigint division precision loss.
-   *
-   * @param size - Size in bytes to align
-   * @returns Aligned size as a multiple of Cpvmpagesize
-   */
-  private alignToPage(size: number): number {
-    const pageSize = Number(MEMORY_CONFIG.PAGE_SIZE)
-    return Math.ceil(size / pageSize) * pageSize
-  }
-
-  /**
-   * Gray Paper equation 766: Zone alignment function
-   * rnq(x ∈ ℕ) ≡ Cpvminitzonesize * ceil(x / Cpvminitzonesize)
-   *
-   * Aligns a size to the nearest zone boundary (65536 bytes).
-   * Uses number arithmetic to avoid bigint division precision loss.
-   *
-   * @param size - Size in bytes to align
-   * @returns Aligned size as a multiple of Cpvminitzonesize
-   */
-  private alignToZone(size: number): number {
-    const zoneSize = INIT_CONFIG.INIT_ZONE_SIZE
-    return Math.ceil(size / zoneSize) * zoneSize
-  }
 
   /**
    * Y - Standard initialization function
@@ -132,33 +129,25 @@ export class PVM implements IPVM {
     if (error) {
       return safeError(error)
     }
-    const { code, roData, rwData, stackSize, jumpTableEntrySize } = result.value
-
-    logger.debug('Program decoded from Y function format', {
-      codeLength: code.length,
-      roDataLength: roData.length,
-      rwDataLength: rwData.length,
-      stackSize,
-      jumpTableEntrySize,
-      argumentDataLength: argumentData.length,
-    })
+    const { code, roData, rwData, stackSize, heapZeroPaddingSize } = result.value
 
     // Gray Paper equation 767: Validate condition
     // 5*Cpvminitzonesize + rnq(len(o)) + rnq(len(w) + z*Cpvmpagesize) + rnq(s) + Cpvminitinputsize <= 2^32
-    const Cpvminitzonesize = INIT_CONFIG.INIT_ZONE_SIZE
-    const Cpvminitinputsize = INIT_CONFIG.INIT_INPUT_SIZE
-    const Cpvmpagesize = MEMORY_CONFIG.PAGE_SIZE
 
-    const rnq_o = this.alignToZone(roData.length)
-    const rnq_w_plus_z = this.alignToZone(
-      rwData.length + jumpTableEntrySize * Number(Cpvmpagesize),
+    const alignedReadOnlyDataLength = alignToZone(roData.length)
+    const alignedHeapLength = alignToZone(
+      rwData.length + heapZeroPaddingSize * MEMORY_CONFIG.PAGE_SIZE,
     )
-    const rnq_s = this.alignToZone(stackSize)
+    const alignedStackSize = alignToZone(stackSize)
 
     const total =
-      5 * Cpvminitzonesize + rnq_o + rnq_w_plus_z + rnq_s + Cpvminitinputsize
+      5 * INIT_CONFIG.ZONE_SIZE +
+      alignedReadOnlyDataLength +
+      alignedHeapLength +
+      alignedStackSize +
+      INIT_CONFIG.INIT_INPUT_SIZE
 
-    if (total > 2n ** 32n) {
+    if (total > 2 ** 32) {
       return safeError(
         new Error(
           `Gray Paper equation 767 condition violated: ${total} > 2^32`,
@@ -166,17 +155,8 @@ export class PVM implements IPVM {
       )
     }
 
-    // Gray Paper equation 803-811: Initialize registers
-    // All registers are initialized to 0 in constructor, then specific ones are set here
-    this.state.registerState[0] = BigInt(2 ** 32) - BigInt(2 ** 16) // 2^32 - 2^16
-    this.state.registerState[1] = BigInt(
-      2 ** 32 - 2 * INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE,
-    ) // 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
-    this.state.registerState[7] = BigInt(
-      2 ** 32 - INIT_CONFIG.INIT_ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE,
-    ) // 2^32 - Cpvminitzonesize - Cpvminitinputsize
-    this.state.registerState[8] = BigInt(argumentData.length) // len(argumentData)
-    // Registers 2-6 and 9-12 remain 0 (already initialized in constructor)
+    // Initialize registers according to Gray Paper equation 803-811
+    this.initializeRegisters(argumentData.length)
 
     // Set up memory sections according to Gray Paper memory layout
     this.initializeMemoryLayout(
@@ -184,10 +164,49 @@ export class PVM implements IPVM {
       roData,
       rwData,
       stackSize,
-      jumpTableEntrySize,
+      heapZeroPaddingSize,
     )
 
     return safeResult(code)
+  }
+
+  /**
+   * Initialize PVM registers according to Gray Paper equation 803-811
+   * Reference: https://graypaper.fluffylabs.dev/#/579bd12/2c7c012cb101
+   *
+   * All registers are initialized to 0 in constructor, then specific ones are set here:
+   * - r0: HALT address (2^32 - 2^16)
+   * - r1: Stack segment end address (2^32 - 2*Cpvminitzonesize - Cpvminitinputsize)
+   * - r7: Arguments segment start address (2^32 - Cpvminitzonesize - Cpvminitinputsize)
+   * - r8: Argument data length
+   * - r2-r6, r9-r12: Remain 0
+   *
+   * @param argumentDataLength - Length of argument data (a) in bytes
+   */
+  private initializeRegisters(argumentDataLength: number): void {
+    // r0: HALT address - jumping to this address causes the PVM to halt gracefully
+    // Gray Paper equation 803: registers[0] = 2^32 - 2^16
+    // This is equivalent to the HALT_ADDRESS constant (0xffff0000)
+    this.state.registerState[0] = BigInt(REGISTER_INIT.HALT_ADDRESS)
+
+    // r1: Stack segment end address (exclusive)
+    // Gray Paper equation 803: registers[1] = 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
+    // This is equivalent to the STACK_SEGMENT_END constant (0xfefe0000)
+    // Represents the end address of the stack region (exclusive boundary)
+    this.state.registerState[1] = BigInt(REGISTER_INIT.STACK_SEGMENT_END())
+
+    // r7: Arguments segment start address
+    // Gray Paper equation 803: registers[7] = 2^32 - Cpvminitzonesize - Cpvminitinputsize
+    // This is equivalent to the ARGS_SEGMENT_START constant (0xfeff0000)
+    // Represents the start address of the arguments/output region
+    this.state.registerState[7] = BigInt(REGISTER_INIT.ARGS_SEGMENT_START())
+
+    // r8: Argument data length
+    // Gray Paper equation 803: registers[8] = len(argumentData)
+    // Stores the length of the argument data in bytes
+    this.state.registerState[8] = BigInt(argumentDataLength)
+
+    // Registers r2-r6 and r9-r12 remain 0 (already initialized in constructor)
   }
 
   /**
@@ -198,202 +217,27 @@ export class PVM implements IPVM {
    * - rnq(x ∈ ℕ) ≡ Cpvminitzonesize * ceil(x / Cpvminitzonesize) - zone alignment
    *
    * @param argumentData - Argument data (a)
-   * @param roData - Read-only data section (o)
-   * @param rwData - Read-write data section (w)
+   * @param readOnlyData - Read-only data section (o)
+   * @param readWriteData - Read-write data section (w) -> initial heap data
    * @param stackSize - Stack size (s)
-   * @param jumpTableEntrySize - Jump table entry size (z)
+   * @param heapZeroPaddingSize - Heap zero padding size (z) (in number of pages)
    */
   private initializeMemoryLayout(
     argumentData: Uint8Array,
-    roData: Uint8Array,
-    rwData: Uint8Array,
+    readOnlyData: Uint8Array,
+    readWriteData: Uint8Array,
     stackSize: number,
-    jumpTableEntrySize: number,
+    heapZeroPaddingSize: number,
   ): void {
-    const Cpvminitzonesize = INIT_CONFIG.INIT_ZONE_SIZE
-    const Cpvminitinputsize = INIT_CONFIG.INIT_INPUT_SIZE
-    const Cpvmpagesize = MEMORY_CONFIG.PAGE_SIZE
+    // This sets up address boundaries, allocates contiguous arrays, and sets data
+    this.state.ram.initializeMemoryLayout(
+      argumentData,
+      readOnlyData,
+      readWriteData,
+      stackSize,
+      heapZeroPaddingSize,
+    )
 
-    const roLength = roData.length
-    const rwLength = rwData.length
-    const argLength = argumentData.length
-    const s = stackSize
-    const z = jumpTableEntrySize
-
-    // Gray Paper equation 770-802: Memory layout
-
-    // 1. Read-only data section (o): Cpvminitzonesize ≤ i < Cpvminitzonesize + len(o)
-    //    Access: R, Value: o[i - Cpvminitzonesize]
-    // 2. Read-only padding: Cpvminitzonesize + len(o) ≤ i < Cpvminitzonesize + rnp(len(o))
-    //    Access: R, Value: 0
-    // Gray Paper equation 770-802: Set access rights for rnp(len(o)) bytes
-    const roStart = Cpvminitzonesize
-    const roDataEnd = Cpvminitzonesize + roLength
-    const roAligned = this.alignToPage(roLength)
-    const roAlignedEnd = Cpvminitzonesize + roAligned
-
-    if (roLength > 0) {
-      // Set data values
-      for (let i = 0; i < roData.length; i++) {
-        this.state.ram.memoryData.set(BigInt(roStart + i), roData[i])
-      }
-
-      logger.debug('[PVM] Read-only data section', {
-        roLength,
-        roAligned,
-        roStart: roStart.toString(),
-        roDataEnd: roDataEnd.toString(),
-        roAlignedEnd: roAlignedEnd.toString(),
-      })
-
-      // Set access rights for page-aligned region (includes padding)
-      this.state.ram.setPageAccessRights(
-        BigInt(roStart),
-        roAligned, // Exactly rnp(len(o)) bytes
-        'read',
-      )
-    }
-
-    // Gray Paper equation 800: Gap region between read-only and read-write sections
-    // Access: none for addresses [roAlignedEnd, rwSectionStart)
-    // Calculate rnq(len(o)) once for use in gap clearing and read-write section
-    const rnq_ro = this.alignToZone(roLength)
-    const rwSectionStart = 2 * Cpvminitzonesize + rnq_ro
-    if (roAlignedEnd < rwSectionStart) {
-      const gapStartPage = Number(roAlignedEnd / Cpvmpagesize)
-      const gapEndPage = Number((rwSectionStart - 1) / Cpvmpagesize)
-
-      logger.debug('[PVM] Clearing gap region', {
-        roAlignedEnd: roAlignedEnd.toString(),
-        rwSectionStart: rwSectionStart.toString(),
-        gapStartPage,
-        gapEndPage,
-        gapPages: Array.from(
-          { length: gapEndPage - gapStartPage + 1 },
-          (_, i) => gapStartPage + i,
-        ),
-      })
-
-      for (let pageIdx = gapStartPage; pageIdx <= gapEndPage; pageIdx++) {
-        this.state.ram.setPageAccessRights(
-          BigInt(pageIdx * Cpvmpagesize),
-          Number(Cpvmpagesize),
-          'none',
-        )
-      }
-    }
-
-    // 3. Read-write data section (w): 2*Cpvminitzonesize + rnq(len(o)) ≤ i < 2*Cpvminitzonesize + rnq(len(o)) + len(w)
-    //    Access: W, Value: w[i - (2*Cpvminitzonesize + rnq(len(o)))]
-    if (rwLength > 0) {
-      const rwStart = 2 * Cpvminitzonesize + rnq_ro
-      for (let i = 0; i < rwData.length; i++) {
-        this.state.ram.memoryData.set(BigInt(rwStart + i), rwData[i])
-      }
-      this.state.ram.setPageAccessRights(
-        BigInt(rwStart),
-        this.alignToPage(rwLength),
-        'write',
-      )
-    }
-
-    // 4. Read-write padding + jump table space:
-    //    2*Cpvminitzonesize + rnq(len(o)) + len(w) ≤ i < 2*Cpvminitzonesize + rnq(len(o)) + rnp(len(w)) + z*Cpvmpagesize
-    //    Access: W, Value: 0
-    const rnp_rw = this.alignToPage(rwLength)
-    const jumpTableSpaceStart = 2 * Cpvminitzonesize + rnq_ro + rwLength
-    const jumpTableSpaceEnd =
-      2 * Cpvminitzonesize + rnq_ro + rnp_rw + z * Cpvmpagesize
-    // setPageAccessRights requires page-aligned addresses and lengths
-    // Align start address down to nearest page boundary
-    const pageSizeNum = Number(Cpvmpagesize)
-    const startPageOffset = Number(jumpTableSpaceStart % Cpvmpagesize)
-    const alignedStart = jumpTableSpaceStart - startPageOffset
-
-    // Align end address up to nearest page boundary
-    const endPageOffset = Number(jumpTableSpaceEnd % Cpvmpagesize)
-    const alignedEnd =
-      endPageOffset === 0
-        ? jumpTableSpaceEnd
-        : jumpTableSpaceEnd + pageSizeNum - endPageOffset
-
-    // Calculate page-aligned length
-    const alignedLength = alignedEnd - alignedStart
-
-    if (alignedLength > 0) {
-      this.state.ram.setPageAccessRights(
-        BigInt(alignedStart),
-        alignedLength,
-        'write',
-      )
-      // Values are implicitly 0 (sparse storage)
-    }
-
-    // 5. Stack section: 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize - rnp(s) ≤ i < 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
-    //    Access: W, Value: 0
-    if (s > 0) {
-      const rnp_s = this.alignToPage(s)
-      const stackStart =
-        2 ** 32 - 2 * Cpvminitzonesize - Cpvminitinputsize - rnp_s
-      this.state.ram.setPageAccessRights(BigInt(stackStart), rnp_s, 'write')
-      // Values are implicitly 0 (sparse storage)
-    }
-
-    // 6. Argument data section (a):
-    //    2^32 - Cpvminitzonesize - Cpvminitinputsize ≤ i < 2^32 - Cpvminitzonesize - Cpvminitinputsize + len(a)
-    //    Access: R, Value: a[i - (2^32 - Cpvminitzonesize - Cpvminitinputsize)]
-    if (argLength > 0) {
-      const argStart = 2 ** 32 - Cpvminitzonesize - Cpvminitinputsize
-      for (let i = 0; i < argumentData.length; i++) {
-        this.state.ram.memoryData.set(BigInt(argStart + i), argumentData[i])
-      }
-      this.state.ram.setPageAccessRights(
-        BigInt(argStart),
-        this.alignToPage(argLength),
-        'read',
-      )
-    }
-
-    // 7. Argument padding: 2^32 - Cpvminitzonesize - Cpvminitinputsize + len(a) ≤ i < 2^32 - Cpvminitzonesize - Cpvminitinputsize + rnp(len(a))
-    //    Access: R, Value: 0
-    const argAligned = this.alignToPage(argLength)
-    if (argAligned > argLength) {
-      const argPaddingStart =
-        2 ** 32 - Cpvminitzonesize - Cpvminitinputsize + argLength
-      const argPaddingLength = argAligned - argLength
-
-      // Align start address down to nearest page boundary and align length
-      const pageSizeNum = Number(Cpvmpagesize)
-      const paddingStartOffset = Number(argPaddingStart % Cpvmpagesize)
-      const alignedPaddingStart = argPaddingStart - paddingStartOffset
-      const alignedPaddingLength =
-        Math.ceil((argPaddingLength + paddingStartOffset) / pageSizeNum) *
-        pageSizeNum
-
-      this.state.ram.setPageAccessRights(
-        BigInt(alignedPaddingStart),
-        alignedPaddingLength,
-        'read',
-        true, // Mark as padding - excluded from pageMap
-      )
-      // Values are implicitly 0 (sparse storage)
-    }
-
-    // 8. All other addresses: Access: none, Value: 0 (implicit, sparse storage)
-
-    // Log RAM initialization for verification
-    const pageMap = this.state.ram.getPageMapJSON()
-
-    logger.debug('[PVM] RAM initialized after Y function', {
-      pageMap,
-      pageCount: pageMap.length,
-      registers: {
-        r0: this.state.registerState[0].toString(),
-        r1: this.state.registerState[1].toString(),
-        r7: this.state.registerState[7].toString(),
-        r8: this.state.registerState[8].toString(),
-      },
-    })
   }
 
   /**
@@ -481,32 +325,37 @@ export class PVM implements IPVM {
       // Gray Paper: If ε = oog: return (u, oog, x')
       result = 'OOG'
     } else if (finalResultCode === RESULT_CODES.HALT) {
-      // Gray Paper: Check if registers'[7]..registers'[8] range is readable
+      // Gray Paper equation 831-832: Check if Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
       const startOffset = finalRegisters[7]
       const length = finalRegisters[8]
 
       if (length === 0n) {
-        // Empty result
+        // Empty range is trivially readable - return empty blob
         result = new Uint8Array(0)
       } else {
-        // Check if range is readable
-        const [readable] = finalMemory.isReadableWithFault(startOffset, length)
+        // Gray Paper: Explicitly check if range is readable before reading
+        // Nrange{registers'[7]}{registers'[8]} means range from startOffset to startOffset+length
+        const [isReadable] = finalMemory.isReadableWithFault(
+          startOffset,
+          length,
+        )
 
-        if (readable) {
-          // Gray Paper: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
-          // return (u, mem'[registers'[7]..registers'[8]], x')
+        if (isReadable) {
+          // Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
+          // return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
           const [memoryResult, readFaultAddress] = finalMemory.readOctets(
             startOffset,
             length,
           )
+          // readOctets should succeed if range is readable, but handle edge case
           if (memoryResult && !readFaultAddress) {
             result = memoryResult
           } else {
-            // Should not happen if readable check passed, but handle gracefully
-            result = 'PANIC'
+            // Should not happen if isReadable is true, but return empty blob as fallback
+            result = new Uint8Array(0)
           }
         } else {
-          // Gray Paper: If ε = halt AND range not readable: return (u, [], x')
+          // Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
           result = new Uint8Array(0)
         }
       }
@@ -559,61 +408,96 @@ export class PVM implements IPVM {
         return RESULT_CODES.OOG
       }
 
-      // Consume 1 gas for each instruction
-      this.state.gasCounter -= 10n
+      try {
+        // Use context mutator if available (for accumulate/refine invocations)
+        if (this.currentContextMutator && this.currentContext !== undefined) {
+          const mutatorResult = this.currentContextMutator(
+            hostCallId,
+            this.state.gasCounter,
+            this.state.registerState,
+            this.state.ram,
+            this.currentContext,
+          )
 
-      logger.debug('Step: Host call', {
-        hostCallId: this.hostFunctionRegistry.get(hostCallId)?.name,
-        gas: this.state.gasCounter.toString(),
-        registers: this.state.registerState,
-      })
+          // Update state from mutator result
+          this.state.gasCounter = mutatorResult.gasCounter
+          this.state.registerState = mutatorResult.registers
+          this.state.ram = mutatorResult.memory
+          this.currentContext = mutatorResult.context
 
-      // Use context mutator if available (for accumulate/refine invocations)
-      if (this.currentContextMutator && this.currentContext !== undefined) {
-        const mutatorResult = this.currentContextMutator(
-          hostCallId,
-          this.state.gasCounter,
-          this.state.registerState,
-          this.state.ram,
-          this.currentContext,
-        )
+          // If host function returns null (continue), advance PC by instruction length
+          // The PC was not advanced in executeInstruction() because it returned HOST early
+          if (mutatorResult.resultCode === null) {
+            const instructionLength = BigInt(1 + instruction.fskip)
+            this.state.instructionPointer += instructionLength
+          }
 
-        // Update state from mutator result
-        this.state.gasCounter = mutatorResult.gasCounter
-        this.state.registerState = mutatorResult.registers
-        this.state.ram = mutatorResult.memory
-        this.currentContext = mutatorResult.context
+          // Check if mutator wants to halt execution
+          return mutatorResult.resultCode
+        } else {
+          // no
+          // Consume 10 gas for host function execution
+          this.state.gasCounter -= 10n
 
-        // Check if mutator wants to halt execution
-        if (mutatorResult.resultCode !== null) {
+          // Fallback to generic host function registry (for standalone PVM execution)
+          const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+          if (!hostFunction) {
+            return RESULT_CODES.PANIC
+          }
+
+          // Create log function for host function context
+          const hostFunctionLog = (
+            message: string,
+            data?: Record<string, unknown>,
+          ) => {
+            if (!this.hostFunctionLogs) {
+              this.hostFunctionLogs = []
+            }
+            this.hostFunctionLogs.push({
+              functionName: hostFunction.name,
+              functionId: hostCallId,
+              message,
+              data,
+              timestamp: Date.now(),
+              pc: this.state.instructionPointer,
+            })
+          }
+
+          const context = {
+            gasCounter: this.state.gasCounter,
+            registers: this.state.registerState,
+            ram: this.state.ram,
+            log: hostFunctionLog,
+          }
+
+          const mutatorResult = await hostFunction.execute(
+            context,
+            this.currentRefineContext,
+          )
+          this.state.gasCounter = context.gasCounter
+          this.state.registerState = context.registers
+          this.state.ram = context.ram
+
+          // If host function returns null (continue), advance PC by instruction length
+          // The PC was not advanced in executeInstruction() because it returned HOST early
+          if (mutatorResult.resultCode === null) {
+            const instructionLength = BigInt(1 + instruction.fskip)
+            this.state.instructionPointer += instructionLength
+          }
+
+          // Check if mutator wants to halt execution
           return mutatorResult.resultCode
         }
-      } else {
-        // Fallback to generic host function registry (for standalone PVM execution)
-        const context = {
-          gasCounter: this.state.gasCounter,
+      } catch (error) {
+        logger.error('Host function execution failed', {
+          error,
+          hostCallId: hostCallId.toString(),
+          gas: this.state.gasCounter.toString(),
           registers: this.state.registerState,
-          ram: this.state.ram,
-        }
-
-        const hostFunction = this.hostFunctionRegistry.get(hostCallId)
-        if (!hostFunction) {
-          return RESULT_CODES.PANIC
-        }
-
-        const mutatorResult = await hostFunction.execute(
-          context,
-          this.currentRefineContext,
-        )
-
-        this.state.gasCounter = context.gasCounter
-        this.state.registerState = context.registers
-        this.state.ram = context.ram
-
-        // Check if mutator wants to halt execution
-        if (mutatorResult.resultCode !== null) {
-          return mutatorResult.resultCode
-        }
+          ram: this.state.ram.getPageMapJSON(),
+          resultCode: RESULT_CODES.PANIC,
+        })
+        return RESULT_CODES.PANIC
       }
     }
 
@@ -646,7 +530,7 @@ export class PVM implements IPVM {
    * @param opcodeBitmask - Bitmask indicating valid instruction boundaries
    * @returns Number of octets minus 1 to next instruction's opcode
    */
-  private skip(instructionIndex: number, opcodeBitmask: Uint8Array): number {
+  protected skip(instructionIndex: number, opcodeBitmask: Uint8Array): number {
     // Append bitmask with sequence of set bits for final instruction
     const extendedBitmask = new Uint8Array(opcodeBitmask.length + 25)
     extendedBitmask.set(opcodeBitmask)
@@ -667,11 +551,50 @@ export class PVM implements IPVM {
   }
 
   /**
+   * Get execution logs collected during the last run
+   */
+  /**
+   * Get execution logs in execution order (not sorted by PC)
+   * Logs are appended during instruction execution, preserving execution sequence
+   * Note: PC values may go backwards due to branches/jumps, but logs remain in execution order
+   */
+  public getExecutionLogs(): Array<{
+    pc: bigint
+    instructionName: string
+    opcode: string
+    message: string
+    data?: Record<string, unknown>
+    timestamp: number
+  }> {
+    // Return copy without sorting - logs are already in execution order
+    return [...this.executionLogs]
+  }
+
+  /**
+   * Get host function logs in execution order
+   * Logs are appended during host function execution, preserving execution sequence
+   */
+  public getHostFunctionLogs(): Array<{
+    functionName: string
+    functionId: bigint
+    message: string
+    data?: Record<string, unknown>
+    timestamp: number
+    pc: bigint | null
+  }> {
+    return [...this.hostFunctionLogs]
+  }
+
+  /**
    * Execute program until termination (Gray Paper Ψ function)
    *
    * Uses step() function to execute instructions one by one
    */
   public async run(programBlob: Uint8Array): Promise<void> {
+    // Clear logs at the start of each execution run
+    this.executionLogs = []
+    this.hostFunctionLogs = []
+
     // Decode the program blob
     const [error, decoded] = decodeBlob(programBlob)
     if (error) {
@@ -784,6 +707,11 @@ export class PVM implements IPVM {
       // Save PC before execution
       const pcBefore = this.state.instructionPointer
 
+      // Initialize logs array if not already present (per execution run)
+      if (!this.executionLogs) {
+        this.executionLogs = []
+      }
+
       // Create execution context (mutable)
       const context = {
         instruction,
@@ -795,6 +723,24 @@ export class PVM implements IPVM {
         fskip: instruction.fskip,
         bitmask: this.state.bitmask, // k
         code: this.state.code, // c
+        logs: this.executionLogs,
+        log: (message: string, data?: Record<string, unknown>) => {
+          // Always include register 12 value for debugging
+          const r12Value = this.state.registerState[12]
+          const logData = {
+            ...data,
+            r12: r12Value.toString(),
+            r12Hex: `0x${r12Value.toString(16)}`,
+          }
+          this.executionLogs.push({
+            pc: this.state.instructionPointer,
+            instructionName: handler.name,
+            opcode: `0x${instruction.opcode.toString(16)}`,
+            message,
+            data: logData,
+            timestamp: Date.now(),
+          })
+        },
       }
 
       // Execute instruction (mutates context)
@@ -826,6 +772,7 @@ export class PVM implements IPVM {
       // Return null to continue execution
       return result.resultCode
     } catch (error) {
+      // Exception occurred during instruction execution
       logger.error('ExecuteInstruction: Instruction execution exception', {
         instruction: handler?.name,
         opcode: instruction.opcode.toString(),
@@ -853,6 +800,9 @@ export class PVM implements IPVM {
       bitmask: new Uint8Array(0),
       hostCallId: null,
     }
+    // Clear execution logs on reset
+    this.executionLogs = []
+    this.hostFunctionLogs = []
   }
 
   /**

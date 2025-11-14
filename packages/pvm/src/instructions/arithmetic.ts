@@ -4,7 +4,6 @@
  * ADD_IMM and MUL_IMM variants - Add/Multiply with immediate values
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -14,23 +13,22 @@ import { BaseInstruction } from './base'
  * Add immediate to 32-bit register
  *
  * Gray Paper pvm.tex §7.4.9 line 490:
- * reg'_A = sext_4((reg_B + immed_X) mod 2^32)
+ * reg'_A = sext{4}{(\reg_B + \immed_X) \bmod 2^{32}}
+ *
+ * Where:
+ * - immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}} (line 469)
+ * - l_X = min(4, max(0, ℓ - 1)) (line 468)
+ * - ℓ = Fskip(ι) (skip distance)
  *
  * Operand format (lines 462-469):
  * - operands[0]: r_A (low 4 bits) + r_B (high 4 bits)
  * - operands[1:1+l_X]: immed_X (sign-extended)
- * Where: l_X = min(4, max(0, ℓ - 1))
  */
 export class ADD_IMM_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ADD_IMM_32
   readonly name = 'ADD_IMM_32'
-  readonly description = 'Add immediate to 32-bit register'
 
   execute(context: InstructionContext): InstructionResult {
-    console.log('ADD_IMM_32: Starting execution', {
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
 
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
@@ -38,53 +36,47 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
         context.fskip,
       )
 
-    console.log('ADD_IMM_32: Parsed operands', {
-      registerA,
-      registerB,
-      immediateX,
-    })
+    // Log BEFORE modification to capture the before state
+    const beforeValue = context.registers[registerA]
+    const beforeValueB = context.registers[registerB]
 
     const registerValue = this.getRegisterValueAs32(
       context.registers,
       registerB,
     )
 
-    console.log('ADD_IMM_32: Register values before operation', {
+
+    // Gray Paper: reg'_A = sext{4}{(\reg_B + \immed_X) \bmod 2^{32}}
+    // Add 32-bit reg_B to 64-bit immed_X, then mod 2^32
+    // BigInt two's complement arithmetic handles the addition correctly
+    const addition = (registerValue + immediateX) & 0xffffffffn // mod 2^32
+    const result = addition // Don't sign-extend here, setRegisterValueWith32BitResult will do it
+
+    context.log('ADD_IMM_32: Add immediate to 32-bit register', {
+      fskip: context.fskip,
       registerA,
       registerB,
-      registerAValue: context.registers[registerA],
-      registerBValue: context.registers[registerB],
-      registerValue,
-      immediateX,
-    })
-
-    // Gray Paper: reg'_A = sext_4((reg_B + immed_X) mod 2^32)
-    const immediateValue = immediateX & 0xffffffffn
-    const addition = registerValue + immediateValue
-    const result = this.signExtend(addition, 4)
-
-    console.log('ADD_IMM_32: Calculation steps', {
-      registerValue,
-      immediateValue,
-      addition,
-      result,
-      signExtended: result,
-    })
-
-    logger.debug('Executing ADD_IMM_32 instruction', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      result,
+      immediateX: immediateX.toString(),
+      beforeValue: beforeValue.toString(),
+      beforeValueB: beforeValueB.toString(),
+      registerValue: registerValue.toString(),
+      addition: addition.toString(),
+      result: result.toString(),
+      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      pc: context.pc,
     })
 
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
-    console.log('ADD_IMM_32: After setting register', {
+    // Log AFTER modification to capture the after state
+    context.log('ADD_IMM_32: After setting register', {
       registerA,
-      result,
-      finalRegisterValue: context.registers[registerA],
+      registerB,
+      immediateX: immediateX.toString(),
+      afterValue: context.registers[registerA].toString(),
+      result: result.toString(),
+      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      pc: context.pc,
     })
 
     // Mutate context directly
@@ -108,7 +100,6 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
 export class MUL_IMM_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_IMM_32
   readonly name = 'MUL_IMM_32'
-  readonly description = 'Multiply 32-bit register by immediate'
 
   execute(context: InstructionContext): InstructionResult {
     // Test vector format: operands[0] = (A << 4) | D, operands[1] = immediate
@@ -122,18 +113,20 @@ export class MUL_IMM_32Instruction extends BaseInstruction {
     const immediate32 = immediate & 0xffffffffn // Convert to 32-bit number
     const result = registerValue * immediate32
 
-    logger.debug('Executing MUL_IMM_32 instruction', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
-    })
     this.setRegisterValueWith32BitResult(
       context.registers,
       registerD,
       BigInt(result),
     )
+
+    context.log('MUL_IMM_32: Multiply 32-bit register by immediate', {
+      registerD,
+      registerA,
+      immediate,
+      registerValue,
+      result,
+      registers: Array.from(context.registers.slice(0, 13)),
+    })
 
     // Mutate context directly
 
@@ -175,7 +168,7 @@ export class ADD_IMM_64Instruction extends BaseInstruction {
     const addition = registerValue + immediateX
     const result = addition & 0xffffffffffffffffn // mod 2^64
 
-    logger.debug('Executing ADD_IMM_64 instruction', {
+    context.log('ADD_IMM_64: Add immediate to 64-bit register', {
       operands: Array.from(context.instruction.operands),
       registerA,
       registerB,
@@ -225,7 +218,7 @@ export class MUL_IMM_64Instruction extends BaseInstruction {
     )
     const result = registerValue * immediate
 
-    logger.debug('Executing MUL_IMM_64 instruction', {
+    context.log('MUL_IMM_64: Multiply 64-bit register by immediate', {
       registerD,
       registerA,
       immediate,

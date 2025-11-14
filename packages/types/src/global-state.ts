@@ -332,23 +332,43 @@ export interface CoreStats {
 /**
  * Per-service statistics
  */
+/**
+ * Service Statistics according to Gray Paper statistics.tex lines 91-101
+ *
+ * Gray Paper Formula:
+ * servicestats ∈ dictionary{serviceid}{tuple{
+ *   provision: tuple{N, N},      // sum over preimages of (1, len(data))
+ *   refinement: tuple{N, gas},   // tuple{R(s)_counter, R(s)_gasused}
+ *   importcount: N,              // R(s)_importcount
+ *   xtcount: N,                  // R(s)_xtcount
+ *   xtsize: N,                   // R(s)_xtsize
+ *   exportcount: N,              // R(s)_exportcount
+ *   accumulation: tuple{N, gas}  // ifnone{accumulationstatistics[s], tuple{0, 0}}
+ * }}
+ *
+ * Field meanings:
+ * - provision: tuple{count, size} - count and total size of preimages provided
+ * - refinement: tuple{count, gas} - count and gas used in refinement operations
+ * - accumulation: tuple{count, gas} - count and gas used in accumulation operations
+ */
 export interface ServiceStats {
-  /** Provision count */
-  provision: number
-  /** Refinement operations */
-  refinement: number
-  /** Accumulation operations */
-  accumulation: number
-  /** Transfer operations */
-  transfer: number
-  /** Import count */
+  /** Provision: tuple{N, N} - [count, size] of preimages provided */
+  provision: [number, number]
+  /** Refinement: tuple{N, gas} - [count, gas] of refinement operations */
+  refinement: [number, number]
+  /** Import count: N - from R(s)_importcount */
   importCount: number
-  /** Extrinsic count */
+  /** Extrinsic count: N - from R(s)_xtcount */
   extrinsicCount: number
-  /** Extrinsic size */
+  /** Extrinsic size: N - from R(s)_xtsize */
   extrinsicSize: number
-  /** Export count */
+  /** Export count: N - from R(s)_exportcount */
   exportCount: number
+  /** Accumulation: tuple{N, gas} - [count, gas] of accumulation operations
+   * Only set when AccumulationService calls updateServiceAccumulationStats()
+   * Gray Paper: accumulation = ifnone{accumulationstatistics[s], tuple{0, 0}}
+   */
+  accumulation?: [number, number]
 }
 
 /**

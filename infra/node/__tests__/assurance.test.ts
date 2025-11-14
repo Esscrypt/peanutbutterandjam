@@ -131,7 +131,7 @@ describe('Assurance Service - JAM Test Vectors', () => {
               eventBusService: eventBusService,
               sealKeyService: null,
               keyPairService: null,
-              ringProver: null,
+              ringProver: null as unknown as any,
               ticketService: null,
               configService: configService,
               initialValidators: vector.pre_state.curr_validators.map((validator) => ({
@@ -142,7 +142,6 @@ describe('Assurance Service - JAM Test Vectors', () => {
               })),
             })
             const workReportService = new WorkReportService({
-              workStore: null,
               eventBus: eventBusService,
               networkingService: null,
               ce136WorkReportRequestProtocol: null,

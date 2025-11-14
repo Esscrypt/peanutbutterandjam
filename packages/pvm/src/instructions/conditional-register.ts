@@ -1,4 +1,4 @@
-import { logger } from '@pbnj/core'
+
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -19,7 +19,7 @@ export class CMOV_IZInstruction extends BaseInstruction {
         ? this.getRegisterValue(context.registers, registerA)
         : this.getRegisterValue(context.registers, registerD)
 
-    logger.debug('Executing CMOV_IZ instruction', {
+    context.log('Executing CMOV_IZ instruction', {
       registerD,
       registerA,
       registerB,
@@ -58,7 +58,7 @@ export class CMOV_NZInstruction extends BaseInstruction {
         ? this.getRegisterValue(context.registers, registerA)
         : this.getRegisterValue(context.registers, registerD)
 
-    logger.debug('Executing CMOV_NZ instruction', {
+    context.log('Executing CMOV_NZ instruction', {
       registerD,
       registerA,
       registerB,

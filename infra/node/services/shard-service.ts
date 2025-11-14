@@ -12,7 +12,7 @@ import {
   verifyMerkleProof,
 } from '@pbnj/core'
 import type { ShardDistributionProtocol } from '@pbnj/networking'
-import { encodeWorkPackage } from '@pbnj/serialization'
+import { encodeWorkPackage } from '@pbnj/codec'
 import type {
   Safe,
   SafePromise,

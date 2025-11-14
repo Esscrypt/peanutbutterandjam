@@ -4,7 +4,6 @@
  * ECALLI - Host call with immediate value
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
@@ -26,16 +25,13 @@ import { BaseInstruction } from './base'
 export class ECALLIInstruction extends BaseInstruction {
   readonly opcode = OPCODES.ECALLI
   readonly name = 'ECALLI'
-  readonly description = 'Host call with immediate value'
 
   execute(context: InstructionContext): InstructionResult {
-    logger.debug('Executing ECALLI instruction', {
+    context.log('ECALLI: Host call with immediate value', {
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
       currentPC: context.pc,
     })
-
-    // Consume gas
 
     context.registers[0] = BigInt(context.instruction.operands[0])
 
@@ -43,7 +39,6 @@ export class ECALLIInstruction extends BaseInstruction {
       resultCode: RESULT_CODES.HOST,
     }
 
-    console.log('ECALLI returning result:', result)
     return result
   }
 }

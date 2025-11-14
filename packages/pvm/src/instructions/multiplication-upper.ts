@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -6,7 +5,6 @@ import { BaseInstruction } from './base'
 export class MUL_UPPER_S_SInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_UPPER_S_S
   readonly name = 'MUL_UPPER_S_S'
-  readonly description = 'Upper bits of signed multiplication'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -25,7 +23,7 @@ export class MUL_UPPER_S_SInstruction extends BaseInstruction {
     // Convert back to unsigned representation
     const result = upperBits < 0n ? upperBits + 2n ** 64n : upperBits
 
-    logger.debug('Executing MUL_UPPER_S_S instruction', {
+    context.log('MUL_UPPER_S_S: Upper bits of signed multiplication', {
       registerD,
       registerA,
       registerB,
@@ -43,18 +41,11 @@ export class MUL_UPPER_S_SInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class MUL_UPPER_U_UInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_UPPER_U_U
   readonly name = 'MUL_UPPER_U_U'
-  readonly description = 'Upper bits of unsigned multiplication'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -66,7 +57,7 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
     const fullProduct = valueA * valueB
     const result = fullProduct >> 64n
 
-    logger.debug('Executing MUL_UPPER_U_U instruction', {
+    context.log('MUL_UPPER_U_U: Upper bits of unsigned multiplication', {
       registerD,
       registerA,
       registerB,
@@ -83,18 +74,11 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class MUL_UPPER_S_UInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MUL_UPPER_S_U
   readonly name = 'MUL_UPPER_S_U'
-  readonly description = 'Upper bits of signed-unsigned multiplication'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -114,7 +98,7 @@ export class MUL_UPPER_S_UInstruction extends BaseInstruction {
     // Convert back to unsigned representation
     const result = upperBits < 0n ? upperBits + 2n ** 64n : upperBits
 
-    logger.debug('Executing MUL_UPPER_S_U instruction', {
+    context.log('MUL_UPPER_S_U: Upper bits of signed-unsigned multiplication', {
       registerD,
       registerA,
       registerB,
@@ -130,12 +114,5 @@ export class MUL_UPPER_S_UInstruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 }

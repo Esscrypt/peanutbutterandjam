@@ -21,6 +21,10 @@ export class GasHostFunction extends BaseHostFunction {
   execute(context: HostFunctionContext): HostFunctionResult {
     // Validate execution
     if (context.gasCounter < this.gasCost) {
+      context.log('Gas host function: Out of gas', {
+        gasCounter: context.gasCounter.toString(),
+        gasCost: this.gasCost.toString(),
+      })
       return {
         resultCode: RESULT_CODES.OOG,
       }
@@ -30,6 +34,10 @@ export class GasHostFunction extends BaseHostFunction {
 
     // Set registers[7] = gascounter (remaining gas)
     context.registers[7] = context.gasCounter
+
+    context.log('Gas host function: Gas counter returned', {
+      remainingGas: context.gasCounter.toString(),
+    })
 
     // Return updated gas counter
     return {

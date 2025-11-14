@@ -19,7 +19,7 @@ import { PreimageRequestProtocol } from '@pbnj/networking'
 import { EntropyService } from '../../../../../infra/node/services/entropy'
 import { PVMParser } from '../../parser'
 import { InstructionRegistry } from '../../instructions/registry'
-import { decodeProgramFromPreimage } from '../../../../serialization/src/pvm'
+import { decodeProgramFromPreimage } from '../../../../codec/src/pvm'
 
 // Test vector file path
 const WORKSPACE_ROOT = process.cwd().includes('/packages/pvm')
@@ -103,7 +103,6 @@ async function executeAccumulateWithPreimage(): Promise<{
   })
   const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
   const serviceAccountService = new ServiceAccountService({
-    preimageStore: null,
     configService: configService,
     eventBusService: eventBusService,
     clockService: clockService,

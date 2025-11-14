@@ -37,5 +37,5 @@ export abstract class BaseHostFunction {
   abstract execute(
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
-  ): HostFunctionResult | Promise<HostFunctionResult>
+  ): HostFunctionResult
 }

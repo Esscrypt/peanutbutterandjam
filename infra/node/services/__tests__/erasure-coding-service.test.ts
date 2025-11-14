@@ -5,7 +5,7 @@ import { logger } from '@pbnj/core'
 import {
   decodeWorkPackage,
   encodeWorkPackage,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type { ShardWithIndex } from '@pbnj/types'
 import { ConfigService } from '../config-service'
 import { ErasureCodingService } from '../erasure-coding-service'

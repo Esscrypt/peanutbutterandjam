@@ -4,9 +4,8 @@
  * NOP, HALT, ERROR, CALL, RETURN, JUMP, JUMP_IF, JUMP_IF_NOT
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { isTerminationInstruction, OPCODES, RESULT_CODES } from '../config'
+import { OPCODES, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
@@ -16,18 +15,13 @@ import { BaseInstruction } from './base'
 export class TRAPInstruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAP
   readonly name = 'TRAP'
-  readonly description = 'Panic the PVM'
 
   execute(_context: InstructionContext): InstructionResult {
-    logger.debug('Executing TRAP instruction')
+    _context.log('TRAP: Panic the PVM')
 
     return {
       resultCode: RESULT_CODES.PANIC,
     }
-  }
-
-  disassemble(_operands: Uint8Array): string {
-    return this.name
   }
 }
 
@@ -38,18 +32,13 @@ export class TRAPInstruction extends BaseInstruction {
 export class FALLTHROUGHInstruction extends BaseInstruction {
   readonly opcode = OPCODES.FALLTHROUGH
   readonly name = 'FALLTHROUGH'
-  readonly description = 'No operation'
 
   execute(_context: InstructionContext): InstructionResult {
-    logger.debug('Executing FALLTHROUGH instruction')
+    _context.log('FALLTHROUGH: No operation')
 
     return {
       resultCode: null, // Continue execution
     }
-  }
-
-  disassemble(_operands: Uint8Array): string {
-    return this.name
   }
 }
 
@@ -70,64 +59,20 @@ export class JUMPInstruction extends BaseInstruction {
       context.pc,
     )
 
-    // Check if target address is within valid bounds
-    // Gray Paper: PC should be constrained to program length
-    if (targetAddress < 0n || targetAddress >= BigInt(context.code.length)) {
-      logger.debug('JUMP: Target address out of bounds', {
-        targetAddress,
-        codeLength: context.code.length,
-      })
-      return { resultCode: RESULT_CODES.PANIC }
-    }
-
     // Gray Paper: Static jumps must target basic block starts
-    // Basic blocks are defined as:
-    // 1. Address 0 (first instruction)
-    // 2. Instructions immediately following termination instructions
-    // 3. Instructions at valid opcode positions (bitmask[n] = 1)
-
-    // Check if target is address 0 (always valid)
-    if (targetAddress === 0n) {
-      logger.debug('JUMP: Targeting address 0 (valid basic block start)')
-      context.pc = targetAddress
-      return { resultCode: null }
-    }
-
-    // Check if target is a valid opcode position (bitmask check)
-    if (
-      targetAddress >= context.bitmask.length ||
-      context.bitmask[Number(targetAddress)] === 0
-    ) {
-      logger.debug('JUMP: Target address not a valid opcode position', {
+    // Use validateBranchTarget for consistent validation with other branch instructions
+    const validationResult = this.validateBranchTarget(targetAddress, context)
+    if (validationResult !== null) {
+      context.log('JUMP: Target address not a valid basic block start', {
         targetAddress,
-        bitmaskValue:
-          targetAddress < context.bitmask.length
-            ? context.bitmask[Number(targetAddress)]
-            : 'out of bounds',
+        validationResult,
       })
-      return { resultCode: RESULT_CODES.PANIC }
+      return validationResult
     }
 
-    // Check if target follows a termination instruction
-    // This is a simplified check - in a complete implementation, we would trace back
-    // through the execution path to verify the target follows a termination instruction
-    if (targetAddress > 0n) {
-      // For test vectors, we assume jump table entries point to valid basic blocks
-      // In a complete implementation, we would verify the execution path
-      const targetOpcode = BigInt(context.code[Number(targetAddress)])
-      logger.debug('JUMP: Target address validation', {
-        targetAddress,
-        targetOpcode,
-        isTerminationInstruction: isTerminationInstruction(targetOpcode),
-      })
-    }
-
-    logger.debug('JUMP: Jumping to valid basic block start', {
+    context.log('JUMP: Jumping to valid basic block start', {
       targetAddress,
       targetOpcode: BigInt(context.code[Number(targetAddress)]),
-      isTerminationInstruction: isTerminationInstruction(
-        BigInt(context.code[Number(targetAddress)]),
-      ),
       currentPC: context.pc,
     })
 
@@ -137,11 +82,6 @@ export class JUMPInstruction extends BaseInstruction {
     return {
       resultCode: null,
     }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const offset = operands[0]
-    return `${this.name} ${offset}`
   }
 }
 
@@ -173,29 +113,29 @@ export class JUMP_INDInstruction extends BaseInstruction {
       registerA,
     )
 
-    // Gray Paper djump logic (equation 11):
+    // Gray Paper djump logic (equation 211-216):
+    // djump(a) ⟹ (ε, ι') = {
+    //   (halt, ι) when a = 2^32 - 2^16
+    //   (panic, ι) otherwhen a = 0 ∨ a > len(j)·2 ∨ a mod 2 ≠ 0 ∨ j_{(a/2) - 1} ∉ basicblocks
+    //   (continue, j_{(a/2) - 1}) otherwise
+    // }
     // a = (register + immediateX) % 2^32
     const a = (registerValue + immediateX) & 0xffffffffn
 
-    console.log('JUMP_IND: Jump calculation', {
+    context.log('JUMP_IND: Jump calculation', {
+      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
       registerA,
       registerValue,
       immediateX,
       a,
+      HALT_ADDRESS: 2n ** 32n - 2n ** 16n,
+      pc: context.pc,
     })
 
     // Check for HALT condition: a = 2^32 - 2^16
     const HALT_ADDRESS = 2n ** 32n - 2n ** 16n
 
-    console.log('JUMP_IND: HALT check', {
-      a,
-      HALT_ADDRESS,
-    })
     if (a === HALT_ADDRESS) {
-      console.log('JUMP_IND: HALT triggered', {
-        a,
-        HALT_ADDRESS,
-      })
       return { resultCode: RESULT_CODES.HALT }
     }
 
@@ -219,14 +159,29 @@ export class JUMP_INDInstruction extends BaseInstruction {
     // Get target from jump table
     const targetAddress = context.jumpTable[index]
 
-    console.log('Executing JUMP_IND instruction', {
+    // Gray Paper: Validate that target is a valid basic block start
+    // This is the same validation as LOAD_IMM_JUMP and other branch instructions
+    // basicblocks = ({0} ∪ {n + 1 + Fskip(n) : n is termination instruction})
+    //               ∩ {n : bitmask[n] = 1 and c[n] in valid opcodes}
+    const validationResult = this.validateBranchTarget(targetAddress, context)
+    if (validationResult !== null) {
+      context.log('JUMP_IND: Target address not a valid basic block start', {
+        targetAddress,
+        index,
+        jumpTableEntry: targetAddress.toString(),
+      })
+      return validationResult
+    }
+
+    context.log('JUMP_IND: Indirect jump using register + immediate', {
       registerA,
       registerValue,
       immediateX,
       a,
       index,
       targetAddress,
-      jumpTableLength: context.jumpTable.length,
+      currentPC: context.pc,
+      validationResult,
     })
 
     // Mutate context directly
@@ -235,12 +190,6 @@ export class JUMP_INDInstruction extends BaseInstruction {
     return {
       resultCode: null,
     }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} ${immediate}`
   }
 }
 
@@ -265,7 +214,7 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
     const signedOffset = this.toSigned64(immediateY)
     const targetAddress = context.pc + signedOffset
 
-    logger.debug('Executing LOAD_IMM_JUMP instruction', {
+    context.log('LOAD_IMM_JUMP: Load immediate into register and jump', {
       registerA,
       immediateX,
       immediateY,
@@ -282,7 +231,7 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
     //               ∩ {n : bitmask[n] = 1 and c[n] in valid opcodes}
     const validationResult = this.validateBranchTarget(targetAddress, context)
     if (validationResult !== null) {
-      logger.debug(
+      context.log(
         'LOAD_IMM_JUMP: Target address not a valid basic block start',
         {
           targetAddress,
@@ -291,7 +240,7 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
       return validationResult
     }
 
-    logger.debug('LOAD_IMM_JUMP: Jumping to valid basic block start', {
+    context.log('LOAD_IMM_JUMP: Jumping to valid basic block start', {
       targetAddress,
       currentPC: context.pc,
     })
@@ -317,7 +266,6 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
 export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IMM_JUMP_IND
   readonly name = 'LOAD_IMM_JUMP_IND'
-  readonly description = 'Load immediate into register and jump'
 
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: Instructions with Arguments of Two Registers and Two Immediates
@@ -333,7 +281,7 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
         context.fskip,
       )
 
-    logger.debug('LOAD_IMM_JUMP_IND: Parsed values', {
+    context.log('LOAD_IMM_JUMP_IND: Load immediate and indirect jump', {
       registerA,
       registerB,
       immediateX,
@@ -357,7 +305,7 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
 
     const a = (registerBValue + immediateY) & 0xffffffffn // mod 2^32
 
-    logger.debug('LOAD_IMM_JUMP_IND: Jump calculation', {
+    context.log('LOAD_IMM_JUMP_IND: Indirect jump calculation', {
       registerBValue,
       immediateY,
       a,
@@ -376,7 +324,7 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
     // - a > len(j) × 2
     // - a mod 2 ≠ 0
     const maxAddress = BigInt(context.jumpTable.length) * 2n
-    logger.debug('LOAD_IMM_JUMP_IND: Panic checks', {
+    context.log('LOAD_IMM_JUMP_IND: Indirect jump panic checks', {
       a,
       maxAddress,
       jumpTableLength: context.jumpTable.length,
@@ -387,7 +335,7 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
     })
 
     if (a === 0n || a > maxAddress || a % 2n !== 0n) {
-      logger.debug('LOAD_IMM_JUMP_IND: PANIC triggered', {
+      context.log('LOAD_IMM_JUMP_IND: Indirect jump panic triggered', {
         reason: a === 0n ? 'zero' : a > maxAddress ? 'too_large' : 'odd',
       })
       return { resultCode: RESULT_CODES.PANIC }
@@ -404,77 +352,32 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
     // Get target from jump table
     const targetAddress = context.jumpTable[index]
 
-    logger.debug('LOAD_IMM_JUMP_IND: Dynamic jump', {
+    context.log('LOAD_IMM_JUMP_IND: Indirect jump to valid basic block start', {
       a,
       index,
       targetAddress,
       jumpTableLength: context.jumpTable.length,
     })
 
-    // Gray Paper: Check if target address is a valid basic block
-    // According to Gray Paper equation 11: j[(a/2)-1] ∉ basicblocks
-    //
-    // Gray Paper section 7.2 defines basic blocks as:
-    // basicblocks ≡ ({0} ∪ {n + 1 + Fskip(n) | n ∈ Nmax(len(c)) ∧ k[n] = 1 ∧ c[n] ∈ T}) ∩ {n | k[n] = 1 ∧ c[n] ∈ U}
-    //
-    // Where T is the set of termination instructions (trap, fallthrough, jumps, branches)
-    // This means valid basic block starts are:
-    // 1. Address 0 (first instruction)
-    // 2. Instructions immediately following termination instructions
-    // 3. Instructions at valid opcode positions (bitmask[n] = 1)
-
-    // Check if target address is within valid bounds
-    // Gray Paper: PC should be constrained to program length
-    if (targetAddress < 0n || targetAddress >= BigInt(context.code.length)) {
-      logger.debug('LOAD_IMM_JUMP_IND: Target address out of bounds', {
-        targetAddress,
-        codeLength: context.code.length,
-      })
-      return { resultCode: RESULT_CODES.PANIC }
-    }
-
-    // Check if target is address 0 (always valid)
-    if (targetAddress === 0n) {
-      logger.debug(
-        'LOAD_IMM_JUMP_IND: Targeting address 0 (valid basic block start)',
-      )
-      context.pc = targetAddress
-      return { resultCode: null }
-    }
-
-    // Check if target is a valid opcode position (bitmask check)
-    if (
-      targetAddress >= context.bitmask.length ||
-      context.bitmask[Number(targetAddress)] === 0
-    ) {
-      logger.debug(
-        'LOAD_IMM_JUMP_IND: Target address not a valid opcode position',
+    // Gray Paper: Validate that target is a valid basic block start
+    // This is the same validation as LOAD_IMM_JUMP, JUMP_IND, and other branch instructions
+    // According to Gray Paper equation 11: j[(a/2)-1] ∉ basicblocks → panic
+    // basicblocks = ({0} ∪ {n + 1 + Fskip(n) : n is termination instruction})
+    //               ∩ {n : bitmask[n] = 1 and c[n] in valid opcodes}
+    const validationResult = this.validateBranchTarget(targetAddress, context)
+    if (validationResult !== null) {
+      context.log(
+        'LOAD_IMM_JUMP_IND: Indirect jump target address not a valid basic block start',
         {
           targetAddress,
-          bitmaskValue:
-            targetAddress < context.bitmask.length
-              ? context.bitmask[Number(targetAddress)]
-              : 'out of bounds',
+          index,
+          jumpTableEntry: targetAddress.toString(),
         },
       )
-      return { resultCode: RESULT_CODES.PANIC }
+      return validationResult
     }
 
-    // Check if target follows a termination instruction
-    // This is a simplified check - in a complete implementation, we would trace back
-    // through the execution path to verify the target follows a termination instruction
-    if (targetAddress > 0n) {
-      // For test vectors, we assume jump table entries point to valid basic blocks
-      // In a complete implementation, we would verify the execution path
-      const targetOpcode = BigInt(context.code[Number(targetAddress)])
-      logger.debug('LOAD_IMM_JUMP_IND: Target address validation', {
-        targetAddress,
-        targetOpcode,
-        isTerminationInstruction: isTerminationInstruction(targetOpcode),
-      })
-    }
-
-    logger.debug('LOAD_IMM_JUMP_IND: Jumping to valid basic block start', {
+    context.log('LOAD_IMM_JUMP_IND: Jumping to valid basic block start', {
       targetAddress,
       currentPC: context.pc,
     })
@@ -482,11 +385,5 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
     context.pc = targetAddress
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const { registerA, registerB, immediateX, immediateY } =
-      this.parseTwoRegistersAndTwoImmediates(operands, 4)
-    return `${this.name} r${registerA} r${registerB} ${immediateX} ${immediateY}`
   }
 }

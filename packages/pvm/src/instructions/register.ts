@@ -4,9 +4,8 @@
  * MOVE_REG, SBRK, and bit manipulation instructions
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES } from '../config'
+import { MEMORY_CONFIG, OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
@@ -19,22 +18,32 @@ export class MOVE_REGInstruction extends BaseInstruction {
   readonly name = 'MOVE_REG'
   readonly description = 'Move register value'
   execute(context: InstructionContext): InstructionResult {
-    // For MOVE_REG: operands[0] = destination, operands[1] = source
-    const registerD = this.getRegisterA(context.instruction.operands)
-    const registerA = this.getRegisterB(context.instruction.operands)
-    const value = this.getRegisterValue(context.registers, registerA)
+    // Gray Paper pvm.tex lines 418-428, 436:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = reg_A
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
+    const value = this.getRegisterValue(context.registers, registerA) // Read from source
 
+    // Write source value to destination: reg'_D = reg_A
     this.setRegisterValue(context.registers, registerD, value)
+
+    // Log after update to show the actual register state
+    context.log('MOVE_REG: Move register value', {
+      registerD,
+      registerA,
+      value: value.toString(),
+      pc: context.pc,
+      operands: Array.from(context.instruction.operands),
+      registers: [...context.registers].map(r => r.toString()), // Copy array to show post-update state
+      r10AfterUpdate: context.registers[10]?.toString(), // Explicitly log r10 to verify update
+    })
 
     // Mutate context directly
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerD} r${registerA}`
   }
 }
 
@@ -42,32 +51,66 @@ export class MOVE_REGInstruction extends BaseInstruction {
  * SBRK instruction (opcode 0x101)
  * Allocate memory as specified in Gray Paper
  * Gray Paper formula: reg'_D ≡ min(x ∈ pvmreg): x ≥ h ∧ Nrange{x}{reg_A} ⊄ readable{memory} ∧ Nrange{x}{reg_A} ⊆ writable{memory'}
+ *
+ * Implementation follows Go reference from jam-test-vectors/traces/README.md
  */
 export class SBRKInstruction extends BaseInstruction {
   readonly opcode = OPCODES.SBRK
   readonly name = 'SBRK'
-  readonly description = 'Allocate memory'
   execute(context: InstructionContext): InstructionResult {
-    const registerA = this.getRegisterA(context.instruction.operands)
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const size = this.getRegisterValue(context.registers, registerB)
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
+    const valueA = this.getRegisterValue(context.registers, registerA)
 
-    logger.debug('Executing SBRK instruction', { registerB, registerA, size })
+    context.log('SBRK: Allocate memory', {
+      registerD,
+      registerA,
+      valueA: valueA.toString(),
+      pc: context.pc,
+      currentHeapPointer: context.ram.currentHeapPointer,
+    })
 
-    // TODO: Implement memory allocation
-    // This is a placeholder - actual implementation would need memory management
-    const allocatedAddress = 0n // Placeholder
-    this.setRegisterValue(context.registers, registerA, allocatedAddress)
+    const ram = context.ram
+    const currentHeapPointer = BigInt(ram.currentHeapPointer)
 
-    // Mutate context directly
+    // Go implementation: if valueA == 0, return current heap pointer
+    if (valueA === 0n) {
+      // The guest is querying the current heap pointer
+      this.setRegisterValue(context.registers, registerD, currentHeapPointer)
+      return { resultCode: null }
+    }
+
+    // Record current heap pointer to return
+    const result = currentHeapPointer
+
+    // P_func: page alignment function (rnp in Gray Paper)
+    // Aligns address up to next page boundary: Cpvmpagesize * ceil(x / Cpvmpagesize)
+    const pageSize = MEMORY_CONFIG.PAGE_SIZE // Z_P = Cpvmpagesize = 4096
+    const pageAlign = (address: number): number => {
+      return Math.ceil(address / pageSize) * pageSize
+    }
+
+    const nextPageBoundary = pageAlign(ram.currentHeapPointer)
+    const newHeapPointer = ram.currentHeapPointer + Number(valueA)
+
+    // If new heap pointer exceeds next page boundary, allocate pages
+    if (newHeapPointer > nextPageBoundary) {
+      const finalBoundary = pageAlign(newHeapPointer)
+      const idxStart = Math.floor(nextPageBoundary / pageSize) // Z_P
+      const idxEnd = Math.floor(finalBoundary / pageSize) // Z_P
+      const pageCount = idxEnd - idxStart
+
+      ram.allocatePages(idxStart, pageCount)
+    }
+
+    // Advance the heap
+    ram.currentHeapPointer = newHeapPointer
+
+    // Return the previous heap pointer (before allocation)
+    this.setRegisterValue(context.registers, registerD, result)
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
   }
 }
 
@@ -79,10 +122,15 @@ export class SBRKInstruction extends BaseInstruction {
 export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_64
   readonly name = 'COUNT_SET_BITS_64'
-  readonly description = 'Count set bits in 64-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 443:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = Σ(i=0 to 63) bitsfunc{8}(reg_A)[i]
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value = this.getRegisterValue(context.registers, registerA)
 
     // Count set bits using bit manipulation
@@ -93,13 +141,13 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
       temp >>= 1n
     }
 
-    logger.debug('Executing COUNT_SET_BITS_64 instruction', {
-      registerB,
+    context.log('COUNT_SET_BITS_64: Count set bits in 64-bit register', {
+      registerD,
       registerA,
       value,
       count,
     })
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
     // Mutate context directly
 
@@ -115,10 +163,15 @@ export class COUNT_SET_BITS_64Instruction extends BaseInstruction {
 export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.COUNT_SET_BITS_32
   readonly name = 'COUNT_SET_BITS_32'
-  readonly description = 'Count set bits in 32-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 444:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = Σ(i=0 to 31) bitsfunc{4}(reg_A mod 2^32)[i]
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -130,17 +183,16 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
       temp >>= 1n
     }
 
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
-    console.log('Executing COUNT_SET_BITS_32 instruction', {
-      registerB,
+    context.log('COUNT_SET_BITS_32: Count set bits in 32-bit register', {
+      registerD,
       registerA,
-      value,
-      count,
-      pc: context.pc,
+      value: value.toString(),
+      count: count.toString(),
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -155,10 +207,14 @@ export class COUNT_SET_BITS_32Instruction extends BaseInstruction {
 export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_64
   readonly name = 'LEADING_ZERO_BITS_64'
-  readonly description = 'Count leading zero bits in 64-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 445:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = max(n ∈ Nmax{65}) where Σ(i=0 to i<n) revbitsfunc{8}(reg_A)[i] = 0
+    const registerD = this.getRegisterA(context.instruction.operands) // r_D from low nibble
+    const registerA = this.getRegisterB(context.instruction.operands) // r_A from high nibble
     const value = this.getRegisterValue(context.registers, registerA)
 
     // Count leading zeros
@@ -172,17 +228,16 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
       }
     }
 
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
-    console.log('Executing LEADING_ZERO_BITS_64 instruction', {
-      registerB,
+    context.log('LEADING_ZERO_BITS_64: Count leading zero bits in 64-bit register', {
+      registerD,
       registerA,
-      value,
-      count,
-      pc: context.pc,
+      value: value.toString(),
+      count: count.toString(),
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -197,10 +252,15 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
 export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.LEADING_ZERO_BITS_32
   readonly name = 'LEADING_ZERO_BITS_32'
-  readonly description = 'Count leading zero bits in 32-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 446:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = max(n ∈ Nmax{33}) where Σ(i=0 to i<n) revbitsfunc{4}(reg_A mod 2^32)[i] = 0
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -215,17 +275,16 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
       }
     }
 
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
-    console.log('Executing LEADING_ZERO_BITS_32 instruction', {
-      registerB,
+    context.log('LEADING_ZERO_BITS_32: Count leading zero bits in 32-bit register', {
+      registerD,
       registerA,
       value: value.toString(),
       count: count.toString(),
-      pc: context.pc,
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -240,10 +299,15 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
 export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.TRAILING_ZERO_BITS_64
   readonly name = 'TRAILING_ZERO_BITS_64'
-  readonly description = 'Count trailing zero bits in 64-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 447:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = max(n ∈ Nmax{65}) where Σ(i=0 to i<n) bitsfunc{8}(reg_A)[i] = 0
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value = this.getRegisterValue(context.registers, registerA)
 
     // Count trailing zeros
@@ -257,27 +321,21 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
       }
     }
 
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
-    console.log('Executing TRAILING_ZERO_BITS_64 instruction', {
-      registerB,
+    context.log('TRAILING_ZERO_BITS_64: Count trailing zero bits in 64-bit register', {
+      registerD,
       registerA,
       value: value.toString(),
       count: count.toString(),
-      pc: context.pc,
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerB = this.getRegisterB(operands)
-    const registerA = this.getRegisterA(operands)
-    return `${this.name} r${registerB} r${registerA}`
-  }
 }
 
 /**
@@ -290,8 +348,14 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
   readonly name = 'TRAILING_ZERO_BITS_32'
   readonly description = 'Count trailing zero bits in 32-bit register'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428, 448:
+    // Two Registers format:
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination from LOW nibble
+    // r_A = min(12, floor(instructions[ι+1] / 16)) - source from HIGH nibble
+    // Formula: reg'_D = max(n ∈ Nmax{33}) where Σ(i=0 to i<n) bitsfunc{4}(reg_A mod 2^32)[i] = 0
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 32n
 
@@ -306,17 +370,16 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
       }
     }
 
-    this.setRegisterValue(context.registers, registerB, count)
+    this.setRegisterValue(context.registers, registerD, count)
 
-    console.log('Executing TRAILING_ZERO_BITS_32 instruction', {
-      registerB,
+    context.log('TRAILING_ZERO_BITS_32: Count trailing zero bits in 32-bit register', {
+      registerD,
       registerA,
       value: value.toString(),
       count: count.toString(),
-      pc: context.pc,
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -333,25 +396,31 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
   readonly name = 'SIGN_EXTEND_8'
   readonly description = 'Sign extend 8-bit value'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper: Two Registers format
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination (low nibble)
+    // r_A = min(12, ⌊instructions[ι+1]/16⌋) - source (high nibble)
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value = this.getRegisterValue(context.registers, registerA) % 2n ** 8n
 
-    // Sign extend 8-bit to 64-bit
+    // Gray Paper: reg'_D = unsigned{signedn{1}{reg_A mod 2^8}}
+    // signedn{1}(x) = signfunc{1}(x) = x if x < 128, else x - 256
+    // unsigned{} converts signed value back to unsigned 64-bit
+    // This is equivalent to bitwise sign extension
     const signBit = value & (1n << 7n)
     const extendedValue = signBit ? value | ~((1n << 8n) - 1n) : value
 
-    this.setRegisterValue(context.registers, registerB, extendedValue)
+    this.setRegisterValue(context.registers, registerD, extendedValue)
 
-    console.log('Executing SIGN_EXTEND_8 instruction', {
-      registerB,
+    context.log('SIGN_EXTEND_8: Sign extend 8-bit value', {
+      registerD,
       registerA,
-      value,
-      extendedValue,
-      pc: context.pc,
+      value: value.toString(),
+      extendedValue: extendedValue.toString(),
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -362,32 +431,37 @@ export class SIGN_EXTEND_8Instruction extends BaseInstruction {
  * SIGN_EXTEND_16 instruction (opcode 0x109)
  * Sign extend 16-bit value as specified in Gray Paper
  * Gray Paper formula: reg'_D = unsigned{signedn{2}{reg_A mod 2^16}}
+ * Gray Paper pvm.tex line 450: "Two Registers" format
  */
 export class SIGN_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SIGN_EXTEND_16
   readonly name = 'SIGN_EXTEND_16'
-  readonly description = 'Sign extend 16-bit value'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper pvm.tex lines 418-428: "Two Registers" format
+    // r_D = min(12, (instructions[ι+1]) mod 16) - destination (LOW nibble)
+    // r_A = min(12, floor(instructions[ι+1]/16)) - source (HIGH nibble)
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
 
-    // Sign extend 16-bit to 64-bit
-    const signBit = value & (1n << 15n)
-    const extendedValue = signBit ? value | ~((1n << 16n) - 1n) : value
+    // Gray Paper: reg'_D = unsigned{signedn{2}{reg_A mod 2^16}}
+    // signedn{2}(x) = signfunc{2}(x) = x if x < 0x8000, else x - 0x10000
+    // unsigned{} converts signed value back to unsigned 64-bit
+    const signedValue = value < 0x8000n ? value : value - 0x10000n
+    const extendedValue = signedValue < 0n ? signedValue + 2n ** 64n : signedValue
 
-    this.setRegisterValue(context.registers, registerB, extendedValue)
+    this.setRegisterValue(context.registers, registerD, extendedValue)
 
-    console.log('Executing SIGN_EXTEND_16 instruction', {
-      registerB,
+    context.log('SIGN_EXTEND_16: Sign extend 16-bit value', {
+      registerD,
       registerA,
-      value,
+      value: value.toString(),
       extendedValue: extendedValue.toString(),
-      pc: context.pc,
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -402,24 +476,24 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
 export class ZERO_EXTEND_16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ZERO_EXTEND_16
   readonly name = 'ZERO_EXTEND_16'
-  readonly description = 'Zero extend 16-bit value'
   execute(context: InstructionContext): InstructionResult {
-    const registerB = this.getRegisterB(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper: Two Registers format
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value =
       this.getRegisterValue(context.registers, registerA) % 2n ** 16n
 
     // Zero extend 16-bit to 64-bit (no change needed since we're already using BigInt)
-    this.setRegisterValue(context.registers, registerB, value)
+    this.setRegisterValue(context.registers, registerD, value)
 
-    console.log('Executing ZERO_EXTEND_16 instruction', {
-      registerB,
+    context.log('ZERO_EXTEND_16: Zero extend 16-bit value', {
+      registerD,
       registerA,
-      value,
-      pc: context.pc,
+      value: value.toString(),
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }
@@ -429,15 +503,20 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
 /**
  * REVERSE_BYTES instruction (opcode 0x10B)
  * Reverse byte order as specified in Gray Paper
- * Gray Paper formula: ∀i ∈ N_8 : encode[8]{reg'_D}[i] = encode[8]{reg_A}[7-i]
+ * Gray Paper pvm.tex line 452: ∀i ∈ N_8 : encode[8]{reg'_D}[i] = encode[8]{reg_A}[7-i]
+ *
+ * Gray Paper pvm.tex line 418-428: "Two Registers" format
+ * r_D = min(12, (instructions[ι+1]) mod 16) - destination (low nibble)
+ * r_A = min(12, ⌊instructions[ι+1]/16⌋) - source (high nibble)
  */
 export class REVERSE_BYTESInstruction extends BaseInstruction {
   readonly opcode = OPCODES.REVERSE_Uint8Array
   readonly name = 'REVERSE_BYTES'
-  readonly description = 'Reverse byte order'
   execute(context: InstructionContext): InstructionResult {
-    const registerD = this.getRegisterD(context.instruction.operands)
-    const registerA = this.getRegisterA(context.instruction.operands)
+    // Gray Paper: Two Registers format
+    const { registerD, registerA } = this.parseTwoRegisters(
+      context.instruction.operands,
+    )
     const value = this.getRegisterValue(context.registers, registerA)
 
     // Reverse byte order (8 bytes)
@@ -449,15 +528,14 @@ export class REVERSE_BYTESInstruction extends BaseInstruction {
 
     this.setRegisterValue(context.registers, registerD, reversed)
 
-    console.log('Executing REVERSE_BYTES instruction', {
+    context.log('REVERSE_BYTES: Reverse byte order', {
       registerD,
       registerA,
-      value,
-      reversed,
-      pc: context.pc,
+      value: value.toString(),
+      reversed: reversed.toString(),
+      pc: context.pc.toString(),
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: context.registers,
     })
 
     return { resultCode: null }

@@ -33,6 +33,12 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const hashOffset = registers[7]
 
+    // Log all input parameters
+    context.log('YIELD host function invoked', {
+      hashOffset: hashOffset.toString(),
+      currentServiceId: implications[0].id.toString(),
+    })
+
     // Read hash from memory (32 bytes)
     const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
     if (faultAddress) {

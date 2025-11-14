@@ -28,7 +28,6 @@ import {
   AccumulatePVM,
   HostFunctionRegistry,
 } from '@pbnj/pvm'
-import { BlockStore, PreimageStore, WorkStore } from '@pbnj/state'
 // import { TelemetryClient } from '@pbnj/telemetry'
 import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
 import {
@@ -38,7 +37,6 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/types'
-import { db } from '../db'
 // import { WorkPackageProcessor } from './work-package-processor'
 import { AccumulationService } from './accumulation-service'
 import { AssuranceService } from './assurance-service'
@@ -132,9 +130,6 @@ export class MainService extends BaseService {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly hostFunctionRegistry: HostFunctionRegistry
   private readonly accumulatePVM: AccumulatePVM
-  private blockStore: BlockStore | null = null
-  private workStore: WorkStore | null = null
-  private preimageStore: PreimageStore | null = null
 
   private readonly ticketService: TicketService
   private readonly serviceAccountService: ServiceAccountService
@@ -179,7 +174,6 @@ export class MainService extends BaseService {
     this.ringProver = new RingVRFProverWasm(srsFilePath)
     this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)
     
-    this.initStores()
     this.initNetworkingProtocols()
     this.initProtocolRegistry()
 
@@ -282,10 +276,7 @@ export class MainService extends BaseService {
       sealKeyService: this.sealKeyService,
       ringProver: this.ringProver,
       ticketService: this.ticketService,
-      keyPairService: this.keyPairService,
       configService: this.configService,
-      // entropyService: this.entropyService,
-      // clockService: this.clockService,
       initialValidators: null,
     })
     // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
@@ -299,7 +290,6 @@ export class MainService extends BaseService {
     )
 
     this.serviceAccountService = new ServiceAccountService({
-      preimageStore: this.preimageStore!,
       configService: this.configService,
       eventBusService: this.eventBusService,
       clockService: this.clockService,
@@ -339,7 +329,7 @@ export class MainService extends BaseService {
       authQueueService: this.authQueueService,
       accumulatePVM: this.accumulatePVM,
       readyService: this.readyService,
-      // statisticsService: this.statisticsService,
+      statisticsService: this.statisticsService,
       // entropyService: this.entropyService,
     })
 
@@ -413,7 +403,6 @@ export class MainService extends BaseService {
     })
 
     this.workReportService = new WorkReportService({
-      workStore: this.workStore!,
       configService: this.configService,
       eventBus: this.eventBusService,
       networkingService: this.networkingService,
@@ -499,7 +488,6 @@ export class MainService extends BaseService {
       validatorSetManagerService: this.validatorSetManagerService,
       entropyService: this.entropyService,
       sealKeyService: this.sealKeyService,
-      blockStore: this.blockStore!,
       assuranceService: this.assuranceService,
       guarantorService: this.guarantorService,
       disputesService: this.disputesService,
@@ -592,12 +580,6 @@ export class MainService extends BaseService {
     return safeResult(true)
   }
 
-  initStores(): void {
-    this.blockStore = new BlockStore(db, this.configService)
-    this.workStore = new WorkStore(db)
-    this.preimageStore = new PreimageStore(db)
-    // this.ticketStore = new TicketStore(db)
-  }
 
   initNetworkingProtocols(): void {
     this.ce131TicketDistributionProtocol = new CE131TicketDistributionProtocol(

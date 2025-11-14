@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -19,7 +18,7 @@ export class CMOV_IZ_IMMInstruction extends BaseInstruction {
         ? immediate
         : this.getRegisterValue(context.registers, registerA)
 
-    logger.debug('Executing CMOV_IZ_IMM instruction', {
+    context.log('Executing CMOV_IZ_IMM instruction', {
       registerA,
       registerB,
       immediate,
@@ -34,12 +33,6 @@ export class CMOV_IZ_IMMInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerA} r${registerB} ${immediate}`
-  }
 }
 
 export class CMOV_NZ_IMMInstruction extends BaseInstruction {
@@ -58,7 +51,7 @@ export class CMOV_NZ_IMMInstruction extends BaseInstruction {
         ? immediate
         : this.getRegisterValue(context.registers, registerA)
 
-    logger.debug('Executing CMOV_NZ_IMM instruction', {
+    context.log('Executing CMOV_NZ_IMM instruction', {
       registerA,
       registerB,
       immediate,
@@ -73,10 +66,4 @@ export class CMOV_NZ_IMMInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }

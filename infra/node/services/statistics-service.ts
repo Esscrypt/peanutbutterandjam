@@ -23,6 +23,7 @@
 import {
   type BlockProcessedEvent,
   type EventBusService,
+  type Hex,
   hexToBytes,
   logger,
   type WorkReportProcessedEvent,
@@ -158,6 +159,12 @@ export class StatisticsService extends BaseService {
    */
   setActivity(activity: Activity): void {
     this.activity = activity
+    logger.debug('setActivity called', {
+      serviceStatsCount: activity.serviceStats.size,
+      serviceIds: Array.from(activity.serviceStats.keys()).map((id) =>
+        id.toString(),
+      ),
+    })
   }
 
   /**
@@ -214,6 +221,47 @@ export class StatisticsService extends BaseService {
    */
   getServiceStatsForService(serviceId: bigint): ServiceStats | null {
     return this.activity.serviceStats.get(serviceId) || null
+  }
+
+  /**
+   * Update accumulation statistics for a service
+   *
+   * Gray Paper: accumulation = ifnone{accumulationstatistics[s], tuple{0, 0}}
+   * This method is called by AccumulationService to update serviceStats.accumulation
+   * for services that have been successfully accumulated.
+   *
+   * @param serviceId - Service ID to update
+   * @param accumulationStats - Accumulation statistics tuple{count, gas}
+   */
+  updateServiceAccumulationStats(
+    serviceId: bigint,
+    accumulationStats: [number, number],
+  ): void {
+    let serviceStats = this.activity.serviceStats.get(serviceId)
+    if (!serviceStats) {
+      // Create new serviceStats entry if it doesn't exist
+      serviceStats = {
+        provision: [0, 0], // tuple{N, N} - [count, size]
+        refinement: [0, 0], // tuple{N, gas} - [count, gas]
+        // accumulation is not initialized here - only set by AccumulationService
+        importCount: 0,
+        extrinsicCount: 0,
+        extrinsicSize: 0,
+        exportCount: 0,
+      }
+      this.activity.serviceStats.set(serviceId, serviceStats)
+      logger.debug('[StatisticsService] Created new serviceStats entry for accumulation', {
+        serviceId: serviceId.toString(),
+      })
+    }
+
+    // Gray Paper: accumulation = accumulationstatistics[s]
+    serviceStats.accumulation = accumulationStats
+    logger.debug('[StatisticsService] Updated accumulation stats', {
+      serviceId: serviceId.toString(),
+      count: accumulationStats[0],
+      gas: accumulationStats[1],
+    })
   }
 
   /**
@@ -304,10 +352,9 @@ export class StatisticsService extends BaseService {
     if (preState.services_statistics) {
       for (const serviceStat of preState.services_statistics) {
         serviceStats.set(BigInt(serviceStat.id), {
-          provision: serviceStat.record.provided_count,
-          refinement: serviceStat.record.refinement_count,
-          accumulation: serviceStat.record.accumulate_count,
-          transfer: 0, // Not in test vector, default to 0
+          provision: [serviceStat.record.provided_count, 0], // tuple{N, N} - [count, size]
+          refinement: [serviceStat.record.refinement_count, 0], // tuple{N, gas} - [count, gas]
+          accumulation: [serviceStat.record.accumulate_count, 0], // tuple{N, gas} - [count, gas]
           importCount: serviceStat.record.imports,
           extrinsicCount: serviceStat.record.extrinsic_count,
           extrinsicSize: serviceStat.record.extrinsic_size,
@@ -359,6 +406,7 @@ export class StatisticsService extends BaseService {
     body: BlockBody,
     currentSlot: bigint,
     authorIndex: number,
+    accumulationOutputs?: Map<bigint, Hex>,
   ): void {
     // Check epoch based on slot and rotate if needed
     const isTransition = this.clockService.isEpochTransition(currentSlot)
@@ -369,6 +417,12 @@ export class StatisticsService extends BaseService {
         validatorStatsAccumulator: this.createEmptyValidatorStats(),
       }
     }
+
+    // Gray Paper: Service Statistics (π_S) are per-block tracking
+    // Clear serviceStats at the start of each block - they will be repopulated
+    // based on the current block's activity (provision, refinement, accumulation)
+    // This ensures serviceStats only contains entries for services with activity in THIS block
+    this.activity.serviceStats.clear()
     let stats = this.activity.validatorStatsAccumulator[authorIndex]
 
     // Ensure we have stats for the author
@@ -403,11 +457,30 @@ export class StatisticsService extends BaseService {
       this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
     }
 
+    // Track guarantees per validator: each guarantee has signatures from multiple validators
+    // Gray Paper: vs_guarantees = number of reports guaranteed by the validator
+    // Each validator who signs a guarantee gets credit for that guarantee
+    // NOTE: This is now handled by the guarantor service instead
+    // this.updateGuarantees(body.guarantees)
+
     // Extract work reports from guarantees for core/service statistics
     const incomingReports: WorkReport[] = []
     for (const guarantee of body.guarantees) {
       incomingReports.push(guarantee.report)
     }
+
+    logger.info('Updating core statistics from work reports', {
+      incomingReportsCount: incomingReports.length,
+      guaranteesCount: body.guarantees.length,
+      firstReportCoreIndex: incomingReports[0]?.core_index?.toString(),
+      firstReportPackageSpec: incomingReports[0]?.package_spec
+        ? {
+            hash: incomingReports[0].package_spec.hash,
+            length: incomingReports[0].package_spec.length?.toString(),
+            hasLength: incomingReports[0].package_spec.length !== undefined,
+          }
+        : null,
+    })
 
     // Update core statistics: popularity from assurances
     this.updateCoreStatistics(body.assurances)
@@ -420,6 +493,73 @@ export class StatisticsService extends BaseService {
 
     // Update service statistics: from work reports
     this.updateServiceStatisticsFromReports(incomingReports)
+
+    // Gray Paper equation 166-169: servicesactive includes keys{accumulationstatistics}
+    // Include services from accumulation outputs (from previous block's accumulation)
+    // These services should be in serviceStats even if they don't appear in work reports or preimages
+    if (accumulationOutputs) {
+      for (const serviceId of accumulationOutputs.keys()) {
+        // Ensure service stats exist for services with accumulation outputs
+        // NOTE: This is legacy code - accumulation outputs don't create serviceStats entries
+        // ServiceStats entries are only created when there's actual activity (provision, refinement, or accumulation)
+        // This code can be removed if accumulationOutputs is no longer used here
+        if (!this.activity.serviceStats.has(serviceId)) {
+          this.activity.serviceStats.set(serviceId, {
+            provision: [0, 0], // tuple{N, N} - [count, size]
+            refinement: [0, 0], // tuple{N, gas} - [count, gas]
+            // accumulation is not initialized here - only set by AccumulationService
+            importCount: 0,
+            extrinsicCount: 0,
+            extrinsicSize: 0,
+            exportCount: 0,
+          })
+        }
+      }
+    }
+
+    // Gray Paper equation 160-163: accumulation = ifnone{accumulationstatistics[s], tuple{0, 0}}
+    // Gray Paper equation 166-169: servicesactive = servicesreported ∪ servicesprovided ∪ keys{accumulationstatistics}
+    // Set accumulation for all services in servicesactive:
+    // - If service is in accumulationStatistics, use that value
+    // - Otherwise, use tuple{0, 0}
+
+    // Collect all service IDs in servicesactive
+    const servicesActive = new Set<bigint>()
+
+    // servicesreported: services from work reports
+    for (const report of incomingReports) {
+      for (const result of report.results) {
+        servicesActive.add(result.service_id)
+      }
+    }
+
+    // servicesprovided: services from preimages
+    for (const preimage of body.preimages) {
+      servicesActive.add(preimage.requester)
+    }
+
+    // keys{accumulationstatistics}: services with accumulation statistics
+    // NOTE: Services with accumulation statistics are now added to servicesActive
+    // by AccumulationService via updateServiceAccumulationStats(), which creates
+    // the serviceStats entry. We don't need to add them here anymore.
+
+    // Gray Paper equation 166-169: servicesactive = servicesreported ∪ servicesprovided ∪ keys{accumulationstatistics}
+    // NOTE: We do NOT create serviceStats entries on-demand here. Entries are only created when there's
+    // actual activity to record:
+    // - provision: created by updateServiceStatistics() when processing preimages
+    // - refinement: created by updateServiceStatisticsFromReports() when processing work reports
+    // - accumulation: created by AccumulationService.updateServiceAccumulationStats() when accumulation succeeds
+    // 
+    // This ensures serviceStats only contains entries for services with actual non-zero activity,
+    // not just services that appear in work reports or preimages but have no activity.
+
+    // Debug: Log final serviceStats
+    logger.debug('Final serviceStats after applyBlockDeltas', {
+      serviceIds: Array.from(this.activity.serviceStats.keys()).map((id) =>
+        id.toString(),
+      ),
+      serviceStatsCount: this.activity.serviceStats.size,
+    })
   }
 
   /**
@@ -535,9 +675,16 @@ export class StatisticsService extends BaseService {
     }
 
     // Gray Paper equation (106-114): Calculate R(c) and L(c) from incomingReports
+    logger.debug('Processing incoming reports for core statistics', {
+      incomingReportsCount: incomingReports.length,
+    })
     for (const report of incomingReports) {
       const coreIdx = Number(report.core_index)
       if (coreIdx < 0 || coreIdx >= this.activity.coreStats.length) {
+        logger.warn('Invalid core index in work report', {
+          coreIdx,
+          maxCores: this.activity.coreStats.length,
+        })
         continue
       }
 
@@ -545,17 +692,58 @@ export class StatisticsService extends BaseService {
 
       // L(c): Sum bundle length from package_spec.length
       // Gray Paper equation (129-133)
-      coreStats.bundleLength += Number(report.package_spec.length)
+      // Note: package_spec.length is a bigint, need to convert to number
+      if (
+        report.package_spec?.length !== undefined &&
+        report.package_spec.length !== null
+      ) {
+        const bundleLen =
+          typeof report.package_spec.length === 'bigint'
+            ? Number(report.package_spec.length)
+            : report.package_spec.length
+        coreStats.bundleLength += bundleLen
+        logger.debug('Updated bundle length for core', {
+          coreIdx,
+          bundleLen,
+          totalBundleLength: coreStats.bundleLength,
+          originalLength: report.package_spec.length.toString(),
+        })
+      } else {
+        logger.warn('Work report missing package_spec.length', {
+          coreIdx,
+          hasPackageSpec: !!report.package_spec,
+          lengthValue: report.package_spec?.length,
+        })
+      }
 
       // R(c): Sum digests from work results
       // Gray Paper equation (118-128)
       // Each work result's refine_load contributes to the sum
-      for (const result of report.results) {
-        coreStats.importCount += Number(result.refine_load.imports)
-        coreStats.extrinsicCount += Number(result.refine_load.extrinsic_count)
-        coreStats.extrinsicSize += Number(result.refine_load.extrinsic_size)
-        coreStats.exportCount += Number(result.refine_load.exports)
-        coreStats.gasUsed += Number(result.refine_load.gas_used)
+      if (report.results && Array.isArray(report.results)) {
+        for (const result of report.results) {
+          if (result.refine_load) {
+            coreStats.importCount += Number(result.refine_load.imports || 0)
+            coreStats.extrinsicCount += Number(
+              result.refine_load.extrinsic_count || 0,
+            )
+            coreStats.extrinsicSize += Number(
+              result.refine_load.extrinsic_size || 0,
+            )
+            coreStats.exportCount += Number(result.refine_load.exports || 0)
+            coreStats.gasUsed += Number(result.refine_load.gas_used || 0)
+          } else {
+            logger.warn('Work result missing refine_load', {
+              coreIdx,
+              hasResult: !!result,
+            })
+          }
+        }
+      } else {
+        logger.warn('Work report missing or invalid results array', {
+          coreIdx,
+          hasResults: !!report.results,
+          isArray: Array.isArray(report.results),
+        })
       }
     }
 
@@ -629,10 +817,9 @@ export class StatisticsService extends BaseService {
 
       if (!serviceStats) {
         serviceStats = {
-          provision: 0,
-          refinement: 0,
-          accumulation: 0,
-          transfer: 0,
+          provision: [0, 0], // tuple{N, N} - [count, size]
+          refinement: [0, 0], // tuple{N, gas} - [count, gas]
+          // accumulation is not initialized here - only set by AccumulationService
           importCount: 0,
           extrinsicCount: 0,
           extrinsicSize: 0,
@@ -642,8 +829,9 @@ export class StatisticsService extends BaseService {
       }
 
       // Gray Paper equation (156-159): provision = sum(1, len(data))
-      // For TypeScript: we store the count, size is implicit
-      serviceStats.provision += provision.count
+      // provision: tuple{N, N} = [count, size]
+      serviceStats.provision[0] += provision.count // count
+      serviceStats.provision[1] += provision.totalSize // size
     }
 
     logger.debug('Service statistics updated from preimages', {
@@ -668,6 +856,8 @@ export class StatisticsService extends BaseService {
   ): void {
     // Gray Paper equation (176-187): Calculate R(s) for each service
     // For each service that appears in work digests, sum upstock the metrics
+    // Gray Paper equation 166-169: servicesactive = servicesreported ∪ servicesprovided ∪ keys{accumulationstatistics}
+    // We only update services that appear in incoming reports, but preserve stats for other services
     const servicesToUpdate = new Set<bigint>()
 
     // First pass: collect all service IDs from work digests (results)
@@ -677,15 +867,15 @@ export class StatisticsService extends BaseService {
       }
     }
 
-    // Reset or initialize service stats for all active services
+    // Reset or initialize service stats ONLY for services that appear in incoming reports
+    // Preserve stats for services that don't appear in this block (from preimages, accumulation, or pre-state)
     for (const serviceId of servicesToUpdate) {
       let serviceStats = this.activity.serviceStats.get(serviceId)
       if (!serviceStats) {
         serviceStats = {
-          provision: 0,
-          refinement: 0,
-          accumulation: 0,
-          transfer: 0,
+          provision: [0, 0], // tuple{N, N} - [count, size]
+          refinement: [0, 0], // tuple{N, gas} - [count, gas]
+          // accumulation is not initialized here - only set by AccumulationService
           importCount: 0,
           extrinsicCount: 0,
           extrinsicSize: 0,
@@ -695,13 +885,17 @@ export class StatisticsService extends BaseService {
       }
 
       // Reset metrics that come from work reports (but preserve provision from preimages)
-      const provision = serviceStats.provision
-      serviceStats.refinement = 0
+      // Gray Paper: refinement, importCount, xtcount, xtsize, exportcount come from R(s)
+      // provision comes from preimages (sum over preimages)
+      // accumulation comes from accumulationstatistics (set separately)
+      const provision = serviceStats.provision // tuple{N, N} - preserve [count, size] from preimages
+      serviceStats.refinement = [0, 0] // tuple{N, gas} - reset [count, gas] (will be updated from work reports)
       serviceStats.importCount = 0
       serviceStats.extrinsicCount = 0
       serviceStats.extrinsicSize = 0
       serviceStats.exportCount = 0
-      // Note: accumulation comes from accumulation process, not reset here
+      // Preserve provision (from preimages)
+      // Note: accumulation will be set from accumulationStatistics later in applyBlockDeltas
       serviceStats.provision = provision
     }
 
@@ -714,10 +908,9 @@ export class StatisticsService extends BaseService {
 
         if (!serviceStats) {
           serviceStats = {
-            provision: 0,
-            refinement: 0,
-            accumulation: 0,
-            transfer: 0,
+            provision: [0, 0], // tuple{N, N} - [count, size]
+            refinement: [0, 0], // tuple{N, gas} - [count, gas]
+            // accumulation is not initialized here - only set by AccumulationService
             importCount: 0,
             extrinsicCount: 0,
             extrinsicSize: 0,
@@ -727,11 +920,10 @@ export class StatisticsService extends BaseService {
         }
 
         // Gray Paper R(s) equation (181): counter = 1 per digest (refinement count)
-        serviceStats.refinement += 1
-        // Note: Gray Paper defines refinement as tuple (counter, gasused)
-        // TypeScript simplifies this to a single number (counter)
-        // Gas used would be tracked separately if needed, but ServiceStats.refinement
-        // is currently just a number representing the count
+        serviceStats.refinement[0] += 1 // count
+
+        // Gray Paper R(s) equation (182): gasused from refine operation
+        serviceStats.refinement[1] += Number(result.refine_load.gas_used) // gas
 
         // Gray Paper R(s) equation (183-186): sum refine_load metrics
         serviceStats.importCount += Number(result.refine_load.imports)
@@ -740,10 +932,6 @@ export class StatisticsService extends BaseService {
         )
         serviceStats.extrinsicSize += Number(result.refine_load.extrinsic_size)
         serviceStats.exportCount += Number(result.refine_load.exports)
-
-        // Gray Paper R(s) equation (182): gasused from refine operation
-        // Note: ServiceStats doesn't track refinement gas separately
-        // If needed, this could be added to a separate field or the refinement tuple
       }
     }
 

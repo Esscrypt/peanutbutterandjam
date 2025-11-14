@@ -1,4 +1,4 @@
-import { logger } from '@pbnj/core'
+
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -10,7 +10,6 @@ import { BaseInstruction } from './base'
 export class SHLO_L_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_32
   readonly name = 'SHLO_L_32'
-  readonly description = 'Shift left (32-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -21,7 +20,7 @@ export class SHLO_L_32Instruction extends BaseInstruction {
     const shiftAmount = valueB % 32n
     const result = valueA << shiftAmount
 
-    logger.debug('Executing SHLO_L_32 instruction', {
+    context.log('SHLO_L_32: Shift left (32-bit)', {
       registerD,
       registerA,
       registerB,
@@ -37,12 +36,6 @@ export class SHLO_L_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -52,7 +45,6 @@ export class SHLO_L_32Instruction extends BaseInstruction {
 export class SHLO_R_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_R_32
   readonly name = 'SHLO_R_32'
-  readonly description = 'Shift right logical (32-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -63,7 +55,7 @@ export class SHLO_R_32Instruction extends BaseInstruction {
     const shiftAmount = valueB % 32n
     const result = valueA >> shiftAmount // Unsigned right shift
 
-    logger.debug('Executing SHLO_R_32 instruction', {
+    context.log('SHLO_R_32: Shift right logical (32-bit)', {
       registerD,
       registerA,
       registerB,
@@ -78,13 +70,6 @@ export class SHLO_R_32Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -94,7 +79,6 @@ export class SHLO_R_32Instruction extends BaseInstruction {
 export class SHAR_R_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHAR_R_32
   readonly name = 'SHAR_R_32'
-  readonly description = 'Shift right arithmetic (32-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -109,7 +93,7 @@ export class SHAR_R_32Instruction extends BaseInstruction {
     const shiftedValue = signedValue >> shiftAmount
     const result = shiftedValue < 0n ? shiftedValue + 2n ** 32n : shiftedValue
 
-    logger.debug('Executing SHAR_R_32 instruction', {
+    context.log('SHAR_R_32: Shift right arithmetic (32-bit)', {
       registerD,
       registerA,
       registerB,
@@ -125,12 +109,5 @@ export class SHAR_R_32Instruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 }

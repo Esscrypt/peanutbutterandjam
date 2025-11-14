@@ -21,8 +21,9 @@ import { ClockService } from '../../../../../infra/node/services/clock-service'
  */
 export function parseJsonSafe(jsonString: string): unknown {
   // Wrap all numbers in quotes to avoid precision loss
-  // Handle both integers and large numbers that might lose precision
-  const quoted = jsonString.replace(/(\[|:)?(\d+)([,}\]])/g, '$1"$2"$3')
+  // Match all standalone numbers (not already in quotes) and wrap them
+  // This regex matches: optional opening bracket/colon/comma + optional whitespace + digits + optional whitespace + comma/brace/bracket
+  const quoted = jsonString.replace(/([:\[,]|^)\s*(\d+)\s*(?=[,\}\]])/gm, '$1"$2"')
   return JSON.parse(quoted)
 }
 
@@ -120,6 +121,8 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   status: string
   faultAddress: bigint | null
   memory: Map<bigint, number>
+  pvm: PVM
+  parseResult: { instructions: Array<{ opcode: bigint; operands: Uint8Array; pc: bigint }>; jumpTable: bigint[]; bitmask: Uint8Array; success: boolean }
 }> {
     // Create PVM instance
   const registry = new InstructionRegistry()
@@ -158,16 +161,17 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   }
 
   // Set initial memory
+  // During initialization, we can write to any initialized page regardless of access type
+  // This matches the test vector format where read-only pages can have initial data
   if (testVector['initial-memory']) {
     for (const memBlock of testVector['initial-memory']) {
       const address = BigInt(memBlock.address)
       const contents = memBlock.contents.map(v => Number(v))
+      const values = new Uint8Array(contents)
       
-      // Bypass writability check during initialization - this is setting up initial state
-      // Write directly to the memory data map
-      for (let i = 0; i < contents.length; i++) {
-        ram['memoryData'].set(address + BigInt(i), contents[i])
-      }
+      // Write directly to memory during initialization, bypassing writable checks
+      // This is needed because test vectors may write to read-only pages during setup
+      ram.writeOctetsDuringInitialization(address, values)
     }
   }
 
@@ -186,7 +190,6 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     configService: configService,
   })
   const serviceAccountService = new ServiceAccountService({
-    preimageStore: null,
     configService: new ConfigService('tiny'),
     eventBusService: eventBusService,
     clockService: clockService,
@@ -248,6 +251,13 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     status,
     faultAddress,
     memory: finalMemory,
+    pvm,
+    parseResult: {
+      instructions: parseResult.instructions,
+      jumpTable: parseResult.jumpTable,
+      bitmask: parseResult.bitmask,
+      success: parseResult.success,
+    },
   }
 }
 

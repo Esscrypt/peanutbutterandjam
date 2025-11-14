@@ -45,6 +45,11 @@ export class ReadHostFunction extends BaseHostFunction {
     // Read key from memory
     const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
     if (!key) {
+      context.log('Read host function: Memory read fault', {
+        keyOffset: keyOffset.toString(),
+        keyLength: keyLength.toString(),
+        faultAddress: faultAddress?.toString() ?? 'null',
+      })
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -61,6 +66,9 @@ export class ReadHostFunction extends BaseHostFunction {
     if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      context.log('Read host function: Service account not found', {
+        serviceId: serviceId.toString(),
+      })
       return {
         resultCode: null, // continue execution
       }
@@ -71,6 +79,10 @@ export class ReadHostFunction extends BaseHostFunction {
     if (!value) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      context.log('Read host function: Storage key not found', {
+        serviceId: serviceId.toString(),
+        keyLength: key.length.toString(),
+      })
       return {
         resultCode: null, // continue execution
       }
@@ -88,6 +100,10 @@ export class ReadHostFunction extends BaseHostFunction {
 
     const faultAddress2 = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress2) {
+      context.log('Read host function: Memory write fault', {
+        outputOffset: outputOffset.toString(),
+        faultAddress: faultAddress2.toString(),
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -100,6 +116,12 @@ export class ReadHostFunction extends BaseHostFunction {
 
     // Return length of value
     context.registers[7] = BigInt(value.length)
+
+    context.log('Read host function: Storage value read successfully', {
+      serviceId: serviceId.toString(),
+      valueLength: value.length.toString(),
+      actualLength: actualLength.toString(),
+    })
 
     return {
       resultCode: null, // continue execution

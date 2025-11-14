@@ -18,7 +18,7 @@ import {
   merklizewb, 
   verifyMerkleProof 
 } from '@pbnj/core'
-import { decodeWorkPackage } from '@pbnj/serialization'
+import { decodeWorkPackage } from '@pbnj/codec'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 

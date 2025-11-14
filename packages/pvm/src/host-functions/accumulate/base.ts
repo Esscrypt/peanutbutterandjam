@@ -12,6 +12,8 @@ export interface AccumulateHostFunctionContext {
   ram: RAM
   implications: ImplicationsPair
   timeslot: bigint
+  expungePeriod: bigint
+  log: (message: string, data?: Record<string, unknown>) => void
 }
 
 /**

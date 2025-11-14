@@ -13,7 +13,7 @@ import {
   IETFVRFProver,
 } from '@pbnj/bandersnatch-vrf'
 import { generateBandersnatchKeyPairFromSeed } from '@pbnj/core'
-import { encodeUnsignedHeader } from '@pbnj/serialization'
+import { encodeUnsignedHeader } from '@pbnj/codec'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BlockTraceTestVector, IConfigService, UnsignedBlockHeader } from '@pbnj/types'

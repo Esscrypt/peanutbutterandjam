@@ -1,4 +1,4 @@
-import { encodeServiceAccount } from '@pbnj/serialization'
+import { encodeServiceAccount } from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -50,6 +50,10 @@ export class InfoHostFunction extends BaseHostFunction {
     const [serviceAccountError, serviceAccount] =
       this.serviceAccountService.getServiceAccount(serviceId)
     if (serviceAccountError) {
+      context.log('Info host function: Service account error', {
+        serviceId: serviceId.toString(),
+        error: serviceAccountError.message,
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -62,6 +66,9 @@ export class InfoHostFunction extends BaseHostFunction {
     if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      context.log('Info host function: Service account not found', {
+        serviceId: serviceId.toString(),
+      })
       return {
         resultCode: null, // continue execution
       }
@@ -88,6 +95,10 @@ export class InfoHostFunction extends BaseHostFunction {
 
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress) {
+      context.log('Info host function: Memory write fault', {
+        outputOffset: outputOffset.toString(),
+        faultAddress: faultAddress.toString(),
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -100,6 +111,12 @@ export class InfoHostFunction extends BaseHostFunction {
 
     // Return length of info
     context.registers[7] = BigInt(info.length)
+
+    context.log('Info host function: Service account info returned', {
+      serviceId: serviceId.toString(),
+      infoLength: info.length.toString(),
+      actualLength: actualLength.toString(),
+    })
 
     return {
       resultCode: null, // continue execution

@@ -1,5 +1,5 @@
 import { bytesToHex, generateAlternativeName, logger } from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/serialization'
+import { decodeFixedLength } from '@pbnj/codec'
 import {
   extractAlternativeNameFromDERCertificate,
   extractPublicKeyFromDERCertificate,

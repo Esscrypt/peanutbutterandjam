@@ -41,9 +41,8 @@ export type MemoryAccessType = 'none' | 'read' | 'write'
  * Implements Gray Paper RAM specification with proper access control
  */
 export interface RAM {
-  /** Memory data
-   * do not use directly unless its for initializing the memory layout*/
-  memoryData: Map<bigint, number>
+  /** Current heap pointer for dynamic memory allocation (SBRK) */
+  currentHeapPointer: number
 
   /** Read multiple consecutive bytes from memory */
   readOctets(address: bigint, count: bigint): [Uint8Array | null, bigint | null]
@@ -56,6 +55,18 @@ export interface RAM {
 
   /** Check if an address range is writable */
   isWritableWithFault(address: bigint, size?: bigint): [boolean, bigint | null]
+
+  /** Allocate additional pages for dynamic heap growth (SBRK) */
+  allocatePages(startPage: number, count: number): void
+
+  /** Initialize memory layout with program data (Gray Paper Y function) */
+  initializeMemoryLayout(
+    argumentData: Uint8Array,
+    readOnlyData: Uint8Array,
+    readWriteData: Uint8Array,
+    stackSize: number,
+    heapZeroPaddingSize: number,
+  ): void
 
   /** Initialize a memory page (for test vectors) */
   initializePage(
@@ -72,6 +83,14 @@ export interface RAM {
     isPadding?: boolean,
   ): void
 
+  /** Set memory page access rights for a range of pages (helper for sequential regions) */
+  setPageAccessRightsForRange(
+    startPage: bigint,
+    endPage: bigint,
+    accessType: MemoryAccessType,
+    isPadding?: boolean,
+  ): void
+
   /** Get memory page access type */
   getPageAccessType(address: bigint): MemoryAccessType
 
@@ -81,10 +100,41 @@ export interface RAM {
     length: number
     'is-writable': boolean
     accessType: MemoryAccessType
+    region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
   }>
 
   /** Get memory contents for a specific address range */
   getMemoryContents(address: bigint, length: number): number[]
+
+  /** Track interaction with instruction context */
+  trackInteraction(
+    address: bigint,
+    type: 'read' | 'write',
+    instructionContext: {
+      pc: bigint
+      opcode: bigint
+      name: string
+      operands?: number[]
+    },
+    register?: number,
+    value?: bigint,
+  ): void
+
+  /** Get address interaction history for debugging */
+  getAddressInteractionHistory(): Map<
+    bigint,
+    Array<{
+      pc: bigint
+      opcode: bigint
+      name: string
+      type: 'read' | 'write'
+      region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
+      address: bigint
+      register?: number
+      value?: bigint
+      operands?: number[]
+    }>
+  >
 
   /** Get page map with contents as JSON-serializable format (for verification) */
   getPageMapWithContentsJSON(): Array<{
@@ -92,6 +142,7 @@ export interface RAM {
     length: number
     'is-writable': boolean
     accessType: MemoryAccessType
+    region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
     contents: number[]
   }>
 }
@@ -184,6 +235,18 @@ export interface PVMInstruction {
 }
 
 /**
+ * Instruction log entry for debugging
+ */
+export interface InstructionLogEntry {
+  pc: bigint
+  instructionName: string
+  opcode: string
+  message: string
+  data?: Record<string, unknown>
+  timestamp: number
+}
+
+/**
  * Instruction execution context (mutable)
  * Instructions modify this context directly
  */
@@ -197,12 +260,17 @@ export interface InstructionContext {
   code: Uint8Array // code
   bitmask: Uint8Array // opcode bitmask
   fskip: number
+  /** Global log collection for instruction execution */
+  logs: InstructionLogEntry[]
+  /** Add a log entry to the global context */
+  log(message: string, data?: Record<string, unknown>): void
 }
 
 export interface HostFunctionContext {
   gasCounter: bigint
   registers: RegisterState
   ram: RAM
+  log: (message: string, data?: Record<string, unknown>) => void
 }
 
 /**
@@ -436,10 +504,12 @@ export type ImplicationsPair = [Implications, Implications]
  * @param type - Type of the input
  * @param value - Value of the input
  */
-export interface AccumulateInput {
-  type: bigint // 0 for operand tuple, 1 for deferred transfer
-  value: OperandTuple | DeferredTransfer
-}
+export type AccumulateInput =
+  | {
+      type: 0 // 0 for operand tuple, 1 for deferred transfer
+      value: OperandTuple
+    }
+  | { type: 1; value: DeferredTransfer }
 
 export interface AccumulateOutput {
   poststate: PartialState
@@ -447,6 +517,7 @@ export interface AccumulateOutput {
   yield: Uint8Array | null
   gasused: bigint
   provisions: Map<bigint, Uint8Array>
+  resultCode: ResultCode // HALT, PANIC, or OOG - needed to determine if accumulation was successful
 }
 
 export type AccumulateInvocationResult =
@@ -506,12 +577,12 @@ export type IsAuthorizedResult = Uint8Array | WorkError
 export const PVM_CONSTANTS = {
   DEFAULT_GAS_LIMIT: 1000000n,
   MIN_GAS_COST: 1n,
-  RESERVED_MEMORY_START: 0n,
+  RESERVED_MEMORY_END: 0n,
   MAX_MEMORY_ADDRESS: 0xffffffffn,
   INITIAL_ZONE_SIZE: 1024n,
   PAGE_SIZE: 4096n,
   DYNAMIC_ADDRESS_ALIGNMENT: 8n,
-  INIT_ZONE_SIZE: 1024n,
+  ZONE_SIZE: 1024n,
   INIT_INPUT_SIZE: 1024n,
   REGISTER_COUNT_64BIT: 8n,
   REGISTER_COUNT_32BIT: 5n,
@@ -560,7 +631,7 @@ export type ContextMutator<T> = (
   memory: RAM,
   context: T,
 ) => {
-  resultCode: ResultCode
+  resultCode: ResultCode | null
   gasCounter: bigint
   registers: bigint[]
   memory: RAM

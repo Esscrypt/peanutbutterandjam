@@ -46,6 +46,7 @@ export class PeekHostFunction extends BaseHostFunction {
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Peek host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -58,34 +59,26 @@ export class PeekHostFunction extends BaseHostFunction {
     const length = context.registers[10] // z: length
 
     // Gray Paper error check order:
-    // 1. Check if destination range is writable → panic
-    const [destWritable, faultAddress] = context.ram.isWritableWithFault(
-      destOffset,
-      length,
-    )
-    if (!destWritable) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_write',
-          address: faultAddress ?? 0n,
-          details: 'Memory not writable',
-        },
-      }
-    }
-
-    // 2. Check if machine exists → WHO
+    // 1. Check if machine exists → WHO
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      context.log('Peek host function: Machine not found', {
+        machineId: machineId.toString(),
+      })
       return {
         resultCode: null, // continue (not HALT)
       }
     }
 
-    // 3. Check if source range is readable → OOB
+    // 2. Check if source range is readable → OOB
     if (!this.isMachineMemoryReadable(machine, sourceOffset, length)) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      context.log('Peek host function: Source memory not readable', {
+        machineId: machineId.toString(),
+        sourceOffset: sourceOffset.toString(),
+        length: length.toString(),
+      })
       return {
         resultCode: null, // continue (not HALT)
       }

@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -6,7 +5,6 @@ import { BaseInstruction } from './base'
 export class MINInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MIN
   readonly name = 'MIN'
-  readonly description = 'Minimum (signed)'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -19,7 +17,7 @@ export class MINInstruction extends BaseInstruction {
     const signedB = this.toSigned64(valueB)
     const result = signedA < signedB ? valueA : valueB
 
-    logger.debug('Executing MIN instruction', {
+    context.log('MIN: Minimum (signed)', {
       registerD,
       registerA,
       registerB,
@@ -40,7 +38,6 @@ export class MINInstruction extends BaseInstruction {
 export class MIN_UInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MIN_U
   readonly name = 'MIN_U'
-  readonly description = 'Minimum (unsigned)'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -49,7 +46,7 @@ export class MIN_UInstruction extends BaseInstruction {
     const valueB = this.getRegisterValue(context.registers, registerB)
     const result = valueA < valueB ? valueA : valueB
 
-    logger.debug('Executing MIN_U instruction', {
+    context.log('MIN_U: Minimum (unsigned)', {
       registerD,
       registerA,
       registerB,
@@ -64,18 +61,11 @@ export class MIN_UInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 export class MAXInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MAX
   readonly name = 'MAX'
-  readonly description = 'Maximum (signed)'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -88,7 +78,7 @@ export class MAXInstruction extends BaseInstruction {
     const signedB = this.toSigned64(valueB)
     const result = signedA > signedB ? valueA : valueB
 
-    logger.debug('Executing MAX instruction', {
+    context.log('MAX: Maximum (signed)', {
       registerD,
       registerA,
       registerB,
@@ -109,7 +99,6 @@ export class MAXInstruction extends BaseInstruction {
 export class MAX_UInstruction extends BaseInstruction {
   readonly opcode = OPCODES.MAX_U
   readonly name = 'MAX_U'
-  readonly description = 'Maximum (unsigned)'
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -118,7 +107,7 @@ export class MAX_UInstruction extends BaseInstruction {
     const valueB = this.getRegisterValue(context.registers, registerB)
     const result = valueA > valueB ? valueA : valueB
 
-    logger.debug('Executing MAX_U instruction', {
+    context.log('MAX_U: Maximum (unsigned)', {
       registerD,
       registerA,
       registerB,

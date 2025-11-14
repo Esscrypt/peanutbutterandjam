@@ -15,7 +15,7 @@ import type {
   SealKey,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
-import { generateRingVRFProof } from './generate-ring-proof'
+import { generateTicketProof } from './generate-ring-proof'
 
 /**
  * Generate tickets for submission according to Gray Paper specifications
@@ -97,7 +97,7 @@ function generateTickets(
 
     // Generate Ring VRF proof using the helper function
     // Message is empty [] for tickets (Gray Paper equation 292)
-    const [proofError, proofResult] = generateRingVRFProof(
+    const [proofError, proofResult] = generateTicketProof(
       validatorSecretKey,
       entropy2,
       entryIndex,
@@ -223,7 +223,7 @@ export function verifyTicket(
   const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
   // Gray Paper Eq. 292: Create VRF context: Xticket ∥ entropy'_2 ∥ xt_entryindex
-  // Use the same encoding as generateRingVRFProof for consistency
+  // Use the same encoding as generateTicketProof for consistency
   // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
 
   const entryIndexBytes = new Uint8Array(1)

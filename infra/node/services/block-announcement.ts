@@ -12,7 +12,7 @@
 //   logger,
 // } from '@pbnj/core'
 // import type { BlockAnnouncementProtocol } from '@pbnj/networking'
-// import { calculateBlockHash } from '@pbnj/serialization'
+// import { calculateBlockHash } from '@pbnj/codec'
 // import type {
 //   Block,
 //   BlockAnnouncement,

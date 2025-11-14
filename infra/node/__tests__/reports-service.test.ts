@@ -11,7 +11,7 @@ import { describe, it, expect } from 'bun:test'
 import { EventBusService, type Hex } from '@pbnj/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { ReportsTestVector, WorkReport } from '@pbnj/types'
+import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnj/types'
 import { ValidatorSetManager } from '../services/validator-set'
 import { EntropyService } from '../services/entropy'
 import { RecentHistoryService } from '../services/recent-history-service'
@@ -123,7 +123,7 @@ describe('Reports - JAM Test Vectors', () => {
             eventBusService,
             sealKeyService: null,
             keyPairService: null,
-            ringProver: null,
+            ringProver: null as any,
             ticketService: null,
             configService: configService,
             initialValidators: vector.pre_state.curr_validators.map((validator, index) => ({
@@ -183,7 +183,6 @@ describe('Reports - JAM Test Vectors', () => {
 
           // Step 4: Initialize ServiceAccountService and set accounts from pre_state
           const serviceAccountService = new ServiceAccountService({
-            preimageStore: null,
             configService,
             eventBusService,
             clockService,
@@ -234,7 +233,6 @@ describe('Reports - JAM Test Vectors', () => {
 
           // Step 6: Initialize WorkReportService, AuthQueueService, and AuthPoolService
           const workReportService = new WorkReportService({
-            workStore: null,
             eventBus: eventBusService,
             networkingService: null,
             ce136WorkReportRequestProtocol: null,
@@ -290,7 +288,7 @@ describe('Reports - JAM Test Vectors', () => {
             authQueueService: authQueueService,
             accumulatePVM: null,
             readyService: null,
-            // statisticsService: statisticsService,
+            statisticsService: statisticsService,
             // entropyService: entropyService,
           })
 
@@ -335,6 +333,23 @@ describe('Reports - JAM Test Vectors', () => {
             BigInt(vector.input.slot)
           )
 
+          // Update core statistics from guarantees (normally done in blockImporterService.applyBlockDeltas)
+          // This is needed because the test calls applyGuarantees directly instead of importBlock
+          if (!applyError) {
+            // Create a mock block body with the guarantees for statistics update
+            const mockBlockBody = {
+              guarantees,
+              assurances: vector.input['assurances'] || [],
+              tickets: [],
+              preimages: vector.input['preimages'] || [],
+              disputes: [],
+            }
+            statisticsService.applyBlockDeltas(
+              mockBlockBody,
+              BigInt(vector.input.slot),
+              0, // authorIndex - not used for core stats
+            )
+          }
 
           // Check if error case is expected
           if (applyError) {
@@ -431,16 +446,16 @@ describe('Reports - JAM Test Vectors', () => {
               .map(([id, stats]) => ({
                 id: Number(id),
                 record: {
-                  provided_count: stats.provision,
-                  provided_size: 0, // Not tracked in ServiceStats
-                  refinement_count: stats.refinement,
-                  refinement_gas_used: 0, // Not tracked in ServiceStats
+                  provided_count: stats.provision?.[0] || 0,
+                  provided_size: stats.provision?.[1] || 0, // Not tracked in ServiceStats
+                  refinement_count: stats.refinement?.[0] || 0,
+                  refinement_gas_used: stats.refinement?.[1] || 0, // Not tracked in ServiceStats
                   imports: stats.importCount,
                   extrinsic_count: stats.extrinsicCount,
                   extrinsic_size: stats.extrinsicSize,
                   exports: stats.exportCount,
-                  accumulate_count: stats.accumulation,
-                  accumulate_gas_used: 0, // Not tracked in ServiceStats
+                  accumulate_count: stats.accumulation?.[0] || 0,
+                  accumulate_gas_used: stats.accumulation?.[1] || 0, // Not tracked in ServiceStats
                 },
               }))
 

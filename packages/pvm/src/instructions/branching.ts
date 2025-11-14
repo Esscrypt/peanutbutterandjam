@@ -4,7 +4,6 @@
  * BRANCH_*_IMM variants - Branch if condition with immediate
  */
 
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -28,14 +27,10 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
       registerA,
     )
 
-    logger.debug('Executing BRANCH_EQ_IMM instruction', {
-      bitmask: context.bitmask,
-      opcode: this.opcode,
-      name: this.name,
-      description: this.description,
+    context.log('BRANCH_EQ_IMM: Branch if register equals immediate', {
       operands: context.instruction.operands,
       pc: context.pc,
-      registers: context.registers,
+      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
       registerA,
       immediateX,
       targetAddress: targetAddress.toString(),
@@ -46,10 +41,17 @@ export class BRANCH_EQ_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_NE_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_EQ_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_EQ_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -86,10 +88,17 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_NE_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_NE_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_NE_IMM: Branching to valid basic block start', {
         registerA,
         immediateX,
         registerValue,
@@ -103,13 +112,6 @@ export class BRANCH_NE_IMMInstruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 2, 2)
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
-  }
 }
 
 /**
@@ -122,8 +124,10 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const { registerA, immediateX, targetAddress } =
-      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerA,
@@ -134,10 +138,17 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LT_U_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LT_U_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_LT_U_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -147,14 +158,6 @@ export class BRANCH_LT_U_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const { registerA, immediateX, offset } = this.parseBranchOperands(
-      operands,
-      0n,
-    )
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -168,8 +171,10 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register less or equal immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const { registerA, immediateX, targetAddress } =
-      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerA,
@@ -180,10 +185,17 @@ export class BRANCH_LE_U_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LE_U_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LE_U_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_LE_U_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -207,8 +219,10 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
     'Branch if register greater or equal immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const { registerA, immediateX, targetAddress } =
-      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerA,
@@ -219,10 +233,17 @@ export class BRANCH_GE_U_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GE_U_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GE_U_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_GE_U_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -245,8 +266,10 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
   readonly description = 'Branch if register greater than immediate (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
-    const { registerA, immediateX, targetAddress } =
-      this.parseBranchOperandsUnsigned(context.instruction.operands, context.pc)
+    const { registerA, immediateX, targetAddress } = this.parseBranchOperands(
+      context.instruction.operands,
+      context.pc,
+    )
     const registerValue = this.getRegisterValueAs64(
       context.registers,
       registerA,
@@ -257,10 +280,17 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GT_U_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GT_U_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_GT_U_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -270,14 +300,6 @@ export class BRANCH_GT_U_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const { registerA, immediateX, offset } = this.parseBranchOperands(
-      operands,
-      0n,
-    )
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -305,10 +327,17 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LT_S_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LT_S_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_LT_S_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -318,13 +347,6 @@ export class BRANCH_LT_S_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-  disassemble(operands: Uint8Array): string {
-    const { registerA, immediateX, offset } = this.parseBranchOperands(
-      operands,
-      0n,
-    )
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -352,10 +374,17 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LE_S_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LE_S_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_LE_S_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -365,13 +394,6 @@ export class BRANCH_LE_S_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 1)
-    const offset = this.getImmediateValue(operands, 0)
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -400,10 +422,17 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GE_S_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GE_S_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_GE_S_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -413,14 +442,6 @@ export class BRANCH_GE_S_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const { registerA, immediateX, offset } = this.parseBranchOperands(
-      operands,
-      0n,
-    )
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -448,10 +469,17 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GT_S_IMM: Not valid basic block start', {
+          registerA,
+          immediateX,
+          registerValue,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GT_S_IMM: Branching to valid basic block start', {
+      context.log('BRANCH_GT_S_IMM: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -461,13 +489,6 @@ export class BRANCH_GT_S_IMMInstruction extends BaseInstruction {
     // else: not branching - PVM will advance PC normally
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerA = this.getRegisterA(operands)
-    const immediateX = this.getImmediateValue(operands, 0)
-    const offset = this.getImmediateValue(operands, 0)
-    return `${this.name} r${registerA} ${immediateX} ${offset}`
   }
 }
 
@@ -503,10 +524,18 @@ export class BRANCH_EQInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_EQ: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_EQ: Branching to valid basic block start', {
+      context.log('BRANCH_EQ: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -518,13 +547,6 @@ export class BRANCH_EQInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const { registerA, registerB, offset } = this.parseRegisterBranchOperands(
-      operands,
-      0n,
-    )
-    return `${this.name} r${registerA} r${registerB} ${offset}`
-  }
 }
 
 /**
@@ -548,7 +570,7 @@ export class BRANCH_NEInstruction extends BaseInstruction {
       registerB,
     )
 
-    console.log('Executing BRANCH_NE instruction', {
+    context.log('BRANCH_NE: Branch if two registers are not equal', {
       operands: Array.from(context.instruction.operands),
       currentPC: context.pc,
       registerA,
@@ -563,10 +585,18 @@ export class BRANCH_NEInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_NE: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_NE: Branching to valid basic block start', {
+      context.log('BRANCH_NE: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -604,10 +634,18 @@ export class BRANCH_LT_UInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LT_U: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LT_U: Branching to valid basic block start', {
+      context.log('BRANCH_LT_U: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -645,10 +683,18 @@ export class BRANCH_LT_SInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_LT_S: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_LT_S: Branching to valid basic block start', {
+      context.log('BRANCH_LT_S: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -687,10 +733,18 @@ export class BRANCH_GE_UInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GE_U: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GE_U: Branching to valid basic block start', {
+      context.log('BRANCH_GE_U: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })
@@ -729,10 +783,18 @@ export class BRANCH_GE_SInstruction extends BaseInstruction {
       // Gray Paper: Branches must target basic block starts
       const validationResult = this.validateBranchTarget(targetAddress, context)
       if (validationResult) {
+        context.log('BRANCH_GE_S: Not valid basic block start', {
+          registerA,
+          registerB,
+          registerValueA,
+          registerValueB,
+          targetAddress,
+          currentPC: context.pc,
+        })
         return validationResult
       }
 
-      logger.debug('BRANCH_GE_S: Branching to valid basic block start', {
+      context.log('BRANCH_GE_S: Branching to valid basic block start', {
         targetAddress,
         currentPC: context.pc,
       })

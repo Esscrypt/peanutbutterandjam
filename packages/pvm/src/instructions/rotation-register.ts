@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -6,7 +5,6 @@ import { BaseInstruction } from './base'
 export class ROT_L_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ROT_L_64
   readonly name = 'ROT_L_64'
-  readonly description = 'Rotate left (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -18,7 +16,7 @@ export class ROT_L_64Instruction extends BaseInstruction {
     )
     const result = this.rotateLeft64(valueA, rotationAmount)
 
-    logger.debug('Executing ROT_L_64 instruction', {
+    context.log('ROT_L_64: Rotate left (64-bit)', {
       registerD,
       registerA,
       registerB,
@@ -32,13 +30,6 @@ export class ROT_L_64Instruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 
   private rotateLeft64(value: bigint, amount: number): bigint {
@@ -60,10 +51,16 @@ export class ROT_L_64Instruction extends BaseInstruction {
   }
 }
 
+/**
+ * ROT_L_32 instruction (opcode 0xDD / 221)
+ * Gray Paper pvm.tex line 678:
+ * reg'_D = sext{4}{x} where x ∈ Nbits{32}, ∀i ∈ Nmax{32} : bitsfunc{4}(x)_{(i + reg_B) mod 32} = bitsfunc{4}(reg_A)_i
+ *
+ * Rotates the lower 32 bits of reg_A left by reg_B positions, then sign-extends to 64 bits.
+ */
 export class ROT_L_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ROT_L_32
-  readonly name = 'ROT_L_32'
-  readonly description = 'Rotate left (32-bit)'
+  readonly name = 'ROT_L_32' 
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -76,7 +73,7 @@ export class ROT_L_32Instruction extends BaseInstruction {
     )
     const result = this.rotateLeft32(valueA, rotationAmount)
 
-    logger.debug('Executing ROT_L_32 instruction', {
+    context.log('ROT_L_32: Rotate left (32-bit)', {
       registerD,
       registerA,
       registerB,
@@ -84,20 +81,13 @@ export class ROT_L_32Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
-    this.setRegisterValue(context.registers, registerD, result)
+    // Gray Paper: reg'_D = sext{4}{x} - sign-extend 32-bit result to 64 bits
+    this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
-
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 
   private rotateLeft32(value: bigint, amount: number): bigint {
     // Handle negative rotation amounts
@@ -121,7 +111,6 @@ export class ROT_L_32Instruction extends BaseInstruction {
 export class ROT_R_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ROT_R_64
   readonly name = 'ROT_R_64'
-  readonly description = 'Rotate right (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -133,7 +122,7 @@ export class ROT_R_64Instruction extends BaseInstruction {
     )
     const result = this.rotateRight64(valueA, rotationAmount)
 
-    logger.debug('Executing ROT_R_64 instruction', {
+    context.log('ROT_R_64: Rotate right (64-bit)', {
       registerD,
       registerA,
       registerB,
@@ -147,13 +136,6 @@ export class ROT_R_64Instruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 
   private rotateRight64(value: bigint, amount: number): bigint {
@@ -175,10 +157,16 @@ export class ROT_R_64Instruction extends BaseInstruction {
   }
 }
 
+/**
+ * ROT_R_32 instruction (opcode 0xDF / 223)
+ * Gray Paper pvm.tex line 680:
+ * reg'_D = sext{4}{x} where x ∈ Nbits{32}, ∀i ∈ Nmax{32} : bitsfunc{4}(x)_i = bitsfunc{4}(reg_A)_{(i + reg_B) mod 32}
+ *
+ * Rotates the lower 32 bits of reg_A right by reg_B positions, then sign-extends to 64 bits.
+ */
 export class ROT_R_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ROT_R_32
   readonly name = 'ROT_R_32'
-  readonly description = 'Rotate right (32-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -191,7 +179,7 @@ export class ROT_R_32Instruction extends BaseInstruction {
     )
     const result = this.rotateRight32(valueA, rotationAmount)
 
-    logger.debug('Executing ROT_R_32 instruction', {
+    context.log('ROT_R_32: Rotate right (32-bit)', {
       registerD,
       registerA,
       registerB,
@@ -199,19 +187,13 @@ export class ROT_R_32Instruction extends BaseInstruction {
       rotationAmount,
       result,
     })
-    this.setRegisterValue(context.registers, registerD, result)
+    // Gray Paper: reg'_D = sext{4}{x} - sign-extend 32-bit result to 64 bits
+    this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 
   private rotateRight32(value: bigint, amount: number): bigint {

@@ -18,7 +18,7 @@ import {
   decodeWorkPackage,
   encodeVariableSequence,
   encodeWorkPackage,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   Safe,
   SafePromise,

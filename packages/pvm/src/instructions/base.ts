@@ -21,7 +21,6 @@ import { isTerminationInstruction, RESULT_CODES } from '../config'
 export interface PVMInstructionHandler {
   readonly opcode: bigint
   readonly name: string
-  readonly description: string
 
   /**
    * Execute the instruction (mutates context in place)
@@ -47,7 +46,6 @@ export interface PVMInstructionHandler {
 export abstract class BaseInstruction implements PVMInstructionHandler {
   abstract readonly opcode: bigint
   abstract readonly name: string
-  abstract readonly description: string
 
   /**
    * Get register index from operand byte (Gray Paper pattern)
@@ -333,7 +331,9 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   /**
    * Parse branch instruction operands (One Register, One Immediate, One Offset)
    * Returns: {registerA, immediateX, offset, targetAddress}
-   * Gray Paper: immed_Y = ι + sign_extend(offset)
+   * Gray Paper pvm.tex line 394: immed_Y = ι + signfunc{l_Y}(decode[l_Y]{instructions[ι+2+l_X:l_Y]})
+   * 
+   * signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
    */
   protected parseBranchOperands(
     operands: Uint8Array,
@@ -349,10 +349,20 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     const immediateX = this.getImmediateValue(operands, 1, lengthX)
 
     // Offset Y starts after immediate X
+    // Gray Paper: l_Y = min(4, max(0, ℓ - l_X - 1))
     const lengthY = Math.min(4, Math.max(0, operands.length - lengthX - 1))
-    const offset = this.getImmediateValue(operands, 1 + lengthX, lengthY)
+    
+    // Read offset as unsigned first
+    const rawOffset = this.getImmediateValueUnsigned(operands, 1 + lengthX, lengthY)
+    
+    // Apply Gray Paper signfunc: signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
+    // This converts unsigned value to signed in range [-2^{8n-1}, 2^{8n-1}-1]
+    const signBitPosition = BigInt(8 * lengthY - 1)
+    const signBit = lengthY > 0 ? (rawOffset >> signBitPosition) & 1n : 0n
+    const offset =
+      signBit === 0n ? rawOffset : rawOffset - 2n ** BigInt(8 * lengthY)
 
-    // Calculate target address: immed_Y = ι + sign_extend(offset)
+    // Calculate target address: immed_Y = ι + signfunc{l_Y}(offset)
     const targetAddress = currentPC + offset
 
     return { registerA, immediateX, offset, targetAddress }
@@ -391,38 +401,11 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
   }
 
   /**
-   * Parse branch instruction operands for unsigned comparisons (One Register, One Immediate, One Offset)
-   * Returns: {registerA, immediateX, offset, targetAddress}
-   * Gray Paper: immed_Y = ι + sign_extend(offset)
-   * Note: immediateX is unsigned (no sign extension)
-   */
-  protected parseBranchOperandsUnsigned(
-    operands: Uint8Array,
-    currentPC: bigint,
-  ): {
-    registerA: RegisterIndex
-    immediateX: bigint
-    offset: bigint
-    targetAddress: bigint
-  } {
-    const registerA = this.getRegisterA(operands)
-    const lengthX = this.getImmediateLengthX(operands)
-    const immediateX = this.getImmediateValueUnsigned(operands, 1, lengthX)
-
-    // Offset Y starts after immediate X
-    const lengthY = Math.min(4, Math.max(0, operands.length - lengthX - 1))
-    const offset = this.getImmediateValue(operands, 1 + lengthX, lengthY)
-
-    // Calculate target address: immed_Y = ι + sign_extend(offset)
-    const targetAddress = currentPC + offset
-
-    return { registerA, immediateX, offset, targetAddress }
-  }
-
-  /**
    * Parse register-to-register branch operands (Two Registers & One Offset)
    * Returns: {registerA, registerB, targetAddress}
-   * Gray Paper: immed_X = ι + sign_extend(offset)
+   * Gray Paper pvm.tex line 541: immed_X = ι + signfunc{l_X}(decode[l_X]{instructions[ι+2:l_X]})
+   * 
+   * signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
    */
   protected parseRegisterBranchOperands(
     operands: Uint8Array,
@@ -436,11 +419,21 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     const registerA = this.getRegisterA(operands)
     const registerB = this.getRegisterB(operands)
 
-    // Offset starts at operands[1] (after register byte)
+    // Gray Paper: l_X = min(4, max(0, ℓ - 1))
+    // Offset starts at operands[1] (after register byte at ι+1, so offset is at ι+2)
     const lengthX = Math.min(4, Math.max(0, operands.length - 1))
-    const offset = this.getImmediateValue(operands, 1, lengthX)
+    
+    // Read offset as unsigned first
+    const rawOffset = this.getImmediateValueUnsigned(operands, 1, lengthX)
+    
+    // Apply Gray Paper signfunc: signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
+    // This converts unsigned value to signed in range [-2^{8n-1}, 2^{8n-1}-1]
+    const signBitPosition = BigInt(8 * lengthX - 1)
+    const signBit = lengthX > 0 ? (rawOffset >> signBitPosition) & 1n : 0n
+    const offset =
+      signBit === 0n ? rawOffset : rawOffset - 2n ** BigInt(8 * lengthX)
 
-    // Calculate target address: immed_X = ι + sign_extend(offset)
+    // Calculate target address: immed_X = ι + signfunc{l_X}(offset)
     const targetAddress = currentPC + offset
 
     return { registerA, registerB, offset, targetAddress }
@@ -492,6 +485,21 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    */
   protected getRegisterB(operands: Uint8Array): RegisterIndex {
     return Number(Math.min(12, Math.floor(operands[0] / 16))) as RegisterIndex
+  }
+
+  /**
+   * Parse "Two Registers" format (Gray Paper pvm.tex lines 418-428)
+   * Used by instructions that only need two registers (no immediate)
+   * r_D = min(12, (instructions[ι+1]) mod 16) - destination (low nibble)
+   * r_A = min(12, ⌊instructions[ι+1]/16⌋) - source (high nibble)
+   */
+  protected parseTwoRegisters(operands: Uint8Array): {
+    registerD: RegisterIndex
+    registerA: RegisterIndex
+  } {
+    const registerD = this.getRegisterA(operands) // r_D from low nibble
+    const registerA = this.getRegisterB(operands) // r_A from high nibble
+    return { registerD, registerA }
   }
 
   /**
@@ -731,17 +739,23 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-    // Check if target is address 0 (always valid basic block start)
-    if (targetAddress === 0n) {
-      return null // Valid - allow the branch
-    }
-
-    // Check if target is a valid opcode position (bitmask check)
+    // Gray Paper line 124: basicblocks ≡ ({0} ∪ {n + 1 + Fskip(n) | ...}) ∩ {n | k[n] = 1 ∧ c[n] ∈ U}
+    // The intersection requires BOTH conditions:
+    // 1. Target is in {0} ∪ {n + 1 + Fskip(n) | ...} (address 0 OR follows termination)
+    // 2. Target is in {n | k[n] = 1 ∧ c[n] ∈ U} (valid opcode position)
+    
+    // Check if target is a valid opcode position (bitmask check) - required by intersection
+    // This must be checked even for address 0
     if (
       targetAddress >= context.bitmask.length ||
       context.bitmask[Number(targetAddress)] === 0
     ) {
       return { resultCode: RESULT_CODES.PANIC }
+    }
+
+    // Check if target is address 0 (always valid basic block start if bitmask[0] = 1)
+    if (targetAddress === 0n) {
+      return null // Valid - allow the branch (bitmask already checked above)
     }
 
     // Gray Paper: Check if target is a basic block start

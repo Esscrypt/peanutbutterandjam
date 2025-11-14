@@ -1,5 +1,5 @@
 import { bytesToHex, type Hex, logger, z, zeroHash } from '@pbnj/core'
-import { createStateKey, createStateTrie } from '@pbnj/serialization'
+import { createStateKey, createStateTrie } from '@pbnj/codec'
 import type {
   Account,
   GenesisState,

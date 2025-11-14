@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -24,7 +23,7 @@ export class ADD_32Instruction extends BaseInstruction {
     const valueA = this.getRegisterValueAs32(context.registers, registerA)
     const valueB = this.getRegisterValueAs32(context.registers, registerB)
 
-    console.log('Executing ADD_32 instruction', {
+    context.log('ADD_32: Addition of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -35,7 +34,7 @@ export class ADD_32Instruction extends BaseInstruction {
     const sum = (valueA + valueB) & 0xffffffffn
     const result = this.signExtend(sum, 4)
 
-    logger.debug('Executing ADD_32 instruction', {
+    context.log('Executing ADD_32 instruction', {
       registerD,
       registerA,
       registerB,
@@ -48,13 +47,6 @@ export class ADD_32Instruction extends BaseInstruction {
     
 
     return { resultCode: null }
-  }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
   }
 }
 
@@ -75,7 +67,7 @@ export class SUB_32Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs32(context.registers, registerB)
     const result = (valueA - valueB + 0x100000000n) & 0xffffffffn // Handle underflow
 
-    logger.debug('Executing SUB_32 instruction', {
+    context.log('SUB_32: Subtraction of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -95,12 +87,6 @@ export class SUB_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -120,7 +106,7 @@ export class MUL_32Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs32(context.registers, registerB)
     const result = (valueA * valueB) & 0xffffffffn
 
-    logger.debug('Executing MUL_32 instruction', {
+    context.log('MUL_32: Multiplication of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -140,12 +126,6 @@ export class MUL_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -176,7 +156,7 @@ export class DIV_U_32Instruction extends BaseInstruction {
       result = valueA / valueB
     }
 
-    logger.debug('Executing DIV_U_32 instruction', {
+    context.log('DIV_U_32: Division of unsigned registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -192,12 +172,6 @@ export class DIV_U_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -241,7 +215,7 @@ export class DIV_S_32Instruction extends BaseInstruction {
       result = result & 0xffffffffn
     }
 
-    console.log('Executing DIV_S_32 instruction', {
+    context.log('DIV_S_32: Division of signed registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -257,12 +231,6 @@ export class DIV_S_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -272,7 +240,6 @@ export class DIV_S_32Instruction extends BaseInstruction {
 export class REM_U_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.REM_U_32
   readonly name = 'REM_U_32'
-  readonly description = 'Remainder 32-bit registers (unsigned)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -284,7 +251,7 @@ export class REM_U_32Instruction extends BaseInstruction {
     // Gray Paper: when B = 0, result = sext(4, A mod 2^32)
     const result = valueB === 0n ? valueA : valueA % valueB
 
-    logger.debug('Executing REM_U_32 instruction', {
+    context.log('REM_U_32: Remainder of registerA and registerB to registerD', {
       registerD,
       registerA,
       registerB,
@@ -300,12 +267,6 @@ export class REM_U_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -359,10 +320,4 @@ export class REM_S_32Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }

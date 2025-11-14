@@ -39,6 +39,15 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       // Extract parameters from registers
       const [hashOffset, preimageLength] = registers.slice(7, 9)
 
+      // Log all input parameters
+      context.log('SOLICIT host function invoked', {
+        hashOffset: hashOffset.toString(),
+        preimageLength: preimageLength.toString(),
+        timeslot: timeslot.toString(),
+        currentServiceId: implications[0].id.toString(),
+        expungePeriod: context.expungePeriod.toString(),
+      })
+
       // Read hash from memory (32 bytes)
       const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
       if (faultAddress) {

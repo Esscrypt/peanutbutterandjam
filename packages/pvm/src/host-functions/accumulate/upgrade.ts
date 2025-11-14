@@ -37,6 +37,14 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
     const [codeHashOffset, newMinimumAccumulationGas, newMinimumMemoryGas] =
       registers.slice(7, 10)
 
+    // Log all input parameters
+    context.log('UPGRADE host function invoked', {
+      codeHashOffset: codeHashOffset.toString(),
+      newMinimumAccumulationGas: newMinimumAccumulationGas.toString(),
+      newMinimumMemoryGas: newMinimumMemoryGas.toString(),
+      currentServiceId: implications[0].id.toString(),
+    })
+
     // Read code hash from memory (32 bytes)
     const [codeHashData, faultAddress] = ram.readOctets(codeHashOffset, 32n)
     if (faultAddress) {

@@ -6,7 +6,7 @@
  */
 
 import { keccak_256 } from '@noble/hashes/sha3'
-import { encodeVariableSequence } from '@pbnj/serialization'
+import { encodeVariableSequence } from '@pbnj/codec'
 import type { Encoder, Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { blake2bHash, bytesToHex, hexToBytes } from './utils/crypto'

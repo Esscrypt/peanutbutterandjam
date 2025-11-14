@@ -14,7 +14,7 @@ import {
   parseGenesisJson,
   zeroHash,
 } from '@pbnj/core'
-import { encodeHeader } from '@pbnj/serialization'
+import { encodeHeader } from '@pbnj/codec'
 import type {
   BlockHeader,
   GenesisState,

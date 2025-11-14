@@ -55,10 +55,10 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     this.serviceAccountService = serviceAccountService
   }
 
-  async execute(
+  execute(
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
-  ): Promise<HostFunctionResult> {
+  ): HostFunctionResult {
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]

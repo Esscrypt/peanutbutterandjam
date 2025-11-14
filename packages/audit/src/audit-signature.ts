@@ -55,7 +55,7 @@ import {
   jamShuffle,
   logger,
 } from '@pbnj/core'
-import { encodeWorkReport } from '@pbnj/serialization'
+import { encodeWorkReport } from '@pbnj/codec'
 import type {
   AuditAnnouncement,
   IConfigService,

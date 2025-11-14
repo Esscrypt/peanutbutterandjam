@@ -42,6 +42,13 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const [preimageOffset, preimageLength] = registers.slice(7, 9)
 
+    // Log all input parameters
+    context.log('QUERY host function invoked', {
+      preimageOffset: preimageOffset.toString(),
+      preimageLength: preimageLength.toString(),
+      currentServiceId: implications[0].id.toString(),
+    })
+
     // Read hash from memory (32 bytes)
     const [hashData, faultAddress] = ram.readOctets(
       preimageOffset,

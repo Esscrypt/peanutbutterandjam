@@ -11,7 +11,7 @@ import {
   decodeNatural,
   encodeFixedLength,
   encodeNatural,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   IJudgmentHolderService,
   JudgmentPublicationRequest,

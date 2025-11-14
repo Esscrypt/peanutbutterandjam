@@ -20,8 +20,7 @@ import {
   decodeFixedLength,
   decodeHeader,
   encodeHeader,
-} from '@pbnj/serialization'
-import type { BlockStore } from '@pbnj/state'
+} from '@pbnj/codec'
 import type {
   BlockAnnouncement,
   BlockAnnouncementHandshake,
@@ -45,16 +44,14 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
     { hash: Uint8Array; slot: bigint }
   > = new Map()
 
-  private readonly blockStore: BlockStore
   private readonly finalizedBlock: { hash: Uint8Array; slot: bigint } = {
     hash: new Uint8Array(32),
     slot: 0n,
   }
   private readonly configService: IConfigService
 
-  constructor(blockStore: BlockStore, configService: IConfigService) {
+  constructor(configService: IConfigService) {
     super()
-    this.blockStore = blockStore
     this.configService = configService
 
     // Initialize event handlers using the base class method
@@ -154,18 +151,10 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   /**
    * Update finalized block
    */
-  async updateFinalizedBlock(hash: Uint8Array, _slot: bigint): Promise<void> {
+  async updateFinalizedBlock(_hash: Uint8Array, _slot: bigint): Promise<void> {
     // Persist to database
-    if (this.blockStore) {
-      try {
-        await this.blockStore.updateBlockStatus(bytesToHex(hash), 'finalized')
-      } catch (error) {
-        logger.error('Failed to persist finalized block:', {
-          hash: bytesToHex(hash).slice(0, 20) + '...',
-          error: error instanceof Error ? error.message : String(error),
-        })
-      }
-    }
+    // not implemented
+    // TODO: implement
   }
 
   /**
@@ -235,7 +224,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
    * Create block announcement message
    */
   createBlockAnnouncement(blockHeader: Uint8Array): BlockAnnouncement {
-    const [error, blockHeaderResult] = decodeHeader(blockHeader)
+    const [error, blockHeaderResult] = decodeHeader(blockHeader, this.configService)
     if (error) {
       throw error
     }
@@ -416,7 +405,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   deserializeBlockAnnouncement(data: Uint8Array): BlockAnnouncement {
     let currentData = data
     // Read block header
-    const [error, decodedHeader] = decodeHeader(currentData)
+    const [error, decodedHeader] = decodeHeader(currentData, this.configService)
     if (error) {
       throw error
     }

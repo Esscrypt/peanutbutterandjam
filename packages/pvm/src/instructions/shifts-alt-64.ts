@@ -1,4 +1,4 @@
-import { logger } from '@pbnj/core'
+
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -6,7 +6,6 @@ import { BaseInstruction } from './base'
 export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_IMM_ALT_64
   readonly name = 'SHLO_L_IMM_ALT_64'
-  readonly description = 'Alternative logical left shift by immediate (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = (immed_X · 2^(reg_B mod 64)) mod 2^64
@@ -28,7 +27,7 @@ export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    console.log('Executing SHLO_L_IMM_ALT_64 instruction', {
+    context.log('SHLO_L_IMM_ALT_64: Alternative logical left shift of immediate by register (64-bit) and storing in registerA', {
       registerA,
       registerB,
       immediateX,
@@ -44,7 +43,6 @@ export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
 export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_R_IMM_ALT_64
   readonly name = 'SHLO_R_IMM_ALT_64'
-  readonly description = 'Alternative logical right shift by immediate (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = floor(immed_X / 2^(reg_B mod 64))
@@ -64,17 +62,20 @@ export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
     // ALT: shift the immediate value by the register amount (unsigned)
     const result = immediateX >> shiftAmount
 
-    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
-
-    console.log('Executing SHLO_R_IMM_ALT_64 instruction', {
+    // Log BEFORE modification to capture the before state
+    const beforeValue = context.registers[registerA]
+    context.log('SHLO_R_IMM_ALT_64: Alternative logical right shift of immediate by register (64-bit) and storing in registerA', {
       registerA,
       registerB,
       immediateX,
       registerBValue,
       shiftAmount,
       result,
-      registers: context.registers,
+      beforeValue: beforeValue.toString(),
+      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
     })
+
+    this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
   }
@@ -83,8 +84,6 @@ export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
 export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHAR_R_IMM_ALT_64
   readonly name = 'SHAR_R_IMM_ALT_64'
-  readonly description =
-    'Alternative arithmetic right shift by immediate (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: reg'_A = unsigned{floor(signed_64(immed_X) / 2^(reg_B mod 64))}
@@ -106,7 +105,7 @@ export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
     const shiftedValue = signedImmediate >> BigInt(shiftAmount)
     const result = this.toUnsigned64(shiftedValue)
 
-    logger.debug('Executing SHAR_R_IMM_ALT_64 instruction', {
+    context.log('SHAR_R_IMM_ALT_64: Alternative arithmetic right shift of immediate by register (64-bit) and storing in registerA', {
       registerA,
       registerB,
       immediateX,

@@ -1,7 +1,7 @@
 import {
   decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   HostFunctionResult,
   IConfigService,
@@ -52,6 +52,16 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     const C_VALCOUNT = this.configService.numValidators // 1023 validators
     const VALIDATOR_SIZE = 336 // bytes per validator
     const totalSize = VALIDATOR_SIZE * C_VALCOUNT
+
+    // Log all input parameters
+    context.log('DESIGNATE host function invoked', {
+      validatorsOffset: validatorsOffset.toString(),
+      validatorCount: C_VALCOUNT.toString(),
+      validatorSize: VALIDATOR_SIZE.toString(),
+      totalSize: totalSize.toString(),
+      currentServiceId: implications[0].id.toString(),
+      delegator: implications[0].state.delegator.toString(),
+    })
 
     const [validatorsData, faultAddress] = ram.readOctets(
       validatorsOffset,

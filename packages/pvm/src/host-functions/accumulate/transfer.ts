@@ -40,6 +40,16 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const [destinationServiceId, amount, gasLimit, memoOffset] =
       registers.slice(7, 11)
 
+    // Log all input parameters
+    context.log('TRANSFER host function invoked', {
+      destinationServiceId: destinationServiceId.toString(),
+      amount: amount.toString(),
+      gasLimit: gasLimit.toString(),
+      memoOffset: memoOffset.toString(),
+      gasCounter: gasCounter.toString(),
+      currentServiceId: implications[0].id.toString(),
+    })
+
     // Read memo from memory (128 bytes - Gray Paper Cmemosize)
     const C_MEMO_SIZE = 128n
     const [memoData, faultAddress] = ram.readOctets(memoOffset, C_MEMO_SIZE)

@@ -29,7 +29,7 @@ import {
   decodeWorkPackage,
   encodeFixedLength,
   encodeWorkPackage,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   Safe,
   SafePromise,

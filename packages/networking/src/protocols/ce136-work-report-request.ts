@@ -11,7 +11,7 @@ import {
   type Hex,
   hexToBytes,
 } from '@pbnj/core'
-import { decodeWorkReport, encodeWorkReport } from '@pbnj/serialization'
+import { decodeWorkReport, encodeWorkReport } from '@pbnj/codec'
 import type {
   Safe,
   SafePromise,

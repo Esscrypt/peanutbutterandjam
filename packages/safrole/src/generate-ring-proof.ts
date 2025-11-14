@@ -61,7 +61,7 @@ const Xticket = new TextEncoder().encode('jam_ticket_seal')
  * @param prover - Ring VRF prover instance
  * @returns 784-byte Ring VRF proof + 32-byte VRF output
  */
-export function generateRingVRFProof(
+export function generateTicketProof(
   secretKey: Uint8Array,
   entropy2: Uint8Array,
   entryIndex: number,

@@ -27,7 +27,7 @@ import {
   encodeGuarantees,
   encodePreimages,
   encodeSafroleTickets,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type { BlockBody, Guarantee, IConfigService, Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 

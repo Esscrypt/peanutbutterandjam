@@ -20,7 +20,7 @@
   "dependencies": {
     "@pbnj/core": "workspace:*",
     "@pbnj/types": "workspace:*",
-    "@pbnj/serialization": "workspace:*"
+    "@pbnj/codec": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -1,4 +1,4 @@
-import { logger } from '@pbnj/core'
+
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -10,8 +10,7 @@ import { BaseInstruction } from './base'
 export class SHLO_L_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_64
   readonly name = 'SHLO_L_64'
-  readonly description = 'Shift left (64-bit)'
-
+  
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)
@@ -21,7 +20,7 @@ export class SHLO_L_64Instruction extends BaseInstruction {
     const shiftAmount = valueB % 64n
     const result = valueA << shiftAmount
 
-    logger.debug('Executing SHLO_L_64 instruction', {
+    context.log('SHLO_L_64: Shift left (64-bit)', {
       registerD,
       registerA,
       registerB,
@@ -35,13 +34,6 @@ export class SHLO_L_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -51,7 +43,6 @@ export class SHLO_L_64Instruction extends BaseInstruction {
 export class SHLO_R_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_R_64
   readonly name = 'SHLO_R_64'
-  readonly description = 'Shift right logical (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -62,7 +53,7 @@ export class SHLO_R_64Instruction extends BaseInstruction {
     const shiftAmount = valueB % 64n
     const result = valueA >> shiftAmount
 
-    logger.debug('Executing SHLO_R_64 instruction', {
+    context.log('SHLO_R_64: Shift right logical (64-bit)', {
       registerD,
       registerA,
       registerB,
@@ -76,13 +67,6 @@ export class SHLO_R_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterD(operands)
-    const registerA = this.getRegisterA(operands)
-    const registerB = this.getRegisterB(operands)
-    return `${this.name} r${registerD} r${registerA} r${registerB}`
-  }
 }
 
 /**
@@ -92,7 +76,6 @@ export class SHLO_R_64Instruction extends BaseInstruction {
 export class SHAR_R_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHAR_R_64
   readonly name = 'SHAR_R_64'
-  readonly description = 'Shift right arithmetic (64-bit)'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -107,7 +90,7 @@ export class SHAR_R_64Instruction extends BaseInstruction {
     const shiftedValue = signedValue >> shiftAmount
     const result = this.toUnsigned64(shiftedValue)
 
-    logger.debug('Executing SHAR_R_64 instruction', {
+    context.log('SHAR_R_64: Shift right arithmetic (64-bit)', {
       registerD,
       registerA,
       registerB,

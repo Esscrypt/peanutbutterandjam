@@ -12,7 +12,7 @@ import {
   encodeFixedLength,
   encodeNatural,
   encodeVariableLength,
-} from '@pbnj/serialization'
+} from '@pbnj/codec'
 import type {
   AccumulateCost,
   BlockOutline,

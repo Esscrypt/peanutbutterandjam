@@ -6,7 +6,7 @@
  */
 
 import { bytesToHex, logger } from '@pbnj/core'
-import { encodeRefineArguments } from '@pbnj/serialization'
+import { encodeRefineArguments } from '@pbnj/codec'
 import type {
   IServiceAccountService,
   PVMOptions,
@@ -213,12 +213,31 @@ export class RefinePVM extends PVM {
           }
         }
 
+        // Create log function for refine host function context
+        const refineHostFunctionLog = (
+          message: string,
+          data?: Record<string, unknown>,
+        ) => {
+          if (!this.executionLogs) {
+            this.executionLogs = []
+          }
+          this.executionLogs.push({
+            pc: this.state.instructionPointer,
+            instructionName: `HOST_${hostFunction.name}`,
+            opcode: `0x${hostCallId.toString(16)}`,
+            message,
+            data,
+            timestamp: Date.now(),
+          })
+        }
+
         // Execute host function with Refine context
         const result = hostFunction.execute(
           {
             gasCounter,
             registers,
             ram: memory,
+            log: refineHostFunctionLog,
           },
           context,
         )

@@ -6,7 +6,7 @@
  */
 
 import { blake2bHash, hexToBytes, logger } from '@pbnj/core'
-import { encodeFixedLength, encodeNatural } from '@pbnj/serialization'
+import { encodeFixedLength, encodeNatural } from '@pbnj/codec'
 import type {
   AccumulateInput,
   AccumulateInvocationResult,
@@ -27,6 +27,12 @@ import type { AccumulateHostFunctionContext } from '../host-functions/accumulate
 import type { AccumulateHostFunctionRegistry } from '../host-functions/accumulate/registry'
 import type { HostFunctionRegistry } from '../host-functions/general/registry'
 import { PVM } from '../pvm'
+import {
+  buildPanicDumpData,
+  decodeLastInstruction,
+  writeHostFunctionLogs,
+  writePanicDump
+} from './panic-dump-util'
 
 /**
  * Simplified PVM implementation
@@ -36,6 +42,8 @@ import { PVM } from '../pvm'
 export class AccumulatePVM extends PVM {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly entropyService: IEntropyService | null
+  private readonly configService: IConfigService
+  private currentPC = 0n // Track current PC for host function logging
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
@@ -46,6 +54,7 @@ export class AccumulatePVM extends PVM {
     super(options.hostFunctionRegistry, options.pvmOptions)
     this.accumulateHostFunctionRegistry = options.accumulateHostFunctionRegistry
     this.entropyService = options.entropyService
+    this.configService = options.configService
     this.state.gasCounter =
       options.pvmOptions?.gasCounter ||
       BigInt(options.configService.maxBlockGas)
@@ -130,32 +139,28 @@ export class AccumulatePVM extends PVM {
           ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE.toString(),
       })
 
-      // Check for null code or oversized code (Gray Paper eq:accinvocation)
+      // Check for null code or oversized code (Gray Paper pvm_invocations.tex line 162)
+      // Gray Paper: when c = none ∨ len(c) > Cmaxservicecodesize → error result
+      // reporting_assurance.tex line 115: BIG indicates code was beyond Cmaxservicecodesize
+      if (!serviceCode || serviceCode.length === 0) {
+        logger.warn('[AccumulatePVM] Service code not found or empty', {
+          serviceId: serviceId.toString(),
+          codeHash: serviceAccount.codehash,
+        })
+        return { ok: false, err: 'BAD' }
+      }
+
       if (
-        !serviceCode ||
-        serviceCode.length === 0 ||
         serviceCode.length > ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE
       ) {
-        logger.warn('[AccumulatePVM] Service code validation failed', {
+        logger.warn('[AccumulatePVM] Service code exceeds maximum size', {
           serviceId: serviceId.toString(),
-          codeLength: serviceCode?.length || 0,
-          isEmpty: !serviceCode || serviceCode.length === 0,
-          isOversized:
-            serviceCode.length >
-            ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE,
+          codeLength: serviceCode.length,
           maxSize:
             ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE.toString(),
         })
-        return {
-          ok: true,
-          value: {
-            poststate: partialState,
-            defxfers: [],
-            yield: null,
-            gasused: 0n,
-            provisions: new Map(),
-          },
-        }
+        // Gray Paper: BIG error when code > Cmaxservicecodesize
+        return { ok: false, err: 'BIG' }
       }
 
       // Calculate post-transfer state (apply deferred transfers to service balance)
@@ -249,18 +254,75 @@ export class AccumulatePVM extends PVM {
         context: updatedImplicationsPair,
       } = marshallingResult
 
-      logger.debug('[AccumulatePVM] Marshalling invocation completed', {
-        serviceId: serviceId.toString(),
-        gasConsumed: gasConsumed.toString(),
-        resultType:
-          typeof marshallingResultValue === 'string'
-            ? marshallingResultValue
-            : 'blob',
-        resultLength:
-          typeof marshallingResultValue === 'string'
-            ? 0
-            : marshallingResultValue.length,
+      // Get post-state information
+      const postState = this.getState()
+      const lastPC = postState.instructionPointer
+
+      // Decode last instruction details for panic analysis
+      const lastInstruction = decodeLastInstruction({
+        lastPC,
+        postState: {
+          code: postState.code,
+          bitmask: postState.bitmask,
+          registerState: postState.registerState,
+        },
+        registry: this.registry,
+        skip: (instructionIndex, opcodeBitmask) =>
+          this.skip(instructionIndex, opcodeBitmask),
       })
+
+      // Always write host function logs to a separate file
+      try {
+        const hostFunctionLogs = this.getHostFunctionLogs()
+        const hostLogsFilepath = writeHostFunctionLogs(serviceId, hostFunctionLogs)
+        if (hostLogsFilepath) {
+          logger.info(
+            `[AccumulatePVM] Host function logs serialized to file: ${hostLogsFilepath}`,
+          )
+        }
+      } catch (error) {
+        logger.error(
+          '[AccumulatePVM] Failed to serialize host function logs to file',
+          error,
+        )
+      }
+
+      // Serialize tracking info to file on panic
+      if (postState.resultCode === RESULT_CODES.PANIC) {
+        try {
+          const panicDumpData = buildPanicDumpData({
+            serviceId,
+            gasConsumed,
+            postState: {
+              instructionPointer: lastPC,
+              resultCode: postState.resultCode,
+              gasCounter: postState.gasCounter,
+              registerState: postState.registerState,
+              faultAddress: postState.faultAddress,
+            },
+            lastInstruction,
+            ram: postState.ram,
+            executionLogs: this.getExecutionLogs(),
+            hostFunctionLogs: this.getHostFunctionLogs(),
+          })
+
+          const filepath = writePanicDump(panicDumpData)
+          if (filepath) {
+            logger.info(
+              `[AccumulatePVM] Panic tracking info serialized to file: ${filepath}`,
+            )
+          } else {
+            logger.error(
+              '[AccumulatePVM] Failed to serialize panic tracking info to file',
+            )
+          }
+        } catch (error) {
+          logger.error(
+            '[AccumulatePVM] Failed to serialize panic tracking info to file',
+            error,
+          )
+        }
+      }
 
       // Determine result code from marshalling result
       let resultCode: ResultCode
@@ -323,7 +385,7 @@ export class AccumulatePVM extends PVM {
     memory: RAM,
     context: ImplicationsPair,
   ) => {
-    resultCode: ResultCode
+    resultCode: ResultCode | null
     gasCounter: bigint
     registers: bigint[]
     memory: RAM
@@ -337,11 +399,24 @@ export class AccumulatePVM extends PVM {
       _context: ImplicationsPair,
     ) => {
       // Create refine context for host functions
+      // Update current PC from state for logging
+      this.currentPC = this.state.instructionPointer
 
       try {
+        logger.debug('[AccumulateContextMutator] Host call received', {
+          hostCallId: hostCallId.toString(),
+          gasCounter: gasCounter.toString(),
+          timeslot: timeslot.toString(),
+        })
+
         // Gray Paper: Apply gas cost (10 gas for all host functions)
         const gasCost = 10n
         if (gasCounter < gasCost) {
+          logger.warn('[AccumulateContextMutator] Out of gas for host call', {
+            hostCallId: hostCallId.toString(),
+            gasCounter: gasCounter.toString(),
+            gasCost: gasCost.toString(),
+          })
           return {
             resultCode: RESULT_CODES.OOG,
             gasCounter,
@@ -354,47 +429,129 @@ export class AccumulatePVM extends PVM {
 
         // Try accumulate host functions first (14-26)
         if (hostCallId >= 14n && hostCallId <= 26n) {
+          logger.debug(
+            '[AccumulateContextMutator] Trying accumulate host function',
+            {
+              hostCallId: hostCallId.toString(),
+              range: '14-26',
+            },
+          )
           const hostFunction =
             this.accumulateHostFunctionRegistry.get(hostCallId)
           if (hostFunction) {
+            logger.debug(
+              '[AccumulateContextMutator] Found accumulate host function',
+              {
+                hostCallId: hostCallId.toString(),
+                functionName: hostFunction.name,
+              },
+            )
+            // Create log function for accumulate host function context
+            const accumulateHostFunctionLog = (
+              message: string,
+              data?: Record<string, unknown>,
+            ) => {
+              if (!this.hostFunctionLogs) {
+                this.hostFunctionLogs = []
+              }
+              this.hostFunctionLogs.push({
+                functionName: hostFunction.name,
+                functionId: hostCallId,
+                message,
+                data,
+                timestamp: Date.now(),
+                pc: this.currentPC,
+              })
+            }
+
             const hostFunctionContext: AccumulateHostFunctionContext = {
               gasCounter: gasCounter,
               registers,
               ram: memory,
               implications: implicationsPair,
               timeslot,
+              expungePeriod: BigInt(this.configService.preimageExpungePeriod),
+              log: accumulateHostFunctionLog,
             }
             const result = hostFunction.execute(hostFunctionContext)
+            logger.debug(
+              '[AccumulateContextMutator] Accumulate host function executed',
+              {
+                hostCallId: hostCallId.toString(),
+                functionName: hostFunction.name,
+                resultCode: result.resultCode,
+                willContinue: result.resultCode === null,
+              },
+            )
+            // Return null to continue execution, or terminal code to stop
             return {
-              resultCode: result.resultCode || RESULT_CODES.PANIC,
+              resultCode: result.resultCode,
               gasCounter: newGasCounter,
               registers,
               memory,
               context: implicationsPair,
             }
+          } else {
+            logger.warn(
+              '[AccumulateContextMutator] Accumulate host function not found',
+              {
+                hostCallId: hostCallId.toString(),
+                range: '14-26',
+              },
+            )
           }
         }
 
         // Try general host functions (0-13)
+        logger.debug(
+          '[AccumulateContextMutator] Trying general host function',
+          {
+            hostCallId: hostCallId.toString(),
+          },
+        )
         const hostFunction = this.hostFunctionRegistry.get(hostCallId)
         if (hostFunction) {
-          const result = hostFunction.execute(
+          logger.debug(
+            '[AccumulateContextMutator] Found general host function',
+            {
+              hostCallId: hostCallId.toString(),
+              functionName: hostFunction.name,
+            },
+          )
+          // Create log function for general host function context
+          const generalHostFunctionLog = (
+            message: string,
+            data?: Record<string, unknown>,
+          ) => {
+            if (!this.executionLogs) {
+              this.executionLogs = []
+            }
+            this.executionLogs.push({
+              pc: this.currentPC,
+              instructionName: `HOST_${hostFunction.name}`,
+              opcode: `0x${hostCallId.toString(16)}`,
+              message,
+              data,
+              timestamp: Date.now(),
+            })
+          }
+
+          const hostFunctionResult = hostFunction.execute(
             {
               gasCounter: newGasCounter,
               registers,
               ram: memory,
+              log: generalHostFunctionLog,
             },
             this.currentRefineContext,
           )
 
-          // Handle both sync and async results
-          const resultCode =
-            result instanceof Promise
-              ? RESULT_CODES.PANIC // For now, treat async as panic - should be handled properly
-              : result.resultCode || RESULT_CODES.PANIC
 
+          // IMPORTANT: Return null to continue execution, or the actual resultCode
+          // Host functions return null to continue, or a terminal code (HALT/PANIC/OOG) to stop
+          // We should NOT convert null to PANIC - null means "continue execution"
           return {
-            resultCode,
+            resultCode: hostFunctionResult.resultCode,
             gasCounter: newGasCounter,
             registers,
             memory,
@@ -402,7 +559,14 @@ export class AccumulatePVM extends PVM {
           }
         }
 
-        logger.error('Unknown accumulate host function', { hostCallId })
+        logger.error(
+          '[AccumulateContextMutator] Unknown accumulate host function',
+          {
+            hostCallId: hostCallId.toString(),
+            checkedAccumulateRange: hostCallId >= 14n && hostCallId <= 26n,
+            checkedGeneralRange: hostCallId >= 0n && hostCallId <= 13n,
+          },
+        )
         return {
           resultCode: RESULT_CODES.PANIC,
           gasCounter,
@@ -411,10 +575,15 @@ export class AccumulatePVM extends PVM {
           context: implicationsPair,
         }
       } catch (error) {
-        logger.error('Accumulate host function execution failed', {
-          error,
-          hostCallId,
-        })
+        logger.error(
+          '[AccumulateContextMutator] Accumulate host function execution failed',
+          {
+            error: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined,
+            hostCallId: hostCallId.toString(),
+            gasCounter: gasCounter.toString(),
+          },
+        )
         return {
           resultCode: RESULT_CODES.PANIC,
           gasCounter,
@@ -510,83 +679,7 @@ export class AccumulatePVM extends PVM {
    * @returns true if input is a deferred transfer, false otherwise
    */
   private isDeferredTransfer(input: AccumulateInput): boolean {
-    // Check type: deferred transfers have type 1
-    if (input.type !== 1n) {
-      return false
-    }
-
-    // Check value exists and is an object
-    if (!input.value || typeof input.value !== 'object') {
-      return false
-    }
-
-    // Type guard: verify value is DeferredTransfer (not OperandTuple)
-    // OperandTuple has fields like packageHash, segmentRoot, authorizer, etc.
-    // DeferredTransfer has fields: source, dest, amount, memo, gas
-    const hasOperandTupleFields =
-      'packageHash' in input.value ||
-      'segmentRoot' in input.value ||
-      'authorizer' in input.value
-    if (hasOperandTupleFields) {
-      return false
-    }
-
-    // Verify all required DeferredTransfer fields exist
-    const value = input.value as DeferredTransfer
-    const hasSource = 'source' in value && typeof value.source === 'bigint'
-    const hasDest = 'dest' in value && typeof value.dest === 'bigint'
-    const hasAmount = 'amount' in value && typeof value.amount === 'bigint'
-    const hasMemo = 'memo' in value && value.memo instanceof Uint8Array
-    const hasGas = 'gas' in value && typeof value.gas === 'bigint'
-
-    // All fields must be present with correct types
-    if (!hasSource || !hasDest || !hasAmount || !hasMemo || !hasGas) {
-      return false
-    }
-
-    // Validate memo size (Gray Paper: Cmemosize = 128 bytes)
-    const C_MEMO_SIZE = 128
-    if (value.memo.length !== C_MEMO_SIZE) {
-      logger.warn('[AccumulatePVM] Deferred transfer memo size mismatch', {
-        expected: C_MEMO_SIZE,
-        actual: value.memo.length,
-      })
-      return false
-    }
-
-    // Validate service IDs are non-negative and within valid range
-    // Gray Paper: serviceid ≡ Nbits{32} (0 ≤ id < 2^32)
-    const MAX_SERVICE_ID = 2n ** 32n
-    if (
-      value.source < 0n ||
-      value.source >= MAX_SERVICE_ID ||
-      value.dest < 0n ||
-      value.dest >= MAX_SERVICE_ID
-    ) {
-      logger.warn('[AccumulatePVM] Deferred transfer has invalid service ID', {
-        source: value.source.toString(),
-        dest: value.dest.toString(),
-      })
-      return false
-    }
-
-    // Validate amount is non-negative
-    if (value.amount < 0n) {
-      logger.warn('[AccumulatePVM] Deferred transfer has negative amount', {
-        amount: value.amount.toString(),
-      })
-      return false
-    }
-
-    // Validate gas is non-negative
-    if (value.gas < 0n) {
-      logger.warn('[AccumulatePVM] Deferred transfer has negative gas', {
-        gas: value.gas.toString(),
-      })
-      return false
-    }
-
-    return true
+    return input.type === 1
   }
 
   /**
@@ -816,6 +909,7 @@ export class AccumulatePVM extends PVM {
         yield: finalImplications.yield,
         gasused: executionResult.gasUsed,
         provisions: finalImplications.provisions,
+        resultCode: executionResult.resultCode,
       },
     }
   }

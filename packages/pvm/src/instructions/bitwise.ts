@@ -1,4 +1,3 @@
-import { logger } from '@pbnj/core'
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
@@ -17,7 +16,7 @@ export class AND_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue & immediate
 
-    logger.debug('Executing AND_IMM instruction', {
+    context.log('AND_IMM: Bitwise AND with immediate of registerA and immediate to registerD', {
       registerD,
       registerA,
       immediate,
@@ -32,12 +31,6 @@ export class AND_IMMInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }
 
 export class XOR_IMMInstruction extends BaseInstruction {
@@ -54,7 +47,7 @@ export class XOR_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue ^ immediate
 
-    logger.debug('Executing XOR_IMM instruction', {
+    context.log('XOR_IMM: Bitwise XOR with immediate of registerA and immediate to registerD', {
       registerD,
       registerA,
       immediate,
@@ -69,12 +62,6 @@ export class XOR_IMMInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }
 
 export class OR_IMMInstruction extends BaseInstruction {
@@ -91,7 +78,7 @@ export class OR_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue | immediate
 
-    logger.debug('Executing OR_IMM instruction', {
+    context.log('OR_IMM: Bitwise OR with immediate of registerA and immediate to registerD', {
       registerD,
       registerA,
       immediate,
@@ -106,10 +93,4 @@ export class OR_IMMInstruction extends BaseInstruction {
     return { resultCode: null }
   }
 
-  disassemble(operands: Uint8Array): string {
-    const registerD = this.getRegisterA(operands)
-    const registerA = this.getRegisterB(operands)
-    const immediate = this.getImmediateValue(operands, 1)
-    return `${this.name} r${registerD} r${registerA} ${immediate}`
-  }
 }

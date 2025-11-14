@@ -27,10 +27,7 @@ import {
   safeError,
   safeResult,
 } from '@pbnj/types'
-// import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
-// import type { EntropyService } from './entropy'
-import type { KeyPairService } from './keypair-service'
 import type { SealKeyService } from './seal-key'
 import type { TicketService } from './ticket-service'
 
@@ -43,7 +40,6 @@ export class ValidatorSetManager
 {
   private readonly eventBusService: EventBusService
   private readonly sealKeyService: SealKeyService | null
-  private readonly keyPairService: KeyPairService | null
   private ticketService: TicketService | null
   private readonly ringProver: RingVRFProverWasm
   private readonly configService: ConfigService
@@ -69,7 +65,6 @@ export class ValidatorSetManager
   constructor(options: {
     eventBusService: EventBusService
     sealKeyService: SealKeyService | null
-    keyPairService: KeyPairService | null
     ringProver: RingVRFProverWasm
     ticketService: TicketService | null
     configService: ConfigService
@@ -78,7 +73,6 @@ export class ValidatorSetManager
     super('validator-set-manager')
     this.eventBusService = options.eventBusService
     this.sealKeyService = options.sealKeyService
-    this.keyPairService = options.keyPairService
     this.ticketService = options.ticketService
     this.ringProver = options.ringProver
     this.configService = options.configService
@@ -691,14 +685,6 @@ export class ValidatorSetManager
       )
     }
     return safeResult(keyPair)
-  }
-
-  /**
-   * Check if a key is a null key (all zeros)
-   * Gray Paper equation (122-123): null keys replace blacklisted validators
-   */
-  private isNullKey(key: Uint8Array): boolean {
-    return key.every((byte) => byte === 0)
   }
 
   /**

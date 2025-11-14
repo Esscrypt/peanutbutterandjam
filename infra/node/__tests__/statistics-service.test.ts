@@ -161,6 +161,8 @@ describe('Statistics Service - JAM Test Vectors', () => {
             body,
           })
 
+          statsService.updateGuarantees(body.guarantees)
+
           // Validate validator statistics against post_state
           const activity = statsService.getActivity()
 
