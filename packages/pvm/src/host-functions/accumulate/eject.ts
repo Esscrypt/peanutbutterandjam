@@ -31,8 +31,6 @@ import {
 export class EjectHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.EJECT
   readonly name = 'eject'
-  readonly gasCost = 10n
-
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context
     // Extract parameters from registers

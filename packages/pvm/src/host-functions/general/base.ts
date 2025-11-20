@@ -1,6 +1,7 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
+  ImplicationsPair,
   RefineInvocationContext,
 } from '@pbnj/types'
 
@@ -23,11 +24,6 @@ export abstract class BaseHostFunction {
   abstract readonly name: string
 
   /**
-   * Gas cost for executing this host function
-   */
-  abstract readonly gasCost: bigint
-
-  /**
    * Execute the host function
    *
    * @param context - Host function context (will be mutated)
@@ -36,6 +32,6 @@ export abstract class BaseHostFunction {
    */
   abstract execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: any,
   ): HostFunctionResult
 }

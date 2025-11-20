@@ -29,7 +29,6 @@ import {
 export class UpgradeHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.UPGRADE
   readonly name = 'upgrade'
-  readonly gasCost = 10n
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications } = context

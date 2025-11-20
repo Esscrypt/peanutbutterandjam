@@ -15,15 +15,17 @@ import { INIT_CONFIG, MEMORY_CONFIG, REGISTER_INIT } from './config'
  */
 export class PVMRAM implements RAM {
   // Memory region address boundaries (uint32)
+  // Fixed addresses according to Gray Paper (pvm.tex equation 770-802)
+  public readonly roDataAddress = INIT_CONFIG.ZONE_SIZE // 65536 (2^16) - fixed
+  public readonly argumentDataAddress = REGISTER_INIT.ARGS_SEGMENT_START() // 4278124544 (0xFEFF0000) - fixed
+  public readonly stackAddressEnd = REGISTER_INIT.STACK_SEGMENT_END() // 4278059008 (0xFEFE0000) - fixed
+
+  // Variable addresses (set during initializeMemoryLayout)
   public stackAddress = 0
-  public stackAddressEnd = 0
   public heapStartAddress = 0
   public heapEndAddress = 0 // heap data end (exclusive), padding starts here
-  public roDataAddress = 0
   public roDataAddressEnd = 0
   public currentHeapPointer = 0 // heap address end (includes padding)
-
-  public argumentDataAddress = 0
   public argumentDataEnd = 0
 
   // Contiguous memory regions (matching Go structure)
@@ -37,10 +39,6 @@ export class PVMRAM implements RAM {
   private readonly pageAccess: Map<[bigint, bigint], MemoryAccessType> =
     new Map()
 
-  // Sparse storage for addresses outside standard regions (used by test vectors)
-  // Maps address to byte value for addresses not in heap/stack/roData/argumentData
-  // Gray Paper: writes are permitted if page has write access, regardless of region
-  private readonly sparseMemory: Map<bigint, number> = new Map()
 
   // Debug: Track full history of all instructions that interacted with each address
   private readonly addressInteractionHistory: Map<
@@ -110,40 +108,82 @@ export class PVMRAM implements RAM {
     const heapEndAddress = heapStartAddress + alignToPage(heapSize)
     const heapZerosEndAddress =
       heapEndAddress + heapZeroPaddingSize * MEMORY_CONFIG.PAGE_SIZE
+    const heapSizeWithPadding = heapZerosEndAddress - heapStartAddress
 
-    const argumentDataStartAddress = REGISTER_INIT.ARGS_SEGMENT_START()
+    // Fixed addresses are already set in constructor
+    const argumentDataStartAddress = this.argumentDataAddress
     const argumentDataEndAddress =
       argumentDataStartAddress + alignToPage(argumentDataLength)
     const argumentDataZeroPaddingEndAddress =
       argumentDataEndAddress + alignToPage(argumentDataLength)
 
-    const stackEndAddress = REGISTER_INIT.STACK_SEGMENT_END()
+    const stackEndAddress = this.stackAddressEnd
     const stackStartAddress = stackEndAddress - alignToPage(stackSize)
 
-    const readOnlyZoneStartAddress = INIT_CONFIG.ZONE_SIZE
+    const readOnlyZoneStartAddress = this.roDataAddress
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
+
+    console.log('\n=== initializeMemoryLayout - Input Data Summary ===');
+    console.log('Argument Data:', {
+      length: argumentDataLength,
+      firstBytes: argumentDataLength > 0 ? 
+        Array.from(argumentData.slice(0, Math.min(32, argumentDataLength)))
+          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
+    });
+    console.log('Read-Only Data:', {
+      length: readOnlyDataLength,
+      firstBytes: readOnlyDataLength > 0 ?
+        Array.from(readOnlyData.slice(0, Math.min(32, readOnlyDataLength)))
+          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
+    });
+    console.log('Heap Data:', {
+      length: heap.length,
+      firstBytes: heap.length > 0 ?
+        Array.from(heap.slice(0, Math.min(32, heap.length)))
+          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
+    });
+    console.log('Stack:', {
+      size: stackSize,
+      initialization: 'ZEROS (per Gray Paper - no data from program blob)',
+    });
+    console.log('Heap Zero Padding Size:', heapZeroPaddingSize);
+
+    console.log('\n=== initializeMemoryLayout - Address Layout ===');
+    console.log({
+      readOnlyZone: `[0x${readOnlyZoneStartAddress.toString(16)}, 0x${readOnlyZoneEndAddress.toString(16)})`,
+      heap: `[0x${heapStartAddress.toString(16)}, 0x${heapEndAddress.toString(16)})`,
+      heapWithPadding: `[0x${heapStartAddress.toString(16)}, 0x${heapZerosEndAddress.toString(16)})`,
+      stack: `[0x${stackStartAddress.toString(16)}, 0x${stackEndAddress.toString(16)})`,
+      argumentData: `[0x${argumentDataStartAddress.toString(16)}, 0x${argumentDataZeroPaddingEndAddress.toString(16)})`,
+    });
 
     // Always reinitialize structure with actual sizes from the program
     // This ensures the structure matches the program's memory layout
     // Note: heap.length is not used - Go reference uses readOnlyDataSize for initial heap region size
     this.stack = new Uint8Array(stackSize)
-    this.heap = new Uint8Array(heapSize) // Match Go: rw_data_address_end - rw_data_address
+    this.heap = new Uint8Array(heapSizeWithPadding) // Match Go: rw_data_address_end - rw_data_address
     this.roData = new Uint8Array(readOnlyDataLength)
     this.argumentData = new Uint8Array(argumentDataLength)
 
+    console.log('\n=== initializeMemoryLayout - Setting Initial Data ===');
+    console.log('Setting argument data...', argumentDataLength > 0 ? `${argumentDataLength} bytes` : 'none');
     this.argumentData.set(argumentData, 0)
+    
+    console.log('Setting read-only data...', readOnlyDataLength > 0 ? `${readOnlyDataLength} bytes` : 'none');
     this.roData.set(readOnlyData, 0)
+    
+    console.log('Setting heap data...', heap.length > 0 ? `${heap.length} bytes` : 'none');
     this.heap.set(heap, 0)
+    
+    console.log('Stack initialized to ZEROS (per Gray Paper - no data from program blob)');
+    console.log('=== initializeMemoryLayout Complete ===\n')
 
-    // Update currentHeapPointer to match their implementation
+    // Update variable addresses (fixed addresses are already set in constructor)
     // currentHeapPointer extends to heapZerosEnd (includes heap length + jump table)
-    this.argumentDataAddress = argumentDataStartAddress
     this.argumentDataEnd = argumentDataZeroPaddingEndAddress
-    this.roDataAddress = readOnlyZoneStartAddress
     this.roDataAddressEnd = readOnlyZoneEndAddress
     this.stackAddress = stackStartAddress
-    this.stackAddressEnd = stackEndAddress
     this.heapStartAddress = heapStartAddress
     this.heapEndAddress = heapEndAddress
     this.currentHeapPointer = heapZerosEndAddress
@@ -263,68 +303,114 @@ export class PVMRAM implements RAM {
     this.setPageAccessRights(address, length, accessType)
 
     // Grow arrays to accommodate pages in standard regions
-    // This ensures arrays are large enough when test vectors write to initialized pages
+    // Determine region based on fixed addresses only (similar to writeOctetsDuringInitialization)
+    // Check in order from highest to lowest addresses
     const addr = Number(address)
+    const end = addr + length
 
-    // Check if page is in heap region and grow array if needed
-    if (addr >= this.heapStartAddress && addr < this.currentHeapPointer) {
-      const offset = addr - this.heapStartAddress
-      const requiredSize = offset + length
-      if (this.heap.length < requiredSize) {
-        // Grow by at least one page (page-aligned)
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        newData.set(this.heap, 0)
-        this.heap = newData
-        // Update currentHeapPointer to reflect the new size
-        this.currentHeapPointer = this.heapStartAddress + this.heap.length
-      }
-    }
-
-    // Check if page is in roData region and grow array if needed
-    if (addr >= this.roDataAddress && addr < this.roDataAddressEnd) {
-      const offset = addr - this.roDataAddress
-      const requiredSize = offset + length
-      if (this.roData.length < requiredSize) {
-        // Grow by at least one page (page-aligned)
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        newData.set(this.roData, 0)
-        this.roData = newData
-        // Update roDataAddressEnd to reflect the new size
-        this.roDataAddressEnd = this.roDataAddress + this.roData.length
-      }
-    }
-
-    // Check if page is in stack region and grow array if needed
-    if (addr >= this.stackAddress && addr < this.stackAddressEnd) {
-      const offset = addr - this.stackAddress
-      const requiredSize = offset + length
-      if (this.stack.length < requiredSize) {
-        // Grow by at least one page (page-aligned)
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        newData.set(this.stack, 0)
-        this.stack = newData
-        // Update stackAddressEnd to reflect the new size
-        this.stackAddressEnd = this.stackAddress + this.stack.length
-      }
-    }
-
-    // Check if page is in output region and grow array if needed
-    if (addr >= this.argumentDataAddress && addr < this.argumentDataEnd) {
+    // 1. Check argument data region (fixed start: argumentDataAddress = 0xFEFF0000, highest)
+    if (addr >= this.argumentDataAddress) {
       const offset = addr - this.argumentDataAddress
       const requiredSize = offset + length
       if (this.argumentData.length < requiredSize) {
-        // Grow by at least one page (page-aligned)
         const alignedSize = alignToPage(requiredSize)
         const newData = new Uint8Array(alignedSize)
-        newData.set(this.argumentData, 0)
+        if (this.argumentData.length > 0) {
+          newData.set(this.argumentData, 0)
+        }
         this.argumentData = newData
-        // Update outputEnd to reflect the new size
-        this.argumentDataEnd =
-          this.argumentDataAddress + this.argumentData.length
+        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
       }
+      return
+    }
+
+    // 2. Check stack region (fixed end: stackAddressEnd = 0xFEFE0000)
+    // Stack grows downward from stackAddressEnd
+    if (end <= this.stackAddressEnd && addr < this.argumentDataAddress) {
+      const requiredSize = this.stackAddressEnd - addr
+      if (this.stack.length < requiredSize) {
+        const alignedSize = alignToPage(requiredSize)
+        const newData = new Uint8Array(alignedSize)
+        if (this.stack.length > 0) {
+          // Copy existing data to the end of the new array (stack grows downward)
+          newData.set(this.stack, alignedSize - this.stack.length)
+        }
+        this.stack = newData
+        this.stackAddress = this.stackAddressEnd - this.stack.length
+      }
+      return
+    }
+
+    // 3. Check heap region (between roData and stack, before roData check)
+    // Heap starts after roData zone, before stack
+    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
+      // Initialize heapStartAddress if not set (heap starts after roData)
+      if (this.heapStartAddress === 0) {
+        // Heap starts after roData zone (zone-aligned)
+        this.heapStartAddress = this.roDataAddressEnd > 0 
+          ? this.roDataAddressEnd 
+          : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+      }
+      // Check if address is in heap (beyond roData region)
+      const isInHeap = addr >= this.heapStartAddress || 
+                       (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
+      if (isInHeap) {
+        // Ensure heapStartAddress is set correctly
+        if (this.heapStartAddress === 0 || (this.roDataAddressEnd > 0 && this.heapStartAddress < this.roDataAddressEnd)) {
+          this.heapStartAddress = this.roDataAddressEnd > 0 
+            ? this.roDataAddressEnd 
+            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        }
+        const offset = addr - this.heapStartAddress
+        const requiredSize = offset + length
+        if (this.heap.length < requiredSize) {
+          const alignedSize = alignToPage(requiredSize)
+          const newData = new Uint8Array(alignedSize)
+          if (this.heap.length > 0) {
+            newData.set(this.heap, 0)
+          }
+          this.heap = newData
+          this.currentHeapPointer = this.heapStartAddress + this.heap.length
+        }
+        return
+      }
+    }
+
+    // 4. Check read-only data region (fixed start: roDataAddress = 65536, lowest)
+    // Only if not already matched by heap
+    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
+      // Check if address is beyond roData region (should be in heap instead)
+      if (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd) {
+        // Should have been caught by heap check, but if heapStartAddress wasn't set, handle it
+        // Initialize heap for this address
+        if (this.heapStartAddress === 0) {
+          this.heapStartAddress = this.roDataAddressEnd
+        }
+        const offset = addr - this.heapStartAddress
+        const requiredSize = offset + length
+        if (this.heap.length < requiredSize) {
+          const alignedSize = alignToPage(requiredSize)
+          const newData = new Uint8Array(alignedSize)
+          if (this.heap.length > 0) {
+            newData.set(this.heap, 0)
+          }
+          this.heap = newData
+          this.currentHeapPointer = this.heapStartAddress + this.heap.length
+        }
+        return
+      }
+      const offset = addr - this.roDataAddress
+      const requiredSize = offset + length
+      if (this.roData.length < requiredSize) {
+        const alignedSize = alignToPage(requiredSize)
+        const newData = new Uint8Array(alignedSize)
+        if (this.roData.length > 0) {
+          newData.set(this.roData, 0)
+        }
+        this.roData = newData
+        this.roDataAddressEnd = this.roDataAddress + this.roData.length
+      }
+      return
     }
   }
 
@@ -538,7 +624,7 @@ export class PVMRAM implements RAM {
 
   readOctets(
     address: bigint,
-    count: 1n | 2n | 4n | 8n | 16n | 32n,
+    count: bigint,
   ): [Uint8Array | null, bigint | null] {
     // Check if entire range is readable first
     const [readable, faultAddress] = this.isReadableWithFault(address, count)
@@ -576,99 +662,27 @@ export class PVMRAM implements RAM {
     if (addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
       const offset = addr - this.heapStartAddress
       if (offset + length > this.heap.length) {
-        // Beyond allocated array - check if we're in padding region
-        if (addr >= this.heapEndAddress) {
-          // In padding region (heapEndAddress to heapZerosEndAddress)
-          // Gray Paper: padding is initialized to zeros and is readable
-          return [new Uint8Array(length), null]
-        } else {
-          // Within data region but array too small
-          // Check sparse memory as fallback (for test vectors that initialized memory before heap bounds were set)
-          const result = new Uint8Array(length)
-          let hasSparseData = false
-          for (let i = 0; i < length; i++) {
-            const sparseAddr = address + BigInt(i)
-            const sparseValue = this.sparseMemory.get(sparseAddr)
-            if (sparseValue !== undefined) {
-              result[i] = sparseValue
-              hasSparseData = true
-            } else {
-              result[i] = 0
-            }
-          }
-          if (hasSparseData) {
-            return [result, null]
-          }
-          // No sparse data - return fault
-          const faultPage = this.getPageIndex(address)
-          return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
-        }
-      } else {
-        // Within allocated array - return data
-        // But also check sparse memory as fallback for addresses that were initialized before heap bounds were set
-        const heapData = this.heap.slice(offset, offset + length)
-        // Check if sparse memory has data for any of these addresses
-        let hasSparseData = false
-        for (let i = 0; i < length; i++) {
-          const sparseAddr = address + BigInt(i)
-          if (this.sparseMemory.has(sparseAddr)) {
-            hasSparseData = true
-            break
-          }
-        }
-        if (hasSparseData) {
-          // Merge: use sparse memory if available, otherwise use heap data
-          const result = new Uint8Array(length)
-          for (let i = 0; i < length; i++) {
-            const sparseAddr = address + BigInt(i)
-            const sparseValue = this.sparseMemory.get(sparseAddr)
-            result[i] = sparseValue !== undefined ? sparseValue : heapData[i]
-          }
-          return [result, null]
-        }
-        return [heapData, null]
+        const faultPage = this.getPageIndex(address)
+        return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
+      return [this.heap.slice(offset, offset + length), null]
     }
 
     // Read-only data section: roDataAddress ≤ i < roDataAddressEnd (data)
     // Read-only padding: roDataAddressEnd ≤ i < roDataAddressEnd + padding (padding, value = 0)
     // Since max read is 32 bytes, a read can span at most one page boundary
-    if (addr >= this.roDataAddress) {
-      if (addr < this.roDataAddressEnd) {
+    if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
         // Read starts in data region
         const offset = addr - this.roDataAddress
-        const dataLength = Math.min(length, this.roDataAddressEnd - addr)
 
-        if (end <= this.roDataAddressEnd) {
-          // Entire read is within data region
-          if (offset + length > this.roData.length) {
-            const faultPage = this.getPageIndex(address)
-            return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
-          }
-          return [this.roData.slice(offset, offset + length), null]
-        } else {
-          // Read spans data + padding (max 32 bytes total, so simple case)
-          const dataPortion = this.roData.slice(offset, offset + dataLength)
-          const result = new Uint8Array(length)
-          result.set(dataPortion, 0)
-          return [result, null]
+        if (offset + length > this.roData.length) {
+          const faultPage = this.getPageIndex(address)
+          return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
         }
-      }
-      // Read starts in padding region - fall through to return zeros
+        return [this.roData.slice(offset, offset + length), null]
     }
 
-    // Address outside defined regions but in readable page
-    // Gray Paper: readable pages can be read even outside standard regions
-    // Check sparse memory first (for test vectors that write to uninitialized regions)
-    const result = new Uint8Array(length)
-    for (let i = 0; i < length; i++) {
-      const addr = address + BigInt(i)
-      const value = this.sparseMemory.get(addr)
-      // If sparse memory has a value, use it; otherwise default to zero
-      // Gray Paper: unallocated memory reads as zero
-      result[i] = value !== undefined ? value : 0
-    }
-    return [result, null]
+    return [null, this.getPageIndex(address) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
   }
 
   writeOctets(address: bigint, values: Uint8Array): bigint | null {
@@ -692,6 +706,10 @@ export class PVMRAM implements RAM {
     // Go implementation: checks bounds, then directly copies (no array growth)
     if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
       const offset = addr - this.argumentDataAddress
+      if (offset + length > this.argumentData.length) {
+        const faultPage = this.getPageIndex(address)
+        return faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)
+      }
       // Go doesn't check array size - assumes it's correct if bounds check passes
       // If array is too small, this will throw (matching Go's behavior)
       this.argumentData.set(values, offset)
@@ -700,6 +718,10 @@ export class PVMRAM implements RAM {
 
     if (addr >= this.stackAddress && end <= this.stackAddressEnd) {
       const offset = addr - this.stackAddress
+      if (offset + length > this.stack.length) {
+        const faultPage = this.getPageIndex(address)
+        return faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)
+      }
       // Go implementation: directly copies (no array growth)
       this.stack.set(values, offset)
       return null
@@ -709,15 +731,9 @@ export class PVMRAM implements RAM {
     // Go WriteRAMBytes: address >= ram.rw_data_address && end <= Z_func(ram.current_heap_pointer)
     if (addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
       const offset = addr - this.heapStartAddress
-      // Check if array needs to be grown to accommodate the write
       if (offset + length > this.heap.length) {
-        // Address is beyond allocated heap but within zone-aligned heap bound
-        // Per Gray Paper: if page is writable, we should be able to write to it
-        // Grow the array to accommodate the write (similar to allocatePages behavior)
-        const requiredSize = offset + length
-        const newData = new Uint8Array(requiredSize)
-        newData.set(this.heap, 0)
-        this.heap = newData
+        const faultPage = this.getPageIndex(address)
+        return faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)
       }
       // Go implementation: directly copies (arrays are grown via allocatePages or here)
       this.heap.set(values, offset)
@@ -726,18 +742,15 @@ export class PVMRAM implements RAM {
 
     if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
       const offset = addr - this.roDataAddress
+      if (offset + length > this.roData.length) {
+        const faultPage = this.getPageIndex(address)
+        return faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)
+      }
       // Go implementation: directly copies (no array growth)
       this.roData.set(values, offset)
       return null
     }
 
-    // Address outside defined regions but in writable page
-    // Gray Paper pvm.tex: writes are permitted if page has write access, regardless of region
-    // Store in sparse memory for addresses outside standard regions
-    // This is needed for test vectors that initialize pages directly
-    for (let i = 0; i < length; i++) {
-      this.sparseMemory.set(address + BigInt(i), values[i])
-    }
     return null
   }
 
@@ -752,43 +765,107 @@ export class PVMRAM implements RAM {
     const length = values.length
     const end = addr + length
 
-    // Write directly to the appropriate region without checking writable access
-    // Check if heap bounds are initialized (non-zero) before using heap region
-    if (this.heapStartAddress > 0 && addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
-      const offset = addr - this.heapStartAddress
-      // Grow heap if needed
-      if (offset + length > this.heap.length) {
-        const requiredSize = offset + length
-        const newData = new Uint8Array(requiredSize)
-        newData.set(this.heap, 0)
-        this.heap = newData
-      }
-      this.heap.set(values, offset)
-      return
-    }
+    // Determine which region based on fixed addresses only
+    // Then initialize/grow the array as needed
+    // Check in order from highest to lowest addresses to avoid false matches
 
-    if (this.argumentDataAddress > 0 && addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
+    // 1. Check argument data region (fixed start: argumentDataAddress = 0xFEFF0000, highest)
+    if (addr >= this.argumentDataAddress) {
       const offset = addr - this.argumentDataAddress
+      const requiredSize = offset + length
+      // Grow array if needed
+      if (this.argumentData.length < requiredSize) {
+        const newSize = alignToPage(requiredSize)
+        const newData = new Uint8Array(newSize)
+        if (this.argumentData.length > 0) {
+          newData.set(this.argumentData, 0)
+        }
+        this.argumentData = newData
+        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
+      }
       this.argumentData.set(values, offset)
       return
     }
 
-    if (this.stackAddress > 0 && addr >= this.stackAddress && end <= this.stackAddressEnd) {
+    // 2. Check stack region (fixed end: stackAddressEnd = 0xFEFE0000)
+    // Stack grows downward from stackAddressEnd
+    if (end <= this.stackAddressEnd && addr < this.argumentDataAddress) {
+      // Calculate required size from address to stack end
+      const requiredSize = this.stackAddressEnd - addr
+      if (this.stack.length < requiredSize) {
+        const newSize = alignToPage(requiredSize)
+        const newData = new Uint8Array(newSize)
+        if (this.stack.length > 0) {
+          // Copy existing data to the end of the new array (stack grows downward)
+          newData.set(this.stack, newSize - this.stack.length)
+        }
+        this.stack = newData
+        this.stackAddress = this.stackAddressEnd - this.stack.length
+      }
       const offset = addr - this.stackAddress
       this.stack.set(values, offset)
       return
     }
 
-    if (this.roDataAddress > 0 && addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
-      const offset = addr - this.roDataAddress
-      this.roData.set(values, offset)
-      return
+    // 3. Check heap region (between roData and stack, before roData check)
+    // Heap starts after roData zone, before stack
+    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
+      // Initialize heapStartAddress if not set (heap starts after roData)
+      if (this.heapStartAddress === 0) {
+        // Heap starts after roData zone (zone-aligned)
+        this.heapStartAddress = this.roDataAddressEnd > 0 
+          ? this.roDataAddressEnd 
+          : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+      }
+      // Check if address is in heap (beyond roData region)
+      const isInHeap = addr >= this.heapStartAddress || 
+                       (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
+      if (isInHeap) {
+        // Ensure heapStartAddress is set correctly
+        if (this.heapStartAddress === 0 || (this.roDataAddressEnd > 0 && this.heapStartAddress < this.roDataAddressEnd)) {
+          this.heapStartAddress = this.roDataAddressEnd > 0 
+            ? this.roDataAddressEnd 
+            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        }
+        const offset = addr - this.heapStartAddress
+        const requiredSize = offset + length
+        // Grow array if needed
+        if (this.heap.length < requiredSize) {
+          const newSize = alignToPage(requiredSize)
+          const newData = new Uint8Array(newSize)
+          if (this.heap.length > 0) {
+            newData.set(this.heap, 0)
+          }
+          this.heap = newData
+          this.currentHeapPointer = this.heapStartAddress + this.heap.length
+        }
+        this.heap.set(values, offset)
+        return
+      }
     }
 
-    // Address outside standard regions or bounds not initialized yet - use sparse memory
-    // This is needed for test vectors that initialize memory before heap bounds are set
-    for (let i = 0; i < length; i++) {
-      this.sparseMemory.set(address + BigInt(i), values[i])
+    // 4. Check read-only data region (fixed start: roDataAddress = 65536, lowest)
+    // Only if not already matched by heap
+    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
+      // Check if address is beyond roData region (should be in heap instead)
+      if (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd) {
+        // Should have been caught by heap check, but if heapStartAddress wasn't set, skip
+        return
+      }
+      const offset = addr - this.roDataAddress
+      const requiredSize = offset + length
+      // Grow array if needed
+      if (this.roData.length < requiredSize) {
+        const newSize = alignToPage(requiredSize)
+        const newData = new Uint8Array(newSize)
+        if (this.roData.length > 0) {
+          newData.set(this.roData, 0)
+        }
+        this.roData = newData
+        this.roDataAddressEnd = this.roDataAddress + this.roData.length
+      }
+      this.roData.set(values, offset)
+      return
     }
   }
 
@@ -956,17 +1033,7 @@ export class PVMRAM implements RAM {
       const offset = addr - this.roDataAddress
       return Array.from(this.roData.slice(offset, offset + length))
     }
-
-    // Address outside defined regions - check sparse memory first
-    // Gray Paper: unallocated memory reads as zero
-    const result = new Array(length)
-    for (let i = 0; i < length; i++) {
-      const addr = address + BigInt(i)
-      const value = this.sparseMemory.get(addr)
-      // If sparse memory has a value, use it; otherwise default to zero
-      result[i] = value !== undefined ? value : 0
-    }
-    return result
+    throw new Error('getMemoryContents: Invalid address range: ' + address.toString() + ' to ' + (address + BigInt(length)).toString())
   }
 
   /**
@@ -1064,19 +1131,14 @@ export class PVMRAM implements RAM {
     this.roData.fill(0)
     this.argumentData.fill(0)
 
-    // Clear sparse memory
-    this.sparseMemory.clear()
-
-    // Reset addresses
+    // Reset variable addresses (fixed addresses remain unchanged)
     this.stackAddress = 0
-    this.stackAddressEnd = 0
     this.heapStartAddress = 0
     this.heapEndAddress = 0
-    this.roDataAddress = 0
     this.roDataAddressEnd = 0
     this.currentHeapPointer = 0
-    this.argumentDataAddress = 0
     this.argumentDataEnd = 0
+    // Fixed addresses (roDataAddress, argumentDataAddress, stackAddressEnd) are not reset
     // Clear page and address interaction history
     this.addressInteractionHistory.clear()
 

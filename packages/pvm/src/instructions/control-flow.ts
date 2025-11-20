@@ -5,7 +5,7 @@
  */
 
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { OPCODES, RESULT_CODES } from '../config'
+import { MEMORY_CONFIG, OPCODES, REGISTER_INIT, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**
@@ -45,6 +45,11 @@ export class FALLTHROUGHInstruction extends BaseInstruction {
 /**
  * JUMP instruction (opcode 0x40)
  * Unconditional jump with offset as specified in Gray Paper
+ * 
+ * Gray Paper (pvm.tex line 322):
+ * Format: "One Offset" (lines 308-314)
+ * immed_X ≡ ι + signfunc{l_X}(decode[l_X]{instructions[ι+1:l_X]})
+ * Mutation: branch(immed_X, ⊤)
  */
 export class JUMPInstruction extends BaseInstruction {
   readonly opcode = OPCODES.JUMP
@@ -89,14 +94,18 @@ export class JUMPInstruction extends BaseInstruction {
  * JUMP_IND instruction (opcode 0x50)
  * Indirect jump as specified in Gray Paper
  *
- * Gray Paper formula (pvm.tex line 343):
- * djump((reg_A + immed_X) mod 2^32)
+ * Gray Paper (pvm.tex line 343):
+ * Format: "One Register & One Immediate" (lines 326-335)
+ * r_A = min(12, instructions[ι+1] mod 16)
+ * l_X = min(4, max(0, ℓ - 1))
+ * immed_X ≡ sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+ * Mutation: djump((reg_A + immed_X) mod 2^32)
  *
- * Where djump(a) is defined in equation 11:
- * djump(a) = {
- *   halt, ι' = ι                    if a = 2^32 - 2^16
- *   panic, ι' = ι                   if a = 0 ∨ a > len(j) × 2 ∨ a mod 2 ≠ 0 ∨ j[(a/2)-1] ∉ basicblocks
- *   continue, ι' = j[(a/2)-1]       otherwise
+ * Where djump(a) is defined in equations 211-216:
+ * djump(a) ⟹ (ε, ι') = {
+ *   (halt, ι)                                 when a = 2^32 - 2^16
+ *   (panic, ι)                                when a = 0 ∨ a > len(j)·2 ∨ a mod 2 ≠ 0 ∨ j_{(a/2)-1} ∉ basicblocks
+ *   (continue, j_{(a/2)-1})                   otherwise
  * }
  */
 export class JUMP_INDInstruction extends BaseInstruction {
@@ -128,14 +137,12 @@ export class JUMP_INDInstruction extends BaseInstruction {
       registerValue,
       immediateX,
       a,
-      HALT_ADDRESS: 2n ** 32n - 2n ** 16n,
+      HALT_ADDRESS: BigInt(REGISTER_INIT.HALT_ADDRESS),
       pc: context.pc,
     })
 
     // Check for HALT condition: a = 2^32 - 2^16
-    const HALT_ADDRESS = 2n ** 32n - 2n ** 16n
-
-    if (a === HALT_ADDRESS) {
+    if (a === BigInt(REGISTER_INIT.HALT_ADDRESS)) {
       return { resultCode: RESULT_CODES.HALT }
     }
 
@@ -196,6 +203,15 @@ export class JUMP_INDInstruction extends BaseInstruction {
 /**
  * LOAD_IMM_JUMP instruction (opcode 0x80)
  * Load immediate and jump as specified in Gray Paper
+ * 
+ * Gray Paper (pvm.tex line 404):
+ * Format: "One Register, One Immediate and One Offset" (lines 385-396)
+ * r_A = min(12, instructions[ι+1] mod 16)
+ * l_X = min(4, ⌊instructions[ι+1]/16⌋ mod 8)
+ * immed_X = sext{l_X}{decode[l_X]{instructions[ι+2:l_X]}}
+ * l_Y = min(4, max(0, ℓ - l_X - 1))
+ * immed_Y = ι + signfunc{l_Y}(decode[l_Y]{instructions[ι+2+l_X:l_Y]})
+ * Mutation: branch(immed_Y, ⊤), reg_A' = immed_X
  */
 export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IMM_JUMP
@@ -262,6 +278,16 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
 /**
  * LOAD_IMM_JUMP_IND instruction (opcode 0x180)
  * Load immediate and indirect jump as specified in Gray Paper
+ * 
+ * Gray Paper (pvm.tex lines 583-586):
+ * Format: "Two Registers and Two Immediates" (lines 560-575)
+ * r_A = min(12, instructions[ι+1] mod 16)
+ * r_B = min(12, ⌊instructions[ι+1]/16⌋)
+ * l_X = min(4, instructions[ι+2] mod 8)
+ * immed_X = sext{l_X}{decode[l_X]{instructions[ι+3:l_X]}}
+ * l_Y = min(4, max(0, ℓ - l_X - 2))
+ * immed_Y = sext{l_Y}{decode[l_Y]{instructions[ι+3+l_X:l_Y]}}
+ * Mutation: djump((reg_B + immed_Y) mod 2^32), reg_A' = immed_X
  */
 export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
   readonly opcode = OPCODES.LOAD_IMM_JUMP_IND
@@ -314,8 +340,7 @@ export class LOAD_IMM_JUMP_INDInstruction extends BaseInstruction {
 
     // Gray Paper djump logic (equation 11):
     // Check for HALT condition: a = 2^32 - 2^16
-    const HALT_ADDRESS = 2n ** 32n - 2n ** 16n
-    if (a === HALT_ADDRESS) {
+    if (a === BigInt(REGISTER_INIT.HALT_ADDRESS)) {
       return { resultCode: RESULT_CODES.HALT }
     }
 

@@ -34,7 +34,6 @@ import {
 export class NewHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.NEW
   readonly name = 'new'
-  readonly gasCost = 10n
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context

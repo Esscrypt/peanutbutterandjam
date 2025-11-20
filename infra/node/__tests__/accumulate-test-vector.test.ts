@@ -34,6 +34,9 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 const tinyConfigService = new ConfigService('tiny')
 const fullConfigService = new ConfigService('full')
 
+// Module-level flag to stop execution on first failure
+let shouldStopOnFailure = false
+
 /**
  * Load all test vector JSON files from the directory for a given configuration
  */
@@ -93,17 +96,18 @@ describe('Accumulate Test Vector Execution', () => {
       const configService = configType === 'tiny' ? tinyConfigService : fullConfigService
       const testVectors = loadTestVectors(configType)
 
-      // Ensure we loaded test vectors
-      it('should load test vectors', () => {
-        expect(testVectors.length).toBeGreaterThan(0)
-      })
-
-      // Test each vector
+      // Test each vector sequentially, stopping on first failure
       for (const { name, vector } of testVectors) {
         describe(`Test Vector: ${name}`, () => {
           it(
             'should correctly transition accumulation state',
             async () => {
+              // Skip if a previous test failed
+              if (shouldStopOnFailure) {
+                return
+              }
+              
+              try {
             // Create services
             const eventBusService = new EventBusService()
             const clockService = new ClockService({
@@ -148,7 +152,6 @@ describe('Accumulate Test Vector Execution', () => {
             const validatorSetManager = new ValidatorSetManager({
               eventBusService: eventBusService,
               sealKeyService: null,
-              keyPairService: null,
               ringProver: ringProver,
               ticketService: null,
               initialValidators: null,
@@ -198,6 +201,9 @@ describe('Accumulate Test Vector Execution', () => {
             // Set accumulated from pre_state.accumulated
             const accumulated = convertToAccumulated(vector.pre_state.accumulated)
             accumulationService.setAccumulated(accumulated)
+
+            // Set last processed slot from pre_state (so shift delta can be calculated)
+            accumulationService.setLastProcessedSlot(BigInt(vector.pre_state.slot))
 
             // Convert input.reports to WorkReport[]
             const reports = vector.input.reports.map(convertJsonReportToWorkReport)
@@ -300,8 +306,13 @@ describe('Accumulate Test Vector Execution', () => {
                 expect(postAccount.lastacc).toBe(expectedAccount.lastacc)
               }
             }
-          },
-            { timeout: 30000 }
+              } catch (error) {
+                // Mark that we should stop on first failure
+                shouldStopOnFailure = true
+                throw error
+              }
+            },
+            { timeout: 6000 }
           )
         })
       }

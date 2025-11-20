@@ -1,15 +1,16 @@
-import { hexToBytes } from '@pbnj/core'
+import { hexToBytes, type Hex } from '@pbnj/core'
 import {
-  calculateWorkPackageHash,
   encodeWorkItem,
+  encodeWorkItemSummary,
   encodeWorkPackage,
+  encodeRefineContext,
+  encodeVariableSequence,
 } from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   IConfigService,
-  RefineInvocationContext,
-  WorkItem,
+  FetchParams,
 } from '@pbnj/types'
 import {
   AUTHORIZATION_CONSTANTS,
@@ -44,10 +45,10 @@ import { BaseHostFunction } from './base'
  * - Writes fetched data to memory at registers[7] offset
  * - Returns length of fetched data in registers[7]
  */
+
 export class FetchHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.FETCH
   readonly name = 'fetch'
-  readonly gasCost = 10n
 
   private readonly configService: IConfigService
   constructor(configService: IConfigService) {
@@ -57,9 +58,9 @@ export class FetchHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: FetchParams
   ): HostFunctionResult {
-    const selector = context.registers[10]
+    const selector = context.registers[10] & 0xffffffffn
     const outputOffset = context.registers[7] // memory offset to write the data to
     const fromOffset = context.registers[8] // start offset in the fetched data
     const length = context.registers[9] // number of bytes to write to memory
@@ -73,7 +74,7 @@ export class FetchHostFunction extends BaseHostFunction {
 
     // Fetch data based on selector according to Gray Paper specification
     // Note: We always fetch to determine available length, even if requested length is 0
-    const fetchedData = this.fetchData(selector, context, refineContext)
+    const fetchedData = this.fetchData(selector, context, params)
 
     // Write result to memory
     if (fetchedData === null) {
@@ -124,6 +125,7 @@ export class FetchHostFunction extends BaseHostFunction {
         selector: selector.toString(),
         dataLength: fetchedData.length.toString(),
         actualLength: actualLength.toString(),
+        gasUsed: context.gasCounter.toString(),
       })
     }
 
@@ -135,7 +137,7 @@ export class FetchHostFunction extends BaseHostFunction {
   private fetchData(
     selector: bigint,
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: FetchParams
   ): Uint8Array | null {
     // Gray Paper: Ω_Y(gascounter, registers, memory, p, n, r, i, ī, x̄, i, ...)
     // where p = work package, n = work package hash, r = authorizer trace,
@@ -143,94 +145,183 @@ export class FetchHostFunction extends BaseHostFunction {
 
     switch (selector) {
       case 0n:
-        // System constants - Gray Paper: registers[10] = 0
+        // Gray Paper pvm_invocations.tex line 307-344: registers[10] = 0
+        // Returns: c (system constants)
+        // Encoded sequence of all system constants: Citemdeposit, Cbytedeposit, Cbasedeposit,
+        // Ccorecount, Cexpungeperiod, Cepochlen, Creportaccgas, Cpackageauthgas, Cpackagerefgas,
+        // Cblockaccgas, Crecenthistorylen, Cmaxpackageitems, Cmaxreportdeps, Cmaxblocktickets,
+        // Cmaxlookupanchorage, Cticketentries, Cauthpoolsize, Cslotseconds, Cauthqueuesize,
+        // Crotationperiod, Cmaxpackagexts, Cassurancetimeoutperiod, Cvalcount, Cmaxauthcodesize,
+        // Cmaxbundlesize, Cmaxservicecodesize, Cecpiecesize, Cmaxpackageimports, Csegmentecpieces,
+        // Cmaxreportvarsize, Cmemosize, Cmaxpackageexports, Cepochtailstart
         return this.getSystemConstants()
 
       case 1n:
-        // Work package hash - Gray Paper: registers[10] = 1
-        // n when n ≠ none ∧ registers[10] = 1
-        return this.getWorkPackageHash(refineContext)
+        // Gray Paper pvm_invocations.tex line 345: registers[10] = 1
+        // Returns: n when n ≠ none
+        // In accumulate invocation (line 189): n = entropyaccumulator' (entropy accumulator)
+        // In refine invocation (line 96): n = zerohash (work package hash, but set to zero/none)
+        // In is-authorized invocation (line 49): n = none (not available)
+        return params.entropyService.getEntropyAccumulator()
 
-      case 2n:
-        // Authorizer trace - Gray Paper: registers[10] = 2
-        // r when r ≠ none ∧ registers[10] = 2
-        return this.getAuthorizerTrace(refineContext)
+      case 2n: {
+        // Gray Paper pvm_invocations.tex line 346: registers[10] = 2
+        // Returns: r (authorizer trace) when r ≠ none
+        // The authorizer trace parameter passed to Ω_Y
+        if (!params?.authorizerTrace) {
+          return null
+        }
+        return hexToBytes(params.authorizerTrace)
+      }
+      case 3n: {
+        const workItemIndex = context.registers[11]
+        const extrinsicIndex = context.registers[12]
+        return params.exportSegments?.[Number(workItemIndex)]?.[Number(extrinsicIndex)] ?? null
+      }
 
-      case 3n:
-        // Export segments - Gray Paper: registers[10] = 3
-        // x̄[registers[11]][registers[12]] when x̄ ≠ none ∧ registers[10] = 3
-        return this.getExportSegment(refineContext, context.registers[11])
+      case 4n: {
+        // Gray Paper pvm_invocations.tex line 348: registers[10] = 4
+        // Returns: x̄[i][registers[11]] when x̄ ≠ none ∧ i ≠ none
+        // Export segments/extrinsics by work item: x̄[i] is the sequence for work item i,
+        // accessed at index registers[11]. Requires: registers[11] < len(x̄[i])
+        if (!params.exportSegments || params.workItemIndex === null) {
+          return null
+        }
+        const workItemIdx = Number(params.workItemIndex)
+        const segmentIdx = Number(context.registers[11])
+        return params.exportSegments[workItemIdx]?.[segmentIdx] ?? null
+      }
+      case 5n: {
+        // Gray Paper pvm_invocations.tex line 349: registers[10] = 5
+        // Returns: ī[registers[11]][registers[12]] when ī ≠ none
+        // Import segments: ī is a nested sequence, accessed by flat index registers[11]
+        // and sub-index registers[12]. Requires: registers[11] < len(ī) and registers[12] < len(ī[registers[11]])
+        const workItemIndex = context.registers[11]
+        const importIndex = context.registers[12]
+        return params.importSegments?.[Number(workItemIndex)]?.[Number(importIndex)] ?? null
+      }
+      case 6n: {
+        // Gray Paper pvm_invocations.tex line 350: registers[10] = 6
+        // Returns: ī[i][registers[11]] when ī ≠ none ∧ i ≠ none
+        // Import segments by work item: ī[i] is the sequence for work item i,
+        // accessed at index registers[11]. Requires: registers[11] < len(ī[i])
+        if (!params.importSegments || params.workItemIndex === null) {
+          return null
+        }
+        const workItemIdx = Number(params.workItemIndex)
+        const segmentIdx = Number(context.registers[11])
+        return params.importSegments[workItemIdx]?.[segmentIdx] ?? null
+      }
 
-      case 4n:
-        // Export segments by work item - Gray Paper: registers[10] = 4
-        // x̄[i][registers[11]] when x̄ ≠ none ∧ i ≠ none ∧ registers[10] = 4
-        return this.getExportSegmentByWorkItem(
-          refineContext,
-          context.registers[11],
-        )
+      case 7n: {
+        if(!params.workPackage) {
+          return null
+        }
+        const [error, encoded] = encodeWorkPackage(params.workPackage)
+        if (error || !encoded) {
+          return null
+        }
+        return encoded
+      }
 
-      case 5n:
-        // Import segments - Gray Paper: registers[10] = 5
-        // ī[registers[11]][registers[12]] when ī ≠ none ∧ registers[10] = 5
-        return this.getImportSegment(
-          refineContext,
-          context.registers[11],
-          context.registers[12],
-        )
-
-      case 6n:
-        // Import segments by work item - Gray Paper: registers[10] = 6
-        // ī[i][registers[11]] when ī ≠ none ∧ i ≠ none ∧ registers[10] = 6
-        return this.getImportSegmentByWorkItem(
-          refineContext,
-          context.registers[11],
-        )
-
-      case 7n:
-        // Work package - Gray Paper: registers[10] = 7
-        // encode(p) when p ≠ none ∧ registers[10] = 7
-        return this.getWorkPackage(refineContext)
-
-      case 8n:
-        // Auth config - Gray Paper: registers[10] = 8
-        // p.authconfig when p ≠ none ∧ registers[10] = 8
-        return this.getAuthConfig(refineContext)
+      case 8n: {
+        // Gray Paper pvm_invocations.tex line 352: registers[10] = 8
+        // Returns: p.authconfig when p ≠ none
+        // Work package authorization configuration blob
+        if(!params.workPackage) {
+          return null
+        }
+        return hexToBytes(params.workPackage.authConfig)
+      }
 
       case 9n:
-        // Auth token - Gray Paper: registers[10] = 9
-        // p.authtoken when p ≠ none ∧ registers[10] = 9
-        return this.getAuthToken(refineContext)
+        // Gray Paper pvm_invocations.tex line 353: registers[10] = 9
+        // Returns: p.authtoken when p ≠ none
+        // Work package authorization token blob
+        if(!params.workPackage) {
+          return null
+        }
+        return hexToBytes(params.workPackage.authToken)
 
-      case 10n:
-        // Work context - Gray Paper: registers[10] = 10
-        // encode(p.context) when p ≠ none ∧ registers[10] = 10
-        return this.getWorkContext(refineContext)
+      case 10n: {
+        // Gray Paper pvm_invocations.tex line 354: registers[10] = 10
+        // Returns: encode(p.context) when p ≠ none
+        // Encoded work package context
+        if(!params.workPackage) {
+          return null
+        }
+        const [error, encoded] = encodeRefineContext(params.workPackage.context)
+        if (error || !encoded) {
+          return null
+        }
+        return encoded
+      }
 
-      case 11n:
-        // Work items summary - Gray Paper: registers[10] = 11
-        // encode({S(w) | w ∈ p.workitems}) when p ≠ none ∧ registers[10] = 11
-        return this.getWorkItemsSummary(refineContext)
+      case 11n: {
+        // Gray Paper pvm_invocations.tex line 355: registers[10] = 11
+        // Returns: encode({S(w) | w ∈ p.workitems}) when p ≠ none
+        // Encoded sequence of work item summaries S(w) for all work items in p.workitems
+        // S(w) = encode{encode[4]{w.serviceindex}, w.codehash, encode[8]{w.refgaslimit, w.accgaslimit},
+        // encode[2]{w.exportcount, len(w.importsegments), len(w.extrinsics)}, encode[4]{len(w.payload)}}
+        if (!params.workPackage) {
+          return null
+        }
+        const [error, encoded] = encodeVariableSequence(params.workPackage.workItems, encodeWorkItemSummary)
+        if (error || !encoded) {
+          return null
+        }
+        return encoded
+      }
 
-      case 12n:
-        // Work item - Gray Paper: registers[10] = 12
-        // S(p.workitems[registers[11]]) when p ≠ none ∧ registers[10] = 12
-        return this.getWorkItem(refineContext, context.registers[11])
+      case 12n: {
+        // Gray Paper pvm_invocations.tex line 356-357: registers[10] = 12
+        // Returns: S(p.workitems[registers[11]]) when p ≠ none ∧ registers[11] < len(p.workitems)
+        // Work item summary S(w) for work item at index registers[11]
+        // S(w) = encode{encode[4]{w.serviceindex}, w.codehash, encode[8]{w.refgaslimit, w.accgaslimit},
+        // encode[2]{w.exportcount, len(w.importsegments), len(w.extrinsics)}, encode[4]{len(w.payload)}}
+        if (!params.workPackage) {
+          return null
+        }
+        const workItems = params.workPackage.workItems
+        const itemIdx = Number(context.registers[11])
+        if (itemIdx >= workItems.length) {
+          return null
+        }
+        const workItem = workItems[itemIdx]
+        const [error, encoded] = encodeWorkItemSummary(workItem)
+        if (error || !encoded) {
+          return null
+        }
+        return encoded
 
-      case 13n:
-        // Work item payload - Gray Paper: registers[10] = 13
-        // p.workitems[registers[11]].payload when p ≠ none ∧ registers[10] = 13
-        return this.getWorkItemPayload(refineContext, context.registers[11])
+      }
+      case 13n: {
+        // Gray Paper pvm_invocations.tex line 358: registers[10] = 13
+        // Returns: p.workitems[registers[11]].payload when p ≠ none ∧ registers[11] < len(p.workitems)
+        // Payload blob of work item at index registers[11]
+        return this.getWorkItemPayload(params, context.registers[11])
+      }
 
-      case 14n:
-        // Work items - Gray Paper: registers[10] = 14
-        // encode(i) when i ≠ none ∧ registers[10] = 14
-        return this.getWorkItems(refineContext)
+      case 14n: {
+        // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
+        // Returns: encode(i) when i ≠ none
+        // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
+        if(!params.workItemsSequence) {
+          return null
+        }
+        const [error, encoded] = encodeVariableSequence(params.workItemsSequence, encodeWorkItem)
+        if (error || !encoded) {
+          return null
+        }
+        return encoded
+      }
 
-      case 15n:
-        // Work item by index - Gray Paper: registers[10] = 15
-        // encode(i[registers[11]]) when i ≠ none ∧ registers[10] = 15
-        return this.getWorkItemByIndex(refineContext, context.registers[11])
-
+      case 15n: {
+        // Gray Paper pvm_invocations.tex line 360: registers[10] = 15
+        // Returns: encode(i[registers[11]]) when i ≠ none ∧ registers[11] < len(i)
+        // Encoded work item at index registers[11] from work items sequence i
+        return this.getWorkItemByIndex(params, context.registers[11])
+      }
       default:
         // Unknown selector - return NONE
         return null
@@ -256,34 +347,34 @@ export class FetchHostFunction extends BaseHostFunction {
     let offset = 0
 
     // encode[8]{Citemdeposit = 10}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), true)
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), false)
     offset += 8
 
     // encode[8]{Cbytedeposit = 1}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), true)
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), false)
     offset += 8
 
     // encode[8]{Cbasedeposit = 100}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), true)
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), false)
     offset += 8
 
     // encode[2]{Ccorecount = 341}
-    view.setUint16(offset, this.configService.numCores, true)
+    view.setUint16(offset, this.configService.numCores, false)
     offset += 2
 
     // encode[4]{Cexpungeperiod = 19200}
-    view.setUint32(offset, this.configService.preimageExpungePeriod, true)
+    view.setUint32(offset, this.configService.preimageExpungePeriod, false)
     offset += 4
 
     // encode[4]{Cepochlen = 600}
-    view.setUint32(offset, this.configService.epochDuration, true)
+    view.setUint32(offset, this.configService.epochDuration, false)
     offset += 4
 
     // encode[8]{Creportaccgas = 10000000}
     view.setBigUint64(
       offset,
       BigInt(WORK_REPORT_CONSTANTS.C_REPORTACCGAS),
-      true,
+      false,
     )
     offset += 8
 
@@ -291,398 +382,125 @@ export class FetchHostFunction extends BaseHostFunction {
     view.setBigUint64(
       offset,
       BigInt(AUTHORIZATION_CONSTANTS.C_PACKAGEAUTHGAS),
-      true,
+      false,
     )
     offset += 8
 
     // encode[8]{Cpackagerefgas = 5000000000}
-    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_PACKAGEREFGAS), true)
+    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_PACKAGEREFGAS), false)
     offset += 8
 
     // encode[8]{Cblockaccgas = 3500000000}
-    view.setBigUint64(offset, BigInt(this.configService.maxBlockGas), true)
+    view.setBigUint64(offset, BigInt(this.configService.maxBlockGas), false)
     offset += 8
 
     // encode[2]{Crecenthistorylen = 8}
-    view.setUint16(offset, HISTORY_CONSTANTS.C_RECENTHISTORYLEN, true)
+    view.setUint16(offset, HISTORY_CONSTANTS.C_RECENTHISTORYLEN, false)
     offset += 2
 
     // encode[2]{Cmaxpackageitems = 16}
-    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, true)
+    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, false)
     offset += 2
 
     // encode[2]{Cmaxreportdeps = 8}
-    view.setUint16(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, true)
+      view.setUint16(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, false)
     offset += 2
 
     // encode[2]{Cmaxblocktickets = 16}
-    view.setUint16(offset, TICKET_CONSTANTS.C_MAXBLOCKTICKETS, true)
+    view.setUint16(offset, TICKET_CONSTANTS.C_MAXBLOCKTICKETS, false)
     offset += 2
 
     // encode[4]{Cmaxlookupanchorage = 14400}
-    view.setUint32(offset, TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE, true)
+    view.setUint32(offset, TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE, false)
     offset += 4
 
     // encode[2]{Cticketentries = 2}
-    view.setUint16(offset, this.configService.ticketsPerValidator, true)
+    view.setUint16(offset, this.configService.ticketsPerValidator, false)
     offset += 2
 
     // encode[2]{Cauthpoolsize = 8}
-    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, true)
+    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, false)
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    view.setUint16(offset, this.configService.slotDuration, true)
+    view.setUint16(offset, this.configService.slotDuration, false)
     offset += 2
 
     // encode[2]{Cauthqueuesize = 80}
-    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, true)
+    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, false)
     offset += 2
 
     // encode[2]{Crotationperiod = 10}
-    view.setUint16(offset, this.configService.rotationPeriod, true)
+    view.setUint16(offset, this.configService.rotationPeriod, false)
     offset += 2
 
     // encode[2]{Cmaxpackagexts = 128}
-    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, true)
+    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, false)
     offset += 2
 
     // encode[2]{Cassurancetimeoutperiod = 5}
-    view.setUint16(offset, TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, true)
+    view.setUint16(offset, TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, false)
     offset += 2
 
     // encode[2]{Cvalcount = 1023}
-    view.setUint16(offset, this.configService.numValidators, true)
+    view.setUint16(offset, this.configService.numValidators, false)
     offset += 2
 
     // encode[4]{Cmaxauthcodesize = 64000}
-    view.setUint32(offset, AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, true)
+    view.setUint32(offset, AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, false)
     offset += 4
 
     // encode[4]{Cmaxbundlesize = 13791360}
-    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, true)
+      view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, false)
     offset += 4
 
     // encode[4]{Cmaxservicecodesize = 4000000}
-    view.setUint32(offset, SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, true)
+    view.setUint32(offset, SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, false)
     offset += 4
 
     // encode[4]{Cecpiecesize = 684}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_ECPIECESIZE, true)
+    view.setUint32(offset, SEGMENT_CONSTANTS.C_ECPIECESIZE, false)
     offset += 4
 
     // encode[4]{Cmaxpackageimports = 3072}
-    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, true)
+    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, false)
     offset += 4
 
     // encode[4]{Csegmentecpieces = 6}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_SEGMENTECPIECES, true)
+    view.setUint32(offset, SEGMENT_CONSTANTS.C_SEGMENTECPIECES, false)
     offset += 4
 
     // encode[4]{Cmaxreportvarsize = 48*2^10 = 49152}
-    view.setUint32(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE, true)
+    view.setUint32(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE, false)
     offset += 4
 
     // encode[4]{Cmemosize = 128}
-    view.setUint32(offset, TRANSFER_CONSTANTS.C_MEMOSIZE, true)
+    view.setUint32(offset, TRANSFER_CONSTANTS.C_MEMOSIZE, false)
     offset += 4
 
     // encode[4]{Cmaxpackageexports = 3072}
-    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, true)
+    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, false)
     offset += 4
 
     // encode[4]{Cepochtailstart = 500}
-    view.setUint32(offset, TICKET_CONSTANTS.C_EPOCHTAILSTART, true)
+    view.setUint32(offset, TICKET_CONSTANTS.C_EPOCHTAILSTART, false)
 
     return new Uint8Array(buffer)
   }
 
-  private getExportSegment(
-    refineContext: RefineInvocationContext | null,
-    segmentIndex: bigint,
-  ): Uint8Array | null {
-    // Gray Paper: x̄[registers[11]][registers[12]] when x̄ ≠ none ∧ registers[10] = 3
-    // Note: exportSegments is Segment[] where Segment = Uint8Array
-    // So we're accessing exportSegments[segmentIndex] which is a Uint8Array
-
-    if (!refineContext) {
-      return null
-    }
-
-    const exportSegments = refineContext.exportSegments
-    const segmentIdx = Number(segmentIndex)
-
-    // Check bounds
-    if (segmentIdx >= exportSegments.length) {
-      return null
-    }
-
-    // Return the entire segment (Uint8Array)
-    // The Gray Paper shows x̄[registers[11]][registers[12]] but our structure
-    // is simpler - just an array of segments
-    return exportSegments[segmentIdx]
-  }
-
-  // Additional fetch methods for work package data
-  // These are placeholders that would be implemented when the invocation system
-  // provides the full work package context
-
-  private getWorkPackageHash(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: n when n ≠ none ∧ registers[10] = 1
-    // Returns work package hash from refine context
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    // Calculate work package hash from the work package
-    const [error, workPackageHash] = calculateWorkPackageHash(
-      refineContext.workPackage,
-    )
-    if (error || !workPackageHash) {
-      return null
-    }
-
-    return hexToBytes(workPackageHash)
-  }
-
-  private getAuthorizerTrace(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: r when r ≠ none ∧ registers[10] = 2
-    // Returns authorizer trace from refine context
-
-    if (!refineContext?.authorizerTrace) {
-      return null
-    }
-
-    // Convert hex string to bytes
-    return hexToBytes(refineContext.authorizerTrace)
-  }
-
-  private getExportSegmentByWorkItem(
-    refineContext: RefineInvocationContext | null,
-    segmentIndex: bigint,
-  ): Uint8Array | null {
-    // Gray Paper: x̄[i][registers[11]] when x̄ ≠ none ∧ i ≠ none ∧ registers[10] = 4
-    // Gray Paper defines x̄ as a nested sequence organized by work item
-    // Each work item has export segments from its extrinsics
-
-    if (!refineContext?.workItemIndex || !refineContext?.workPackage) {
-      return null
-    }
-
-    const workItemIdx = Number(refineContext.workItemIndex)
-    const segmentIdx = Number(segmentIndex)
-
-    // Gray Paper lines 109-117: x̄ is constructed from work package extrinsics
-    // For work item i, get its extrinsics and return segment index
-    const workItems = refineContext.workPackage.workItems
-
-    if (workItemIdx >= workItems.length) {
-      return null
-    }
-
-    const workItem = workItems[workItemIdx]
-
-    // Check bounds for the segment index
-    if (segmentIdx >= workItem.extrinsics.length) {
-      return null
-    }
-
-    // Gray Paper: x̄[i][segmentIdx] is the actual blob x from extrinsics
-    // The current implementation would need access to the actual extrinsic blob data
-    // For now, we can't return the actual blob without the extrinsic data
-    // This needs to be resolved from extrinsic storage or cache
-
-    return null // Extrinsic blob data not available in current context
-  }
-
-  private getImportSegment(
-    refineContext: RefineInvocationContext | null,
-    segmentIndex: bigint,
-    subIndex: bigint,
-  ): Uint8Array | null {
-    // Gray Paper: ī[registers[11]][registers[12]] when ī ≠ none ∧ registers[10] = 5
-    // Returns specific import segment
-
-    if (!refineContext?.importSegments) {
-      return null
-    }
-
-    const segmentIdx = Number(segmentIndex)
-    const subIdx = Number(subIndex)
-
-    if (segmentIdx >= refineContext.importSegments.length) {
-      return null
-    }
-
-    const segment = refineContext.importSegments[segmentIdx]
-    if (subIdx >= segment.length) {
-      return null
-    }
-
-    return segment[subIdx]
-  }
-
-  private getImportSegmentByWorkItem(
-    refineContext: RefineInvocationContext | null,
-    segmentIndex: bigint,
-  ): Uint8Array | null {
-    // Gray Paper: ī[i][registers[11]] when ī ≠ none ∧ i ≠ none ∧ registers[10] = 6
-    // Returns import segment for specific work item
-
-    if (!refineContext?.workItemIndex || !refineContext?.importSegments) {
-      return null
-    }
-
-    const workItemIdx = Number(refineContext.workItemIndex)
-    const segmentIdx = Number(segmentIndex)
-
-    if (workItemIdx >= refineContext.importSegments.length) {
-      return null
-    }
-
-    const workItemImports = refineContext.importSegments[workItemIdx]
-    if (segmentIdx >= workItemImports.length) {
-      return null
-    }
-
-    return workItemImports[segmentIdx]
-  }
-
-  private getWorkPackage(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: encode(p) when p ≠ none ∧ registers[10] = 7
-    // Returns encoded work package
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    const [error, encoded] = encodeWorkPackage(refineContext.workPackage)
-    if (error) {
-      return null
-    }
-
-    return encoded
-  }
-
-  private getAuthConfig(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: p.authconfig when p ≠ none ∧ registers[10] = 8
-    // Returns work package authorization configuration
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    return hexToBytes(refineContext.workPackage.authConfig)
-  }
-
-  private getAuthToken(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: p.authtoken when p ≠ none ∧ registers[10] = 9
-    // Returns work package authorization token
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    return hexToBytes(refineContext.workPackage.authToken)
-  }
-
-  private getWorkContext(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: encode(p.context) when p ≠ none ∧ registers[10] = 10
-    // Returns encoded work package context
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    // For now, return a placeholder - would need proper context encoding
-    return new Uint8Array(32) // Placeholder
-  }
-
-  private getWorkItemsSummary(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: encode({S(w) | w ∈ p.workitems}) when p ≠ none ∧ registers[10] = 11
-    // Returns encoded summary of all work items
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    const workItems = refineContext.workPackage.workItems
-    const summaries: Uint8Array[] = []
-
-    for (const workItem of workItems) {
-      const [error, encoded] = encodeWorkItem(workItem)
-      if (error) {
-        return null
-      }
-      summaries.push(encoded)
-    }
-
-    // Concatenate all summaries
-    const totalLength = summaries.reduce((sum, item) => sum + item.length, 0)
-    const result = new Uint8Array(totalLength)
-    let offset = 0
-
-    for (const summary of summaries) {
-      result.set(summary, offset)
-      offset += summary.length
-    }
-
-    return result
-  }
-
-  private getWorkItem(
-    refineContext: RefineInvocationContext | null,
-    itemIndex: bigint,
-  ): Uint8Array | null {
-    // Gray Paper: S(p.workitems[registers[11]]) when p ≠ none ∧ registers[10] = 12
-    // Returns summary of specific work item (S function)
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    const workItems = refineContext.workPackage.workItems
-    const itemIdx = Number(itemIndex)
-
-    if (itemIdx >= workItems.length) {
-      return null
-    }
-
-    const workItem = workItems[itemIdx]
-
-    // Create summary according to Gray Paper S(w) function
-    // S(w) = encode{serviceIndex, codeHash, gasLimits, counts, payloadLen}
-    const summary = this.createWorkItemSummary(workItem)
-    return summary
-  }
 
   private getWorkItemPayload(
-    refineContext: RefineInvocationContext | null,
+    params: FetchParams,
     itemIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: p.workitems[registers[11]].payload when p ≠ none ∧ registers[10] = 13
     // Returns payload of specific work item
 
-    if (!refineContext?.workPackage) {
+    if (!params.workPackage) {
       return null
     }
 
-    const workItems = refineContext.workPackage.workItems
+    const workItems = params.workPackage.workItems
     const itemIdx = Number(itemIndex)
 
     if (itemIdx >= workItems.length) {
@@ -693,52 +511,20 @@ export class FetchHostFunction extends BaseHostFunction {
     return workItem.payload
   }
 
-  private getWorkItems(
-    refineContext: RefineInvocationContext | null,
-  ): Uint8Array | null {
-    // Gray Paper: encode(i) when i ≠ none ∧ registers[10] = 14
-    // Returns encoded work items (extrinsics)
-
-    if (!refineContext?.workPackage) {
-      return null
-    }
-
-    const workItems = refineContext.workPackage.workItems
-    const encodedItems: Uint8Array[] = []
-
-    for (const workItem of workItems) {
-      const [error, encoded] = encodeWorkItem(workItem)
-      if (error) {
-        return null
-      }
-      encodedItems.push(encoded)
-    }
-
-    // Concatenate all encoded work items
-    const totalLength = encodedItems.reduce((sum, item) => sum + item.length, 0)
-    const result = new Uint8Array(totalLength)
-    let offset = 0
-
-    for (const encodedItem of encodedItems) {
-      result.set(encodedItem, offset)
-      offset += encodedItem.length
-    }
-
-    return result
-  }
 
   private getWorkItemByIndex(
-    refineContext: RefineInvocationContext | null,
+    params: FetchParams,
     itemIndex: bigint,
   ): Uint8Array | null {
     // Gray Paper: encode(i[registers[11]]) when i ≠ none ∧ registers[10] = 15
-    // Returns encoded specific work item
+    // Returns encoded work item at index registers[11] from work items sequence i
+    // Note: i is the second 'i' parameter (workItemsSequence), not workPackage.workItems
 
-    if (!refineContext?.workPackage) {
+    if (!params.workItemsSequence) {
       return null
     }
 
-    const workItems = refineContext.workPackage.workItems
+    const workItems = params.workItemsSequence
     const itemIdx = Number(itemIndex)
 
     if (itemIdx >= workItems.length) {
@@ -747,50 +533,10 @@ export class FetchHostFunction extends BaseHostFunction {
 
     const workItem = workItems[itemIdx]
     const [error, encoded] = encodeWorkItem(workItem)
-    if (error) {
+    if (error || !encoded) {
       return null
     }
 
     return encoded
-  }
-
-  /**
-   * Create work item summary according to Gray Paper S(w) function
-   * S(w) = encode{serviceIndex, codeHash, gasLimits, counts, payloadLen}
-   */
-  private createWorkItemSummary(workItem: WorkItem): Uint8Array {
-    // Create a summary buffer with key work item fields
-    // This is a simplified implementation - in practice would need full S(w) spec
-    const buffer = new ArrayBuffer(64) // Fixed size summary
-    const view = new DataView(buffer)
-    let offset = 0
-
-    // Encode service index (8 bytes)
-    view.setBigUint64(offset, BigInt(workItem.serviceindex || 0), true)
-    offset += 8
-
-    // Encode code hash (32 bytes) - simplified
-    const codeHashBytes = new Uint8Array(32)
-    if (workItem.codehash) {
-      const hashBytes = Buffer.from(workItem.codehash.slice(2), 'hex')
-      codeHashBytes.set(hashBytes.subarray(0, 32))
-    }
-    for (let i = 0; i < codeHashBytes.length; i++) {
-      view.setUint8(offset + i, codeHashBytes[i])
-    }
-    offset += 32
-
-    // Encode gas limits (8 bytes)
-    view.setBigUint64(offset, BigInt(workItem.refgaslimit || 0), true)
-    offset += 8
-
-    // Encode counts (8 bytes) - simplified
-    view.setBigUint64(offset, BigInt(workItem.extrinsics?.length || 0), true)
-    offset += 8
-
-    // Encode payload length (8 bytes)
-    view.setBigUint64(offset, BigInt(workItem.payload?.length || 0), true)
-
-    return new Uint8Array(buffer)
   }
 }

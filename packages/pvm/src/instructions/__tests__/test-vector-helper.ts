@@ -10,6 +10,7 @@ import { PVMParser } from '../../parser'
 import { InstructionRegistry } from '../registry'
 import type { PVMOptions } from '@pbnj/types'
 import { PVMRAM } from '../../ram'
+import { MEMORY_CONFIG } from '../../config'
 import { HostFunctionRegistry } from '../../host-functions/general/registry'
 import { ConfigService } from '../../../../../infra/node/services/config-service'
 import { ServiceAccountService } from '../../../../../infra/node/services/service-account-service'
@@ -225,7 +226,41 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   // Access the private cells map through the PVMRAM instance
   const finalMemory = new Map<bigint, number>()
   if (testVector['expected-memory']) {
-    // Only extract memory that's expected to be checked
+    // Set page access for expected memory addresses if not already set
+    // This ensures we can read from addresses that were written during execution
+    // but weren't in the initial-page-map
+    for (const memBlock of testVector['expected-memory']) {
+      const address = BigInt(memBlock.address)
+      const length = memBlock.contents.length
+      
+      // Calculate page-aligned range
+      const pageSize = BigInt(MEMORY_CONFIG.PAGE_SIZE)
+      const startPage = address / pageSize
+      const endPage = (address + BigInt(length) + pageSize - 1n) / pageSize
+      const startAddress = startPage * pageSize
+      const endAddress = endPage * pageSize
+      
+      // Check if page access is already set for all pages in this range
+      const ram = pvm.getState().ram as PVMRAM
+      let allPagesHaveAccess = true
+      for (let page = startPage; page < endPage; page++) {
+        const pageAddr = page * pageSize
+        const accessType = ram.getPageAccessType(pageAddr)
+        if (accessType === 'none') {
+          allPagesHaveAccess = false
+          break
+        }
+      }
+      
+      // If any page doesn't have access, set it to 'read' for the entire range
+      // This ensures we can read from addresses that were written during execution
+      // but weren't in the initial-page-map
+      if (!allPagesHaveAccess) {
+        ram.setPageAccessRightsForAddressRange(startAddress, endAddress, 'read')
+      }
+    }
+    
+    // Now read the memory
     for (const memBlock of testVector['expected-memory']) {
       const address = BigInt(memBlock.address)
       const length = memBlock.contents.length
@@ -246,7 +281,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   // Our PVM tracks PC as code-relative as well, so return it directly
   return {
     registers: finalRegisters,
-    pc: Number(pvm.getState().instructionPointer),
+    pc: Number(pvm.getState().programCounter),
     gas: Number(pvm.getState().gasCounter),
     status,
     faultAddress,

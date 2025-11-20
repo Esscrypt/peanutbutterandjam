@@ -5,8 +5,8 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { logger } from '@pbnj/core'
 import { decodeBlob, decodeProgramFromPreimage } from '@pbnj/codec'
+import { logger } from '@pbnj/core'
 import type {
   ContextMutator,
   ImplicationsPair,
@@ -14,6 +14,7 @@ import type {
   PVMInstruction,
   PVMOptions,
   PVMState,
+  RAM,
   RefineInvocationContext,
   ResultCode,
   Safe,
@@ -31,10 +32,17 @@ import {
 } from './config'
 import type { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
+import {
+  buildPanicDumpData,
+  decodeLastInstruction,
+  writeHostFunctionLogs,
+  writePanicDump,
+} from './panic-dump-util'
+import { PVMParser } from './parser'
 import { PVMRAM } from './ram'
 
 /**
- * Simplified PVM implementation
+ * PVM implementation
  *
  * Gray Paper Ψ function: Executes instructions until a halting condition
  */
@@ -42,10 +50,8 @@ export class PVM implements IPVM {
   public state: PVMState
   protected readonly registry: InstructionRegistry
   protected readonly hostFunctionRegistry: HostFunctionRegistry
-  protected currentAccumulateContext?: ImplicationsPair
-  protected currentRefineContext: RefineInvocationContext | null = null
-  protected currentContextMutator: ContextMutator<any> | null = null
-  protected currentContext: any | null = null
+  protected context: RefineInvocationContext | ImplicationsPair | null = null
+  protected contextMutator: ContextMutator = () => null
   /** Global log collection for instruction execution (per execution run) */
   protected executionLogs: Array<{
     pc: bigint
@@ -53,6 +59,7 @@ export class PVM implements IPVM {
     opcode: string
     message: string
     data?: Record<string, unknown>
+    registers: string[]
     timestamp: number
   }> = []
 
@@ -62,7 +69,7 @@ export class PVM implements IPVM {
     functionId: bigint
     message: string
     data?: Record<string, unknown>
-    timestamp: number
+    registers: string[]
     pc: bigint | null
   }> = []
 
@@ -76,8 +83,9 @@ export class PVM implements IPVM {
 
     // Initialize state with options
     this.state = {
+      instructions: new Map(),
       resultCode: RESULT_CODES.HALT,
-      instructionPointer: options.pc ?? 0n,
+      programCounter: options.pc ?? 0n,
       registerState: options.registerState ?? new Array(13).fill(0n), // All 13 registers (r0-r12) store 64-bit values,
       ram: options.ram ?? new PVMRAM(),
       gasCounter: options.gasCounter ?? GAS_CONFIG.DEFAULT_GAS_LIMIT,
@@ -120,7 +128,7 @@ export class PVM implements IPVM {
    * @param argumentData - Argument data blob (max Cpvminitinputsize)
    * @returns Tuple of (code, registers, ram) or null if invalid
    */
-  protected initializeProgram(
+  public initializeProgram(
     programBlob: Uint8Array,
     argumentData: Uint8Array,
   ): Safe<Uint8Array> {
@@ -261,23 +269,29 @@ export class PVM implements IPVM {
    * @param encodedArgs - Encoded arguments blob
    * @param contextMutator - Context mutator function F
    * @param context - Context X (ImplicationsPair for accumulate, RefineContext for refine)
+   * @param buildPanicDump - Optional flag to build panic dump on panic/OOG
+   * @param serviceId - Optional service ID for panic dump and host function logs (required if buildPanicDump or writeHostFunctionLogs is true)
+   * @param writeHostFunctionLogs - Optional flag to write host function logs to file
    * @returns Tuple of (gas consumed, result, updated context) where result is blob ∪ {panic, oog}
    */
-  protected async executeMarshallingInvocation<T>(
+  protected async executeMarshallingInvocation(
     programBlob: Uint8Array,
     initialPC: bigint,
     gasLimit: bigint,
     encodedArgs: Uint8Array,
-    contextMutator: ContextMutator<T>,
-    context: T,
+    contextMutator: ContextMutator,
+    context: RefineInvocationContext | ImplicationsPair,
+    buildPanicDump?: boolean,
+    serviceId?: bigint,
+    writeHostFunctionLogsFlag?: boolean,
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
-    context: T
+    context: RefineInvocationContext | ImplicationsPair
   }> {
     // Store context mutator and context for use during execution
-    this.currentContextMutator = contextMutator
-    this.currentContext = context
+    this.contextMutator = contextMutator
+    this.context = context
 
     // Gray Paper equation 822: Use Y function to initialize program state
     // Y(programBlob, argumentData) → (code, registers, ram)?
@@ -300,7 +314,7 @@ export class PVM implements IPVM {
     // Store initial gas for calculation
     const initialGas = gasLimit
     this.state.gasCounter = gasLimit
-    this.state.instructionPointer = initialPC
+    this.state.programCounter = initialPC
 
     // Gray Paper: Call core Ψ function (Ψ_H) with context mutator
     // The core Ψ function (this.run) handles all PVM execution logic
@@ -311,7 +325,6 @@ export class PVM implements IPVM {
     const finalResultCode = this.state.resultCode
     const finalRegisters = this.state.registerState
     const finalMemory = this.state.ram
-    const finalContext = this.currentContext as T
 
     // Gray Paper equation 834: Calculate gas consumed
     // u = gascounter - max(gascounter', 0)
@@ -319,56 +332,179 @@ export class PVM implements IPVM {
       initialGas - (finalGasCounter > 0n ? finalGasCounter : 0n)
 
     // Gray Paper equation 829-835: R function - extract result based on termination
-    let result: Uint8Array | 'PANIC' | 'OOG'
+    const result = this.extractResultFromExecution(
+      finalResultCode,
+      finalRegisters,
+      finalMemory,
+    )
 
-    if (finalResultCode === RESULT_CODES.OOG) {
-      // Gray Paper: If ε = oog: return (u, oog, x')
-      result = 'OOG'
-    } else if (finalResultCode === RESULT_CODES.HALT) {
-      // Gray Paper equation 831-832: Check if Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
-      const startOffset = finalRegisters[7]
-      const length = finalRegisters[8]
+    // Build panic dump if requested and execution ended in panic or OOG
+    if (
+      buildPanicDump &&
+      (finalResultCode === RESULT_CODES.PANIC ||
+        finalResultCode === RESULT_CODES.OOG) &&
+      serviceId !== undefined
+    ) {
+      try {
+        const lastPC = this.state.programCounter
 
-      if (length === 0n) {
-        // Empty range is trivially readable - return empty blob
-        result = new Uint8Array(0)
-      } else {
-        // Gray Paper: Explicitly check if range is readable before reading
-        // Nrange{registers'[7]}{registers'[8]} means range from startOffset to startOffset+length
-        const [isReadable] = finalMemory.isReadableWithFault(
-          startOffset,
-          length,
-        )
+        // Decode last instruction details for panic analysis
+        const lastInstruction = decodeLastInstruction({
+          lastPC,
+          postState: {
+            code: this.state.code,
+            bitmask: this.state.bitmask,
+            registerState: this.state.registerState,
+          },
+          registry: this.registry,
+          skip: (instructionIndex, opcodeBitmask) =>
+            this.skip(instructionIndex, opcodeBitmask),
+        })
 
-        if (isReadable) {
-          // Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
-          // return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
-          const [memoryResult, readFaultAddress] = finalMemory.readOctets(
-            startOffset,
-            length,
+        const panicDumpData = buildPanicDumpData({
+          serviceId,
+          gasConsumed,
+          postState: {
+            programCounter: lastPC,
+            resultCode: finalResultCode,
+            gasCounter: finalGasCounter,
+            registerState: finalRegisters,
+            faultAddress: this.state.faultAddress,
+          },
+          lastInstruction,
+          ram: finalMemory,
+          executionLogs: this.getExecutionLogs(),
+          hostFunctionLogs: this.getHostFunctionLogs(),
+        })
+
+        const dumpType =
+          finalResultCode === RESULT_CODES.OOG ? 'oog' : 'panic'
+        const filepath = writePanicDump(panicDumpData, dumpType)
+        if (filepath) {
+          logger.info(
+            `[PVM] ${dumpType.toUpperCase()} tracking info serialized to file: ${filepath}`,
           )
-          // readOctets should succeed if range is readable, but handle edge case
-          if (memoryResult && !readFaultAddress) {
-            result = memoryResult
-          } else {
-            // Should not happen if isReadable is true, but return empty blob as fallback
-            result = new Uint8Array(0)
-          }
         } else {
-          // Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
-          result = new Uint8Array(0)
+          logger.error(
+            `[PVM] Failed to serialize ${dumpType} tracking info to file`,
+          )
         }
+      } catch (error) {
+        logger.error(
+          `[PVM] Failed to serialize tracking info to file`,
+          error instanceof Error ? error : new Error(String(error)),
+        )
       }
-    } else {
-      // Gray Paper: Otherwise: return (u, panic, x')
-      result = 'PANIC'
+    }
+
+    // Write host function logs if requested
+    if (writeHostFunctionLogsFlag && serviceId !== undefined) {
+      try {
+        const hostFunctionLogs = this.getHostFunctionLogs()
+        const hostLogsFilepath = writeHostFunctionLogs(serviceId, hostFunctionLogs)
+        if (hostLogsFilepath) {
+          logger.info(
+            `[PVM] Host function logs serialized to file: ${hostLogsFilepath}`,
+          )
+        }
+      } catch (error) {
+        logger.error(
+          `[PVM] Failed to write host function logs`,
+          error instanceof Error ? error : new Error(String(error)),
+        )
+      }
     }
 
     return safeResult({
       gasConsumed,
       result,
-      context: finalContext,
+      context: this.context as RefineInvocationContext | ImplicationsPair,
     })
+  }
+
+  /**
+   * R function - Extract result from execution based on termination condition
+   *
+   * Gray Paper equation 829-835 (pvm.tex):
+   * R(gascounter, Ψ_H(...)) → (gas, result, context)
+   *
+   * Where result is determined by:
+   * - Gray Paper equation 829: If ε = oog: return (u, oog, x')
+   * - Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}:
+   *   return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
+   * - Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
+   * - Gray Paper equation 833: Otherwise: return (u, panic, x')
+   *
+   * Where:
+   * - ε = resultCode (termination condition: halt, panic, or oog)
+   * - u = gas consumed (calculated in executeMarshallingInvocation)
+   * - registers'[7] = start offset of result range (arguments segment start)
+   * - registers'[8] = length of result range (argument data length)
+   * - mem' = final memory state after execution
+   * - Nrange{a}{b} = range from address a to a+b (inclusive start, exclusive end)
+   * - readable{mem'} = set of readable memory addresses
+   *
+   * @param resultCode - Termination condition (HALT, PANIC, or OOG)
+   * @param finalRegisters - Final register state after execution
+   * @param finalMemory - Final memory state after execution
+   * @returns Result blob, 'PANIC', or 'OOG'
+   */
+  private extractResultFromExecution(
+    resultCode: ResultCode,
+    finalRegisters: bigint[],
+    finalMemory: RAM,
+  ): Uint8Array | 'PANIC' | 'OOG' {
+    // Gray Paper equation 829: If ε = oog: return (u, oog, x')
+    if (resultCode === RESULT_CODES.OOG) {
+      return 'OOG'
+    }
+
+    // Gray Paper equation 830-832: Handle HALT case
+    if (resultCode === RESULT_CODES.HALT) {
+      // Extract result range from registers
+      // registers'[7] = arguments segment start address
+      // registers'[8] = argument data length
+      const startOffset = finalRegisters[7]
+      const length = finalRegisters[8]
+
+      // Empty range is trivially readable - return empty blob
+      if (length === 0n) {
+        return new Uint8Array(0)
+      }
+
+      // Gray Paper equation 831-832: Check if Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
+      // Nrange{registers'[7]}{registers'[8]} means range from startOffset to startOffset+length
+
+        // Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
+        // return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
+        const [memoryResult, readFaultAddress] = finalMemory.readOctets(
+          startOffset,
+          length,
+        )
+
+        // If readOctets returns a fault, this is an inconsistency (range was readable but read failed)
+        // Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
+        if (readFaultAddress) {
+          return new Uint8Array(0)
+        }
+
+        // If memoryResult is null, also treat as error (should not happen if range is readable)
+        if (!memoryResult) {
+          logger.error('ExtractResultFromExecution: Memory result is null', {
+            startOffset: startOffset.toString(),
+            length: length.toString(),
+            faultAddress: readFaultAddress?.toString() ?? 'null',
+          })
+          return 'PANIC'
+        }
+
+        return memoryResult
+
+    }
+
+    // Gray Paper equation 833: Otherwise: return (u, panic, x')
+    // This covers PANIC and any other unexpected result codes
+    return 'PANIC'
   }
 
   /**
@@ -392,7 +528,7 @@ export class PVM implements IPVM {
     //   opcode: instruction.opcode.toString(),
     //   instructionName: this.registry.getHandler(instruction.opcode)?.name,
     //   gas: this.state.gasCounter.toString(),
-    //   pc: this.state.instructionPointer.toString(),
+    //   pc: this.state.programCounter.toString(),
     //   registers: this.state.registerState,
     // })
 
@@ -408,97 +544,22 @@ export class PVM implements IPVM {
         return RESULT_CODES.OOG
       }
 
-      try {
         // Use context mutator if available (for accumulate/refine invocations)
-        if (this.currentContextMutator && this.currentContext !== undefined) {
-          const mutatorResult = this.currentContextMutator(
+        const resultCode = this.contextMutator(
             hostCallId,
-            this.state.gasCounter,
-            this.state.registerState,
-            this.state.ram,
-            this.currentContext,
           )
-
-          // Update state from mutator result
-          this.state.gasCounter = mutatorResult.gasCounter
-          this.state.registerState = mutatorResult.registers
-          this.state.ram = mutatorResult.memory
-          this.currentContext = mutatorResult.context
 
           // If host function returns null (continue), advance PC by instruction length
           // The PC was not advanced in executeInstruction() because it returned HOST early
-          if (mutatorResult.resultCode === null) {
+          if (resultCode === null) {
             const instructionLength = BigInt(1 + instruction.fskip)
-            this.state.instructionPointer += instructionLength
+            this.state.programCounter += instructionLength
           }
 
           // Check if mutator wants to halt execution
-          return mutatorResult.resultCode
-        } else {
-          // no
-          // Consume 10 gas for host function execution
-          this.state.gasCounter -= 10n
+          return resultCode
 
-          // Fallback to generic host function registry (for standalone PVM execution)
-          const hostFunction = this.hostFunctionRegistry.get(hostCallId)
-          if (!hostFunction) {
-            return RESULT_CODES.PANIC
-          }
 
-          // Create log function for host function context
-          const hostFunctionLog = (
-            message: string,
-            data?: Record<string, unknown>,
-          ) => {
-            if (!this.hostFunctionLogs) {
-              this.hostFunctionLogs = []
-            }
-            this.hostFunctionLogs.push({
-              functionName: hostFunction.name,
-              functionId: hostCallId,
-              message,
-              data,
-              timestamp: Date.now(),
-              pc: this.state.instructionPointer,
-            })
-          }
-
-          const context = {
-            gasCounter: this.state.gasCounter,
-            registers: this.state.registerState,
-            ram: this.state.ram,
-            log: hostFunctionLog,
-          }
-
-          const mutatorResult = await hostFunction.execute(
-            context,
-            this.currentRefineContext,
-          )
-          this.state.gasCounter = context.gasCounter
-          this.state.registerState = context.registers
-          this.state.ram = context.ram
-
-          // If host function returns null (continue), advance PC by instruction length
-          // The PC was not advanced in executeInstruction() because it returned HOST early
-          if (mutatorResult.resultCode === null) {
-            const instructionLength = BigInt(1 + instruction.fskip)
-            this.state.instructionPointer += instructionLength
-          }
-
-          // Check if mutator wants to halt execution
-          return mutatorResult.resultCode
-        }
-      } catch (error) {
-        logger.error('Host function execution failed', {
-          error,
-          hostCallId: hostCallId.toString(),
-          gas: this.state.gasCounter.toString(),
-          registers: this.state.registerState,
-          ram: this.state.ram.getPageMapJSON(),
-          resultCode: RESULT_CODES.PANIC,
-        })
-        return RESULT_CODES.PANIC
-      }
     }
 
     return resultCode
@@ -564,7 +625,7 @@ export class PVM implements IPVM {
     opcode: string
     message: string
     data?: Record<string, unknown>
-    timestamp: number
+    registers: string[]
   }> {
     // Return copy without sorting - logs are already in execution order
     return [...this.executionLogs]
@@ -579,7 +640,7 @@ export class PVM implements IPVM {
     functionId: bigint
     message: string
     data?: Record<string, unknown>
-    timestamp: number
+    registers: string[]
     pc: bigint | null
   }> {
     return [...this.hostFunctionLogs]
@@ -632,14 +693,14 @@ export class PVM implements IPVM {
 
     let resultCode: ResultCode | null = null
     while (resultCode === null) {
-      const instructionIndex = Number(this.state.instructionPointer)
+      const instructionIndex = Number(this.state.programCounter)
 
       // Bounds check: instruction pointer must be within valid code range
       if (instructionIndex < 0 || instructionIndex >= extendedCode.length) {
         logger.error('Instruction pointer out of bounds', {
           instructionIndex,
           codeLength: extendedCode.length,
-          pc: this.state.instructionPointer.toString(),
+          pc: this.state.programCounter.toString(),
         })
         this.state.resultCode = RESULT_CODES.PANIC
         return
@@ -652,7 +713,7 @@ export class PVM implements IPVM {
         logger.error('Invalid opcode read from code', {
           instructionIndex,
           codeLength: extendedCode.length,
-          pc: this.state.instructionPointer.toString(),
+          pc: this.state.programCounter.toString(),
         })
         this.state.resultCode = RESULT_CODES.PANIC
         return
@@ -673,7 +734,7 @@ export class PVM implements IPVM {
         opcode: BigInt(opcode),
         operands,
         fskip,
-        pc: this.state.instructionPointer,
+        pc: this.state.programCounter,
       }
 
       resultCode = await this.step(instruction)
@@ -685,7 +746,7 @@ export class PVM implements IPVM {
     // PANIC keeps PC at the instruction that caused the panic (for debugging)
     // TODO: Uncomment this for PRODUCTION
     // if (resultCode === RESULT_CODES.HALT || resultCode === RESULT_CODES.PANIC) {
-    //   this.state.instructionPointer = 0n
+    //   this.state.programCounter = 0n
     // }
   }
 
@@ -705,7 +766,7 @@ export class PVM implements IPVM {
 
     try {
       // Save PC before execution
-      const pcBefore = this.state.instructionPointer
+      const pcBefore = this.state.programCounter
 
       // Initialize logs array if not already present (per execution run)
       if (!this.executionLogs) {
@@ -718,26 +779,24 @@ export class PVM implements IPVM {
         registers: this.state.registerState,
         ram: this.state.ram,
         gas: this.state.gasCounter,
-        pc: this.state.instructionPointer,
+        pc: this.state.programCounter,
         jumpTable: this.state.jumpTable, // j
         fskip: instruction.fskip,
         bitmask: this.state.bitmask, // k
         code: this.state.code, // c
         logs: this.executionLogs,
         log: (message: string, data?: Record<string, unknown>) => {
-          // Always include register 12 value for debugging
-          const r12Value = this.state.registerState[12]
           const logData = {
             ...data,
-            r12: r12Value.toString(),
-            r12Hex: `0x${r12Value.toString(16)}`,
+            gasCounter: this.state.gasCounter.toString(),
           }
           this.executionLogs.push({
-            pc: this.state.instructionPointer,
+            pc: this.state.programCounter,
             instructionName: handler.name,
             opcode: `0x${instruction.opcode.toString(16)}`,
             message,
             data: logData,
+            registers: Array.from(context.registers.slice(0, 13)).map(x=>x.toString()),
             timestamp: Date.now(),
           })
         },
@@ -758,12 +817,12 @@ export class PVM implements IPVM {
       // Check if instruction modified PC (branches/jumps)
       if (context.pc !== pcBefore) {
         // Instruction modified PC (branch/jump)
-        this.state.instructionPointer = context.pc
+        this.state.programCounter = context.pc
       } else {
         // Normal flow - advance PC by instruction length (in bytes)
         // Instruction length = 1 (opcode) + Fskip(ι) according to Gray Paper
         const instructionLength = BigInt(1 + instruction.fskip)
-        this.state.instructionPointer += instructionLength
+        this.state.programCounter += instructionLength
 
         // Next iteration will check if there's a valid instruction at new PC
         // If not, it will panic with "Invalid PC"
@@ -777,7 +836,7 @@ export class PVM implements IPVM {
         instruction: handler?.name,
         opcode: instruction.opcode.toString(),
         error: error instanceof Error ? error.message : String(error),
-        pc: this.state.instructionPointer.toString(),
+        pc: this.state.programCounter.toString(),
         gas: this.state.gasCounter.toString(),
       })
       return RESULT_CODES.PANIC
@@ -789,8 +848,9 @@ export class PVM implements IPVM {
    */
   public reset(): void {
     this.state = {
+      instructions: new Map(),
       resultCode: RESULT_CODES.HALT,
-      instructionPointer: 0n,
+      programCounter: 0n,
       registerState: new Array(13).fill(0n), // All 13 registers (r0-r12) store 64-bit values,
       ram: new PVMRAM(),
       gasCounter: GAS_CONFIG.DEFAULT_GAS_LIMIT,
@@ -810,5 +870,60 @@ export class PVM implements IPVM {
    */
   public getState(): PVMState {
     return { ...this.state }
+  }
+
+  /**
+   * Get parser instance
+   * 
+   * Returns a PVMParser instance for parsing program blobs.
+   * Used by WASM wrapper to parse programs before execution.
+   * 
+   * @returns PVMParser instance
+   */
+  public getParser(): PVMParser {
+    return new PVMParser()
+  }
+
+  /**
+   * Execute single instruction step
+   * 
+   * Gray Paper: Ψ_1 - Execute one instruction and return result code
+   * 
+   * This method executes exactly one PVM instruction and returns the result code.
+   * Used by the WASM wrapper for step-by-step execution.
+   * 
+   * @returns Safe<ResultCode | null> - Result code or null to continue
+   */
+  public executeSingleStep(): Safe<ResultCode | null> {
+    try {
+      // Check if we're out of gas before executing
+      if (this.state.gasCounter < 0n) {
+        return safeResult(RESULT_CODES.OOG)
+      }
+
+      // Get current instruction
+      const instruction = this.state.instructions.get(Number(this.state.programCounter))
+
+      if (!instruction) {
+        logger.error('PVM: No instruction at PC', {
+          pc: this.state.programCounter.toString(),
+        })
+        return safeResult(RESULT_CODES.PANIC)
+      }
+
+      // Execute instruction
+      const resultCode = this.executeInstruction(instruction)
+
+      // Return the result code
+      // null means continue execution
+      // Non-null means halt, panic, oog, fault, or host
+      return safeResult(resultCode)
+    } catch (error) {
+      logger.error('PVM: executeSingleStep error', {
+        error: error instanceof Error ? error.message : String(error),
+        pc: this.state.programCounter.toString(),
+      })
+      return safeError(error instanceof Error ? error : new Error(String(error)))
+    }
   }
 }

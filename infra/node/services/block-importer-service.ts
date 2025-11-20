@@ -239,7 +239,9 @@ export class BlockImporterService extends BaseService {
     // since each core may only have a single work-report pending its package becoming available at a time.
     // This removes work reports that became available (super-majority) or timed out, freeing cores
     // for new guarantees to be processed.
-    const [assuranceValidationError] = this.assuranceService.applyAssurances(
+    // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
+    // passed to accumulation
+    const [assuranceValidationError, availableWorkReports] = this.assuranceService.applyAssurances(
       block.body.assurances,
       Number(block.header.timeslot),
       block.header.parent,
@@ -247,6 +249,9 @@ export class BlockImporterService extends BaseService {
     )
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
+    }
+    if (!availableWorkReports) {
+      return safeError(new Error('Assurance validation failed'))
     }
 
     // Process guarantees AFTER assurances
@@ -336,13 +341,23 @@ export class BlockImporterService extends BaseService {
     }
 
     // Process accumulations for this block
-    // Gray Paper: This enqueues new work reports and processes ready work-reports
-    // This MUST happen before updating recent history, as recent history uses accumulation outputs
-    // Extract work reports from guarantees
-    const workReports = block.body.guarantees.map((guarantee) => guarantee.report)
+    // Gray Paper accumulation.tex: Process newly available work-reports (ρ̂)
+    // These are work reports that just became available (reached super-majority assurances)
+    // in the current block, returned from applyAssurances above
+    // The accumulation service will partition them into:
+    // - ρ̂! (no dependencies) → accumulated immediately
+    // - ρ̂Q (with dependencies) → added to ready queue at current slot
+    
+    logger.info('[BlockImporter] Processing accumulations', {
+      slot: block.header.timeslot.toString(),
+      guaranteesCount: block.body.guarantees.length,
+      availableWorkReportsCount: availableWorkReports.length,
+      availablePackageHashes: availableWorkReports.map(wr => wr.package_spec.hash.slice(0, 40)),
+    })
+    
     const accumulationResult = await this.accumulationService.applyTransition(
       block.header.timeslot,
-      workReports,
+      availableWorkReports, // Newly available work reports (ρ̂) from assurances
     )
     if (!accumulationResult.ok) {
       return safeError(accumulationResult.err)

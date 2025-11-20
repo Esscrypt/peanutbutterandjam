@@ -180,6 +180,106 @@ export function encodeWorkItem(workItem: WorkItem): Safe<Uint8Array> {
 }
 
 /**
+ * Encode work item summary according to Gray Paper S(w) function.
+ *
+ * Gray Paper pvm_invocations.tex line 357:
+ * S(w) ≡ encode{
+ *   encode[4]{w.serviceindex},
+ *   w.codehash,
+ *   encode[8]{w.refgaslimit, w.accgaslimit},
+ *   encode[2]{w.exportcount, len(w.importsegments), len(w.extrinsics)},
+ *   encode[4]{len(w.payload)}
+ * }
+ *
+ * Field order per Gray Paper:
+ * 1. encode[4]{serviceindex} - 4-byte fixed-length service ID
+ * 2. codehash - 32-byte hash
+ * 3. encode[8]{refgaslimit} - 8-byte fixed-length gas limit
+ * 4. encode[8]{accgaslimit} - 8-byte fixed-length gas limit
+ * 5. encode[2]{exportcount} - 2-byte fixed-length export count
+ * 6. encode[2]{len(importsegments)} - 2-byte fixed-length import segments count
+ * 7. encode[2]{len(extrinsics)} - 2-byte fixed-length extrinsics count
+ * 8. encode[4]{len(payload)} - 4-byte fixed-length payload length
+ *
+ * Total size: 4 + 32 + 8 + 8 + 2 + 2 + 2 + 4 = 62 bytes
+ */
+export function encodeWorkItemSummary(workItem: WorkItem): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
+  // 1. encode[4]{serviceindex} - 4-byte fixed-length service ID
+  const [error1, encoded1] = encodeFixedLength(
+    BigInt(workItem.serviceindex || 0),
+    4n,
+  )
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(encoded1)
+
+  // 2. codehash - 32-byte hash
+  parts.push(hexToBytes(workItem.codehash))
+
+  // 3. encode[8]{refgaslimit} - 8-byte fixed-length gas limit
+  const [error2, encoded2] = encodeFixedLength(
+    BigInt(workItem.refgaslimit || 0),
+    8n,
+  )
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(encoded2)
+
+  // 4. encode[8]{accgaslimit} - 8-byte fixed-length gas limit
+  const [error3, encoded3] = encodeFixedLength(
+    BigInt(workItem.accgaslimit || 0),
+    8n,
+  )
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(encoded3)
+
+  // 5. encode[2]{exportcount} - 2-byte fixed-length export count
+  const [error4, encoded4] = encodeFixedLength(
+    BigInt(workItem.exportcount || 0),
+    2n,
+  )
+  if (error4) {
+    return safeError(error4)
+  }
+  parts.push(encoded4)
+
+  // 6. encode[2]{len(importsegments)} - 2-byte fixed-length import segments count
+  const importSegmentsLength = workItem.importsegments?.length || 0
+  const [error5, encoded5] = encodeFixedLength(
+    BigInt(importSegmentsLength),
+    2n,
+  )
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(encoded5)
+
+  // 7. encode[2]{len(extrinsics)} - 2-byte fixed-length extrinsics count
+  const extrinsicsLength = workItem.extrinsics?.length || 0
+  const [error6, encoded6] = encodeFixedLength(BigInt(extrinsicsLength), 2n)
+  if (error6) {
+    return safeError(error6)
+  }
+  parts.push(encoded6)
+
+  // 8. encode[4]{len(payload)} - 4-byte fixed-length payload length
+  const payloadLength = workItem.payload?.length || 0
+  const [error7, encoded7] = encodeFixedLength(BigInt(payloadLength), 4n)
+  if (error7) {
+    return safeError(error7)
+  }
+  parts.push(encoded7)
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
  * Encode extrinsic reference
  *
  * @param extrinsicRef - Extrinsic reference to encode

@@ -7,6 +7,7 @@
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
 import { MEMORY_CONFIG, OPCODES } from '../config'
 import { BaseInstruction } from './base'
+import { alignToPage } from '../alignment-helpers'
 
 /**
  * MOVE_REG instruction (opcode 0x100)
@@ -81,22 +82,23 @@ export class SBRKInstruction extends BaseInstruction {
       return { resultCode: null }
     }
 
-    // Record current heap pointer to return
-    const result = currentHeapPointer
-
     // P_func: page alignment function (rnp in Gray Paper)
     // Aligns address up to next page boundary: Cpvmpagesize * ceil(x / Cpvmpagesize)
     const pageSize = MEMORY_CONFIG.PAGE_SIZE // Z_P = Cpvmpagesize = 4096
-    const pageAlign = (address: number): number => {
-      return Math.ceil(address / pageSize) * pageSize
+
+    const nextPageBoundary = alignToPage(ram.currentHeapPointer)
+    const newHeapPointer = ram.currentHeapPointer + Number(valueA)
+
+    // https://paritytech.github.io/matrix-archiver/archive/_21ddsEwXlCWnreEGuqXZ_3Apolkadot.io/index.html#$_RkIlMDNZrROw_6WDXpbllO2VSbjY1FNTIfDjVZhhdw
+    if(newHeapPointer > MEMORY_CONFIG.MAX_MEMORY_ADDRESS) { 
+      this.setRegisterValue(context.registers, registerD, 0n)
+      return { resultCode: null }
     }
 
-    const nextPageBoundary = pageAlign(ram.currentHeapPointer)
-    const newHeapPointer = ram.currentHeapPointer + Number(valueA)
 
     // If new heap pointer exceeds next page boundary, allocate pages
     if (newHeapPointer > nextPageBoundary) {
-      const finalBoundary = pageAlign(newHeapPointer)
+      const finalBoundary = alignToPage(newHeapPointer)
       const idxStart = Math.floor(nextPageBoundary / pageSize) // Z_P
       const idxEnd = Math.floor(finalBoundary / pageSize) // Z_P
       const pageCount = idxEnd - idxStart
@@ -108,7 +110,7 @@ export class SBRKInstruction extends BaseInstruction {
     ram.currentHeapPointer = newHeapPointer
 
     // Return the previous heap pointer (before allocation)
-    this.setRegisterValue(context.registers, registerD, result)
+    this.setRegisterValue(context.registers, registerD, BigInt(newHeapPointer))
 
     return { resultCode: null }
   }
@@ -510,7 +512,7 @@ export class ZERO_EXTEND_16Instruction extends BaseInstruction {
  * r_A = min(12, ⌊instructions[ι+1]/16⌋) - source (high nibble)
  */
 export class REVERSE_BYTESInstruction extends BaseInstruction {
-  readonly opcode = OPCODES.REVERSE_Uint8Array
+  readonly opcode = OPCODES.REVERSE_BYTES
   readonly name = 'REVERSE_BYTES'
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: Two Registers format

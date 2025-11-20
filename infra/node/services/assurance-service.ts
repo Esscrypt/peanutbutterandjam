@@ -25,12 +25,14 @@ import {
   type AssuranceDistributionEvent,
   type EventBusService,
   hexToBytes,
+  logger,
 } from '@pbnj/core'
 import type {
   Assurance,
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
+  WorkReport,
 } from '@pbnj/types'
 import { BaseService, safeError, safeResult, TIME_CONSTANTS } from '@pbnj/types'
 import type { Hex } from 'viem'
@@ -192,9 +194,12 @@ export class AssuranceService extends BaseService {
     currentSlot: number,
     parentHash: Hex,
     configService: IConfigService,
-  ): Safe<void> {
+  ): Safe<WorkReport[]> {
     // Reset assurance counts for this transition (counts are per-transition, not cumulative)
     this.assuranceCountByCoreIndex.clear()
+
+    // Track work reports that become available in this block
+    const availableWorkReports: WorkReport[] = []
 
     // Get pending reports first to check for engaged cores
     const pendingReports = this.workReportService.getPendingReports()
@@ -297,14 +302,27 @@ export class AssuranceService extends BaseService {
 
     // Gray Paper: A work-report becomes available if > 2/3 of validators have marked it
     // This requires strictly more than 2/3, not >= 2/3
+    // Gray Paper accumulation.tex: These are the "newly available work-reports" (ρ̂)
+    // that should be passed to accumulation
     const threshold = Math.floor((configService.numValidators * 2) / 3) + 1
 
     for (const [coreIndex, count] of this.assuranceCountByCoreIndex.entries()) {
       if (count >= threshold) {
+        const pendingReport = pendingReports.coreReports[coreIndex]
+        if (pendingReport) {
+          // Collect the work report that just became available
+          availableWorkReports.push(pendingReport.workReport)
+        }
+        // Remove from reports state (chapter 10)
         this.workReportService.removePendingWorkReport(BigInt(coreIndex))
       }
     }
 
-    return safeResult(undefined)
+    logger.debug('[AssuranceService] Work reports became available', {
+      count: availableWorkReports.length,
+      packageHashes: availableWorkReports.map(wr => wr.package_spec.hash.slice(0, 40)),
+    })
+
+    return safeResult(availableWorkReports)
   }
 }

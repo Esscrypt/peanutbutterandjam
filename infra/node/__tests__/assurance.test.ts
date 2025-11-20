@@ -130,7 +130,6 @@ describe('Assurance Service - JAM Test Vectors', () => {
             const validatorSetManager = new ValidatorSetManager({
               eventBusService: eventBusService,
               sealKeyService: null,
-              keyPairService: null,
               ringProver: null as unknown as any,
               ticketService: null,
               configService: configService,

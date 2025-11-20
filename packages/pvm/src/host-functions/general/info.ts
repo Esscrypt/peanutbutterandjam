@@ -2,8 +2,8 @@ import { encodeServiceAccount } from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  IServiceAccountService,
-  RefineInvocationContext,
+  InfoParams,
+  ServiceAccount,
   ServiceAccountCore,
 } from '@pbnj/types'
 import {
@@ -18,62 +18,62 @@ import { BaseHostFunction } from './base'
  *
  * Gets information about service accounts
  *
- * Gray Paper Specification:
+ * Gray Paper Specification (pvm-invocations.tex line 193, 457-482):
  * - Function ID: 5 (info)
  * - Gas Cost: 10
- * - Uses registers[7] to specify service account (or self if 2^64-1)
- * - Uses registers[8:3] to specify output offset, from offset, length
+ * - Signature: Ω_I(gascounter, registers, memory, s, d)
+ *   - s = service ID (from Implications)
+ *   - d = accounts dictionary (from PartialState)
+ * - Uses registers[7] to specify service account (NONE for self, or specific service ID)
+ * - Uses registers[8] for output offset (o)
+ * - Uses registers[9] for from offset (f)
+ * - Uses registers[10] for length (l)
  * - Returns encoded service account info (codehash, balance, gas limits, etc.)
  * - Writes result to memory at specified offset
  */
+
 export class InfoHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.INFO
   readonly name = 'info'
   readonly gasCost = 10n
 
-  private readonly serviceAccountService: IServiceAccountService
-  constructor(serviceAccountService: IServiceAccountService) {
-    super()
-    this.serviceAccountService = serviceAccountService
-  }
-
   execute(
     context: HostFunctionContext,
-    _refineContext: RefineInvocationContext | null,
+    params: InfoParams,
   ): HostFunctionResult {
-    const serviceId = context.registers[7]
+    // Gray Paper: Extract parameters from registers
+    // registers[7] = service ID selector (NONE for self, or specific service ID)
+    // registers[8] = output offset (o)
+    // registers[9] = from offset (f)
+    // registers[10] = length (l)
+    const requestedServiceId = context.registers[7]
     const outputOffset = context.registers[8]
     const fromOffset = context.registers[9]
     const length = context.registers[10]
 
-    // Get service account
-    const [serviceAccountError, serviceAccount] =
-      this.serviceAccountService.getServiceAccount(serviceId)
-    if (serviceAccountError) {
-      context.log('Info host function: Service account error', {
-        serviceId: serviceId.toString(),
-        error: serviceAccountError.message,
-      })
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'basic_block',
-          address: serviceId,
-          details: 'Service account not found',
-        },
-      }
+    // Gray Paper equation 460-463: Determine service account
+    // a = {
+    //   d[s] if registers[7] = NONE (2^64 - 1)
+    //   d[registers[7]] otherwise
+    // }
+    let serviceAccount: ServiceAccount | null = null
+    if (requestedServiceId === ACCUMULATE_ERROR_CODES.NONE) {
+      // registers[7] = NONE, use self (s)
+      serviceAccount = params.accounts.get(params.serviceId) ?? null
+    } else if (params.accounts.has(requestedServiceId)) {
+      // registers[7] specifies a service ID in accounts
+      serviceAccount = params.accounts.get(requestedServiceId) ?? null
     }
+
     if (!serviceAccount) {
-      // Return NONE (2^64 - 1) for not found
+      // Gray Paper: Return NONE if service account not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Info host function: Service account not found', {
-        serviceId: serviceId.toString(),
-      })
       return {
         resultCode: null, // continue execution
       }
     }
 
+    // Gray Paper equation 466-473: Encode service account info
     const [error, info] = encodeServiceAccount(
       serviceAccount as ServiceAccountCore,
     )
@@ -83,22 +83,27 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Write info to memory
-    const actualLength = Math.min(
-      Number(length),
-      info.length - Number(fromOffset),
-    )
-    const dataToWrite = info.slice(
-      Number(fromOffset),
-      Number(fromOffset) + actualLength,
-    )
+    // Gray Paper equation 475-476: Calculate slice parameters
+    // f = min(registers[9], len(v))
+    // l = min(registers[10], len(v) - f)
+    const f = Math.min(Number(fromOffset), info.length)
+    const l = Math.min(Number(length), info.length - f)
 
+    if (l <= 0) {
+      // Return NONE if no data to copy
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Gray Paper equation 480: Extract slice v[f:f+l]
+    const dataToWrite = info.slice(f, f + l)
+
+    // Gray Paper equation 478: Write to memory[o:o+l]
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress) {
-      context.log('Info host function: Memory write fault', {
-        outputOffset: outputOffset.toString(),
-        faultAddress: faultAddress.toString(),
-      })
+      // Gray Paper: Return panic if memory not writable
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -109,14 +114,8 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Return length of info
+    // Gray Paper equation 480: Return length of info
     context.registers[7] = BigInt(info.length)
-
-    context.log('Info host function: Service account info returned', {
-      serviceId: serviceId.toString(),
-      infoLength: info.length.toString(),
-      actualLength: actualLength.toString(),
-    })
 
     return {
       resultCode: null, // continue execution

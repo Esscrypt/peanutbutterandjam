@@ -231,7 +231,7 @@ for (let i = 0; i < testVectors.length; i++) {
             status: testVector['expected-status'] !== result.status,
           },
           postState: {
-            pc: result.pvm.getState().instructionPointer.toString(),
+            pc: result.pvm.getState().programCounter.toString(),
             resultCode: result.pvm.getState().resultCode,
             gasCounter: result.pvm.getState().gasCounter.toString(),
             registers: result.pvm.getState().registerState.reduce(

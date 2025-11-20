@@ -56,10 +56,10 @@ function loadAuthorizationsTestVectors(directory: string): Array<{ file: string,
 }
 
 describe('JAM Authorizations Test Vectors', () => {
-  const tinyVectors = loadAuthorizationsTestVectors(join(process.cwd(), '../../submodules/jamtestvectors/stf/authorizations/tiny'))
-  const fullVectors = loadAuthorizationsTestVectors(join(process.cwd(), '../../submodules/jamtestvectors/stf/authorizations/full'))
+  const tinyVectors = loadAuthorizationsTestVectors(join(process.cwd(), 'submodules/jam-test-vectors/stf/authorizations/tiny'))
+  const fullVectors = loadAuthorizationsTestVectors(join(process.cwd(), 'submodules/jam-test-vectors/stf/authorizations/full'))
 
-  logger.info(`Loaded ${tinyVectors.length} Authorizations test vectors from submodules/jamtestvectors/stf/authorizations/tiny`)
+  logger.info(`Loaded ${tinyVectors.length} Authorizations test vectors from submodules/jam-test-vectors/stf/authorizations/tiny`)
   logger.info(`Loaded ${fullVectors.length} Authorizations test vectors from submodules/jamtestvectors/stf/authorizations/full`)
 
   describe('Authorizations tiny test vectors', () => {
@@ -201,7 +201,7 @@ describe('JAM Authorizations Test Vectors', () => {
         logger.info(`${file} authorization consumption:`, {
           totalAuths: testVector.input.auths.length,
           coresWithAuths: Array.from(authsByCore.keys()),
-          authsPerCore: Object.fromEntries(authsByCore.entries().map(([core, auths]) => [core, auths.length]))
+          authsPerCore: Object.fromEntries(Array.from(authsByCore.entries()).map(([core, auths]) => [core, auths.length]))
         })
       }
     })

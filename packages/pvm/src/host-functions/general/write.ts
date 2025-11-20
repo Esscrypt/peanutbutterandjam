@@ -2,7 +2,7 @@ import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineInvocationContext,
+  WriteParams,
   ServiceAccount,
 } from '@pbnj/types'
 import { DEPOSIT_CONSTANTS } from '@pbnj/types'
@@ -30,35 +30,21 @@ import { BaseHostFunction } from './base'
  * - Returns FULL if insufficient balance, length of previous value otherwise
  * - Updates service account's storage footprint (items, octets)
  */
+
 export class WriteHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.WRITE
   readonly name = 'write'
-  readonly gasCost = 10n
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    writeParams: WriteParams,
   ): HostFunctionResult {
     // Extract parameters from registers
+    // Gray Paper: registers[7:4] = (keyOffset, keyLength, valueOffset, valueLength)
     const [keyOffset, keyLength, valueOffset, valueLength] =
       context.registers.slice(7, 11)
 
-    // Check if refine context is available
-    if (!refineContext) {
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: RESULT_CODES.HALT,
-      }
-    }
-
-    // Get current service account
-    const serviceAccount = this.getServiceAccount(refineContext)
-    if (!serviceAccount) {
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: RESULT_CODES.HALT,
-      }
-    }
+    const serviceAccount = writeParams.serviceAccount
 
     // Read key from memory
     const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
@@ -110,7 +96,7 @@ export class WriteHostFunction extends BaseHostFunction {
       }
 
       // Calculate what the new storage footprint would be
-      const newItems = this.calculateItems(serviceAccount, key, value, false)
+      const newItems = this.calculateItems(serviceAccount, key, false)
       const newOctets = this.calculateOctets(serviceAccount, key, value, false)
       const newMinBalance = this.calculateMinBalance(
         newItems,
@@ -148,21 +134,9 @@ export class WriteHostFunction extends BaseHostFunction {
     }
   }
 
-  private getServiceAccount(
-    refineContext: RefineInvocationContext,
-  ): ServiceAccount | null {
-    // Gray Paper: Ω_W(gascounter, registers, memory, s, s)
-    // where s = current service account (always self)
-    return (
-      refineContext.accountsDictionary.get(refineContext.currentServiceId) ||
-      null
-    )
-  }
-
   private calculateItems(
     serviceAccount: ServiceAccount,
     key: Uint8Array,
-    _value: Uint8Array,
     isDelete: boolean,
   ): bigint {
     // Gray Paper: a_items = 2 * len(a_requests) + len(a_storage)
@@ -200,28 +174,24 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Sum over storage: 34 + len(y) + len(x) for each (x, y) in storage
     const keyHex = bytesToHex(key)
-    const keyBytes = new Uint8Array(Buffer.from(keyHex.slice(2), 'hex')) // Remove 0x prefix
 
     for (const [existingKeyHex, existingValue] of serviceAccount.storage) {
       if (existingKeyHex === keyHex) {
         // This is the key we're modifying
         if (!isDelete) {
           // Adding/updating: use new value
-          totalOctets += 34 + value.length + keyBytes.length
+          totalOctets += 34 + value.length + key.length
         }
         // If deleting, skip this entry
       } else {
         // Different key: use existing value
-        const existingKeyBytes = new Uint8Array(
-          Buffer.from(existingKeyHex.slice(2), 'hex'),
-        )
-        totalOctets += 34 + existingValue.length + existingKeyBytes.length
+        totalOctets += 34 + existingValue.length + existingKeyHex.length
       }
     }
 
     // If adding a new key (not updating existing), add it
     if (!isDelete && !serviceAccount.storage.has(keyHex)) {
-      totalOctets += 34 + value.length + keyBytes.length
+      totalOctets += 34 + value.length + key.length
     }
 
     return BigInt(totalOctets)
@@ -262,7 +232,6 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.items = this.calculateItems(
       serviceAccount,
       key,
-      value,
       false,
     )
     serviceAccount.octets = this.calculateOctets(
@@ -293,7 +262,6 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.items = this.calculateItems(
       serviceAccount,
       key,
-      new Uint8Array(0),
       true,
     )
     serviceAccount.octets = this.calculateOctets(

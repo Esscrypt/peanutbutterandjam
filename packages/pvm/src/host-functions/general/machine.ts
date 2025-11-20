@@ -1,4 +1,3 @@
-import { decodeBlob } from '@pbnj/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -67,19 +66,6 @@ export class MachineHostFunction extends BaseHostFunction {
       }
     }
 
-    // Validate program (deblob)
-    const [error, programBlob] = decodeBlob(programData)
-    if (error || !programBlob) {
-      // Return HUH (2^64 - 9) if program is invalid
-      context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
-      context.log('Machine host function: Invalid program blob', {
-        programLength: programData.length.toString(),
-        error: error?.message ?? 'null',
-      })
-      return {
-        resultCode: null, // continue execution
-      }
-    }
 
     // Check if refine context is available
     if (!refineContext) {

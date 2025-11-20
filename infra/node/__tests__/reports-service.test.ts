@@ -24,6 +24,8 @@ import { AuthQueueService } from '../services/auth-queue-service'
 import { WorkReportService } from '../services/work-report-service'
 import { GuarantorService } from '../services/guarantor-service'
 import { AccumulationService } from '../services/accumulation-service'
+import { ReadyService } from '../services/ready-service'
+import { AccumulateHostFunctionRegistry, AccumulatePVM, HostFunctionRegistry } from '@pbnj/pvm'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
@@ -122,7 +124,6 @@ describe('Reports - JAM Test Vectors', () => {
           const validatorSetManager = new ValidatorSetManager({
             eventBusService,
             sealKeyService: null,
-            keyPairService: null,
             ringProver: null as any,
             ticketService: null,
             configService: configService,
@@ -279,6 +280,26 @@ describe('Reports - JAM Test Vectors', () => {
           const clonedAuthPool = structuredClone(vector.pre_state.auth_pools)
           authPoolService.setAuthPool(clonedAuthPool)
 
+          const readyService = new ReadyService({
+            configService: configService, 
+          })
+
+          const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
+            configService,
+          )
+
+          const hostFunctionRegistry = new HostFunctionRegistry(
+            serviceAccountService,
+            configService,
+          )
+
+          const accumulatePVM = new AccumulatePVM({
+            hostFunctionRegistry: hostFunctionRegistry,
+            accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
+            configService: configService,
+            entropyService: entropyService,
+          })
+
           const accumulatedService = new AccumulationService({
             configService: configService,
             clockService: clockService,
@@ -286,8 +307,8 @@ describe('Reports - JAM Test Vectors', () => {
             privilegesService: null,
             validatorSetManager: validatorSetManager,
             authQueueService: authQueueService,
-            accumulatePVM: null,
-            readyService: null,
+            accumulatePVM: accumulatePVM,
+            readyService: readyService,
             statisticsService: statisticsService,
             // entropyService: entropyService,
           })
@@ -356,6 +377,8 @@ describe('Reports - JAM Test Vectors', () => {
             if (vector.output?.err !== undefined) {
               // Expected error case - validation will check output.err
               expect(applyError.message).toBe(vector.output.err)
+              // When error is expected, skip post_state validation
+              // return
             } else {
               // Unexpected error - rethrow
               throw applyError
@@ -405,13 +428,28 @@ describe('Reports - JAM Test Vectors', () => {
             // Statistics are now updated automatically by GuarantorService after successful processing
           }
 
-
           // Step 8: Validate post_state against service states
-          // Note: These validations will fail until processing logic is implemented
-
+          // Only validate post_state when there was no error (or error was not expected)
+          if (!applyError || vector.output?.err === undefined) {
             // Smoke check: has at least one guarantee and recent history present
             expect(vector.input.guarantees.length).toBeGreaterThan(0)
             expect(vector.pre_state.recent_blocks.history.length).toBeGreaterThan(0)
+
+            // Validate avail_assignments match post_state
+            const expectedAvailAssignments = vector.post_state.avail_assignments
+            const actualAvailAssignments = Array.from(
+              { length: expectedAvailAssignments.length },
+              (_, idx) => {
+                const coreReport = workReportService.getCoreReport(BigInt(idx))
+                if (!coreReport) return null
+                const jsonReport = convertWorkReportToJson(coreReport.workReport)
+                return {
+                  report: jsonReport,
+                  timeout: Number(coreReport.timeslot),
+                }
+              },
+            )
+            expect(actualAvailAssignments).toEqual(expectedAvailAssignments)
 
             // Validate auth pools match post_state
             const actualAuthPool = authPoolService.getAuthPool()
@@ -488,7 +526,7 @@ describe('Reports - JAM Test Vectors', () => {
                 expectedServiceStats[i].record.accumulate_count,
               )
             }
-          
+          }
         })
       }
     })

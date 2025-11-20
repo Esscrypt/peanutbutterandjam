@@ -62,12 +62,10 @@
 import {
   blake2bHash,
   bytesToHex,
-  concatBytes,
   type Hex,
   hexToBytes,
 } from '@pbnj/core'
 import type {
-  AccumulatedItem,
   GlobalState,
   IConfigService,
   Safe,
@@ -503,19 +501,10 @@ export function createStateTrie(
   // var{i} encodes the set as: var{sq{hash, hash, ...}} = length + sequence of hashes
   const accumulatedKey = createStateKey(15)
   // Ensure accumulated is initialized (default to empty array if undefined)
-  const accumulatedPackages = globalState.accumulated?.packages ?? []
-  const accumulatedItems: AccumulatedItem[] = accumulatedPackages.map(
-    (hashSet) => {
-      // Convert set of hashes to a sequence of hashes
-      const hashBytes = Array.from(hashSet).map((hash) => hexToBytes(hash))
-      // Concatenate all hashes
-      const setData = concatBytes(hashBytes)
-      return { data: setData }
-    },
-  )
+  const accumulatedPackages = globalState.accumulated
 
   const [error15, accumulatedData] = encodeAccumulated(
-    accumulatedItems,
+    accumulatedPackages,
     configService,
   )
   if (error15) {

@@ -53,7 +53,6 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
             const eventBusService = new EventBusService()
             const clockService = new ClockService({ eventBusService, configService })
             const service = new ServiceAccountService({
-              preimageStore: null,
               configService,
               eventBusService,
               clockService,

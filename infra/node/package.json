@@ -21,6 +21,7 @@
     "@pbnj/safrole": "workspace:*",
     "@pbnj/codec": "workspace:*",
     "@pbnj/pvm": "workspace:*",
+    "@pbnj/pvm-invocations": "workspace:*",
     "@pbnj/bandersnatch-vrf": "workspace:*",
     "@pbnj/erasure-coding": "workspace:*",
     "@pbnj/networking": "workspace:*",

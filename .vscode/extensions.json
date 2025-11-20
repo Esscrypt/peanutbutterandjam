@@ -8,6 +8,7 @@
     "matthewpi.caddyfile-support",
     "streetsidesoftware.code-spell-checker",
     "usernamehw.errorlens",
-    "pflannery.vscode-versionlens"
+    "pflannery.vscode-versionlens",
+    "AssemblyScript.assemblyscript"
   ]
 }

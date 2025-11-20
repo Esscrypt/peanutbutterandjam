@@ -23,11 +23,15 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: Instructions with Arguments of One Register and One Extended Width Immediate
     // r_A = min(12, instructions[ι+1] mod 16)
-    // immed_X = decode[8]{instructions[ι+2:8]}
-    const { registerA, immediateX } = this.parseOneRegisterAndImmediate(
-      context.instruction.operands,
-      context.fskip,
-    )
+    // immed_X = decode[8]{instructions[ι+2:8]} - decode 8 bytes as unsigned (no sign extension)
+    const registerA = this.getRegisterA(context.instruction.operands)
+    
+    // Read 8 bytes (64 bits) as unsigned little-endian
+    // Gray Paper: decode[8] means read 8 bytes without sign extension
+    let immediateX = 0n
+    for (let i = 0; i < 8 && (1 + i) < context.instruction.operands.length; i++) {
+      immediateX |= BigInt(context.instruction.operands[1 + i]) << BigInt(i * 8)
+    }
 
     this.setRegisterValue(context.registers, registerA, immediateX)
 

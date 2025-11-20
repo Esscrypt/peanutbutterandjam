@@ -1,0 +1,169 @@
+import { RESULT_CODE_PANIC } from '../../config'
+import { bytesToHex } from '../../types'
+import {
+  ACCUMULATE_ERROR_HUH,
+  ACCUMULATE_ERROR_WHO,
+  AccumulateHostFunctionContext,
+  BaseAccumulateHostFunction,
+  HostFunctionResult,
+} from './base'
+
+/**
+ * EJECT accumulation host function (Ω_J)
+ *
+ * Ejects/removes service account
+ *
+ * Gray Paper Specification:
+ * - Function ID: 21 (eject)
+ * - Gas Cost: 10
+ * - Parameters: registers[7-8] = d, o
+ *   - d: service account ID to eject
+ *   - o: hash offset in memory (32 bytes)
+ * - Returns: registers[7] = OK or error code
+ *
+ * Gray Paper Logic:
+ * 1. Read hash from memory at offset o (32 bytes)
+ * 2. Get service account d from accounts dictionary
+ * 3. Check if service account exists and is not the current service
+ * 4. Verify the hash matches the service's code hash
+ * 5. Check if the service has exactly 2 items and the request exists
+ * 6. Check if the ejection period has expired (y < t - Cexpungeperiod)
+ * 7. Remove the service account and transfer its balance to current service
+ */
+export class EjectHostFunction extends BaseAccumulateHostFunction {
+  functionId: u64 = u64(20) // EJECT function ID
+  name: string = 'eject'
+  gasCost: u64 = u64(10)
+
+  execute(context: AccumulateHostFunctionContext): HostFunctionResult {
+    const registers = context.registers
+    const ram = context.ram
+    const implications = context.implications
+    const timeslot = context.timeslot
+    const expungePeriod = context.expungePeriod
+    // Extract parameters from registers
+    const serviceIdToEject = u64(registers[7])
+    const hashOffset = u64(registers[8])
+
+    // Read hash from memory (32 bytes)
+    // Gray Paper line 851-854: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
+    const readResult_hashData = ram.readOctets(hashOffset, u64(32))
+    // Gray Paper line 862: panic when h = error, registers[7] unchanged
+    if (faultAddress !== null || hashData === null) {
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+
+    // Get the current implications context
+    const imX = implications.regular
+
+    // Get service account d from accounts dictionary
+    // Gray Paper: d ≠ imX.id ∧ d ∈ keys(imX.state.ps_accounts)
+    if (serviceIdToEject === imX.id) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    const serviceAccount = imX.state.accounts.get(serviceIdToEject)
+    if (!serviceAccount) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Verify the hash matches the service's code hash
+    // Gray Paper: d.sa_codehash ≠ encode[32]{imX.id}
+    const expectedCodeHash = this.encodeServiceId(imX.id)
+    const serviceCodeHash = this.hexToBytes(serviceAccount.codehash)
+    if (!this.arraysEqual(serviceCodeHash, expectedCodeHash)) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
+      return new HostFunctionResult(null) // continue execution
+    }
+
+    // Calculate length: max(81, d.sa_octets) - 81
+    const octetsI32 = i32(serviceAccount.octets)
+    const l = max(81, octetsI32) - 81
+
+    // Check if the service has exactly 2 items and the request exists
+    // Gray Paper: d.sa_items ≠ 2 ∨ (h, l) ∉ d.sa_requests
+    if (i32(serviceAccount.items) !== 2) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(null) // continue execution
+    }
+
+    // Get request using nested map structure: requests[hash][length]
+    const hashHex = bytesToHex(hashData)
+    const requestMap = serviceAccount.requests.get(hashHex)
+    if (!requestMap) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(null) // continue execution
+    }
+
+    const request = requestMap.get(u64(l))
+    if (!request) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(null) // continue execution
+    }
+
+    // Check if the ejection period has expired
+    // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
+    // For test vectors, Cexpungeperiod = 32 (as per README)
+    // For production, Cexpungeperiod = 19200 (Gray Paper constant)
+    if (request.length < 2 || u64(request[1]) >= timeslot - expungePeriod) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(null) // continue execution
+    }
+
+    // Transfer balance to current service and remove the ejected service
+    // Gray Paper: imX'.state.ps_accounts = imX.state.ps_accounts \ {d} ∪ {imX.id: s'}
+    // where s' = imX.self except s'.sa_balance = imX.self.sa_balance + d.sa_balance
+    const currentService = imX.state.accounts.get(imX.id)
+
+    if (currentService) {
+      currentService.balance += serviceAccount.balance
+    }
+
+    // Remove the ejected service account
+    imX.state.accounts.delete(serviceIdToEject)
+
+    // Set success result
+    this.setAccumulateSuccess(registers)
+    return new HostFunctionResult(null) // continue execution
+  }
+
+  encodeServiceId(serviceId: u64): Uint8Array {
+    // Encode service ID as 32-byte hash (little-endian)
+    const result = new Uint8Array(32)
+    // Write u64 in little-endian format
+    result[0] = u8(serviceId & u64(0xff))
+    result[1] = u8((serviceId >> 8) & u64(0xff))
+    result[2] = u8((serviceId >> 16) & u64(0xff))
+    result[3] = u8((serviceId >> 24) & u64(0xff))
+    result[4] = u8((serviceId >> 32) & u64(0xff))
+    result[5] = u8((serviceId >> 40) & u64(0xff))
+    result[6] = u8((serviceId >> 48) & u64(0xff))
+    result[7] = u8((serviceId >> 56) & u64(0xff))
+    // Remaining bytes are zero
+    return result
+  }
+
+  hexToBytes(hex: string): Uint8Array {
+    // Convert hex string to bytes
+    const result = new Uint8Array(hex.length / 2)
+    for (let i: i32 = 0; i < hex.length; i += 2) {
+      const byte = u8(Number.parseInt(hex.substr(i, 2), 16))
+      result[i / 2] = byte
+    }
+    return result
+  }
+
+  arraysEqual(a: Uint8Array, b: Uint8Array): bool {
+    if (a.length !== b.length) return false
+    for (let i: i32 = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
+  }
+}

@@ -113,3 +113,7 @@ native/
 *.nodesubmodules/jamtestvectors/
 
 remark-wallet.json
+
+panic-dumps/
+
+host-function-logs/

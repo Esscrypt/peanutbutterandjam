@@ -120,7 +120,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,
@@ -146,7 +145,6 @@ describe('Genesis Parse Tests', () => {
       })
 
       const workReportService = new WorkReportService({
-        workStore: null,
         eventBus: eventBusService,
         networkingService: null,
         ce136WorkReportRequestProtocol: null,
@@ -169,7 +167,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        preimageStore: null,
         configService,
         eventBusService,
         clockService,
@@ -187,6 +184,12 @@ describe('Genesis Parse Tests', () => {
         pvmOptions: { gasCounter: 1_000_000n },
       })
 
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
+        configService: configService,
+        clockService: clockService,
+      })
+
       const accumulatedService = new AccumulationService({
         configService: configService,
         clockService: clockService,
@@ -196,18 +199,13 @@ describe('Genesis Parse Tests', () => {
         authQueueService: authQueueService,
         accumulatePVM: accumulatePVM,
         readyService: readyService,
+        statisticsService: statisticsService,
       })
             
       const recentHistoryService = new RecentHistoryService({
         eventBusService: eventBusService,
         configService: configService,
         accumulationService: accumulatedService,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
       })
 
 
@@ -269,7 +267,6 @@ describe('Genesis Parse Tests', () => {
         validatorSetManagerService: validatorSetManager,
         entropyService: entropyService,
         sealKeyService: sealKeyService,
-        blockStore: null,
         assuranceService: assuranceService,
         guarantorService: guarantorService,
         ticketService: ticketService,

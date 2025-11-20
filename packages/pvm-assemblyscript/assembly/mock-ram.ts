@@ -1,0 +1,100 @@
+/**
+ * Mock RAM implementation for testing
+ * 
+ * A no-op implementation that satisfies the RAM interface but does nothing.
+ * Useful for testing when you don't need actual memory functionality,
+ * or to isolate issues that might be in RAM implementation code.
+ */
+
+import { FaultCheckResult, ReadResult, RAM, MemoryAccessType, WriteResult } from './types'
+
+export class MockRAM implements RAM {
+  currentHeapPointer: u32 = 0
+
+  /**
+   * Read multiple octets from memory (no-op)
+   * Returns zero-filled data with no faults
+   */
+  readOctets(address: u32, count: u32): ReadResult {
+    // Return zero-filled data, no fault
+    return new ReadResult(new Uint8Array(count), 0)
+  }
+
+  /**
+   * Write multiple octets to memory (no-op)
+   * Always succeeds
+   */
+  writeOctets(address: u32, values: Uint8Array): WriteResult {
+    // Always succeed (no fault)
+    return new WriteResult(false, 0)
+  }
+
+  /**
+   * Allocate pages (no-op)
+   */
+  allocatePages(startPage: u32, count: u32): void {
+    // Do nothing
+  }
+
+  /**
+   * Check if memory is readable (no-op)
+   * Always returns readable
+   */
+  isReadableWithFault(address: u32, size: u32 = u32(1)): FaultCheckResult {
+    // Always readable (no fault)
+    return new FaultCheckResult(true, 0)
+  }
+
+  /**
+   * Check if memory is writable (no-op)
+   * Always returns writable
+   */
+  isWritableWithFault(address: u32, size: u32 = u32(1)): FaultCheckResult {
+    // Always writable (no fault)
+    return new FaultCheckResult(true, 0)
+  }
+
+  /**
+   * Initialize memory layout (no-op)
+   */
+  initializeMemoryLayout(
+    argumentData: Uint8Array,
+    readOnlyData: Uint8Array,
+    readWriteData: Uint8Array,
+    stackSize: u32,
+    heapZeroPaddingSize: u32,
+  ): void {
+    // Do nothing
+  }
+
+  /**
+   * Set page access rights (no-op)
+   */
+  setPageAccessRights(address: u32, length: u32, accessType: MemoryAccessType): void {
+    // Do nothing
+  }
+
+  /**
+   * Initialize a memory page (no-op)
+   */
+  initPage(address: u32, length: u32, accessType: MemoryAccessType): void {
+    // Do nothing
+  }
+
+  /**
+   * Write to memory during initialization (no-op)
+   */
+  writeOctetsDuringInitialization(address: u32, values: Uint8Array): void {
+    // Do nothing
+  }
+
+  /**
+   * Reset RAM to initial state
+   * Resets heap pointer (no-op for mock)
+   */
+  reset(): void {
+    // Reset heap pointer
+    this.currentHeapPointer = 0
+  }
+}
+

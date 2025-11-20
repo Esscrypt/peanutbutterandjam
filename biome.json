@@ -33,7 +33,8 @@
       "!**/*.spec.tsx",
       "!**/__tests__/**",
       "!**/test/**",
-      "!**/tests/**"
+      "!**/tests/**",
+      "!**/packages/pvm-assemblyscript/assembly/**"
     ]
   },
   "formatter": {

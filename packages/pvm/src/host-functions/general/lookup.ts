@@ -1,9 +1,8 @@
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  IServiceAccountService,
-  RefineInvocationContext,
+  LookupParams,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -37,29 +36,15 @@ import { BaseHostFunction } from './base'
  * if v != NONE: write v[f:f+l] to memory[o:o+l], return len(v)
  * else: return NONE
  */
+
 export class LookupHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.LOOKUP
   readonly name = 'lookup'
-  readonly gasCost = 10n
-
-  private readonly serviceAccountService: IServiceAccountService
-  constructor(serviceAccountService: IServiceAccountService) {
-    super()
-    this.serviceAccountService = serviceAccountService
-  }
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    lookupParams: LookupParams,
   ): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
 
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
@@ -67,31 +52,15 @@ export class LookupHostFunction extends BaseHostFunction {
     const fromOffset = context.registers[10]
     const length = context.registers[11]
 
-    // Check if refine context is available
-    if (!refineContext) {
-      // If no refine context available, return WHO
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Lookup host function: No refine context available')
-      return {
-        resultCode: RESULT_CODES.HALT,
-      }
-    }
-
     // Get service account
-    const [serviceAccountError, serviceAccount] =
-      this.serviceAccountService.getServiceAccount(serviceId)
-    if (serviceAccountError) {
+    const serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
+    if (!serviceAccount) {
       context.log('Lookup host function: Service account error', {
-        serviceId: serviceId.toString(),
-        error: serviceAccountError.message,
+        serviceId: lookupParams.serviceId.toString(),
       })
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'basic_block',
-          address: serviceId,
-          details: 'Service account not found',
-        },
+        resultCode: null, // continue execution
       }
     }
     if (!serviceAccount) {
@@ -114,10 +83,8 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Look up preimage by hash
-    const [lookupError, preimage] = this.serviceAccountService.getPreimage(
-      bytesToHex(hashData),
-    )
-    if (lookupError || !preimage) {
+    const preimage = serviceAccount.preimages.get(bytesToHex(hashData))
+    if (!preimage) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
@@ -128,7 +95,7 @@ export class LookupHostFunction extends BaseHostFunction {
     // Calculate slice parameters
     const f = Number(fromOffset)
     const l = Number(length)
-    const preimageLength = preimage.blob.length
+    const preimageLength = preimage.length
 
     // Calculate actual slice length
     const actualLength = Math.min(l, preimageLength - f)
@@ -142,7 +109,7 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Extract data slice
-    const dataToWrite = hexToBytes(preimage.blob).subarray(f, f + actualLength)
+    const dataToWrite = preimage.subarray(f, f + actualLength)
 
     // Write preimage slice to memory
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)

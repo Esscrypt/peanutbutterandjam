@@ -6,7 +6,8 @@
  */
 
 import type { Hex } from 'viem'
-import type { OperandTuple, ServiceAccount, WorkPackage } from './serialization'
+import type { OperandTuple, ServiceAccount, WorkPackage, WorkItem } from './serialization'
+import type { Safe } from './safe'
 
 // Register indices: 0-7 are 64-bit, 8-12 are 32-bit
 // All 13 registers (r0-r12) can store 64-bit values
@@ -200,7 +201,10 @@ export interface FaultInfo {
 
 export interface IPVM {
   state: PVMState
-
+  initializeProgram(
+    programBlob: Uint8Array,
+    argumentData: Uint8Array,
+  ): Safe<Uint8Array>
   invoke(
     gasLimit: bigint,
     registers: bigint[],
@@ -209,8 +213,9 @@ export interface IPVM {
 }
 
 export interface PVMState {
+  instructions: Map<number, PVMInstruction> // Parsed instructions indexed by PC
   resultCode: ResultCode // ε: result code
-  instructionPointer: bigint // ı: instruction pointer (index)
+  programCounter: bigint // ı: instruction pointer (index)
   registerState: RegisterState // ϱ: register state
   ram: RAM // µ: RAM
   gasCounter: bigint // Gas counter as specified in Gray Paper
@@ -378,9 +383,6 @@ export interface JumpTableEntry {
 // Accounts state interface
 export type Accounts = Map<bigint, ServiceAccount>
 
-// Segment type (blob of length Csegmentsize)
-export type Segment = Uint8Array
-
 // PVM Guest type as per Gray Paper equation eq:pvmguest
 export interface PVMGuest {
   code: Uint8Array // pg_code
@@ -393,24 +395,31 @@ export interface PVMGuest {
 export interface RefineInvocationContext {
   // Core refine context pair (Gray Paper: (m, e))
   machines: Map<bigint, PVMGuest> // m: Dictionary of PVM guests
-  exportSegments: Segment[] // e: Sequence of export segments
+  exportSegments: Uint8Array[] // e: Sequence of export segments
 
-  // Refine invocation parameters (Gray Paper: c, i, p, r, ī, segoff)
-  coreIndex: bigint // c: Core index
-  workItemIndex: bigint // i: Work item index
-  workPackage: WorkPackage // p: Work package
-  authorizerTrace: Hex // r: Authorizer trace
-  importSegments: Segment[][] // ī: Import segments by work item
-  exportSegmentOffset: bigint // segoff: Export segment offset
-
-  // Additional context from refine invocation
-  accountsDictionary: Map<bigint, ServiceAccount> // accounts: Service accounts
-  lookupTimeslot: bigint // lookup anchor time from work package context
-  currentServiceId: bigint // s: Current service ID (for host functions)
 }
 
 // Refine result type
 export type RefineResult = Uint8Array | WorkError
+
+// FETCH host function context matching Gray Paper signature
+// Gray Paper: Ω_Y(gascounter, registers, memory, p, n, r, i, ī, x̄, i, ...)
+export interface FetchContext {
+  // p: work package (or null)
+  workPackage: WorkPackage | null
+  // n: work package hash (or null)
+  workPackageHash: Hex | null
+  // r: authorizer trace (or null)
+  authorizerTrace: Hex | null
+  // i: work item index (or null)
+  workItemIndex: bigint | null
+  // ī: import segments (or null) - nested by work item
+  importSegments: Uint8Array[][] | null
+  // x̄: export segments/extrinsics (or null) - nested by work item
+  exportSegments: Uint8Array[][] | null
+  // i: work items sequence (or null) - second 'i' parameter
+  workItemsSequence: WorkItem[] | null
+}
 
 // ===== ACCUMULATE INVOCATION TYPES =====
 
@@ -467,7 +476,7 @@ export interface DeferredTransfer {
   dest: bigint // DX_dest (4 bytes)
   amount: bigint // DX_amount (8 bytes)
   memo: Uint8Array // DX_memo (variable)
-  gas: bigint // DX_gas (8 bytes)
+  gasLimit: bigint // DX_gas (8 bytes)
 }
 
 /**
@@ -624,16 +633,6 @@ export interface PVMOptions {
   registerState?: bigint[]
 }
 
-export type ContextMutator<T> = (
+export type ContextMutator = (
   hostCallId: bigint,
-  gasCounter: bigint,
-  registers: bigint[],
-  memory: RAM,
-  context: T,
-) => {
-  resultCode: ResultCode | null
-  gasCounter: bigint
-  registers: bigint[]
-  memory: RAM
-  context: T
-}
+) => ResultCode | null

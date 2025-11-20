@@ -27,13 +27,6 @@ export const INIT_CONFIG = {
   INIT_INPUT_SIZE: 16_777_216, // 16MB (2^24) - Gray Paper Cpvminitinputsize
 } as const
 
-// Register configuration
-export const REGISTER_CONFIG = {
-  COUNT_64BIT: 8n, // r0-r7
-  COUNT_32BIT: 5n, // r8-r12
-  TOTAL_COUNT: 13n,
-} as const
-
 // Register initialization constants (Gray Paper equation 803-811)
 // Reference: https://graypaper.fluffylabs.dev/#/579bd12/2c7c012cb101
 export const REGISTER_INIT = {
@@ -45,14 +38,16 @@ export const REGISTER_INIT = {
   // Gray Paper: 2^32 - 2*Cpvminitzonesize - Cpvminitinputsize
   // This is the end address of the stack region (STACK_SEGMENT)
   STACK_SEGMENT_END: (): number => {
-    return 2 ** 32 - 2 * INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+    // return 2 ** 32 - 2 * INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+    return 4_278_059_008 // 0xFEFE0000
   },
 
   // r7: Arguments segment start address
   // Gray Paper: 2^32 - Cpvminitzonesize - Cpvminitinputsize
   // This is the start address of the arguments/output region (ARGS_SEGMENT)
   ARGS_SEGMENT_START: (): number => {
-    return 2 ** 32 - INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+    // return 2 ** 32 - INIT_CONFIG.ZONE_SIZE - INIT_CONFIG.INIT_INPUT_SIZE
+    return 4_278_124_544 // 0xfeff0000
   },
 } as const
 
@@ -153,7 +148,7 @@ export const OPCODES = {
   SIGN_EXTEND_8: 108n, // Sign extend 8-bit value
   SIGN_EXTEND_16: 109n, // Sign extend 16-bit value
   ZERO_EXTEND_16: 110n, // Zero extend 16-bit value
-  REVERSE_Uint8Array: 111n, // Reverse byte order
+  REVERSE_BYTES: 111n, // Reverse byte order
 
   // Instructions with Arguments of Two Registers & One Immediate
   STORE_IND_U8: 120n, // Store to indexed memory (8-bit)
@@ -275,173 +270,6 @@ export const ACCUMULATE_INVOCATION_CONFIG = {
   ENTROPY_ACCUMULATOR: 'entropy', // Placeholder for entropy accumulator
 } as const
 
-// Instruction length mapping based on Gray Paper skip distance calculations
-export const INSTRUCTION_LENGTHS = {
-  // Instructions without Arguments (length 1)
-  TRAP: 1n,
-  FALLTHROUGH: 1n,
-
-  // Instructions with Arguments of One Immediate (variable length)
-  ECALLI: 2n, // 1 byte opcode + 1 byte immediate
-
-  // Instructions with Arguments of One Register and One Extended Width Immediate
-  LOAD_IMM_64: 10n, // 1 byte opcode + 1 byte register + 8 Uint8Array immediate
-
-  // Instructions with Arguments of Two Immediates (variable length)
-  STORE_IMM_U8: 3n, // 1 byte opcode + 1 byte address + 1 byte value
-  STORE_IMM_U16: 4n, // 1 byte opcode + 1 byte address + 2 Uint8Array value
-  STORE_IMM_U32: 6n, // 1 byte opcode + 1 byte address + 4 Uint8Array value
-  STORE_IMM_U64: 10n, // 1 byte opcode + 1 byte address + 8 Uint8Array value
-
-  // Instructions with Arguments of One Offset (variable length)
-  JUMP: 3n, // 1 byte opcode + 2 Uint8Array offset
-
-  // Instructions with Arguments of One Register & One Immediate (variable length)
-  JUMP_IND: 3n, // 1 byte opcode + 1 byte register + 1 byte immediate
-  LOAD_IMM: 3n, // 1 byte opcode + 1 byte register + 1 byte immediate
-  LOAD_U8: 3n, // 1 byte opcode + 1 byte register + 1 byte address
-  LOAD_I8: 3n, // 1 byte opcode + 1 byte register + 1 byte address
-  LOAD_U16: 4n, // 1 byte opcode + 1 byte register + 2 Uint8Array address
-  LOAD_I16: 4n, // 1 byte opcode + 1 byte register + 2 Uint8Array address
-  LOAD_U32: 6n, // 1 byte opcode + 1 byte register + 4 Uint8Array address
-  LOAD_I32: 6n, // 1 byte opcode + 1 byte register + 4 Uint8Array address
-  LOAD_U64: 10n, // 1 byte opcode + 1 byte register + 8 Uint8Array address
-  STORE_U8: 3n, // 1 byte opcode + 1 byte register + 1 byte address
-  STORE_U16: 4n, // 1 byte opcode + 1 byte register + 2 Uint8Array address
-  STORE_U32: 6n, // 1 byte opcode + 1 byte register + 4 Uint8Array address
-  STORE_U64: 10n, // 1 byte opcode + 1 byte register + 8 Uint8Array address
-
-  // Instructions with Arguments of One Register & Two Immediates
-  STORE_IMM_IND_U8: 4n, // 1 byte opcode + 1 byte register + 1 byte offset + 1 byte value
-  STORE_IMM_IND_U16: 5n, // 1 byte opcode + 1 byte register + 1 byte offset + 2 Uint8Array value
-  STORE_IMM_IND_U32: 7n, // 1 byte opcode + 1 byte register + 1 byte offset + 4 Uint8Array value
-  STORE_IMM_IND_U64: 11n, // 1 byte opcode + 1 byte register + 1 byte offset + 8 Uint8Array value
-
-  // Instructions with Arguments of One Register, One Immediate and One Offset
-  LOAD_IMM_JUMP: 5n, // 1 byte opcode + 1 byte register + 1 byte immediate + 2 Uint8Array offset
-  BRANCH_EQ_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_NE_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_LT_U_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_LE_U_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_GE_U_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_GT_U_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_LT_S_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_LE_S_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_GE_S_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-  BRANCH_GT_S_IMM: 4n, // 1 byte opcode + 1 byte register + 1 byte immediate + 1 byte offset
-
-  // Instructions with Arguments of Two Registers (length 2)
-  MOVE_REG: 2n,
-  SBRK: 2n,
-  COUNT_SET_BITS_64: 2n,
-  COUNT_SET_BITS_32: 2n,
-  LEADING_ZERO_BITS_64: 2n,
-  LEADING_ZERO_BITS_32: 2n,
-  TRAILING_ZERO_BITS_64: 2n,
-  TRAILING_ZERO_BITS_32: 2n,
-  SIGN_EXTEND_8: 2n,
-  SIGN_EXTEND_16: 2n,
-  ZERO_EXTEND_16: 2n,
-  REVERSE_Uint8Array: 2n,
-
-  // Instructions with Arguments of Two Registers & One Immediate (variable length)
-  STORE_IND_U8: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
-  STORE_IND_U16: 4n, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
-  STORE_IND_U32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  STORE_IND_U64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  LOAD_IND_U8: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
-  LOAD_IND_I8: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate
-  LOAD_IND_U16: 4n, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
-  LOAD_IND_I16: 4n, // 1 byte opcode + 2 Uint8Array registers + 2 Uint8Array immediate
-  LOAD_IND_U32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  LOAD_IND_I32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  LOAD_IND_U64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  ADD_IMM_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  AND_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  XOR_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  OR_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  MUL_IMM_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  SET_LT_U_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SET_LT_S_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_L_IMM_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  SHLO_R_IMM_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  SHAR_R_IMM_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  NEG_ADD_IMM_32: 6n, // 1 byte + 2 Uint8Array registers + 4 Uint8Array immediate
-  SET_GT_U_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SET_GT_S_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_L_IMM_ALT_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  SHLO_R_IMM_ALT_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  SHAR_R_IMM_ALT_32: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  CMOV_IZ_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  CMOV_NZ_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  ADD_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  MUL_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_L_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_R_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHAR_R_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  NEG_ADD_IMM_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_L_IMM_ALT_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHLO_R_IMM_ALT_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  SHAR_R_IMM_ALT_64: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  ROT_R_64_IMM: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  ROT_R_64_IMM_ALT: 10n, // 1 byte opcode + 2 Uint8Array registers + 8 Uint8Array immediate
-  ROT_R_32_IMM: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-  ROT_R_32_IMM_ALT: 6n, // 1 byte opcode + 2 Uint8Array registers + 4 Uint8Array immediate
-
-  // Instructions with Arguments of Two Registers & One Offset (variable length)
-  BRANCH_EQ: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-  BRANCH_NE: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-  BRANCH_LT_U: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-  BRANCH_LT_S: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-  BRANCH_GE_U: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-  BRANCH_GE_S: 3n, // 1 byte opcode + 2 Uint8Array registers + 1 byte offset
-
-  // Instructions with Arguments of Two Registers and Two Immediates
-  LOAD_IMM_JUMP_IND: 6n, // 1 byte opcode + 2 Uint8Array registers + 1 byte immediate + 2 Uint8Array immediate
-
-  // Instructions with Arguments of Three Registers (length 3)
-  ADD_32: 3n,
-  SUB_32: 3n,
-  MUL_32: 3n,
-  DIV_U_32: 3n,
-  DIV_S_32: 3n,
-  REM_U_32: 3n,
-  REM_S_32: 3n,
-  SHLO_L_32: 3n,
-  SHLO_R_32: 3n,
-  SHAR_R_32: 3n,
-  ADD_64: 3n,
-  SUB_64: 3n,
-  MUL_64: 3n,
-  DIV_U_64: 3n,
-  DIV_S_64: 3n,
-  REM_U_64: 3n,
-  REM_S_64: 3n,
-  SHLO_L_64: 3n,
-  SHLO_R_64: 3n,
-  SHAR_R_64: 3n,
-  AND: 3n,
-  XOR: 3n,
-  OR: 3n,
-  MUL_UPPER_S_S: 3n,
-  MUL_UPPER_U_U: 3n,
-  MUL_UPPER_S_U: 3n,
-  SET_LT_U: 3n,
-  SET_LT_S: 3n,
-  CMOV_IZ: 3n,
-  CMOV_NZ: 3n,
-  ROT_L_64: 3n,
-  ROT_L_32: 3n,
-  ROT_R_64: 3n,
-  ROT_R_32: 3n,
-  AND_INV: 3n,
-  OR_INV: 3n,
-  XNOR: 3n,
-  MAX: 3n,
-  MAX_U: 3n,
-  MIN: 3n,
-  MIN_U: 3n,
-} as const
 
 // Gas costs for instructions (all cost 1 as per Gray Paper)
 export const INSTRUCTION_GAS_COSTS = Object.fromEntries(

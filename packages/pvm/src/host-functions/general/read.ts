@@ -2,8 +2,7 @@ import { bytesToHex } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineInvocationContext,
-  ServiceAccount,
+  ReadParams,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -26,16 +25,29 @@ import { BaseHostFunction } from './base'
  * - Writes result to memory at specified offset
  * - Returns NONE if not found, length if found
  */
+
 export class ReadHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.READ
   readonly name = 'read'
-  readonly gasCost = 10n
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: ReadParams,
   ): HostFunctionResult {
-    const serviceId = context.registers[7]
+    // Gray Paper equation 404-407: Determine service account
+    // s^* = s when registers[7] = 2^64 - 1 (NONE), otherwise registers[7]
+    const requestedServiceId =
+      context.registers[7] === ACCUMULATE_ERROR_CODES.NONE
+        ? params.serviceId
+        : context.registers[7]
+
+    // Gray Paper equation 408-412: Select service account
+    // a = s when s^* = s, otherwise d[s^*] if s^* in keys(d), otherwise none
+    const serviceAccount =
+      requestedServiceId === params.serviceId
+        ? params.serviceAccount
+        : params.accounts.get(requestedServiceId) ?? null
+
     const keyOffset = context.registers[8]
     const keyLength = context.registers[9]
     const outputOffset = context.registers[10]
@@ -61,26 +73,25 @@ export class ReadHostFunction extends BaseHostFunction {
       }
     }
 
-    // Get service account
-    const serviceAccount = this.getServiceAccount(refineContext!, serviceId)
+    // Gray Paper equation 423: Return NONE if service account not found
     if (!serviceAccount) {
-      // Return NONE (2^64 - 1) for not found
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       context.log('Read host function: Service account not found', {
-        serviceId: serviceId.toString(),
+        requestedServiceId: requestedServiceId.toString(),
       })
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
         resultCode: null, // continue execution
       }
     }
 
-    // Read storage value by key
+    // Gray Paper equation 414-418: Read storage value by key
+    // v = a_storage[k] if a != none and k in keys(a_storage), otherwise none
     const value = serviceAccount.storage.get(bytesToHex(key)) || null
     if (!value) {
-      // Return NONE (2^64 - 1) for not found
+      // Gray Paper equation 423: Return NONE if storage key not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       context.log('Read host function: Storage key not found', {
-        serviceId: serviceId.toString(),
+        requestedServiceId: requestedServiceId.toString(),
         keyLength: key.length.toString(),
       })
       return {
@@ -88,18 +99,18 @@ export class ReadHostFunction extends BaseHostFunction {
       }
     }
 
-    // Write value to memory
-    const actualLength = Math.min(
-      Number(length),
-      value.length - Number(fromOffset),
-    )
-    const dataToWrite = value.slice(
-      Number(fromOffset),
-      Number(fromOffset) + actualLength,
-    )
+    // Gray Paper equation 419-420: Calculate slice parameters
+    // f = min(registers[11], len(v))
+    // l = min(registers[12], len(v) - f)
+    const f = Math.min(Number(fromOffset), value.length)
+    const l = Math.min(Number(length), value.length - f)
+    const dataToWrite = value.slice(f, f + l)
 
+    // Gray Paper equation 421-425: Write to memory and return result
+    // Write v[f:l] to memory at offset o (registers[10])
     const faultAddress2 = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress2) {
+      // Gray Paper equation 422: Return panic if memory not writable
       context.log('Read host function: Memory write fault', {
         outputOffset: outputOffset.toString(),
         faultAddress: faultAddress2.toString(),
@@ -114,24 +125,17 @@ export class ReadHostFunction extends BaseHostFunction {
       }
     }
 
-    // Return length of value
+    // Gray Paper equation 424: Return len(v) in registers[7]
     context.registers[7] = BigInt(value.length)
 
     context.log('Read host function: Storage value read successfully', {
-      serviceId: serviceId.toString(),
+      requestedServiceId: requestedServiceId.toString(),
       valueLength: value.length.toString(),
-      actualLength: actualLength.toString(),
+      writtenLength: l.toString(),
     })
 
     return {
       resultCode: null, // continue execution
     }
-  }
-
-  private getServiceAccount(
-    refineContext: RefineInvocationContext,
-    serviceId: bigint,
-  ): ServiceAccount | null {
-    return refineContext.accountsDictionary.get(serviceId) || null
   }
 }

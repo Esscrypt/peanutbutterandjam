@@ -31,7 +31,7 @@ import {
 export class SolicitHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.SOLICIT
   readonly name = 'solicit'
-  readonly gasCost = 10n
+
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context

@@ -298,8 +298,19 @@ export class WorkReportService extends BaseService {
   }
 
   setPendingReports(reports: Reports): void {
+    logger.debug('[WorkReportService] setPendingReports called', {
+      coreReportsCount: reports.coreReports.size,
+      coreIndices: Array.from(reports.coreReports.keys()),
+    })
+    
     for (const [coreIndex, report] of reports.coreReports.entries()) {
       if (report) {
+        logger.debug('[WorkReportService] Adding pending report from setState', {
+          coreIndex,
+          timeslot: report.timeslot,
+          packageHash: report.workReport.package_spec.hash.slice(0, 40),
+        })
+        
         this.addPendingWorkReport(
           BigInt(coreIndex),
           report.workReport,
@@ -465,10 +476,15 @@ export class WorkReportService extends BaseService {
         timeslot: Number(timeout),
       })
 
+      // Get stack trace to see who called this
+      const stack = new Error().stack
+      
       logger.debug('Work report marked as available', {
         hash,
         coreIndex: coreIndex.toString(),
         timeout: timeout.toString(),
+        packageHash: workReport.package_spec.hash.slice(0, 40),
+        callStack: stack?.split('\n').slice(1, 6).join('\n'),
       })
 
       return safeResult(undefined)

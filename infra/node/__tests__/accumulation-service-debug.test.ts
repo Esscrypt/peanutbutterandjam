@@ -155,7 +155,6 @@ describe('Accumulation Service Debug Tests', () => {
       sealKeyService,
       ringProver,
       ticketService,
-      keyPairService: null, 
       configService,
       initialValidators: initialValidators.map((validator) => ({
         bandersnatch: validator.bandersnatch,
@@ -217,7 +216,7 @@ describe('Accumulation Service Debug Tests', () => {
       accumulateHostFunctionRegistry,
       configService: configService,
       entropyService: entropyService,
-      pvmOptions: { gasCounter: 1_000_000n },
+      pvmOptions: { gasCounter: 1_000n },
     })
 
 
@@ -226,7 +225,7 @@ describe('Accumulation Service Debug Tests', () => {
       configService: configService,
       clockService: clockService,
     })
-    
+
     accumulatedService = new AccumulationService({
       configService: configService,
       clockService: clockService,

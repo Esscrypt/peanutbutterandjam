@@ -120,7 +120,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,
@@ -146,7 +145,6 @@ describe('Genesis Parse Tests', () => {
       })
 
       const workReportService = new WorkReportService({
-        workStore: null,
         eventBus: eventBusService,
         networkingService: null,
         ce136WorkReportRequestProtocol: null,
@@ -169,7 +167,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        preimageStore: null,
         configService,
         eventBusService,
         clockService,
@@ -184,7 +181,7 @@ describe('Genesis Parse Tests', () => {
         accumulateHostFunctionRegistry,
         configService: configService,
         entropyService: entropyService,
-        pvmOptions: { gasCounter: 1_000_000n },
+        pvmOptions: { gasCounter: 10000n },
       })
 
 
@@ -270,7 +267,6 @@ describe('Genesis Parse Tests', () => {
         validatorSetManagerService: validatorSetManager,
         entropyService: entropyService,
         sealKeyService: sealKeyService,
-        blockStore: null,
         assuranceService: assuranceService,
         guarantorService: guarantorService,
         ticketService: ticketService,
@@ -477,10 +473,10 @@ describe('Genesis Parse Tests', () => {
         let missingKeys = 0
 
         for (const keyval of blockJsonData.post_state.keyvals) {
-          const expectedValue = stateTrie?.[keyval.key]
+          const actualValue = stateTrie?.[keyval.key]
           
           // Check if key exists in generated state trie
-          if (expectedValue === undefined) {
+          if (actualValue === undefined) {
             // Key is missing from generated state trie - this is a failure
             missingKeys++
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
@@ -508,13 +504,13 @@ describe('Genesis Parse Tests', () => {
             console.error('=====================================\n')
             
             // Fail the test - key should exist
-            expect(expectedValue).toBeDefined()
+            expect(actualValue).toBeDefined()
             continue
           }
 
           // Key exists - check if value matches
           checkedKeys++
-          if (keyval.value !== expectedValue) {
+          if (keyval.value !== actualValue) {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
             let decodedExpected: any = null
@@ -579,7 +575,7 @@ describe('Genesis Parse Tests', () => {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
             console.error(`Expected Value (hex): ${keyval.value}`)
-            console.error(`Actual Value (hex): ${expectedValue}`)
+            console.error(`Actual Value (hex): ${actualValue}`)
             
             // Special handling for accumulated (chapter 15) - show detailed inner structure
             if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 15) {
@@ -686,13 +682,25 @@ describe('Genesis Parse Tests', () => {
             if (decodedExpected) {
               // Convert Maps to arrays for proper JSON serialization
               const serializedExpected = JSON.parse(JSON.stringify(decodedExpected, (key, value) => {
+                // Skip preimage blobs (they can be very large)
+                if (key === 'preimages' && value instanceof Map) {
+                  const entries = Array.from(value.entries())
+                  return entries.map(([k, v]) => ({
+                    key: typeof k === 'bigint' ? k.toString() : k,
+                    value: v instanceof Uint8Array ? `<blob ${v.length} bytes>` : v,
+                  }))
+                }
                 if (value instanceof Uint8Array) {
+                  // Truncate large Uint8Arrays (likely preimage blobs)
+                  if (value.length > 256) {
+                    return `<truncated ${value.length} bytes, first 32: ${bytesToHex(value.slice(0, 32))}...>`
+                  }
                   return bytesToHex(value)
                 }
                 if (value instanceof Map) {
                   return Array.from(value.entries()).map(([k, v]) => ({
                     key: typeof k === 'bigint' ? k.toString() : k,
-                    value: v,
+                    value: v instanceof Uint8Array && v.length > 256 ? `<blob ${v.length} bytes>` : v,
                   }))
                 }
                 if (typeof value === 'bigint') {
@@ -706,7 +714,12 @@ describe('Genesis Parse Tests', () => {
                   const converted: any = {}
                   for (const [k, v] of Object.entries(value)) {
                     if (v instanceof Uint8Array) {
-                      converted[k] = bytesToHex(v)
+                      // Truncate large blobs
+                      if (v.length > 256) {
+                        converted[k] = `<truncated ${v.length} bytes, first 32: ${bytesToHex(v.slice(0, 32))}...>`
+                      } else {
+                        converted[k] = bytesToHex(v)
+                      }
                     } else {
                       converted[k] = v
                     }
@@ -720,13 +733,25 @@ describe('Genesis Parse Tests', () => {
             if (decodedActual) {
               // Convert Maps to arrays for proper JSON serialization
               const serializedActual = JSON.parse(JSON.stringify(decodedActual, (key, value) => {
+                // Skip preimage blobs (they can be very large)
+                if (key === 'preimages' && value instanceof Map) {
+                  const entries = Array.from(value.entries())
+                  return entries.map(([k, v]) => ({
+                    key: typeof k === 'bigint' ? k.toString() : k,
+                    value: v instanceof Uint8Array ? `<blob ${v.length} bytes>` : v,
+                  }))
+                }
                 if (value instanceof Uint8Array) {
+                  // Truncate large Uint8Arrays (likely preimage blobs)
+                  if (value.length > 256) {
+                    return `<truncated ${value.length} bytes, first 32: ${bytesToHex(value.slice(0, 32))}...>`
+                  }
                   return bytesToHex(value)
                 }
                 if (value instanceof Map) {
                   return Array.from(value.entries()).map(([k, v]) => ({
                     key: typeof k === 'bigint' ? k.toString() : k,
-                    value: v,
+                    value: v instanceof Uint8Array && v.length > 256 ? `<blob ${v.length} bytes>` : v,
                   }))
                 }
                 if (typeof value === 'bigint') {
@@ -740,7 +765,12 @@ describe('Genesis Parse Tests', () => {
                   const converted: any = {}
                   for (const [k, v] of Object.entries(value)) {
                     if (v instanceof Uint8Array) {
-                      converted[k] = bytesToHex(v)
+                      // Truncate large blobs
+                      if (v.length > 256) {
+                        converted[k] = `<truncated ${v.length} bytes, first 32: ${bytesToHex(v.slice(0, 32))}...>`
+                      } else {
+                        converted[k] = bytesToHex(v)
+                      }
                     } else {
                       converted[k] = v
                     }
@@ -753,7 +783,7 @@ describe('Genesis Parse Tests', () => {
             }
             console.error('=====================================\n')
           }
-          expect(keyval.value).toBe(expectedValue)
+          expect(actualValue).toBe(keyval.value)
         }
 
         // Log summary

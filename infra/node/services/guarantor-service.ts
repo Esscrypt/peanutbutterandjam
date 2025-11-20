@@ -1470,29 +1470,48 @@ export class GuarantorService extends BaseService {
       }
 
       // Gray Paper equation 267-281: Validate signatures and validator assignments
-      // For guarantees from previous rotations, use previous validators for lookup
+      // We need to track both previous epoch and previous rotation:
+      // - Previous epoch: determines which validator set to use (previousValidators vs activeValidators)
+      // - Previous rotation: used for rotation-based validation (assignment checks, etc.)
       const previousValidators =
         this.validatorSetManager.getPreviousValidators()
+      
+      // Calculate epochs to determine which validator set to use
+      // previousValidators contains validators from the previous epoch,
+      // while activeValidators contains validators from the current epoch
+      const epochDuration = BigInt(this.configService.epochDuration)
+      const currentEpoch = currentSlot / epochDuration
+      const guaranteeEpoch = guarantee.slot / epochDuration
+      const isFromPreviousEpoch = guaranteeEpoch < currentEpoch
+
+      // Calculate rotations for rotation-based validation
+      // A rotation is a period within an epoch, used for assignment validation
+      // Note: guaranteeRotation and currentRotation are already calculated above
       const isFromPreviousRotation = guaranteeRotation < currentRotation
 
       // Get active validators once per guarantee (not per signature) to ensure consistency
-      // For current rotation guarantees, we'll use this; for previous rotation, we'll use previousValidators
-      const activeValidators = !isFromPreviousRotation
+      // For current epoch guarantees, we'll use this; for previous epoch, we'll use previousValidators
+      const activeValidators = !isFromPreviousEpoch
         ? this.validatorSetManager.getActiveValidators()
         : null
+
+      // Collect validator keys for reporter collection (only add after all validations pass)
+      // Gray Paper equation 277: reporters should only include validators who signed
+      // guarantees that were successfully processed
+      const guaranteeReporterKeys: Hex[] = []
 
       for (const sig of guaranteeSignatures) {
         const validatorIdx = sig.validator_index
 
         // Get validator keys for reporter collection
         // Strategy:
-        // - For current rotation guarantees: use active validators only (getActiveValidators)
-        // - For previous rotation guarantees: use previous validators (getPreviousValidators)
+        // - For current epoch guarantees: use active validators only (getActiveValidators)
+        // - For previous epoch guarantees: use previous validators (getPreviousValidators)
         // This ensures we use the correct validator set, not the merged getAllConnectedValidators
         let validatorKey: { ed25519: Hex } | null = null
 
-        if (!isFromPreviousRotation) {
-          // Current rotation guarantee: use active validators only
+        if (!isFromPreviousEpoch) {
+          // Current epoch guarantee: use active validators only
           // Verify validator is actually in the active set (not previous set)
           if (!this.validatorSetManager.isValidatorActive(validatorIdx)) {
             return safeError(new Error('bad_validator_index'))
@@ -1508,27 +1527,24 @@ export class GuarantorService extends BaseService {
             return safeError(new Error('bad_validator_index'))
           }
           const activeValidator = activeValidators.get(validatorIdx)
-          // For current rotation guarantees, we MUST use the active validator's key from the active set
-          // Never use previous validator's key - always use active set key for current rotation
+          // For current epoch guarantees, we MUST use the active validator's key from the active set
+          // Never use previous validator's key - always use active set key for current epoch
           // Explicitly ensure we're getting the key from the active set at the correct index
           if (!activeValidator) {
             return safeError(
               new Error(
-                `Validator ${validatorIdx} not found in active set for current rotation guarantee`,
+                `Validator ${validatorIdx} not found in active set for current epoch guarantee`,
               ),
             )
           }
           validatorKey = { ed25519: activeValidator.ed25519 }
         } else {
-          // Previous rotation guarantee: use previous validators only
+          // Previous epoch guarantee: use previous validators only
           const prevValidator = previousValidators.get(validatorIdx)
-          if (prevValidator) {
-            validatorKey = { ed25519: prevValidator.ed25519 }
-          } else {
-            // Validator not in previous set - this is an error for previous rotation guarantees
-            // Do NOT fall back to current set - we must use the set that matches the rotation
+          if (!prevValidator) {
             return safeError(new Error('bad_validator_index'))
           }
+          validatorKey = { ed25519: prevValidator.ed25519 }
         }
 
         // Check if validator is banned/offender
@@ -1570,31 +1586,40 @@ export class GuarantorService extends BaseService {
         }
 
         // Check that validator was assigned to this core at guarantee slot time
-        // For guarantees from previous rotation, we've already verified the validators
-        // are in the previous set and signed correctly. The assignment calculation
-        // using getAssignedCore may not work correctly if the validator count changed,
-        // so for previous rotation guarantees, we skip strict assignment check.
-        // The fact that they signed and are in the previous set is sufficient validation.
+        // For guarantees from previous rotation (but same epoch), we've already verified
+        // the validators are in the active set and signed correctly. The assignment calculation
+        // using getAssignedCore should work correctly for same-epoch guarantees.
+        // For guarantees from previous epoch, we've verified validators are in the previous set,
+        // but the assignment calculation may not work correctly if the validator count changed,
+        // so we allow some flexibility for previous epoch guarantees.
         if (!isFromPreviousRotation && assignedCore !== coreIndex) {
+          // Current rotation guarantee: strict assignment check
           return safeError(new Error('wrong_assignment'))
         }
 
         // For previous rotation guarantees, we still verify the assignment if possible,
-        // but if getAssignedCore fails due to validator count mismatch, we allow it
-        // since the validators are verified to be in the previous set
+        // but if getAssignedCore fails due to validator count mismatch or epoch transition,
+        // we allow it since the validators are verified to be in the correct set
         if (isFromPreviousRotation && assignedCore !== coreIndex) {
-          // Check if validator exists in previous set - if so, assignment is acceptable
-          // (the assignment calculation may be off due to validator count changes)
-          const prevValidator = previousValidators.get(validatorIdx)
-          if (!prevValidator) {
-            // Validator not in previous set - this is an error
+          // For previous epoch guarantees, check if validator exists in previous set
+          // For previous rotation (same epoch), we still require assignment match
+          if (isFromPreviousEpoch) {
+            // Previous epoch: assignment check is more lenient due to potential validator count changes
+            const prevValidator = previousValidators.get(validatorIdx)
+            if (!prevValidator) {
+              // Validator not in previous set - this is an error
+              return safeError(new Error('wrong_assignment'))
+            }
+            // Validator is in previous set - assignment check passed via validator existence
+          } else {
+            // Previous rotation but same epoch: still require strict assignment match
             return safeError(new Error('wrong_assignment'))
           }
-          // Validator is in previous set - assignment check passed via validator existence
         }
 
-        // Add to reporters set (Gray Paper equation 277)
-        // Ensure we have a valid key before adding
+        // Store validator key for reporter collection (only add after all validations pass)
+        // Gray Paper equation 277: reporters should only include validators who signed
+        // guarantees that were successfully processed
         if (!validatorKey || !validatorKey.ed25519) {
           return safeError(
             new Error(
@@ -1602,7 +1627,7 @@ export class GuarantorService extends BaseService {
             ),
           )
         }
-        reporters.add(validatorKey.ed25519)
+        guaranteeReporterKeys.push(validatorKey.ed25519)
       }
 
       // Gray Paper equation 296-298: Core must not be engaged (no pending report)
@@ -1819,6 +1844,12 @@ export class GuarantorService extends BaseService {
             `Failed to clear work report core mapping: ${clearError.message}`,
           ),
         )
+      }
+
+      // Gray Paper equation 277: Add reporters only after all validations pass
+      // Reporters should only include validators who signed guarantees that were successfully processed
+      for (const reporterKey of guaranteeReporterKeys) {
+        reporters.add(reporterKey)
       }
     }
 

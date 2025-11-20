@@ -1,6 +1,6 @@
 export * from './host-functions'
-export * from './invocations'
 export * from './pvm'
 export {RESULT_CODES} from './config'
 export * from './instructions'
 export * from './parser'
+export * from './wasm-wrapper'

@@ -57,6 +57,8 @@ export * from './network'
 // Export PVM work types for compatibility
 // PVM types
 export * from './pvm'
+// PVM host functions types
+export * from './pvm-host-functions'
 // Safe types
 export * from './safe'
 // Serialization types - export specific types to avoid conflicts

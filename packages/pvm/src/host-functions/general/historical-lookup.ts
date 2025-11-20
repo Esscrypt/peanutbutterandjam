@@ -3,7 +3,7 @@ import type {
   HostFunctionContext,
   HostFunctionResult,
   IServiceAccountService,
-  RefineInvocationContext,
+  HistoricalLookupParams,
   ServiceAccount,
 } from '@pbnj/types'
 import {
@@ -43,11 +43,10 @@ import { BaseHostFunction } from './base'
  * if v != NONE: write v[f:f+l] to memory[o:o+l], return len(v)
  * else: return NONE
  */
+
 export class HistoricalLookupHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.HISTORICAL_LOOKUP
   readonly name = 'historical_lookup'
-  readonly gasCost = 10n
-
   private readonly serviceAccountService: IServiceAccountService
 
   constructor(serviceAccountService: IServiceAccountService) {
@@ -57,55 +56,66 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: HistoricalLookupParams,
   ): HostFunctionResult {
-    const serviceId = context.registers[7]
+    // Gray Paper: Extract parameters from registers
+    // registers[7] = service ID selector (NONE for self, or specific service ID)
+    // registers[8:2] = (hash offset, output offset)
+    // registers[10:2] = (from offset, length)
+    const requestedServiceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]
     const fromOffset = context.registers[10]
     const length = context.registers[11]
 
-    // Check if refine context is available
-    if (!refineContext) {
-      // If no refine context available, return WHO
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: RESULT_CODES.HALT,
-      }
+    // Gray Paper equation 508-511: Determine service account
+    // a = {
+    //   d[s] if registers[7] = NONE (2^64 - 1) AND s in keys(d)
+    //   d[registers[7]] if registers[7] in keys(d)
+    //   none otherwise
+    // }
+    let serviceAccount: ServiceAccount | null = null
+    if (
+      requestedServiceId === ACCUMULATE_ERROR_CODES.NONE &&
+      params.accounts.has(params.serviceId)
+    ) {
+      // registers[7] = NONE, use self (s)
+      serviceAccount = params.accounts.get(params.serviceId) ?? null
+    } else if (params.accounts.has(requestedServiceId)) {
+      // registers[7] specifies a service ID in accounts
+      serviceAccount = params.accounts.get(requestedServiceId) ?? null
     }
 
-    // Read hash from memory (32 bytes)
-    const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
-    if (hashData === null) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: readFaultAddress ?? 0n,
-          details: 'Failed to read memory',
-        },
-      }
-    }
-
-    // Get service account
-    const serviceAccount = this.getServiceAccount(refineContext, serviceId)
     if (!serviceAccount) {
-      // Return NONE (2^64 - 1) for not found
+      // Gray Paper: Return NONE if service account not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
         resultCode: null, // continue execution
       }
     }
 
-    // Get lookup time from refine context
-    const lookupTime = this.getLookupTime(refineContext)
+    // Gray Paper: Read hash from memory (32 bytes at hashOffset)
+    const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
+    if (hashData === null) {
+      // Gray Paper: Return panic if memory range not readable
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: readFaultAddress ?? 0n,
+          details: 'Memory range not readable',
+        },
+      }
+    }
 
+    // Gray Paper equation 517: histlookup(a, t, memory[h:32])
     // Perform historical lookup using histlookup function
+    // We use the service account we determined from the lookup logic
     const [lookupError, preimage] =
-      this.serviceAccountService.histLookupForService(
-        serviceId,
+      this.serviceAccountService.histLookupServiceAccount(
+        serviceAccount,
         bytesToHex(hashData),
-        lookupTime,
+        params.timeslot,
       )
     if (lookupError || !preimage) {
       // Return NONE (2^64 - 1) for not found
@@ -153,30 +163,5 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     return {
       resultCode: null, // continue execution
     }
-  }
-
-  private getServiceAccount(
-    refineContext: RefineInvocationContext,
-    serviceId: bigint,
-  ): ServiceAccount | null {
-    // Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
-    // where s = current service ID, d = accounts dictionary
-
-    // If registers[7] = NONE (2^64 - 1), use current service
-    if (serviceId === ACCUMULATE_ERROR_CODES.NONE) {
-      return (
-        refineContext.accountsDictionary.get(refineContext.currentServiceId) ||
-        null
-      )
-    }
-
-    // Otherwise, lookup service by ID from accounts dictionary
-    return refineContext.accountsDictionary.get(serviceId) || null
-  }
-
-  private getLookupTime(refineContext: RefineInvocationContext): bigint {
-    // Gray Paper: Ω_H(gascounter, registers, memory, (m, e), s, d, t)
-    // where t = timeslot for historical lookup
-    return refineContext.lookupTimeslot
   }
 }

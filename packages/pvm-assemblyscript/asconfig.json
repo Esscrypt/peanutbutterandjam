@@ -1,0 +1,67 @@
+{
+	"targets": {
+		"raw": {
+			"outFile": "build/debug-raw.wasm",
+			"textFile": "build/debug-raw.wat",
+			"sourceMap": true,
+			"debug": true,
+			"bindings": "raw"
+		},
+		"debug": {
+			"outFile": "build/debug.wasm",
+			"textFile": "build/debug.wat",
+			"sourceMap": true,
+			"debug": true,
+			"exportRuntime": true,
+			"bindings": "esm"
+		},
+		"release": {
+			"outFile": "build/pvm.wasm",
+			"textFile": "build/pvm.wat",
+			"sourceMap": true,
+			"optimizeLevel": 3,
+			"shrinkLevel": 0,
+			"converge": true,
+			"noAssert": true,
+			"exportRuntime": true,
+			"bindings": "esm"
+		},
+		"release-mini": {
+			"outFile": "build/release-mini.wasm",
+			"textFile": "build/release-mini.wat",
+			"sourceMap": true,
+			"optimizeLevel": 3,
+			"shrinkLevel": 0,
+			"converge": true,
+			"noAssert": true,
+			"runtime": "minimal",
+			"exportRuntime": true,
+			"bindings": "esm"
+		},
+		"release-stub": {
+			"outFile": "build/release-stub.wasm",
+			"textFile": "build/release-stub.wat",
+			"sourceMap": true,
+			"optimizeLevel": 3,
+			"shrinkLevel": 0,
+			"converge": true,
+			"noAssert": true,
+			"runtime": "stub",
+			"exportRuntime": true,
+			"bindings": "esm"
+		},
+		"test": {
+			"outFile": "build/test.wasm",
+			"textFile": "build/test.wat",
+			"sourceMap": true,
+			"debug": true,
+			"exportRuntime": true,
+			"bindings": "esm"
+		}
+	},
+	"options": {
+		"exportRuntime": true,
+		"initialMemory": 2048,
+		"maximumMemory": 4294967296
+	}
+}

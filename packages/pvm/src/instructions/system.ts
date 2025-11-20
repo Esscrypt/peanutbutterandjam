@@ -27,14 +27,15 @@ export class ECALLIInstruction extends BaseInstruction {
   readonly name = 'ECALLI'
 
   execute(context: InstructionContext): InstructionResult {
+
+    context.registers[0] = BigInt(context.instruction.operands[0])
+
     context.log('ECALLI: Host call with immediate value', {
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
       currentPC: context.pc,
+      registerZero: context.registers[0].toString(),
     })
-
-    context.registers[0] = BigInt(context.instruction.operands[0])
-
     const result = {
       resultCode: RESULT_CODES.HOST,
     }

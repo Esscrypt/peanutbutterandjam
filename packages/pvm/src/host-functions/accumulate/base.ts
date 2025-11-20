@@ -27,7 +27,6 @@ export interface AccumulateHostFunctionContext {
 export abstract class BaseAccumulateHostFunction {
   public abstract readonly functionId: bigint
   public abstract readonly name: string
-  public abstract readonly gasCost: bigint
 
   public abstract execute(
     context: AccumulateHostFunctionContext,

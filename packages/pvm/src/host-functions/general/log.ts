@@ -2,7 +2,7 @@ import { logger } from '@pbnj/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineInvocationContext,
+  LogParams,
 } from '@pbnj/types'
 import { GENERAL_FUNCTIONS } from '../../config'
 import { BaseHostFunction } from './base'
@@ -25,11 +25,10 @@ import { BaseHostFunction } from './base'
 export class LogHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.LOG
   readonly name = 'log'
-  readonly gasCost = 0n
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: LogParams,
   ): HostFunctionResult {
     const level = context.registers[7]
     const targetOffset = context.registers[8]
@@ -85,8 +84,8 @@ export class LogHostFunction extends BaseHostFunction {
     }
 
     // Get service ID and core index from refine context if available
-    const serviceId = refineContext?.currentServiceId ?? null
-    const coreIndex = refineContext?.coreIndex ?? null
+    const serviceId = params.serviceId ?? null
+    const coreIndex = params.coreIndex ?? null
 
     // Map level to log level string
     const levelMap: Record<number, string> = {
@@ -140,7 +139,8 @@ export class LogHostFunction extends BaseHostFunction {
       service: serviceId === null ? null : serviceId.toString(),
       core: coreIndex === null ? null : coreIndex.toString(),
     }
-    logger.debug('PVM Log (JSON)', jsonLog)
+    context.log('PVM Log', jsonLog)
+    logger.info(consoleMessage)
 
     return {
       resultCode: null, // continue execution

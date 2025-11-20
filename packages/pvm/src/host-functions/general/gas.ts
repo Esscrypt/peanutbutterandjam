@@ -1,5 +1,5 @@
 import type { HostFunctionContext, HostFunctionResult } from '@pbnj/types'
-import { GENERAL_FUNCTIONS, RESULT_CODES } from '../../config'
+import { GENERAL_FUNCTIONS } from '../../config'
 import { BaseHostFunction } from './base'
 
 /**
@@ -16,21 +16,8 @@ import { BaseHostFunction } from './base'
 export class GasHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.GAS
   readonly name = 'gas'
-  readonly gasCost = 10n
 
   execute(context: HostFunctionContext): HostFunctionResult {
-    // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      context.log('Gas host function: Out of gas', {
-        gasCounter: context.gasCounter.toString(),
-        gasCost: this.gasCost.toString(),
-      })
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
-
-    context.gasCounter -= this.gasCost
 
     // Set registers[7] = gascounter (remaining gas)
     context.registers[7] = context.gasCounter

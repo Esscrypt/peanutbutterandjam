@@ -1,7 +1,7 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  RefineInvocationContext,
+  ExportParams,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -24,23 +24,16 @@ import { BaseHostFunction } from './base'
  * - Returns FULL if segoff + len(𝐞) >= Cmaxpackageexports (3072)
  * - Otherwise returns segoff + len(𝐞)
  */
+
 export class ExportHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.EXPORT
   readonly name = 'export'
-  readonly gasCost = 10n
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: ExportParams,
   ): HostFunctionResult {
-    // Gray Paper: Check if refine context is available
-    if (!refineContext) {
-      // Without refine context, we can't export
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
+
 
     // Gray Paper: p = registers[7]
     const memoryOffset = context.registers[7]
@@ -90,7 +83,7 @@ export class ExportHostFunction extends BaseHostFunction {
     const segment = this.createZeroPaddedSegment(data)
 
     // Gray Paper: Append to export sequence and check limits
-    const result = this.appendToExports(refineContext, segment)
+    const result = this.appendToExports(params, segment)
 
     if (result === 'FULL') {
       // Gray Paper: Return FULL (2^64 - 5)
@@ -122,11 +115,11 @@ export class ExportHostFunction extends BaseHostFunction {
    * Return FULL if limit exceeded, otherwise return segoff + len(𝐞)
    */
   private appendToExports(
-    refineContext: RefineInvocationContext,
+    params: ExportParams,
     segment: Uint8Array,
   ): bigint | 'FULL' {
-    const exportSegments = refineContext.exportSegments
-    const segoff = refineContext.exportSegmentOffset
+    const exportSegments = params.refineContext.exportSegments
+    const segoff = params.segmentOffset
 
     // Gray Paper: Check if segoff + len(𝐞) >= Cmaxpackageexports
     const currentLength = BigInt(exportSegments.length)

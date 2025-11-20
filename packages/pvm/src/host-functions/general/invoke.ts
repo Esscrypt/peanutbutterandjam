@@ -3,7 +3,7 @@ import type {
   HostFunctionResult,
   PVMState,
   RAM,
-  RefineInvocationContext,
+  InvokeParams,
 } from '@pbnj/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -17,15 +17,20 @@ import { BaseHostFunction } from './base'
  *
  * Invokes execution on a PVM machine instance
  *
- * Gray Paper Specification:
+ * Gray Paper Specification (pvm-invocations.tex line 103, 626-653):
  * - Function ID: 12 (invoke)
  * - Gas Cost: 10
- * - Uses registers[7:2] to specify machine ID and memory offset
- * - Reads gas limit and register values from memory
+ * - Signature: Ω_K(gascounter, registers, memory, (m, e))
+ *   - (m, e) = refine context pair (machines, export segments)
+ * - Uses registers[7] for machine ID (n)
+ * - Uses registers[8] for memory offset (o)
+ * - Reads gas limit (8 bytes) and register values (13 × 8 = 104 bytes) from memory[o:112]
  * - Executes PVM machine with specified parameters
  * - Returns execution result (HALT, PANIC, FAULT, OOG, HOST)
- * - Updates machine state and writes results back to memory
+ * - Updates machine state (RAM and PC) and writes results back to memory
  */
+
+
 export class InvokeHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.INVOKE
   readonly name = 'invoke'
@@ -33,58 +38,40 @@ export class InvokeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: InvokeParams,
   ): HostFunctionResult {
+    // Gray Paper: Extract parameters from registers
+    // registers[7] = machine ID (n)
+    // registers[8] = memory offset (o)
     const machineId = context.registers[7]
     const memoryOffset = context.registers[8]
 
-    // Check if refine context is available
-    if (!refineContext) {
-      // If no refine context available, return WHO
-      context.registers[7] = ACCUMULATE_ERROR_CODES.WHO // WHO
-      context.log('Invoke host function: No refine context available')
-      return {
-        resultCode: RESULT_CODES.HALT,
-      }
-    }
+    const machines = params.refineContext.machines
 
-    const machines = refineContext.machines
-
-    // Check if machine exists
+    // Gray Paper equation 646: Check if machine exists
+    // Return WHO if n not in m
     const machine = machines.get(machineId)
     if (!machine) {
-      // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Invoke host function: Machine not found', {
-        machineId: machineId.toString(),
-      })
       return {
-        resultCode: RESULT_CODES.HALT,
+        resultCode: null, // continue execution
       }
     }
 
-    // Read gas limit and register values from memory
-    // Gray Paper: Read gas limit (8 bytes)
-    const [gasLimitData, faultAddress] = context.ram.readOctets(
+    // Gray Paper equation 630-633: Read gas limit and register values from memory
+    // (g, w) = decode[8]{g} || decode[8]{w} = memory[o:112]
+    // where memory[o:112] must be readable
+    const [gasLimitData, gasFaultAddress] = context.ram.readOctets(
       memoryOffset,
       8n,
     )
-    if (faultAddress) {
+    if (gasFaultAddress || gasLimitData === null) {
+      // Gray Paper equation 645: Return panic if memory not readable
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
           type: 'memory_read',
-          address: faultAddress,
-          details: 'Memory not readable',
-        },
-      }
-    }
-    if (gasLimitData === null) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: faultAddress ?? 0n,
+          address: gasFaultAddress ?? 0n,
           details: 'Memory not readable',
         },
       }
@@ -92,55 +79,64 @@ export class InvokeHostFunction extends BaseHostFunction {
     const gasLimit = new DataView(gasLimitData.buffer).getBigUint64(0, true)
 
     // Gray Paper: Read register values (13 registers * 8 bytes each = 104 bytes)
-    const [registersData, faultAddress2] = context.ram.readOctets(
+    const [registersData, registersFaultAddress] = context.ram.readOctets(
       memoryOffset + 8n,
       104n,
     )
-    if (faultAddress2 || !registersData) {
+    if (registersFaultAddress || !registersData) {
+      // Gray Paper equation 645: Return panic if memory not readable
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
           type: 'memory_read',
-          address: faultAddress2 ?? 0n,
+          address: registersFaultAddress ?? 0n,
           details: 'Memory not readable',
         },
       }
     }
 
+    // Decode register values (13 registers * 8 bytes each = 104 bytes)
     const registers: bigint[] = []
     for (let i = 0; i < 13; i++) {
       const registerData = registersData.slice(i * 8, (i + 1) * 8)
       registers.push(new DataView(registerData.buffer).getBigUint64(0, true))
     }
 
-    // Execute PVM machine
-    // const result = this.executePVMMachine(
-    //   machine,
-    //   params.gasLimit,
-    //   params.registers,
-    // )
+    // Gray Paper equation 635: Execute PVM machine
+    // (c, i', g', w', u') = Ψ(code, pc, g, w, ram)
     machine.pvm.invoke(gasLimit, registers, machine.code)
 
-    // Write results back to memory
-    this.writeInvokeResults(context.ram, memoryOffset, machine.pvm.state)
+    const pvmState = machine.pvm.state
 
-    // Gray Paper: Update machine state (RAM and PC)
+    // Gray Paper equation 636: Update memory
+    // memory*[o:112] = encode[8]{g'} || encode[8]{w'}
+    this.writeInvokeResults(context.ram, memoryOffset, pvmState)
 
-    // Gray Paper: Return result code in registers[7]
-    // If HOST or FAULT, also return ID/address in registers[8]
-    context.registers[7] = BigInt(machine.pvm.state.resultCode)
-    if (machine.pvm.state.resultCode === RESULT_CODES.HOST) {
-      context.registers[8] = machine.pvm.state.hostCallId ?? 0n
-    } else if (machine.pvm.state.resultCode === RESULT_CODES.FAULT) {
-      context.registers[8] = machine.pvm.state.faultAddress ?? 0n
+    // Gray Paper equation 637-642: Update machine state
+    // m*[n].ram = u' (already updated in machine.pvm.state.ram)
+    // m*[n].pc = i' + fskip(i') + 1 if HOST, else i' (already updated in machine.pvm.state.programCounter)
+    // Note: The PVM state is already updated by the invoke call, so no explicit assignment needed
+
+    // Gray Paper equation 644-652: Return result code in registers[7] and registers[8]
+    const resultCode = pvmState.resultCode
+    if (resultCode === RESULT_CODES.HOST) {
+      // Gray Paper equation 647: Return HOST with host call ID
+      context.registers[7] = BigInt(RESULT_CODES.HOST)
+      context.registers[8] = pvmState.hostCallId ?? 0n
+    } else if (resultCode === RESULT_CODES.FAULT) {
+      // Gray Paper equation 648: Return FAULT with fault address
+      context.registers[7] = BigInt(RESULT_CODES.FAULT)
+      context.registers[8] = pvmState.faultAddress ?? 0n
+    } else if (resultCode === RESULT_CODES.OOG) {
+      // Gray Paper equation 649: Return OOG
+      context.registers[7] = BigInt(RESULT_CODES.OOG)
+    } else if (resultCode === RESULT_CODES.PANIC) {
+      // Gray Paper equation 650: Return PANIC
+      context.registers[7] = BigInt(RESULT_CODES.PANIC)
+    } else if (resultCode === RESULT_CODES.HALT) {
+      // Gray Paper equation 651: Return HALT
+      context.registers[7] = BigInt(RESULT_CODES.HALT)
     }
-
-    context.log('Invoke host function: PVM machine execution completed', {
-      machineId: machineId.toString(),
-      resultCode: machine.pvm.state.resultCode.toString(),
-      remainingGas: machine.pvm.state.gasCounter.toString(),
-      finalPC: machine.pvm.state.instructionPointer.toString(),
-    })
 
     return {
       resultCode: null, // continue execution
