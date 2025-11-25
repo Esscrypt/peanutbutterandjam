@@ -70,7 +70,7 @@ export class PokeHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(params.refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
-      return new HostFunctionResult(null) // continue
+      return new HostFunctionResult(255) // continue
     }
 
     // 3. Check if destination range is writable → OOB
@@ -78,13 +78,13 @@ export class PokeHostFunction extends BaseHostFunction {
     const writeFaultAddress = machine.pvm.ram.writeOctets(destOffset, data)
     if (writeFaultAddress !== null) {
       context.registers[7] = ACCUMULATE_ERROR_OOB
-      return new HostFunctionResult(null) // continue (not HALT)
+      return new HostFunctionResult(255) // continue (not HALT)
     }
 
     // Return OK (0) for success
     context.registers[7] = ACCUMULATE_ERROR_OK
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   getPVMMachine(

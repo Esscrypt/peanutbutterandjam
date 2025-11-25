@@ -45,18 +45,19 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
     const totalSize = this.VALIDATOR_SIZE * this.C_VALCOUNT
 
-    const readResult_validatorsData = ram.readOctets(
-      validatorsOffset,
-      u64(totalSize),
+    const readResult_validators = ram.readOctets(
+      u32(validatorsOffset),
+      u32(totalSize),
     )
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    if (readResult_validators.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (validatorsData === null) {
+    if (readResult_validators.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const validatorsData = readResult_validators.data!
 
     // Parse validators array (336 bytes per validator)
     // Note: For AssemblyScript, we store raw validator data as Uint8Array
@@ -77,9 +78,9 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Check if current service is the delegator
     // Gray Paper: imX.id !== imX.state.ps_delegator
-    if (imX.id !== imX.state.delegator) {
+    if (imX.id !== u64(imX.state.delegator)) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Update staging set with new validators
@@ -88,6 +89,6 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

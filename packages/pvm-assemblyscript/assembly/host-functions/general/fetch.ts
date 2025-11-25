@@ -24,7 +24,6 @@ import {
   WORK_PACKAGE_CONSTANTS,
   WORK_REPORT_CONSTANTS,
 } from '../../pbnj-types-compat'
-import { hexToBytes } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -65,12 +64,6 @@ export class FetchHostFunction extends BaseHostFunction {
     const fromOffset = context.registers[8] // start offset in the fetched data
     const length = context.registers[9] // number of bytes to write to memory
 
-    context.log('Fetch host function: Executing', {
-      selector: selector.toString(),
-      outputOffset: outputOffset.toString(),
-      fromOffset: fromOffset.toString(),
-      length: length.toString(),
-    })
 
     // Fetch data based on selector according to Gray Paper specification
     // Note: We always fetch to determine available length, even if requested length is 0
@@ -80,9 +73,6 @@ export class FetchHostFunction extends BaseHostFunction {
     if (fetchedData === null) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Fetch host function: Data not found', {
-        selector: selector.toString(),
-      })
     } else {
       // Write data to memory
       // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
@@ -103,30 +93,14 @@ export class FetchHostFunction extends BaseHostFunction {
         // Write data (may be empty if length was 0 or fromOffset beyond data)
         const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
         if (faultAddress) {
-          context.log('Fetch host function: Memory write fault', {
-            selector: selector.toString(),
-            outputOffset: outputOffset.toString(),
-            faultAddress: faultAddress.toString(),
-          })
           return {
             resultCode: RESULT_CODES.PANIC,
-            faultInfo: {
-              type: 'memory_write',
-              address: faultAddress,
-              details: 'Memory is not writable',
-            },
           }
         }
       }
 
       // Return length of fetched data
       context.registers[7] = BigInt(fetchedData.length)
-      context.log('Fetch host function: Data fetched successfully', {
-        selector: selector.toString(),
-        dataLength: fetchedData.length.toString(),
-        actualLength: actualLength.toString(),
-        gasUsed: context.gasCounter.toString(),
-      })
     }
 
     return {
@@ -171,7 +145,7 @@ export class FetchHostFunction extends BaseHostFunction {
         if (!params.authorizerTrace) {
           return null
         }
-        return hexToBytes(params.authorizerTrace)
+        return params.authorizerTrace
       }
       case 3: {
         const workItemIndex = context.registers[11]
@@ -233,7 +207,7 @@ export class FetchHostFunction extends BaseHostFunction {
         if(!params.workPackage) {
           return null
         }
-        return hexToBytes(params.workPackage.authConfig)
+        return params.workPackage.authConfig
       }
 
       case 9:
@@ -243,7 +217,7 @@ export class FetchHostFunction extends BaseHostFunction {
         if(!params.workPackage) {
           return null
         }
-        return hexToBytes(params.workPackage.authToken)
+        return params.workPackage.authToken
 
       case 10: {
         // Gray Paper pvm_invocations.tex line 354: registers[10] = 10

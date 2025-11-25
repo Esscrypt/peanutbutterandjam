@@ -12,7 +12,8 @@ import type {
   PreimageRequestStatus,
 } from '@pbnj/types'
 import { ConfigService } from '../services/config-service'
-import { HostFunctionRegistry, AccumulateHostFunctionRegistry, AccumulatePVM } from '@pbnj/pvm'
+import { HostFunctionRegistry, AccumulateHostFunctionRegistry } from '@pbnj/pvm'
+import { AccumulatePVM } from '@pbnj/pvm-invocations'
 import { hexToBytes, zeroHash } from '../../../packages/core/src/utils/crypto'
 import { ServiceAccountService } from '../services/service-account-service'
 import { EventBusService } from '@pbnj/core'

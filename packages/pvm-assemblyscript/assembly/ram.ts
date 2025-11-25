@@ -6,21 +6,8 @@
  */
 
 import { alignToPage, alignToZone } from './alignment-helpers'
-import { INIT_CONFIG, MEMORY_CONFIG, REGISTER_INIT, REGISTER_INIT_ARGS_SEGMENT_START, REGISTER_INIT_STACK_SEGMENT_END } from './config'
-import { MemoryAccessType, RAM, WriteResult } from './types'
-
-/**
- * Address range for page access tracking
- */
-class AddressRange {
-  startAddress: u64
-  endAddress: u64
-
-  constructor(startAddress: u64, endAddress: u64) {
-    this.startAddress = startAddress
-    this.endAddress = endAddress
-  }
-}
+import { INIT_CONFIG, MEMORY_CONFIG, REGISTER_INIT_ARGS_SEGMENT_START, REGISTER_INIT_STACK_SEGMENT_END } from './config'
+import { FaultCheckResult, MemoryAccessType, RAM, ReadResult, WriteResult } from './types'
 
 /**
  * Page map entry
@@ -38,8 +25,6 @@ export class PageMapEntry {
     this.accessType = accessType
   }
 }
-
-import { FaultCheckResult, ReadResult, RAM } from './types'
 
 /**
  * PVM RAM Implementation
@@ -60,17 +45,15 @@ export class PVMRAM implements RAM {
   currentHeapPointer: u32 = 0
   argumentDataEnd: u32 = 0
 
-  stack: Uint8Array = new Uint8Array(0)
-  heap: Uint8Array = new Uint8Array(0)
-  roData: Uint8Array = new Uint8Array(0)
-  argumentData: Uint8Array = new Uint8Array(0)
+  // Page-based memory: Map from page index to Uint8Array(4096)
+  // Each page is a separate 4KB array - created on-demand when initPage is called
+  pages: Map<u32, Uint8Array> = new Map<u32, Uint8Array>()
 
+  // Page access tracking: Map from page index to access type
+  // Only stores pages that have been explicitly initialized
+  pageAccess: Map<u32, MemoryAccessType> = new Map<u32, MemoryAccessType>()
 
-  // Page access tracking (simple map-based approach)
-  // Maps "startAddress:endAddress" → access type
-  pageAccess: Map<string, MemoryAccessType> = new Map()
-
-  MAX_ADDRESS: u32 = 2 ** 32 // 4GB address space
+  MAX_ADDRESS: u32 = 0xffffffff // 4GB address space
 
   /**
    * Initialize memory layout according to Gray Paper equation 770-802
@@ -88,9 +71,17 @@ export class PVMRAM implements RAM {
     stackSize: u32,
     heapZeroPaddingSize: u32,
   ): void {
+    console.log('[RAM] initializeMemoryLayout: Starting memory layout initialization')
+    
     const readOnlyDataLength = readOnlyData.length
     const heapSize = heap.length
     const argumentDataLength = argumentData.length
+
+    console.log('[RAM] initializeMemoryLayout: Input sizes roData=' + readOnlyDataLength.toString() + 
+      ', heap=' + heapSize.toString() + 
+      ', args=' + argumentDataLength.toString() + 
+      ', stack=' + stackSize.toString() + 
+      ', heapPadding=' + heapZeroPaddingSize.toString())
 
     // Calculate addresses
     const heapStartAddress =
@@ -98,7 +89,7 @@ export class PVMRAM implements RAM {
     const heapEndAddress = heapStartAddress + alignToPage(heapSize)
     const heapZerosEndAddress =
       heapEndAddress + heapZeroPaddingSize * MEMORY_CONFIG.PAGE_SIZE
-    const heapSizeWithPadding = heapZerosEndAddress - heapStartAddress
+    // const heapSizeWithPadding = heapZerosEndAddress - heapStartAddress
 
     const argumentDataStartAddress = this.argumentDataAddress
     const argumentDataEndAddress =
@@ -113,24 +104,29 @@ export class PVMRAM implements RAM {
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
 
-    // Allocate memory regions
-    this.stack = new Uint8Array(stackSize)
-    this.heap = new Uint8Array(heapSizeWithPadding)
-    this.roData = new Uint8Array(readOnlyDataLength)
-    this.argumentData = new Uint8Array(argumentDataLength)
+    console.log('[RAM] initializeMemoryLayout: Calculated addresses roData=[0x' + readOnlyZoneStartAddress.toString(16) + ', 0x' + readOnlyZoneEndAddress.toString(16) + 
+      '), heap=[0x' + heapStartAddress.toString(16) + ', 0x' + heapZerosEndAddress.toString(16) + 
+      '), stack=[0x' + stackStartAddress.toString(16) + ', 0x' + stackEndAddress.toString(16) + 
+      '), args=[0x' + argumentDataStartAddress.toString(16) + ', 0x' + argumentDataZeroPaddingEndAddress.toString(16) + ')')
 
-    // Copy data into regions
+    // Create pages for all memory regions and copy data
+    // Pages are created on-demand, but we initialize them here for efficiency
+    
+    // Copy argument data to pages
     if (argumentDataLength > 0) {
-      this.argumentData.set(argumentData, 0)
+      this.writeOctetsDuringInitialization(argumentDataStartAddress, argumentData)
     }
+    
+    // Copy read-only data to pages
     if (readOnlyDataLength > 0) {
-      this.roData.set(readOnlyData, 0)
+      this.writeOctetsDuringInitialization(readOnlyZoneStartAddress, readOnlyData)
     }
+    
+    // Copy heap data to pages
     if (heapSize > 0) {
-      this.heap.set(heap, 0)
+      this.writeOctetsDuringInitialization(heapStartAddress, heap)
     }
-    // Stack is zero-initialized (per Gray Paper)
-
+    
     // Update variable addresses
     this.argumentDataEnd = argumentDataZeroPaddingEndAddress
     this.roDataAddressEnd = readOnlyZoneEndAddress
@@ -139,61 +135,104 @@ export class PVMRAM implements RAM {
     this.heapEndAddress = heapEndAddress
     this.currentHeapPointer = heapZerosEndAddress
 
-    // Set page access rights for all memory regions
-    this.setPageAccessRightsForAddressRange(
-      readOnlyZoneStartAddress,
-      readOnlyZoneEndAddress,
-      MemoryAccessType.READ,
-    )
+    // Initialize pages and set access rights for all memory regions using initPage
+    // This ensures pages are created and access rights are set together
+    
+    // Read-only data region (READ access)
+    if (readOnlyDataLength > 0) {
+      const roDataSize = readOnlyZoneEndAddress - readOnlyZoneStartAddress
+      console.log('[RAM] initializeMemoryLayout: Initializing roData region start=0x' + readOnlyZoneStartAddress.toString(16) +
+        ', size=' + roDataSize.toString() +
+        ', pages=' + (roDataSize / MEMORY_CONFIG.PAGE_SIZE).toString())
+      this.initPage(
+        readOnlyZoneStartAddress,
+        roDataSize,
+        MemoryAccessType.READ,
+      )
+    }
 
-    this.setPageAccessRightsForAddressRange(
-      argumentDataStartAddress,
-      argumentDataZeroPaddingEndAddress,
-      MemoryAccessType.READ,
-    )
+    // Argument data region (READ access)
+    if (argumentDataLength > 0) {
+      const argsSize = argumentDataZeroPaddingEndAddress - argumentDataStartAddress
+      console.log('[RAM] initializeMemoryLayout: Initializing argumentData region start=0x' + argumentDataStartAddress.toString(16) +
+        ', size=' + argsSize.toString() +
+        ', pages=' + (argsSize / MEMORY_CONFIG.PAGE_SIZE).toString())
+      this.initPage(
+        argumentDataStartAddress,
+        argsSize,
+        MemoryAccessType.READ,
+      )
+    }
 
+    // Stack region (WRITE access, zero-initialized per Gray Paper)
     if (stackStartAddress < stackEndAddress) {
-      this.setPageAccessRightsForAddressRange(
+      const stackSizeActual = stackEndAddress - stackStartAddress
+      const stackPageCount = stackSizeActual / MEMORY_CONFIG.PAGE_SIZE
+      console.log('[RAM] initializeMemoryLayout: Initializing stack region start=0x' + stackStartAddress.toString(16) +
+        ', end=0x' + stackEndAddress.toString(16) +
+        ', size=' + stackSizeActual.toString() +
+        ', pages=' + stackPageCount.toString())
+      this.initPage(
         stackStartAddress,
-        stackEndAddress,
+        stackSizeActual,
+        MemoryAccessType.WRITE,
+      )
+      console.log('[RAM] initializeMemoryLayout: Stack region initialized stackAddress=' + this.stackAddress.toString() +
+        ', pageAccess entries for stack pages should be set')
+    } else {
+      console.log('[RAM] initializeMemoryLayout: Stack region skipped (stackStartAddress >= stackEndAddress) stackStartAddress=0x' + 
+        stackStartAddress.toString(16) + ', stackEndAddress=0x' + stackEndAddress.toString(16))
+    }
+
+    // Heap region (WRITE access)
+    if (heapSize > 0) {
+      const heapSizeActual = heapEndAddress - heapStartAddress
+      console.log('[RAM] initializeMemoryLayout: Initializing heap region start=0x' + heapStartAddress.toString(16) +
+        ', end=0x' + heapEndAddress.toString(16) +
+        ', size=' + heapSizeActual.toString() +
+        ', pages=' + (heapSizeActual / MEMORY_CONFIG.PAGE_SIZE).toString())
+      this.initPage(
+        heapStartAddress,
+        heapSizeActual,
+        MemoryAccessType.WRITE,
+      )
+    }
+    
+    // Heap zero padding region (WRITE access)
+    if (heapEndAddress < heapZerosEndAddress) {
+      const heapPaddingSize = heapZerosEndAddress - heapEndAddress
+      console.log('[RAM] initializeMemoryLayout: Initializing heap zero padding region start=0x' + heapEndAddress.toString(16) +
+        ', end=0x' + heapZerosEndAddress.toString(16) +
+        ', size=' + heapPaddingSize.toString() +
+        ', pages=' + (heapPaddingSize / MEMORY_CONFIG.PAGE_SIZE).toString())
+      this.initPage(
+        heapEndAddress,
+        heapPaddingSize,
         MemoryAccessType.WRITE,
       )
     }
 
-    if (heapSize > 0) {
-      this.setPageAccessRightsForAddressRange(
-        heapStartAddress,
-        heapEndAddress,
-        MemoryAccessType.WRITE,
-      )
-    }
-    if (heapEndAddress < heapZerosEndAddress) {
-      this.setPageAccessRightsForAddressRange(
-        heapEndAddress,
-        heapZerosEndAddress,
-        MemoryAccessType.WRITE,
-      )
-    }
+    console.log('[RAM] initializeMemoryLayout: Memory layout initialization complete totalPages=' + this.pageAccess.keys().length.toString())
   }
 
   /**
    * Allocate additional pages for dynamic heap growth (SBRK)
    */
   allocatePages(startPage: u32, count: u32): void {
-    const required =
-      (startPage + count) * MEMORY_CONFIG.PAGE_SIZE - this.heapStartAddress
-    if (u32(this.heap.length) < required) {
-      const oldSize = this.heap.length
-      const newData = new Uint8Array(required)
-      if (oldSize > 0) {
-        newData.set(this.heap, 0)
-      }
-      this.heap = newData
+    // Create pages and set access rights
+    const endPage = startPage + count
+    for (let pageIndex = startPage; pageIndex < endPage; pageIndex++) {
+      // Create page if it doesn't exist
+      this.getOrCreatePage(pageIndex)
+      // Set write access
+      this.pageAccess.set(pageIndex, MemoryAccessType.WRITE)
     }
 
-    // Set page access rights for newly allocated pages
-    const endPage = startPage + count
-    this.setPageAccessRightsForRange(startPage, endPage, MemoryAccessType.WRITE)
+    // Update heap pointer to reflect allocated pages
+    const endAddress = endPage * MEMORY_CONFIG.PAGE_SIZE
+    if (endAddress > this.currentHeapPointer) {
+      this.currentHeapPointer = endAddress
+    }
   }
 
   /**
@@ -204,151 +243,83 @@ export class PVMRAM implements RAM {
   }
 
   /**
-   * Determine which memory region an address belongs to
-   * Returns: 'argumentData' | 'stack' | 'heap' | 'roData' | null
-   * 
-   * Matches TypeScript implementation logic:
-   * 1. Check argumentData (highest addresses)
-   * 2. Check stack (high addresses, below argumentData)
-   * 3. Check heap (between roData and stack)
-   * 4. Check roData (lowest addresses, above reserved)
+   * Get page offset within a page for an address
    */
-  private determineRegion(address: u32, length: u32): string | null {
-    const addr = address
-    const end = addr + length
+  private getPageOffset(address: u32): u32 {
+    return address % MEMORY_CONFIG.PAGE_SIZE
+  }
 
-    // 1. Check argument data region (fixed start: argumentDataAddress = 0xFEFF0000, highest)
-    if (addr >= this.argumentDataAddress) {
-      return 'argumentData'
+  /**
+   * Get or create a page at the given page index
+   * Returns null if page cannot be created
+   */
+  private getOrCreatePage(pageIndex: u32): Uint8Array | null {
+    if (this.pages.has(pageIndex)) {
+      return this.pages.get(pageIndex) as Uint8Array
     }
+    // Create new page (4KB)
+    const page = new Uint8Array(MEMORY_CONFIG.PAGE_SIZE)
+    this.pages.set(pageIndex, page)
+    return page
+  }
 
-    // 2. Check stack region (fixed end: stackAddressEnd = 0xFEFE0000)
-    // Stack grows downward from stackAddressEnd
-    // Match TypeScript: end <= stackAddressEnd && addr < argumentDataAddress
-    // If stackAddress is set, also check addr >= stackAddress to ensure we're in the actual stack range
-    if (end <= this.stackAddressEnd && addr < this.argumentDataAddress) {
-      // If stackAddress is initialized, verify we're actually in the stack range
-      return 'stack'
+  /**
+   * Get a page at the given page index (returns null if not exists)
+   */
+  private getPage(pageIndex: u32): Uint8Array | null {
+    if (this.pages.has(pageIndex)) {
+      const page = this.pages.get(pageIndex)
+      return page !== null ? page : null
     }
-
-    // 3. Check heap region (between roData and stack, before roData check)
-    // Heap starts after roData zone, before stack
-    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
-      // Initialize heapStartAddress if not set (heap starts after roData)
-      if (this.heapStartAddress === 0) {
-        // Heap starts after roData zone (zone-aligned)
-        this.heapStartAddress = this.roDataAddressEnd > 0 
-          ? this.roDataAddressEnd 
-          : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
-      }
-      // Check if address is in heap (beyond roData region)
-      // Match TypeScript logic: addr >= heapStartAddress OR (roDataAddressEnd > 0 && addr >= roDataAddressEnd)
-      const isInHeap = addr >= this.heapStartAddress || 
-                       (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
-      if (isInHeap) {
-        return 'heap'
-      }
-    }
-
-    // 4. Check read-only data region (fixed start: roDataAddress = 65536, lowest)
-    // Only if not already matched by heap
-    // Match TypeScript: addr >= roDataAddress && addr < roDataAddressEnd (if roDataAddressEnd > 0)
-    if (addr >= this.roDataAddress && end < this.stackAddressEnd) {
-      // If roDataAddressEnd is set and address is beyond it, it should be heap (already checked above)
-      if (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd) {
-        // Should have been caught by heap check, but if heapStartAddress wasn't set, it's heap
-        // Initialize heap for this address
-        if (this.heapStartAddress === 0) {
-          this.heapStartAddress = this.roDataAddressEnd
-        }
-        return 'heap'
-      }
-      // Otherwise, it's roData
-      return 'roData'
-    }
-
     return null
   }
 
   /**
    * Initialize a memory page (used for test vectors)
+   * Creates 4KB pages as needed, regardless of region
    */
   initPage(
     address: u32,
     length: u32,
     accessType: MemoryAccessType,
   ): void {
-
-    // Set page access rights first
-    this.setPageAccessRights(address, length, accessType)
-
-    // Determine which region this address belongs to
-    const region = this.determineRegion(address, length)
-    if (!region) {
-      return // Address doesn't match any region
+    if (length === 0) {
+      return // Nothing to initialize
     }
 
-    const addr = address
+    // Calculate which pages this address range covers
+    const startPage = this.getPageIndex(address)
+    const endAddress = address + length - 1
+    const endPage = this.getPageIndex(endAddress)
+    const pageCount = endPage - startPage + 1
 
-    // Grow the appropriate array based on region
-    // Match TypeScript behavior: update end addresses only when growing arrays
-    if (region === 'argumentData') {
-      const offset = addr - this.argumentDataAddress
-      const requiredSize = offset + length
-      if (u32(this.argumentData.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.argumentData.length > 0) {
-          newData.set(this.argumentData, 0)
-        }
-        this.argumentData = newData
-        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
-      }
-    } else if (region === 'stack') {
-      const requiredSize = this.stackAddressEnd - addr
-      if (u32(this.stack.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.stack.length > 0) {
-          // Copy existing data to the end of the new array (stack grows downward)
-          newData.set(this.stack, alignedSize - this.stack.length)
-        }
-        this.stack = newData
-        this.stackAddress = this.stackAddressEnd - this.stack.length
-      }
-    } else if (region === 'heap') {
-      // Ensure heapStartAddress is set
-      if (this.heapStartAddress === 0) {
-        if (this.roDataAddressEnd === 0 && addr >= 2 * INIT_CONFIG.ZONE_SIZE) {
-          this.heapStartAddress = 2 * INIT_CONFIG.ZONE_SIZE
-        } else {
-          this.heapStartAddress = this.roDataAddressEnd > 0 
-            ? this.roDataAddressEnd 
-            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
-        }
-      }
-      const offset = addr - this.heapStartAddress
-      const requiredSize = offset + length
-      if (u32(this.heap.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.heap.length > 0) {
-          newData.set(this.heap, 0)
-        }
-        this.heap = newData
-        this.currentHeapPointer = this.heapStartAddress + this.heap.length
-      }
-    } else if (region === 'roData') {
-      const offset = addr - this.roDataAddress
-      const requiredSize = offset + length
-      if (u32(this.roData.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.roData.length > 0) {
-          newData.set(this.roData, 0)
-        }
-        this.roData = newData
-        this.roDataAddressEnd = this.roDataAddress + this.roData.length
+    const accessTypeStr = accessType === MemoryAccessType.READ ? 'READ' : 
+                         accessType === MemoryAccessType.WRITE ? 'WRITE' : 'NONE'
+    
+    console.log('[RAM] initPage: Initializing pages startAddr=0x' + address.toString(16) +
+      ', length=' + length.toString() +
+      ', startPage=' + startPage.toString() +
+      ', endPage=' + endPage.toString() +
+      ', pageCount=' + pageCount.toString() +
+      ', accessType=' + accessTypeStr)
+
+    // Create/ensure all pages in the range exist
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      const pageAddress = pageIndex * MEMORY_CONFIG.PAGE_SIZE
+      // Get or create the page (creates a new 4KB array if needed)
+      const page = this.getOrCreatePage(pageIndex)
+      
+      if (page === null) {
+        console.log('[RAM] initPage: ERROR - Failed to create page pageIndex=' + pageIndex.toString() +
+          ', pageAddress=0x' + pageAddress.toString(16))
+      } else {
+        // Set page access rights
+        this.pageAccess.set(pageIndex, accessType)
+        console.log('[RAM] initPage: Page created and access rights set pageIndex=' + pageIndex.toString() +
+          ', pageAddress=0x' + pageAddress.toString(16) +
+          ', accessType=' + accessTypeStr +
+          ', pageExists=' + (this.pages.has(pageIndex) ? 'true' : 'false') +
+          ', accessRightsSet=' + (this.pageAccess.has(pageIndex) ? 'true' : 'false'))
       }
     }
   }
@@ -361,77 +332,40 @@ export class PVMRAM implements RAM {
     endPage: u32,
     accessType: MemoryAccessType,
   ): void {
-    const startAddress = startPage * MEMORY_CONFIG.PAGE_SIZE
-    const endAddress = endPage * MEMORY_CONFIG.PAGE_SIZE
-    this.pageAccess.set(this.createAddressRangeKey(startAddress, endAddress), accessType)
+    for (let pageIndex = startPage; pageIndex < endPage; pageIndex++) {
+      this.pageAccess.set(pageIndex, accessType)
+    }
   }
 
   /**
-   * Set memory page access rights
+   * Set memory page access rights for an address range
    */
   setPageAccessRights(
     address: u32,
     length: u32,
     accessType: MemoryAccessType,
   ): void {
-    const startAddress = address
-    const endAddress = address + length
-    this.pageAccess.set(this.createAddressRangeKey(startAddress, endAddress), accessType)
-  }
-
-  setPageAccessRightsForAddressRange(
-    startAddress: u32,
-    endAddress: u32,
-    accessType: MemoryAccessType,
-  ): void {
-    this.pageAccess.set(this.createAddressRangeKey(startAddress, endAddress), accessType)
-  }
-
-  /**
-   * Create a key for address range
-   */
-  createAddressRangeKey(startAddress: u32, endAddress: u32): string {
-    return startAddress.toString() + ':' + endAddress.toString()
-  }
-
-  /**
-   * Parse address range key
-   */
-  parseAddressRangeKey(key: string): AddressRange | null {
-    const colonIndex = key.indexOf(':')
-    if (colonIndex < 0) {
-      return null
+    const startPage = this.getPageIndex(address)
+    const endAddress = address + length - 1
+    const endPage = this.getPageIndex(endAddress)
+    
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      this.pageAccess.set(pageIndex, accessType)
     }
-    const startStr = key.substring(0, colonIndex)
-    const endStr = key.substring(colonIndex + 1)
-    const startAddress = u64(Number.parseInt(startStr))
-    const endAddress = u64(Number.parseInt(endStr))
-    return new AddressRange(startAddress, endAddress)
   }
 
+
   /**
-   * Get memory page access type
+   * Get memory page access type for an address
    */
   getPageAccessType(address: u64): MemoryAccessType {
-    const keys = this.pageAccess.keys()
-    for (let i: i32 = 0; i < i32(keys.length); i++) {
-      const key = keys[i]
-      const range = this.parseAddressRangeKey(key)
-      if (range) {
-        if (address >= range.startAddress && address < range.endAddress) {
-          // In AssemblyScript, Map.get() throws if key doesn't exist, so check first
-          if (this.pageAccess.has(key)) {
-            const accessType = this.pageAccess.get(key)
-            return accessType
-          }
-        }
-      }
-    }
-    return MemoryAccessType.NONE
+    const pageIndex = this.getPageIndex(u32(address))
+    return this.pageAccess.has(pageIndex) ? (this.pageAccess.get(pageIndex) as MemoryAccessType) : MemoryAccessType.NONE
   }
 
   /**
    * Read multiple octets from memory
+   * Uses page-based memory access
    */
   readOctets(
     address: u32,
@@ -444,53 +378,41 @@ export class PVMRAM implements RAM {
 
     const addr = u32(address)
     const length = u32(count)
-    const end = addr + length
+    const result = new Uint8Array(length)
+    let resultOffset = 0
+    let currentAddr = addr
+    const endAddr = addr + length
 
-    if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
-      const offset = addr - this.argumentDataAddress
-      if (offset + length > u32(this.argumentData.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new ReadResult(null, faultPage * MEMORY_CONFIG.PAGE_SIZE)
+    // Read across pages if needed
+    while (currentAddr < endAddr) {
+      const pageIndex = this.getPageIndex(currentAddr)
+      const pageOffset = this.getPageOffset(currentAddr)
+      const page = this.getPage(pageIndex)
+      
+      if (page === null) {
+        // Page doesn't exist - fault
+        return new ReadResult(null, pageIndex * MEMORY_CONFIG.PAGE_SIZE)
       }
-      const view = this.argumentData
-      return new ReadResult(view.slice(offset, offset + length), 0)
-    }
 
-    if (addr >= this.stackAddress && end <= this.stackAddressEnd) {
-      const offset = addr - this.stackAddress
-      if (offset + length > u32(this.stack.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new ReadResult(null, faultPage * MEMORY_CONFIG.PAGE_SIZE)
+      // Calculate how many bytes to read from this page
+      const bytesInPage = min(length - resultOffset, MEMORY_CONFIG.PAGE_SIZE - pageOffset)
+      const pageEnd = pageOffset + bytesInPage
+      
+      // Copy data from page to result
+      const pageData: Uint8Array = page // Explicit type after null check
+      for (let i = pageOffset; i < pageEnd; i++) {
+        result[resultOffset++] = pageData[i]
       }
-      const view = this.stack
-      return new ReadResult(view.slice(offset, offset + length), 0)
+      
+      currentAddr += bytesInPage
     }
 
-    if (addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
-      const offset: u32 = addr - this.heapStartAddress
-      if (offset + length > u32(this.heap.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new ReadResult(null, faultPage * MEMORY_CONFIG.PAGE_SIZE)
-      }
-      const view = this.heap
-      return new ReadResult(view.slice(offset, offset + length), 0)
-    }
-
-    if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
-        const offset = addr - this.roDataAddress
-        if (offset + length > u32(this.roData.length)) {
-          const faultPage = this.getPageIndex(address)
-          return new ReadResult(null, faultPage * MEMORY_CONFIG.PAGE_SIZE)
-        }
-        const view = this.roData
-        return new ReadResult(view.slice(offset, offset + length), 0)
-    }
-
-    return new ReadResult(null, this.getPageIndex(address) * MEMORY_CONFIG.PAGE_SIZE)
+    return new ReadResult(result, 0)
   }
 
   /**
    * Write multiple octets to memory
+   * Uses page-based memory access
    */
   writeOctets(address: u32, values: Uint8Array): WriteResult {
     const writableResult = this.isWritableWithFault(
@@ -503,148 +425,70 @@ export class PVMRAM implements RAM {
 
     const addr = u32(address)
     const length = values.length
-    const end = addr + length
+    let valuesOffset = 0
+    let currentAddr = addr
+    const endAddr = addr + length
 
-    if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
-      const offset = addr - this.argumentDataAddress
-      if (offset + length > u32(this.argumentData.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new WriteResult(true, faultPage * MEMORY_CONFIG.PAGE_SIZE)
+    // Write across pages if needed
+    while (currentAddr < endAddr) {
+      const pageIndex = this.getPageIndex(currentAddr)
+      const pageOffset = this.getPageOffset(currentAddr)
+      const page = this.getPage(pageIndex)
+      
+      if (page === null) {
+        // Page doesn't exist - fault
+        return new WriteResult(true, pageIndex * MEMORY_CONFIG.PAGE_SIZE)
       }
-      const view = this.argumentData
-      view.set(values, offset)
-      return new WriteResult(false, 0)
+
+      // Calculate how many bytes to write to this page
+      const bytesInPage = min(length - valuesOffset, MEMORY_CONFIG.PAGE_SIZE - pageOffset)
+      const pageEnd = pageOffset + bytesInPage
+      
+      // Copy data from values to page
+      const pageData: Uint8Array = page // Explicit type after null check
+      for (let i = pageOffset; i < pageEnd; i++) {
+        pageData[i] = values[valuesOffset++]
+      }
+      
+      currentAddr += bytesInPage
     }
 
-    if (addr >= this.stackAddress && end <= this.stackAddressEnd) {
-      const offset = addr - this.stackAddress
-      if (offset + length > u32(this.stack.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new WriteResult(true, faultPage * MEMORY_CONFIG.PAGE_SIZE)
-      }
-      const view = this.stack
-      view.set(values, offset)
       return new WriteResult(false, 0)
-    }
-
-    if (addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
-      const offset = addr - this.heapStartAddress
-      if (offset + length > u32(this.heap.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new WriteResult(true, faultPage * MEMORY_CONFIG.PAGE_SIZE)
-      }
-      const view = this.heap
-      view.set(values, offset)
-      return new WriteResult(false, 0)
-    }
-
-    if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
-      const offset = addr - this.roDataAddress
-      if (offset + length > u32(this.roData.length)) {
-        const faultPage = this.getPageIndex(address)
-        return new WriteResult(true, faultPage * MEMORY_CONFIG.PAGE_SIZE)
-      }
-      const view = this.roData
-      view.set(values, offset)
-      return new WriteResult(false, 0)
-    }
-
-    return new WriteResult(true, 0xFFFFFFFF)
   }
 
   /**
    * Write to memory during initialization, bypassing writable checks
-   * Uses the same region detection as initializePage to ensure consistency
+   * Uses page-based memory access
    */
   writeOctetsDuringInitialization(address: u32, values: Uint8Array): void {
     const addr = u32(address)
     const length = values.length
+    let valuesOffset = 0
+    let currentAddr = addr
+    const endAddr = addr + length
 
-    // Determine which region this address belongs to (same logic as initializePage)
-    const region = this.determineRegion(addr, length)
-    if (!region) {
-      return // Address doesn't match any region
-    }
+    // Write across pages if needed
+    while (currentAddr < endAddr) {
+      const pageIndex = this.getPageIndex(currentAddr)
+      const pageOffset = this.getPageOffset(currentAddr)
+      
+      // Get or create the page (creates if needed during initialization)
+      const page = this.getOrCreatePage(pageIndex)
+      if (page === null) {
+        return // Failed to create page
+      }
 
-    if (region === 'argumentData') {
-      const offset = addr - this.argumentDataAddress
-      const requiredSize = offset + length
-      // Grow array if needed (defensive: in case initializePage wasn't called or didn't grow enough)
-      if (u32(this.argumentData.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.argumentData.length > 0) {
-          newData.set(this.argumentData, 0)
-        }
-        this.argumentData = newData
-        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
+      // Calculate how many bytes to write to this page
+      const pageData: Uint8Array = page // Explicit type after null check
+      const bytesInPage = min(length - valuesOffset, MEMORY_CONFIG.PAGE_SIZE - pageOffset)
+      const pageEnd = pageOffset + bytesInPage
+      
+      // Copy data from values to page
+      for (let i = pageOffset; i < pageEnd; i++) {
+        pageData[i] = values[valuesOffset++]
       }
-      // Now write the data (array is guaranteed to be large enough)
-      this.argumentData.set(values, offset)
-    } else if (region === 'stack') {
-      // Set stackAddress if not already set (needed for offset calculation)
-      if (this.stackAddress === 0) {
-        this.stackAddress = this.stackAddressEnd - this.stack.length
-      }
-      const requiredSize = this.stackAddressEnd - addr
-      // Grow array if needed (defensive: in case initializePage wasn't called or didn't grow enough)
-      if (u32(this.stack.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.stack.length > 0) {
-          // Copy existing data to the end of the new array (stack grows downward)
-          newData.set(this.stack, alignedSize - this.stack.length)
-        }
-        this.stack = newData
-        this.stackAddress = this.stackAddressEnd - this.stack.length
-      }
-      const offset = addr - this.stackAddress
-      // Now write the data (array is guaranteed to be large enough)
-      this.stack.set(values, offset)
-    } else if (region === 'heap') {
-      // Ensure heapStartAddress is set (should already be set by initializePage, but be safe)
-      if (this.heapStartAddress === 0) {
-        if (this.roDataAddressEnd === 0 && addr >= 2 * INIT_CONFIG.ZONE_SIZE) {
-          this.heapStartAddress = 2 * INIT_CONFIG.ZONE_SIZE
-        } else {
-          this.heapStartAddress = this.roDataAddressEnd > 0 
-            ? this.roDataAddressEnd 
-            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
-        }
-      }
-      const offset = addr - this.heapStartAddress
-      const requiredSize = offset + length
-      // Grow array if needed (defensive: in case initializePage wasn't called or didn't grow enough)
-      if (u32(this.heap.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.heap.length > 0) {
-          newData.set(this.heap, 0)
-        }
-        this.heap = newData
-      }
-      // Always update currentHeapPointer to reflect the end of the heap array
-      // This ensures readOctets can access the entire allocated heap region
-      this.currentHeapPointer = this.heapStartAddress + this.heap.length
-      // Now write the data (array is guaranteed to be large enough)
-      this.heap.set(values, offset)
-    } else if (region === 'roData') {
-      const offset = addr - this.roDataAddress
-      const requiredSize = offset + length
-      // Grow array if needed (defensive: in case initializePage wasn't called or didn't grow enough)
-      if (u32(this.roData.length) < u32(requiredSize)) {
-        const alignedSize = alignToPage(requiredSize)
-        const newData = new Uint8Array(alignedSize)
-        if (this.roData.length > 0) {
-          newData.set(this.roData, 0)
-        }
-        this.roData = newData
-      }
-      // Always update roDataAddressEnd to reflect the end of the roData array
-      // This ensures readOctets can access the entire allocated roData region
-      this.roDataAddressEnd = this.roDataAddress + this.roData.length
-      // Now write the data (array is guaranteed to be large enough)
-      this.roData.set(values, offset)
+      
+      currentAddr += bytesInPage
     }
   }
 
@@ -654,76 +498,72 @@ export class PVMRAM implements RAM {
     }
 
     const endRequestedAddress = address + size
-    const keys = this.pageAccess.keys()
-    for (let i: i32 = 0; i < i32(keys.length); i++) {
-      const key = keys[i]
-      const colonIndex = key.indexOf(':')
-      if (colonIndex < 0) {
-        continue
-      }
-      const startStr = key.substring(0, colonIndex)
-      const endStr = key.substring(colonIndex + 1)
-      const startAddress = u64(Number.parseInt(startStr))
-      const endAddress = u64(Number.parseInt(endStr))
+    const startPage = this.getPageIndex(address)
+    const endPage = this.getPageIndex(endRequestedAddress - 1)
       
-      // Check if the requested address range is within this page access range
-      // The range must fully contain the requested address range
-      if (startAddress <= u64(address) && endAddress >= u64(endRequestedAddress)) {
-        // In AssemblyScript, Map.get() throws if key doesn't exist, so check first
-        if (this.pageAccess.has(key)) {
-          const accessType = this.pageAccess.get(key)
-          if (accessType !== MemoryAccessType.NONE) {
-            return new FaultCheckResult(true, 0)
-          }
-        }
+    // Check all pages in the range have READ or WRITE access
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      const accessType = this.pageAccess.has(pageIndex) 
+        ? (this.pageAccess.get(pageIndex) as MemoryAccessType)
+        : MemoryAccessType.NONE
+      
+      if (accessType === MemoryAccessType.NONE) {
+        // Page not accessible - return fault at page start
+        return new FaultCheckResult(false, pageIndex * MEMORY_CONFIG.PAGE_SIZE)
       }
     }
-    // If no matching page access found, return fault
-    return new FaultCheckResult(false, this.getPageIndex(address) * MEMORY_CONFIG.PAGE_SIZE)
+    
+    return new FaultCheckResult(true, 0)
   }
 
   isWritableWithFault(address: u32, size: u32 = u32(1)): FaultCheckResult {
     if (address + size > this.MAX_ADDRESS) {
       const faultAddress =
         this.getPageIndex(address) * MEMORY_CONFIG.PAGE_SIZE
+      console.log('[RAM] isWritableWithFault: Address exceeds MAX_ADDRESS address=0x' + address.toString(16) +
+        ', size=' + size.toString() +
+        ', faultAddress=0x' + faultAddress.toString(16))
       return new FaultCheckResult(false, faultAddress)
     }
 
     const endRequestedAddress = address + size
-    let minInaccessibleAddress: u32 = 0xFFFFFFFF // Sentinel value for "not found"
-
-    for (let addr: u32 = address; addr < endRequestedAddress; addr++) {
-      let isWritable = false
-      const keys = this.pageAccess.keys()
-      for (let i: i32 = 0; i < i32(keys.length); i++) {
-        const key = keys[i]
-        const range = this.parseAddressRangeKey(key)
-        if (range) {
-          if (u64(addr) >= range.startAddress && u64(addr) < range.endAddress) {
-            // In AssemblyScript, Map.get() throws if key doesn't exist, so check first
-            if (this.pageAccess.has(key)) {
-              const pageAccess = this.pageAccess.get(key)
-              if (pageAccess === MemoryAccessType.WRITE) {
-                isWritable = true
-                break
-              }
-            }
-          }
-        }
-      }
-      if (!isWritable) {
-        minInaccessibleAddress = addr
-        break
+    const startPage = this.getPageIndex(address)
+    const endPage = this.getPageIndex(endRequestedAddress - 1)
+    
+    console.log('[RAM] isWritableWithFault: Checking writability address=0x' + address.toString(16) +
+      ', size=' + size.toString() +
+      ', startPage=' + startPage.toString() +
+      ', endPage=' + endPage.toString())
+    
+    // Check all pages in the range have WRITE access
+    for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
+      const pageAddress = pageIndex * MEMORY_CONFIG.PAGE_SIZE
+      const hasAccess = this.pageAccess.has(pageIndex)
+      const accessType = hasAccess
+        ? (this.pageAccess.get(pageIndex) as MemoryAccessType)
+        : MemoryAccessType.NONE
+      
+      const accessTypeStr = accessType === MemoryAccessType.READ ? 'READ' : 
+                           accessType === MemoryAccessType.WRITE ? 'WRITE' : 'NONE'
+      
+      console.log('[RAM] isWritableWithFault: Checking page pageIndex=' + pageIndex.toString() +
+        ', pageAddress=0x' + pageAddress.toString(16) +
+        ', hasAccess=' + (hasAccess ? 'true' : 'false') +
+        ', accessType=' + accessTypeStr +
+        ', pageExists=' + (this.pages.has(pageIndex) ? 'true' : 'false'))
+      
+      if (accessType !== MemoryAccessType.WRITE) {
+        // Page not writable - return fault at page start
+        console.log('[RAM] isWritableWithFault: FAULT - Page not writable pageIndex=' + pageIndex.toString() +
+          ', pageAddress=0x' + pageAddress.toString(16) +
+          ', accessType=' + accessTypeStr +
+          ', faultAddress=0x' + pageAddress.toString(16))
+        return new FaultCheckResult(false, pageAddress)
       }
     }
 
-    if (minInaccessibleAddress !== 0xFFFFFFFF) {
-      const faultAddress =
-        this.getPageIndex(minInaccessibleAddress) *
-        MEMORY_CONFIG.PAGE_SIZE
-      return new FaultCheckResult(false, faultAddress)
-    }
-
+    console.log('[RAM] isWritableWithFault: All pages writable address=0x' + address.toString(16) +
+      ', size=' + size.toString())
     return new FaultCheckResult(true, 0)
   }
 
@@ -733,21 +573,18 @@ export class PVMRAM implements RAM {
   getPageMap(): PageMapEntry[] {
     const pages: PageMapEntry[] = []
 
-    const keys = this.pageAccess.keys()
-    for (let i: i32 = 0; i < i32(keys.length); i++) {
-      const key = keys[i]
-      const range = this.parseAddressRangeKey(key)
-      if (range) {
-        // In AssemblyScript, Map.get() throws if key doesn't exist, so check first
-        if (this.pageAccess.has(key)) {
-          const accessType = this.pageAccess.get(key)
+    const pageIndices = this.pageAccess.keys()
+    for (let i: i32 = 0; i < i32(pageIndices.length); i++) {
+      const pageIndex = pageIndices[i]
+      if (this.pageAccess.has(pageIndex)) {
+        const accessType = this.pageAccess.get(pageIndex) as MemoryAccessType
+        const startAddress = u64(pageIndex * MEMORY_CONFIG.PAGE_SIZE)
           pages.push(new PageMapEntry(
-            range.startAddress,
-            i32(range.endAddress - range.startAddress),
+          startAddress,
+          MEMORY_CONFIG.PAGE_SIZE,
             accessType === MemoryAccessType.WRITE,
             accessType,
           ))
-        }
       }
     }
 
@@ -756,48 +593,58 @@ export class PVMRAM implements RAM {
 
   /**
    * Get memory contents for a specific address range
+   * Uses page-based memory access
    */
   getMemoryContents(address: u64, length: i32): u64[] {
     const addr = u32(address)
-    const end = addr + length
+    const result: u64[] = []
+    let currentAddr = addr
+    const endAddr = addr + length
 
-    if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
-      const offset = addr - this.argumentDataAddress
-      const view = this.argumentData
-      return Array.from(view.slice(offset, offset + length))
+    // Read across pages if needed
+    while (currentAddr < endAddr) {
+      const pageIndex = this.getPageIndex(currentAddr)
+      const pageOffset = this.getPageOffset(currentAddr)
+      const page = this.getPage(pageIndex)
+      
+      if (page === null) {
+        // Page doesn't exist - return zeros
+        const remaining = endAddr - currentAddr
+        for (let i = 0; i < remaining; i++) {
+          result.push(u64(0))
+    }
+        break
+      }
+
+      // Calculate how many bytes to read from this page
+      const pageData: Uint8Array = page // Explicit type after null check
+      const bytesInPage = min(i32(endAddr - currentAddr), i32(MEMORY_CONFIG.PAGE_SIZE - pageOffset))
+      const pageEnd = pageOffset + bytesInPage
+      
+      // Copy data from page to result
+      for (let i = pageOffset; i < pageEnd; i++) {
+        result.push(u64(pageData[i]))
+      }
+      
+      currentAddr += u32(bytesInPage)
     }
 
-    if (addr >= this.stackAddress && end <= this.stackAddressEnd) {
-      const offset = addr - this.stackAddress
-      const view = this.stack
-      return Array.from(view.slice(offset, offset + length))
-    }
-
-    if (addr >= this.heapStartAddress && end <= this.currentHeapPointer) {
-      const offset = addr - this.heapStartAddress
-      const view = this.heap
-      return Array.from(view.slice(offset, offset + length))
-    }
-
-    if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
-      const offset = addr - this.roDataAddress
-        const view = this.roData
-        return Array.from(view.slice(offset, offset + length))
-    }
-    // Return empty array instead of throwing to avoid WASM abort
-    // This should not happen if called correctly
-    return new Array<u8>(0)
+    return result
   }
 
   /**
-   * Clear all memory
+   * Clear all memory (zero out pages but keep them allocated)
    */
   clear(): void {
-    this.pageAccess.clear()
-    this.stack.fill(0)
-    this.heap.fill(0)
-    this.roData.fill(0)
-    this.argumentData.fill(0)
+    // Clear all pages (zero them out)
+    const pageIndices = this.pages.keys()
+    for (let i: i32 = 0; i < i32(pageIndices.length); i++) {
+      const pageIndex = pageIndices[i]
+      const page = this.pages.get(pageIndex)!
+      page.fill(0)
+    }
+    
+    // Reset address variables
     this.stackAddress = 0
     this.heapStartAddress = 0
     this.heapEndAddress = 0
@@ -814,11 +661,8 @@ export class PVMRAM implements RAM {
     // Clear page access rights
     this.pageAccess.clear()
     
-    // Reset memory arrays to empty
-    this.stack = new Uint8Array(0)
-    this.heap = new Uint8Array(0)
-    this.roData = new Uint8Array(0)
-    this.argumentData = new Uint8Array(0)
+    // Clear all pages
+    this.pages.clear()
     
     // Reset all address variables
     this.stackAddress = 0
@@ -827,5 +671,22 @@ export class PVMRAM implements RAM {
     this.roDataAddressEnd = 0
     this.currentHeapPointer = 0
     this.argumentDataEnd = 0
+  }
+
+  /**
+   * Get page dump for a specific page index
+   * Returns a copy of the page data (4KB) or zeros if page doesn't exist
+   */
+  getPageDump(pageIndex: u32): Uint8Array {
+    const page = this.getPage(pageIndex)
+    if (page === null) {
+      // Return zeros if page doesn't exist
+      return new Uint8Array(MEMORY_CONFIG.PAGE_SIZE)
+    }
+    // Return a copy of the page
+    const result = new Uint8Array(MEMORY_CONFIG.PAGE_SIZE)
+    const pageData: Uint8Array = page // Explicit type to help flow analysis
+    result.set(pageData)
+    return result
   }
 }

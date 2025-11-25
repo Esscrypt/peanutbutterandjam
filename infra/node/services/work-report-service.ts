@@ -299,7 +299,7 @@ export class WorkReportService extends BaseService {
 
   setPendingReports(reports: Reports): void {
     logger.debug('[WorkReportService] setPendingReports called', {
-      coreReportsCount: reports.coreReports.size,
+      coreReportsCount: reports.coreReports.length,
       coreIndices: Array.from(reports.coreReports.keys()),
     })
     

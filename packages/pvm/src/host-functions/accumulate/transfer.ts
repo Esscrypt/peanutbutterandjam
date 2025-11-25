@@ -1,5 +1,5 @@
 import { logger } from '@pbnj/core'
-import type { HostFunctionResult } from '@pbnj/types'
+import type { DeferredTransfer, HostFunctionResult } from '@pbnj/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -119,8 +119,8 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
       dest: destinationServiceId,
       amount,
       memo: memoData,
-      gas: gasLimit,
-    }
+      gasLimit,
+    } satisfies DeferredTransfer
 
     // Add transfer to xfers list
     imX.xfers.push(deferredTransfer)

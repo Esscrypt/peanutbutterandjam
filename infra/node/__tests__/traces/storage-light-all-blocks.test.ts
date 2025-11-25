@@ -42,9 +42,9 @@ import {
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
-  AccumulatePVM,
   HostFunctionRegistry,
 } from '@pbnj/pvm'
+import { AccumulatePVM } from '@pbnj/pvm-invocations'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
@@ -120,7 +120,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,

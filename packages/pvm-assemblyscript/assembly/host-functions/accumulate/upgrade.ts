@@ -1,5 +1,4 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_HUH,
   ACCUMULATE_ERROR_WHAT,
@@ -43,36 +42,38 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
     const newMinimumMemoryGas = u64(registers[9])
 
     // Read code hash from memory (32 bytes)
-    const readResult_codeHashData = ram.readOctets(codeHashOffset, u64(32))
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    const readResult_codeHash = ram.readOctets(u32(codeHashOffset), u32(32))
+    if (readResult_codeHash.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (codeHashData === null) {
+    if (readResult_codeHash.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const codeHashData = readResult_codeHash.data!
 
     // Get the current implications context
     const imX = implications.regular
 
     // Get current service account
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
+    const accountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
+    if (accountEntry === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
+    const serviceAccount = accountEntry.account
 
     // Update service account with new code hash and gas limits
     // Gray Paper: imX.self.codehash = c, imX.self.minaccgas = g, imX.self.minmemogas = m
-    serviceAccount.codehash = bytesToHex(codeHashData)
+    serviceAccount.codehash = codeHashData
     serviceAccount.minaccgas = newMinimumAccumulationGas
     serviceAccount.minmemogas = newMinimumMemoryGas
 
-    imX.state.accounts.set(imX.id, serviceAccount)
+    this.setAccountEntry(imX.state.accounts, imX.id, serviceAccount)
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

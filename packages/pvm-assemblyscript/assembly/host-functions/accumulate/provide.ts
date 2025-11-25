@@ -1,5 +1,4 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_HUH,
   ACCUMULATE_ERROR_WHO,
@@ -54,63 +53,57 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
       targetServiceId === MAX_U64 ? implications.regular.id : targetServiceId
 
     // Read preimage data from memory
-    const readResult_preimageData = ram.readOctets(
-      preimageOffset,
-      preimageLength,
+    const readResult_preimage = ram.readOctets(
+      u32(preimageOffset),
+      u32(preimageLength),
     )
-    if (faultAddress !== null || preimageData === null) {
+    if (readResult_preimage.faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    if (readResult_preimage.data === null) {
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+    const preimageData = readResult_preimage.data!
 
     // Get the current implications context
     const imX = implications.regular
 
     // Check if service account exists
-    const serviceAccount = imX.state.accounts.get(serviceId)
-    if (!serviceAccount) {
+    const accountEntry = this.findAccountEntry(imX.state.accounts, serviceId)
+    if (accountEntry === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
-
-    // Compute hash of the preimage data
-    const preimageHash = bytesToHex(preimageData)
+    const serviceAccount = accountEntry.account
 
     // Check if there's a matching request for this hash and size
     // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
-    const requestMap = serviceAccount.requests.get(preimageHash)
-    if (!requestMap) {
+    // preimageData is already the hash as Uint8Array
+    const requestStatus = serviceAccount.requests.get(preimageData, preimageLength)
+    if (requestStatus === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
-    }
-
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Check if the preimage hasn't already been provided
     // Gray Paper: (s, i) ∈ imX.provisions
-    // Note: We use a simple approach here - in practice, provisions would be a set of tuples
-    // For now, we'll use the service ID as the key and check if the data matches
-    const existingProvision = imX.provisions.get(serviceId)
+    const existingProvision = this.findProvisionEntry(imX.provisions, serviceId)
     if (
       existingProvision !== null &&
-      this.arraysEqual(existingProvision, preimageData)
+      this.arraysEqual(existingProvision.blob, preimageData)
     ) {
       // Gray Paper line 942: HUH when a = error (preimage already provided)
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Add the preimage to provisions
     // Gray Paper: imX.provisions ∪ {(s, i)}
-    imX.provisions.set(serviceId, preimageData)
+    this.setProvisionEntry(imX.provisions, serviceId, preimageData)
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   arraysEqual(a: Uint8Array, b: Uint8Array): bool {

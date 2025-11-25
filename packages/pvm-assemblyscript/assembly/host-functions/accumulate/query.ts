@@ -1,5 +1,4 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_NONE,
   AccumulateHostFunctionContext,
@@ -47,75 +46,72 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
     const preimageLength = u64(registers[8])
 
     // Read hash from memory (32 bytes)
-    const readResult_hashData = ram.readOctets(
-      preimageOffset,
-      preimageLength,
+    const readResult_hash = ram.readOctets(
+      u32(preimageOffset),
+      u32(preimageLength),
     )
-    if (faultAddress !== null || hashData === null) {
+    if (readResult_hash.faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    if (readResult_hash.data === null) {
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+    const hashData = readResult_hash.data!
 
     // Get the current implications context
     const imX = implications.regular
 
     // Get current service account
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
+    const accountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
+    if (accountEntry === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
       registers[8] = u64(0)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
+    const serviceAccount = accountEntry.account
 
-    // Convert hash to hex and look up request
-    const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
+    // Look up request (hashData is already Uint8Array)
+    const requestStatus = serviceAccount.requests.get(hashData, preimageLength)
 
-    if (!requestMap) {
+    if (requestStatus === null) {
       // Request doesn't exist
       this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
       registers[8] = u64(0)
-      return new HostFunctionResult(null) // continue execution
-    }
-
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Request doesn't exist for this size
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
-      registers[8] = u64(0)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Return encoded status based on request length
     const TWO_TO_32: u64 = u64(4294967296) // 2^32
-    if (request.length === 0) {
+    const timeslots = requestStatus.timeslots
+    if (timeslots.length === 0) {
       // Empty request []
       registers[7] = u64(0)
       registers[8] = u64(0)
-    } else if (request.length === 1) {
+    } else if (timeslots.length === 1) {
       // Single entry [x]
-      const x = request[0]
+      const x = u64(timeslots[0])
       registers[7] = u64(1) + TWO_TO_32 * x
       registers[8] = u64(0)
-    } else if (request.length === 2) {
+    } else if (timeslots.length === 2) {
       // Two entries [x, y]
-      const x = request[0]
-      const y = request[1]
+      const x = u64(timeslots[0])
+      const y = u64(timeslots[1])
       registers[7] = u64(2) + TWO_TO_32 * x
       registers[8] = y
-    } else if (request.length === 3) {
+    } else if (timeslots.length === 3) {
       // Three entries [x, y, z]
-      const x = request[0]
-      const y = request[1]
-      const z = request[2]
+      const x = u64(timeslots[0])
+      const y = u64(timeslots[1])
+      const z = u64(timeslots[2])
       registers[7] = u64(3) + TWO_TO_32 * x
       registers[8] = y + TWO_TO_32 * z
     } else {
       // Invalid request state
       this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
       registers[8] = u64(0)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

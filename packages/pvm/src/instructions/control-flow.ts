@@ -5,7 +5,7 @@
  */
 
 import type { InstructionContext, InstructionResult } from '@pbnj/types'
-import { MEMORY_CONFIG, OPCODES, REGISTER_INIT, RESULT_CODES } from '../config'
+import { OPCODES, REGISTER_INIT, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
 
 /**

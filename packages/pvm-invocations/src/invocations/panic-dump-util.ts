@@ -9,8 +9,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { logger } from '@pbnj/core'
 import type { RAM } from '@pbnj/types'
-import { RESULT_CODES } from '../config'
-import type { InstructionRegistry } from '../instructions/registry'
+import { RESULT_CODES, type InstructionRegistry } from '@pbnj/pvm'
 
 export interface PanicDumpData {
   timestamp: string

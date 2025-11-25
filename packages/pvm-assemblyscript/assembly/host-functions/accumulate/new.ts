@@ -1,5 +1,5 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
+import { CompleteServiceAccount, PreimageRequestStatus, AccountEntry } from '../../codec'
 import {
   ACCUMULATE_ERROR_CASH,
   ACCUMULATE_ERROR_FULL,
@@ -58,34 +58,36 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     const desiredId = u64(registers[12])
 
     // Read code hash from memory (32 bytes)
-    const readResult_codeHashData = ram.readOctets(
-      codeHashOffset,
-      codeHashLength,
+    const readResult_codeHash = ram.readOctets(
+      u32(codeHashOffset),
+      u32(codeHashLength),
     )
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    if (readResult_codeHash.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (codeHashData === null) {
+    if (readResult_codeHash.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const codeHashData = readResult_codeHash.data!
 
     // Get the current implications context
     const imX = implications.regular
 
     // Get current service account
-    const currentService = imX.state.accounts.get(imX.id)
-    if (!currentService) {
+    const currentAccountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
+    if (currentAccountEntry === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
+    const currentService = currentAccountEntry.account
 
     // Check if gratis is set and validate permissions
     if (gratis === u64(0) && imX.id !== imX.state.registrar) {
       // Only registrar can create paid services
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Calculate minimum balance required
@@ -95,7 +97,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Check if current service has sufficient balance
     if (currentService.balance < minBalance) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_CASH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Determine new service ID
@@ -106,9 +108,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       // Paid service - use desired ID if valid
       if (desiredId < C_MIN_PUBLIC_INDEX) {
         // Check if desired ID is already taken
-        if (imX.state.accounts.has(desiredId)) {
+        if (this.hasAccountEntry(imX.state.accounts, desiredId)) {
           this.setAccumulateError(registers, ACCUMULATE_ERROR_FULL)
-          return new HostFunctionResult(null) // continue execution
+          return new HostFunctionResult(255) // continue execution
         }
         newServiceId = desiredId
       } else {
@@ -121,35 +123,33 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     }
 
     // Create new service account
-    const codeHashHex = bytesToHex(codeHashData)
-    const newServiceAccount = new ServiceAccount()
-    newServiceAccount.codehash = codeHashHex
+    const newServiceAccount = new CompleteServiceAccount()
+    newServiceAccount.codehash = codeHashData
     newServiceAccount.balance = minBalance
     newServiceAccount.minaccgas = minAccGas
     newServiceAccount.minmemogas = minMemoGas
     newServiceAccount.octets = u64(0) // Will be calculated
     newServiceAccount.gratis = gratis
-    newServiceAccount.items = u64(0) // Will be calculated
-    newServiceAccount.created = timeslot
-    newServiceAccount.lastacc = u64(0)
-    newServiceAccount.parent = imX.id
-    // Initial request for code: requests[codeHashHex][0] = []
-    const initialRequestMap = new Map<u64, u64[]>()
-    initialRequestMap.set(u64(0), [] as u64[])
-    newServiceAccount.requests.set(codeHashHex, initialRequestMap)
+    newServiceAccount.items = 0 // Will be calculated
+    newServiceAccount.created = u32(timeslot)
+    newServiceAccount.lastacc = 0
+    newServiceAccount.parent = u32(imX.id)
+    // Initial request for code: requests[codeHashData][0] = []
+    const initialStatus = new PreimageRequestStatus()
+    newServiceAccount.requests.set(codeHashData, u64(0), initialStatus)
 
     // Deduct balance from current service
     currentService.balance -= minBalance
 
     // Add new service to accounts
-    imX.state.accounts.set(newServiceId, newServiceAccount)
+    this.setAccountEntry(imX.state.accounts, newServiceId, newServiceAccount)
 
     // Update next free ID
-    imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    imX.nextfreeid = u32(this.getNextFreeId(u64(imX.nextfreeid), imX.state.accounts))
 
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   /**
@@ -163,7 +163,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
    */
   getNextFreeId(
     currentId: u64,
-    accounts: Map<u64, ServiceAccount>,
+    accounts: Array<AccountEntry>,
   ): u64 {
     const C_MIN_PUBLIC_INDEX: u64 = u64(65536) // 2^16 = Cminpublicindex
     const MODULUS: u64 = u64(4294967296) - C_MIN_PUBLIC_INDEX - u64(256) // 2^32 - Cminpublicindex - 2^8
@@ -187,13 +187,13 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
    */
   checkServiceId(
     id: u64,
-    accounts: Map<u64, ServiceAccount>,
+    accounts: Array<AccountEntry>,
   ): u64 {
     const C_MIN_PUBLIC_INDEX: u64 = u64(65536) // 2^16 = Cminpublicindex
     const MODULUS: u64 = u64(4294967296) - u64(256) - C_MIN_PUBLIC_INDEX // 2^32 - 2^8 - Cminpublicindex
 
     // If ID is not in accounts, return it
-    if (!accounts.has(id)) {
+    if (!this.hasAccountEntry(accounts, id)) {
       return id
     }
 

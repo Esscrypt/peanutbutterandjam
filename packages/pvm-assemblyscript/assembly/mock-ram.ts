@@ -7,6 +7,7 @@
  */
 
 import { FaultCheckResult, ReadResult, RAM, MemoryAccessType, WriteResult } from './types'
+import { MEMORY_CONFIG } from './config'
 
 export class MockRAM implements RAM {
   currentHeapPointer: u32 = 0
@@ -86,6 +87,15 @@ export class MockRAM implements RAM {
    */
   writeOctetsDuringInitialization(address: u32, values: Uint8Array): void {
     // Do nothing
+  }
+
+  /**
+   * Get page dump for a specific page index (no-op)
+   * Returns zeros for mock implementation
+   */
+  getPageDump(pageIndex: u32): Uint8Array {
+    // Return zeros (mock implementation)
+    return new Uint8Array(MEMORY_CONFIG.PAGE_SIZE)
   }
 
   /**

@@ -35,6 +35,7 @@ import { bytesToHex } from '@pbnj/core'
 import type { DecodingResult, Safe } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
+import { decodeNatural } from './natural-number'
 
 /**
  * Dictionary entry with key-value pair
@@ -101,9 +102,11 @@ export function encodeDictionary(entries: DictionaryEntry[]): Safe<Uint8Array> {
 export function decodeDictionary(
   data: Uint8Array,
   keyLength: number,
-  valueLength = -1,
+  valueLength: number,
 ): Safe<DecodingResult<DictionaryEntry[]>> {
   // Decode variable-length sequence: var{⟨⟨encode(k), encode(d[k])⟩⟩}
+  // Gray Paper: var{x} = encode{len(x)} || encode{x}
+  // So we decode the length prefix first, then process exactly that many bytes
   const [error, concatenatedPairsResult] = decodeVariableLength(data)
   if (error) {
     return safeError(error)
@@ -122,30 +125,62 @@ export function decodeDictionary(
 
   const result: DictionaryEntry[] = []
   let currentData = concatenatedPairs
+  const totalPairsLength = concatenatedPairs.length
+  let processedLength = 0
 
-  // Decode pairs until no data remains
-  while (currentData.length >= keyLength) {
+  // Decode pairs until we've processed all bytes in concatenatedPairs
+  // We know the exact length from the var{} prefix, so we stop when processedLength >= totalPairsLength
+  while (processedLength < totalPairsLength) {
     try {
       // Extract key
-      const key = currentData.slice(0, keyLength)
-      currentData = currentData.slice(keyLength)
+      let key: Uint8Array
+      let keyConsumed: number
+      if (keyLength === -1) {
+        // Variable length key - decode length prefix to find where key ends
+        // Keep the length prefix in the key (for nested decoding)
+        const [keyLenError, keyLenResult] = decodeNatural(currentData)
+        if (keyLenError) {
+          break
+        }
+        const keyLen = Number(keyLenResult.value)
+        const keyOffset = keyLenResult.consumed
+        if (currentData.length < keyOffset + keyLen) {
+          break
+        }
+        // Include length prefix in key (matches encoding where key includes length prefix)
+        key = currentData.slice(0, keyOffset + keyLen)
+        keyConsumed = keyOffset + keyLen
+        currentData = currentData.slice(keyConsumed)
+      } else {
+        // Fixed length key
+        if (currentData.length < keyLength) {
+          break
+        }
+        key = currentData.slice(0, keyLength)
+        keyConsumed = keyLength
+        currentData = currentData.slice(keyConsumed)
+      }
 
       // Extract value
-      let value: Uint8Array
-      if (valueLength === -1) {
-        // Variable length value - take remaining data
-        value = currentData
-        currentData = new Uint8Array(0)
-      } else if (currentData.length >= valueLength) {
-        // Fixed length value
-        value = currentData.slice(0, valueLength)
-        currentData = currentData.slice(valueLength)
-      } else {
+      // Value length must be specified - variable-length values should be handled at a higher level
+      if (currentData.length < valueLength) {
         // Not enough data for value
         break
       }
+      const value = currentData.slice(0, valueLength)
+      const valueConsumed = valueLength
+      currentData = currentData.slice(valueLength)
 
       result.push({ key, value })
+      
+      // Update processed length
+      const pairLength = keyConsumed + valueConsumed
+      processedLength += pairLength
+      
+      // Check if we've processed all bytes
+      if (processedLength >= totalPairsLength) {
+        break
+      }
     } catch (_error) {
       // If we can't decode more pairs, we're done
       break

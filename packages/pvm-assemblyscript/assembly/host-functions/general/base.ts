@@ -49,58 +49,135 @@ export class HostFunctionContext {
 /**
  * Host function parameter types
  */
-export interface ReadParams {
+export class ReadParams extends HostFunctionParams {
   serviceId: u64
   serviceAccount: ServiceAccount | null
   accounts: Map<u64, ServiceAccount>
+
+  constructor(
+    serviceId: u64,
+    serviceAccount: ServiceAccount | null,
+    accounts: Map<u64, ServiceAccount>,
+  ) {
+    super()
+    this.serviceId = serviceId
+    this.serviceAccount = serviceAccount
+    this.accounts = accounts
+  }
 }
 
-export interface WriteParams {
+export class WriteParams extends HostFunctionParams {
   serviceAccount: ServiceAccount
+
+  constructor(serviceAccount: ServiceAccount) {
+    super()
+    this.serviceAccount = serviceAccount
+  }
 }
 
-export interface InfoParams {
+export class InfoParams extends HostFunctionParams {
   serviceId: u64
   accounts: Map<u64, ServiceAccount>
+
+  constructor(serviceId: u64, accounts: Map<u64, ServiceAccount>) {
+    super()
+    this.serviceId = serviceId
+    this.accounts = accounts
+  }
 }
 
-export interface LookupParams {
+export class LookupParams extends HostFunctionParams {
   serviceId: u64
   accounts: Map<u64, ServiceAccount>
+
+  constructor(serviceId: u64, accounts: Map<u64, ServiceAccount>) {
+    super()
+    this.serviceId = serviceId
+    this.accounts = accounts
+  }
 }
 
-export interface HistoricalLookupParams {
+export class HistoricalLookupParams extends HostFunctionParams {
   serviceId: u64
   accounts: Map<u64, ServiceAccount>
   lookupTimeslot: u64
+
+  constructor(
+    serviceId: u64,
+    accounts: Map<u64, ServiceAccount>,
+    lookupTimeslot: u64,
+  ) {
+    super()
+    this.serviceId = serviceId
+    this.accounts = accounts
+    this.lookupTimeslot = lookupTimeslot
+  }
 }
 
-export interface InvokeParams {
+export class InvokeParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+
+  constructor(refineContext: RefineInvocationContext | null) {
+    super()
+    this.refineContext = refineContext
+  }
 }
 
-export interface ExpungeParams {
+export class ExpungeParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+
+  constructor(refineContext: RefineInvocationContext | null) {
+    super()
+    this.refineContext = refineContext
+  }
 }
 
-export class LogParams {
+export class LogParams extends HostFunctionParams {
   // LogParams doesn't need any properties - all data comes from registers
+  constructor() {
+    super()
+  }
 }
 
-export interface MachineParams {
+export class MachineParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+
+  constructor(refineContext: RefineInvocationContext | null) {
+    super()
+    this.refineContext = refineContext
+  }
 }
 
-export interface PagesParams {
+export class PagesParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+
+  constructor(refineContext: RefineInvocationContext | null) {
+    super()
+    this.refineContext = refineContext
+  }
 }
 
-export interface PeekPokeParams {
+export class PeekPokeParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+
+  constructor(refineContext: RefineInvocationContext | null) {
+    super()
+    this.refineContext = refineContext
+  }
 }
 
-export interface ExportParams {
+export class ExportParams extends HostFunctionParams {
   refineContext: RefineInvocationContext | null
+  segmentOffset: i64
+
+  constructor(
+    refineContext: RefineInvocationContext | null,
+    segmentOffset: i64 = 0,
+  ) {
+    super()
+    this.refineContext = refineContext
+    this.segmentOffset = segmentOffset
+  }
 }
 
 /**

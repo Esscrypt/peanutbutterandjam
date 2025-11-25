@@ -1,5 +1,4 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_HUH,
   ACCUMULATE_ERROR_WHO,
@@ -47,11 +46,15 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Read hash from memory (32 bytes)
     // Gray Paper line 851-854: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
-    const readResult_hashData = ram.readOctets(hashOffset, u64(32))
+    const readResult_hash = ram.readOctets(u32(hashOffset), u32(32))
     // Gray Paper line 862: panic when h = error, registers[7] unchanged
-    if (faultAddress !== null || hashData === null) {
+    if (readResult_hash.faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    if (readResult_hash.data === null) {
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+    const hashData = readResult_hash.data!
 
     // Get the current implications context
     const imX = implications.regular
@@ -59,27 +62,24 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Get service account d from accounts dictionary
     // Gray Paper: d ≠ imX.id ∧ d ∈ keys(imX.state.ps_accounts)
     if (serviceIdToEject === imX.id) {
-      this.setAccumulateError(registers, 'WHO')
-      return {
-        resultCode: null, // continue execution
-      }
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
+      return new HostFunctionResult(255) // continue execution
     }
 
-    const serviceAccount = imX.state.accounts.get(serviceIdToEject)
-    if (!serviceAccount) {
-      this.setAccumulateError(registers, 'WHO')
-      return {
-        resultCode: null, // continue execution
-      }
+    const accountEntry = this.findAccountEntry(imX.state.accounts, serviceIdToEject)
+    if (accountEntry === null) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
+      return new HostFunctionResult(255) // continue execution
     }
+    const serviceAccount = accountEntry.account
 
     // Verify the hash matches the service's code hash
     // Gray Paper: d.sa_codehash ≠ encode[32]{imX.id}
     const expectedCodeHash = this.encodeServiceId(imX.id)
-    const serviceCodeHash = this.hexToBytes(serviceAccount.codehash)
+    const serviceCodeHash = serviceAccount.codehash
     if (!this.arraysEqual(serviceCodeHash, expectedCodeHash)) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Calculate length: max(81, d.sa_octets) - 81
@@ -88,49 +88,48 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Check if the service has exactly 2 items and the request exists
     // Gray Paper: d.sa_items ≠ 2 ∨ (h, l) ∉ d.sa_requests
-    if (i32(serviceAccount.items) !== 2) {
+    if (serviceAccount.items !== 2) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
-    // Get request using nested map structure: requests[hash][length]
-    const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
-    if (!requestMap) {
+    // Get request using requests structure: requests.get(hash, length)
+    const requestStatus = serviceAccount.requests.get(hashData, u64(l))
+    if (requestStatus === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
-    }
-
-    const request = requestMap.get(u64(l))
-    if (!request) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Check if the ejection period has expired
     // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
     // For test vectors, Cexpungeperiod = 32 (as per README)
     // For production, Cexpungeperiod = 19200 (Gray Paper constant)
-    if (request.length < 2 || u64(request[1]) >= timeslot - expungePeriod) {
+    const timeslots = requestStatus.timeslots
+    if (timeslots.length < 2 || u64(timeslots[1]) >= timeslot - expungePeriod) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Transfer balance to current service and remove the ejected service
     // Gray Paper: imX'.state.ps_accounts = imX.state.ps_accounts \ {d} ∪ {imX.id: s'}
     // where s' = imX.self except s'.sa_balance = imX.self.sa_balance + d.sa_balance
-    const currentService = imX.state.accounts.get(imX.id)
+    const currentAccountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
 
-    if (currentService) {
-      currentService.balance += serviceAccount.balance
+    if (currentAccountEntry !== null) {
+      currentAccountEntry.account.balance += serviceAccount.balance
     }
 
     // Remove the ejected service account
-    imX.state.accounts.delete(serviceIdToEject)
+    for (let i = 0; i < imX.state.accounts.length; i++) {
+      if (u64(imX.state.accounts[i].serviceId) === serviceIdToEject) {
+        imX.state.accounts.splice(i, 1)
+        break
+      }
+    }
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   encodeServiceId(serviceId: u64): Uint8Array {

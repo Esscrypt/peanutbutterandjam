@@ -288,6 +288,26 @@ export class SimpleRAM implements RAM {
   }
 
   /**
+   * Get page dump for a specific page index
+   * Returns a copy of the page data (4KB) or zeros if page doesn't exist
+   */
+  getPageDump(pageIndex: u32): Uint8Array {
+    const pageSize = MEMORY_CONFIG.PAGE_SIZE
+    const startAddress = pageIndex * pageSize
+    const endAddress = startAddress + pageSize
+    
+    // Ensure memory is large enough
+    this.ensureMemorySize(endAddress)
+    
+    // Extract page data
+    const pageData = new Uint8Array(pageSize)
+    const sourceView = this.memory.subarray(startAddress, endAddress)
+    pageData.set(sourceView, 0)
+    
+    return pageData
+  }
+
+  /**
    * Reset RAM to initial state
    * Clears all memory, page access rights, and resets heap pointer
    */

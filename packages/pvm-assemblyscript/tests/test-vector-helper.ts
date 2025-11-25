@@ -2,12 +2,12 @@
  * Helper utilities for PVM test vector loading and execution
  */
 
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 // import { instantiate } from '@assemblyscript/loader'
 import { instantiate } from './wasmAsInit'
 import { logger } from '@pbnj/core'
-import { PVMParser } from '@pbnj/pvm'
+import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
 
 // PVM page size (4KB)
 const PAGE_SIZE = 4096
@@ -109,79 +109,142 @@ export function loadTestVectorsByPrefix(prefix: string): PVMTestVector[] {
 }
 
 /**
- * Dump memory state for debugging
+ * Dump parsed instructions for debugging
+ * Writes instructions with names to a file and shows which one failed
  */
-function dumpMemoryState(wasm: WebAssembly.Instance, testVectorName?: string): void {
+export function dumpParsedInstructions(testVector: PVMTestVector, failedPC?: number): void {
   try {
-    console.log('\n🔍 MEMORY DUMP ON ERROR:')
+    console.log('\n🔍 PARSED INSTRUCTIONS:')
     console.log('='.repeat(80))
     
-    if (testVectorName) {
-      console.log(`Test Vector: ${testVectorName}`)
+    if (testVector.name) {
+      console.log(`Test Vector: ${testVector.name}`)
     }
     
-    // Dump registers
+    // Parse program
     try {
-      // getRegisters() returns a pointer - use loader helper to lift it
-      const regs = wasm.getRegisters()
-      if (regs && regs.length >= 104) {
-        const regView = new DataView(regs.buffer)
-        console.log('\n📊 Registers:')
-        for (let i = 0; i < 13; i++) {
-          const value = regView.getBigUint64(i * 8, true)
-          console.log(`  r${i}: 0x${value.toString(16).padStart(16, '0')} (${value.toString()})`)
+      const parser = new PVMParser()
+      const registry = new InstructionRegistry()
+      const programBytes = testVector.program.map(Number)
+      const programBlob = new Uint8Array(programBytes)
+      const parsed = parser.parseProgram(programBlob)
+      
+      if (!parsed.success) {
+        console.error('❌ Failed to parse program:', parsed.errors)
+        return
+      }
+      
+      if (parsed.success) {
+        // Prepare instructions with names
+        const instructionsWithNames = parsed.instructions.map((inst, index) => {
+          const handler = registry.getHandler(inst.opcode)
+          const instructionName = handler ? handler.name : `UNKNOWN_OPCODE_${inst.opcode.toString()}`
+          const operandsStr = Array.from(inst.operands)
+            .map(b => `0x${b.toString(16).padStart(2, '0')}`)
+            .join(', ')
+          
+          return {
+            index,
+            pc: inst.pc.toString(),
+            pcHex: `0x${inst.pc.toString(16)}`,
+            opcode: inst.opcode.toString(),
+            opcodeHex: `0x${inst.opcode.toString(16)}`,
+            name: instructionName,
+            operands: Array.from(inst.operands).map(b => `0x${b.toString(16).padStart(2, '0')}`),
+            operandsStr,
+            fskip: inst.fskip,
+            isFailed: failedPC !== undefined && Number(inst.pc) === failedPC,
+      }
+        })
+        
+        // Write to file
+        const outputDir = join(process.cwd(), 'test-failures')
+        try {
+          // Ensure directory exists (create if it doesn't)
+          mkdirSync(outputDir, { recursive: true })
+        } catch {
+          // Ignore - directory might already exist or creation might fail
+        }
+        
+        const fileName = `${testVector.name || 'unknown'}_instructions.json`
+        const filePath = join(outputDir, fileName)
+        
+        const output = {
+          testVector: testVector.name,
+          programInfo: {
+            codeLength: parsed.codeLength,
+            jumpTableSize: parsed.jumpTable.length,
+            bitmaskLength: parsed.bitmask.length,
+            instructionsCount: parsed.instructions.length,
+          },
+          jumpTable: parsed.jumpTable.map((target, index) => ({
+            index,
+            target: target.toString(),
+            targetHex: `0x${target.toString(16)}`,
+          })),
+          instructions: instructionsWithNames,
+          failedPC: failedPC !== undefined ? {
+            pc: failedPC,
+            instruction: instructionsWithNames.find(inst => inst.isFailed) || null,
+          } : null,
+          parseErrors: parsed.errors,
+        }
+        
+        writeFileSync(filePath, JSON.stringify(output, null, 2))
+        console.log(`\n📝 Instructions written to: ${filePath}`)
+        
+        // Show summary
+        console.log(`\n📊 Program Info:`)
+        console.log(`  Code Length: ${parsed.codeLength}`)
+        console.log(`  Jump Table Size: ${parsed.jumpTable.length}`)
+        console.log(`  Bitmask Length: ${parsed.bitmask.length}`)
+        console.log(`  Instructions Count: ${parsed.instructions.length}`)
+        
+        // Show failed instruction if available
+        if (failedPC !== undefined) {
+          const failedInst = instructionsWithNames.find(inst => inst.isFailed)
+          if (failedInst) {
+            console.log(`\n❌ FAILED INSTRUCTION:`)
+            console.log(`  Index: ${failedInst.index}`)
+            console.log(`  PC: ${failedInst.pcHex} (${failedInst.pc})`)
+            console.log(`  Name: ${failedInst.name}`)
+            console.log(`  Opcode: ${failedInst.opcodeHex} (${failedInst.opcode})`)
+            console.log(`  Operands: [${failedInst.operandsStr}]`)
+            console.log(`  Fskip: ${failedInst.fskip}`)
+          } else {
+            console.log(`\n⚠️  Failed PC ${failedPC} (0x${failedPC.toString(16)}) not found in parsed instructions`)
+          }
+        }
+        
+        // Show first few instructions
+        console.log(`\n📊 First 10 Instructions:`)
+        instructionsWithNames.slice(0, 10).forEach((inst) => {
+          const marker = inst.isFailed ? ' ❌' : ''
+          console.log(`  [${inst.index}] PC: ${inst.pcHex} | ${inst.name} (${inst.opcodeHex}) | Operands: [${inst.operandsStr}]${marker}`)
+        })
+        
+        if (parsed.errors.length > 0) {
+          console.log(`\n⚠️  Parse Errors:`)
+          parsed.errors.forEach((error) => {
+            console.log(`  - ${error}`)
+          })
         }
       } else {
-        console.log('  ⚠️  Registers array too short or null:', regs?.length ?? 'null')
-      }
-    } catch (e) {
-      console.log('  ❌ Failed to get registers:', e)
-    }
-    
-    // Dump PC, gas, status
-    try {
-      console.log('\n📊 State:')
-      console.log(`  PC: ${wasm.getProgramCounter()}`)
-      console.log(`  Gas: ${wasm.getGasLeft()}`)
-      console.log(`  Status: ${wasm.getStatus()}`)
-      console.log(`  Exit Arg: ${wasm.getExitArg()}`)
-    } catch (e) {
-      console.log('  ❌ Failed to get state:', e)
-    }
-    
-    // Dump memory pages (first few pages)
-    try {
-      console.log('\n📊 Memory Pages (first 10 pages):')
-      for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
-        const pageData = wasm.getPageDump(pageIndex)
-        if (pageData && pageData.length > 0) {
-          // Show first 64 bytes of non-zero data
-          const nonZeroBytes: number[] = []
-          for (let i = 0; i < Math.min(64, pageData.length); i++) {
-            if (pageData[i] !== 0) {
-              nonZeroBytes.push(i)
-            }
-          }
-          if (nonZeroBytes.length > 0) {
-            console.log(`  Page ${pageIndex} (addr 0x${(pageIndex * PAGE_SIZE).toString(16)}):`)
-            console.log(`    Non-zero bytes at offsets: ${nonZeroBytes.slice(0, 20).join(', ')}${nonZeroBytes.length > 20 ? '...' : ''}`)
-            // Show first few non-zero values
-            const sampleValues = nonZeroBytes.slice(0, 10).map(offset => ({
-              offset,
-              value: pageData[offset],
-            }))
-            console.log(`    Sample values: ${sampleValues.map(v => `[${v.offset}]=0x${v.value.toString(16)}`).join(', ')}`)
-          }
+        console.log(`\n❌ Failed to parse program`)
+        if (parsed.errors.length > 0) {
+          parsed.errors.forEach((error) => {
+            console.log(`  - ${error}`)
+          })
         }
       }
     } catch (e) {
-      console.log('  ❌ Failed to get memory pages:', e)
+      console.log(`  ❌ Failed to parse program: ${e}`)
     }
     
     console.log('='.repeat(80))
     console.log('')
   } catch (e) {
-    console.log('❌ Failed to dump memory state:', e)
+    console.log('❌ Failed to dump parsed instructions:', e)
   }
 }
 
@@ -202,6 +265,256 @@ async function loadWasmModule(): Promise<any> {
   return wasmModule
 }
 
+
+/**
+ * Execute a test vector step-by-step and return comprehensive execution trace
+ */
+export async function executeTestVectorStepByStep(testVector: PVMTestVector): Promise<{
+  registers: Uint8Array
+  pc: number
+  gas: number
+  status: string
+  faultAddress: bigint | null
+  memory: Map<bigint, number>
+  parseResult: { instructions: Array<{ opcode: bigint; operands: Uint8Array; pc: bigint }>; jumpTable: bigint[]; bitmask: Uint8Array; success: boolean }
+  executionTrace: Array<{
+    step: number
+    pc: number
+    instructionName: string
+    opcode: string
+    operands: number[]
+    registersBefore: Record<string, string>
+    registersAfter: Record<string, string>
+    gas: number
+    status: string
+  }>
+}> {
+  // Load WASM module
+  const wasm = await loadWasmModule()
+  
+  // Convert program bytes to Uint8Array
+  const programBytes = testVector.program.map(Number)
+  const programBlob = new Uint8Array(programBytes)
+
+  // Parse program to get instruction info
+  const parser = new PVMParser()
+  const registry = new InstructionRegistry()
+  const parseResult = parser.parseProgram(programBlob)
+  
+  // Create instruction lookup by PC
+  const instructionMap = new Map<number, { name: string; opcode: string; operands: number[] }>()
+  if (parseResult.success) {
+    for (const inst of parseResult.instructions) {
+      const pc = Number(inst.pc)
+      const handler = registry.getHandler(Number(inst.opcode))
+      instructionMap.set(pc, {
+        name: handler?.name || `UNKNOWN_${inst.opcode}`,
+        opcode: `0x${Number(inst.opcode).toString(16)}`,
+        operands: Array.from(inst.operands),
+      })
+    }
+  }
+
+  // Initialize WASM PVM
+  wasm.init(1) // RAMType.SimpleRAM
+
+  // Create initial registers (13 x 8 bytes = 104 bytes)
+  const initialRegisters = new Uint8Array(104)
+  const initialRegisterView = new DataView(initialRegisters.buffer)
+  for (let i = 0; i < 13; i++) {
+    const value = BigInt(String(testVector['initial-regs'][i]))
+    initialRegisterView.setBigUint64(i * 8, value, true)
+  }
+
+  // Set gas and initial PC
+  const initialGas = BigInt(String(testVector['initial-gas']))
+  wasm.setGasLeft(initialGas)
+  wasm.setRegisters(initialRegisters)
+
+  const initialPC = Number(testVector['initial-pc'])
+  if (initialPC !== 0) {
+    wasm.setNextProgramCounter(initialPC)
+  }
+
+  // Initialize pages and memory (same as executeTestVector)
+  if (testVector['initial-page-map']) {
+    for (const page of testVector['initial-page-map']) {
+      const address = Number(page.address)
+      const length = Number(page.length)
+      const isWritable = page['is-writable']
+      const accessType = isWritable ? 2 : 1
+      try {
+        wasm.initPage(address, length, accessType)
+      } catch (error) {
+        console.error(`❌ Error initializing page at address 0x${address.toString(16)}:`, error)
+        throw error
+      }
+    }
+  }
+
+  if (testVector['initial-memory']) {
+    for (const memBlock of testVector['initial-memory']) {
+      const address = Number(memBlock.address)
+      const contents = memBlock.contents.map(Number)
+      const values = new Uint8Array(contents)
+      try {
+        wasm.setMemory(address, values)
+      } catch (error) {
+        console.error(`❌ Error setting memory at address 0x${address.toString(16)}:`, error)
+        throw error
+      }
+    }
+  }
+
+  // Prepare program blob (decode without executing)
+  wasm.prepareBlob(programBlob)
+  
+  // Set initial PC and gas
+  wasm.setNextProgramCounter(initialPC)
+  wasm.setGasLeft(initialGas)
+
+  // Execution trace
+  const executionTrace: Array<{
+    step: number
+    pc: number
+    instructionName: string
+    opcode: string
+    operands: number[]
+    registersBefore: Record<string, string>
+    registersAfter: Record<string, string>
+    gas: number
+    status: string
+  }> = []
+
+  // Status map
+  const statusMap: Record<number, string> = {
+    0: 'halt',
+    1: 'halt',
+    2: 'panic',
+    3: 'page-fault',
+    4: 'host',
+    5: 'out-of-gas',
+  }
+
+  // Helper to decode registers
+  const decodeRegisters = (registers: Uint8Array): Record<string, string> => {
+    const view = new DataView(registers.buffer)
+    const result: Record<string, string> = {}
+    for (let i = 0; i < 13; i++) {
+      const value = view.getBigUint64(i * 8, true)
+      result[`r${i}`] = value.toString()
+    }
+    return result
+  }
+
+  // Execute step-by-step
+  let step = 0
+  const maxSteps = 10000 // Safety limit
+  let lastPC = wasm.getProgramCounter()
+
+  while (step < maxSteps) {
+    const pcBefore = wasm.getProgramCounter()
+    const gasBefore = wasm.getGasLeft()
+    const statusBefore = wasm.getStatus()
+    const registersBefore = wasm.getRegisters()
+    
+    // Get instruction info
+    const instInfo = instructionMap.get(pcBefore) || {
+      name: 'UNKNOWN',
+      opcode: '0x0',
+      operands: [],
+    }
+
+    // Execute one step
+    const shouldContinue = wasm.nextStep()
+    
+    const pcAfter = wasm.getProgramCounter()
+    const gasAfter = wasm.getGasLeft()
+    const statusAfter = wasm.getStatus()
+    const registersAfter = wasm.getRegisters()
+
+    // Record step
+    executionTrace.push({
+      step: step + 1,
+      pc: pcBefore,
+      instructionName: instInfo.name,
+      opcode: instInfo.opcode,
+      operands: instInfo.operands,
+      registersBefore: decodeRegisters(registersBefore),
+      registersAfter: decodeRegisters(registersAfter),
+      gas: Number(gasAfter),
+      status: statusMap[statusAfter] || 'unknown',
+    })
+
+    // Check if execution should stop
+    if (!shouldContinue || statusAfter !== 0) {
+      break
+    }
+
+    // Safety check: if PC didn't change and we're not halted, something is wrong
+    if (pcAfter === lastPC && statusAfter === 0) {
+      console.warn(`⚠️  PC did not advance at step ${step + 1}, stopping execution`)
+      break
+    }
+
+    lastPC = pcAfter
+    step++
+  }
+
+  // Get final state
+  const finalRegisters = wasm.getRegisters()
+  const finalPC = wasm.getProgramCounter()
+  const finalGas = wasm.getGasLeft()
+  const wasmStatus = wasm.getStatus()
+  const exitArg = wasm.getExitArg()
+
+  const status = statusMap[wasmStatus] || 'panic'
+
+  // Extract final memory state
+  const finalMemory = new Map<bigint, number>()
+  if (testVector['expected-memory']) {
+    for (const memBlock of testVector['expected-memory']) {
+      const address = BigInt(memBlock.address)
+      const length = memBlock.contents.length
+      const pageSize = PAGE_SIZE
+      const pageIndex = Math.floor(Number(address) / pageSize)
+      const pageData = wasm.getPageDump(pageIndex)
+      if (pageData && pageData.length > 0) {
+        for (let i = 0; i < length; i++) {
+          const addr = address + BigInt(i)
+          const pageIdx = Math.floor(Number(addr) / pageSize)
+          const offset = Number(addr) % pageSize
+          if (pageIdx === pageIndex) {
+            finalMemory.set(addr, pageData[offset])
+          } else {
+            const otherPageData = wasm.getPageDump(pageIdx)
+            if (otherPageData && otherPageData.length > 0) {
+              finalMemory.set(addr, otherPageData[offset])
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const faultAddress: bigint | null = wasmStatus === 3 ? (exitArg !== 0 ? BigInt(exitArg) : null) : null
+
+  return {
+    registers: finalRegisters,
+    pc: finalPC,
+    gas: Number(finalGas),
+    status,
+    faultAddress,
+    memory: finalMemory,
+    parseResult: {
+      instructions: parseResult.instructions,
+      jumpTable: parseResult.jumpTable,
+      bitmask: parseResult.bitmask,
+      success: parseResult.success,
+    },
+    executionTrace,
+  }
+}
 
 /**
  * Execute a test vector and return the resulting state
@@ -246,6 +559,21 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   // @assemblyscript/loader automatically converts Uint8Array to Array<u8>
   wasm.setRegisters(initialRegisters)
 
+  // Debug: Verify registers were set correctly
+  const regsAfterSet = wasm.getRegisters()
+  const regViewAfterSet = new DataView(regsAfterSet.buffer)
+  const registersAfterSet: Record<string, string> = {}
+  for (let i = 0; i < 13; i++) {
+    const value = regViewAfterSet.getBigUint64(i * 8, true)
+    registersAfterSet[`r${i}`] = `0x${value.toString(16)} (${value.toString()})`
+  }
+  console.log('🔍 DEBUG: After setRegisters', {
+    testVector: testVector.name,
+    registers: registersAfterSet,
+    pc: wasm.getProgramCounter(),
+    gas: Number(wasm.getGasLeft()),
+  })
+
   const initialPC = Number(testVector['initial-pc'])
   if (initialPC !== 0) {
     wasm.setNextProgramCounter(initialPC)
@@ -268,7 +596,14 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
         wasm.initPage(address, length, accessType)
       } catch (error) {
         console.error(`❌ Error initializing page at address 0x${address.toString(16)}:`, error)
-        dumpMemoryState(wasm, testVector.name)
+        const failedPC = (() => {
+          try {
+            return wasm.getProgramCounter()
+          } catch {
+            return undefined
+          }
+        })()
+        dumpParsedInstructions(testVector, failedPC)
         throw error
       }
     }
@@ -287,7 +622,14 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
         wasm.setMemory(address, values)
       } catch (error) {
         console.error(`❌ Error setting memory at address 0x${address.toString(16)}:`, error)
-        dumpMemoryState(wasm, testVector.name)
+        const failedPC = (() => {
+          try {
+            return wasm.getProgramCounter()
+          } catch {
+            return undefined
+          }
+        })()
+        dumpParsedInstructions(testVector, failedPC)
         throw error
       }
       
@@ -390,7 +732,39 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     })
   }
   
+  // Debug: Check state right before runBlob
+  const regsBeforeRun = wasm.getRegisters()
+  const regViewBeforeRun = new DataView(regsBeforeRun.buffer)
+  const registersBeforeRun: Record<string, string> = {}
+  for (let i = 0; i < 13; i++) {
+    const value = regViewBeforeRun.getBigUint64(i * 8, true)
+    registersBeforeRun[`r${i}`] = `0x${value.toString(16)} (${value.toString()})`
+  }
+  console.log('🔍 DEBUG: Right before runBlob', {
+    testVector: testVector.name,
+    registers: registersBeforeRun,
+    pc: wasm.getProgramCounter(),
+    gas: Number(wasm.getGasLeft()),
+    status: wasm.getStatus(),
+  })
+  
   wasm.runBlob(programBlob)
+  
+  // Debug: Check state right after runBlob
+  const regsAfterRun = wasm.getRegisters()
+  const regViewAfterRun = new DataView(regsAfterRun.buffer)
+  const registersAfterRun: Record<string, string> = {}
+  for (let i = 0; i < 13; i++) {
+    const value = regViewAfterRun.getBigUint64(i * 8, true)
+    registersAfterRun[`r${i}`] = `0x${value.toString(16)} (${value.toString()})`
+  }
+  console.log('🔍 DEBUG: Right after runBlob', {
+    testVector: testVector.name,
+    registers: registersAfterRun,
+    pc: wasm.getProgramCounter(),
+    gas: Number(wasm.getGasLeft()),
+    status: wasm.getStatus(),
+  })
   
   // Debug for specific tests
   if (testVector.name === 'inst_store_imm_indirect_u16_without_offset_ok' || 
@@ -551,7 +925,14 @@ export async function executeTestVectorWithRunProgram(testVector: PVMTestVector)
         wasm.initPage(address, length, accessType)
       } catch (error) {
         console.error(`❌ Error initializing page at address 0x${address.toString(16)}:`, error)
-        dumpMemoryState(wasm, testVector.name)
+        const failedPC = (() => {
+          try {
+            return wasm.getProgramCounter()
+          } catch {
+            return undefined
+          }
+        })()
+        dumpParsedInstructions(testVector, failedPC)
         throw error
       }
     }
@@ -568,7 +949,14 @@ export async function executeTestVectorWithRunProgram(testVector: PVMTestVector)
         wasm.setMemory(address, values)
       } catch (error) {
         console.error(`❌ Error setting memory at address 0x${address.toString(16)}:`, error)
-        dumpMemoryState(wasm, testVector.name)
+        const failedPC = (() => {
+          try {
+            return wasm.getProgramCounter()
+          } catch {
+            return undefined
+          }
+        })()
+        dumpParsedInstructions(testVector, failedPC)
         throw error
       }
     }

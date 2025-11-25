@@ -1,4 +1,4 @@
-import { hexToBytes, type Hex } from '@pbnj/core'
+import { hexToBytes } from '@pbnj/core'
 import {
   encodeWorkItem,
   encodeWorkItemSummary,

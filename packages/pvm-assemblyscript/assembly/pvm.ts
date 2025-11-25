@@ -9,7 +9,12 @@ import { alignToZone } from './alignment-helpers'
 import {
   decodeBlob,
   decodeProgramFromPreimage,
+  decodeImplicationsPair,
+  decodeServiceCodeFromPreimage,
+  decodeAccumulateArgs,
+  encodeImplicationsPair,
 } from './codec'
+import { ImplicationsPair } from './codec'
 import {
   ARGS_SEGMENT_START,
   DEFAULT_GAS_LIMIT,
@@ -23,6 +28,8 @@ import {
   STACK_SEGMENT_END,
   ZONE_SIZE,
 } from './config'
+import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
+import { AccumulateHostFunctionContext } from './host-functions/accumulate/base'
 import { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMParser } from './parser'
@@ -92,13 +99,19 @@ export class MarshallingInvocationResult {
 }
 
 /**
- * Host function context mutator callback
- * Called when a host function is invoked (ECALLI instruction)
- * 
- * @param hostCallId - The host function ID to execute
- * @returns Result code if execution should halt, or null to continue
+ * Accumulation invocation result
  */
-export type HostFunctionContextMutator = (hostCallId: u64) => i32 // -1 = continue, >= 0 = halt with that code
+export class AccumulateInvocationResult {
+  gasConsumed: u32
+  result: ExecutionResult
+  encodedContext: Uint8Array
+
+  constructor(gasConsumed: u32, result: ExecutionResult, encodedContext: Uint8Array) {
+    this.gasConsumed = gasConsumed
+    this.result = result
+    this.encodedContext = encodedContext
+  }
+}
 
 /**
  * PVM implementation
@@ -109,8 +122,9 @@ export class PVM {
   public state: PVMState
   registry: InstructionRegistry
   hostFunctionRegistry: HostFunctionRegistry
-  contextMutator: HostFunctionContextMutator | null = null
-  context: usize = 0 // Context X (RefineInvocationContext | ImplicationsPair) - using usize as generic pointer
+  accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
+  accumulationContext: ImplicationsPair | null = null
+  timeslot: u64 = u64(0) // Current timeslot for accumulation
 
   constructor(
     registerState: RegisterState,
@@ -125,19 +139,13 @@ export class PVM {
     // Initialize host function registry (optional)
     this.hostFunctionRegistry = hostFunctionRegistry
 
+    // Initialize accumulation host function registry
+    this.accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry()
+
     // Initialize state
     this.state = new PVMState(registerState, ram, programCounter, gasCounter)
   }
 
-  /**
-   * Set the host function context mutator
-   * This callback is invoked when a host function is called (ECALLI instruction)
-   * 
-   * @param mutator - Function that handles host function calls
-   */
-  public setContextMutator(mutator: HostFunctionContextMutator | null): void {
-    this.contextMutator = mutator
-  }
 
   /**
    * Invoke PVM execution with specific parameters
@@ -178,17 +186,30 @@ export class PVM {
     programBlob: Uint8Array,
     argumentData: Uint8Array,
   ): Uint8Array | null {
+    // Extract codeBlob from preimage first (needed for both Y function and deblob decoding)
+    const preimageResult = decodeServiceCodeFromPreimage(programBlob)
+    if (!preimageResult) {
+      abort(
+        `initializeProgram: Failed to decode service code from preimage: programBlob length=${programBlob.length}`
+      )
+      unreachable()
+    }
+    const codeBlob = preimageResult!.value.codeBlob
+
     // Try to decode as standard program format first (Gray Paper Y function)
     const result = decodeProgramFromPreimage(programBlob)
     if (!result) {
-      return null
+      abort(
+        `initializeProgram: Failed to decode program from preimage: programBlob length=${programBlob.length}, codeBlob length=${codeBlob.length}`
+      )
+      unreachable()
     }
 
-    const code = result.code
-    const roData = result.roData
-    const rwData = result.rwData
-    const stackSize = result.stackSize
-    const heapZeroPaddingSize = result.heapZeroPaddingSize
+    const code = result!.code
+    const roData = result!.roData
+    const rwData = result!.rwData
+    const stackSize = result!.stackSize
+    const heapZeroPaddingSize = result!.heapZeroPaddingSize
 
     // Gray Paper equation 767: Validate condition
     // 5*Cpvminitzonesize + rnq(len(o)) + rnq(len(w) + z*Cpvmpagesize) + rnq(s) + Cpvminitinputsize <= 2^32
@@ -199,15 +220,22 @@ export class PVM {
     )
     const alignedStackSize = alignToZone(i32(stackSize))
 
-    const total =
-      5 * ZONE_SIZE +
+    const total: u32 =
+      u32(5 * ZONE_SIZE +
       alignedReadOnlyDataLength +
       alignedHeapLength +
       alignedStackSize +
-      INIT_INPUT_SIZE
+      INIT_INPUT_SIZE)
 
-    if (total > 2 ** 32) {
-      return null
+    // Gray Paper equation 767: total must be <= 2^32
+    // Use u32.MAX_VALUE (2^32 - 1) for comparison since 2^32 cannot be represented as u32
+    // If total > u32.MAX_VALUE, then total >= 2^32, which violates the condition
+    const MAX_U32: u32 = 0xFFFFFFFF // 2^32 - 1 = 4294967295
+    if (total > MAX_U32) {
+      abort(
+        `initializeProgram: Gray Paper equation 767 condition violated: total=${total} > 2^32 (${MAX_U32 + 1}), roDataLength=${roData.length}, rwDataLength=${rwData.length}, heapZeroPaddingSize=${heapZeroPaddingSize}, stackSize=${stackSize}, alignedReadOnlyDataLength=${alignedReadOnlyDataLength}, alignedHeapLength=${alignedHeapLength}, alignedStackSize=${alignedStackSize}`
+      )
+      unreachable()
     }
 
     // Initialize registers according to Gray Paper equation 803-811
@@ -221,6 +249,20 @@ export class PVM {
       stackSize,
       heapZeroPaddingSize,
     )
+
+    // The code field from decodeProgramFromPreimage is the instruction data blob in deblob format
+    // Decode it as deblob format to get bitmask and jump table
+    const decodedBlob = decodeBlob(code)
+    if (!decodedBlob) {
+      abort(
+        `initializeProgram: Failed to decode code as deblob format: code length=${code.length}, codeBlob length=${codeBlob.length}`
+      )
+      unreachable()
+    }
+    // Set decoded program state so run() can use it
+    this.state.code = decodedBlob!.code
+    this.state.bitmask = decodedBlob!.bitmask
+    this.state.jumpTable = decodedBlob!.jumpTable
 
     return code
   }
@@ -292,78 +334,6 @@ export class PVM {
       stackSize,
       heapZeroPaddingSize,
     )
-  }
-
-  /**
-   * Ψ_M - Marshalling PVM invocation function
-   * Gray Paper: Ψ_M(blob, pvmreg, gas, blob, contextmutator, X) → (gas, blob ∪ {panic, oog}, X)
-   *
-   * Gray Paper equation 817-839:
-   * - If Y(p, a) = none: return (0, panic, x)
-   * - If Y(p, a) = (c, registers, mem): call R(gascounter, Ψ_H(.))
-   *
-   * R function (equation 829-835):
-   * - If ε = oog: return (u, oog, x')
-   * - If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}: return (u, mem'[registers'[7].registers'[8]], x')
-   * - If ε = halt AND range not readable: return (u, [], x')
-   * - Otherwise: return (u, panic, x')
-   * Where u = gascounter - max(gascounter', 0)
-   *
-   * @param programBlob - Service code blob
-   * @param initialPC - Initial program counter (typically 0 for refine, 5 for accumulate)
-   * @param gasLimit - Gas limit for execution
-   * @param encodedArgs - Encoded arguments blob
-   * @param contextMutator - Context mutator function F
-   * @param context - Context X (ImplicationsPair for accumulate, RefineContext for refine)
-   * @returns Tuple of (gas consumed, result, updated context) where result is blob ∪ {panic, oog}
-   */
-  executeMarshallingInvocation(
-    programBlob: Uint8Array,
-    initialPC: u32,
-    gasLimit: u32,
-    encodedArgs: Uint8Array,
-    contextMutator: HostFunctionContextMutator,
-    context: any,
-  ): MarshallingInvocationResult {
-    // Store context mutator and context for use during execution
-    this.contextMutator = contextMutator
-    this.context = context
-
-    // Gray Paper equation 822: Use Y function to initialize program state
-    // Y(programBlob, argumentData) → (code, registers, ram)?
-    const codeBlob = this.initializeProgram(programBlob, encodedArgs)
-    if (codeBlob === null) {
-      // Gray Paper: If Y(p, a) = none: return (0, panic, x)
-      return new MarshallingInvocationResult(0, ExecutionResult.fromPanic(), context)
-    }
-
-    // Store initial gas for calculation
-    const initialGas = gasLimit
-    this.state.gasCounter = gasLimit
-    this.state.programCounter = initialPC
-
-    // Gray Paper: Call core Ψ function (Ψ_H) with context mutator
-    // The core Ψ function (this.run) handles all PVM execution logic
-    this.run(codeBlob) // null means use existing state.code
-
-    // After execution, extract final state
-    const finalGasCounter = this.state.gasCounter
-    const finalResultCode = this.state.resultCode
-    const finalRegisters = this.state.registerState
-    const finalMemory = this.state.ram
-
-    // Gray Paper equation 834: Calculate gas consumed
-    // u = gascounter - max(gascounter', 0)
-    const gasConsumed = initialGas - (finalGasCounter > 0 ? finalGasCounter : 0)
-
-    // Gray Paper equation 829-835: R function - extract result based on termination
-    const result = this.extractResultFromExecution(
-      finalResultCode,
-      finalRegisters,
-      finalMemory,
-    )
-
-    return new MarshallingInvocationResult(gasConsumed, result, this.context)
   }
 
   runProgram(): RunProgramResult {
@@ -499,27 +469,83 @@ export class PVM {
         return i32(RESULT_CODE_OOG)
       }
 
-      // Use context mutator if available (for accumulate/refine invocations)
-      if (this.contextMutator !== null) {
-        const mutatorResult = this.contextMutator(hostCallId)
-
-        // If host function returns -1 (continue), advance PC by instruction length
-        // The PC was not advanced in executeInstruction() because it returned HOST early
-        if (mutatorResult === -1) {
-          const instructionLength = u32(1 + instruction.fskip)
-          this.state.programCounter += instructionLength
-        }
-
-        // Check if mutator wants to halt execution (-1 = continue, >= 0 = halt)
-        return mutatorResult
+      // Handle HOST calls according to pvm_invocations.tex
+      // If in accumulation context, route to accumulation host functions
+      if (this.accumulationContext !== null) {
+        return this.handleAccumulationHostCall(hostCallId, instruction)
       }
 
-      // If no context mutator is set, return HOST result code to indicate host call needed
+      // Otherwise, return HOST result code to indicate host call needed (general functions)
       return i32(RESULT_CODE_HOST)
     }
 
     // Return the result code (halt/panic/oog/etc)
     return resultCode
+  }
+
+  /**
+   * Handle HOST calls during accumulation invocation
+   * 
+   * Gray Paper pvm_invocations.tex equation 187-211:
+   * Routes host calls to appropriate handlers based on function ID
+   * - General functions: gas, fetch, read, write, lookup, info
+   * - Accumulation-specific functions: bless, assign, designate, checkpoint, new, upgrade, transfer, eject, query, solicit, forget, yield, provide
+   * 
+   * @param hostCallId - Host function ID
+   * @param instruction - Current instruction (for PC advancement)
+   * @returns Result code (-1 = continue, >= 0 = halt)
+   */
+  private handleAccumulationHostCall(hostCallId: u64, instruction: PVMInstruction): i32 {
+    // Check if it's an accumulation-specific function
+    const accumulateHandler = this.accumulateHostFunctionRegistry.get(hostCallId)
+    
+    if (accumulateHandler !== null) {
+      // Create accumulation host function context
+      const context = new AccumulateHostFunctionContext(
+        this.state.gasCounter,
+        this.state.registerState,
+        this.state.ram,
+        this.accumulationContext!,
+        this.timeslot,
+        u64(19200), // Cexpungeperiod = 19200
+      )
+      
+      // Execute accumulation host function
+      const result = accumulateHandler.execute(context)
+      
+      // Update gas counter from context
+      this.state.gasCounter = context.gasCounter
+      
+      // Update implications from context (mutations are done in-place)
+      // The context.implications is the same reference, so mutations are already reflected
+      
+      // If result code is null, continue execution
+      if (result.resultCode === null) {
+        // Advance PC by instruction length (host function handled it)
+        const instructionLength = u32(1 + instruction.fskip)
+        this.state.programCounter += instructionLength
+        return -1 // Continue
+      }
+      
+      // Otherwise, halt with the result code
+      this.state.resultCode = result.resultCode
+      return i32(result.resultCode)
+    }
+    
+    // Check if it's a general function that's available in accumulation context
+    // Gray Paper: gas (0), fetch (1), read (3), write (4), lookup (2), info (5)
+    const generalHandler = this.hostFunctionRegistry.get(hostCallId)
+    if (generalHandler !== null) {
+      // For general functions in accumulation context, we still need to handle them
+      // but they don't have access to accumulation context
+      // For now, return HOST to indicate it needs external handling
+      // TODO: Implement general function execution with accumulation context if needed
+      return i32(RESULT_CODE_HOST)
+    }
+    
+    // Unknown host function
+    this.state.resultCode = RESULT_CODE_PANIC
+    return i32(RESULT_CODE_PANIC)
   }
 
   /**
@@ -769,6 +795,127 @@ export class PVM {
     return newState
   }
 
+
+  public accumulateInvocation(
+    gasLimit: u32,
+    program: Uint8Array,
+    args: Uint8Array,
+    context: Uint8Array,
+    numCores: i32,
+    numValidators: i32,
+    authQueueSize: i32,
+  ): AccumulateInvocationResult {
+    const initialGas = gasLimit
+    
+    // Set up accumulation invocation (decodes context, initializes program, sets up state, extracts timeslot)
+    // setupAccumulateInvocation already decodes args and sets this.timeslot according to Gray Paper
+    this.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+
+    // Gray Paper: Call core Ψ function (Ψ_H) with context mutator
+    // The core Ψ function (this.run) handles all PVM execution logic
+    // Pass null because setupAccumulateInvocation already set up state.code, state.bitmask, etc.
+    this.run(null) // null means use existing state.code (set by setupAccumulateInvocation)
+    
+    // After execution, extract final state
+    const finalGasCounter = this.state.gasCounter
+    const finalResultCode = this.state.resultCode
+    const finalRegisters = this.state.registerState
+    const finalMemory = this.state.ram
+
+    // Gray Paper equation 834: Calculate gas consumed
+    // u = gascounter - max(gascounter', 0)
+    const gasConsumed = initialGas - (finalGasCounter > 0 ? finalGasCounter : 0)
+
+    // Gray Paper equation 829-835: R function - extract result based on termination
+    const result = this.extractResultFromExecution(
+      finalResultCode,
+      finalRegisters,
+      finalMemory,
+    )
+    
+    // Encode final context (ImplicationsPair) - use the updated accumulationContext
+    if (!this.accumulationContext) {
+      abort(
+        `accumulateInvocation: accumulationContext is null after execution`
+      )
+      unreachable()
+    }
+    
+    const encodedContext = encodeImplicationsPair(
+      this.accumulationContext!,
+      numCores,
+      numValidators,
+      authQueueSize,
+    )
+    
+    // Clear accumulation context after execution
+    this.accumulationContext = null
+    
+    return new AccumulateInvocationResult(gasConsumed, result, encodedContext)
+  }
+
+  /**
+   * Set up accumulation invocation without executing
+   * This allows step-by-step execution after setup
+   */
+  public setupAccumulateInvocation(
+    gasLimit: u32,
+    program: Uint8Array,
+    args: Uint8Array,
+    context: Uint8Array,
+    numCores: i32,
+    numValidators: i32,
+    authQueueSize: i32,
+  ): void {
+    this.state.gasCounter = gasLimit
+    this.state.programCounter = 5 // initial PC for accumulate invocation
+    
+    // Decode accumulation context (ImplicationsPair)
+    const contextResult = decodeImplicationsPair(context, numCores, numValidators, authQueueSize)
+    if (!contextResult) {
+      abort(
+        `setupAccumulateInvocation: decodeImplicationsPair failed: context length=${context.length}, numCores=${numCores}, numValidators=${numValidators}, authQueueSize=${authQueueSize}`
+      )
+      unreachable()
+    }
+    
+    // Store accumulation context for HOST call handling
+    this.accumulationContext = contextResult!.value
+    
+    // Decode arguments to extract timeslot according to Gray Paper
+    // Gray Paper: encode(timeslot, serviceid, len(inputs))
+    const argsResult = decodeAccumulateArgs(args)
+    if (!argsResult) {
+      abort(
+        `setupAccumulateInvocation: Failed to decode arguments: args length=${args.length}`
+      )
+      unreachable()
+    }
+    
+    // Extract timeslot from decoded arguments
+    // argsResult is guaranteed to be non-null after the check above
+    this.timeslot = argsResult!.value.timeslot
+    
+    // Initialize program (decodes preimage and sets up memory/registers)
+    const codeBlob = this.initializeProgram(program, args)
+    if (!codeBlob) {
+      abort(
+        `setupAccumulateInvocation: initializeProgram failed: program length=${program.length}, args length=${args.length}`
+      )
+      unreachable()
+    }
+    
+    // Verify that state.code and state.bitmask were set by initializeProgram
+    if (this.state.code.length === 0 || this.state.bitmask.length === 0) {
+      abort(
+        `setupAccumulateInvocation: initializeProgram succeeded but state not set: code.length=${this.state.code.length}, bitmask.length=${this.state.bitmask.length}`
+      )
+      unreachable()
+    }
+    
+    // Don't call run() - caller will step through manually
+  }
+
   /**
    * Reset PVM with program, registers, and gas
    * 
@@ -839,16 +986,4 @@ export class PVM {
   public getParser(): PVMParser {
     return new PVMParser()
   }
-
-  /**
-   * Execute single instruction step
-   * 
-   * Gray Paper: Ψ_1 - Execute one instruction and return result code
-   * 
-   * This method executes exactly one PVM instruction and returns the result code.
-   * Used by the WASM wrapper for step-by-step execution.
-   * 
-   * NOTE: This method is simplified for AssemblyScript - use step() directly instead.
-   */
-  // Removed for AssemblyScript - use step() method directly
 }

@@ -1,13 +1,14 @@
 import pino from 'pino'
 
 // Declare Bun global if not available from types
-declare global {
-  const Bun:
-    | {
-        inspect: (value: unknown) => string
-      }
-    | undefined
-}
+// TODO: double check if needed
+// declare global {
+//   const Bun:
+//     | {
+//         inspect: (value: unknown) => string
+//       }
+//     | undefined
+// }
 
 /**
  * LoggerProvider is a class that provides logging functionality.

@@ -65,6 +65,7 @@ export class PVM implements IPVM {
 
   /** Global log collection for host function execution (per execution run) */
   protected hostFunctionLogs: Array<{
+    timestamp: number
     functionName: string
     functionId: bigint
     message: string
@@ -626,6 +627,7 @@ export class PVM implements IPVM {
     message: string
     data?: Record<string, unknown>
     registers: string[]
+    timestamp: number
   }> {
     // Return copy without sorting - logs are already in execution order
     return [...this.executionLogs]
@@ -636,6 +638,7 @@ export class PVM implements IPVM {
    * Logs are appended during host function execution, preserving execution sequence
    */
   public getHostFunctionLogs(): Array<{
+    timestamp: number
     functionName: string
     functionId: bigint
     message: string

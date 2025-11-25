@@ -1,4 +1,5 @@
 import { RESULT_CODE_PANIC } from '../../config'
+import { AlwaysAccerEntry } from '../../codec'
 import {
   ACCUMULATE_ERROR_WHAT,
   ACCUMULATE_ERROR_WHO,
@@ -52,49 +53,51 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
 
     // Read assigners array from memory (341 cores * 4 bytes each)
     const assignersLength = this.C_CORE_COUNT * u64(4)
-    const readResult_assignersData = ram.readOctets(
-      assignersOffset,
-      assignersLength,
+    const readResult_assigners = ram.readOctets(
+      u32(assignersOffset),
+      u32(assignersLength),
     )
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    if (readResult_assigners.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (assignersData === null) {
+    if (readResult_assigners.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const assignersData = readResult_assigners.data!
 
     // Read always accessors array from memory (n entries * 12 bytes each)
     const accessorsLength = numberOfAlwaysAccessors * u64(12)
-    const readResult_accessorsData = ram.readOctets(
-      alwaysAccessorsOffset,
-      accessorsLength,
+    const readResult_accessors = ram.readOctets(
+      u32(alwaysAccessorsOffset),
+      u32(accessorsLength),
     )
-    if (accessorsData === null) {
+    if (readResult_accessors.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (accessorsFaultAddress !== null) {
+    if (readResult_accessors.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const accessorsData = readResult_accessors.data!
 
     // Parse assigners array (4 bytes per core ID, little-endian)
-    const assigners: u64[] = []
+    const assigners: u32[] = []
     for (let i: i32 = 0; i < i32(this.C_CORE_COUNT); i++) {
       const offset = i * 4
-      // Read 4 bytes as little-endian u32, then convert to u64
+      // Read 4 bytes as little-endian u32
       let coreId: u32 = u32(0)
       coreId |= u32(assignersData[offset])
       coreId |= u32(assignersData[offset + 1]) << 8
       coreId |= u32(assignersData[offset + 2]) << 16
       coreId |= u32(assignersData[offset + 3]) << 24
-      assigners.push(u64(coreId))
+      assigners.push(coreId)
     }
 
     // Parse always accessors array (12 bytes per accessor: 4 bytes service ID + 8 bytes gas, little-endian)
-    const alwaysAccessors = new Map<u64, u64>()
+    const alwaysAccessors: Array<AlwaysAccerEntry> = []
     for (let i: i32 = 0; i < i32(numberOfAlwaysAccessors); i++) {
       const offset = i * 12
       // Read service ID (4 bytes, little-endian)
@@ -113,7 +116,7 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       gas |= u64(accessorsData[offset + 9]) << 40
       gas |= u64(accessorsData[offset + 10]) << 48
       gas |= u64(accessorsData[offset + 11]) << 56
-      alwaysAccessors.set(u64(serviceId), gas)
+      alwaysAccessors.push(new AlwaysAccerEntry(serviceId, gas))
     }
 
     // Validate service IDs
@@ -131,20 +134,20 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       !isValidServiceId(registrarServiceId)
     ) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Update state with new privileges
     // Gray Paper: imX.state = {manager: m, assigners: a, delegator: v, registrar: r, alwaysaccers: z}
     const imX = implications.regular
-    imX.state.manager = managerServiceId
+    imX.state.manager = u32(managerServiceId)
     imX.state.assigners = assigners
-    imX.state.delegator = delegatorServiceId
-    imX.state.registrar = registrarServiceId
+    imX.state.delegator = u32(delegatorServiceId)
+    imX.state.registrar = u32(registrarServiceId)
     imX.state.alwaysaccers = alwaysAccessors
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

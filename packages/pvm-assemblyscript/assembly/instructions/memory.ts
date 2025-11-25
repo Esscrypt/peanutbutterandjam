@@ -199,6 +199,14 @@ export class STORE_IMM_U64Instruction extends BaseInstruction {
  *
  * Gray Paper pvm.tex formula:
  * reg'_A = immed_X
+ *
+ * Gray Paper §7.4.5: One Register and One Immediate
+ * - r_A = min(12, operands[0] mod 16)
+ * - l_X = min(4, max(0, ℓ - 1))
+ * - immed_X = sext(l_X, decode[l_X](operands[1:l_X]))
+ * 
+ * The immediate is sign-extended to i64, then converted to u64 for storage in registers.
+ * Registers store unsigned 64-bit values, but immediates are sign-extended per Gray Paper.
  */
 export class LOAD_IMMInstruction extends BaseInstruction {
   opcode: i32 = OPCODE_LOAD_IMM
@@ -207,7 +215,9 @@ export class LOAD_IMMInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     const parseResult = this.parseOneRegisterAndImmediate(context.operands, context.fskip)
     const registerA: u8 = parseResult.registerA
-    const immediateX = parseResult.immediateX
+    // getImmediateValue returns i64 (sign-extended), convert to u64 for register storage
+    // In AssemblyScript, casting i64 to u64 handles two's complement conversion
+    const immediateX: u64 = u64(parseResult.immediateX)
 
     this.setRegisterValue(context.registers, registerA, immediateX)
 

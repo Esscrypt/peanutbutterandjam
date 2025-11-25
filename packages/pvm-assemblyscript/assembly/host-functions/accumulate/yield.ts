@@ -36,15 +36,16 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     const hashOffset = u64(registers[7])
 
     // Read hash from memory (32 bytes)
-    const readResult_hashData = ram.readOctets(hashOffset, u64(32))
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    const readResult_hash = ram.readOctets(u32(hashOffset), u32(32))
+    if (readResult_hash.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
-    if (hashData === null) {
+    if (readResult_hash.data === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const hashData = readResult_hash.data!
 
     // Get the current implications context
     const imX = implications.regular
@@ -56,6 +57,6 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

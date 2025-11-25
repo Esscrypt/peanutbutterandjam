@@ -22,6 +22,6 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const registers = context.registers
     // Simplified implementation - would need full Implications structure
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null)
+    return new HostFunctionResult(255)
   }
 }

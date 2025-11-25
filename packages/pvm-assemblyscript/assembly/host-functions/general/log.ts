@@ -41,7 +41,7 @@ export class LogHostFunction extends BaseHostFunction {
       )
       if (targetData === null || faultAddress !== null) {
         // Invalid memory access - no side effects, continue execution
-        return new HostFunctionResult(null)
+        return new HostFunctionResult(255)
       }
       // Decode target as UTF-8 string (simplified - AssemblyScript doesn't have TextDecoder)
       // For now, just use bytes as string representation
@@ -55,7 +55,7 @@ export class LogHostFunction extends BaseHostFunction {
     )
     if (messageData === null || faultAddress !== null) {
       // Invalid memory access - no side effects, continue execution
-      return new HostFunctionResult(null)
+      return new HostFunctionResult(255)
     }
 
     // Decode message as UTF-8 string (simplified)
@@ -65,7 +65,7 @@ export class LogHostFunction extends BaseHostFunction {
     // For now, this is a no-op that continues execution
     // The actual logging would be done by the host environment
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   bytesToString(bytes: Uint8Array): string {

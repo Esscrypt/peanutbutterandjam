@@ -59,6 +59,6 @@ export class ExpungeHostFunction extends BaseHostFunction {
     // Return machine's PC
     context.registers[7] = pc
 
-    return new HostFunctionResult(null)
+    return new HostFunctionResult(255)
   }
 }

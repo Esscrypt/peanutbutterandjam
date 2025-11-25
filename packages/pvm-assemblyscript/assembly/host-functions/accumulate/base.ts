@@ -1,109 +1,28 @@
 import { RAM, RegisterState } from '../../types'
+import { ImplicationsPair, Implications, PartialState, CompleteServiceAccount, AccountEntry, ProvisionEntry } from '../../codec'
+
+// Re-export types for convenience
+export { ImplicationsPair, Implications, PartialState, CompleteServiceAccount, AccountEntry, ProvisionEntry }
+
+// Alias for backward compatibility
+export type ServiceAccount = CompleteServiceAccount
 
 /**
  * Host function result
+ * Uses 255 (0xFF) as sentinel value for null (continue execution)
  */
 export class HostFunctionResult {
-  resultCode: u8 | null
+  resultCode: u8
 
-  constructor(resultCode: u8 | null) {
+  constructor(resultCode: u8 = 255) {
+    // Use 255 (0xFF) as sentinel value for null (continue execution)
+    // This is safe because valid result codes are 0-5 (HALT, PANIC, etc.)
     this.resultCode = resultCode
   }
-}
-
-/**
- * Service Account structure (simplified for AssemblyScript)
- * Note: Full implementation would include all ServiceAccount fields
- */
-export class ServiceAccount {
-  codehash: string
-  balance: u64
-  minaccgas: u64
-  minmemogas: u64
-  octets: u64
-  gratis: u64
-  items: u64
-  created: u64
-  lastacc: u64
-  parent: u64
-  storage: Map<string, Uint8Array>
-  preimages: Map<string, Uint8Array>
-  requests: Map<string, Map<u64, u64[]>> // Simplified structure
-
-  constructor() {
-    this.codehash = ''
-    this.balance = u64(0)
-    this.minaccgas = u64(0)
-    this.minmemogas = u64(0)
-    this.octets = u64(0)
-    this.gratis = u64(0)
-    this.items = u64(0)
-    this.created = u64(0)
-    this.lastacc = u64(0)
-    this.parent = u64(0)
-    this.storage = new Map<string, Uint8Array>()
-    this.preimages = new Map<string, Uint8Array>()
-    this.requests = new Map<string, Map<u64, u64[]>>()
-  }
-}
-
-/**
- * Partial state type as per Gray Paper section 31.1
- */
-export class PartialState {
-  accounts: Map<u64, ServiceAccount>
-  stagingset: Uint8Array[]
-  authqueue: Uint8Array[][] // Array of arrays (one per core)
-  manager: u64
-  assigners: u64[] // Array of service IDs (one per core)
-  delegator: u64
-  registrar: u64
-  alwaysaccers: Map<u64, u64>
-
-  constructor() {
-    this.accounts = new Map<u64, ServiceAccount>()
-    this.stagingset = [] as Uint8Array[]
-    this.authqueue = [] as Uint8Array[][]
-    this.manager = u64(0)
-    this.assigners = [] as u64[]
-    this.delegator = u64(0)
-    this.registrar = u64(0)
-    this.alwaysaccers = new Map<u64, u64>()
-  }
-}
-
-/**
- * Implications type as per Gray Paper section 31.1
- */
-export class Implications {
-  id: u64
-  state: PartialState
-  nextfreeid: u64
-  xfers: Uint8Array[] // Simplified - would be DeferredTransfer[]
-  yield: Uint8Array | null
-  provisions: Map<u64, Uint8Array>
-
-  constructor() {
-    this.id = u64(0)
-    this.state = new PartialState()
-    this.nextfreeid = u64(0)
-    this.xfers = []
-    this.yield = null
-    this.provisions = new Map<u64, Uint8Array>()
-  }
-}
-
-/**
- * Implications pair (regular and exceptional dimensions)
- * Gray Paper: I(postxferstate, s)² = (implications, implications)
- */
-export class ImplicationsPair {
-  regular: Implications
-  exceptional: Implications
-
-  constructor(regular: Implications, exceptional: Implications) {
-    this.regular = regular
-    this.exceptional = exceptional
+  
+  // Helper to check if execution should continue
+  shouldContinue(): bool {
+    return this.resultCode === 255
   }
 }
 
@@ -162,13 +81,16 @@ export class BaseAccumulateHostFunction {
   public functionId: u64
   public name: string
 
+  constructor(functionId: u64 = u64(0), name: string = '') {
+    this.functionId = functionId
+    this.name = name
+  }
+
   public execute(
     context: AccumulateHostFunctionContext,
   ): HostFunctionResult {
     // This should be overridden by all accumulate host function subclasses
-    return {
-      resultCode: null,
-    }
+    return new HostFunctionResult(255)
   }
 
   // Helper methods for accumulation-specific operations
@@ -205,12 +127,55 @@ export class BaseAccumulateHostFunction {
     offset: u64,
     length: u64,
   ): bool {
-    const result_writable = ram.isWritableWithFault(offset, length)
-    const writable = result_writable.data || result_writable[0] || result_writable
-    const faultAddress = result_writable.faultAddress || result_writable[1] || null
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    const result_writable = ram.isWritableWithFault(u32(offset), u32(length))
+    if (result_writable.faultAddress !== 0) {
       return false
     }
-    return writable
+    return result_writable.success
+  }
+
+  // Helper functions for Array-based operations
+  findAccountEntry(accounts: Array<AccountEntry>, serviceId: u64): AccountEntry | null {
+    for (let i = 0; i < accounts.length; i++) {
+      if (u64(accounts[i].serviceId) === serviceId) {
+        return accounts[i]
+      }
+    }
+    return null
+  }
+
+  hasAccountEntry(accounts: Array<AccountEntry>, serviceId: u64): bool {
+    return this.findAccountEntry(accounts, serviceId) !== null
+  }
+
+  setAccountEntry(accounts: Array<AccountEntry>, serviceId: u64, account: CompleteServiceAccount): void {
+    const entry = this.findAccountEntry(accounts, serviceId)
+    if (entry !== null) {
+      entry.account = account
+    } else {
+      accounts.push(new AccountEntry(u32(serviceId), account))
+    }
+  }
+
+  findProvisionEntry(provisions: Array<ProvisionEntry>, serviceId: u64): ProvisionEntry | null {
+    for (let i = 0; i < provisions.length; i++) {
+      if (u64(provisions[i].serviceId) === serviceId) {
+        return provisions[i]
+      }
+    }
+    return null
+  }
+
+  hasProvisionEntry(provisions: Array<ProvisionEntry>, serviceId: u64): bool {
+    return this.findProvisionEntry(provisions, serviceId) !== null
+  }
+
+  setProvisionEntry(provisions: Array<ProvisionEntry>, serviceId: u64, blob: Uint8Array): void {
+    const entry = this.findProvisionEntry(provisions, serviceId)
+    if (entry !== null) {
+      entry.blob = blob
+    } else {
+      provisions.push(new ProvisionEntry(u32(serviceId), blob))
+    }
   }
 }

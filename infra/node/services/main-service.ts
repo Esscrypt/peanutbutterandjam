@@ -25,9 +25,9 @@ import {
 } from '@pbnj/networking'
 import {
   AccumulateHostFunctionRegistry,
-  AccumulatePVM,
   HostFunctionRegistry,
 } from '@pbnj/pvm'
+import { AccumulatePVM } from '@pbnj/pvm-invocations'
 // import { TelemetryClient } from '@pbnj/telemetry'
 import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
 import {

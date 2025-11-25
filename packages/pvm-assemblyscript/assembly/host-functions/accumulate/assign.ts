@@ -51,12 +51,12 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     // Read auth queue from memory (80 entries * 32 bytes each)
     const authQueueLength = this.C_AUTH_QUEUE_SIZE * u64(32)
     const readResult1 = ram.readOctets(
-      authQueueOffset,
-      authQueueLength,
+      u32(authQueueOffset),
+      u32(authQueueLength),
     )
     const authQueueData = readResult1.data
     const faultAddress = readResult1.faultAddress
-    if (faultAddress_readResult !== null || faultAddress !== null) {
+    if (faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
@@ -76,7 +76,7 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: c >= Ccorecount
     if (coreIndex >= this.C_CORE_COUNT) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_CORE)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Get the current implications context
@@ -88,19 +88,19 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     if (coreIndexI32 >= imX.state.assigners.length) {
       // Extend assigners array if needed
       while (imX.state.assigners.length <= coreIndexI32) {
-        imX.state.assigners.push(u64(0))
+        imX.state.assigners.push(u32(0))
       }
     }
     if (imX.id !== u64(imX.state.assigners[coreIndexI32])) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Check if service account ID is valid
     // Gray Paper: a not in serviceid (assuming positive service IDs)
     if (serviceIdToAssign === u64(0)) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Update auth queue and assigner for the core
@@ -112,10 +112,10 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
       }
     }
     imX.state.authqueue[coreIndexI32] = authQueue
-    imX.state.assigners[coreIndexI32] = serviceIdToAssign
+    imX.state.assigners[coreIndexI32] = u32(serviceIdToAssign)
 
     // Set success result
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

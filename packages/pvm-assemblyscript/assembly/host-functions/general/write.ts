@@ -87,7 +87,7 @@ export class WriteHostFunction extends BaseHostFunction {
       if (newMinBalance > serviceAccount.balance) {
         // Return FULL (2^64 - 5) for insufficient balance
         context.registers[7] = ACCUMULATE_ERROR_FULL
-        return new HostFunctionResult(null) // continue execution
+        return new HostFunctionResult(255) // continue execution
       }
 
       // Write key-value pair to storage
@@ -95,7 +95,7 @@ export class WriteHostFunction extends BaseHostFunction {
       context.registers[7] = previousLength
     }
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   calculateItems(

@@ -25,6 +25,8 @@ export * from './types'
 // WASM wrapper (internal use)
 export * from './wasm-wrapper'
 
+export * from './test-exports'
+
 // =============================================================================
 // WASM API - Top-level exported functions for WASM usage
 // Only these functions are exported to WASM, not the internal classes
@@ -33,8 +35,8 @@ export * from './wasm-wrapper'
 import { PVMWasmWrapper, Status } from './wasm-wrapper'
 import { SimpleRAM } from './simple-ram'
 import { MockRAM } from './mock-ram'
-import { RAM , RunProgramResult, MemoryAccessType } from './types'
-import { BaseInstruction } from './instructions/base'
+import { RAM , RunProgramResult, MemoryAccessType, ExecutionResult } from './types'
+import { AccumulateInvocationResult } from './pvm'
 
 // Global PVM instance (singleton for WASM usage)
 let pvmInstance: PVMWasmWrapper | null = null
@@ -152,6 +154,15 @@ export function runBlob(program: Uint8Array): void {
   pvmInstance!.runBlob(program)
 }
 
+/**
+ * Prepare program blob for step-by-step execution (decode without executing)
+ * @param program - Program blob bytes (deblob format)
+ */
+export function prepareBlob(program: Uint8Array): void {
+  if (!pvmInstance) return
+  pvmInstance!.prepareBlob(program)
+}
+
 //TODO: we cannot pass in closures, find another way to pass in context
 // export function executeMarshallingInvocation(
 //   programPtr: Uint8Array,
@@ -162,6 +173,49 @@ export function runBlob(program: Uint8Array): void {
 //   if (!pvmInstance) return
 //   pvmInstance!.executeMarshallingInvocation(programPtr, initialPC, gasLimit, encodedArgs)
 // }
+
+export function accumulateInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  context: Uint8Array,
+  numCores: i32,
+  numValidators: i32,
+  authQueueSize: i32,
+): AccumulateInvocationResult {
+  if (!pvmInstance) {
+    // Return error result if PVM not initialized
+    return new AccumulateInvocationResult(
+      0,
+      ExecutionResult.fromPanic(),
+      new Uint8Array(0),
+    )
+  }
+  return pvmInstance!.pvm.accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+}
+
+/**
+ * Set up accumulation invocation without executing (for step-by-step execution)
+ * @param gasLimit - Gas limit for execution
+ * @param program - Program preimage blob
+ * @param args - Encoded arguments
+ * @param context - Encoded implications pair context
+ * @param numCores - Number of cores
+ * @param numValidators - Number of validators
+ * @param authQueueSize - Auth queue size
+ */
+export function setupAccumulateInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  context: Uint8Array,
+  numCores: i32,
+  numValidators: i32,
+  authQueueSize: i32,
+): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+}
 
 
 export function runProgram(
@@ -225,6 +279,15 @@ export function getStatus(): Status {
 export function getExitArg(): u32 {
   if (!pvmInstance) return 0
   return pvmInstance!.getExitArg()
+}
+
+/**
+ * Get result code from last execution
+ * @returns Result code (0=OK, 1=HALT, 2=PANIC, 3=FAULT, 4=HOST, 5=OOG)
+ */
+export function getResultCode(): u32 {
+  if (!pvmInstance) return 2 // PANIC
+  return pvmInstance!.pvm.state.resultCode
 }
 
 /**
@@ -325,3 +388,4 @@ export function initializeProgram(
   // All parameters are already Uint8Array, use directly
   pvmInstance!.pvm.initializeProgram(program, args)
 }
+

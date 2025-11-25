@@ -36,6 +36,6 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     const gasAfterCost = gasCounter - this.gasCost
     this.setAccumulateSuccess(registers, gasAfterCost)
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

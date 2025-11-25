@@ -122,7 +122,7 @@ export function encodeDeferredTransfer(
   parts.push(deferredTransfer.memo)
 
   // Gas: encode[8](dxX_gas) (8-byte fixed-length)
-  const [error5, encoded5] = encodeFixedLength(deferredTransfer.gas, 8n)
+  const [error5, encoded5] = encodeFixedLength(deferredTransfer.gasLimit, 8n)
   if (error5) {
     return safeError(error5)
   }
@@ -224,7 +224,7 @@ export function decodeDeferredTransfer(
     dest: destination,
     amount,
     memo,
-    gas,
+    gasLimit: gas,
   }
 
   return safeResult({

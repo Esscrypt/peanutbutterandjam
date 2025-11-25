@@ -8,41 +8,29 @@
 import { encodeFixedLength, encodeNatural } from '@pbnj/codec'
 import { blake2bHash, concatBytes, hexToBytes, logger } from '@pbnj/core'
 import type {
+  AccumulateHostFunctionRegistry,
+  HostFunctionRegistry,
+} from '@pbnj/pvm'
+import { ACCUMULATE_INVOCATION_CONFIG } from '@pbnj/pvm'
+import type {
   AccumulateInput,
   AccumulateInvocationResult,
-  ContextMutator,
   DeferredTransfer,
-  FetchParams,
-  HostFunctionContext,
-  HostFunctionResult,
   IConfigService,
   IEntropyService,
   Implications,
   ImplicationsPair,
-  InfoParams,
-  LookupParams,
   PartialState,
   PVMOptions,
   ResultCode,
   Safe,
-  ServiceAccount,
   WorkItem,
-  WriteParams,
 } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
-import {
-  ACCUMULATE_ERROR_CODES,
-  ACCUMULATE_INVOCATION_CONFIG,
-  RESULT_CODES,
-} from '../config'
-import type { AccumulateHostFunctionContext } from '../host-functions/accumulate/base'
-import type { AccumulateHostFunctionRegistry } from '../host-functions/accumulate/registry'
-import type { HostFunctionRegistry } from '../host-functions/general/registry'
+import { RESULT_CODES, safeError, safeResult } from '@pbnj/types'
 import {
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
 } from '../pvm-executor-adapters'
-import type { IPVMExecutor } from '../pvm-executor-interface'
 
 /**
  * Simplified PVM implementation
@@ -50,10 +38,8 @@ import type { IPVMExecutor } from '../pvm-executor-interface'
  * Gray Paper Ψ function: Executes instructions until a halting condition
  */
 export class AccumulatePVM {
-  private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly entropyService: IEntropyService
-  private readonly configService: IConfigService
-  private readonly pvmExecutor: IPVMExecutor
+  private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
@@ -61,17 +47,23 @@ export class AccumulatePVM {
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
     useWasm?: boolean
-    wasmShell?: any // WasmPvmShellInterface - optional WASM shell instance
+    wasmPath?: string // Path to WASM module file (e.g., 'src/wasm/pvm.wasm')
   }) {
     // Create PVM executor based on useWasm flag
-    if (options.useWasm && options.wasmShell) {
+    if (options.useWasm && options.wasmPath) {
+      // Create WASM executor - module will be loaded from path and instantiated lazily on first use
       this.pvmExecutor = new WasmPVMExecutor(
-        options.wasmShell,
+        options.wasmPath,
+        options.configService,
+        options.entropyService,
         options.hostFunctionRegistry,
       )
     } else {
       this.pvmExecutor = new TypeScriptPVMExecutor(
         options.hostFunctionRegistry,
+        options.accumulateHostFunctionRegistry,
+        options.configService,
+        options.entropyService,
         {
           ...options.pvmOptions,
           gasCounter:
@@ -80,9 +72,7 @@ export class AccumulatePVM {
         },
       )
     }
-    this.accumulateHostFunctionRegistry = options.accumulateHostFunctionRegistry
     this.entropyService = options.entropyService
-    this.configService = options.configService
   }
 
   /**
@@ -128,7 +118,6 @@ export class AccumulatePVM {
       inputCount: inputs.length,
       totalAccounts: partialState.accounts.size,
     })
-    try {
       // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
       const serviceAccount = partialState.accounts.get(serviceId)
       if (!serviceAccount) {
@@ -234,39 +223,60 @@ export class AccumulatePVM {
         })
         return { ok: false, err: 'BAD' }
       }
-      // Create accumulate context mutator F
-      // Gray Paper: F needs access to inputs (i) and work items for fetch
-      // partialState and serviceId are already in ImplicationsPair[0].state and ImplicationsPair[0].id
-      const accumulateContextMutator = this.createAccumulateContextMutator(
-        timeslot,
-        implicationsPair,
-        inputs,
-        workItems,
-      )
+      // Execute accumulation invocation
+      // Both executors now support executeAccumulationInvocation
+      let error: Error | undefined
+      let marshallingResult: {
+        gasConsumed: bigint
+        result: Uint8Array | 'PANIC' | 'OOG'
+        context: ImplicationsPair
+      } | undefined
 
-      // Execute Ψ_M(c, 5, g, encode(t, s, len(i)), F, I(postxferstate, s)^2)
-      const [error, marshallingResult] =
-        await this.pvmExecutor.executeMarshallingInvocation(
-          serviceCode,
-          // 5n, // Initial PC = 5 (Gray Paper)
-          5n,
-          gas,
-          encodedArgs,
-          accumulateContextMutator,
-          implicationsPair,
-          true, // buildPanicDump
-          serviceId, // serviceId for panic dump and host function logs
-          true, // writeHostFunctionLogs
+      if (this.pvmExecutor instanceof WasmPVMExecutor) {
+        // WASM executor - use direct accumulation method
+        const [wasmError, wasmResult] =
+          await this.pvmExecutor.executeAccumulationInvocation(
+            serviceCode,
+            gas,
+            encodedArgs,
+            implicationsPair,
+          )
+        error = wasmError
+        marshallingResult = wasmResult
+      } else if (this.pvmExecutor instanceof TypeScriptPVMExecutor) {
+        // TypeScript executor - use executeAccumulationInvocation
+        const [tsError, tsResult] =
+          await this.pvmExecutor.executeAccumulationInvocation(
+            serviceCode,
+            gas,
+            encodedArgs,
+            implicationsPair,
+            timeslot,
+            inputs,
+            workItems,
+            serviceId,
+          )
+        error = tsError
+        marshallingResult = tsResult
+      } else {
+        logger.error(
+          '[AccumulatePVM] Executor does not support accumulation',
+          {
+            serviceId: serviceId.toString(),
+          },
         )
-      if (error) {
-        logger.error('[AccumulatePVM] Marshalling invocation failed', {
+        return { ok: false, err: 'BAD' }
+      }
+
+      if (error || !marshallingResult) {
+        logger.error('[AccumulatePVM] Accumulation invocation failed', {
           serviceId: serviceId.toString(),
-          error: error.message,
+          error: error?.message,
         })
         return { ok: false, err: 'BAD' }
       }
 
-      // Extract values from Ψ_M return: (gas consumed, result, updated context)
+      // Extract values from execution return: (gas consumed, result, updated context)
       const {
         gasConsumed,
         result: marshallingResultValue,
@@ -302,305 +312,11 @@ export class AccumulatePVM {
       )
 
       return collapsedResult
-    } catch (error) {
-      logger.error(
-        '[AccumulatePVM] Accumulate invocation failed with exception',
-        {
-          serviceId: serviceId.toString(),
-          error: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        },
-      )
-      return { ok: false, err: 'BAD' }
-    }
+
   }
 
 
-  /**
-   * Build FetchParams for accumulate context
-   * Gray Paper equation 189: Ω_Y(..., none, entropyaccumulator', none, none, none, none, i, imXY)
-   *
-   * @param workItems - Work items from work packages being accumulated (i in Gray Paper)
-   * @param _entropyService - Entropy service to get entropy accumulator (not used directly here, but available for fetch)
-   * @returns FetchParams for accumulate context
-   */
-  private buildFetchParams(
-    workItems: WorkItem[]
-  ): FetchParams {
-    // Work items come from the work packages being accumulated in the current batch
-    const workItemsSequence = workItems.length > 0 ? workItems : null
 
-    return {
-      workPackage: null, // accumulate context: none
-      workPackageHash: null,
-      authorizerTrace: null,
-      workItemIndex: null,
-      importSegments: null,
-      exportSegments: null,
-      workItemsSequence,
-      entropyService: this.entropyService,
-    }
-  }
-
-  /**
-   * Build parameters for read host function in accumulate context
-   * Gray Paper equation 190: Ω_R needs imX_self, imX_id, (imX_state)_accounts
-   *
-   * @param implicationsPair - Implications pair context
-   * @returns Parameters for read host function
-   */
-  private buildReadParams(implicationsPair: ImplicationsPair): {
-    serviceAccount: ServiceAccount
-    serviceId: bigint
-    accounts: Map<bigint, ServiceAccount>
-  } {
-    const imX = implicationsPair[0] // Regular dimension
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
-      throw new Error(
-        `Service account not found for read: ${imX.id.toString()}`,
-      )
-    }
-    return {
-      serviceAccount,
-      serviceId: imX.id,
-      accounts: imX.state.accounts,
-    }
-  }
-
-  /**
-   * Build parameters for write host function in accumulate context
-   * Gray Paper equation 191: Ω_W needs imX_self, imX_id
-   *
-   * @param implicationsPair - Implications pair context
-   * @returns Parameters for write host function
-   */
-  private buildWriteParams(implicationsPair: ImplicationsPair): WriteParams {
-    const imX = implicationsPair[0] // Regular dimension
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
-      throw new Error(
-        `Service account not found for write: ${imX.id.toString()}`,
-      )
-    }
-    return {
-      serviceAccount,
-      serviceId: imX.id,
-    }
-  }
-
-  /**
-   * Build parameters for lookup host function in accumulate context
-   * Gray Paper equation 192: Ω_L needs imX_self, imX_id, (imX_state)_accounts
-   *
-   * @param implicationsPair - Implications pair context
-   * @returns Parameters for lookup host function
-   */
-  private buildLookupParams(implicationsPair: ImplicationsPair): LookupParams {
-    const imX = implicationsPair[0] // Regular dimension
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
-      throw new Error(
-        `Service account not found for lookup: ${imX.id.toString()}`,
-      )
-    }
-    return {
-      serviceAccount,
-      serviceId: imX.id,
-      accounts: imX.state.accounts,
-    }
-  }
-
-  /**
-   * Build parameters for info host function in accumulate context
-   * Gray Paper equation 193: Ω_I needs imX_id, (imX_state)_accounts
-   *
-   * @param implicationsPair - Implications pair context
-   * @returns Parameters for info host function
-   */
-  private buildInfoParams(implicationsPair: ImplicationsPair): InfoParams {
-    const imX = implicationsPair[0] // Regular dimension
-    return {
-      serviceId: imX.id,
-      accounts: imX.state.accounts,
-    }
-  }
-
-  /**
-   * Create accumulate context mutator F
-   * Gray Paper equation 187-211: F ∈ contextmutator{implicationspair}
-   *
-   * Available general host functions in accumulate context:
-   * - gas (0): Ω_G
-   * - fetch (1): Ω_Y - needs: none, entropyaccumulator', none, none, none, none, i, imXY
-   * - read (3): Ω_R - needs: imX_self, imX_id, (imX_state)_accounts
-   * - write (4): Ω_W - needs: imX_self, imX_id
-   * - lookup (2): Ω_L - needs: imX_self, imX_id, (imX_state)_accounts
-   * - info (5): Ω_I - needs: imX_id, (imX_state)_accounts
-   *
-   * Note: partialState and serviceId are already available in ImplicationsPair[0].state and ImplicationsPair[0].id
-   * Host functions can extract them from the context when needed.
-   *
-   * @param timeslot - Current timeslot
-   * @param implicationsPair - Initial implications pair context (contains state and service ID)
-   * @param inputs - Accumulation inputs (i) - needed for fetch (Gray Paper equation 189)
-   * @param workItems - Work items from work packages being accumulated (for fetch host function)
-   */
-  private createAccumulateContextMutator(
-    timeslot: bigint,
-    implicationsPair: ImplicationsPair,
-    _inputs: AccumulateInput[],
-    workItems: WorkItem[],
-  ): ContextMutator {
-    return (
-      hostCallId: bigint,
-    ) => {
-        // Gray Paper: Apply gas cost (10 gas for all host functions)
-        const gasCost = 10n
-        if (this.pvmExecutor.state.gasCounter < gasCost) {
-          return RESULT_CODES.OOG
-        }
-
-        this.pvmExecutor.state.gasCounter -= gasCost
-
-        // Try accumulate host functions first (14-26)
-        if (hostCallId >= 14n && hostCallId <= 26n) {
-          return this.handleAccumulateHostFunction(hostCallId, implicationsPair, timeslot)
-          
-        }
-        // General host functions available in accumulate context (0-5)
-        // Also include log (100) - JIP-1 debug/monitoring function
-        if((hostCallId >= 0n && hostCallId <= 5n) || hostCallId === 100n) {
-          return this.handleGeneralHostFunction(hostCallId, implicationsPair, workItems)
-        }
-        return null
-    }
-  }
-
-  private handleAccumulateHostFunction(hostCallId: bigint, implicationsPair: ImplicationsPair, timeslot: bigint): ResultCode | null {
-    const hostFunction =
-    this.accumulateHostFunctionRegistry.get(hostCallId)
-  if (!hostFunction) {
-    return null
-  }
-    // Create log function for accumulate host function context
-    const accumulateHostFunctionLog = (
-      message: string,
-      data?: Record<string, unknown>,
-    ) => {
-      if (!this.hostFunctionLogs) {
-        this.hostFunctionLogs = []
-      }
-      this.hostFunctionLogs.push({
-        functionName: hostFunction.name,
-        functionId: hostCallId,
-        message,
-        data,
-        timestamp: Date.now(),
-        pc: this.pvmExecutor.state.programCounter,
-      })
-    }
-
-    const hostFunctionContext: AccumulateHostFunctionContext = {
-      gasCounter: this.pvmExecutor.state.gasCounter,
-      registers: this.pvmExecutor.state.registerState,
-      ram: this.pvmExecutor.state.ram,
-      implications: implicationsPair,
-      timeslot,
-      expungePeriod: BigInt(this.configService.preimageExpungePeriod),
-      log: accumulateHostFunctionLog,
-    }
-    const result = hostFunction.execute(hostFunctionContext)
-    // Return null to continue execution, or terminal code to stop
-    return result.resultCode
-  }
-
-  private handleGeneralHostFunction(hostCallId: bigint, implicationsPair: ImplicationsPair, workItems: WorkItem[]): ResultCode | null {
-   
-        // Try general host functions (0-13)
-        // Gray Paper: Available general host functions in accumulate context:
-        // - gas (0): Ω_G
-        // - fetch (1): Ω_Y - needs accumulate-specific params
-        // - lookup (2): Ω_L - needs accumulate-specific params
-        // - read (3): Ω_R - needs accumulate-specific params
-        // - write (4): Ω_W - needs accumulate-specific params
-        // - info (5): Ω_I - needs accumulate-specific params
-        // Use registry to build parameters and execute host function
-        const hostFunction = this.pvmExecutor.hostFunctionRegistry.get(hostCallId)
-        if (!hostFunction) {
-          return null
-        }
-
-        const generalHostFunctionLog = (
-          message: string,
-          data?: Record<string, unknown>,
-        ) => {
-          if (!this.hostFunctionLogs) {
-            this.hostFunctionLogs = []
-          }
-          this.hostFunctionLogs.push({
-            functionName: hostFunction.name,
-            functionId: hostCallId,
-            message,
-            data,
-            timestamp: Date.now(),
-            pc: this.pvmExecutor.state.programCounter,
-          })
-        }
-
-        const hostFunctionContext: HostFunctionContext = {
-          gasCounter: this.pvmExecutor.state.gasCounter,
-          registers: this.pvmExecutor.state.registerState,
-          ram: this.pvmExecutor.state.ram,
-          log: generalHostFunctionLog,
-        }
-
-        let result: HostFunctionResult | null = null
-        switch(hostCallId) {
-          case 0n: { // gas
-            result = hostFunction.execute(hostFunctionContext, null)
-            break
-          }
-          case 1n: { // fetch
-            const fetchParams = this.buildFetchParams(workItems)
-            result = hostFunction.execute(hostFunctionContext, fetchParams)
-            break
-          }
-          case 2n: { // lookup
-            const lookupParams = this.buildLookupParams(implicationsPair)
-            result = hostFunction.execute(hostFunctionContext, lookupParams)
-            break
-          }
-          case 3n: { // read
-            const readParams = this.buildReadParams(implicationsPair)
-            result = hostFunction.execute(hostFunctionContext, readParams)
-            break
-          }
-          case 4n: { // write
-            const writeParams = this.buildWriteParams(implicationsPair)
-            result = hostFunction.execute(hostFunctionContext, writeParams)
-            break
-          }
-          case 5n: { // info
-            const infoParams = this.buildInfoParams(implicationsPair)
-            result = hostFunction.execute(hostFunctionContext, infoParams)
-            break
-          }
-          case 100n: { // log (JIP-1)
-            const logParams = {
-              serviceId: implicationsPair[0].id,
-              coreIndex: null, // No core context in accumulate
-            }
-            result = hostFunction.execute(hostFunctionContext, logParams)
-            break
-          }
-          default: {
-            this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
-            return null
-          }
-        }
-        return result?.resultCode ?? null
-  }
 
   /**
    * Calculate post-transfer state

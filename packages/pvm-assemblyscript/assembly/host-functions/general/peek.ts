@@ -60,20 +60,20 @@ export class PeekHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(params.refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
-      return new HostFunctionResult(null) // continue (not HALT)
+      return new HostFunctionResult(255) // continue (not HALT)
     }
 
     // 2. Check if source range is readable → OOB
     if (!this.isMachineMemoryReadable(machine, sourceOffset, length)) {
       context.registers[7] = ACCUMULATE_ERROR_OOB
-      return new HostFunctionResult(null) // continue (not HALT)
+      return new HostFunctionResult(255) // continue (not HALT)
     }
 
     // Read data from machine's memory
     const data = this.readFromMachineMemory(machine, sourceOffset, length)
     if (data === null) {
       context.registers[7] = ACCUMULATE_ERROR_OOB
-      return new HostFunctionResult(null) // continue
+      return new HostFunctionResult(255) // continue
     }
 
     // Gray Paper: mem'[o:z] = (m[n].ram)[s:z]
@@ -84,7 +84,7 @@ export class PeekHostFunction extends BaseHostFunction {
 
     // Return OK (0) for success
     context.registers[7] = ACCUMULATE_ERROR_OK
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 
   getPVMMachine(

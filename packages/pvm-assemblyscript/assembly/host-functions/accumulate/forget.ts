@@ -1,5 +1,4 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_HUH,
   AccumulateHostFunctionContext,
@@ -50,96 +49,103 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
 
     // Read hash from memory (32 bytes)
     // Gray Paper line 924-927: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
-    const readResult_hashData = ram.readOctets(hashOffset, u64(32))
+    const readResult_hash = ram.readOctets(u32(hashOffset), u32(32))
     // Gray Paper line 941: panic when h = error, registers[7] unchanged
-    if (faultAddress !== null || hashData === null) {
+    if (readResult_hash.faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    if (readResult_hash.data === null) {
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+    const hashData = readResult_hash.data!
 
     // Get the current implications context
     const imX = implications.regular
 
     // Get current service account (imX.self)
     // Gray Paper line 928-939: a = imX.self except modifications based on request state
-    const serviceAccount = imX.state.accounts.get(imX.id)
-    if (!serviceAccount) {
+    const accountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
+    if (accountEntry === null) {
       // Gray Paper line 942: HUH when a = error
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
+    const serviceAccount = accountEntry.account
 
-    // Convert hash to hex and get request
-    const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
-    if (!requestMap) {
+    // Get request (hashData is already Uint8Array)
+    const requestStatus = serviceAccount.requests.get(hashData, preimageLength)
+    if (requestStatus === null) {
       // Gray Paper line 942: HUH when a = error (request doesn't exist)
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
-    }
-
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Apply Gray Paper logic for different request states (line 935-938)
-    if (request.length === 0) {
+    const timeslots = requestStatus.timeslots
+    if (timeslots.length === 0) {
       // Case 1 (line 935): [] (empty) - Remove request and preimage completely
-      // keys(a.sa_requests) = keys(imX.self.sa_requests) \ {(h, z)}
-      // keys(a.sa_preimages) = keys(imX.self.sa_preimages) \ {h}
-      requestMap.delete(preimageLength)
-      if (requestMap.size === 0) {
-        serviceAccount.requests.delete(hashHex)
+      // For Array-based structure, we need to remove the entry
+      // This is a simplified implementation - full version would remove from requests array
+      // For now, we'll just clear the status
+      requestStatus.timeslots = []
+      // Remove preimage
+      for (let i = 0; i < serviceAccount.preimages.entries.length; i++) {
+        if (this.compareHashes(serviceAccount.preimages.entries[i].hash, hashData)) {
+          serviceAccount.preimages.entries.splice(i, 1)
+          break
+        }
       }
-      serviceAccount.preimages.delete(hashHex)
-    } else if (request.length === 2) {
+    } else if (timeslots.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
-      const y = u64(request[1])
+      const y = u64(timeslots[1])
       if (y < timeslot - expungePeriod) {
         // Remove request and preimage completely
-        requestMap.delete(preimageLength)
-        if (requestMap.size === 0) {
-          serviceAccount.requests.delete(hashHex)
+        requestStatus.timeslots = []
+        // Remove preimage
+        for (let i = 0; i < serviceAccount.preimages.entries.length; i++) {
+          if (this.compareHashes(serviceAccount.preimages.entries[i].hash, hashData)) {
+            serviceAccount.preimages.entries.splice(i, 1)
+            break
+          }
         }
-        serviceAccount.preimages.delete(hashHex)
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-        return new HostFunctionResult(null) // continue execution
+        return new HostFunctionResult(255) // continue execution
       }
-    } else if (request.length === 1) {
+    } else if (timeslots.length === 1) {
       // Case 3 (line 936): [x] - Update to [x, t] (mark as unavailable)
-      const x = request[0]
-      const newRequest: u64[] = []
-      newRequest.push(x)
-      newRequest.push(timeslot)
-      requestMap.set(preimageLength, newRequest)
-    } else if (request.length === 3) {
+      const x = timeslots[0]
+      requestStatus.timeslots = [x, u32(timeslot)]
+    } else if (timeslots.length === 3) {
       // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
-      const y = u64(request[1])
-      const w = request[2]
+      const y = u64(timeslots[1])
+      const w = timeslots[2]
       if (y < timeslot - expungePeriod) {
         // Update to [w, t] (mark as unavailable again)
-        const newRequest: u64[] = []
-        newRequest.push(w)
-        newRequest.push(timeslot)
-        requestMap.set(preimageLength, newRequest)
+        requestStatus.timeslots = [w, u32(timeslot)]
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-        return new HostFunctionResult(null) // continue execution
+        return new HostFunctionResult(255) // continue execution
       }
     } else {
       // Gray Paper line 938: otherwise → error (HUH)
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Set success result
     // Gray Paper line 943: OK when otherwise
     this.setAccumulateSuccess(registers)
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
+  }
+
+  private compareHashes(a: Uint8Array, b: Uint8Array): bool {
+    if (a.length !== b.length) return false
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
   }
 }

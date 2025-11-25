@@ -23,6 +23,6 @@ export class GasHostFunction extends BaseHostFunction {
     context.registers[7] = context.gasCounter
 
     // Return updated gas counter
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

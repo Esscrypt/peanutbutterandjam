@@ -34,7 +34,7 @@ export class ReadHostFunction extends BaseHostFunction {
   ): HostFunctionResult {
     if (!params) {
       context.registers[7] = ACCUMULATE_ERROR_NONE
-      return new HostFunctionResult(null)
+      return new HostFunctionResult(255)
     }
 
     // Gray Paper equation 404-407: Determine service account
@@ -67,7 +67,7 @@ export class ReadHostFunction extends BaseHostFunction {
     // Gray Paper equation 423: Return NONE if service account not found
     if (!serviceAccount) {
       context.registers[7] = ACCUMULATE_ERROR_NONE
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 414-418: Read storage value by key
@@ -77,7 +77,7 @@ export class ReadHostFunction extends BaseHostFunction {
     if (!value) {
       // Gray Paper equation 423: Return NONE if storage key not found
       context.registers[7] = ACCUMULATE_ERROR_NONE
-      return new HostFunctionResult(null) // continue execution
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 419-420: Calculate slice parameters
@@ -98,6 +98,6 @@ export class ReadHostFunction extends BaseHostFunction {
     // Gray Paper equation 424: Return len(v) in registers[7]
     context.registers[7] = u64(value.length)
 
-    return new HostFunctionResult(null) // continue execution
+    return new HostFunctionResult(255) // continue execution
   }
 }

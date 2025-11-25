@@ -14,6 +14,7 @@ import {
   RESULT_CODE_OOG,
   RESULT_CODE_PANIC,
 } from './config'
+import { decodeBlob } from './codec'
 import { PVM, PVMInstruction } from './pvm'
 
 import { PVMRAM } from './ram'
@@ -310,6 +311,44 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
   }
   
   /**
+   * Decode program blob without executing (for step-by-step execution)
+   * 
+   * Takes raw program bytes in deblob format, decodes them, and sets up PVM state
+   * without executing. This allows for step-by-step execution using nextStep().
+   * 
+   * @param blob - Raw program bytes (deblob format) to decode
+   */
+  prepareBlob(blob: Uint8Array): void {
+    // Decode the blob and set state without executing
+    const decoded = decodeBlob(blob)
+    if (!decoded) {
+      this.lastStatus = Status.PANIC
+      this.pvm.state.resultCode = RESULT_CODE_PANIC
+      return
+    }
+    
+    // Set decoded program state
+    this.pvm.state.code = decoded.code
+    this.pvm.state.bitmask = decoded.bitmask
+    this.pvm.state.jumpTable = decoded.jumpTable
+    
+    // Extend code and bitmask (same as run() does)
+    const extendedCode = new Uint8Array(this.pvm.state.code.length + 16)
+    extendedCode.set(this.pvm.state.code)
+    
+    const extendedBitmask = new Uint8Array(this.pvm.state.bitmask.length + 16)
+    extendedBitmask.set(this.pvm.state.bitmask)
+    extendedBitmask.fill(1, this.pvm.state.bitmask.length)
+    
+    this.pvm.state.code = extendedCode
+    this.pvm.state.bitmask = extendedBitmask
+    
+    // Reset status to OK so we can step through
+    this.lastStatus = Status.OK
+    this.pvm.state.resultCode = 0
+  }
+  
+  /**
    * Execute program with deblob format program bytes
    * 
    * Takes raw program bytes in deblob format, decodes them, and runs the program.
@@ -447,19 +486,8 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
   
 
   getPageDump(index: u32): Uint8Array {
-    const pageSize: u16 = 4096
-    const startAddress = index * pageSize
-    
-    const readResult = this.pvm.state.ram.readOctets(
-      startAddress,
-      pageSize
-    )
-    
-    if (readResult.faultAddress !== 0 || readResult.data === null) {
-      return new Uint8Array(pageSize) // Return zeros on fault
-    }
-    
-    return readResult.data!
+    // All RAM implementations now have getPageDump method
+    return this.pvm.state.ram.getPageDump(index)
   }
   
   /**

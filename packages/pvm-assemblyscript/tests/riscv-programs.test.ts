@@ -8,7 +8,8 @@
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { executeTestVectorWithRunProgram, getTestVectorsDir, parseJsonSafe, type PVMTestVector } from './test-vector-helper'
+import { executeTestVector, getTestVectorsDir, parseJsonSafe, type PVMTestVector, dumpParsedInstructions } from './test-vector-helper'
+import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
 
 
 const testVectorsDir = getTestVectorsDir()
@@ -62,14 +63,21 @@ for (let i = 0; i < testVectors.length; i++) {
   
   try {
       // Execute the program using runProgram with PVMRAM
-      const result = await executeTestVectorWithRunProgram(testVector)
+      const result = await executeTestVector(testVector)
+
+      // Decode registers from Uint8Array (104 bytes: 13 registers x 8 bytes each, little-endian)
+      const registerView = new DataView(result.registers.buffer)
+      const decodedRegisters: bigint[] = []
+      for (let j = 0; j < 13; j++) {
+        decodedRegisters[j] = registerView.getBigUint64(j * 8, true)
+      }
 
       // Verify registers match expected values
       for (let j = 0; j < 13; j++) {
-          if(result.registers[j] !== BigInt(testVector['expected-regs'][j])) {
+          if(decodedRegisters[j] !== BigInt(testVector['expected-regs'][j])) {
               console.error(`❌ Test failed: ${testVector.name}`, {
                   expected: `${testVector['expected-regs'][j]} at register ${j}`,
-                  actual: `${result.registers[j]} at register ${j}`,
+                  actual: `${decodedRegisters[j]} at register ${j}`,
               })
               throw new Error(`Test failed: ${testVector.name}`)
           }
@@ -137,9 +145,24 @@ for (let i = 0; i < testVectors.length; i++) {
     } catch (error) {
       console.error(`❌ Test failed: ${testVector.name}`, error)
       
+      // Dump parsed instructions to test-failures directory
+      try {
+        const result = await executeTestVector(testVector)
+        console.log(`\n🔍 Dumping parsed instructions for failed test at PC ${result.pc}...`)
+        dumpParsedInstructions(testVector, result.pc)
+      } catch (dumpError) {
+        console.error('❌ Error getting result for dump, trying without PC:', dumpError)
+        // If we can't get the result, try to dump with just the test vector
+        try {
+          dumpParsedInstructions(testVector)
+        } catch (dumpError2) {
+          console.error('❌ Failed to dump parsed instructions:', dumpError2)
+        }
+      }
+      
       // Create test failure dump similar to panic dump
       try {
-        const result = await executeTestVectorWithRunProgram(testVector)
+        const result = await executeTestVector(testVector)
         
         // Note: runProgram doesn't provide execution logs or PVM state access
         // Execution logs are not available with runProgram API
@@ -180,30 +203,57 @@ for (let i = 0; i < testVectors.length; i++) {
           }
         }
 
+        // Parse program with full details (like dumpParsedInstructions)
+        const parser = new PVMParser()
+        const registry = new InstructionRegistry()
+        const programBytes = testVector.program.map(Number)
+        const programBlob = new Uint8Array(programBytes)
+        const parsed = parser.parseProgram(programBlob)
+        
+        // Prepare instructions with names (same format as dumpParsedInstructions)
+        const instructionsWithNames = parsed.success ? parsed.instructions.map((inst, index) => {
+          const handler = registry.getHandler(inst.opcode)
+          const instructionName = handler ? handler.name : `UNKNOWN_OPCODE_${inst.opcode.toString()}`
+          const operandsStr = Array.from(inst.operands)
+            .map(b => `0x${b.toString(16).padStart(2, '0')}`)
+            .join(', ')
+          
+          return {
+            index,
+            pc: inst.pc.toString(),
+            pcHex: `0x${inst.pc.toString(16)}`,
+            opcode: inst.opcode.toString(),
+            opcodeHex: `0x${inst.opcode.toString(16)}`,
+            name: instructionName,
+            operands: Array.from(inst.operands).map(b => `0x${b.toString(16).padStart(2, '0')}`),
+            operandsStr,
+            fskip: inst.fskip,
+            isFailed: Number(inst.pc) === result.pc,
+          }
+        }) : []
+
         // Get last instruction executed from parsed instructions
-        // Use parseResult to get instruction info at the final PC
-        const lastInstruction = result.parseResult.instructions.find(
-          (inst) => inst.pc === BigInt(result.pc)
-        ) || (result.parseResult.instructions.length > 0
-          ? {
-              pc: result.parseResult.instructions[result.parseResult.instructions.length - 1].pc.toString(),
-              instructionName: `opcode_${result.parseResult.instructions[result.parseResult.instructions.length - 1].opcode}`,
-              opcode: result.parseResult.instructions[result.parseResult.instructions.length - 1].opcode.toString(),
-              message: 'Parsed from program',
-              data: {
-                operands: Array.from(result.parseResult.instructions[result.parseResult.instructions.length - 1].operands),
-              },
-            }
+        const lastInstruction = instructionsWithNames.find(
+          (inst) => inst.pc === result.pc.toString()
+        ) || (instructionsWithNames.length > 0
+          ? instructionsWithNames[instructionsWithNames.length - 1]
           : null)
         
         // Convert to proper format if found
-        const lastInstFormatted = lastInstruction && typeof lastInstruction === 'object' && 'pc' in lastInstruction
+        const lastInstFormatted = lastInstruction
           ? {
-              pc: typeof lastInstruction.pc === 'bigint' ? lastInstruction.pc.toString() : lastInstruction.pc,
-              instructionName: lastInstruction.instructionName || 'unknown',
-              opcode: typeof lastInstruction.opcode === 'bigint' ? lastInstruction.opcode.toString() : lastInstruction.opcode,
-              message: lastInstruction.message || 'Parsed from program',
-              data: lastInstruction.data || {},
+              pc: lastInstruction.pc,
+              pcHex: lastInstruction.pcHex,
+              instructionName: lastInstruction.name,
+              opcode: lastInstruction.opcode,
+              opcodeHex: lastInstruction.opcodeHex,
+              operands: lastInstruction.operands,
+              operandsStr: lastInstruction.operandsStr,
+              fskip: lastInstruction.fskip,
+              message: 'Parsed from program',
+              data: {
+                operands: lastInstruction.operands,
+              },
             }
           : null
 
@@ -262,15 +312,31 @@ for (let i = 0; i < testVectors.length; i++) {
           lastInstruction: lastInstFormatted,
           pageMap,
           executionLogs,
-          parsedProgram: {
-            instructions: result.parseResult.instructions.map((inst) => ({
-              pc: inst.pc.toString(),
-              opcode: inst.opcode.toString(),
-              operands: Array.from(inst.operands),
+          parsedProgram: parsed.success ? {
+            programInfo: {
+              codeLength: parsed.codeLength,
+              jumpTableSize: parsed.jumpTable.length,
+              bitmaskLength: parsed.bitmask.length,
+              instructionsCount: parsed.instructions.length,
+            },
+            jumpTable: parsed.jumpTable.map((target, index) => ({
+              index,
+              target: target.toString(),
+              targetHex: `0x${target.toString(16)}`,
             })),
-            jumpTable: result.parseResult.jumpTable.map((jt) => jt.toString()),
-            bitmask: Array.from(result.parseResult.bitmask),
-            success: result.parseResult.success,
+            instructions: instructionsWithNames,
+            failedPC: {
+              pc: result.pc,
+              instruction: instructionsWithNames.find(inst => inst.isFailed) || null,
+            },
+            parseErrors: parsed.errors,
+            success: true,
+          } : {
+            instructions: [],
+            jumpTable: [],
+            bitmask: [],
+            parseErrors: parsed.errors,
+            success: false,
           },
         }
 

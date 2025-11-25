@@ -93,6 +93,8 @@ export interface RAM {
   setPageAccessRights(address: u32, length: u32, accessType: MemoryAccessType): void
   initPage(address: u32, length: u32, accessType: MemoryAccessType): void
   writeOctetsDuringInitialization(address: u32, values: Uint8Array): void
+  // Get page dump for a specific page index (4KB)
+  getPageDump(pageIndex: u32): Uint8Array
   // Reset RAM to initial state
   reset(): void
 }
