@@ -7,6 +7,7 @@ import {
 } from '../accumulate/base'
 import {
   HostFunctionContext,
+  HostFunctionParams,
   PeekPokeParams,
   PVMGuest,
   RefineInvocationContext,
@@ -42,9 +43,13 @@ export class PokeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: PeekPokeParams | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
-    if (!params || !params.refineContext) {
+    if (!params) {
+      return new HostFunctionResult(255) // continue execution
+    }
+    const pokeParams = params as PeekPokeParams
+    if (!pokeParams.refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
@@ -59,15 +64,18 @@ export class PokeHostFunction extends BaseHostFunction {
     // 1. Check if source range is readable in current memory → panic
     // Read data from current PVM's memory
     const readResult_data = context.ram.readOctets(
-      sourceOffset,
-      length,
+      u32(sourceOffset),
+      u32(length),
     )
-    if (data === null || readFaultAddress !== null) {
+    const data = readResult_data.data
+    const readFaultAddress = readResult_data.faultAddress
+    if (data === null || readFaultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
     // 2. Check if machine exists → WHO
-    const machine = this.getPVMMachine(params.refineContext, machineId)
+    const refineContext = pokeParams.refineContext!
+    const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
       return new HostFunctionResult(255) // continue
@@ -75,8 +83,8 @@ export class PokeHostFunction extends BaseHostFunction {
 
     // 3. Check if destination range is writable → OOB
     // Gray Paper: (m'[n].ram)[o:z] = mem[s:z]
-    const writeFaultAddress = machine.pvm.ram.writeOctets(destOffset, data)
-    if (writeFaultAddress !== null) {
+    const writeResult = machine.pvm.state.ram.writeOctets(u32(destOffset), data)
+    if (writeResult.hasFault) {
       context.registers[7] = ACCUMULATE_ERROR_OOB
       return new HostFunctionResult(255) // continue (not HALT)
     }

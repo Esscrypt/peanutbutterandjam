@@ -148,16 +148,6 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     return result
   }
 
-  hexToBytes(hex: string): Uint8Array {
-    // Convert hex string to bytes
-    const result = new Uint8Array(hex.length / 2)
-    for (let i: i32 = 0; i < hex.length; i += 2) {
-      const byte = u8(Number.parseInt(hex.substr(i, 2), 16))
-      result[i / 2] = byte
-    }
-    return result
-  }
-
   arraysEqual(a: Uint8Array, b: Uint8Array): bool {
     if (a.length !== b.length) return false
     for (let i: i32 = 0; i < a.length; i++) {

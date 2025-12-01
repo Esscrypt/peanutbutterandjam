@@ -1,9 +1,5 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  LookupParams,
-} from '../../pbnj-types-compat'
-import { bytesToHex } from '../../types'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, LookupParams } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -43,9 +39,12 @@ export class LookupHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    lookupParams: LookupParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
-
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const lookupParams = params as LookupParams
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]
@@ -55,80 +54,53 @@ export class LookupHostFunction extends BaseHostFunction {
     // Get service account
     const serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
     if (!serviceAccount) {
-      context.log('Lookup host function: Service account error', {
-        serviceId: lookupParams.serviceId.toString(),
-      })
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-    if (!serviceAccount) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Lookup host function: Service account not found', {
-        serviceId: serviceId.toString(),
-      })
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Read hash from memory (32 bytes)
-    const readResult_hashData = context.ram.readOctets(hashOffset, 32)
-    if (!hashData) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
+    const readResult_hashData = context.ram.readOctets(u32(hashOffset), 32)
+    const hashData = readResult_hashData.data
+    const hashFaultAddress = readResult_hashData.faultAddress
+    if (hashData === null || hashFaultAddress !== 0) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Look up preimage by hash
-    const preimage = serviceAccount.preimages.get(bytesToHex(hashData))
+    const preimage = serviceAccount.preimages.get(hashData)
     if (!preimage) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Calculate slice parameters
-    const f = Number(fromOffset)
-    const l = Number(length)
+    const f = i32(fromOffset)
+    const l = i32(length)
     const preimageLength = preimage.length
 
     // Calculate actual slice length
-    const actualLength = Math.min(l, preimageLength - f)
+    const actualLength = min(l, preimageLength - f)
 
     if (actualLength <= 0) {
       // Return NONE if no data to copy
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Extract data slice
-    const dataToWrite = preimage.subarray(f, f + actualLength)
+    const dataToWrite = preimage.slice(f, f + actualLength)
 
     // Write preimage slice to memory
-    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
-    if (faultAddress) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_write',
-          address: faultAddress,
-          details: 'Memory not writable',
-        },
-      }
+    const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
+    if (writeResult.hasFault) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Return length of preimage
-    context.registers[7] = BigInt(preimageLength)
+    context.registers[7] = u64(preimageLength)
 
-    return {
-      resultCode: null, // continue execution
-    }
+    return new HostFunctionResult(255) // continue execution
   }
 }

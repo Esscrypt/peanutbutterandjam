@@ -1,11 +1,11 @@
+import { CompleteServiceAccount } from '../../codec'
 import { RESULT_CODE_PANIC } from '../../config'
-import { bytesToHex } from '../../types'
 import {
   ACCUMULATE_ERROR_FULL,
   ACCUMULATE_ERROR_NONE,
   HostFunctionResult,
 } from '../accumulate/base'
-import { HostFunctionContext, WriteParams } from './base'
+import { HostFunctionContext, HostFunctionParams, WriteParams } from './base'
 import { BaseHostFunction } from './base'
 
 // Deposit constants (Gray Paper)
@@ -38,11 +38,12 @@ export class WriteHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: WriteParams | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
     if (!params) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
+    const writeParams = params as WriteParams
 
     // Extract parameters from registers
     // Gray Paper: registers[7:4] = (keyOffset, keyLength, valueOffset, valueLength)
@@ -51,32 +52,36 @@ export class WriteHostFunction extends BaseHostFunction {
     const valueOffset = u64(context.registers[9])
     const valueLength = u64(context.registers[10])
 
-    const serviceAccount = params.serviceAccount
+    const serviceAccount = writeParams.serviceAccount
 
     // Read key from memory
-    const readResult_key = context.ram.readOctets(keyOffset, keyLength)
-    if (key === null || faultAddress !== null) {
+    const readResult_key = context.ram.readOctets(u32(keyOffset), u32(keyLength))
+    const key = readResult_key.data
+    const faultAddress = readResult_key.faultAddress
+    if (key === null || faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
     // Check if this is a delete operation (value length = 0)
     if (valueLength === u64(0)) {
       // Delete the key
-      const previousLength = this.deleteStorage(serviceAccount, key)
-      context.registers[7] = previousLength
+      const previousLength = this.deleteStorage(serviceAccount, key!)
+      context.registers[7] = u64(previousLength)
     } else {
       // Read value from memory
       const readResult_value = context.ram.readOctets(
-        valueOffset,
-        valueLength,
+        u32(valueOffset),
+        u32(valueLength),
       )
-      if (value === null || _faultAddress !== null) {
+      const value = readResult_value.data
+      const _faultAddress = readResult_value.faultAddress
+      if (value === null || _faultAddress !== 0) {
         return new HostFunctionResult(RESULT_CODE_PANIC)
       }
 
       // Calculate what the new storage footprint would be
-      const newItems = this.calculateItems(serviceAccount, key, false)
-      const newOctets = this.calculateOctets(serviceAccount, key, value, false)
+      const newItems = this.calculateItems(serviceAccount, key!, false)
+      const newOctets = this.calculateOctets(serviceAccount, key!, value!, false)
       const newMinBalance = this.calculateMinBalance(
         newItems,
         newOctets,
@@ -91,24 +96,23 @@ export class WriteHostFunction extends BaseHostFunction {
       }
 
       // Write key-value pair to storage
-      const previousLength = this.writeStorage(serviceAccount, key, value)
-      context.registers[7] = previousLength
+      const previousLength = this.writeStorage(serviceAccount, key!, value!)
+      context.registers[7] = u64(previousLength)
     }
 
     return new HostFunctionResult(255) // continue execution
   }
 
   calculateItems(
-    serviceAccount: ServiceAccount,
+    serviceAccount: CompleteServiceAccount,
     key: Uint8Array,
     isDelete: bool,
   ): u64 {
     // Gray Paper: a_items = 2 * len(a_requests) + len(a_storage)
-    const requestsCount = serviceAccount.requests.size
-    const keyHex = bytesToHex(key)
-    const hasKey = serviceAccount.storage.has(keyHex)
+    const requestsCount = serviceAccount.requests.entries.length
+    const hasKey = serviceAccount.storage.get(key) !== null
 
-    let storageCount = serviceAccount.storage.size
+    let storageCount = serviceAccount.storage.entries.length
     if (isDelete) {
       // If deleting and key exists, reduce count by 1
       storageCount = hasKey ? storageCount - 1 : storageCount
@@ -121,7 +125,7 @@ export class WriteHostFunction extends BaseHostFunction {
   }
 
   calculateOctets(
-    serviceAccount: ServiceAccount,
+    serviceAccount: CompleteServiceAccount,
     key: Uint8Array,
     value: Uint8Array,
     isDelete: bool,
@@ -130,25 +134,18 @@ export class WriteHostFunction extends BaseHostFunction {
     let totalOctets: u64 = u64(0)
 
     // Sum over requests: 81 + z for each (h, z) in requests
-    const requestKeys = serviceAccount.requests.keys()
-    for (let i: i32 = 0; i < requestKeys.length; i++) {
-      const hashHex = requestKeys[i]
-      const requestMap = serviceAccount.requests.get(hashHex)!
-      const lengthKeys = requestMap.keys()
-      for (let j: i32 = 0; j < lengthKeys.length; j++) {
-        const length = lengthKeys[j]
-        totalOctets += u64(81) + length
-      }
+    for (let i: i32 = 0; i < serviceAccount.requests.entries.length; i++) {
+      const entry = serviceAccount.requests.entries[i]
+      totalOctets += u64(81) + entry.length
     }
 
     // Sum over storage: 34 + len(y) + len(x) for each (x, y) in storage
-    const keyHex = bytesToHex(key)
-    const storageKeys = serviceAccount.storage.keys()
-
-    for (let i: i32 = 0; i < storageKeys.length; i++) {
-      const existingKeyHex = storageKeys[i]
-      const existingValue = serviceAccount.storage.get(existingKeyHex)!
-      if (existingKeyHex === keyHex) {
+    const keyExists = serviceAccount.storage.get(key) !== null
+    
+    for (let i: i32 = 0; i < serviceAccount.storage.entries.length; i++) {
+      const entry = serviceAccount.storage.entries[i]
+      const isCurrentKey = this.compareKeys(entry.key, key)
+      if (isCurrentKey) {
         // This is the key we're modifying
         if (!isDelete) {
           // Adding/updating: use new value
@@ -157,16 +154,24 @@ export class WriteHostFunction extends BaseHostFunction {
         // If deleting, skip this entry
       } else {
         // Different key: use existing value
-        totalOctets += u64(34) + u64(existingValue.length) + u64(existingKeyHex.length / 2) // hex string length / 2 = byte length
+        totalOctets += u64(34) + u64(entry.value.length) + u64(entry.key.length)
       }
     }
 
     // If adding a new key (not updating existing), add it
-    if (!isDelete && !serviceAccount.storage.has(keyHex)) {
+    if (!isDelete && !keyExists) {
       totalOctets += u64(34) + u64(value.length) + u64(key.length)
     }
 
     return totalOctets
+  }
+  
+  private compareKeys(a: Uint8Array, b: Uint8Array): bool {
+    if (a.length !== b.length) return false
+    for (let i: i32 = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false
+    }
+    return true
   }
 
   calculateMinBalance(
@@ -186,22 +191,21 @@ export class WriteHostFunction extends BaseHostFunction {
   }
 
   writeStorage(
-    serviceAccount: ServiceAccount,
+    serviceAccount: CompleteServiceAccount,
     key: Uint8Array,
     value: Uint8Array,
   ): i64 {
     // Get previous value length before writing
-    const keyHex = bytesToHex(key)
-    const previousValue = serviceAccount.storage.get(keyHex)
+    const previousValue = serviceAccount.storage.get(key)
     const previousLength = previousValue
       ? i64(previousValue.length)
       : ACCUMULATE_ERROR_NONE
 
     // Write key-value pair to service account's storage
-    serviceAccount.storage.set(keyHex, value)
+    serviceAccount.storage.set(key, value)
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(serviceAccount, key, false)
+    serviceAccount.items = u32(this.calculateItems(serviceAccount, key, false))
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,
@@ -213,21 +217,31 @@ export class WriteHostFunction extends BaseHostFunction {
   }
 
   deleteStorage(
-    serviceAccount: ServiceAccount,
+    serviceAccount: CompleteServiceAccount,
     key: Uint8Array,
   ): i64 {
     // Get previous value length before deleting
-    const keyHex = bytesToHex(key)
-    const previousValue = serviceAccount.storage.get(keyHex)
+    const previousValue = serviceAccount.storage.get(key)
     const previousLength = previousValue
       ? i64(previousValue.length)
       : ACCUMULATE_ERROR_NONE
 
     // Delete key from service account's storage
-    serviceAccount.storage.delete(keyHex)
+    // Find and remove the entry
+    const entries = serviceAccount.storage.entries
+    for (let i: i32 = 0; i < entries.length; i++) {
+      if (this.compareKeys(entries[i].key, key)) {
+        // Remove entry by shifting remaining elements
+        for (let j: i32 = i; j < entries.length - 1; j++) {
+          entries[j] = entries[j + 1]
+        }
+        entries.pop()
+        break
+      }
+    }
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(serviceAccount, key, true)
+    serviceAccount.items = u32(this.calculateItems(serviceAccount, key, true))
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,

@@ -1,5 +1,5 @@
 import { HostFunctionResult } from '../accumulate/base'
-import { HostFunctionContext, LogParams } from './base'
+import { HostFunctionContext, HostFunctionParams, LogParams } from './base'
 import { BaseHostFunction } from './base'
 
 /**
@@ -24,8 +24,12 @@ export class LogHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: LogParams | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(255) // continue execution
+    }
+    const logParams = params as LogParams
     const level = i32(context.registers[7])
     const targetOffset = u64(context.registers[8])
     const targetLength = u64(context.registers[9])
@@ -36,10 +40,12 @@ export class LogHostFunction extends BaseHostFunction {
     let target: string | null = null
     if (targetOffset !== u64(0) || targetLength !== u64(0)) {
       const readResult_targetData = context.ram.readOctets(
-        targetOffset,
-        targetLength,
+        u32(targetOffset),
+        u32(targetLength),
       )
-      if (targetData === null || faultAddress !== null) {
+      const targetData = readResult_targetData.data
+      const targetFaultAddress = readResult_targetData.faultAddress
+      if (targetData === null || targetFaultAddress !== 0) {
         // Invalid memory access - no side effects, continue execution
         return new HostFunctionResult(255)
       }
@@ -50,10 +56,12 @@ export class LogHostFunction extends BaseHostFunction {
 
     // Read message from memory
     const readResult_messageData = context.ram.readOctets(
-      messageOffset,
-      messageLength,
+      u32(messageOffset),
+      u32(messageLength),
     )
-    if (messageData === null || faultAddress !== null) {
+    const messageData = readResult_messageData.data
+    const messageFaultAddress = readResult_messageData.faultAddress
+    if (messageData === null || messageFaultAddress !== 0) {
       // Invalid memory access - no side effects, continue execution
       return new HostFunctionResult(255)
     }

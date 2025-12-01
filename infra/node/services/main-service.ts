@@ -32,7 +32,6 @@ import { AccumulatePVM } from '@pbnj/pvm-invocations'
 import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
 import {
   BaseService,
-  PVM_CONSTANTS,
   type SafePromise,
   safeError,
   safeResult,
@@ -315,7 +314,8 @@ export class MainService extends BaseService {
       accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
       configService: this.configService,
       entropyService: this.entropyService,
-      pvmOptions: { gasCounter: PVM_CONSTANTS.DEFAULT_GAS_LIMIT },
+      pvmOptions: { gasCounter: BigInt(this.configService.maxBlockGas) },
+      useWasm: false,
     })
     this.privilegesService = new PrivilegesService({
       configService: this.configService,

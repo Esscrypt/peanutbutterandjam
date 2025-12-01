@@ -5,7 +5,8 @@
  * and executes a single accumulation to verify gas consumption
  */
 
-import { EventBusService, logger, hexToBytes, blake2bHash, bytesToHex, zeroHash } from '@pbnj/core'
+import { EventBusService, logger, hexToBytes, blake2bHash, zeroHash } from '@pbnj/core'
+import { decodeProgramFromPreimage, encodeValidatorPublicKeys } from '@pbnj/codec'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { type AccumulateInput, type PartialState, type ServiceAccount, type OperandTuple } from '@pbnj/types'
@@ -17,10 +18,7 @@ import { AccumulationService } from '../services/accumulation-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ReadyService } from '../services/ready-service'
 import { AccumulatePVM } from '@pbnj/pvm-invocations'
-import { HostFunctionRegistry } from '@pbnj/pvm'
-import { AccumulateHostFunctionRegistry } from '@pbnj/pvm'
-import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
-import { decodeProgramFromPreimage } from '@pbnj/codec'
+import { HostFunctionRegistry, AccumulateHostFunctionRegistry, PVMParser, InstructionRegistry } from '@pbnj/pvm'
 import { describe, expect, beforeEach, test } from 'bun:test'
 import { StatisticsService } from '../services/statistics-service'
 import { PrivilegesService } from '../services/privileges-service'
@@ -230,6 +228,7 @@ function parseAndWriteInstructions(preimageBlob: Uint8Array, codeHash: Hex): voi
 describe('Accumulation Gas Debug Tests', () => {
   let configService: ConfigService
   let accumulationService: AccumulationService
+  let validatorSetManager: ValidatorSetManager
   let testData: TestVectorData
 
   beforeEach(async () => {
@@ -255,7 +254,7 @@ describe('Accumulation Gas Debug Tests', () => {
     await ringProver.init()
     await ringVerifier.init()
 
-    const validatorSetManager = new ValidatorSetManager({
+    validatorSetManager = new ValidatorSetManager({
       eventBusService,
       sealKeyService: null,
       ringProver,
@@ -291,7 +290,8 @@ describe('Accumulation Gas Debug Tests', () => {
       accumulateHostFunctionRegistry,
       configService: configService,
       entropyService: entropyService,
-      pvmOptions: { gasCounter: 1000n }, // High gas limit for debugging
+      pvmOptions: { gasCounter: 100000n }, // High gas limit for debugging
+      useWasm: true,
     })
 
     const statisticsService = new StatisticsService({
@@ -334,6 +334,13 @@ describe('Accumulation Gas Debug Tests', () => {
     // Create a minimal partial state with our service
     const serviceId = 1729n
     const preimages = new Map([[codeHash, preimageBlob]])
+    
+    // Create staging set with exactly Cvalcount (6) null validators
+    // Gray Paper accumulation.tex equation 134: ps_stagingset must have exactly Cvalcount validators
+    const requiredValidatorCount = configService.numValidators
+    const nullValidators = validatorSetManager.createNullValidatorSet(requiredValidatorCount)
+    const stagingset = nullValidators.map(encodeValidatorPublicKeys)
+    
     const partialState: PartialState = {
       accounts: new Map([
         [
@@ -357,7 +364,7 @@ describe('Accumulation Gas Debug Tests', () => {
       ]),
       authqueue: [[], []], // Empty auth queue
       assigners: [],
-      stagingset: [],
+      stagingset, // Now has exactly 6 null validators
       manager: 0n,
       registrar: 0n,
       delegator: 0n,

@@ -16,6 +16,7 @@ import {
   verifyEntropyVRFSignature,
   verifyEpochRoot,
 } from '@pbnj/bandersnatch-vrf'
+import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import {
   bytesToHex,
   type EventBusService,
@@ -28,7 +29,6 @@ import {
   verifyFallbackSealSignature,
   verifyTicketBasedSealSignature,
 } from '@pbnj/safrole'
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import type { Block, BlockHeader, ValidatorPublicKeys } from '@pbnj/types'
 import {
   BaseService,

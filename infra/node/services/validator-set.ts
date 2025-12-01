@@ -20,12 +20,12 @@ import { isSafroleTicket } from '@pbnj/safrole'
 import {
   BaseService,
   type ConnectionEndpoint,
-  type ValidatorPublicKeys,
   type IValidatorSetManager,
   type Safe,
   type SafePromise,
   safeError,
   safeResult,
+  type ValidatorPublicKeys,
 } from '@pbnj/types'
 import type { ConfigService } from './config-service'
 import type { SealKeyService } from './seal-key'
@@ -56,7 +56,8 @@ export class ValidatorSetManager
   // Map of public keys to validator indices
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
 
-  private epochRoot: Hex = zeroHash
+  // Initialize to 144-byte zero epoch root (Gray Paper: ringroot ⊂ blob[144])
+  private epochRoot: Hex = ('0x' + '00'.repeat(144)) as Hex
   // Store bound callback for removal
   private readonly boundHandleEpochTransition: (
     event: EpochTransitionEvent,
@@ -626,18 +627,41 @@ export class ValidatorSetManager
     const bandersnatchKeys = Array.from(this.pendingSet.values()).map((validator) =>
       hexToBytes(validator.bandersnatch),
     )
+    
+    // If pending set is empty, return a zero-padded 144-byte epoch root
+    // Gray Paper: epochRoot must be 144 bytes (ringroot ⊂ blob[144])
+    if (bandersnatchKeys.length === 0) {
+      logger.warn('Pending set is empty, returning zero-padded 144-byte epoch root')
+      // Return 144 bytes of zeros (288 hex chars)
+      return ('0x' + '00'.repeat(144)) as Hex
+    }
+    
     const [epochRootError, epochRoot] = getRingRoot(bandersnatchKeys, this.ringProver)
     if (epochRootError) {
       logger.error('Failed to get epoch root', { error: epochRootError })
-      return zeroHash
+      // Return zero-padded 144-byte epoch root instead of 32-byte zeroHash
+      // Gray Paper: epochRoot must be 144 bytes
+      return ('0x' + '00'.repeat(144)) as Hex
     }
 
     const epochRootHex = bytesToHex(epochRoot)
+    
+    // Verify epoch root is 144 bytes (safety check)
+    if (hexToBytes(epochRootHex).length !== 144) {
+      logger.error(`Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`)
+      return ('0x' + '00'.repeat(144)) as Hex
+    }
 
     return epochRootHex
   }
 
   setEpochRoot(epochRoot: Hex): void {
+    // Validate epoch root is 144 bytes (Gray Paper: ringroot ⊂ blob[144])
+    const epochRootBytes = hexToBytes(epochRoot)
+    if (epochRootBytes.length !== 144) {
+      logger.error(`setEpochRoot: Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`)
+      throw new Error(`Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`)
+    }
     this.epochRoot = epochRoot
   }
 
@@ -704,8 +728,11 @@ export class ValidatorSetManager
   /**
    * Create a set of null validators of the specified length
    * Used to pad validator sets to Cvalcount
+   * 
+   * Gray Paper: null keys replace blacklisted validators (equation 122-123)
+   * Each validator key is 336 bytes with all fields zeroed
    */
-  private createNullValidatorSet(count: number): ValidatorPublicKeys[] {
+  public createNullValidatorSet(count: number): ValidatorPublicKeys[] {
     return Array.from({ length: count }, () => this.createNullValidator())
   }
 

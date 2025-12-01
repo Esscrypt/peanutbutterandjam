@@ -6,10 +6,11 @@
  */
 
 import { RegisterState, RAM } from './types'
-import { PVMState } from './pvm'
+import { PVM } from './pvm'
+import { HostFunctionParams } from './host-functions/general/base'
 
 // Re-export types from other modules
-export { PVMState } from './pvm'
+export { PVM, PVMState } from './pvm'
 export { RAM, MemoryAccessType } from './types'
 
 // ============================================================================
@@ -17,9 +18,11 @@ export { RAM, MemoryAccessType } from './types'
 // ============================================================================
 
 export class HostFunctionResult {
-  resultCode: u8 | null
+  resultCode: u8
 
-  constructor(resultCode: u8 | null) {
+  constructor(resultCode: u8 = 255) {
+    // Use 255 (0xFF) as sentinel value for null (continue execution)
+    // This is safe because valid result codes are 0-5 (HALT, PANIC, etc.)
     this.resultCode = resultCode
   }
 }
@@ -27,12 +30,12 @@ export class HostFunctionResult {
 export class HostFunctionContext {
   registers: RegisterState
   ram: RAM
-  gasCounter: u64
+  gasCounter: u32
 
-  constructor(registers: RegisterState, ram: RAM, gasCounter: u64) {
+  constructor(gasCounter: u32, registers: RegisterState, ram: RAM) {
+    this.gasCounter = gasCounter
     this.registers = registers
     this.ram = ram
-    this.gasCounter = gasCounter
   }
 }
 
@@ -96,23 +99,7 @@ export class ServiceAccountCore {
 // Service Interfaces (Stub implementations)
 // ============================================================================
 
-export class IServiceAccountService {
-  getAccount(serviceId: u64): ServiceAccount | null {
-    return null
-  }
-
-  setAccount(serviceId: u64, account: ServiceAccount): void {
-    // Stub
-  }
-}
-
-export class IConfigService {
-  numCores: i32 = 341
-
-  getNumCores(): i32 {
-    return this.numCores
-  }
-}
+// Removed IServiceAccountService and IConfigService - functionality implemented directly in host functions
 
 // ============================================================================
 // Host Function Parameter Types
@@ -154,11 +141,12 @@ export class InfoParams {
   }
 }
 
-export class FetchParams {
+export class FetchParams extends HostFunctionParams {
   timeslot: u64
   offset: u64
 
   constructor(timeslot: u64, offset: u64) {
+    super()
     this.timeslot = timeslot
     this.offset = offset
   }
@@ -171,7 +159,7 @@ export interface InvokeParams {
 }
 
 export interface PVMGuest {
-  pvm: PVMState
+  pvm: PVM
 }
 
 export interface PVMOptions {
@@ -189,12 +177,15 @@ export interface RefineInvocationContext {
 export class WORK_PACKAGE_CONSTANTS {
   static readonly C_MAXPACKAGEITEMS: i32 = 16
   static readonly C_MAXPACKAGEXTS: i32 = 128
-  static readonly C_MAXPACKAGEIMPORTS: i32 = 64
+  static readonly C_MAXPACKAGEIMPORTS: i32 = 3072
+  static readonly C_MAXPACKAGEEXPORTS: i32 = 3072
+  static readonly C_MAXBUNDLESIZE: i32 = 13791360
 }
 
 export class WORK_REPORT_CONSTANTS {
   static readonly C_MAXREPORTDEPS: i32 = 8
   static readonly C_REPORTACCGAS: i32 = 10000000
+  static readonly C_MAXREPORTVARSIZE: i32 = 49152 // 48 * 2^10
 }
 
 export class AUTHORIZATION_CONSTANTS {

@@ -32,12 +32,6 @@ import {
 } from './config'
 import type { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
-import {
-  buildPanicDumpData,
-  decodeLastInstruction,
-  writeHostFunctionLogs,
-  writePanicDump,
-} from './panic-dump-util'
 import { PVMParser } from './parser'
 import { PVMRAM } from './ram'
 
@@ -52,15 +46,17 @@ export class PVM implements IPVM {
   protected readonly hostFunctionRegistry: HostFunctionRegistry
   protected context: RefineInvocationContext | ImplicationsPair | null = null
   protected contextMutator: ContextMutator = () => null
+  /** Step counter for execution traces (per execution run) */
+  protected executionStep = 0
+
   /** Global log collection for instruction execution (per execution run) */
   protected executionLogs: Array<{
+    step: number
     pc: bigint
     instructionName: string
     opcode: string
-    message: string
-    data?: Record<string, unknown>
+    gas: bigint
     registers: string[]
-    timestamp: number
   }> = []
 
   /** Global log collection for host function execution (per execution run) */
@@ -270,9 +266,6 @@ export class PVM implements IPVM {
    * @param encodedArgs - Encoded arguments blob
    * @param contextMutator - Context mutator function F
    * @param context - Context X (ImplicationsPair for accumulate, RefineContext for refine)
-   * @param buildPanicDump - Optional flag to build panic dump on panic/OOG
-   * @param serviceId - Optional service ID for panic dump and host function logs (required if buildPanicDump or writeHostFunctionLogs is true)
-   * @param writeHostFunctionLogs - Optional flag to write host function logs to file
    * @returns Tuple of (gas consumed, result, updated context) where result is blob ∪ {panic, oog}
    */
   protected async executeMarshallingInvocation(
@@ -282,9 +275,6 @@ export class PVM implements IPVM {
     encodedArgs: Uint8Array,
     contextMutator: ContextMutator,
     context: RefineInvocationContext | ImplicationsPair,
-    buildPanicDump?: boolean,
-    serviceId?: bigint,
-    writeHostFunctionLogsFlag?: boolean,
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -338,83 +328,6 @@ export class PVM implements IPVM {
       finalRegisters,
       finalMemory,
     )
-
-    // Build panic dump if requested and execution ended in panic or OOG
-    if (
-      buildPanicDump &&
-      (finalResultCode === RESULT_CODES.PANIC ||
-        finalResultCode === RESULT_CODES.OOG) &&
-      serviceId !== undefined
-    ) {
-      try {
-        const lastPC = this.state.programCounter
-
-        // Decode last instruction details for panic analysis
-        const lastInstruction = decodeLastInstruction({
-          lastPC,
-          postState: {
-            code: this.state.code,
-            bitmask: this.state.bitmask,
-            registerState: this.state.registerState,
-          },
-          registry: this.registry,
-          skip: (instructionIndex, opcodeBitmask) =>
-            this.skip(instructionIndex, opcodeBitmask),
-        })
-
-        const panicDumpData = buildPanicDumpData({
-          serviceId,
-          gasConsumed,
-          postState: {
-            programCounter: lastPC,
-            resultCode: finalResultCode,
-            gasCounter: finalGasCounter,
-            registerState: finalRegisters,
-            faultAddress: this.state.faultAddress,
-          },
-          lastInstruction,
-          ram: finalMemory,
-          executionLogs: this.getExecutionLogs(),
-          hostFunctionLogs: this.getHostFunctionLogs(),
-        })
-
-        const dumpType =
-          finalResultCode === RESULT_CODES.OOG ? 'oog' : 'panic'
-        const filepath = writePanicDump(panicDumpData, dumpType)
-        if (filepath) {
-          logger.info(
-            `[PVM] ${dumpType.toUpperCase()} tracking info serialized to file: ${filepath}`,
-          )
-        } else {
-          logger.error(
-            `[PVM] Failed to serialize ${dumpType} tracking info to file`,
-          )
-        }
-      } catch (error) {
-        logger.error(
-          `[PVM] Failed to serialize tracking info to file`,
-          error instanceof Error ? error : new Error(String(error)),
-        )
-      }
-    }
-
-    // Write host function logs if requested
-    if (writeHostFunctionLogsFlag && serviceId !== undefined) {
-      try {
-        const hostFunctionLogs = this.getHostFunctionLogs()
-        const hostLogsFilepath = writeHostFunctionLogs(serviceId, hostFunctionLogs)
-        if (hostLogsFilepath) {
-          logger.info(
-            `[PVM] Host function logs serialized to file: ${hostLogsFilepath}`,
-          )
-        }
-      } catch (error) {
-        logger.error(
-          `[PVM] Failed to write host function logs`,
-          error instanceof Error ? error : new Error(String(error)),
-        )
-      }
-    }
 
     return safeResult({
       gasConsumed,
@@ -621,13 +534,12 @@ export class PVM implements IPVM {
    * Note: PC values may go backwards due to branches/jumps, but logs remain in execution order
    */
   public getExecutionLogs(): Array<{
+    step: number
     pc: bigint
     instructionName: string
     opcode: string
-    message: string
-    data?: Record<string, unknown>
+    gas: bigint
     registers: string[]
-    timestamp: number
   }> {
     // Return copy without sorting - logs are already in execution order
     return [...this.executionLogs]
@@ -655,9 +567,10 @@ export class PVM implements IPVM {
    * Uses step() function to execute instructions one by one
    */
   public async run(programBlob: Uint8Array): Promise<void> {
-    // Clear logs at the start of each execution run
+    // Clear logs and step counter at the start of each execution run
     this.executionLogs = []
     this.hostFunctionLogs = []
+    this.executionStep = 0
 
     // Decode the program blob
     const [error, decoded] = decodeBlob(programBlob)
@@ -709,6 +622,20 @@ export class PVM implements IPVM {
         return
       }
 
+      // Debug: Log bitmask and code at PC for debugging trace differences
+      if (instructionIndex === 5) {
+        logger.debug('[TypeScript PVM] PC=5 debug info', {
+          pc: this.state.programCounter.toString(),
+          codeAt5: extendedCode[5],
+          codeAt5Hex: `0x${extendedCode[5]?.toString(16) || 'undefined'}`,
+          bitmaskAt5: extendedBitmask[5],
+          bitmaskLength: extendedBitmask.length,
+          codeLength: extendedCode.length,
+          codeSlice: Array.from(extendedCode.slice(0, 20)).map(b => `0x${b.toString(16)}`),
+          bitmaskSlice: Array.from(extendedBitmask.slice(0, 20)),
+        })
+      }
+
       const opcode = extendedCode[instructionIndex]
 
       // Validate opcode is not undefined
@@ -733,6 +660,9 @@ export class PVM implements IPVM {
         instructionIndex + instructionLength,
       )
 
+      // Save PC before instruction execution (for trace logging)
+      const pcBefore = this.state.programCounter
+
       const instruction: PVMInstruction = {
         opcode: BigInt(opcode),
         operands,
@@ -740,7 +670,22 @@ export class PVM implements IPVM {
         pc: this.state.programCounter,
       }
 
+      // Get instruction handler for trace logging
+      const handler = this.registry.getHandler(instruction.opcode)
+      const instructionName = handler?.name ?? 'UNKNOWN'
+
       resultCode = await this.step(instruction)
+
+      // Log execution step with PC before instruction execution
+      // This shows where the instruction was executed, not where it jumped to
+      this.executionLogs.push({
+        step: this.executionStep,
+        pc: pcBefore,
+        instructionName,
+        opcode: `0x${instruction.opcode.toString(16)}`,
+        gas: this.state.gasCounter,
+        registers: Array.from(this.state.registerState.slice(0, 13)).map((r) => r.toString()),
+      })
     }
 
     this.state.resultCode = resultCode
@@ -776,6 +721,19 @@ export class PVM implements IPVM {
         this.executionLogs = []
       }
 
+      // Increment step counter for this instruction execution
+      this.executionStep++
+
+      // Create instruction logs array for this instruction (separate from trace logs)
+      const instructionLogs: Array<{
+        pc: bigint
+        instructionName: string
+        opcode: string
+        message: string
+        data?: Record<string, unknown>
+        timestamp: number
+      }> = []
+
       // Create execution context (mutable)
       const context = {
         instruction,
@@ -787,19 +745,14 @@ export class PVM implements IPVM {
         fskip: instruction.fskip,
         bitmask: this.state.bitmask, // k
         code: this.state.code, // c
-        logs: this.executionLogs,
+        logs: instructionLogs,
         log: (message: string, data?: Record<string, unknown>) => {
-          const logData = {
-            ...data,
-            gasCounter: this.state.gasCounter.toString(),
-          }
-          this.executionLogs.push({
+          instructionLogs.push({
             pc: this.state.programCounter,
             instructionName: handler.name,
             opcode: `0x${instruction.opcode.toString(16)}`,
             message,
-            data: logData,
-            registers: Array.from(context.registers.slice(0, 13)).map(x=>x.toString()),
+            data,
             timestamp: Date.now(),
           })
         },
@@ -863,9 +816,10 @@ export class PVM implements IPVM {
       bitmask: new Uint8Array(0),
       hostCallId: null,
     }
-    // Clear execution logs on reset
+    // Clear execution logs and step counter on reset
     this.executionLogs = []
     this.hostFunctionLogs = []
+    this.executionStep = 0
   }
 
   /**

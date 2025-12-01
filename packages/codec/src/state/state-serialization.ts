@@ -68,6 +68,7 @@ import {
 import type {
   GlobalState,
   IConfigService,
+  JamVersion,
   Safe,
   StateTrie,
 } from '@pbnj/types'
@@ -330,7 +331,7 @@ export function createServiceRequestKey(
 export function createStateTrie(
   globalState: GlobalState,
   configService: IConfigService,
-  rawCshKeys?: Map<Hex, Hex>,
+  jamVersion?: JamVersion,
 ): Safe<StateTrie> {
   const stateTrie: StateTrie = {}
 
@@ -465,6 +466,7 @@ export function createStateTrie(
   const [error12, privilegesData] = encodePrivileges(
     globalState.privileges,
     configService,
+    jamVersion,
   )
   if (error12) {
     return safeError(error12)
@@ -530,7 +532,7 @@ export function createStateTrie(
   // ServiceAccounts.accounts is a Map<bigint, ServiceAccount>, not a plain object
   for (const [serviceId, account] of globalState.accounts.accounts) {
     const accountKey = createStateKey(255, serviceId)
-    const [error17, accountData] = encodeServiceAccount(account)
+    const [error17, accountData] = encodeServiceAccount(account, jamVersion)
     if (error17) {
       return safeError(error17)
     }
@@ -538,59 +540,46 @@ export function createStateTrie(
       stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
     }
 
-    // Only generate C(s, h) keys from service account Maps if we don't have rawCshKeys
-    // When rawCshKeys is provided (from test vectors), use those instead to preserve
-    // the exact key-value pairs and order from the test vectors
-    if (!rawCshKeys || rawCshKeys.size === 0) {
-      // Service storage mappings: C(s, encode[4]{0xFFFFFFFF} ∥ storage_key) ↦ storage_value
-      // Gray Paper merklization.tex (lines 103-104)
-      for (const [storageKey, storageValue] of account.storage) {
-        const storageStateKey = createServiceStorageKey(serviceId, storageKey)
-        stateTrie[bytesToHex(storageStateKey)] = bytesToHex(storageValue)
-      }
-
-      // Service preimage mappings: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash) ↦ preimage_data
-      // Gray Paper merklization.tex (lines 105-106)
-      for (const [preimageHash, preimageData] of account.preimages) {
-        const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
-        stateTrie[bytesToHex(preimageStateKey)] = bytesToHex(preimageData)
-      }
-
-      // Service request mappings: C(s, encode[4]{length} ∥ request_hash) ↦ request_status
-      // Gray Paper merklization.tex (lines 107-110)
-      // encode{var{sequence{encode[4]{x} | x ∈ t}}}
-      // where t is the sequence of timeslots (up to 3)
-      for (const [requestHash, lengthMap] of account.requests) {
-        for (const [length, requestStatus] of lengthMap) {
-          const requestStateKey = createServiceRequestKey(
-            serviceId,
-            requestHash,
-            length,
-          )
-          // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
-          // var{...} = length prefix (natural number)
-          // sequence{encode[4]{x}} = sequence of 4-byte timeslots
-          const [error18, requestStatusData] = encodeVariableSequence(
-            requestStatus,
-            (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
-          )
-          if (error18) {
-            return safeError(error18)
-          }
-          stateTrie[bytesToHex(requestStateKey)] = bytesToHex(requestStatusData)
-        }
-      }
+    // Generate C(s, h) keys from service account Maps
+    // Gray Paper merklization.tex line 118: "Implementations are free to use this fact in order
+    // to avoid storing the keys themselves" - we generate keys from service account storage/preimages/requests
+    // Service storage mappings: C(s, encode[4]{0xFFFFFFFF} ∥ storage_key) ↦ storage_value
+    // Gray Paper merklization.tex (lines 103-104)
+    for (const [storageKey, storageValue] of account.storage) {
+      const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+      stateTrie[bytesToHex(storageStateKey)] = bytesToHex(storageValue)
     }
-  }
 
-  // Add raw C(s, h) keys that were decoded from test vectors
-  // These are stored because the original storage/request keys cannot be recovered
-  // from their Blake hashes, so we preserve the raw key-value pairs
-  // When rawCshKeys is provided, use them exclusively to preserve exact test vector format
-  if (rawCshKeys) {
-    for (const [key, value] of rawCshKeys.entries()) {
-      // Overwrite any generated keys with raw keys to ensure exact match with test vectors
-      stateTrie[key] = value
+    // Service preimage mappings: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash) ↦ preimage_data
+    // Gray Paper merklization.tex (lines 105-106)
+    for (const [preimageHash, preimageData] of account.preimages) {
+      const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
+      stateTrie[bytesToHex(preimageStateKey)] = bytesToHex(preimageData)
+    }
+
+    // Service request mappings: C(s, encode[4]{length} ∥ request_hash) ↦ request_status
+    // Gray Paper merklization.tex (lines 107-110)
+    // encode{var{sequence{encode[4]{x} | x ∈ t}}}
+    // where t is the sequence of timeslots (up to 3)
+    for (const [requestHash, lengthMap] of account.requests) {
+      for (const [length, requestStatus] of lengthMap) {
+        const requestStateKey = createServiceRequestKey(
+          serviceId,
+          requestHash,
+          length,
+        )
+        // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
+        // var{...} = length prefix (natural number)
+        // sequence{encode[4]{x}} = sequence of 4-byte timeslots
+        const [error18, requestStatusData] = encodeVariableSequence(
+          requestStatus,
+          (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
+        )
+        if (error18) {
+          return safeError(error18)
+        }
+        stateTrie[bytesToHex(requestStateKey)] = bytesToHex(requestStatusData)
+      }
     }
   }
 

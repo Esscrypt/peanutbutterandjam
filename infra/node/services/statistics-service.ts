@@ -469,19 +469,6 @@ export class StatisticsService extends BaseService {
       incomingReports.push(guarantee.report)
     }
 
-    logger.info('Updating core statistics from work reports', {
-      incomingReportsCount: incomingReports.length,
-      guaranteesCount: body.guarantees.length,
-      firstReportCoreIndex: incomingReports[0]?.core_index?.toString(),
-      firstReportPackageSpec: incomingReports[0]?.package_spec
-        ? {
-            hash: incomingReports[0].package_spec.hash,
-            length: incomingReports[0].package_spec.length?.toString(),
-            hasLength: incomingReports[0].package_spec.length !== undefined,
-          }
-        : null,
-    })
-
     // Update core statistics: popularity from assurances
     this.updateCoreStatistics(body.assurances)
 
@@ -553,13 +540,6 @@ export class StatisticsService extends BaseService {
     // This ensures serviceStats only contains entries for services with actual non-zero activity,
     // not just services that appear in work reports or preimages but have no activity.
 
-    // Debug: Log final serviceStats
-    logger.debug('Final serviceStats after applyBlockDeltas', {
-      serviceIds: Array.from(this.activity.serviceStats.keys()).map((id) =>
-        id.toString(),
-      ),
-      serviceStatsCount: this.activity.serviceStats.size,
-    })
   }
 
   /**
@@ -934,10 +914,5 @@ export class StatisticsService extends BaseService {
         serviceStats.exportCount += Number(result.refine_load.exports)
       }
     }
-
-    logger.debug('Updated service statistics from work reports', {
-      incomingCount: incomingReports.length,
-      servicesUpdated: servicesToUpdate.size,
-    })
   }
 }

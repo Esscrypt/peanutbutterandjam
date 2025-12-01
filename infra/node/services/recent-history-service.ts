@@ -21,6 +21,7 @@
  * - Ccorecount = 341 (maximum cores, affects reportedpackagehashes size)
  */
 
+import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import {
   type BlockProcessedEvent,
   bytesToHex,
@@ -35,7 +36,6 @@ import {
   mmrsuperpeak,
   zeroHash,
 } from '@pbnj/core'
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
 import type {
   AccoutBelt,
   BlockBody,
@@ -268,7 +268,6 @@ export class RecentHistoryService extends BaseServiceClass {
     this.mmrPeaks = []
     this.currentBlockNumber = 0n
     // this.persistenceCounter = 0
-    logger.info('Recent history cleared')
   }
 
   /**
@@ -477,6 +476,22 @@ export class RecentHistoryService extends BaseServiceClass {
     if (firstEntry.headerHash === genesisHash) {
       firstEntry.stateRoot = genesisHash
     }
+  }
+
+  /**
+   * Update the most recent entry's state root to the final calculated state root
+   * 
+   * Gray Paper: After state transition, the new entry's state_root should be updated
+   * from the initial 0x0 (eq 41) to the actual computed state root.
+   * 
+   * @param finalStateRoot - The final calculated state root after state transition
+   */
+  public updateLastEntryStateRoot(finalStateRoot: Hex): void {
+    if (this.recentHistory.length === 0) {
+      return
+    }
+    const lastEntry = this.recentHistory[this.recentHistory.length - 1]
+    lastEntry.stateRoot = finalStateRoot
   }
 
   /**

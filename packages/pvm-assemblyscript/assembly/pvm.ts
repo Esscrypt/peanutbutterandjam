@@ -10,9 +10,10 @@ import {
   decodeBlob,
   decodeProgramFromPreimage,
   decodeImplicationsPair,
-  decodeServiceCodeFromPreimage,
   decodeAccumulateArgs,
   encodeImplicationsPair,
+  PartialState,
+  CompleteServiceAccount,
 } from './codec'
 import { ImplicationsPair } from './codec'
 import {
@@ -31,6 +32,8 @@ import {
 import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
 import { AccumulateHostFunctionContext } from './host-functions/accumulate/base'
 import { HostFunctionRegistry } from './host-functions/general/registry'
+import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams } from './host-functions/general/base'
+import { FetchParams, ServiceAccount } from './pbnj-types-compat'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMParser } from './parser'
 import { InstructionContext, RegisterState, RAM, ExecutionResult, RunProgramResult } from './types'
@@ -125,6 +128,17 @@ export class PVM {
   accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   accumulationContext: ImplicationsPair | null = null
   timeslot: u64 = u64(0) // Current timeslot for accumulation
+  entropyAccumulator: Uint8Array | null = null // Entropy accumulator for FETCH host function
+  
+  // Config parameters (set during setupAccumulateInvocation)
+  configNumCores: i32 = 341
+  configPreimageExpungePeriod: u32 = 19200
+  configEpochDuration: u32 = 600
+  configMaxBlockGas: u64 = u64(3500000000)
+  configTicketsPerValidator: u16 = 2
+  configSlotDuration: u16 = 6
+  configRotationPeriod: u16 = 10
+  configNumValidators: u16 = 1023
 
   constructor(
     registerState: RegisterState,
@@ -168,7 +182,7 @@ export class PVM {
     this.state.jumpTable = jumpTable
 
     // Execute until termination
-    this.run()
+    this.run(null)
   }
 
   /**
@@ -186,21 +200,13 @@ export class PVM {
     programBlob: Uint8Array,
     argumentData: Uint8Array,
   ): Uint8Array | null {
-    // Extract codeBlob from preimage first (needed for both Y function and deblob decoding)
-    const preimageResult = decodeServiceCodeFromPreimage(programBlob)
-    if (!preimageResult) {
-      abort(
-        `initializeProgram: Failed to decode service code from preimage: programBlob length=${programBlob.length}`
-      )
-      unreachable()
-    }
-    const codeBlob = preimageResult!.value.codeBlob
-
     // Try to decode as standard program format first (Gray Paper Y function)
+    // Note: decodeProgramFromPreimage internally calls decodeServiceCodeFromPreimage
+    // to extract metadata and codeBlob, then decodes the codeBlob as Y function format
     const result = decodeProgramFromPreimage(programBlob)
     if (!result) {
       abort(
-        `initializeProgram: Failed to decode program from preimage: programBlob length=${programBlob.length}, codeBlob length=${codeBlob.length}`
+        `initializeProgram: Failed to decode program from preimage: programBlob length=${programBlob.length}`
       )
       unreachable()
     }
@@ -255,7 +261,7 @@ export class PVM {
     const decodedBlob = decodeBlob(code)
     if (!decodedBlob) {
       abort(
-        `initializeProgram: Failed to decode code as deblob format: code length=${code.length}, codeBlob length=${codeBlob.length}`
+        `initializeProgram: Failed to decode code as deblob format: code length=${code.length}`
       )
       unreachable()
     }
@@ -489,38 +495,34 @@ export class PVM {
    * Gray Paper pvm_invocations.tex equation 187-211:
    * Routes host calls to appropriate handlers based on function ID
    * - General functions: gas, fetch, read, write, lookup, info
-   * - Accumulation-specific functions: bless, assign, designate, checkpoint, new, upgrade, transfer, eject, query, solicit, forget, yield, provide
+   * - Accumulation-specific functions: bless (14), assign (15), designate (16), checkpoint (17), 
+   *   new (18), upgrade (19), transfer (20), eject (21), query (22), solicit (23), forget (24), 
+   *   yield (25), provide (26)
+   * 
+   * Similar to TypeScript createAccumulateContextMutator and handleAccumulateHostFunction
    * 
    * @param hostCallId - Host function ID
    * @param instruction - Current instruction (for PC advancement)
    * @returns Result code (-1 = continue, >= 0 = halt)
    */
   private handleAccumulationHostCall(hostCallId: u64, instruction: PVMInstruction): i32 {
-    // Check if it's an accumulation-specific function
-    const accumulateHandler = this.accumulateHostFunctionRegistry.get(hostCallId)
+    // Gray Paper: Apply base gas cost (10 gas for all host functions)
+    const gasCost: u32 = 10
+    if (this.state.gasCounter < gasCost) {
+      this.state.resultCode = RESULT_CODE_OOG
+      return i32(RESULT_CODE_OOG)
+    }
     
-    if (accumulateHandler !== null) {
-      // Create accumulation host function context
-      const context = new AccumulateHostFunctionContext(
-        this.state.gasCounter,
-        this.state.registerState,
-        this.state.ram,
-        this.accumulationContext!,
-        this.timeslot,
-        u64(19200), // Cexpungeperiod = 19200
-      )
+    // Deduct base gas cost before calling host function
+    this.state.gasCounter -= gasCost
+    
+    // Try accumulate host functions first (14-26)
+    // Gray Paper: Accumulation-specific functions are in range 14-26
+    if (hostCallId >= u64(14) && hostCallId <= u64(26)) {
+      const result = this.handleAccumulateHostFunction(hostCallId, instruction)
       
-      // Execute accumulation host function
-      const result = accumulateHandler.execute(context)
-      
-      // Update gas counter from context
-      this.state.gasCounter = context.gasCounter
-      
-      // Update implications from context (mutations are done in-place)
-      // The context.implications is the same reference, so mutations are already reflected
-      
-      // If result code is null, continue execution
-      if (result.resultCode === null) {
+      // If result code is 255 (sentinel for null), continue execution
+      if (result === -1) {
         // Advance PC by instruction length (host function handled it)
         const instructionLength = u32(1 + instruction.fskip)
         this.state.programCounter += instructionLength
@@ -528,24 +530,202 @@ export class PVM {
       }
       
       // Otherwise, halt with the result code
-      this.state.resultCode = result.resultCode
-      return i32(result.resultCode)
+      this.state.resultCode = u8(result)
+      return result
     }
     
-    // Check if it's a general function that's available in accumulation context
-    // Gray Paper: gas (0), fetch (1), read (3), write (4), lookup (2), info (5)
-    const generalHandler = this.hostFunctionRegistry.get(hostCallId)
-    if (generalHandler !== null) {
-      // For general functions in accumulation context, we still need to handle them
-      // but they don't have access to accumulation context
-      // For now, return HOST to indicate it needs external handling
-      // TODO: Implement general function execution with accumulation context if needed
-      return i32(RESULT_CODE_HOST)
+    // General host functions available in accumulate context (0-5)
+    // Also include log (100) - JIP-1 debug/monitoring function
+    if ((hostCallId >= u64(0) && hostCallId <= u64(5)) || hostCallId === u64(100)) {
+      const result = this.handleGeneralHostFunction(hostCallId, instruction)
+      
+      // If result code is 255 (sentinel for null), continue execution
+      if (result === -1) {
+        // Advance PC by instruction length (host function handled it)
+        const instructionLength = u32(1 + instruction.fskip)
+        this.state.programCounter += instructionLength
+        return -1 // Continue
+      }
+      
+      // Otherwise, halt with the result code
+      this.state.resultCode = u8(result)
+      return result
     }
     
     // Unknown host function
     this.state.resultCode = RESULT_CODE_PANIC
     return i32(RESULT_CODE_PANIC)
+  }
+
+  /**
+   * Handle accumulation-specific host function (similar to TypeScript handleAccumulateHostFunction)
+   * 
+   * Gray Paper: Functions 14-26 (bless, assign, designate, checkpoint, new, upgrade, transfer, eject, query, solicit, forget, yield, provide)
+   * 
+   * @param hostCallId - Host function ID (should be 14-26)
+   * @param instruction - Current instruction (for PC advancement)
+   * @returns Result code (-1 = continue, >= 0 = halt)
+   */
+  private handleAccumulateHostFunction(hostCallId: u64, instruction: PVMInstruction): i32 {
+    const accumulateHandler = this.accumulateHostFunctionRegistry.get(hostCallId)
+    if (accumulateHandler === null) {
+      // Unknown accumulation host function
+      this.state.resultCode = RESULT_CODE_PANIC
+      return i32(RESULT_CODE_PANIC)
+    }
+
+    // Create accumulation host function context (similar to TypeScript handleAccumulateHostFunction)
+    if (!this.accumulationContext) {
+      this.state.resultCode = RESULT_CODE_PANIC
+      return i32(RESULT_CODE_PANIC)
+    }
+    
+    const context = new AccumulateHostFunctionContext(
+      this.state.gasCounter,
+      this.state.registerState,
+      this.state.ram,
+      this.accumulationContext!,
+      this.timeslot,
+      u64(19200), // Cexpungeperiod = 19200
+    )
+    
+    // Execute accumulation host function
+    const result = accumulateHandler.execute(context)
+    
+    // Update gas counter from context (host function may consume additional gas beyond base 10)
+    this.state.gasCounter = context.gasCounter
+    
+    // Update implications from context (mutations are done in-place)
+    // The context.implications is the same reference, so mutations are already reflected
+    
+    // If result code is 255 (sentinel for null), continue execution
+    if (result.resultCode === u8(255)) {
+      return -1 // Continue
+    }
+    
+    // Otherwise, return the result code (will be converted to halt code by caller)
+    return i32(result.resultCode)
+  }
+
+  /**
+   * Handle general host function (similar to TypeScript handleGeneralHostFunction)
+   * 
+   * Gray Paper: gas (0), fetch (1), read (3), write (4), lookup (2), info (5), log (100)
+   * 
+   * @param hostCallId - Host function ID
+   * @param instruction - Current instruction (for PC advancement)
+   * @returns Result code (-1 = continue, >= 0 = halt)
+   */
+  private handleGeneralHostFunction(hostCallId: u64, instruction: PVMInstruction): i32 {
+    const generalHandler = this.hostFunctionRegistry.get(hostCallId)
+    if (generalHandler === null) {
+      // Unknown general host function
+      this.state.resultCode = RESULT_CODE_PANIC
+      return i32(RESULT_CODE_PANIC)
+    }
+
+    // Create host function context (similar to TypeScript handleGeneralHostFunction)
+    const hostContext = new HostFunctionContext(
+      this.state.gasCounter,
+      this.state.registerState,
+      this.state.ram,
+    )
+    
+    // Build params based on function type (similar to TypeScript handleGeneralHostFunction)
+    const params = this.buildGeneralHostFunctionParams(hostCallId)
+    
+    // Execute host function
+    const result = generalHandler.execute(hostContext, params)
+    
+    // Update gas counter from context (host function may consume additional gas beyond base 10)
+    this.state.gasCounter = hostContext.gasCounter
+    
+    // If result code is 255 (sentinel for null), continue execution
+    if (result.resultCode === u8(255)) {
+      return -1 // Continue
+    }
+    
+    // Otherwise, return the result code (will be converted to halt code by caller)
+    return i32(result.resultCode)
+  }
+
+  /**
+   * Build params for general host functions (similar to TypeScript handleGeneralHostFunction)
+   * Gray Paper: gas (0), fetch (1), read (3), write (4), lookup (2), info (5), log (100)
+   */
+  private buildGeneralHostFunctionParams(hostCallId: u64): HostFunctionParams | null {
+    if (!this.accumulationContext) {
+      return null
+    }
+
+    const imX = this.accumulationContext!.regular
+
+    switch (u32(hostCallId)) {
+      case u32(0): {
+        // gas - no params needed
+        return null
+      }
+      case u32(1): {
+        // fetch - FetchParams with timeslot
+        return new FetchParams(this.timeslot, u64(0))
+      }
+      case u32(2): {
+        // lookup - LookupParams with service ID and accounts Map
+        const accountsMap = this.buildAccountsMap(imX.state)
+        return new LookupParams(u64(imX.id), accountsMap)
+      }
+      case u32(3): {
+        // read - ReadParams with service account and accounts
+        const serviceAccount = this.findServiceAccount(imX.state, u32(imX.id))
+        const accountsMap = this.buildAccountsMap(imX.state)
+        return new ReadParams(u64(imX.id), serviceAccount, accountsMap)
+      }
+      case u32(4): {
+        // write - WriteParams with service account
+        const serviceAccount = this.findServiceAccount(imX.state, u32(imX.id))
+        if (!serviceAccount) {
+          return null
+        }
+        return new WriteParams(serviceAccount)
+      }
+      case u32(5): {
+        // info - InfoParams with service ID and accounts Map
+        const accountsMap = this.buildAccountsMap(imX.state)
+        return new InfoParams(u64(imX.id), accountsMap)
+      }
+      case u32(100): {
+        // log (JIP-1) - LogParams (no properties needed)
+        return new LogParams()
+      }
+      default: {
+        return null
+      }
+    }
+  }
+
+  /**
+   * Build accounts Map from PartialState accounts array
+   */
+  private buildAccountsMap(state: PartialState): Map<u64, CompleteServiceAccount> {
+    const accountsMap = new Map<u64, CompleteServiceAccount>()
+    for (let i = 0; i < state.accounts.length; i++) {
+      const entry = state.accounts[i]
+      accountsMap.set(u64(entry.serviceId), entry.account)
+    }
+    return accountsMap
+  }
+
+  /**
+   * Find service account in partial state by service ID
+   */
+  private findServiceAccount(state: PartialState, serviceId: u32): CompleteServiceAccount | null {
+    // Search through accounts array to find matching serviceId
+    for (let i = 0; i < state.accounts.length; i++) {
+      if (state.accounts[i].serviceId === u32(serviceId)) {
+        return state.accounts[i].account
+      }
+    }
+    return null
   }
 
   /**
@@ -631,7 +811,8 @@ export class PVM {
 
     // Extend bitmask to cover the padded zeros (all 1s = valid opcode positions)
     // Gray Paper: "appends k with a sequence of set bits in order to ensure a well-defined result"
-    const extendedBitmask = new Uint8Array(this.state.bitmask.length + 16)
+    // Use 25 to match skip function's maximum distance (24 + 1 for safety)
+    const extendedBitmask = new Uint8Array(this.state.bitmask.length + 25)
     extendedBitmask.set(this.state.bitmask)
     extendedBitmask.fill(1, this.state.bitmask.length) // Fill remaining positions with 1s
 
@@ -804,12 +985,38 @@ export class PVM {
     numCores: i32,
     numValidators: i32,
     authQueueSize: i32,
+    entropyAccumulator: Uint8Array,
+    configNumCores: i32 = 341,
+    configPreimageExpungePeriod: u32 = 19200,
+    configEpochDuration: u32 = 600,
+    configMaxBlockGas: u64 = u64(3500000000),
+    configTicketsPerValidator: u16 = 2,
+    configSlotDuration: u16 = 6,
+    configRotationPeriod: u16 = 10,
+    configNumValidators: u16 = 1023,
   ): AccumulateInvocationResult {
     const initialGas = gasLimit
     
     // Set up accumulation invocation (decodes context, initializes program, sets up state, extracts timeslot)
     // setupAccumulateInvocation already decodes args and sets this.timeslot according to Gray Paper
-    this.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+    this.setupAccumulateInvocation(
+      gasLimit,
+      program,
+      args,
+      context,
+      numCores,
+      numValidators,
+      authQueueSize,
+      entropyAccumulator,
+      configNumCores,
+      configPreimageExpungePeriod,
+      configEpochDuration,
+      configMaxBlockGas,
+      configTicketsPerValidator,
+      configSlotDuration,
+      configRotationPeriod,
+      configNumValidators,
+    )
 
     // Gray Paper: Call core Ψ function (Ψ_H) with context mutator
     // The core Ψ function (this.run) handles all PVM execution logic
@@ -866,7 +1073,25 @@ export class PVM {
     numCores: i32,
     numValidators: i32,
     authQueueSize: i32,
+    entropyAccumulator: Uint8Array,
+    configNumCores: i32 = 341,
+    configPreimageExpungePeriod: u32 = 19200,
+    configEpochDuration: u32 = 600,
+    configMaxBlockGas: u64 = u64(3500000000),
+    configTicketsPerValidator: u16 = 2,
+    configSlotDuration: u16 = 6,
+    configRotationPeriod: u16 = 10,
+    configNumValidators: u16 = 1023,
   ): void {
+    // Store config parameters
+    this.configNumCores = configNumCores
+    this.configPreimageExpungePeriod = configPreimageExpungePeriod
+    this.configEpochDuration = configEpochDuration
+    this.configMaxBlockGas = configMaxBlockGas
+    this.configTicketsPerValidator = configTicketsPerValidator
+    this.configSlotDuration = configSlotDuration
+    this.configRotationPeriod = configRotationPeriod
+    this.configNumValidators = configNumValidators
     this.state.gasCounter = gasLimit
     this.state.programCounter = 5 // initial PC for accumulate invocation
     
@@ -895,6 +1120,9 @@ export class PVM {
     // Extract timeslot from decoded arguments
     // argsResult is guaranteed to be non-null after the check above
     this.timeslot = argsResult!.value.timeslot
+    
+    // Store entropy accumulator for FETCH host function
+    this.entropyAccumulator = entropyAccumulator
     
     // Initialize program (decodes preimage and sets up memory/registers)
     const codeBlob = this.initializeProgram(program, args)

@@ -1,6 +1,6 @@
-import { RESULT_CODE_HALT } from '../../config'
+import { RESULT_CODES } from '../../config'
 import { ACCUMULATE_ERROR_WHO, HostFunctionResult } from '../accumulate/base'
-import { ExpungeParams, HostFunctionContext } from './base'
+import { ExpungeParams, HostFunctionContext, HostFunctionParams } from './base'
 import { BaseHostFunction } from './base'
 
 /**
@@ -31,27 +31,31 @@ export class ExpungeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: ExpungeParams | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
-    const machineId = u64(context.registers[7])
-
-    if (!params || !params.refineContext) {
-      context.registers[7] = ACCUMULATE_ERROR_WHO
-      return new HostFunctionResult(RESULT_CODE_HALT)
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
-
-    const machines = params.refineContext.machines
+    const expungeParams = params as ExpungeParams
+    if (!expungeParams.refineContext) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    
+    const machineId = u64(context.registers[7])
+    const refineContext = expungeParams.refineContext!
+    const machines = refineContext.machines
 
     // Check if machine exists
     if (!machines.has(machineId)) {
       // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_WHO
-      return new HostFunctionResult(RESULT_CODE_HALT)
+      return new HostFunctionResult(RESULT_CODES.HALT)
     }
 
     // Get machine's PC before removal
     const machine = machines.get(machineId)!
-    const pc = machine.pvm.programCounter
+    const pvm = machine.pvm
+    const pc = pvm.state.programCounter
 
     // Remove machine from context
     machines.delete(machineId)

@@ -7,6 +7,7 @@ import {
 } from '../accumulate/base'
 import {
   HostFunctionContext,
+  HostFunctionParams,
   PeekPokeParams,
   PVMGuest,
   RefineInvocationContext,
@@ -42,9 +43,13 @@ export class PeekHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: PeekPokeParams | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
-    if (!params || !params.refineContext) {
+    if (!params) {
+      return new HostFunctionResult(255) // continue execution
+    }
+    const peekParams = params as PeekPokeParams
+    if (!peekParams.refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
@@ -57,7 +62,8 @@ export class PeekHostFunction extends BaseHostFunction {
 
     // Gray Paper error check order:
     // 1. Check if machine exists → WHO
-    const machine = this.getPVMMachine(params.refineContext, machineId)
+    const refineContext = peekParams.refineContext!
+    const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_WHO
       return new HostFunctionResult(255) // continue (not HALT)
@@ -77,8 +83,8 @@ export class PeekHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper: mem'[o:z] = (m[n].ram)[s:z]
-    const writeFaultAddress = context.ram.writeOctets(destOffset, data)
-    if (writeFaultAddress !== null) {
+    const writeResult = context.ram.writeOctets(u32(destOffset), data)
+    if (writeResult.hasFault) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
@@ -103,13 +109,13 @@ export class PeekHostFunction extends BaseHostFunction {
     offset: u64,
     length: u64,
   ): bool {
-    const result_readable = machine.pvm.ram.isReadableWithFault(
-      offset,
-      length,
+    const result_readable = machine.pvm.state.ram.isReadableWithFault(
+      u32(offset),
+      u32(length),
     )
-    const readable = result_readable.data
+    const readable = result_readable.success
     const faultAddress = result_readable.faultAddress
-    if (faultAddress !== null) {
+    if (faultAddress !== 0) {
       return false
     }
     return readable
@@ -121,8 +127,10 @@ export class PeekHostFunction extends BaseHostFunction {
     length: u64,
   ): Uint8Array | null {
     // Read data from machine's memory
-    const readResult_data = machine.pvm.ram.readOctets(offset, length)
-    if (data === null || faultAddress !== null) {
+    const readResult_data = machine.pvm.state.ram.readOctets(u32(offset), u32(length))
+    const data = readResult_data.data
+    const faultAddress = readResult_data.faultAddress
+    if (data === null || faultAddress !== 0) {
       return null
     }
     return data

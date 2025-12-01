@@ -117,3 +117,8 @@ remark-wallet.json
 panic-dumps/
 
 host-function-logs/
+
+parsed-programs/
+
+pvm-traces/
+

@@ -177,6 +177,13 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
     // Get current instruction
     const instructionIndex = i32(this.pvm.state.programCounter)
     
+    // CRITICAL: Verify code and bitmask are set
+    // If code is empty, this means initializeProgram failed or wasn't called
+    if (this.pvm.state.code.length === 0 || this.pvm.state.bitmask.length === 0) {
+      this.lastStatus = Status.PANIC
+      return false
+    }
+    
     // Extend code and bitmask if needed (same as run method)
     const extendedCode = new Uint8Array(this.pvm.state.code.length + 16)
     extendedCode.set(this.pvm.state.code)
@@ -423,6 +430,22 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
    */
   getExitArg(): i32 {
     return this.exitArg
+  }
+  
+  /**
+   * Get code array (for debugging/comparison)
+   * @returns Copy of the code array
+   */
+  getCode(): Uint8Array {
+    return this.pvm.state.code.slice()
+  }
+  
+  /**
+   * Get bitmask array (for debugging/comparison)
+   * @returns Copy of the bitmask array
+   */
+  getBitmask(): Uint8Array {
+    return this.pvm.state.bitmask.slice()
   }
   
   /**

@@ -413,7 +413,6 @@ export function encodeCompleteServiceAccount(
   parts.push(encodedParent)
 
   const result = concatBytes(parts)
-  console.log('TS encodeCompleteServiceAccount size:', result.length)
   return safeResult(result)
 }
 

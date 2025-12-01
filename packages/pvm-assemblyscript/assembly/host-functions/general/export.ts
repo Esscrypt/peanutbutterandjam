@@ -1,13 +1,11 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  ExportParams,
-} from '../../pbnj-types-compat'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, ExportParams } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
-  REFINE_CONFIG,
+  MAX_PACKAGE_EXPORTS,
   RESULT_CODES,
+  SEGMENT_SIZE,
 } from '../../config'
 import { BaseHostFunction } from './base'
 
@@ -31,37 +29,36 @@ export class ExportHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: ExportParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
-
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const exportParams = params as ExportParams
+    if (!exportParams.refineContext) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
 
     // Gray Paper: p = registers[7]
-    const memoryOffset = context.registers[7]
+    const memoryOffset = u32(context.registers[7])
     // Gray Paper: z = min(registers[8], Csegmentsize)
-    const rawLength = context.registers[8]
+    const rawLength = u32(context.registers[8])
     const cappedLength =
-      rawLength < REFINE_CONFIG.SEGMENT_SIZE
+      rawLength < SEGMENT_SIZE
         ? rawLength
-        : REFINE_CONFIG.SEGMENT_SIZE
+        : SEGMENT_SIZE
 
     // Gray Paper: Check if Nrange[p][z] ⊆ readable[memory]
     const readableResult = context.ram.isReadableWithFault(
       memoryOffset,
       cappedLength,
     )
-    const readable = readableResult.data || readableResult[0] || readableResult
-    const readableFaultAddress = readableResult.faultAddress || readableResult[1] || null
+    const readable = readableResult.success
+    const readableFaultAddress = readableResult.faultAddress
     if (!readable) {
       // Gray Paper: Return PANIC if memory not readable
-      context.registers[7] = 0
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: readableFaultAddress || 0,
-          details: 'Memory is not readable',
-        },
-      }
+      context.registers[7] = u64(0)
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Gray Paper: Read data from memory
@@ -71,23 +68,16 @@ export class ExportHostFunction extends BaseHostFunction {
     )
     const data = readResult.data
     const readFaultAddress = readResult.faultAddress
-    if (data === null) {
-      context.registers[7] = 0
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: readFaultAddress || 0,
-          details: 'Failed to read memory',
-        },
-      }
+    if (data === null || readFaultAddress !== 0) {
+      context.registers[7] = u64(0)
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Gray Paper: Create zero-padded segment of Csegmentsize
     const segment = this.createZeroPaddedSegment(data)
 
     // Gray Paper: Append to export sequence and check limits
-    const result = this.appendToExports(params, segment)
+    const result = this.appendToExports(exportParams, segment)
 
     if (result === -1) {
       // Gray Paper: Return FULL (2^64 - 5)
@@ -97,9 +87,7 @@ export class ExportHostFunction extends BaseHostFunction {
       context.registers[7] = u64(result)
     }
 
-    return {
-      resultCode: null, // Continue execution
-    }
+    return new HostFunctionResult(255) // Continue execution
   }
 
   /**
@@ -107,7 +95,7 @@ export class ExportHostFunction extends BaseHostFunction {
    * zeropad{Csegmentsize}{mem[p:p+z]}
    */
   createZeroPaddedSegment(data: Uint8Array): Uint8Array {
-    const segment = new Uint8Array(Number(REFINE_CONFIG.SEGMENT_SIZE))
+    const segment = new Uint8Array(SEGMENT_SIZE)
     segment.set(data, 0)
     // Remaining bytes are already zero (Uint8Array initialization)
     return segment
@@ -122,12 +110,15 @@ export class ExportHostFunction extends BaseHostFunction {
     params: ExportParams,
     segment: Uint8Array,
   ): i64 {
-    const exportSegments = params.refineContext.exportSegments
+    if (!params.refineContext) {
+      return -1 // FULL indicator
+    }
+    const exportSegments = params.refineContext!.exportSegments
     const segoff = params.segmentOffset
 
     // Gray Paper: Check if segoff + len(𝐞) >= Cmaxpackageexports
     const currentLength = i64(exportSegments.length)
-    if (segoff + currentLength >= i64(REFINE_CONFIG.MAX_PACKAGE_EXPORTS)) {
+    if (segoff + currentLength >= i64(MAX_PACKAGE_EXPORTS)) {
       return -1 // FULL indicator
     }
 

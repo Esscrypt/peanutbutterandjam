@@ -224,16 +224,17 @@ export async function instantiate(module, imports = {}) {
         __release(context);
       }
     },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32) => void
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32, u32, u32, u64, u16, u16, u16, u16) => void
       // Clear any previous error before calling
       clearLastWasmError();
       
       program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
       args = __lowerTypedArray(Uint8Array, 11, 0, args) || __notnull();
       context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
+      entropyAccumulator = __retain(__lowerTypedArray(Uint8Array, 11, 0, entropyAccumulator) || __notnull());
       try {
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores || 341, configPreimageExpungePeriod || 19200, configEpochDuration || 600, configMaxBlockGas || 3500000000n, configTicketsPerValidator || 2, configSlotDuration || 6, configRotationPeriod || 10, configNumValidators || 1023);
       } catch (error) {
         // If error was thrown, check if we have WASM error details
         const wasmError = getLastWasmError();
@@ -245,6 +246,7 @@ export async function instantiate(module, imports = {}) {
       } finally {
         __release(program);
         __release(context);
+        __release(entropyAccumulator);
       }
     },
     alignToPage(size) {
@@ -279,6 +281,14 @@ export async function instantiate(module, imports = {}) {
       // assembly/codec/decodeProgramFromPreimage(~lib/typedarray/Uint8Array) => assembly/codec/DecodedProgram | null
       preimageBlob = __lowerTypedArray(Uint8Array, 11, 0, preimageBlob) || __notnull();
       return __liftInternref(exports.decodeProgramFromPreimage(preimageBlob) >>> 0);
+    },
+    getCode() {
+      // assembly/index/getCode() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getCode() >>> 0);
+    },
+    getBitmask() {
+      // assembly/index/getBitmask() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getBitmask() >>> 0);
     },
     encodeServiceAccount(account) {
       // assembly/codec/encodeServiceAccount(assembly/codec/ServiceAccountData) => ~lib/typedarray/Uint8Array

@@ -1,10 +1,7 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  PVMGuest,
-  PVMOptions,
-  RefineInvocationContext,
-} from '../../pbnj-types-compat'
+import { RefineInvocationContext } from '../../pbnj-types-compat'
+import { PVMGuest } from './base'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, MachineParams } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -13,6 +10,7 @@ import {
 import { PVM } from '../../pvm'
 import { BaseHostFunction } from './base'
 import { HostFunctionRegistry } from './registry'
+import { PVMRAM } from '../../ram'
 
 /**
  * MACHINE host function (Ω_M)
@@ -40,19 +38,24 @@ export class MachineHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    refineContext: RefineInvocationContext | null,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const machineParams = params as MachineParams
+    if (!machineParams.refineContext) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
     // Validate execution
-    if (context.gasCounter < this.gasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
+    if (context.gasCounter < u32(this.gasCost)) {
+      return new HostFunctionResult(RESULT_CODES.OOG)
     }
 
-    context.gasCounter -= this.gasCost
+    context.gasCounter -= u32(this.gasCost)
 
-    const programOffset = context.registers[7]
-    const programLength = context.registers[8]
+    const programOffset = u32(context.registers[7])
+    const programLength = u32(context.registers[8])
     const initialPC = context.registers[9]
 
     // Read program from memory
@@ -60,23 +63,13 @@ export class MachineHostFunction extends BaseHostFunction {
       programOffset,
       programLength,
     )
-    if (!programData) {
-      return {
-        resultCode: RESULT_CODES.FAULT,
-      }
+    const programData = readResult_programData.data
+    const programFaultAddress = readResult_programData.faultAddress
+    if (programData === null || programFaultAddress !== 0) {
+      return new HostFunctionResult(u8(RESULT_CODES.FAULT))
     }
 
-
-    // Check if refine context is available
-    if (!refineContext) {
-      // If no refine context available, return HUH
-      context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
-      context.log('Machine host function: No refine context available')
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-
+    const refineContext = machineParams.refineContext!
     const machines = refineContext.machines
 
     // Create new PVM machine
@@ -85,37 +78,29 @@ export class MachineHostFunction extends BaseHostFunction {
     // Return machine ID
     context.registers[7] = machineId
 
-    context.log('Machine host function: PVM machine created', {
-      machineId: machineId.toString(),
-      programLength: programData.length.toString(),
-      initialPC: initialPC.toString(),
-    })
-
-    return {
-      resultCode: null, // continue execution
-    }
+    return new HostFunctionResult(255) // continue execution
   }
 
   createPVMMachine(
-    machines: Map<bigint, PVMGuest>,
+    machines: Map<u64, PVMGuest>,
     program: Uint8Array,
-    initialPC: bigint,
-  ): bigint {
+    initialPC: u64,
+  ): u64 {
     // Generate new machine ID
-    const machineId = BigInt(machines.size + 1)
+    const machineId = u64(machines.size + 1)
 
-    // Create PVM instance with options
-    const pvmOptions: PVMOptions = {
-      pc: initialPC,
+    // Create PVM instance
+    // Initialize with empty registers, new RAM, initial PC, and default gas
+    const registerState = new StaticArray<u64>(13)
+    for (let i: i32 = 0; i < 13; i++) {
+      registerState[i] = 0
     }
-
-    const pvm = new PVM(this.hostFunctionRegistry, pvmOptions)
+    const ram = new PVMRAM()
+    const pvm = new PVM(registerState, ram, u32(initialPC), 0, this.hostFunctionRegistry)
 
     // Add machine to context
-    machines.set(machineId, {
-      code: program,
-      pvm: pvm,
-    })
+    const guest = new PVMGuest(pvm)
+    machines.set(machineId, guest)
 
     return machineId
   }

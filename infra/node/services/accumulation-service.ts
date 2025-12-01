@@ -17,10 +17,10 @@
  * - Service account updated with new storage and metadata
  */
 
-import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
-import type { AccumulatePVM } from '@pbnj/pvm-invocations'
-import { RESULT_CODES } from '@pbnj/pvm'
 import { calculateWorkReportHash, encodeValidatorPublicKeys } from '@pbnj/codec'
+import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
+import { RESULT_CODES } from '@pbnj/pvm'
+import type { AccumulatePVM } from '@pbnj/pvm-invocations'
 import {
   type Accumulated,
   type AccumulateInput,
@@ -176,18 +176,6 @@ export class AccumulationService extends BaseService {
       }
     }
 
-    // Debug logging
-    logger.debug('[AccumulationService] getAccumulated() called', {
-      packagesCount: this.accumulated.packages.length,
-      slotsWithData: this.accumulated.packages
-        .map((set, idx) => ({
-          slotIdx: idx,
-          count: set.size,
-          packages: Array.from(set).map((h) => h.slice(0, 40)),
-        }))
-        .filter((s) => s.count > 0),
-    })
-
     return this.accumulated
   }
 
@@ -195,16 +183,6 @@ export class AccumulationService extends BaseService {
    * Set accumulated state
    */
   setAccumulated(accumulated: Accumulated): void {
-    logger.debug('[AccumulationService] setAccumulated() called', {
-      packagesCount: accumulated.packages.length,
-      slotsWithData: accumulated.packages
-        .map((set, idx) => ({
-          slotIdx: idx,
-          count: set.size,
-          packages: Array.from(set).map((h) => h.slice(0, 40)),
-        }))
-        .filter((s) => s.count > 0),
-    })
     this.accumulated = accumulated
   }
 
@@ -274,7 +252,6 @@ export class AccumulationService extends BaseService {
    * 6. Clean up processed work-reports from ready queue
    */
   async processAccumulation(currentSlot: bigint): Promise<void> {
-    const processAccumStartTime = performance.now()
     // Clear accumulation outputs at start to track only the latest accumulation
     this.accumulationOutputs.clear()
 
@@ -303,7 +280,6 @@ export class AccumulationService extends BaseService {
     let totalGasUsed = 0n
 
     while (iterationCount < maxIterations) {
-      const iterationStartTime = performance.now()
       iterationCount++
 
       // Step 1: Collect all ready items from ALL slots
@@ -437,70 +413,8 @@ export class AccumulationService extends BaseService {
         partialStateAccountsPerInvocation,
       )
 
-      const iterationTime = performance.now() - iterationStartTime
-      logger.info('[AccumulationService] Iteration completed', {
-        slot: currentSlot.toString(),
-        iteration: iterationCount,
-        iterationTime: `${iterationTime.toFixed(2)}ms`,
-        processedCount: processedWorkReports.length,
-        successfulCount: results.filter((r) => r.ok).length,
-        iterationGasUsed: iterationGasUsed.toString(),
-        totalGasUsed: totalGasUsed.toString(),
-        totalGasLimit: totalGasLimit.toString(),
-        pendingDefxfersCount: pendingDefxfers.length,
-        processedPackages: processedWorkReports.map((r) =>
-          r.package_spec.hash.slice(0, 40),
-        ),
-      })
     }
 
-    // Debug: Log final ready queue state after accumulation
-    const finalReadyQueue = this.readyService.getReady()
-    logger.debug(
-      '[AccumulationService] Final ready queue after processAccumulation',
-      {
-        slot: currentSlot.toString(),
-        readyQueueBySlot: finalReadyQueue.epochSlots
-          .map((slotItems, idx) => ({
-            slot: idx,
-            itemCount: slotItems.length,
-            packages: slotItems.map((item) =>
-              item.workReport.package_spec.hash.slice(0, 40),
-            ),
-          }))
-          .filter((s) => s.itemCount > 0),
-      },
-    )
-
-    const totalProcessingTime = performance.now() - processAccumStartTime
-    logger.info(
-      `[AccumulationService] processAccumulation completed in ${totalProcessingTime.toFixed(2)}ms`,
-      {
-        slot: currentSlot.toString(),
-        totalIterations: iterationCount,
-        totalGasUsed: totalGasUsed.toString(),
-        totalGasLimit: totalGasLimit.toString(),
-      },
-    )
-
-    if (iterationCount >= maxIterations) {
-      logger.warn('[AccumulationService] Reached max iterations limit', {
-        slot: currentSlot.toString(),
-        iterations: iterationCount,
-      })
-    }
-
-    logger.info('[AccumulationService] Accumulation completed', {
-      slot: currentSlot.toString(),
-      totalIterations: iterationCount,
-      totalGasUsed: totalGasUsed.toString(),
-      totalGasLimit: totalGasLimit.toString(),
-      gasUtilization:
-        totalGasLimit > 0n
-          ? ((Number(totalGasUsed) / Number(totalGasLimit)) * 100).toFixed(2) +
-            '%'
-          : 'N/A',
-    })
   }
 
   /**
@@ -665,7 +579,7 @@ export class AccumulationService extends BaseService {
     )
 
     // Track defxfers within this iteration (for services in same iteration)
-    let iterationDefxfers = [...pendingDefxfers]
+    const iterationDefxfers = [...pendingDefxfers]
 
     let invocationIndex = 0
     for (const [serviceId, serviceItems] of serviceToItems) {
@@ -847,16 +761,64 @@ export class AccumulationService extends BaseService {
   /**
    * Create partial state for PVM invocation
    */
+  /**
+   * Create partial state for PVM invocation
+   * 
+   * Gray Paper accumulation.tex equation 134 (eq:partialstate):
+   * partialstate ≡ tuple{
+   *   ps_accounts: dictionary{serviceid}{serviceaccount},
+   *   ps_stagingset: sequence[Cvalcount]{valkey},  // MUST have exactly Cvalcount validators
+   *   ps_authqueue: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}},
+   *   ps_manager: serviceid,
+   *   ps_assigners: sequence[Ccorecount]{serviceid},
+   *   ps_delegator: serviceid,
+   *   ps_registrar: serviceid,
+   *   ps_alwaysaccers: dictionary{serviceid}{gas}
+   * }
+   * 
+   * The staging set MUST be a fixed-length sequence of exactly Cvalcount validators.
+   * If not initialized, we pad with null validators (all zeros) to meet the requirement.
+   */
   private createPartialState(): PartialState {
+    // Get staging validators - MUST have exactly Cvalcount elements
+    let stagingset: Uint8Array[] = []
+    
+    const stagingValidatorsMap = this.validatorSetManager.getStagingValidators()
+    const stagingValidatorsArray = Array.from(stagingValidatorsMap.values())
+    
+    // Convert to Uint8Array format
+    stagingset = stagingValidatorsArray.map(encodeValidatorPublicKeys)
+  
+    
+    // Gray Paper requires exactly Cvalcount validators in the staging set
+    // If we have fewer (or zero), pad with null validators
+    const requiredCount = this.configService.numValidators
+    if (stagingset.length < requiredCount) {
+      logger.debug('[AccumulationService] Staging set has fewer than Cvalcount validators, padding with null validators', {
+        currentCount: stagingset.length,
+        requiredCount,
+      })
+      
+      // Create null validators using ValidatorSetManager's method
+      // Gray Paper: null keys replace blacklisted validators (equation 122-123)
+      const nullValidators = this.validatorSetManager.createNullValidatorSet(requiredCount - stagingset.length)
+        
+      
+      // Encode null validators to Uint8Array format and append
+      const nullValidatorsEncoded = nullValidators.map(encodeValidatorPublicKeys)
+      stagingset = [...stagingset, ...nullValidatorsEncoded]
+    } else if (stagingset.length > requiredCount) {
+      // Truncate if somehow we have more than required (shouldn't happen, but be safe)
+      logger.warn('[AccumulationService] Staging set has more than Cvalcount validators, truncating', {
+        currentCount: stagingset.length,
+        requiredCount,
+      })
+      stagingset = stagingset.slice(0, requiredCount)
+    }
+    
     return {
       accounts: this.serviceAccountsService.getServiceAccounts().accounts,
-      stagingset: this.validatorSetManager
-        ? this.validatorSetManager
-            .getStagingValidators()
-            .values()
-            .toArray()
-            .map(encodeValidatorPublicKeys)
-        : [],
+      stagingset,
       authqueue: this.authQueueService
         ? this.authQueueService
             .getAuthQueue()
@@ -895,13 +857,13 @@ export class AccumulationService extends BaseService {
     } else {
       logger.debug(
         '[AccumulationService] Yield is None, not adding to local_fnservouts',
-        {
-          serviceId: serviceId.toString(),
-          slot: currentSlot.toString(),
-          gasused: output.gasused.toString(),
-          resultCode: output.resultCode.toString(),
-          poststate: output.poststate,
-        },
+        // {
+        //   serviceId: serviceId.toString(),
+        //   slot: currentSlot.toString(),
+        //   gasused: output.gasused.toString(),
+        //   resultCode: output.resultCode.toString(),
+        //   poststate: output.poststate,
+        // },
       )
     }
   }
@@ -1352,30 +1314,12 @@ export class AccumulationService extends BaseService {
     const transitionStartTime = performance.now()
     const epochDuration = this.configService.epochDuration
 
-    logger.info(
-      `[AccumulationService] ===== Starting applyTransition for slot ${slot} =====`,
-      {
-        slot: slot.toString(),
-        reportsCount: reports.length,
-        lastProcessedSlot: this.lastProcessedSlot?.toString() || 'null',
-      },
-    )
-
     // Step 1: Separate new reports into immediate and queued
-    const step1Start = performance.now()
     const { immediateItems, queuedItems } =
       this.separateReportsIntoImmediateAndQueued(reports, slot)
-    logger.debug(
-      `[AccumulationService] Step 1 (separate reports): ${(performance.now() - step1Start).toFixed(2)}ms`,
-      {
-        immediateCount: immediateItems.length,
-        queuedCount: queuedItems.length,
-      },
-    )
 
     // Step 2: Shift accumulated packages history and ready queue if slot advanced
     // Gray Paper equations 417-418: Shift is part of the state transition from τ to τ'
-    const step2Start = performance.now()
 
     // Determine slot delta: if lastProcessedSlot is set, calculate delta; otherwise assume delta=1
     let slotDelta = 1
@@ -1393,74 +1337,18 @@ export class AccumulationService extends BaseService {
       this.shiftReadyQueue(slotDelta, epochDuration, currentEpochSlot)
     }
 
-    logger.debug(
-      `[AccumulationService] Step 2 (shift history & queue): ${(performance.now() - step2Start).toFixed(2)}ms`,
-      {
-        slotDelta,
-        hadPreviousState: this.lastProcessedSlot !== null,
-      },
-    )
-
-    // Log accumulated state after shift
-    logger.info('[AccumulationService] Accumulated state after shift:', {
-      slot: slot.toString(),
-      accumulatedPackages: this.accumulated.packages.map((set, idx) => ({
-        slotIdx: idx,
-        count: set.size,
-        packages: Array.from(set).map((h) => h.slice(0, 40)),
-      })),
-    })
-
     // Step 3: Process immediate items first
-    const step3Start = performance.now()
     await this.processImmediateItems(immediateItems, slot)
-    logger.debug(
-      `[AccumulationService] Step 3 (process immediate): ${(performance.now() - step3Start).toFixed(2)}ms`,
-    )
-
-    // Log accumulated state after immediate processing
-    logger.info(
-      '[AccumulationService] Accumulated state after immediate processing:',
-      {
-        slot: slot.toString(),
-        accumulatedPackages: this.accumulated.packages.map((set, idx) => ({
-          slotIdx: idx,
-          count: set.size,
-          packages: Array.from(set).map((h) => h.slice(0, 40)),
-        })),
-      },
-    )
 
     // Get accumulated packages from immediate items for queue editing (after shift and immediate processing)
     const accumulatedFromImmediate =
       this.accumulated.packages[epochDuration - 1] || new Set<Hex>()
 
     // Step 4: Build and edit queue
-    const step4Start = performance.now()
     await this.buildAndEditQueue(queuedItems, accumulatedFromImmediate, slot)
-    logger.debug(
-      `[AccumulationService] Step 4 (build/edit queue): ${(performance.now() - step4Start).toFixed(2)}ms`,
-    )
 
     // Step 5: Process queue with Q function
-    const step5Start = performance.now()
     await this.processAccumulation(slot)
-    logger.debug(
-      `[AccumulationService] Step 5 (process accumulation): ${(performance.now() - step5Start).toFixed(2)}ms`,
-    )
-
-    // Log final accumulated state
-    logger.info(
-      '[AccumulationService] Final accumulated state after full transition:',
-      {
-        slot: slot.toString(),
-        accumulatedPackages: this.accumulated.packages.map((set, idx) => ({
-          slotIdx: idx,
-          count: set.size,
-          packages: Array.from(set).map((h) => h.slice(0, 40)),
-        })),
-      },
-    )
 
     // Update last processed slot to reflect that state now represents this slot
     this.lastProcessedSlot = slot
@@ -1659,14 +1547,6 @@ export class AccumulationService extends BaseService {
     }
 
     this.accumulated.packages = newAccumulatedPackages
-
-    logger.debug(
-      '[AccumulationService] Shifted accumulated packages history (non-wrapping)',
-      {
-        slotDelta,
-        epochDuration,
-      },
-    )
   }
 
   /**
@@ -2044,27 +1924,10 @@ export class AccumulationService extends BaseService {
     // Step 3: Apply queue-editing function E (Gray Paper equation 48-61)
     // E removes entries whose package hash is accumulated, and removes satisfied
     // dependencies from remaining entries
-    logger.debug('[AccumulationService] Applying queue-editing function E', {
-      slot: currentSlot.toString(),
-      processedReportsCount: processedWorkReports.length,
-      newPackagesCount: newPackages.size,
-    })
 
     // Use newPackages (successfully accumulated) for queue editing
     // Only remove work reports and dependencies for successfully accumulated packages
     const accumulatedPackageHashes = newPackages
-
-    logger.debug('[AccumulationService] Queue editing - packages to remove', {
-      slot: currentSlot.toString(),
-      accumulatedCount: accumulatedPackageHashes.size,
-      accumulatedPackages: Array.from(accumulatedPackageHashes).map((h) =>
-        h.slice(0, 40),
-      ),
-      processedReportsCount: processedWorkReports.length,
-      processedReports: processedWorkReports.map((r) =>
-        r.package_spec.hash.slice(0, 40),
-      ),
-    })
 
     // First, remove entries whose package hash was successfully accumulated
     // Gray Paper E function (equation 48-61): Only remove if (r_avspec)_packagehash ∈ x (accumulated set)

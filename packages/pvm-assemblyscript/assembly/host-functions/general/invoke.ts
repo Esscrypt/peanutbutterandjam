@@ -1,10 +1,6 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  PVMState,
-  RAM,
-  InvokeParams,
-} from '../../pbnj-types-compat'
+import { PVMState, RAM } from '../../pbnj-types-compat'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, InvokeParams } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -38,75 +34,80 @@ export class InvokeHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: InvokeParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const invokeParams = params as InvokeParams
+    if (!invokeParams.refineContext) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    
     // Gray Paper: Extract parameters from registers
     // registers[7] = machine ID (n)
     // registers[8] = memory offset (o)
     const machineId = context.registers[7]
     const memoryOffset = context.registers[8]
 
-    const machines = params.refineContext.machines
+    const refineContext = invokeParams.refineContext!
+    const machines = refineContext.machines
 
     // Gray Paper equation 646: Check if machine exists
     // Return WHO if n not in m
     const machine = machines.get(machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 630-633: Read gas limit and register values from memory
     // (g, w) = decode[8]{g} || decode[8]{w} = memory[o:112]
     // where memory[o:112] must be readable
     const readResult_gasLimitData = context.ram.readOctets(
-      memoryOffset,
+      u32(memoryOffset),
       8,
     )
-    if (gasFaultAddress || gasLimitData === null) {
+    const gasLimitData = readResult_gasLimitData.data
+    const gasFaultAddress = readResult_gasLimitData.faultAddress
+    if (gasLimitData === null || gasFaultAddress !== 0) {
       // Gray Paper equation 645: Return panic if memory not readable
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: gasFaultAddress || 0,
-          details: 'Memory not readable',
-        },
-      }
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
-    const gasLimit = new DataView(gasLimitData.buffer).getBigUint64(0, true)
+    const gasLimit = this.decodeU64(gasLimitData)
 
     // Gray Paper: Read register values (13 registers * 8 bytes each = 104 bytes)
     const readResult_registersData = context.ram.readOctets(
-      memoryOffset + 8,
+      u32(memoryOffset + 8),
       104,
     )
-    if (registersFaultAddress || !registersData) {
+    const registersData = readResult_registersData.data
+    const registersFaultAddress = readResult_registersData.faultAddress
+    if (registersData === null || registersFaultAddress !== 0) {
       // Gray Paper equation 645: Return panic if memory not readable
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: registersFaultAddress || 0,
-          details: 'Memory not readable',
-        },
-      }
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Decode register values (13 registers * 8 bytes each = 104 bytes)
-    const registers: bigint[] = []
-    for (let i = 0; i < 13; i++) {
+    const registers = new StaticArray<u64>(13)
+    for (let i: i32 = 0; i < 13; i++) {
       const registerData = registersData.slice(i * 8, (i + 1) * 8)
-      registers.push(new DataView(registerData.buffer).getBigUint64(0, true))
+      registers[i] = this.decodeU64(registerData)
     }
 
     // Gray Paper equation 635: Execute PVM machine
     // (c, i', g', w', u') = Ψ(code, pc, g, w, ram)
-    machine.pvm.invoke(gasLimit, registers, machine.code)
+    // Get code, bitmask, and jumpTable from machine's current state
+    const pvm = machine.pvm
+    pvm.invoke(
+      u32(gasLimit),
+      registers,
+      pvm.state.code,
+      pvm.state.bitmask,
+      pvm.state.jumpTable,
+    )
 
-    const pvmState = machine.pvm.state
+    const pvmState = pvm.state
 
     // Gray Paper equation 636: Update memory
     // memory*[o:112] = encode[8]{g'} || encode[8]{w'}
@@ -121,46 +122,63 @@ export class InvokeHostFunction extends BaseHostFunction {
     const resultCode = pvmState.resultCode
     if (resultCode === RESULT_CODES.HOST) {
       // Gray Paper equation 647: Return HOST with host call ID
-      context.registers[7] = BigInt(RESULT_CODES.HOST)
-      context.registers[8] = pvmState.hostCallId || 0
+      context.registers[7] = u64(RESULT_CODES.HOST)
+      context.registers[8] = u64(pvmState.hostCallId || 0)
     } else if (resultCode === RESULT_CODES.FAULT) {
       // Gray Paper equation 648: Return FAULT with fault address
-      context.registers[7] = BigInt(RESULT_CODES.FAULT)
-      context.registers[8] = pvmState.faultAddress || 0
+      context.registers[7] = u64(RESULT_CODES.FAULT)
+      context.registers[8] = u64(pvmState.faultAddress || 0)
     } else if (resultCode === RESULT_CODES.OOG) {
       // Gray Paper equation 649: Return OOG
-      context.registers[7] = BigInt(RESULT_CODES.OOG)
+      context.registers[7] = u64(RESULT_CODES.OOG)
     } else if (resultCode === RESULT_CODES.PANIC) {
       // Gray Paper equation 650: Return PANIC
-      context.registers[7] = BigInt(RESULT_CODES.PANIC)
+      context.registers[7] = u64(RESULT_CODES.PANIC)
     } else if (resultCode === RESULT_CODES.HALT) {
       // Gray Paper equation 651: Return HALT
-      context.registers[7] = BigInt(RESULT_CODES.HALT)
+      context.registers[7] = u64(RESULT_CODES.HALT)
     }
 
-    return {
-      resultCode: null, // continue execution
+    return new HostFunctionResult(255) // continue execution
+  }
+
+  writeInvokeResults(ram: RAM, offset: u64, pvm: PVMState): void {
+    // Gray Paper: mem*[o:112] = encode[8]{g'} ∥ encode[8]{w'}
+    // Write final gas (8 bytes)
+    const gasData = this.encodeU64(pvm.gasCounter)
+    const gasWriteResult = ram.writeOctets(u32(offset), gasData)
+    if (gasWriteResult.hasFault) {
+      return // Ignore write errors
+    }
+
+    // Write final registers (13 registers * 8 bytes each = 104 bytes)
+    const registersData = new Uint8Array(104)
+    for (let i: i32 = 0; i < 13; i++) {
+      const registerValue = pvm.registerState[i] || u64(0)
+      const registerBytes = this.encodeU64(registerValue)
+      registersData.set(registerBytes, i * 8)
+    }
+    const registersWriteResult = ram.writeOctets(u32(offset + 8), registersData)
+    if (registersWriteResult.hasFault) {
+      return // Ignore write errors
     }
   }
 
-  writeInvokeResults(ram: RAM, offset: bigint, pvm: PVMState): void {
-    try {
-      // Gray Paper: mem*[o:112] = encode[8]{g'} ∥ encode[8]{w'}
-      // Write final gas (8 bytes)
-      const gasData = new Uint8Array(8)
-      new DataView(gasData.buffer).setBigUint64(0, pvm.gasCounter, true)
-      ram.writeOctets(offset, gasData)
-
-      // Write final registers (13 registers * 8 bytes each = 104 bytes)
-      const registersData = new Uint8Array(104)
-      for (let i = 0; i < 13; i++) {
-        const registerValue = pvm.registerState[i] || 0
-        const view = new DataView(registersData.buffer, i * 8, 8)
-        view.setBigUint64(0, registerValue, true)
-      }
-      ram.writeOctets(offset + 8, registersData)
-    } catch (e) {
-      // Ignore write errors
+  // Helper to decode u64 from little-endian bytes
+  decodeU64(bytes: Uint8Array): u64 {
+    let value: u64 = u64(0)
+    for (let i: i32 = 0; i < 8 && i < bytes.length; i++) {
+      value |= (u64(bytes[i]) << (u64(i) * 8))
     }
+    return value
+  }
+
+  // Helper to encode u64 to little-endian bytes
+  encodeU64(value: u64): Uint8Array {
+    const bytes = new Uint8Array(8)
+    for (let i: i32 = 0; i < 8; i++) {
+      bytes[i] = u8((value >> (u64(i) * 8)) & 0xff)
+    }
+    return bytes
   }
 }

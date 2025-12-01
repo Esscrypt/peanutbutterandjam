@@ -182,6 +182,15 @@ export function accumulateInvocation(
   numCores: i32,
   numValidators: i32,
   authQueueSize: i32,
+  entropyAccumulator: Uint8Array,
+  configNumCores: i32 = 341,
+  configPreimageExpungePeriod: u32 = 19200,
+  configEpochDuration: u32 = 600,
+  configMaxBlockGas: u64 = u64(3500000000),
+  configTicketsPerValidator: u16 = 2,
+  configSlotDuration: u16 = 6,
+  configRotationPeriod: u16 = 10,
+  configNumValidators: u16 = 1023,
 ): AccumulateInvocationResult {
   if (!pvmInstance) {
     // Return error result if PVM not initialized
@@ -191,7 +200,24 @@ export function accumulateInvocation(
       new Uint8Array(0),
     )
   }
-  return pvmInstance!.pvm.accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+  return pvmInstance!.pvm.accumulateInvocation(
+    gasLimit,
+    program,
+    args,
+    context,
+    numCores,
+    numValidators,
+    authQueueSize,
+    entropyAccumulator,
+    configNumCores,
+    configPreimageExpungePeriod,
+    configEpochDuration,
+    configMaxBlockGas,
+    configTicketsPerValidator,
+    configSlotDuration,
+    configRotationPeriod,
+    configNumValidators,
+  )
 }
 
 /**
@@ -212,9 +238,35 @@ export function setupAccumulateInvocation(
   numCores: i32,
   numValidators: i32,
   authQueueSize: i32,
+  entropyAccumulator: Uint8Array,
+  configNumCores: i32 = 341,
+  configPreimageExpungePeriod: u32 = 19200,
+  configEpochDuration: u32 = 600,
+  configMaxBlockGas: u64 = u64(3500000000),
+  configTicketsPerValidator: u16 = 2,
+  configSlotDuration: u16 = 6,
+  configRotationPeriod: u16 = 10,
+  configNumValidators: u16 = 1023,
 ): void {
   if (!pvmInstance) return
-  pvmInstance!.pvm.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize)
+  pvmInstance!.pvm.setupAccumulateInvocation(
+    gasLimit,
+    program,
+    args,
+    context,
+    numCores,
+    numValidators,
+    authQueueSize,
+    entropyAccumulator,
+    configNumCores,
+    configPreimageExpungePeriod,
+    configEpochDuration,
+    configMaxBlockGas,
+    configTicketsPerValidator,
+    configSlotDuration,
+    configRotationPeriod,
+    configNumValidators,
+  )
 }
 
 
@@ -288,6 +340,24 @@ export function getExitArg(): u32 {
 export function getResultCode(): u32 {
   if (!pvmInstance) return 2 // PANIC
   return pvmInstance!.pvm.state.resultCode
+}
+
+/**
+ * Get code array (for debugging/comparison)
+ * @returns Copy of the code array
+ */
+export function getCode(): Uint8Array {
+  if (!pvmInstance) return new Uint8Array(0)
+  return pvmInstance!.getCode()
+}
+
+/**
+ * Get bitmask array (for debugging/comparison)
+ * @returns Copy of the bitmask array
+ */
+export function getBitmask(): Uint8Array {
+  if (!pvmInstance) return new Uint8Array(0)
+  return pvmInstance!.getBitmask()
 }
 
 /**

@@ -135,11 +135,12 @@ function encodeEpochMark(
  *    - tuple{bskey, edkey}: (Bandersnatch key, Ed25519 key) pairs
  *
  * ✅ CORRECT: Option discriminator, entropy fields
- * ✅ CORRECT: Fixed-length sequence of exactly C_valcount (1023) validators
+ * ✅ CORRECT: Fixed-length sequence of exactly C_valcount validators (from config)
  * ✅ CORRECT: No length prefix for fixed sequence
  */
 function decodeEpochMark(
   data: Uint8Array,
+  config: IConfigService,
 ): Safe<DecodingResult<EpochMark | null>> {
   let currentData = data
 
@@ -162,12 +163,12 @@ function decodeEpochMark(
   const ticketsEntropy = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
-  // Decode validators - FIXED-LENGTH sequence of exactly C_valcount (1023) validators
+  // Decode validators - FIXED-LENGTH sequence of exactly C_valcount validators
   // No length prefix needed since it's sequence[C_valcount] not var{sequence}
   // Each validator is just (bandersnatch_key, ed25519_key) - no entry index
-  const C_VALCOUNT = 1023 // Gray Paper constant
+  // Use config.numValidators instead of hardcoded 1023 to support different configs
   const validators: ValidatorKeyTuple[] = []
-  for (let i = 0; i < C_VALCOUNT; i++) {
+  for (let i = 0; i < config.numValidators; i++) {
     const validatorResult = decodeValidatorKeyPair(currentData)
     validators.push(validatorResult.result)
     currentData = validatorResult.remaining
@@ -479,7 +480,7 @@ export function decodeUnsignedHeader(
   currentData = slotResult.remaining
 
   // epoch_mark (optional)
-  const [error2, epochMarkResult] = decodeEpochMark(currentData)
+  const [error2, epochMarkResult] = decodeEpochMark(currentData, config)
   if (error2) {
     return safeError(error2)
   }

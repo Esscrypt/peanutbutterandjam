@@ -158,6 +158,7 @@ describe('Accumulate Test Vector Execution', () => {
               configService: configService,
               entropyService: entropyService,
               pvmOptions: { gasCounter: 10000n },
+              useWasm: true,
             })
             const privilegesService = new PrivilegesService({
               configService: configService,

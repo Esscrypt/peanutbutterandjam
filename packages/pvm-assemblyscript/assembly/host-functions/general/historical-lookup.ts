@@ -1,11 +1,6 @@
-import {
-  HistoricalLookupParams,
-  HostFunctionContext,
-  HostFunctionResult,
-  IServiceAccountService,
-  ServiceAccount,
-} from '../../pbnj-types-compat'
-import { bytesToHex } from '../../types'
+import { CompleteServiceAccount, PreimageRequestStatus } from '../../codec'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, HistoricalLookupParams } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -47,17 +42,15 @@ import { BaseHostFunction } from './base'
 export class HistoricalLookupHostFunction extends BaseHostFunction {
   functionId: u64 = GENERAL_FUNCTIONS.HISTORICAL_LOOKUP
   name: string = 'historical_lookup'
-  serviceAccountService: IServiceAccountService
-
-  constructor(serviceAccountService: IServiceAccountService) {
-    super()
-    this.serviceAccountService = serviceAccountService
-  }
 
   execute(
     context: HostFunctionContext,
-    params: HistoricalLookupParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const lookupParams = params as HistoricalLookupParams
     // Gray Paper: Extract parameters from registers
     // registers[7] = service ID selector (NONE for self, or specific service ID)
     // registers[8:2] = (hash offset, output offset)
@@ -74,96 +67,158 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     //   d[registers[7]] if registers[7] in keys(d)
     //   none otherwise
     // }
-    let serviceAccount: ServiceAccount | null = null
+    let serviceAccount: CompleteServiceAccount | null = null
     if (
       requestedServiceId === ACCUMULATE_ERROR_CODES.NONE &&
-      params.accounts.has(params.serviceId)
+      lookupParams.accounts.has(lookupParams.serviceId)
     ) {
       // registers[7] = NONE, use self (s)
-      serviceAccount = params.accounts.get(params.serviceId) || null
-    } else if (params.accounts.has(requestedServiceId)) {
+      serviceAccount = lookupParams.accounts.get(lookupParams.serviceId) || null
+    } else if (lookupParams.accounts.has(requestedServiceId)) {
       // registers[7] specifies a service ID in accounts
-      serviceAccount = params.accounts.get(requestedServiceId) || null
+      serviceAccount = lookupParams.accounts.get(requestedServiceId) || null
     }
 
     if (!serviceAccount) {
       // Gray Paper: Return NONE if service account not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper: Read hash from memory (32 bytes at hashOffset)
-    const readResult_hashData = context.ram.readOctets(hashOffset, 32)
-    if (hashData === null) {
+    const readResult_hashData = context.ram.readOctets(u32(hashOffset), 32)
+    const hashData = readResult_hashData.data
+    const readFaultAddress = readResult_hashData.faultAddress
+    if (hashData === null || readFaultAddress !== 0) {
       // Gray Paper: Return panic if memory range not readable
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_read',
-          address: readFaultAddress || 0,
-          details: 'Memory range not readable',
-        },
-      }
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Gray Paper equation 517: histlookup(a, t, memory[h:32])
     // Perform historical lookup using histlookup function
     // We use the service account we determined from the lookup logic
-    const lookupResult =
-      this.serviceAccountService.histLookupServiceAccount(
-        serviceAccount,
-        bytesToHex(hashData),
-        params.timeslot,
-      )
-    const lookupError = lookupResult[0]
-    const preimage = lookupResult[1]
-    if (lookupError || !preimage) {
+    // serviceAccount is guaranteed to be non-null here due to check above
+    const preimage = this.histLookupServiceAccount(
+      serviceAccount,
+      hashData,
+      lookupParams.lookupTimeslot,
+    )
+    if (!preimage) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Calculate slice parameters
-    const f = Number(fromOffset)
-    const l = Number(length)
+    const f = i32(fromOffset)
+    const l = i32(length)
     const preimageLength = preimage.length
 
     // Calculate actual slice length
-    const actualLength = Math.min(l, preimageLength - f)
+    const actualLength = min(l, preimageLength - f)
 
     if (actualLength <= 0) {
       // Return NONE if no data to copy
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Extract data slice
     const dataToWrite = preimage.slice(f, f + actualLength)
 
     // Write preimage slice to memory
-    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
-    if (faultAddress) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_write',
-          address: faultAddress,
-          details: 'Failed to write memory',
-        },
-      }
+    const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
+    if (writeResult.hasFault) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Return length of preimage
-    context.registers[7] = BigInt(preimageLength)
+    context.registers[7] = u64(preimageLength)
 
-    return {
-      resultCode: null, // continue execution
+    return new HostFunctionResult(255) // continue execution
+  }
+
+  /**
+   * Gray Paper histlookup function
+   *
+   * Gray Paper equation 115-127:
+   * histlookup(a, t, h) ≡ a.sa_preimages[h] when h ∈ keys(a.sa_preimages) ∧ I(a.sa_requests[h, len(a.sa_preimages[h])], t)
+   *
+   * @param serviceAccount - Service account containing preimages and requests
+   * @param hashBytes - Hash to lookup (as Uint8Array)
+   * @param timeslot - Timeslot for historical lookup
+   * @returns Preimage blob or null if not found/not available
+   */
+  private histLookupServiceAccount(
+    serviceAccount: CompleteServiceAccount,
+    hashBytes: Uint8Array,
+    timeslot: u64,
+  ): Uint8Array | null {
+    // Get the preimage for this hash
+    const preimage = serviceAccount.preimages.get(hashBytes)
+    if (!preimage) {
+      return null
+    }
+
+    const length = u64(preimage.length)
+
+    // Get the request status for this hash and length
+    const requestStatus = serviceAccount.requests.get(hashBytes, length)
+    if (!requestStatus) {
+      return null
+    }
+
+    // Apply the Gray Paper histlookup logic using I(l, t) function
+    const isValid = this.checkRequestValidity(requestStatus, timeslot)
+
+    if (!isValid) {
+      return null
+    }
+
+    return preimage
+  }
+
+  /**
+   * Check if a request is available at a given time using Gray Paper function I(l, t)
+   *
+   * Gray Paper equation 120-125:
+   * I(l, t) = false when [] = l
+   * I(l, t) = x ≤ t when [x] = l
+   * I(l, t) = x ≤ t < y when [x, y] = l
+   * I(l, t) = x ≤ t < y ∨ z ≤ t when [x, y, z] = l
+   *
+   * @param requestStatus - Request status sequence (up to 3 timeslots)
+   * @param timeslot - Timeslot to check availability
+   * @returns True if preimage is available at the given timeslot
+   */
+  private checkRequestValidity(
+    requestStatus: PreimageRequestStatus,
+    timeslot: u64,
+  ): bool {
+    const timeslots = requestStatus.timeslots
+    switch (timeslots.length) {
+      case 0:
+        // Empty request - not available
+        return false
+
+      case 1:
+        // [x] - available from x onwards
+        return u64(timeslots[0]) <= timeslot
+
+      case 2:
+        // [x, y] - available from x to y (exclusive)
+        return u64(timeslots[0]) <= timeslot && timeslot < u64(timeslots[1])
+
+      case 3:
+        // [x, y, z] - available from x to y OR from z onwards
+        return (
+          (u64(timeslots[0]) <= timeslot && timeslot < u64(timeslots[1])) ||
+          u64(timeslots[2]) <= timeslot
+        )
+
+      default:
+        // Invalid request format - not available
+        return false
     }
   }
 }

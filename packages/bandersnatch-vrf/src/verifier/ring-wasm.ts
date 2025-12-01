@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs'
 import { logger } from '@pbnj/core'
 // Import WASM module (from ark-vrf, matches test vectors exactly)
-import init, { verify_ring_proof } from '../../wasm-ark-vrf/ark_vrf_wasm'
+import initWasm, { verify_ring_proof } from '../../wasm-ark-vrf/ark_vrf_wasm'
 import { PedersenVRFProver } from '../prover/pedersen'
 import type { RingVRFInput } from '../prover/ring-kzg'
 import { PedersenVRFVerifier } from './pedersen'
@@ -36,7 +36,9 @@ export class RingVRFVerifierWasm {
   }
 
   async init(): Promise<void> {
-    await init()
+    // Load WASM module - pass the WASM file path directly to avoid import.meta.url issues in Bun
+    const wasmPath = new URL('../../wasm-ark-vrf/ark_vrf_wasm_bg.wasm', import.meta.url)
+    await initWasm(wasmPath.toString())
     this.wasmInitialized = true
   }
 

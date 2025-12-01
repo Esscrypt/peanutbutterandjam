@@ -65,7 +65,7 @@ export function encodeFixedLength(
 
   // Little-endian encoding
   for (let i = 0; i < lengthNum; i++) {
-    result[i] = Number((value >> BigInt(8 * i)) & 0xffn)
+    result[i] = Number((value >> (8n * BigInt(i))) & 0xffn)
   }
 
   return safeResult(result)

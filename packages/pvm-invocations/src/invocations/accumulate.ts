@@ -40,23 +40,24 @@ import {
 export class AccumulatePVM {
   private readonly entropyService: IEntropyService
   private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
+  private readonly useWasm: boolean
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
     configService: IConfigService
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
-    useWasm?: boolean
-    wasmPath?: string // Path to WASM module file (e.g., 'src/wasm/pvm.wasm')
+    useWasm: boolean
   }) {
+    this.useWasm = options.useWasm
+    
     // Create PVM executor based on useWasm flag
-    if (options.useWasm && options.wasmPath) {
-      // Create WASM executor - module will be loaded from path and instantiated lazily on first use
+    if (options.useWasm) {
+      // Create WASM executor - module will be loaded from pvm-assemblyscript/build/pvm.wasm
+      // and instantiated lazily on first use
       this.pvmExecutor = new WasmPVMExecutor(
-        options.wasmPath,
         options.configService,
         options.entropyService,
-        options.hostFunctionRegistry,
       )
     } else {
       this.pvmExecutor = new TypeScriptPVMExecutor(
@@ -224,7 +225,7 @@ export class AccumulatePVM {
         return { ok: false, err: 'BAD' }
       }
       // Execute accumulation invocation
-      // Both executors now support executeAccumulationInvocation
+      // Use the useWasm flag to determine which executor method to call
       let error: Error | undefined
       let marshallingResult: {
         gasConsumed: bigint
@@ -232,7 +233,7 @@ export class AccumulatePVM {
         context: ImplicationsPair
       } | undefined
 
-      if (this.pvmExecutor instanceof WasmPVMExecutor) {
+      if (this.useWasm) {
         // WASM executor - use direct accumulation method
         const [wasmError, wasmResult] =
           await this.pvmExecutor.executeAccumulationInvocation(
@@ -240,10 +241,14 @@ export class AccumulatePVM {
             gas,
             encodedArgs,
             implicationsPair,
+            timeslot,
+            inputs,
+            workItems,
+            serviceId,
           )
         error = wasmError
         marshallingResult = wasmResult
-      } else if (this.pvmExecutor instanceof TypeScriptPVMExecutor) {
+      } else {
         // TypeScript executor - use executeAccumulationInvocation
         const [tsError, tsResult] =
           await this.pvmExecutor.executeAccumulationInvocation(
@@ -258,14 +263,6 @@ export class AccumulatePVM {
           )
         error = tsError
         marshallingResult = tsResult
-      } else {
-        logger.error(
-          '[AccumulatePVM] Executor does not support accumulation',
-          {
-            serviceId: serviceId.toString(),
-          },
-        )
-        return { ok: false, err: 'BAD' }
       }
 
       if (error || !marshallingResult) {

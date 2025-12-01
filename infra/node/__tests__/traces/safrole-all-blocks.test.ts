@@ -33,6 +33,7 @@ import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
 import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
 import {
+  DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
@@ -622,14 +623,16 @@ describe('Genesis Parse Tests', () => {
           if (blockNumber === 1) {
             // Set pre_state from test vector BEFORE validating the block
             // This ensures entropy3 and other state components match what was used to create the seal signature
+            // Use JAM version 0.7.1+ for safrole traces (includes registrar in privileges and discriminator in service accounts)
+            const jamVersion = DEFAULT_JAM_VERSION // v0.7.2
             if (blockJsonData.pre_state?.keyvals) {
-              const [setStateError] = stateService.setState(blockJsonData.pre_state.keyvals)
+              const [setStateError] = stateService.setState(blockJsonData.pre_state.keyvals, jamVersion)
               if (setStateError) {
                 throw new Error(`Failed to set pre-state: ${setStateError.message}`)
               }
             } else {
               // Fallback to genesis state if pre_state is not available
-              const [setStateError] = stateService.setState(genesisJson?.state?.keyvals ?? [])
+              const [setStateError] = stateService.setState(genesisJson?.state?.keyvals ?? [], jamVersion)
               if (setStateError) {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
               }

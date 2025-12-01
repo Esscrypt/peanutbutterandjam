@@ -10,6 +10,8 @@
 
 export * from './block'
 export * from './core'
+// Fuzz codec
+export * from './fuzz'
 // PVM serialization
 export * from './pvm'
 // State serialization
@@ -17,3 +19,4 @@ export * from './state'
 export * from './utils'
 // Work package serialization
 export * from './work-package'
+

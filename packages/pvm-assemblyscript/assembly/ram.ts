@@ -71,17 +71,9 @@ export class PVMRAM implements RAM {
     stackSize: u32,
     heapZeroPaddingSize: u32,
   ): void {
-    console.log('[RAM] initializeMemoryLayout: Starting memory layout initialization')
-    
     const readOnlyDataLength = readOnlyData.length
     const heapSize = heap.length
     const argumentDataLength = argumentData.length
-
-    console.log('[RAM] initializeMemoryLayout: Input sizes roData=' + readOnlyDataLength.toString() + 
-      ', heap=' + heapSize.toString() + 
-      ', args=' + argumentDataLength.toString() + 
-      ', stack=' + stackSize.toString() + 
-      ', heapPadding=' + heapZeroPaddingSize.toString())
 
     // Calculate addresses
     const heapStartAddress =
@@ -103,11 +95,6 @@ export class PVMRAM implements RAM {
     const readOnlyZoneStartAddress = this.roDataAddress
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
-
-    console.log('[RAM] initializeMemoryLayout: Calculated addresses roData=[0x' + readOnlyZoneStartAddress.toString(16) + ', 0x' + readOnlyZoneEndAddress.toString(16) + 
-      '), heap=[0x' + heapStartAddress.toString(16) + ', 0x' + heapZerosEndAddress.toString(16) + 
-      '), stack=[0x' + stackStartAddress.toString(16) + ', 0x' + stackEndAddress.toString(16) + 
-      '), args=[0x' + argumentDataStartAddress.toString(16) + ', 0x' + argumentDataZeroPaddingEndAddress.toString(16) + ')')
 
     // Create pages for all memory regions and copy data
     // Pages are created on-demand, but we initialize them here for efficiency
@@ -141,9 +128,6 @@ export class PVMRAM implements RAM {
     // Read-only data region (READ access)
     if (readOnlyDataLength > 0) {
       const roDataSize = readOnlyZoneEndAddress - readOnlyZoneStartAddress
-      console.log('[RAM] initializeMemoryLayout: Initializing roData region start=0x' + readOnlyZoneStartAddress.toString(16) +
-        ', size=' + roDataSize.toString() +
-        ', pages=' + (roDataSize / MEMORY_CONFIG.PAGE_SIZE).toString())
       this.initPage(
         readOnlyZoneStartAddress,
         roDataSize,
@@ -154,9 +138,7 @@ export class PVMRAM implements RAM {
     // Argument data region (READ access)
     if (argumentDataLength > 0) {
       const argsSize = argumentDataZeroPaddingEndAddress - argumentDataStartAddress
-      console.log('[RAM] initializeMemoryLayout: Initializing argumentData region start=0x' + argumentDataStartAddress.toString(16) +
-        ', size=' + argsSize.toString() +
-        ', pages=' + (argsSize / MEMORY_CONFIG.PAGE_SIZE).toString())
+
       this.initPage(
         argumentDataStartAddress,
         argsSize,
@@ -167,30 +149,17 @@ export class PVMRAM implements RAM {
     // Stack region (WRITE access, zero-initialized per Gray Paper)
     if (stackStartAddress < stackEndAddress) {
       const stackSizeActual = stackEndAddress - stackStartAddress
-      const stackPageCount = stackSizeActual / MEMORY_CONFIG.PAGE_SIZE
-      console.log('[RAM] initializeMemoryLayout: Initializing stack region start=0x' + stackStartAddress.toString(16) +
-        ', end=0x' + stackEndAddress.toString(16) +
-        ', size=' + stackSizeActual.toString() +
-        ', pages=' + stackPageCount.toString())
       this.initPage(
         stackStartAddress,
         stackSizeActual,
         MemoryAccessType.WRITE,
       )
-      console.log('[RAM] initializeMemoryLayout: Stack region initialized stackAddress=' + this.stackAddress.toString() +
-        ', pageAccess entries for stack pages should be set')
-    } else {
-      console.log('[RAM] initializeMemoryLayout: Stack region skipped (stackStartAddress >= stackEndAddress) stackStartAddress=0x' + 
-        stackStartAddress.toString(16) + ', stackEndAddress=0x' + stackEndAddress.toString(16))
     }
 
     // Heap region (WRITE access)
     if (heapSize > 0) {
       const heapSizeActual = heapEndAddress - heapStartAddress
-      console.log('[RAM] initializeMemoryLayout: Initializing heap region start=0x' + heapStartAddress.toString(16) +
-        ', end=0x' + heapEndAddress.toString(16) +
-        ', size=' + heapSizeActual.toString() +
-        ', pages=' + (heapSizeActual / MEMORY_CONFIG.PAGE_SIZE).toString())
+      
       this.initPage(
         heapStartAddress,
         heapSizeActual,
@@ -201,10 +170,7 @@ export class PVMRAM implements RAM {
     // Heap zero padding region (WRITE access)
     if (heapEndAddress < heapZerosEndAddress) {
       const heapPaddingSize = heapZerosEndAddress - heapEndAddress
-      console.log('[RAM] initializeMemoryLayout: Initializing heap zero padding region start=0x' + heapEndAddress.toString(16) +
-        ', end=0x' + heapZerosEndAddress.toString(16) +
-        ', size=' + heapPaddingSize.toString() +
-        ', pages=' + (heapPaddingSize / MEMORY_CONFIG.PAGE_SIZE).toString())
+
       this.initPage(
         heapEndAddress,
         heapPaddingSize,
@@ -212,7 +178,6 @@ export class PVMRAM implements RAM {
       )
     }
 
-    console.log('[RAM] initializeMemoryLayout: Memory layout initialization complete totalPages=' + this.pageAccess.keys().length.toString())
   }
 
   /**
@@ -291,17 +256,7 @@ export class PVMRAM implements RAM {
     const startPage = this.getPageIndex(address)
     const endAddress = address + length - 1
     const endPage = this.getPageIndex(endAddress)
-    const pageCount = endPage - startPage + 1
-
-    const accessTypeStr = accessType === MemoryAccessType.READ ? 'READ' : 
-                         accessType === MemoryAccessType.WRITE ? 'WRITE' : 'NONE'
     
-    console.log('[RAM] initPage: Initializing pages startAddr=0x' + address.toString(16) +
-      ', length=' + length.toString() +
-      ', startPage=' + startPage.toString() +
-      ', endPage=' + endPage.toString() +
-      ', pageCount=' + pageCount.toString() +
-      ', accessType=' + accessTypeStr)
 
     // Create/ensure all pages in the range exist
     for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
@@ -310,17 +265,12 @@ export class PVMRAM implements RAM {
       const page = this.getOrCreatePage(pageIndex)
       
       if (page === null) {
-        console.log('[RAM] initPage: ERROR - Failed to create page pageIndex=' + pageIndex.toString() +
-          ', pageAddress=0x' + pageAddress.toString(16))
-      } else {
+        // Failed to create page
+        return
+      }
+      
         // Set page access rights
         this.pageAccess.set(pageIndex, accessType)
-        console.log('[RAM] initPage: Page created and access rights set pageIndex=' + pageIndex.toString() +
-          ', pageAddress=0x' + pageAddress.toString(16) +
-          ', accessType=' + accessTypeStr +
-          ', pageExists=' + (this.pages.has(pageIndex) ? 'true' : 'false') +
-          ', accessRightsSet=' + (this.pageAccess.has(pageIndex) ? 'true' : 'false'))
-      }
     }
   }
 
@@ -520,20 +470,12 @@ export class PVMRAM implements RAM {
     if (address + size > this.MAX_ADDRESS) {
       const faultAddress =
         this.getPageIndex(address) * MEMORY_CONFIG.PAGE_SIZE
-      console.log('[RAM] isWritableWithFault: Address exceeds MAX_ADDRESS address=0x' + address.toString(16) +
-        ', size=' + size.toString() +
-        ', faultAddress=0x' + faultAddress.toString(16))
       return new FaultCheckResult(false, faultAddress)
     }
 
     const endRequestedAddress = address + size
     const startPage = this.getPageIndex(address)
     const endPage = this.getPageIndex(endRequestedAddress - 1)
-    
-    console.log('[RAM] isWritableWithFault: Checking writability address=0x' + address.toString(16) +
-      ', size=' + size.toString() +
-      ', startPage=' + startPage.toString() +
-      ', endPage=' + endPage.toString())
     
     // Check all pages in the range have WRITE access
     for (let pageIndex = startPage; pageIndex <= endPage; pageIndex++) {
@@ -546,24 +488,12 @@ export class PVMRAM implements RAM {
       const accessTypeStr = accessType === MemoryAccessType.READ ? 'READ' : 
                            accessType === MemoryAccessType.WRITE ? 'WRITE' : 'NONE'
       
-      console.log('[RAM] isWritableWithFault: Checking page pageIndex=' + pageIndex.toString() +
-        ', pageAddress=0x' + pageAddress.toString(16) +
-        ', hasAccess=' + (hasAccess ? 'true' : 'false') +
-        ', accessType=' + accessTypeStr +
-        ', pageExists=' + (this.pages.has(pageIndex) ? 'true' : 'false'))
-      
       if (accessType !== MemoryAccessType.WRITE) {
         // Page not writable - return fault at page start
-        console.log('[RAM] isWritableWithFault: FAULT - Page not writable pageIndex=' + pageIndex.toString() +
-          ', pageAddress=0x' + pageAddress.toString(16) +
-          ', accessType=' + accessTypeStr +
-          ', faultAddress=0x' + pageAddress.toString(16))
         return new FaultCheckResult(false, pageAddress)
       }
     }
 
-    console.log('[RAM] isWritableWithFault: All pages writable address=0x' + address.toString(16) +
-      ', size=' + size.toString())
     return new FaultCheckResult(true, 0)
   }
 

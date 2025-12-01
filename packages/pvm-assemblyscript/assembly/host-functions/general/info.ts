@@ -1,10 +1,6 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  InfoParams,
-  ServiceAccount,
-  ServiceAccountCore,
-} from '../../pbnj-types-compat'
+import { CompleteServiceAccount, ServiceAccountData } from '../../codec'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, InfoParams } from './base'
 import { encodeServiceAccount } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -39,8 +35,12 @@ export class InfoHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: InfoParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const infoParams = params as InfoParams
     // Gray Paper: Extract parameters from registers
     // registers[7] = service ID selector (NONE for self, or specific service ID)
     // registers[8] = output offset (o)
@@ -56,64 +56,62 @@ export class InfoHostFunction extends BaseHostFunction {
     //   d[s] if registers[7] = NONE (2^64 - 1)
     //   d[registers[7]] otherwise
     // }
-    let serviceAccount: ServiceAccount | null = null
+    let serviceAccount: CompleteServiceAccount | null = null
     if (requestedServiceId === ACCUMULATE_ERROR_CODES.NONE) {
       // registers[7] = NONE, use self (s)
-      serviceAccount = params.accounts.get(params.serviceId) || null
-    } else if (params.accounts.has(requestedServiceId)) {
+      serviceAccount = infoParams.accounts.get(infoParams.serviceId) || null
+    } else if (infoParams.accounts.has(requestedServiceId)) {
       // registers[7] specifies a service ID in accounts
-      serviceAccount = params.accounts.get(requestedServiceId) || null
+      serviceAccount = infoParams.accounts.get(requestedServiceId) || null
     }
 
     if (!serviceAccount) {
       // Gray Paper: Return NONE if service account not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 466-473: Encode service account info
-    const info = encodeServiceAccount(
-      serviceAccount as ServiceAccountCore,
+    // Convert CompleteServiceAccount to ServiceAccountData for encoding
+    const accountData = new ServiceAccountData(
+      serviceAccount.codehash,
+      serviceAccount.balance,
+      serviceAccount.minaccgas,
+      serviceAccount.minmemogas,
+      serviceAccount.octets,
+      serviceAccount.gratis,
+      serviceAccount.items,
+      serviceAccount.created,
+      serviceAccount.lastacc,
+      serviceAccount.parent
     )
+    const info = encodeServiceAccount(accountData)
 
     // Gray Paper equation 475-476: Calculate slice parameters
     // f = min(registers[9], len(v))
     // l = min(registers[10], len(v) - f)
-    const f = Math.min(Number(fromOffset), info.length)
-    const l = Math.min(Number(length), info.length - f)
+    const f = min(i32(fromOffset), info.length)
+    const l = min(i32(length), info.length - f)
 
     if (l <= 0) {
       // Return NONE if no data to copy
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 480: Extract slice v[f:f+l]
     const dataToWrite = info.slice(f, f + l)
 
     // Gray Paper equation 478: Write to memory[o:o+l]
-    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
-    if (faultAddress) {
+    const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
+    if (writeResult.hasFault) {
       // Gray Paper: Return panic if memory not writable
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_write',
-          address: faultAddress,
-          details: 'Memory not writable',
-        },
-      }
+      return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
     // Gray Paper equation 480: Return length of info
-    context.registers[7] = BigInt(info.length)
+    context.registers[7] = u64(info.length)
 
-    return {
-      resultCode: null, // continue execution
-    }
+    return new HostFunctionResult(255) // continue execution
   }
 }

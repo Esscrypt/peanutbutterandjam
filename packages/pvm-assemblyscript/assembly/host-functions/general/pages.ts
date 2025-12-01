@@ -1,17 +1,15 @@
-import {
-  HostFunctionContext,
-  HostFunctionResult,
-  MemoryAccessType,
-  PVMGuest,
-  RAM,
-  RefineInvocationContext,
-} from '../../pbnj-types-compat'
+import { RAM, RefineInvocationContext } from '../../pbnj-types-compat'
+import { MemoryAccessType } from '../../types'
+import { PVMGuest } from './base'
+import { HostFunctionResult } from '../accumulate/base'
+import { HostFunctionContext, HostFunctionParams, PagesParams } from './base'
+import { BaseHostFunction } from './base'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
   MEMORY_CONFIG,
+  RESULT_CODES,
 } from '../../config'
-import { BaseHostFunction } from './base'
 
 /**
  * PAGES host function (Ω_Z)
@@ -48,16 +46,6 @@ import { BaseHostFunction } from './base'
  * - registers[7] = HUH when r > 2 ∧ (u_ram_access)[p:c] ∋ none
  * - registers[7] = OK otherwise
  */
-/**
- * Pages host function parameters matching Gray Paper signature
- * Gray Paper: Ω_Z(gascounter, registers, memory, (m, e))
- * 
- * @param refineContext - Refine context pair (m, e) - machines and export segments
- */
-export interface PagesParams {
-  refineContext: RefineInvocationContext
-}
-
 export class PagesHostFunction extends BaseHostFunction {
   functionId: u64 = GENERAL_FUNCTIONS.PAGES
   name: string = 'pages'
@@ -65,31 +53,37 @@ export class PagesHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: PagesParams,
+    params: HostFunctionParams | null,
   ): HostFunctionResult {
+    if (!params) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    const pagesParams = params as PagesParams
+    if (!pagesParams.refineContext) {
+      return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+    
     // Gray Paper: Extract parameters from registers
     // registers[7:4] = (n, p, c, r)
-    const registerSlice = context.registers.slice(7, 11)
-    const machineId = registerSlice[0]
-    const pageStart = registerSlice[1]
-    const pageCount = registerSlice[2]
-    const accessRights = registerSlice[3]
+    const machineId = context.registers[7]
+    const pageStart = u32(context.registers[8])
+    const pageCount = u32(context.registers[9])
+    const accessRights = u32(context.registers[10])
 
     // Gray Paper equation 601-604: Get machine RAM
     // u = m[n].ram if n in keys(m), error otherwise
-    const machine = params.refineContext.machines.get(machineId)
+    const refineContext = pagesParams.refineContext!
+    const machine = refineContext.machines.get(machineId)
     if (!machine) {
       // Gray Paper equation 617: Return WHO if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 618: Validate parameters
     // Return HUH if r > 4 ∨ p < 16 ∨ p+c >= 2^32/Cpvmpagesize
-    const MIN_PAGE_INDEX = 16 // Gray Paper: p < 16 is invalid
-    const MAX_PAGE_INDEX = (2 ** 32) / BigInt(MEMORY_CONFIG.PAGE_SIZE) // Gray Paper: p+c >= 2^32/Cpvmpagesize is invalid
+    const MIN_PAGE_INDEX: u32 = 16 // Gray Paper: p < 16 is invalid
+    const MAX_PAGE_INDEX: u32 = u32((u64(2) ** 32) / u64(MEMORY_CONFIG.PAGE_SIZE)) // Gray Paper: p+c >= 2^32/Cpvmpagesize is invalid
 
     if (
       accessRights > 4 ||
@@ -98,9 +92,7 @@ export class PagesHostFunction extends BaseHostFunction {
     ) {
       // Gray Paper equation 619: Return HUH if invalid parameters
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
-      return {
-        resultCode: null, // continue execution
-      }
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Gray Paper equation 619: Additional validation
@@ -113,9 +105,7 @@ export class PagesHostFunction extends BaseHostFunction {
       )
       if (hasInaccessiblePages) {
         context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
-        return {
-          resultCode: null, // continue execution
-        }
+        return new HostFunctionResult(255) // continue execution
       }
     }
 
@@ -130,26 +120,24 @@ export class PagesHostFunction extends BaseHostFunction {
     // Gray Paper equation 620: Return OK for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
 
-    return {
-      resultCode: null, // continue execution
-    }
+    return new HostFunctionResult(255) // continue execution
   }
 
   checkForInaccessiblePages(
     ram: RAM,
-    pageStart: bigint,
-    pageCount: bigint,
-  ): boolean {
+    pageStart: u32,
+    pageCount: u32,
+  ): bool {
     // Gray Paper equation 619: r > 2 ∧ (u_ram_access)[p:c] ∋ none
     // Check if any pages in the range have 'none' access
-    const PAGE_SIZE = BigInt(MEMORY_CONFIG.PAGE_SIZE)
-    for (let i = 0; i < pageCount; i++) {
+    const PAGE_SIZE = MEMORY_CONFIG.PAGE_SIZE
+    for (let i: u32 = 0; i < pageCount; i++) {
       const pageIndex = pageStart + i
-      const pageAddress = pageIndex * PAGE_SIZE
+      const pageAddress = u32(pageIndex * PAGE_SIZE)
 
       // Check if the page has 'none' access
-      const accessType = ram.getPageAccessType(pageAddress)
-      if (accessType === 'none') {
+      const accessResult = ram.isReadableWithFault(pageAddress, PAGE_SIZE)
+      if (!accessResult.success) {
         return true // Found inaccessible page
       }
     }
@@ -166,11 +154,11 @@ export class PagesHostFunction extends BaseHostFunction {
    */
   setMemoryPageAccessRights(
     machine: PVMGuest,
-    pageStart: bigint,
-    pageCount: bigint,
-    accessRights: bigint,
+    pageStart: u32,
+    pageCount: u32,
+    accessRights: u32,
   ): void {
-    const PAGE_SIZE = BigInt(MEMORY_CONFIG.PAGE_SIZE)
+    const PAGE_SIZE = u32(MEMORY_CONFIG.PAGE_SIZE)
     const accessType = this.convertAccessRights(accessRights)
     // accessRights is already validated to be <= 4, so accessType should never be null
     if (!accessType) {
@@ -178,9 +166,9 @@ export class PagesHostFunction extends BaseHostFunction {
       return
     }
 
-    for (let i = 0; i < pageCount; i++) {
+    for (let i: u32 = 0; i < pageCount; i++) {
       const pageIndex = pageStart + i
-      const pageAddress = pageIndex * PAGE_SIZE
+      const pageAddress = u32(pageIndex * PAGE_SIZE)
 
       // Gray Paper equation 606-609: Clear page data when r < 3
       if (accessRights < 3) {
@@ -194,7 +182,7 @@ export class PagesHostFunction extends BaseHostFunction {
       // Gray Paper equation 610-614: Set access rights
       machine.pvm.state.ram.setPageAccessRights(
         pageAddress,
-        Number(PAGE_SIZE),
+        PAGE_SIZE,
         accessType,
       )
     }
@@ -208,18 +196,18 @@ export class PagesHostFunction extends BaseHostFunction {
    * r = 1 or 3 → read access only (R)
    * r = 2 or 4 → write access only (W)
    */
-  convertAccessRights(accessRights: bigint): MemoryAccessType | null {
+  convertAccessRights(accessRights: u32): MemoryAccessType {
     switch (accessRights) {
       case 0:
-        return 'none' // r = 0
+        return MemoryAccessType.NONE // r = 0
       case 1:
       case 3:
-        return 'read' // r = 1 ∨ r = 3 → R
+        return MemoryAccessType.READ // r = 1 ∨ r = 3 → R
       case 2:
       case 4:
-        return 'write' // r = 2 ∨ r = 4 → W
+        return MemoryAccessType.WRITE // r = 2 ∨ r = 4 → W
       default:
-        return null // Invalid r
+        return MemoryAccessType.NONE // Invalid r - default to NONE
     }
   }
 
@@ -229,8 +217,8 @@ export class PagesHostFunction extends BaseHostFunction {
    * Gray Paper equation 606-609:
    * (u'_ram_value)[p*Cpvmpagesize.(p+c)*Cpvmpagesize] = {0, 0, .}
    */
-  clearPageData(ram: RAM, startAddress: bigint, size: bigint): void {
-    const zeroData = new Uint8Array(Number(size))
-    ram.writeOctets(u32(startAddress), zeroData)
+  clearPageData(ram: RAM, startAddress: u32, size: u32): void {
+    const zeroData = new Uint8Array(size)
+    ram.writeOctets(startAddress, zeroData)
   }
 }

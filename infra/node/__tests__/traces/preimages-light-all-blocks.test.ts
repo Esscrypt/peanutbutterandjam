@@ -182,6 +182,7 @@ describe('Genesis Parse Tests', () => {
         configService: configService,
         entropyService: entropyService,
         pvmOptions: { gasCounter: 10000n },
+        useWasm: true,
       })
 
 
@@ -441,6 +442,18 @@ describe('Genesis Parse Tests', () => {
         return chapterNames[chapterIndex] || `unknown (${chapterIndex})`
       }
 
+      // Helper function to check if a key exists in pre-state or post-state
+      const checkKeyInStates = (key: Hex, blockJsonData: BlockTraceTestVector) => {
+        const inPreState = blockJsonData.pre_state?.keyvals?.some(kv => kv.key === key) ?? false
+        const inPostState = blockJsonData.post_state.keyvals.some(kv => kv.key === key) ?? false
+        return { inPreState, inPostState }
+      }
+
+      // Helper function to get key value from pre-state
+      const getKeyFromPreState = (key: Hex, blockJsonData: BlockTraceTestVector): Hex | undefined => {
+        return blockJsonData.pre_state?.keyvals?.find(kv => kv.key === key)?.value
+      }
+
       // Helper function to verify post-state
       const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector) => {
         const [stateTrieError, stateTrie] = stateService.generateStateTrie()
@@ -471,6 +484,8 @@ describe('Genesis Parse Tests', () => {
         // Track which keys are checked vs missing
         let checkedKeys = 0
         let missingKeys = 0
+        const missingKeyvals: Array<{ key: Hex; expected: Hex; inPreState: boolean; inPostState: boolean; preStateValue?: Hex }> = []
+        const mismatchedKeyvals: Array<{ key: Hex; expected: Hex; actual: Hex; inPreState: boolean; inPostState: boolean; preStateValue?: Hex }> = []
 
         for (const keyval of blockJsonData.post_state.keyvals) {
           const actualValue = stateTrie?.[keyval.key]
@@ -480,6 +495,16 @@ describe('Genesis Parse Tests', () => {
             // Key is missing from generated state trie - this is a failure
             missingKeys++
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            const stateCheck = checkKeyInStates(keyval.key as Hex, blockJsonData)
+            const preStateValue = getKeyFromPreState(keyval.key as Hex, blockJsonData)
+            
+            missingKeyvals.push({
+              key: keyval.key as Hex,
+              expected: keyval.value as Hex,
+              inPreState: stateCheck.inPreState,
+              inPostState: stateCheck.inPostState,
+              preStateValue,
+            })
             
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
@@ -499,7 +524,13 @@ describe('Genesis Parse Tests', () => {
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
-            console.error(`Expected Value: ${keyval.value}`)
+            console.error(`Expected Value (from post_state): ${keyval.value}`)
+            console.error(`In Pre-State: ${stateCheck.inPreState ? 'YES' : 'NO'}`)
+            if (stateCheck.inPreState && preStateValue) {
+              console.error(`Pre-State Value: ${preStateValue}`)
+              console.error(`Pre-State vs Post-State Match: ${preStateValue === keyval.value ? 'YES' : 'NO'}`)
+            }
+            console.error(`In Post-State: ${stateCheck.inPostState ? 'YES' : 'NO'}`)
             console.error(`Actual Value: undefined (key not found in state trie)`)
             console.error('=====================================\n')
             
@@ -511,6 +542,19 @@ describe('Genesis Parse Tests', () => {
           // Key exists - check if value matches
           checkedKeys++
           if (keyval.value !== actualValue) {
+            // Value mismatch - track it
+            const stateCheck = checkKeyInStates(keyval.key as Hex, blockJsonData)
+            const preStateValue = getKeyFromPreState(keyval.key as Hex, blockJsonData)
+            
+            mismatchedKeyvals.push({
+              key: keyval.key as Hex,
+              expected: keyval.value as Hex,
+              actual: actualValue as Hex,
+              inPreState: stateCheck.inPreState,
+              inPostState: stateCheck.inPostState,
+              preStateValue,
+            })
+            
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
             let decodedExpected: any = null
@@ -559,6 +603,13 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
+            console.error(`In Pre-State: ${stateCheck.inPreState ? 'YES' : 'NO'}`)
+            if (stateCheck.inPreState && preStateValue) {
+              console.error(`Pre-State Value: ${preStateValue}`)
+              console.error(`Pre-State == Expected: ${preStateValue === keyval.value ? 'YES' : 'NO'}`)
+              console.error(`Pre-State == Actual: ${preStateValue === actualValue ? 'YES' : 'NO'}`)
+            }
+            console.error(`In Post-State: ${stateCheck.inPostState ? 'YES' : 'NO'}`)
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
               console.error(`Key Type: ${keyInfo.type}`)
@@ -787,12 +838,68 @@ describe('Genesis Parse Tests', () => {
         }
 
         // Log summary
+        const totalMismatches = missingKeys + mismatchedKeyvals.length
         console.log(`\n✅ [Block ${blockNumber}] State Key Verification Summary:`)
         console.log(`  Total keys in post_state: ${blockJsonData.post_state.keyvals.length}`)
         console.log(`  Keys checked (found in state trie): ${checkedKeys}`)
         console.log(`  Keys missing (not in state trie): ${missingKeys}`)
-        if (missingKeys > 0) {
-          console.error(`  ⚠️  ${missingKeys} key(s) are missing from the generated state trie`)
+        console.log(`  Keys with value mismatch: ${mismatchedKeyvals.length}`)
+        console.log(`  Total mismatches: ${totalMismatches}`)
+        
+        if (totalMismatches > 0) {
+          // Dump all missing keyvals with detailed information
+          if (missingKeys > 0) {
+            console.error(`\n📋 [Block ${blockNumber}] Missing Keyvals Dump (${missingKeys} total):`)
+            console.error('='.repeat(80))
+            for (const missing of missingKeyvals) {
+              console.error(`\nMissing Key: ${missing.key}`)
+              const keyInfo = parseStateKeyForDebug(missing.key)
+              console.error(`  Key Info: ${JSON.stringify(keyInfo, null, 2)}`)
+              console.error(`  Expected Value (from post_state): ${missing.expected}`)
+              console.error(`  In Pre-State: ${missing.inPreState ? 'YES' : 'NO'}`)
+              if (missing.inPreState) {
+                console.error(`  Pre-State Value: ${missing.preStateValue ?? 'undefined'}`)
+                if (missing.preStateValue) {
+                  console.error(`  Pre-State == Post-State: ${missing.preStateValue === missing.expected ? 'YES (same)' : 'NO (different)'}`)
+                }
+              }
+              console.error(`  In Post-State: ${missing.inPostState ? 'YES' : 'NO'}`)
+              
+              // Try to get the actual value from current state (might be different key)
+              const [currentStateTrieError, currentStateTrie] = stateService.generateStateTrie()
+              if (!currentStateTrieError && currentStateTrie) {
+                const currentValue = currentStateTrie[missing.key]
+                if (currentValue !== undefined) {
+                  console.error(`  Current State Value: ${currentValue}`)
+                  console.error(`  Current == Expected: ${currentValue === missing.expected ? 'YES' : 'NO'}`)
+                } else {
+                  console.error(`  Current State Value: undefined (not found)`)
+                }
+              }
+            }
+            console.error('='.repeat(80))
+          }
+          
+          // Dump all value mismatches
+          if (mismatchedKeyvals.length > 0) {
+            console.error(`\n📋 [Block ${blockNumber}] Value Mismatch Keyvals Dump (${mismatchedKeyvals.length} total):`)
+            console.error('='.repeat(80))
+            for (const mismatch of mismatchedKeyvals) {
+              console.error(`\nMismatched Key: ${mismatch.key}`)
+              const keyInfo = parseStateKeyForDebug(mismatch.key)
+              console.error(`  Key Info: ${JSON.stringify(keyInfo, null, 2)}`)
+              console.error(`  Expected Value (from post_state): ${mismatch.expected}`)
+              console.error(`  Actual Value (from state trie): ${mismatch.actual}`)
+              console.error(`  In Pre-State: ${mismatch.inPreState ? 'YES' : 'NO'}`)
+              if (mismatch.inPreState && mismatch.preStateValue) {
+                console.error(`  Pre-State Value: ${mismatch.preStateValue}`)
+                console.error(`  Pre-State == Expected: ${mismatch.preStateValue === mismatch.expected ? 'YES' : 'NO'}`)
+                console.error(`  Pre-State == Actual: ${mismatch.preStateValue === mismatch.actual ? 'YES' : 'NO'}`)
+              }
+              console.error(`  In Post-State: ${mismatch.inPostState ? 'YES' : 'NO'}`)
+            }
+            console.error('='.repeat(80))
+          }
         }
 
         // Compare state root with expected post_state
@@ -875,6 +982,37 @@ describe('Genesis Parse Tests', () => {
 
           // Verify post-state matches expected post_state from test vector
           verifyPostState(blockNumber, blockJsonData)
+
+          // Special check for the specific key mentioned in the error
+          const specificKey: Hex = '0x0001007100a000ab5cbd7e82c9744baf137918fe8d08741476a397e9dc2884'
+          const specificKeyCheck = checkKeyInStates(specificKey, blockJsonData)
+          const specificKeyPreValue = getKeyFromPreState(specificKey, blockJsonData)
+          const [specificKeyStateTrieError, specificKeyStateTrie] = stateService.generateStateTrie()
+          const specificKeyActualValue = !specificKeyStateTrieError && specificKeyStateTrie ? specificKeyStateTrie[specificKey] : undefined
+          const specificKeyExpectedValue = blockJsonData.post_state.keyvals.find(kv => kv.key === specificKey)?.value
+          
+          if (specificKeyCheck.inPreState || specificKeyCheck.inPostState || specificKeyActualValue !== undefined) {
+            console.log(`\n🔍 [Block ${blockNumber}] Specific Key Analysis: ${specificKey}`)
+            console.log('='.repeat(80))
+            const keyInfo = parseStateKeyForDebug(specificKey)
+            console.log(`Key Info: ${JSON.stringify(keyInfo, null, 2)}`)
+            console.log(`In Pre-State: ${specificKeyCheck.inPreState ? 'YES' : 'NO'}`)
+            if (specificKeyCheck.inPreState) {
+              console.log(`Pre-State Value: ${specificKeyPreValue ?? 'undefined'}`)
+            }
+            console.log(`In Post-State: ${specificKeyCheck.inPostState ? 'YES' : 'NO'}`)
+            if (specificKeyCheck.inPostState) {
+              console.log(`Post-State Expected Value: ${specificKeyExpectedValue ?? 'undefined'}`)
+            }
+            console.log(`In Current State Trie: ${specificKeyActualValue !== undefined ? 'YES' : 'NO'}`)
+            if (specificKeyActualValue !== undefined) {
+              console.log(`Current State Value: ${specificKeyActualValue}`)
+              if (specificKeyExpectedValue) {
+                console.log(`Current == Expected: ${specificKeyActualValue === specificKeyExpectedValue ? 'YES' : 'NO'}`)
+              }
+            }
+            console.log('='.repeat(80))
+          }
 
           console.log(`✅ Block ${blockNumber} imported and verified successfully`)
 

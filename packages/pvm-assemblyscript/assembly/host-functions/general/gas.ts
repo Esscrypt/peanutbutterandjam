@@ -1,5 +1,5 @@
 import { HostFunctionResult } from '../accumulate/base'
-import { HostFunctionContext } from './base'
+import { HostFunctionContext, HostFunctionParams } from './base'
 import { BaseHostFunction } from './base'
 import { GENERAL_FUNCTIONS } from '../../config'
 
@@ -18,7 +18,7 @@ export class GasHostFunction extends BaseHostFunction {
   functionId: u64 = GENERAL_FUNCTIONS.GAS
   name: string = 'gas'
 
-  execute(context: HostFunctionContext, params: null): HostFunctionResult {
+  execute(context: HostFunctionContext, params: HostFunctionParams | null): HostFunctionResult {
     // Set registers[7] = gascounter (remaining gas)
     context.registers[7] = context.gasCounter
 

@@ -57,8 +57,13 @@
  */
 
 import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, Safe, ServiceAccountCore } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type {
+  DecodingResult,
+  JamVersion,
+  Safe,
+  ServiceAccountCore,
+} from '@pbnj/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnj/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**
@@ -76,7 +81,7 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * smart contract accounts in Ethereum.
  *
  * Field encoding per Gray Paper:
- * 1. **0**: Placeholder discriminator (1 byte)
+ * 1. **0**: Placeholder discriminator (1 byte) - included for JAM version > 0.7.0
  * 2. **codehash**: 32-byte hash of service code
  * 3. **encode[8]**: 5 × 8-byte fields (balance, minaccgas, minmemogas, octets, gratis)
  * 4. **encode[4]**: 4 × 4-byte fields (items, created, lastacc, parent)
@@ -95,23 +100,35 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  *
  * ✅ CORRECT: Uses encode[8] for 8-byte fields (balance, minaccgas, minmemogas, octets, gratis)
  * ✅ CORRECT: Uses encode[4] for 4-byte fields (items, created, lastacc, parent)
- * ✅ CORRECT: Includes placeholder discriminator (0)
+ * ✅ CORRECT: Includes placeholder discriminator (0) for JAM version > 0.7.0
  * ✅ CORRECT: Supports service account state management
  *
  * @param account - Service account to encode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2 (includes discriminator)
  * @returns Encoded octet sequence
  */
 export function encodeServiceAccount(
   account: ServiceAccountCore,
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Gray Paper: 0 (placeholder discriminator)
-  const [error, encoded] = encodeNatural(0n)
-  if (error) {
-    return safeError(error)
+  // Include discriminator for JAM version > 0.7.0 (v0.7.1+)
+  // Fuzzer test vectors (v0.7.0) omit this discriminator byte
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  const includeDiscriminator =
+    version.major > 0 ||
+    (version.major === 0 && version.minor > 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch > 0)
+
+  if (includeDiscriminator) {
+    const [error, encoded] = encodeNatural(0n)
+    if (error) {
+      return safeError(error)
+    }
+    parts.push(encoded)
   }
-  parts.push(encoded)
 
   // Gray Paper: sa_codehash (32-byte hash)
   parts.push(hexToBytes(account.codehash))
@@ -176,19 +193,54 @@ export function encodeServiceAccount(
  * ✅ CORRECT: Maintains round-trip compatibility with encoding
  *
  * @param data - Octet sequence to decode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2 (expects discriminator)
  * @returns Decoded service account and remaining data
  */
 export function decodeServiceAccount(
   data: Uint8Array,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<ServiceAccountCore>> {
   let currentData = data
 
   // Gray Paper: 0 (placeholder discriminator)
-  const [discriminatorError, discriminatorResult] = decodeNatural(currentData)
-  if (discriminatorError) {
-    return safeError(discriminatorError)
+  // Include discriminator for JAM version > 0.7.0 (v0.7.1+)
+  // Fuzzer test vectors (v0.7.0) omit this discriminator byte
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  const expectDiscriminator =
+    version.major > 0 ||
+    (version.major === 0 && version.minor > 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch > 0)
+
+  if (expectDiscriminator) {
+    // For v0.7.1+, expect discriminator byte
+    if (currentData.length > 0 && currentData[0] === 0x00) {
+      const [discriminatorError, discriminatorResult] =
+        decodeNatural(currentData)
+      if (discriminatorError) {
+        return safeError(discriminatorError)
+      }
+      currentData = discriminatorResult.remaining
+    } else {
+      // Discriminator expected but missing - this is an error for v0.7.1+
+      return safeError(
+        new Error(
+          `Service account discriminator expected for JAM version ${version.major}.${version.minor}.${version.patch} but first byte is 0x${currentData[0]?.toString(16) || 'undefined'}`,
+        ),
+      )
+    }
+  } else {
+    // For v0.7.0 and earlier, discriminator is optional (fuzzer test vectors omit it)
+    // If first byte is 0x00, decode it as natural number. Otherwise, assume discriminator is missing.
+    if (currentData.length > 0 && currentData[0] === 0x00) {
+      const [discriminatorError, discriminatorResult] =
+        decodeNatural(currentData)
+      if (discriminatorError) {
+        return safeError(discriminatorError)
+      }
+      currentData = discriminatorResult.remaining
+    }
+    // If first byte is not 0x00, assume discriminator is missing and start with codehash
   }
-  currentData = discriminatorResult.remaining
 
   // Gray Paper: sa_codehash (32-byte hash)
   if (currentData.length < 32) {
