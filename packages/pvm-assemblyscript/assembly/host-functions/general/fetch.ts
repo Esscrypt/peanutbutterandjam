@@ -388,7 +388,7 @@ export class FetchHostFunction extends BaseHostFunction {
     // encode[4]{Cmaxpackageimports}, encode[4]{Csegmentecpieces}, encode[4]{Cmaxreportvarsize},
     // encode[4]{Cmemosize}, encode[4]{Cmaxpackageexports}, encode[4]{Cepochtailstart}
 
-    const buffer = new Uint8Array(200) // Total size: 8+8+8+2+4+4+8+8+8+8+2+2+2+2+4+2+2+2+2+2+2+2+2+4+4+4+4+4+4+4+4+4+4+4 = 200 bytes
+    const buffer = new Uint8Array(134) // Total size: 8+8+8+2+4+4+8+8+8+8+2+2+2+2+4+2+2+2+2+2+2+2+2+4+4+4+4+4+4+4+4+4+4+4 = 134 bytes (per Gray Paper pvm_invocations.tex lines 308-343)
     let offset: i32 = 0
 
     // encode[8]{Citemdeposit = 10}

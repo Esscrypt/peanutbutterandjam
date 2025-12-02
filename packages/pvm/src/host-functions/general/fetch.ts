@@ -342,7 +342,7 @@ export class FetchHostFunction extends BaseHostFunction {
     // encode[4]{Cmaxpackageimports}, encode[4]{Csegmentecpieces}, encode[4]{Cmaxreportvarsize},
     // encode[4]{Cmemosize}, encode[4]{Cmaxpackageexports}, encode[4]{Cepochtailstart}
 
-    const buffer = new ArrayBuffer(200) // Total size: 8+8+8+2+4+4+8+8+8+8+2+2+2+2+4+2+2+2+2+2+2+2+2+4+4+4+4+4+4+4+4+4+4+4 = 200 bytes
+    const buffer = new ArrayBuffer(134) // Total size: 8+8+8+2+4+4+8+8+8+8+2+2+2+2+4+2+2+2+2+2+2+2+2+4+4+4+4+4+4+4+4+4+4+4 = 134 bytes (per Gray Paper pvm_invocations.tex lines 308-343)
     const view = new DataView(buffer)
     let offset = 0
 
@@ -483,7 +483,13 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Cepochtailstart = 500}
-    view.setUint32(offset, TICKET_CONSTANTS.C_EPOCHTAILSTART, false)
+    view.setUint32(offset, this.configService.contestDuration, true) // little-endian
+    offset += 4
+
+    // Verify we've used exactly 134 bytes as per Gray Paper specification
+    if (offset !== 134) {
+      throw new Error(`System constants encoding error: expected 134 bytes, got ${offset}`)
+    }
 
     return new Uint8Array(buffer)
   }

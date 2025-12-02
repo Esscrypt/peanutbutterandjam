@@ -6,7 +6,9 @@ import type {
   Safe,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
-import { decodeNatural } from '../core/natural-number'
+import { decodeNatural, encodeNatural } from '../core/natural-number'
+import { encodeFixedLength } from '../core/fixed-length'
+import { concatBytes } from '@pbnj/core'
 
 /**
  * Decoded standard program components (Gray Paper: Y function)
@@ -464,4 +466,265 @@ export function decodeProgramFromPreimage(preimageBlob: Uint8Array): Safe<
       preimageResult.value.codeBlob.length +
       programResult.consumed,
   })
+}
+
+/**
+ * Encode a PVM program blob according to Gray Paper deblob function
+ *
+ * Gray Paper pvm.tex equation 52-58:
+ * Format: p = encode(len(j)) ⊕ encode[1](z) ⊕ encode(len(c)) ⊕ encode[z](j) ⊕ encode(c) ⊕ encode(k)
+ *
+ * Where:
+ * - encode(len(j)): Jump table length (natural number encoding)
+ * - encode[1](z): Element size in jump table (1 byte)
+ * - encode(len(c)): Code section length (natural number encoding)
+ * - encode[z](j): Jump table data (each element is z bytes, little-endian)
+ * - encode(c): Code data (instruction bytes)
+ * - encode(k): Opcode bitmask (1 bit per byte of code, marking opcodes)
+ * - Constraint: len(k) = len(c)
+ *
+ * @param blob - Blob components to encode
+ * @returns Encoded blob bytes or error
+ */
+export function encodeBlob(blob: {
+  code: Uint8Array
+  bitmask: Uint8Array
+  jumpTable: bigint[]
+  elementSize: number
+}): Safe<Uint8Array> {
+  // Validate element size
+  if (blob.elementSize < 1 || blob.elementSize > 8) {
+    return safeError(
+      new Error(
+        `Invalid element size: ${blob.elementSize} (must be 1-8)`,
+      ),
+    )
+  }
+
+  // Validate bitmask length matches code length
+  if (blob.bitmask.length !== blob.code.length) {
+    return safeError(
+      new Error(
+        `Bitmask length ${blob.bitmask.length} does not match code length ${blob.code.length}`,
+      ),
+    )
+  }
+
+  const parts: Uint8Array[] = []
+
+  // 1. encode(len(j)) - jump table length (natural number encoding)
+  const [error1, jumpTableLengthEncoded] = encodeNatural(
+    BigInt(blob.jumpTable.length),
+  )
+  if (error1) {
+    return safeError(error1)
+  }
+  parts.push(jumpTableLengthEncoded)
+
+  // 2. encode[1](z) - element size (1 byte)
+  const elementSizeBytes = new Uint8Array([blob.elementSize])
+  parts.push(elementSizeBytes)
+
+  // 3. encode(len(c)) - code length (natural number encoding)
+  const [error2, codeLengthEncoded] = encodeNatural(BigInt(blob.code.length))
+  if (error2) {
+    return safeError(error2)
+  }
+  parts.push(codeLengthEncoded)
+
+  // 4. encode[z](j) - jump table data (each element is z bytes, little-endian)
+  const jumpTableBytes = new Uint8Array(
+    blob.jumpTable.length * blob.elementSize,
+  )
+  for (let i = 0; i < blob.jumpTable.length; i++) {
+    const value = blob.jumpTable[i]
+    for (let j = 0; j < blob.elementSize; j++) {
+      jumpTableBytes[i * blob.elementSize + j] = Number(
+        (value >> (8n * BigInt(j))) & 0xffn,
+      )
+    }
+  }
+  parts.push(jumpTableBytes)
+
+  // 5. encode(c) - code data
+  parts.push(blob.code)
+
+  // 6. encode(k) - opcode bitmask (pack bits into bytes)
+  // Gray Paper serialization.tex: bits are packed into octets in order of least significant to most
+  const bitmaskBytes = new Uint8Array(Math.ceil(blob.bitmask.length / 8))
+  for (let i = 0; i < blob.bitmask.length; i++) {
+    const byteIndex = Math.floor(i / 8)
+    const bitIndex = i % 8
+    if (blob.bitmask[i]) {
+      bitmaskBytes[byteIndex] |= 1 << bitIndex
+    }
+  }
+  parts.push(bitmaskBytes)
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
+ * Encode a PVM program according to Gray Paper Y function specification
+ *
+ * Gray Paper pvm.tex: Y function (Standard Program Initialization)
+ * Format: E₃(|o|) || E₃(|w|) || E₂(z) || E₃(s) || o || w || E₄(|c|) || c
+ *
+ * Where:
+ * - E₃(|o|): Read-only data length (3 bytes, little-endian)
+ * - E₃(|w|): Read-write data length (3 bytes, little-endian) -> heap
+ * - E₂(z): heap zero padding size (2 bytes, little-endian)
+ * - E₃(s): Stack size (3 bytes, little-endian)
+ * - o: Read-only data section
+ * - w: heap data section
+ * - E₄(|c|): Instruction data length (4 bytes, little-endian)
+ * - c: Instruction data
+ *
+ * @param program - Program components to encode
+ * @returns Encoded program bytes or error
+ */
+export function encodeProgram(program: {
+  roData: Uint8Array
+  rwData: Uint8Array
+  heapZeroPaddingSize: number
+  stackSize: number
+  code: Uint8Array
+}): Safe<Uint8Array> {
+  // Validate lengths fit in their fixed-length encodings
+  const max3Bytes = 0xffffff // 2^24 - 1
+  const max2Bytes = 0xffff // 2^16 - 1
+  const max4Bytes = 0xffffffff // 2^32 - 1
+
+  if (program.roData.length > max3Bytes) {
+    return safeError(
+      new Error(
+        `Read-only data length ${program.roData.length} exceeds maximum ${max3Bytes}`,
+      ),
+    )
+  }
+  if (program.rwData.length > max3Bytes) {
+    return safeError(
+      new Error(
+        `Read-write data length ${program.rwData.length} exceeds maximum ${max3Bytes}`,
+      ),
+    )
+  }
+  if (program.heapZeroPaddingSize > max2Bytes) {
+    return safeError(
+      new Error(
+        `Heap zero padding size ${program.heapZeroPaddingSize} exceeds maximum ${max2Bytes}`,
+      ),
+    )
+  }
+  if (program.stackSize > max3Bytes) {
+    return safeError(
+      new Error(
+        `Stack size ${program.stackSize} exceeds maximum ${max3Bytes}`,
+      ),
+    )
+  }
+  if (program.code.length > max4Bytes) {
+    return safeError(
+      new Error(
+        `Code length ${program.code.length} exceeds maximum ${max4Bytes}`,
+      ),
+    )
+  }
+
+  const parts: Uint8Array[] = []
+
+  // 1. E₃(|o|) - read-only data length (3 bytes, little-endian)
+  // Note: FixedLengthSize doesn't include 3n, so we encode manually
+  const roDataLengthBytes = new Uint8Array(3)
+  const roDataLength = BigInt(program.roData.length)
+  for (let i = 0; i < 3; i++) {
+    roDataLengthBytes[i] = Number((roDataLength >> (8n * BigInt(i))) & 0xffn)
+  }
+  parts.push(roDataLengthBytes)
+
+  // 2. E₃(|w|) - read-write data length (3 bytes, little-endian)
+  const rwDataLengthBytes = new Uint8Array(3)
+  const rwDataLength = BigInt(program.rwData.length)
+  for (let i = 0; i < 3; i++) {
+    rwDataLengthBytes[i] = Number((rwDataLength >> (8n * BigInt(i))) & 0xffn)
+  }
+  parts.push(rwDataLengthBytes)
+
+  // 3. E₂(z) - heap zero padding size (2 bytes, little-endian)
+  const [error3, heapZeroPaddingEncoded] = encodeFixedLength(
+    BigInt(program.heapZeroPaddingSize),
+    2n,
+  )
+  if (error3) {
+    return safeError(error3)
+  }
+  parts.push(heapZeroPaddingEncoded)
+
+  // 4. E₃(s) - stack size (3 bytes, little-endian)
+  const stackSizeBytes = new Uint8Array(3)
+  const stackSize = BigInt(program.stackSize)
+  for (let i = 0; i < 3; i++) {
+    stackSizeBytes[i] = Number((stackSize >> (8n * BigInt(i))) & 0xffn)
+  }
+  parts.push(stackSizeBytes)
+
+  // 5. o - read-only data section
+  parts.push(program.roData)
+
+  // 6. w - heap data section
+  parts.push(program.rwData)
+
+  // 7. E₄(|c|) - instruction data length (4 bytes, little-endian)
+  const [error5, codeLengthEncoded] = encodeFixedLength(
+    BigInt(program.code.length),
+    4n,
+  )
+  if (error5) {
+    return safeError(error5)
+  }
+  parts.push(codeLengthEncoded)
+
+  // 8. c - instruction data
+  parts.push(program.code)
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
+ * Encode service code to preimage blob according to Gray Paper accounts.tex
+ *
+ * Gray Paper accounts.tex equation 42-43:
+ * \encode{\var{\mathbf{m}}, \mathbf{c}} = \mathbf{a}_\sa¬preimages[\mathbf{a}_\sa¬codehash]
+ *
+ * Format: encode(len(m)) || encode(m) || encode(code_blob)
+ *
+ * Where:
+ * - encode(len(m)): Variable-length natural number encoding of metadata length
+ * - encode(m): Metadata blob
+ * - encode(code_blob): Code blob (in Y function format or deblob format)
+ *
+ * @param metadata - Metadata blob
+ * @param codeBlob - Code blob (in Y function format or deblob format)
+ * @returns Encoded preimage blob or error
+ */
+export function encodeServiceCodeToPreimage(
+  metadata: Uint8Array,
+  codeBlob: Uint8Array,
+): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
+  // 1. encode(len(m)) - metadata length (natural number encoding)
+  const [error, metadataLengthEncoded] = encodeNatural(BigInt(metadata.length))
+  if (error) {
+    return safeError(error)
+  }
+  parts.push(metadataLengthEncoded)
+
+  // 2. encode(m) - metadata blob
+  parts.push(metadata)
+
+  // 3. encode(code_blob) - code blob
+  parts.push(codeBlob)
+
+  return safeResult(concatBytes(parts))
 }
