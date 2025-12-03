@@ -28,12 +28,14 @@ import {
   RESULT_CODE_PANIC,
   STACK_SEGMENT_END,
   ZONE_SIZE,
+  GENERAL_FUNCTIONS,
 } from './config'
+import { FetchHostFunction } from './host-functions/general/fetch'
 import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
 import { AccumulateHostFunctionContext } from './host-functions/accumulate/base'
 import { HostFunctionRegistry } from './host-functions/general/registry'
-import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams } from './host-functions/general/base'
-import { FetchParams, ServiceAccount } from './pbnj-types-compat'
+import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams, FetchParams } from './host-functions/general/base'
+import { ServiceAccount } from './pbnj-types-compat'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMParser } from './parser'
 import { InstructionContext, RegisterState, RAM, ExecutionResult, RunProgramResult } from './types'
@@ -135,10 +137,14 @@ export class PVM {
   configPreimageExpungePeriod: u32 = 19200
   configEpochDuration: u32 = 600
   configMaxBlockGas: u64 = u64(3500000000)
+  configMaxRefineGas: u64 = u64(5000000000)
+  configMaxTicketsPerExtrinsic: u16 = 16
   configTicketsPerValidator: u16 = 2
   configSlotDuration: u16 = 6
   configRotationPeriod: u16 = 10
   configNumValidators: u16 = 1023
+  configNumEcPiecesPerSegment: u32 = 6
+  configContestDuration: u32 = 500
 
   constructor(
     registerState: RegisterState,
@@ -1078,20 +1084,28 @@ export class PVM {
     configPreimageExpungePeriod: u32 = 19200,
     configEpochDuration: u32 = 600,
     configMaxBlockGas: u64 = u64(3500000000),
+    configMaxRefineGas: u64 = u64(5000000000),
+    configMaxTicketsPerExtrinsic: u16 = 16,
     configTicketsPerValidator: u16 = 2,
     configSlotDuration: u16 = 6,
     configRotationPeriod: u16 = 10,
     configNumValidators: u16 = 1023,
+    configNumEcPiecesPerSegment: u32 = 6,
+    configContestDuration: u32 = 500,
   ): void {
     // Store config parameters
     this.configNumCores = configNumCores
     this.configPreimageExpungePeriod = configPreimageExpungePeriod
     this.configEpochDuration = configEpochDuration
     this.configMaxBlockGas = configMaxBlockGas
+    this.configMaxRefineGas = configMaxRefineGas
+    this.configMaxTicketsPerExtrinsic = configMaxTicketsPerExtrinsic
     this.configTicketsPerValidator = configTicketsPerValidator
     this.configSlotDuration = configSlotDuration
     this.configRotationPeriod = configRotationPeriod
     this.configNumValidators = configNumValidators
+    this.configNumEcPiecesPerSegment = configNumEcPiecesPerSegment
+    this.configContestDuration = configContestDuration
     this.state.gasCounter = gasLimit
     this.state.programCounter = 5 // initial PC for accumulate invocation
     
@@ -1123,6 +1137,13 @@ export class PVM {
     
     // Store entropy accumulator for FETCH host function
     this.entropyAccumulator = entropyAccumulator
+    
+    // Set PVM instance on FetchHostFunction so it can access config values
+    const fetchHandler = this.hostFunctionRegistry.get(GENERAL_FUNCTIONS.FETCH)
+    if (fetchHandler) {
+      const fetchHostFunction = fetchHandler as FetchHostFunction
+      fetchHostFunction.setPvmInstance(this)
+    }
     
     // Initialize program (decodes preimage and sets up memory/registers)
     const codeBlob = this.initializeProgram(program, args)

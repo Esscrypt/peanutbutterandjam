@@ -224,29 +224,21 @@ export async function instantiate(module, imports = {}) {
         __release(context);
       }
     },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32, u32, u32, u64, u16, u16, u16, u16) => void
-      // Clear any previous error before calling
-      clearLastWasmError();
-      
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?) => void
       program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
-      args = __lowerTypedArray(Uint8Array, 11, 0, args) || __notnull();
+      args = __retain(__lowerTypedArray(Uint8Array, 11, 0, args) || __notnull());
       context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
-      entropyAccumulator = __retain(__lowerTypedArray(Uint8Array, 11, 0, entropyAccumulator) || __notnull());
+      entropyAccumulator = __lowerTypedArray(Uint8Array, 11, 0, entropyAccumulator) || __notnull();
+      configMaxBlockGas = configMaxBlockGas || 0n;
+      configMaxRefineGas = configMaxRefineGas || 0n;
       try {
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores || 341, configPreimageExpungePeriod || 19200, configEpochDuration || 600, configMaxBlockGas || 3500000000n, configTicketsPerValidator || 2, configSlotDuration || 6, configRotationPeriod || 10, configNumValidators || 1023);
-      } catch (error) {
-        // If error was thrown, check if we have WASM error details
-        const wasmError = getLastWasmError();
-        if (wasmError) {
-          // Enhance the error with WASM details
-          (error as any).wasmErrorDetails = wasmError;
-        }
-        throw error;
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration);
       } finally {
         __release(program);
+        __release(args);
         __release(context);
-        __release(entropyAccumulator);
       }
     },
     alignToPage(size) {

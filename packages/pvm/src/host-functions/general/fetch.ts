@@ -1,16 +1,16 @@
-import { hexToBytes } from '@pbnj/core'
 import {
+  encodeRefineContext,
+  encodeVariableSequence,
   encodeWorkItem,
   encodeWorkItemSummary,
   encodeWorkPackage,
-  encodeRefineContext,
-  encodeVariableSequence,
 } from '@pbnj/codec'
+import { hexToBytes } from '@pbnj/core'
 import type {
+  FetchParams,
   HostFunctionContext,
   HostFunctionResult,
   IConfigService,
-  FetchParams,
 } from '@pbnj/types'
 import {
   AUTHORIZATION_CONSTANTS,
@@ -58,7 +58,7 @@ export class FetchHostFunction extends BaseHostFunction {
 
   execute(
     context: HostFunctionContext,
-    params: FetchParams
+    params: FetchParams,
   ): HostFunctionResult {
     const selector = context.registers[10] & 0xffffffffn
     const outputOffset = context.registers[7] // memory offset to write the data to
@@ -86,12 +86,14 @@ export class FetchHostFunction extends BaseHostFunction {
     } else {
       // Write data to memory
       // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
+      // Note: When length = 0, it means "all available data" (common API pattern)
       // First clamp fromOffset to available data length
       const clampedFromOffset = Math.min(Number(fromOffset), fetchedData.length)
       // Then calculate available length after fromOffset
       const availableLength = fetchedData.length - clampedFromOffset
       // Finally clamp requested length to available data
-      const actualLength = Math.min(Number(length), availableLength)
+      // If length = 0, use all available data; otherwise use min(length, availableLength)
+      const actualLength = length === 0n ? availableLength : Math.min(Number(length), availableLength)
       const dataToWrite = fetchedData.slice(
         clampedFromOffset,
         clampedFromOffset + actualLength,
@@ -137,7 +139,7 @@ export class FetchHostFunction extends BaseHostFunction {
   private fetchData(
     selector: bigint,
     context: HostFunctionContext,
-    params: FetchParams
+    params: FetchParams,
   ): Uint8Array | null {
     // Gray Paper: Ω_Y(gascounter, registers, memory, p, n, r, i, ī, x̄, i, ...)
     // where p = work package, n = work package hash, r = authorizer trace,
@@ -176,7 +178,11 @@ export class FetchHostFunction extends BaseHostFunction {
       case 3n: {
         const workItemIndex = context.registers[11]
         const extrinsicIndex = context.registers[12]
-        return params.exportSegments?.[Number(workItemIndex)]?.[Number(extrinsicIndex)] ?? null
+        return (
+          params.exportSegments?.[Number(workItemIndex)]?.[
+            Number(extrinsicIndex)
+          ] ?? null
+        )
       }
 
       case 4n: {
@@ -198,7 +204,11 @@ export class FetchHostFunction extends BaseHostFunction {
         // and sub-index registers[12]. Requires: registers[11] < len(ī) and registers[12] < len(ī[registers[11]])
         const workItemIndex = context.registers[11]
         const importIndex = context.registers[12]
-        return params.importSegments?.[Number(workItemIndex)]?.[Number(importIndex)] ?? null
+        return (
+          params.importSegments?.[Number(workItemIndex)]?.[
+            Number(importIndex)
+          ] ?? null
+        )
       }
       case 6n: {
         // Gray Paper pvm_invocations.tex line 350: registers[10] = 6
@@ -214,7 +224,7 @@ export class FetchHostFunction extends BaseHostFunction {
       }
 
       case 7n: {
-        if(!params.workPackage) {
+        if (!params.workPackage) {
           return null
         }
         const [error, encoded] = encodeWorkPackage(params.workPackage)
@@ -228,7 +238,7 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 352: registers[10] = 8
         // Returns: p.authconfig when p ≠ none
         // Work package authorization configuration blob
-        if(!params.workPackage) {
+        if (!params.workPackage) {
           return null
         }
         return hexToBytes(params.workPackage.authConfig)
@@ -238,7 +248,7 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 353: registers[10] = 9
         // Returns: p.authtoken when p ≠ none
         // Work package authorization token blob
-        if(!params.workPackage) {
+        if (!params.workPackage) {
           return null
         }
         return hexToBytes(params.workPackage.authToken)
@@ -247,7 +257,7 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 354: registers[10] = 10
         // Returns: encode(p.context) when p ≠ none
         // Encoded work package context
-        if(!params.workPackage) {
+        if (!params.workPackage) {
           return null
         }
         const [error, encoded] = encodeRefineContext(params.workPackage.context)
@@ -266,7 +276,10 @@ export class FetchHostFunction extends BaseHostFunction {
         if (!params.workPackage) {
           return null
         }
-        const [error, encoded] = encodeVariableSequence(params.workPackage.workItems, encodeWorkItemSummary)
+        const [error, encoded] = encodeVariableSequence(
+          params.workPackage.workItems,
+          encodeWorkItemSummary,
+        )
         if (error || !encoded) {
           return null
         }
@@ -293,7 +306,6 @@ export class FetchHostFunction extends BaseHostFunction {
           return null
         }
         return encoded
-
       }
       case 13n: {
         // Gray Paper pvm_invocations.tex line 358: registers[10] = 13
@@ -306,10 +318,13 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
         // Returns: encode(i) when i ≠ none
         // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
-        if(!params.workItemsSequence) {
+        if (!params.workItemsSequence) {
           return null
         }
-        const [error, encoded] = encodeVariableSequence(params.workItemsSequence, encodeWorkItem)
+        const [error, encoded] = encodeVariableSequence(
+          params.workItemsSequence,
+          encodeWorkItem,
+        )
         if (error || !encoded) {
           return null
         }
@@ -347,34 +362,35 @@ export class FetchHostFunction extends BaseHostFunction {
     let offset = 0
 
     // encode[8]{Citemdeposit = 10}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), false)
+    // Use little-endian to match AssemblyScript implementation
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), true)
     offset += 8
 
     // encode[8]{Cbytedeposit = 1}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), false)
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), true)
     offset += 8
 
     // encode[8]{Cbasedeposit = 100}
-    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), false)
+    view.setBigUint64(offset, BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), true)
     offset += 8
 
     // encode[2]{Ccorecount = 341}
-    view.setUint16(offset, this.configService.numCores, false)
+    view.setUint16(offset, this.configService.numCores, true)
     offset += 2
 
     // encode[4]{Cexpungeperiod = 19200}
-    view.setUint32(offset, this.configService.preimageExpungePeriod, false)
+    view.setUint32(offset, this.configService.preimageExpungePeriod, true)
     offset += 4
 
     // encode[4]{Cepochlen = 600}
-    view.setUint32(offset, this.configService.epochDuration, false)
+    view.setUint32(offset, this.configService.epochDuration, true)
     offset += 4
 
     // encode[8]{Creportaccgas = 10000000}
     view.setBigUint64(
       offset,
       BigInt(WORK_REPORT_CONSTANTS.C_REPORTACCGAS),
-      false,
+      true,
     )
     offset += 8
 
@@ -382,118 +398,119 @@ export class FetchHostFunction extends BaseHostFunction {
     view.setBigUint64(
       offset,
       BigInt(AUTHORIZATION_CONSTANTS.C_PACKAGEAUTHGAS),
-      false,
+      true,
     )
     offset += 8
 
     // encode[8]{Cpackagerefgas = 5000000000}
-    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_PACKAGEREFGAS), false)
+    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_PACKAGEREFGAS), true)
     offset += 8
 
     // encode[8]{Cblockaccgas = 3500000000}
-    view.setBigUint64(offset, BigInt(this.configService.maxBlockGas), false)
+    view.setBigUint64(offset, BigInt(this.configService.maxBlockGas), true)
     offset += 8
 
     // encode[2]{Crecenthistorylen = 8}
-    view.setUint16(offset, HISTORY_CONSTANTS.C_RECENTHISTORYLEN, false)
+    view.setUint16(offset, HISTORY_CONSTANTS.C_RECENTHISTORYLEN, true)
     offset += 2
 
     // encode[2]{Cmaxpackageitems = 16}
-    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, false)
+    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, true)
     offset += 2
 
     // encode[2]{Cmaxreportdeps = 8}
-      view.setUint16(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, false)
+    view.setUint16(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, true)
     offset += 2
 
     // encode[2]{Cmaxblocktickets = 16}
-    view.setUint16(offset, TICKET_CONSTANTS.C_MAXBLOCKTICKETS, false)
+    view.setUint16(offset, TICKET_CONSTANTS.C_MAXBLOCKTICKETS, true)
     offset += 2
 
     // encode[4]{Cmaxlookupanchorage = 14400}
-    view.setUint32(offset, TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE, false)
+    view.setUint32(offset, TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE, true)
     offset += 4
 
     // encode[2]{Cticketentries = 2}
-    view.setUint16(offset, this.configService.ticketsPerValidator, false)
+    view.setUint16(offset, this.configService.ticketsPerValidator, true)
     offset += 2
 
     // encode[2]{Cauthpoolsize = 8}
-    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, false)
+    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, true)
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    view.setUint16(offset, this.configService.slotDuration, false)
+    view.setUint16(offset, this.configService.slotDuration, true)
     offset += 2
 
     // encode[2]{Cauthqueuesize = 80}
-    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, false)
+    view.setUint16(offset, AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, true)
     offset += 2
 
     // encode[2]{Crotationperiod = 10}
-    view.setUint16(offset, this.configService.rotationPeriod, false)
+    view.setUint16(offset, this.configService.rotationPeriod, true)
     offset += 2
 
     // encode[2]{Cmaxpackagexts = 128}
-    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, false)
+    view.setUint16(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, true)
     offset += 2
 
     // encode[2]{Cassurancetimeoutperiod = 5}
-    view.setUint16(offset, TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, false)
+    view.setUint16(offset, TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, true)
     offset += 2
 
     // encode[2]{Cvalcount = 1023}
-    view.setUint16(offset, this.configService.numValidators, false)
+    view.setUint16(offset, this.configService.numValidators, true)
     offset += 2
 
     // encode[4]{Cmaxauthcodesize = 64000}
-    view.setUint32(offset, AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, false)
+    view.setUint32(offset, AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, true)
     offset += 4
 
     // encode[4]{Cmaxbundlesize = 13791360}
-      view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, false)
+    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, true)
     offset += 4
 
     // encode[4]{Cmaxservicecodesize = 4000000}
-    view.setUint32(offset, SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, false)
+    view.setUint32(offset, SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, true)
     offset += 4
 
     // encode[4]{Cecpiecesize = 684}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_ECPIECESIZE, false)
+    view.setUint32(offset, SEGMENT_CONSTANTS.C_ECPIECESIZE, true)
     offset += 4
 
     // encode[4]{Cmaxpackageimports = 3072}
-    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, false)
+    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, true)
     offset += 4
 
     // encode[4]{Csegmentecpieces = 6}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_SEGMENTECPIECES, false)
+    view.setUint32(offset, SEGMENT_CONSTANTS.C_SEGMENTECPIECES, true)
     offset += 4
 
     // encode[4]{Cmaxreportvarsize = 48*2^10 = 49152}
-    view.setUint32(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE, false)
+    view.setUint32(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE, true)
     offset += 4
 
     // encode[4]{Cmemosize = 128}
-    view.setUint32(offset, TRANSFER_CONSTANTS.C_MEMOSIZE, false)
+    view.setUint32(offset, TRANSFER_CONSTANTS.C_MEMOSIZE, true)
     offset += 4
 
     // encode[4]{Cmaxpackageexports = 3072}
-    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, false)
+    view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, true)
     offset += 4
 
     // encode[4]{Cepochtailstart = 500}
-    view.setUint32(offset, this.configService.contestDuration, true) // little-endian
+    view.setUint32(offset, this.configService.contestDuration, true)
     offset += 4
 
     // Verify we've used exactly 134 bytes as per Gray Paper specification
     if (offset !== 134) {
-      throw new Error(`System constants encoding error: expected 134 bytes, got ${offset}`)
+      throw new Error(
+        `System constants encoding error: expected 134 bytes, got ${offset}`,
+      )
     }
 
     return new Uint8Array(buffer)
   }
-
 
   private getWorkItemPayload(
     params: FetchParams,
@@ -516,7 +533,6 @@ export class FetchHostFunction extends BaseHostFunction {
     const workItem = workItems[itemIdx]
     return workItem.payload
   }
-
 
   private getWorkItemByIndex(
     params: FetchParams,

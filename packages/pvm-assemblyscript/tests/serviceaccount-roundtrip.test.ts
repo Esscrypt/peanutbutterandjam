@@ -16,7 +16,6 @@ import {
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { hexToBytes } from '@pbnj/core'
 
 let wasm: any = null
 

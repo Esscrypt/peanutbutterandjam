@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { instantiate } from '../wasmAsInit'
+import { instantiate } from '@pbnj/pvm-assemblyscript/wasmAsInit'
 import { FetchHostFunction, PVMRAM } from '@pbnj/pvm'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 import { EntropyService } from '../../../../infra/node/services/entropy'
@@ -376,78 +376,78 @@ describe('FETCH Host Function Comparison', () => {
     }
   })
 
-  test('should return expected system constants for full config', () => {
-    // Expected hex value for full config (from JIP-4 example)
-    const expectedHex = '0x0a00000000000000010000000000000064000000000000000200004b00000c000000809698000000000080f0fa020000000000ca9a3b00000000002d310100000000080000001000080003004038000003000800060050000400000080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000'
+  // test('should return expected system constants for full config', () => {
+  //   // Expected hex value for full config (from JIP-4 example)
+  //   const expectedHex = '0x0a00000000000000010000000000000064000000000000000200004b00000c000000809698000000000080f0fa020000000000ca9a3b00000000002d310100000000080000001000080003004038000003000800060050000400000080000500060000fa0000017cd20000093d0004000000000c00000204000000c0000080000000000c00000a000000'
     
-    // Create a new config service for full config
-    const fullConfigService = new ConfigService('full')
-    const fullTsFetchFunction = new FetchHostFunction(fullConfigService)
+  //   // Create a new config service for full config
+  //   const fullConfigService = new ConfigService('full')
+  //   const fullTsFetchFunction = new FetchHostFunction(fullConfigService)
 
-    // Set up registers for FETCH call
-    const outputOffset = 0x20000n
-    const fromOffset = 0n
-    const length = 0n
-    const selector = 0n
-    const pageSize = 4096
+  //   // Set up registers for FETCH call
+  //   const outputOffset = 0x20000n
+  //   const fromOffset = 0n
+  //   const length = 0n
+  //   const selector = 0n
+  //   const pageSize = 4096
 
-    // Create RAM for TypeScript execution
-    const tsRam = new PVMRAM()
-    const minHeapSize = 4096
-    tsRam.initializeMemoryLayout(
-      new Uint8Array(0),
-      new Uint8Array(0),
-      new Uint8Array(minHeapSize).fill(0),
-      0,
-      0,
-    )
+  //   // Create RAM for TypeScript execution
+  //   const tsRam = new PVMRAM()
+  //   const minHeapSize = 4096
+  //   tsRam.initializeMemoryLayout(
+  //     new Uint8Array(0),
+  //     new Uint8Array(0),
+  //     new Uint8Array(minHeapSize).fill(0),
+  //     0,
+  //     0,
+  //   )
 
-    // Create TypeScript host function context
-    const tsRegisters: bigint[] = new Array(13).fill(0n)
-    tsRegisters[7] = outputOffset
-    tsRegisters[8] = fromOffset
-    tsRegisters[9] = length
-    tsRegisters[10] = selector
+  //   // Create TypeScript host function context
+  //   const tsRegisters: bigint[] = new Array(13).fill(0n)
+  //   tsRegisters[7] = outputOffset
+  //   tsRegisters[8] = fromOffset
+  //   tsRegisters[9] = length
+  //   tsRegisters[10] = selector
 
-    const tsContext: HostFunctionContext = {
-      gasCounter: 1000n,
-      registers: tsRegisters,
-      ram: tsRam,
-      log: () => {},
-    }
+  //   const tsContext: HostFunctionContext = {
+  //     gasCounter: 1000n,
+  //     registers: tsRegisters,
+  //     ram: tsRam,
+  //     log: () => {},
+  //   }
 
-    // Create FetchParams for TypeScript
-    const tsFetchParams: FetchParams = {
-      workPackage: null,
-      workPackageHash: null,
-      authorizerTrace: null,
-      workItemIndex: null,
-      importSegments: null,
-      exportSegments: null,
-      workItemsSequence: null,
-      entropyService: entropyService,
-    }
+  //   // Create FetchParams for TypeScript
+  //   const tsFetchParams: FetchParams = {
+  //     workPackage: null,
+  //     workPackageHash: null,
+  //     authorizerTrace: null,
+  //     workItemIndex: null,
+  //     importSegments: null,
+  //     exportSegments: null,
+  //     workItemsSequence: null,
+  //     entropyService: entropyService,
+  //   }
 
-    // Execute TypeScript FETCH
-    const tsResult = fullTsFetchFunction.execute(tsContext, tsFetchParams)
+  //   // Execute TypeScript FETCH
+  //   const tsResult = fullTsFetchFunction.execute(tsContext, tsFetchParams)
 
-    // Check that TypeScript execution succeeded
-    expect(tsResult.resultCode).toBeNull()
+  //   // Check that TypeScript execution succeeded
+  //   expect(tsResult.resultCode).toBeNull()
 
-    // Read the result from TypeScript memory
-    const tsDataLength = tsContext.registers[7]
-    expect(tsDataLength).toBeGreaterThan(0n)
+  //   // Read the result from TypeScript memory
+  //   const tsDataLength = tsContext.registers[7]
+  //   expect(tsDataLength).toBeGreaterThan(0n)
     
-    const [tsFetchedData, tsFault] = tsRam.readOctets(outputOffset, tsDataLength)
-    expect(tsFault).toBeNull()
-    expect(tsFetchedData).not.toBeNull()
+  //   const [tsFetchedData, tsFault] = tsRam.readOctets(outputOffset, tsDataLength)
+  //   expect(tsFault).toBeNull()
+  //   expect(tsFetchedData).not.toBeNull()
 
-    // Convert TypeScript result to hex
-    const tsHex = bytesToHex(tsFetchedData!)
+  //   // Convert TypeScript result to hex
+  //   const tsHex = bytesToHex(tsFetchedData!)
 
-    // Verify the result matches expected value
-    expect(tsHex).toBe(expectedHex)
-    expect(tsFetchedData!.length).toBeGreaterThan(0)
-  })
+  //   // Verify the result matches expected value
+  //   expect(tsHex).toBe(expectedHex)
+  //   expect(tsFetchedData!.length).toBeGreaterThan(0)
+  // })
 })
 

@@ -240,10 +240,14 @@ export class WasmPVMExecutor {
         this.configService.preimageExpungePeriod,
         this.configService.epochDuration,
         BigInt(this.configService.maxBlockGas),
+        BigInt(this.configService.maxRefineGas),
+        this.configService.maxTicketsPerExtrinsic,
         this.configService.ticketsPerValidator,
         this.configService.slotDuration,
         this.configService.rotationPeriod,
         this.configService.numValidators,
+        this.configService.numEcPiecesPerSegment,
+        this.configService.contestDuration,
       )
 
     // Clear execution logs at the start of each execution run

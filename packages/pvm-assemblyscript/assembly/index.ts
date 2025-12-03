@@ -243,10 +243,14 @@ export function setupAccumulateInvocation(
   configPreimageExpungePeriod: u32 = 19200,
   configEpochDuration: u32 = 600,
   configMaxBlockGas: u64 = u64(3500000000),
+  configMaxRefineGas: u64 = u64(5000000000),
+  configMaxTicketsPerExtrinsic: u16 = 16,
   configTicketsPerValidator: u16 = 2,
   configSlotDuration: u16 = 6,
   configRotationPeriod: u16 = 10,
   configNumValidators: u16 = 1023,
+  configNumEcPiecesPerSegment: u32 = 6,
+  configContestDuration: u32 = 500,
 ): void {
   if (!pvmInstance) return
   pvmInstance!.pvm.setupAccumulateInvocation(
@@ -262,10 +266,14 @@ export function setupAccumulateInvocation(
     configPreimageExpungePeriod,
     configEpochDuration,
     configMaxBlockGas,
+    configMaxRefineGas,
+    configMaxTicketsPerExtrinsic,
     configTicketsPerValidator,
     configSlotDuration,
     configRotationPeriod,
     configNumValidators,
+    configNumEcPiecesPerSegment,
+    configContestDuration,
   )
 }
 

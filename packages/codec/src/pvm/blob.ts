@@ -1,3 +1,4 @@
+import { concatBytes } from '@pbnj/core'
 import type {
   DecodedBlob,
   DecodingResult,
@@ -6,9 +7,8 @@ import type {
   Safe,
 } from '@pbnj/types'
 import { safeError, safeResult } from '@pbnj/types'
-import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { encodeFixedLength } from '../core/fixed-length'
-import { concatBytes } from '@pbnj/core'
+import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**
  * Decoded standard program components (Gray Paper: Y function)
@@ -495,9 +495,7 @@ export function encodeBlob(blob: {
   // Validate element size
   if (blob.elementSize < 1 || blob.elementSize > 8) {
     return safeError(
-      new Error(
-        `Invalid element size: ${blob.elementSize} (must be 1-8)`,
-      ),
+      new Error(`Invalid element size: ${blob.elementSize} (must be 1-8)`),
     )
   }
 
@@ -618,9 +616,7 @@ export function encodeProgram(program: {
   }
   if (program.stackSize > max3Bytes) {
     return safeError(
-      new Error(
-        `Stack size ${program.stackSize} exceeds maximum ${max3Bytes}`,
-      ),
+      new Error(`Stack size ${program.stackSize} exceeds maximum ${max3Bytes}`),
     )
   }
   if (program.code.length > max4Bytes) {

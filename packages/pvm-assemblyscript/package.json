@@ -29,7 +29,8 @@
       "import": "./build/pvm.js",
       "types": "./build/pvm.d.ts"
     },
-    "./wasm": "./build/pvm.wasm"
+    "./wasm": "./build/pvm.wasm",
+    "./wasmAsInit": "./tests/wasmAsInit.ts"
   },
   "files": [
     "build/**",

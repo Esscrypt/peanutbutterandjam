@@ -77,12 +77,14 @@ export class FetchHostFunction extends BaseHostFunction {
     } else {
       // Write data to memory
       // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
+      // Note: When length = 0, it means "all available data" (common API pattern)
       // First clamp fromOffset to available data length
       const clampedFromOffset = min(i32(fromOffset), fetchedData.length)
       // Then calculate available length after fromOffset
       const availableLength = fetchedData.length - clampedFromOffset
       // Finally clamp requested length to available data
-      const actualLength = min(i32(length), availableLength)
+      // If length = 0, use all available data; otherwise use min(length, availableLength)
+      const actualLength = length === u64(0) ? availableLength : min(i32(length), availableLength)
       const dataToWrite = fetchedData.slice(
         clampedFromOffset,
         clampedFromOffset + actualLength,
@@ -434,8 +436,9 @@ export class FetchHostFunction extends BaseHostFunction {
     buffer.set(packageAuthGasBytes, offset)
     offset += 8
 
-    // encode[8]{Cpackagerefgas = 5000000000}
-    const packageRefGasBytes = this.encodeU64(u64(GAS_CONSTANTS.C_PACKAGEREFGAS))
+    // encode[8]{Cpackagerefgas = configMaxRefineGas}
+    const maxRefineGas = this.pvmInstance ? this.pvmInstance!.configMaxRefineGas : u64(5000000000)
+    const packageRefGasBytes = this.encodeU64(maxRefineGas)
     buffer.set(packageRefGasBytes, offset)
     offset += 8
 
@@ -460,8 +463,9 @@ export class FetchHostFunction extends BaseHostFunction {
     buffer.set(maxReportDepsBytes, offset)
     offset += 2
 
-    // encode[2]{Cmaxblocktickets = 16}
-    const maxBlockTicketsBytes = this.encodeU16(u16(TICKET_CONSTANTS.C_MAXBLOCKTICKETS))
+    // encode[2]{Cmaxblocktickets = configMaxTicketsPerExtrinsic}
+    const maxTicketsPerExtrinsic = this.pvmInstance ? this.pvmInstance!.configMaxTicketsPerExtrinsic : 16
+    const maxBlockTicketsBytes = this.encodeU16(u16(maxTicketsPerExtrinsic))
     buffer.set(maxBlockTicketsBytes, offset)
     offset += 2
 
@@ -539,8 +543,9 @@ export class FetchHostFunction extends BaseHostFunction {
     buffer.set(maxPackageImportsBytes, offset)
     offset += 4
 
-    // encode[4]{Csegmentecpieces = 6}
-    const segmentEcPiecesBytes = this.encodeU32(SEGMENT_CONSTANTS.C_SEGMENTECPIECES)
+    // encode[4]{Csegmentecpieces = configNumEcPiecesPerSegment}
+    const numEcPiecesPerSegment = this.pvmInstance ? this.pvmInstance!.configNumEcPiecesPerSegment : 6
+    const segmentEcPiecesBytes = this.encodeU32(numEcPiecesPerSegment)
     buffer.set(segmentEcPiecesBytes, offset)
     offset += 4
 
@@ -559,8 +564,9 @@ export class FetchHostFunction extends BaseHostFunction {
     buffer.set(maxPackageExportsBytes, offset)
     offset += 4
 
-    // encode[4]{Cepochtailstart = 500}
-    const epochTailStartBytes = this.encodeU32(TICKET_CONSTANTS.C_EPOCHTAILSTART)
+    // encode[4]{Cepochtailstart = configContestDuration}
+    const contestDuration = this.pvmInstance ? this.pvmInstance!.configContestDuration : 500
+    const epochTailStartBytes = this.encodeU32(contestDuration)
     buffer.set(epochTailStartBytes, offset)
 
     return buffer
