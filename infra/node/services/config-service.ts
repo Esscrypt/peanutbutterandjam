@@ -10,7 +10,9 @@ import {
   BaseService,
   FULL_SAFROLE_CONSTANTS,
   type IConfigService,
+  SEGMENT_CONSTANTS,
   SMALL_SAFROLE_CONSTANTS,
+  TIME_CONSTANTS,
   TINY_SAFROLE_CONSTANTS,
 } from '@pbnj/types'
 
@@ -250,6 +252,50 @@ export class ConfigService extends BaseService implements IConfigService {
         return 2
       case 'full':
         return 342
+      default:
+        throw new Error('Invalid mode')
+    }
+  }
+
+  /**
+   * Get maximum lookup anchorage
+   * Gray Paper: Cmaxlookupanchorage = 14400 (full config)
+   * Tiny config uses 24
+   */
+  get maxLookupAnchorage(): number {
+    switch (this.mode) {
+      case 'tiny':
+        return 24
+      case 'small':
+      case 'medium':
+      case 'large':
+      case 'xlarge':
+      case '2xlarge':
+      case '3xlarge':
+      case 'full':
+        return TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE // 14400
+      default:
+        throw new Error('Invalid mode')
+    }
+  }
+
+  /**
+   * Get erasure coding piece size
+   * Gray Paper: Cecpiecesize = 684 (full config)
+   * Tiny config uses 4
+   */
+  get ecPieceSize(): number {
+    switch (this.mode) {
+      case 'tiny':
+        return 4
+      case 'small':
+      case 'medium':
+      case 'large':
+      case 'xlarge':
+      case '2xlarge':
+      case '3xlarge':
+      case 'full':
+        return SEGMENT_CONSTANTS.C_ECPIECESIZE // 684
       default:
         throw new Error('Invalid mode')
     }

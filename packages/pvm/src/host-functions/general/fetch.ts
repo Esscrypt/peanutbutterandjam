@@ -15,11 +15,8 @@ import type {
 import {
   AUTHORIZATION_CONSTANTS,
   DEPOSIT_CONSTANTS,
-  GAS_CONSTANTS,
   HISTORY_CONSTANTS,
-  SEGMENT_CONSTANTS,
   SERVICE_CONSTANTS,
-  TICKET_CONSTANTS,
   TIME_CONSTANTS,
   TRANSFER_CONSTANTS,
   WORK_PACKAGE_CONSTANTS,
@@ -93,7 +90,10 @@ export class FetchHostFunction extends BaseHostFunction {
       const availableLength = fetchedData.length - clampedFromOffset
       // Finally clamp requested length to available data
       // If length = 0, use all available data; otherwise use min(length, availableLength)
-      const actualLength = length === 0n ? availableLength : Math.min(Number(length), availableLength)
+      const actualLength =
+        length === 0n
+          ? availableLength
+          : Math.min(Number(length), availableLength)
       const dataToWrite = fetchedData.slice(
         clampedFromOffset,
         clampedFromOffset + actualLength,
@@ -402,8 +402,8 @@ export class FetchHostFunction extends BaseHostFunction {
     )
     offset += 8
 
-    // encode[8]{Cpackagerefgas = 5000000000}
-    view.setBigUint64(offset, BigInt(GAS_CONSTANTS.C_PACKAGEREFGAS), true)
+    // encode[8]{Cpackagerefgas = configMaxRefineGas}
+    view.setBigUint64(offset, BigInt(this.configService.maxRefineGas), true)
     offset += 8
 
     // encode[8]{Cblockaccgas = 3500000000}
@@ -422,12 +422,12 @@ export class FetchHostFunction extends BaseHostFunction {
     view.setUint16(offset, WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, true)
     offset += 2
 
-    // encode[2]{Cmaxblocktickets = 16}
-    view.setUint16(offset, TICKET_CONSTANTS.C_MAXBLOCKTICKETS, true)
+    // encode[2]{Cmaxblocktickets = configMaxTicketsPerExtrinsic}
+    view.setUint16(offset, this.configService.maxTicketsPerExtrinsic, true)
     offset += 2
 
     // encode[4]{Cmaxlookupanchorage = 14400}
-    view.setUint32(offset, TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE, true)
+    view.setUint32(offset, this.configService.maxLookupAnchorage, true)
     offset += 4
 
     // encode[2]{Cticketentries = 2}
@@ -439,7 +439,11 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    view.setUint16(offset, this.configService.slotDuration, true)
+    // Convert from milliseconds to seconds (configService.slotDuration is in milliseconds)
+    const slotDurationSeconds = Math.floor(
+      this.configService.slotDuration / 1000,
+    )
+    view.setUint16(offset, slotDurationSeconds, true)
     offset += 2
 
     // encode[2]{Cauthqueuesize = 80}
@@ -475,15 +479,15 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Cecpiecesize = 684}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_ECPIECESIZE, true)
+    view.setUint32(offset, this.configService.ecPieceSize, true)
     offset += 4
 
     // encode[4]{Cmaxpackageimports = 3072}
     view.setUint32(offset, WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, true)
     offset += 4
 
-    // encode[4]{Csegmentecpieces = 6}
-    view.setUint32(offset, SEGMENT_CONSTANTS.C_SEGMENTECPIECES, true)
+    // encode[4]{Csegmentecpieces = configNumEcPiecesPerSegment}
+    view.setUint32(offset, this.configService.numEcPiecesPerSegment, true)
     offset += 4
 
     // encode[4]{Cmaxreportvarsize = 48*2^10 = 49152}

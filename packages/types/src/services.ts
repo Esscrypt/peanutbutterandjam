@@ -102,6 +102,8 @@ export interface IConfigService extends BaseService {
   get numCores(): number
   get preimageExpungePeriod(): number
   get slotDuration(): number
+  get maxLookupAnchorage(): number
+  get ecPieceSize(): number
 }
 
 export interface IClockService extends BaseService {

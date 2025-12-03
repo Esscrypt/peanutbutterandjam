@@ -224,8 +224,8 @@ export async function instantiate(module, imports = {}) {
         __release(context);
       }
     },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?) => void
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
       program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
       args = __retain(__lowerTypedArray(Uint8Array, 11, 0, args) || __notnull());
       context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
@@ -234,7 +234,7 @@ export async function instantiate(module, imports = {}) {
       configMaxRefineGas = configMaxRefineGas || 0n;
       try {
         exports.__setArgumentsLength(arguments.length);
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
       } finally {
         __release(program);
         __release(args);

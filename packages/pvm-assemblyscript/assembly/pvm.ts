@@ -145,6 +145,8 @@ export class PVM {
   configNumValidators: u16 = 1023
   configNumEcPiecesPerSegment: u32 = 6
   configContestDuration: u32 = 500
+  configMaxLookupAnchorage: u32 = 14400
+  configEcPieceSize: u32 = 684
 
   constructor(
     registerState: RegisterState,
@@ -1092,6 +1094,8 @@ export class PVM {
     configNumValidators: u16 = 1023,
     configNumEcPiecesPerSegment: u32 = 6,
     configContestDuration: u32 = 500,
+    configMaxLookupAnchorage: u32 = 14400,
+    configEcPieceSize: u32 = 684,
   ): void {
     // Store config parameters
     this.configNumCores = configNumCores
@@ -1106,6 +1110,8 @@ export class PVM {
     this.configNumValidators = configNumValidators
     this.configNumEcPiecesPerSegment = configNumEcPiecesPerSegment
     this.configContestDuration = configContestDuration
+    this.configMaxLookupAnchorage = configMaxLookupAnchorage
+    this.configEcPieceSize = configEcPieceSize
     this.state.gasCounter = gasLimit
     this.state.programCounter = 5 // initial PC for accumulate invocation
     

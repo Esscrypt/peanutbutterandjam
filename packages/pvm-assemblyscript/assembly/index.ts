@@ -251,6 +251,8 @@ export function setupAccumulateInvocation(
   configNumValidators: u16 = 1023,
   configNumEcPiecesPerSegment: u32 = 6,
   configContestDuration: u32 = 500,
+  configMaxLookupAnchorage: u32 = 14400,
+  configEcPieceSize: u32 = 684,
 ): void {
   if (!pvmInstance) return
   pvmInstance!.pvm.setupAccumulateInvocation(
@@ -274,6 +276,8 @@ export function setupAccumulateInvocation(
     configNumValidators,
     configNumEcPiecesPerSegment,
     configContestDuration,
+    configMaxLookupAnchorage,
+    configEcPieceSize,
   )
 }
 

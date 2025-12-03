@@ -470,7 +470,8 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[4]{Cmaxlookupanchorage = 14400}
-    const maxLookupAnchorageBytes = this.encodeU32(TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE)
+    const maxLookupAnchorage = this.pvmInstance ? this.pvmInstance!.configMaxLookupAnchorage : TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE
+    const maxLookupAnchorageBytes = this.encodeU32(maxLookupAnchorage)
     buffer.set(maxLookupAnchorageBytes, offset)
     offset += 4
 
@@ -486,8 +487,11 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    const slotDuration = this.pvmInstance ? this.pvmInstance!.configSlotDuration : 6
-    const slotSecondsBytes = this.encodeU16(slotDuration)
+    // Convert from milliseconds to seconds (configSlotDuration is in milliseconds)
+    // const slotDuration = this.pvmInstance ? this.pvmInstance!.configSlotDuration : 6
+    const slotDurationMs = this.pvmInstance ? this.pvmInstance!.configSlotDuration : 6
+    const slotDurationSeconds = slotDurationMs / 1000 // Convert milliseconds to seconds
+    const slotSecondsBytes = this.encodeU16(u16(slotDurationSeconds))
     buffer.set(slotSecondsBytes, offset)
     offset += 2
 
@@ -534,7 +538,8 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Cecpiecesize = 684}
-    const ecPieceSizeBytes = this.encodeU32(SEGMENT_CONSTANTS.C_ECPIECESIZE)
+    const ecPieceSize = this.pvmInstance ? this.pvmInstance!.configEcPieceSize : SEGMENT_CONSTANTS.C_ECPIECESIZE
+    const ecPieceSizeBytes = this.encodeU32(ecPieceSize)
     buffer.set(ecPieceSizeBytes, offset)
     offset += 4
 
