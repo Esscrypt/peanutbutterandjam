@@ -32,3 +32,6 @@
 	path = submodules/pvm-test-vectors
 	url = https://github.com/koute/jamtestvectors.git
 	branch = master_pvm_initial
+[submodule "packages/bandersnatch"]
+	path = packages/bandersnatch
+	url = git@github.com:Esscrypt/bandersnatch.git
