@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -24,8 +24,6 @@ export class ANDInstruction extends BaseInstruction {
       result,
     })
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    
 
     return { resultCode: null }
   }
@@ -74,7 +72,6 @@ export class XORInstruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -103,7 +100,7 @@ export class ORInstruction extends BaseInstruction {
     const registerB = this.getRegisterB(context.instruction.operands)
     const valueA = this.getRegisterValueAs64(context.registers, registerA)
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
-    
+
     // Gray Paper: ∀i ∈ Nmax{64} : bits{reg'_D}_i = bits{reg_A}_i ∨ bits{reg_B}_i
     const result = valueA | valueB
 

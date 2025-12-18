@@ -1,5 +1,5 @@
 /**
- * @pbnj/telemetry - JIP-3 Telemetry Package
+ * @pbnjam/telemetry - JIP-3 Telemetry Package
  *
  * This package provides a complete implementation of JIP-3 telemetry for JAM nodes,
  * including message encoding, client connection management, and event emission.
@@ -8,7 +8,7 @@
  * (Testing, Analytics and Research Telemetry).
  */
 
-import type { TelemetryConfig } from '@pbnj/types'
+import type { TelemetryConfig } from '@pbnjam/types'
 
 export * from './client'
 export * from './encoder'

@@ -11,8 +11,8 @@ import {
   generateValidatorKeyPairFromSeed,
   hexToBytes,
   logger,
-} from '@pbnj/core'
-import { generateNetworkingCertificates } from '@pbnj/networking'
+} from '@pbnjam/core'
+import { generateNetworkingCertificates } from '@pbnjam/networking'
 
 async function testCertificateGeneration(): Promise<void> {
   logger.info('Testing certificate generation and OpenSSL verification...')

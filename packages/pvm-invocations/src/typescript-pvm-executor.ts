@@ -1,15 +1,17 @@
 /**
  * TypeScript PVM Executor
- * 
+ *
  * Extends the TypeScript PVM implementation to provide accumulation invocation support.
  */
 
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
-  AccumulateHostFunctionRegistry,
+  type AccumulateHostFunctionRegistry,
   type HostFunctionRegistry,
   PVM,
   writeTraceDump,
-} from '@pbnj/pvm'
+} from '@pbnjam/pvm'
 import type {
   AccumulateInput,
   ContextMutator,
@@ -27,21 +29,22 @@ import type {
   ServiceAccount,
   WorkItem,
   WriteParams,
-} from '@pbnj/types'
-import { RESULT_CODES, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import types that aren't exported from main index - use relative path to source
 import { ACCUMULATE_ERROR_CODES } from '../../pvm/src/config'
 import type { AccumulateHostFunctionContext } from '../../pvm/src/host-functions/accumulate/base'
 
 /**
  * TypeScript PVM Adapter
- * 
+ *
  * Extends the TypeScript PVM implementation to provide accumulation invocation support.
  */
 export class TypeScriptPVMExecutor extends PVM {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly configService: IConfigService
   private readonly entropyService: IEntropyService
+  private readonly workspaceRoot: string
   private traceHostFunctionLogs: Array<{
     step: number
     hostCallId: bigint
@@ -61,6 +64,20 @@ export class TypeScriptPVMExecutor extends PVM {
     this.accumulateHostFunctionRegistry = accumulateHostFunctionRegistry
     this.configService = configService
     this.entropyService = entropyService
+
+    // Calculate workspace root (same logic as WasmPVMExecutor)
+    const currentDir =
+      typeof __dirname !== 'undefined'
+        ? __dirname
+        : dirname(fileURLToPath(import.meta.url))
+
+    // Go up from src/ to packages/, then to workspace root
+    // currentDir = packages/pvm-invocations/src/
+    // .. = packages/pvm-invocations/
+    // ../.. = packages/
+    // ../../.. = workspace root
+    const packagesDir = join(currentDir, '..', '..')
+    this.workspaceRoot = join(packagesDir, '..')
   }
 
   async executeAccumulationInvocation(
@@ -101,13 +118,33 @@ export class TypeScriptPVMExecutor extends PVM {
     // Write trace dump if we have execution logs
     const executionLogs = this.getExecutionLogs()
     if (executionLogs.length > 0) {
-      // Use timeslot as block number for jamduna-style filename
-      writeTraceDump(
+      // Write to pvm-traces folder in workspace root (same as WasmPVMExecutor)
+      const traceOutputDir = join(this.workspaceRoot, 'pvm-traces')
+      console.log(
+        `[TypeScriptPVMExecutor] Writing trace to: ${traceOutputDir}, timeslot=${timeslot.toString()}`,
+      )
+      // Write trace with typescript executor type and block number
+      const filepath = writeTraceDump(
         executionLogs,
-        this.traceHostFunctionLogs.length > 0 ? this.traceHostFunctionLogs : undefined,
+        this.traceHostFunctionLogs.length > 0
+          ? this.traceHostFunctionLogs
+          : undefined,
+        traceOutputDir,
         undefined,
-        undefined,
-        timeslot,
+        timeslot, // blockNumber
+        'typescript', // executorType - generates typescript-{slot}.log format
+        undefined, // serviceId - not needed
+      )
+      if (filepath) {
+        console.log(`[TypeScriptPVMExecutor] Trace written to: ${filepath}`)
+      } else {
+        console.warn(
+          `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
+        )
+      }
+    } else {
+      console.warn(
+        `[TypeScriptPVMExecutor] No execution logs to write (executionLogs.length=${executionLogs.length})`,
       )
     }
 
@@ -155,7 +192,7 @@ export class TypeScriptPVMExecutor extends PVM {
           implicationsPair,
           timeslot,
         )
-        
+
         // Log host function call (gasAfter is captured after host function execution)
         // The host function may consume additional gas beyond the base 10 gas cost
         this.traceHostFunctionLogs.push({
@@ -165,15 +202,19 @@ export class TypeScriptPVMExecutor extends PVM {
           gasAfter: this.state.gasCounter,
           serviceId,
         })
-        
+
         return result
       }
 
       // General host functions available in accumulate context (0-5)
       // Also include log (100) - JIP-1 debug/monitoring function
       if ((hostCallId >= 0n && hostCallId <= 5n) || hostCallId === 100n) {
-        const result = this.handleGeneralHostFunction(hostCallId, implicationsPair, workItems)
-        
+        const result = this.handleGeneralHostFunction(
+          hostCallId,
+          implicationsPair,
+          workItems,
+        )
+
         // Log host function call (gasAfter is captured after host function execution)
         // The host function may consume additional gas beyond the base 10 gas cost
         this.traceHostFunctionLogs.push({
@@ -183,7 +224,7 @@ export class TypeScriptPVMExecutor extends PVM {
           gasAfter: this.state.gasCounter,
           serviceId,
         })
-        
+
         return result
       }
 
@@ -302,7 +343,13 @@ export class TypeScriptPVMExecutor extends PVM {
   }
 
   private buildFetchParams(workItems: WorkItem[]): FetchParams {
-    const workItemsSequence = workItems.length > 0 ? workItems : null
+    // Gray Paper pvm_invocations.tex line 359: encode(i) when i ≠ none
+    // During accumulation, workItemsSequence should always be an array (never null)
+    // An empty array [] is distinct from none (null):
+    // - [] (empty array) = provided but empty → returns encode(var{[]}) = 0x00
+    // - null (none) = not provided → returns none (null)
+    // Always pass an array, even if empty, to match Gray Paper specification
+    const workItemsSequence = workItems.length > 0 ? workItems : []
 
     return {
       workPackage: null,
@@ -324,7 +371,9 @@ export class TypeScriptPVMExecutor extends PVM {
     const imX = implicationsPair[0]
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
-      throw new Error(`Service account not found for read: ${imX.id.toString()}`)
+      throw new Error(
+        `Service account not found for read: ${imX.id.toString()}`,
+      )
     }
     return {
       serviceAccount,
@@ -337,7 +386,9 @@ export class TypeScriptPVMExecutor extends PVM {
     const imX = implicationsPair[0]
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
-      throw new Error(`Service account not found for write: ${imX.id.toString()}`)
+      throw new Error(
+        `Service account not found for write: ${imX.id.toString()}`,
+      )
     }
     return {
       serviceAccount,
@@ -368,4 +419,3 @@ export class TypeScriptPVMExecutor extends PVM {
     }
   }
 }
-

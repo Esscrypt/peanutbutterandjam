@@ -28,7 +28,7 @@
  * ✅ CORRECT: Properly encodes all fields of each statistic type
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   Activity,
   CoreStats,
@@ -37,8 +37,8 @@ import type {
   Safe,
   ServiceStats,
   ValidatorStats,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -342,19 +342,27 @@ function encodeServiceStats(serviceStat: ServiceStats): Safe<Uint8Array> {
 
   // 1. provision: tuple{N, N}
   // encode{tuple{N, N}} ≡ encode{N} ∥ encode{N}
-  const [error1, provisionData1] = encodeNatural(BigInt(serviceStat.provision[0])) // count
+  const [error1, provisionData1] = encodeNatural(
+    BigInt(serviceStat.provision[0]),
+  ) // count
   if (error1) return safeError(error1)
   parts.push(provisionData1)
-  const [error2, provisionData2] = encodeNatural(BigInt(serviceStat.provision[1])) // size
+  const [error2, provisionData2] = encodeNatural(
+    BigInt(serviceStat.provision[1]),
+  ) // size
   if (error2) return safeError(error2)
   parts.push(provisionData2)
 
   // 2. refinement: tuple{N, gas}
   // encode{tuple{N, gas}} ≡ encode{N} ∥ encode{gas}
-  const [error3, refinementData1] = encodeNatural(BigInt(serviceStat.refinement[0])) // count
+  const [error3, refinementData1] = encodeNatural(
+    BigInt(serviceStat.refinement[0]),
+  ) // count
   if (error3) return safeError(error3)
   parts.push(refinementData1)
-  const [error4, refinementData2] = encodeNatural(BigInt(serviceStat.refinement[1])) // gas
+  const [error4, refinementData2] = encodeNatural(
+    BigInt(serviceStat.refinement[1]),
+  ) // gas
   if (error4) return safeError(error4)
   parts.push(refinementData2)
 
@@ -503,12 +511,18 @@ function decodeServiceStats(
 
   const serviceStat: ServiceStats = {
     provision: [Number(provisionResult1.value), Number(provisionResult2.value)], // tuple{N, N} - [count, size]
-    refinement: [Number(refinementResult1.value), Number(refinementResult2.value)], // tuple{N, gas} - [count, gas]
+    refinement: [
+      Number(refinementResult1.value),
+      Number(refinementResult2.value),
+    ], // tuple{N, gas} - [count, gas]
     importCount: Number(importCountResult.value),
     extrinsicCount: Number(extrinsicCountResult.value),
     extrinsicSize: Number(extrinsicSizeResult.value),
     exportCount: Number(exportCountResult.value),
-    accumulation: [Number(accumulationResult1.value), Number(accumulationResult2.value)], // tuple{N, gas} - [count, gas]
+    accumulation: [
+      Number(accumulationResult1.value),
+      Number(accumulationResult2.value),
+    ], // tuple{N, gas} - [count, gas]
   }
 
   return safeResult({

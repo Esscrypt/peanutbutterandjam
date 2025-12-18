@@ -130,7 +130,7 @@ The Bandersnatch VRF package is used by the Safrole consensus protocol for:
 1. Follow the established directory structure
 2. Implement types first, then configuration, then implementation
 3. Write comprehensive tests for all functionality
-4. Use the logger from `@pbnj/core` for all logging
+4. Use the logger from `@pbnjam/core` for all logging
 5. Ensure all exports are properly documented
 6. Maintain compatibility with RFC-9381 specifications
 7. **One implementation class per file**

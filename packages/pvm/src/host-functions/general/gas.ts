@@ -1,4 +1,4 @@
-import type { HostFunctionContext, HostFunctionResult } from '@pbnj/types'
+import type { HostFunctionContext, HostFunctionResult } from '@pbnjam/types'
 import { GENERAL_FUNCTIONS } from '../../config'
 import { BaseHostFunction } from './base'
 
@@ -18,7 +18,6 @@ export class GasHostFunction extends BaseHostFunction {
   readonly name = 'gas'
 
   execute(context: HostFunctionContext): HostFunctionResult {
-
     // Set registers[7] = gascounter (remaining gas)
     context.registers[7] = context.gasCounter
 

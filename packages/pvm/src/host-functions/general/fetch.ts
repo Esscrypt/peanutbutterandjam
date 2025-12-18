@@ -4,14 +4,14 @@ import {
   encodeWorkItem,
   encodeWorkItemSummary,
   encodeWorkPackage,
-} from '@pbnj/codec'
-import { hexToBytes } from '@pbnj/core'
+} from '@pbnjam/codec'
+import { hexToBytes } from '@pbnjam/core'
 import type {
   FetchParams,
   HostFunctionContext,
   HostFunctionResult,
   IConfigService,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   AUTHORIZATION_CONSTANTS,
   DEPOSIT_CONSTANTS,
@@ -21,7 +21,7 @@ import {
   TRANSFER_CONSTANTS,
   WORK_PACKAGE_CONSTANTS,
   WORK_REPORT_CONSTANTS,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -89,11 +89,9 @@ export class FetchHostFunction extends BaseHostFunction {
       // Then calculate available length after fromOffset
       const availableLength = fetchedData.length - clampedFromOffset
       // Finally clamp requested length to available data
-      // If length = 0, use all available data; otherwise use min(length, availableLength)
-      const actualLength =
-        length === 0n
-          ? availableLength
-          : Math.min(Number(length), availableLength)
+      // Gray Paper: l = min(registers_9, len(v) - f)
+      // When registers_9 = 0, l = 0 (write nothing, just return length in r7)
+      const actualLength = Math.min(Number(length), availableLength)
       const dataToWrite = fetchedData.slice(
         clampedFromOffset,
         clampedFromOffset + actualLength,
@@ -318,6 +316,8 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
         // Returns: encode(i) when i ≠ none
         // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
+        // Note: workItemsSequence should always be an array (never null) during accumulation
+        // If it's null, return null (i = none). If it's an empty array, return encoded empty sequence.
         if (!params.workItemsSequence) {
           return null
         }
@@ -328,6 +328,7 @@ export class FetchHostFunction extends BaseHostFunction {
         if (error || !encoded) {
           return null
         }
+        // encodeVariableSequence always returns a Uint8Array (even for empty sequence, it's length prefix 0x00)
         return encoded
       }
 

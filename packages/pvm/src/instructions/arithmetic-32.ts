@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -44,7 +44,6 @@ export class ADD_32Instruction extends BaseInstruction {
     })
 
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
@@ -82,11 +81,9 @@ export class SUB_32Instruction extends BaseInstruction {
       registerD,
       BigInt(result),
     )
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -106,14 +103,17 @@ export class MUL_32Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs32(context.registers, registerB)
     const result = (valueA * valueB) & 0xffffffffn
 
-    context.log('MUL_32: Multiplication of registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'MUL_32: Multiplication of registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(
@@ -121,11 +121,9 @@ export class MUL_32Instruction extends BaseInstruction {
       registerD,
       BigInt(result),
     )
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -156,22 +154,23 @@ export class DIV_U_32Instruction extends BaseInstruction {
       result = valueA / valueB
     }
 
-    context.log('DIV_U_32: Division of unsigned registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'DIV_U_32: Division of unsigned registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -215,22 +214,23 @@ export class DIV_S_32Instruction extends BaseInstruction {
       result = result & 0xffffffffn
     }
 
-    context.log('DIV_S_32: Division of signed registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      signedA,
-      signedB,
-      result,
-    })
+    context.log(
+      'DIV_S_32: Division of signed registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        signedA,
+        signedB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -262,11 +262,9 @@ export class REM_U_32Instruction extends BaseInstruction {
 
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -315,9 +313,7 @@ export class REM_S_32Instruction extends BaseInstruction {
     }
     // Mutate context directly
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
-    
 
     return { resultCode: null }
   }
-
 }

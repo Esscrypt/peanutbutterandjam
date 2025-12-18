@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeDisputes, encodeDisputes } from '../block/dispute'
-import type { Dispute, IConfigService } from '@pbnj/types'
+import type { Dispute, IConfigService } from '@pbnjam/types'
 
 describe('Disputes Test Vectors - Comprehensive Round Trip', () => {
   // Create configs for different test vector sizes

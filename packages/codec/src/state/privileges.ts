@@ -52,15 +52,15 @@
  * proper access control and service capabilities.
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
   JamVersion,
   Privileges,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   type DictionaryEntry,
   decodeDictionary,

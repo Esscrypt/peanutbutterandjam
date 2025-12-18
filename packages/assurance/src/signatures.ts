@@ -8,10 +8,10 @@
  * Message format: "$jam_available" || BLAKE2b(encode(parent_hash, bitfield))
  */
 
-import { ed25519 } from '@noble/curves/ed25519'
-import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
-import type { Assurance, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { ed25519 } from '@noble/curves/ed25519.js'
+import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
+import type { Assurance, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Create an assurance signature

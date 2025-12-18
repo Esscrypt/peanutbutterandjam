@@ -15,28 +15,28 @@ import {
   banderout,
   verifyEntropyVRFSignature,
   verifyEpochRoot,
-} from '@pbnj/bandersnatch-vrf'
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
+} from '@pbnjam/bandersnatch-vrf'
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import {
   bytesToHex,
   type EventBusService,
   hexToBytes,
   logger,
-  zeroHash
-} from '@pbnj/core'
+  zeroHash,
+} from '@pbnjam/core'
 import {
   isSafroleTicket,
   verifyFallbackSealSignature,
   verifyTicketBasedSealSignature,
-} from '@pbnj/safrole'
-import type { Block, BlockHeader, ValidatorPublicKeys } from '@pbnj/types'
+} from '@pbnjam/safrole'
+import type { Block, BlockHeader, ValidatorPublicKeys } from '@pbnjam/types'
 import {
   BaseService,
   type Safe,
   type SafePromise,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -241,12 +241,13 @@ export class BlockImporterService extends BaseService {
     // for new guarantees to be processed.
     // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
     // passed to accumulation
-    const [assuranceValidationError, availableWorkReports] = this.assuranceService.applyAssurances(
-      block.body.assurances,
-      Number(block.header.timeslot),
-      block.header.parent,
-      this.configService,
-    )
+    const [assuranceValidationError, availableWorkReports] =
+      this.assuranceService.applyAssurances(
+        block.body.assurances,
+        Number(block.header.timeslot),
+        block.header.parent,
+        this.configService,
+      )
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
     }
@@ -347,14 +348,16 @@ export class BlockImporterService extends BaseService {
     // The accumulation service will partition them into:
     // - ρ̂! (no dependencies) → accumulated immediately
     // - ρ̂Q (with dependencies) → added to ready queue at current slot
-    
+
     logger.info('[BlockImporter] Processing accumulations', {
       slot: block.header.timeslot.toString(),
       guaranteesCount: block.body.guarantees.length,
       availableWorkReportsCount: availableWorkReports.length,
-      availablePackageHashes: availableWorkReports.map(wr => wr.package_spec.hash.slice(0, 40)),
+      availablePackageHashes: availableWorkReports.map((wr) =>
+        wr.package_spec.hash.slice(0, 40),
+      ),
     })
-    
+
     const accumulationResult = await this.accumulationService.applyTransition(
       block.header.timeslot,
       availableWorkReports, // Newly available work reports (ρ̂) from assurances
@@ -367,7 +370,7 @@ export class BlockImporterService extends BaseService {
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     // where s is the encoded accumulation outputs from this block
     // Note: merklizewb([]) returns zero hash, so we always update even with empty outputs
-// TODO: add last accumulation outputs to the accout belt
+    // TODO: add last accumulation outputs to the accout belt
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
 
@@ -485,7 +488,9 @@ export class BlockImporterService extends BaseService {
     if (header.winnersMark) {
       if (currentPhase < configService.contestDuration) {
         return safeError(
-          new Error(`winners mark is present at phase < contest duration: ${currentPhase} <= ${configService.contestDuration}`),
+          new Error(
+            `winners mark is present at phase < contest duration: ${currentPhase} <= ${configService.contestDuration}`,
+          ),
         )
       }
 
@@ -523,21 +528,19 @@ export class BlockImporterService extends BaseService {
 
       const nextEpochRoot = this.validatorSetManagerService.getEpochRoot()
 
-        const [verifyError, isValid] = verifyEpochRoot(nextEpochRoot, pendingSet)
-        if (verifyError) {
-          return safeError(
-            new Error(
-              `Epoch root verification failed: ${verifyError.message}`,
-            ),
-          )
-        }
-        if (!isValid) {
-          return safeError(
-            new Error(
-              'Epoch root does not match the validators in the epoch mark',
-            ),
-          )
-        }
+      const [verifyError, isValid] = verifyEpochRoot(nextEpochRoot, pendingSet)
+      if (verifyError) {
+        return safeError(
+          new Error(`Epoch root verification failed: ${verifyError.message}`),
+        )
+      }
+      if (!isValid) {
+        return safeError(
+          new Error(
+            'Epoch root does not match the validators in the epoch mark',
+          ),
+        )
+      }
     }
 
     // verify state against prior state root

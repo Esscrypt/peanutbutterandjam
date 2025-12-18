@@ -33,8 +33,8 @@
  * and other boolean arrays common in consensus protocols.
  */
 
-import type { Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type { Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 // Uint8Array is a built-in type, no need to import
 

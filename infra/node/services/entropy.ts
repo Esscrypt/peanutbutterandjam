@@ -1,4 +1,7 @@
-import { banderout, generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
+import {
+  banderout,
+  generateEntropyVRFSignature,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   type BlockProcessedEvent,
   blake2bHash,
@@ -7,7 +10,7 @@ import {
   hexToBytes,
   logger,
   zeroHash,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import {
   BaseService,
   type BlockHeader,
@@ -16,7 +19,7 @@ import {
   type Safe,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 
 /**
  * EntropyService - Manages Gray Paper entropy tracking

@@ -3,8 +3,8 @@ import {
   RingVRFProver,
   type RingVRFProverWasm,
   type RingVRFVerifierWasm,
-} from '@pbnj/bandersnatch-vrf'
-import { bytesToHex, type Hex, hexToBytes, logger } from '@pbnj/core'
+} from '@pbnjam/bandersnatch-vrf'
+import { bytesToHex, type Hex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   IConfigService,
   IEntropyService,
@@ -13,8 +13,8 @@ import type {
   Safe,
   SafroleTicket,
   SealKey,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { generateTicketProof } from './generate-ring-proof'
 
 /**
@@ -214,7 +214,13 @@ export function verifyTicket(
   // Gray Paper Eq. 292: Validate proof format - must be 288 bytes per bandersnatch-vrf-spec
   const proofBytes = hexToBytes(ticket.proof)
   if (proofBytes.length !== 784) {
-    return safeError(new Error('Invalid Ring VRF proof size, expected 784 bytes, got ' + proofBytes.length + ' bytes'))
+    return safeError(
+      new Error(
+        'Invalid Ring VRF proof size, expected 784 bytes, got ' +
+          proofBytes.length +
+          ' bytes',
+      ),
+    )
   }
 
   const entropy2 = entropyService.getEntropy2()
@@ -273,7 +279,6 @@ export function verifyTicket(
     ringKeys: ringKeys,
     proverIndex: 0, // Not used during verification - Ring VRF is anonymous
   }
-
 
   // Step 4: Perform Ring VRF verification using RingVRFVerifier
   // The verifier now internally deserializes gamma and proofs from the serialized result

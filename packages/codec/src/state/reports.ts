@@ -47,15 +47,15 @@
  * proper core utilization and availability tracking.
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
   PendingReport,
   Reports,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
 

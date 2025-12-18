@@ -5,8 +5,8 @@
 //  * Gray Paper Reference: pvm.tex
 //  */
 
-// import { bytesToHex, logger } from '@pbnj/core'
-// import { encodeRefineArguments } from '@pbnj/codec'
+// import { bytesToHex, logger } from '@pbnjam/core'
+// import { encodeRefineArguments } from '@pbnjam/codec'
 // import type {
 //   IServiceAccountService,
 //   PVMOptions,
@@ -16,11 +16,11 @@
 //   WorkError,
 //   WorkItem,
 //   WorkPackage,
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 
-// import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '@pbnj/pvm'
-// import type { HostFunctionRegistry } from '@pbnj/pvm'
-// import { PVM, HostFunctionRegistry } from '@pbnj/pvm'
+// import { ACCUMULATE_INVOCATION_CONFIG, RESULT_CODES } from '@pbnjam/pvm'
+// import type { HostFunctionRegistry } from '@pbnjam/pvm'
+// import { PVM, HostFunctionRegistry } from '@pbnjam/pvm'
 
 // export class RefinePVM extends PVM {
 //   private readonly serviceAccountService: IServiceAccountService

@@ -5,7 +5,7 @@
  * Validates conformance to the Gray Paper specification for validator statistics tracking
  */
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'

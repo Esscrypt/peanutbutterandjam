@@ -1,5 +1,5 @@
-import { bytesToHex, logger } from '@pbnj/core'
-import type { HostFunctionResult, ServiceAccount } from '@pbnj/types'
+import { bytesToHex, logger } from '@pbnjam/core'
+import type { HostFunctionResult, ServiceAccount } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -179,11 +179,14 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Update next free ID
     imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
 
-    logger.info('[NEW Host Function] New service account created successfully', {
-      newServiceId: newServiceId.toString(),
-      nextFreeId: imX.nextfreeid.toString(),
-      totalAccounts: imX.state.accounts.size,
-    })
+    logger.info(
+      '[NEW Host Function] New service account created successfully',
+      {
+        newServiceId: newServiceId.toString(),
+        nextFreeId: imX.nextfreeid.toString(),
+        totalAccounts: imX.state.accounts.size,
+      },
+    )
 
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)

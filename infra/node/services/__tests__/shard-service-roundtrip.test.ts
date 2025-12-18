@@ -9,9 +9,9 @@ import { describe, expect, it, beforeAll } from 'vitest'
 import { ConfigService } from '../config-service'
 import { ErasureCodingService } from '../erasure-coding-service'
 import { ShardService } from '../shard-service'
-import { EventBusService } from '@pbnj/core'
-import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnj/types'
-import { ShardDistributionProtocol } from '@pbnj/networking'
+import { EventBusService } from '@pbnjam/core'
+import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnjam/types'
+import { ShardDistributionProtocol } from '@pbnjam/networking'
 
 // Mock networking service for testing
 class MockNetworkingService {

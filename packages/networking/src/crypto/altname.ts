@@ -1,4 +1,4 @@
-import type { AlternativeName, DisplayAlternativeName } from '@pbnj/types'
+import type { AlternativeName, DisplayAlternativeName } from '@pbnjam/types'
 
 /**
  * Convert alternative name to display format with $e prefix

@@ -30,15 +30,15 @@
  * 6. **Refine load**: Refinement load statistics
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   RefineLoad,
   Safe,
   WorkExecResultValue,
   WorkResult,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

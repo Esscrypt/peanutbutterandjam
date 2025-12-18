@@ -61,7 +61,19 @@ export async function instantiate(module, imports = {}) {
       },
       'console.log'(message) {
         console.log(__liftString(message >>> 0));
-      }
+      },
+      'console.debug'(message) {
+        console.debug(__liftString(message >>> 0));
+      },
+      'console.info'(message) {
+        console.info(__liftString(message >>> 0));
+      },
+      'console.warn'(message) {
+        console.warn(__liftString(message >>> 0));
+      },
+      'console.error'(message) {
+        console.error(__liftString(message >>> 0));
+      },
     }),
   };
   const result = await WebAssembly.instantiate(module, adaptedImports);
@@ -224,17 +236,18 @@ export async function instantiate(module, imports = {}) {
         __release(context);
       }
     },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
       program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
       args = __retain(__lowerTypedArray(Uint8Array, 11, 0, args) || __notnull());
       context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
       entropyAccumulator = __lowerTypedArray(Uint8Array, 11, 0, entropyAccumulator) || __notnull();
+      encodedWorkItems = __lowerTypedArray(Uint8Array, 11, 0, encodedWorkItems) || __notnull();
       configMaxBlockGas = configMaxBlockGas || 0n;
       configMaxRefineGas = configMaxRefineGas || 0n;
       try {
         exports.__setArgumentsLength(arguments.length);
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
       } finally {
         __release(program);
         __release(args);

@@ -1,4 +1,4 @@
-import { type Hex, hexToBytes, verifySignature } from '@pbnj/core'
+import { type Hex, hexToBytes, verifySignature } from '@pbnjam/core'
 import type {
   Culprit,
   IConfigService,
@@ -6,8 +6,8 @@ import type {
   Judgment,
   Safe,
   Verdict,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Validate verdicts according to Gray Paper specifications

@@ -1,5 +1,5 @@
-import { bytesToHex } from '@pbnj/core'
-import type { HostFunctionResult } from '@pbnj/types'
+import { bytesToHex } from '@pbnjam/core'
+import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,

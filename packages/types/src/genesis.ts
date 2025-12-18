@@ -9,7 +9,7 @@
  * Reference: graypaper/text/header.tex - "genesis header genesisheader"
  */
 
-import type { ChainSpecValidator, Hex } from '@pbnj/core'
+import type { ChainSpecValidator, Hex } from '@pbnjam/core'
 import type { ValidatorPublicKeys } from './consensus'
 
 import type { BlockHeader, GlobalState } from './global-state'

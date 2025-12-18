@@ -6,8 +6,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
-import { GENERAL_FUNCTIONS, ACCUMULATE_FUNCTIONS } from './config'
+import { logger } from '@pbnjam/core'
+import { ACCUMULATE_FUNCTIONS, GENERAL_FUNCTIONS } from './config'
 
 /**
  * Get host function name from function ID
@@ -19,41 +19,73 @@ function getHostFunctionName(hostCallId: bigint): string {
       return name
     }
   }
-  
+
   // Check accumulate functions
   for (const [name, id] of Object.entries(ACCUMULATE_FUNCTIONS)) {
     if (id === hostCallId) {
       return name
     }
   }
-  
+
   return `UNKNOWN_${hostCallId.toString()}`
 }
 
 /**
- * Generate jamduna-style filename from block number
- * Format: 00000004.log (8-digit zero-padded block number)
+ * Generate trace filename
+ *
+ * Priority:
+ * 1. If both executorType and blockNumber are provided: {executorType}-{blockNumber}.log (e.g., wasm-4.log)
+ * 2. If only executorType is provided: {executorType}-{timestamp}.log
+ * 3. If only blockNumber is provided: jamduna format 00000004.log
+ * 4. Otherwise: trace-{timestamp}.log
  */
-export function generateTraceFilename(blockNumber?: number | bigint | string): string {
+export function generateTraceFilename(
+  blockNumber?: number | bigint | string,
+  executorType?: 'wasm' | 'typescript',
+  _serviceId?: number | bigint | string,
+): string {
+  // If executor type is provided with block number, use {executorType}-{blockNumber}.log
+  if (executorType !== undefined && blockNumber !== undefined) {
+    const blockNum =
+      typeof blockNumber === 'string'
+        ? Number.parseInt(blockNumber, 10)
+        : Number(blockNumber)
+    return `${executorType}-${blockNum}.log`
+  }
+
+  // If only executor type is provided, use {executorType}-{timestamp}.log
+  if (executorType !== undefined) {
+    const timestamp = Date.now()
+    return `${executorType}-${timestamp}.log`
+  }
+
+  // If only blockNumber is provided (and executorType is not), use jamduna format
   if (blockNumber !== undefined) {
-    const blockNum = typeof blockNumber === 'string' ? Number.parseInt(blockNumber, 10) : Number(blockNumber)
+    const blockNum =
+      typeof blockNumber === 'string'
+        ? Number.parseInt(blockNumber, 10)
+        : Number(blockNumber)
     return `${String(blockNum).padStart(8, '0')}.log`
   }
+
+  // Default: timestamp-based
   return `trace-${Date.now()}.log`
 }
 
 /**
  * Write PVM execution trace in jamduna format
- * 
+ *
  * Format matches jamduna exactly:
  * - Instruction lines: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
  * - Host function calls: Calling host function: <NAME> <ID> [gas used: <GAS_USED>, gas remaining: <GAS_REMAINING>] [service: <SERVICE_ID>]
- * 
+ *
  * @param executionLogs - Array of execution log entries
  * @param hostFunctionLogs - Optional array of host function call logs
  * @param outputDir - Optional output directory (defaults to 'pvm-traces' in process.cwd())
- * @param filename - Optional filename (defaults to timestamp-based name, or use blockNumber to generate jamduna-style name)
+ * @param filename - Optional filename (overrides all other filename generation options)
  * @param blockNumber - Optional block number for jamduna-style filename (e.g., 4 -> "00000004.log")
+ * @param executorType - Optional executor type ('wasm' or 'ts') for trace-style filename
+ * @param serviceId - Optional service ID to include in trace-style filename
  * @returns The filepath where the trace was written, or undefined if writing failed
  */
 export function writeTraceDump(
@@ -75,6 +107,8 @@ export function writeTraceDump(
   outputDir?: string,
   filename?: string,
   blockNumber?: number | bigint | string,
+  executorType?: 'wasm' | 'typescript',
+  serviceId?: number | bigint | string,
 ): string | undefined {
   if (executionLogs.length === 0) {
     // No logs to write
@@ -91,8 +125,18 @@ export function writeTraceDump(
 
     // Build combined trace lines
     const traceLines: string[] = []
-    const hostLogsByStep = new Map<number, { step: number; hostCallId: bigint; gasBefore: bigint; gasAfter: bigint; serviceId?: bigint } | undefined>()
-    
+    const hostLogsByStep = new Map<
+      number,
+      | {
+          step: number
+          hostCallId: bigint
+          gasBefore: bigint
+          gasAfter: bigint
+          serviceId?: bigint
+        }
+      | undefined
+    >()
+
     if (hostFunctionLogs && hostFunctionLogs.length > 0) {
       for (const hostLog of hostFunctionLogs) {
         hostLogsByStep.set(hostLog.step, hostLog)
@@ -108,10 +152,10 @@ export function writeTraceDump(
         const gasUsed = hostLog.gasBefore - hostLog.gasAfter
         const serviceId = hostLog.serviceId ?? 0n
         traceLines.push(
-          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`
+          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`,
         )
       }
-      
+
       // Format registers as comma-separated values (jamduna format)
       const registersStr = log.registers.join(', ')
       const gasValue = log.gas.toString()
@@ -119,12 +163,13 @@ export function writeTraceDump(
       // Format: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
       // Matches jamduna format exactly
       traceLines.push(
-        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}]`
+        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}]`,
       )
     }
 
-    // Create filename (use blockNumber if provided and filename not specified)
-    const traceFilename = filename ?? generateTraceFilename(blockNumber)
+    // Create filename (use provided filename, or generate based on parameters)
+    const traceFilename =
+      filename ?? generateTraceFilename(blockNumber, executorType, serviceId)
     const filepath = join(targetDir, traceFilename)
 
     // Write to file

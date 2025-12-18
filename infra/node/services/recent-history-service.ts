@@ -21,7 +21,7 @@
  * - Ccorecount = 341 (maximum cores, affects reportedpackagehashes size)
  */
 
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import {
   type BlockProcessedEvent,
   bytesToHex,
@@ -35,7 +35,7 @@ import {
   mmrappend,
   mmrsuperpeak,
   zeroHash,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   AccoutBelt,
   BlockBody,
@@ -44,13 +44,13 @@ import type {
   Recent,
   RecentHistoryEntry,
   Safe,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   BaseService as BaseServiceClass,
   HISTORY_CONSTANTS,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { AccumulationService } from './accumulation-service'
 import type { ConfigService } from './config-service'
 
@@ -480,10 +480,10 @@ export class RecentHistoryService extends BaseServiceClass {
 
   /**
    * Update the most recent entry's state root to the final calculated state root
-   * 
+   *
    * Gray Paper: After state transition, the new entry's state_root should be updated
    * from the initial 0x0 (eq 41) to the actual computed state root.
-   * 
+   *
    * @param finalStateRoot - The final calculated state root after state transition
    */
   public updateLastEntryStateRoot(finalStateRoot: Hex): void {

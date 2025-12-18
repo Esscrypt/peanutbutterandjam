@@ -12,7 +12,7 @@ import {
   hexToBytes, 
   merklizewb, 
   verifyMerkleProof 
-} from '@pbnj/core'
+} from '@pbnjam/core'
 
 describe('Core Merkle Proof Methods', () => {
   describe('merklizewb function', () => {

@@ -7,9 +7,9 @@
 
 import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
-import type { Hex } from '@pbnj/core'
-import { bytesToHex, hexToBytes } from '@pbnj/core'
-import type { BlockTraceTestVector } from '@pbnj/types'
+import type { Hex } from '@pbnjam/core'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import type { BlockTraceTestVector } from '@pbnjam/types'
 import { ConfigService } from '../infra/node/services/config-service'
 import {
   decodeAccumulated,

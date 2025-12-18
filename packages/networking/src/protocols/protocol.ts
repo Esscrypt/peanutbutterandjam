@@ -1,6 +1,6 @@
-import { type Hex, logger } from '@pbnj/core'
-import type { Safe, SafePromise } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { type Hex, logger } from '@pbnjam/core'
+import type { Safe, SafePromise } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Event-driven protocol message interface

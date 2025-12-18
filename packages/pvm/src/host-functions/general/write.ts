@@ -1,11 +1,11 @@
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  WriteParams,
   ServiceAccount,
-} from '@pbnj/types'
-import { DEPOSIT_CONSTANTS } from '@pbnj/types'
+  WriteParams,
+} from '@pbnjam/types'
+import { DEPOSIT_CONSTANTS } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -229,11 +229,7 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.storage.set(keyHex, value)
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(
-      serviceAccount,
-      key,
-      false,
-    )
+    serviceAccount.items = this.calculateItems(serviceAccount, key, false)
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,
@@ -259,11 +255,7 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.storage.delete(keyHex)
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(
-      serviceAccount,
-      key,
-      true,
-    )
+    serviceAccount.items = this.calculateItems(serviceAccount, key, true)
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,

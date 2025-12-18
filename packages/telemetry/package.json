@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/telemetry",
+  "name": "@pbnjam/telemetry",
   "version": "0.0.1",
   "description": "JIP-3 telemetry implementation for JAM nodes",
   "type": "module",
@@ -18,9 +18,9 @@
     "lint:fix": "biome check . --fix"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*",
-    "@pbnj/codec": "workspace:*"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/codec": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -5,9 +5,9 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import type { Activity, ValidatorStats, CoreStats, ServiceStats } from '@pbnj/types'
+import type { Activity, ValidatorStats, CoreStats, ServiceStats } from '@pbnjam/types'
 import { encodeActivity, decodeActivity } from '../state/activity'
-import type { IConfigService } from '@pbnj/types'
+import type { IConfigService } from '@pbnjam/types'
 
 describe('Activity Serialization', () => {
   const configService: IConfigService = {

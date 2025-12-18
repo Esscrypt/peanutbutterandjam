@@ -36,9 +36,9 @@
  * work package sizes manageable.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, Preimage, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
+import type { DecodingResult, Preimage, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'

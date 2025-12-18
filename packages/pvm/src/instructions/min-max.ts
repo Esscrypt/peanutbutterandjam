@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -60,7 +60,6 @@ export class MIN_UInstruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 export class MAXInstruction extends BaseInstruction {

@@ -19,23 +19,23 @@
  */
 
 import {
-  blake2bHash,
-  concatBytes,
-  type EventBusService,
-  type Hex,
-} from '@pbnj/core'
-import {
   decodeFixedLength,
   decodeWorkPackage,
   encodeFixedLength,
   encodeWorkPackage,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
+import {
+  blake2bHash,
+  concatBytes,
+  type EventBusService,
+  type Hex,
+} from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
   WorkPackageSubmissionRequest,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

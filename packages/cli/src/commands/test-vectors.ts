@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 interface TestVectorOptions {
   component?: string

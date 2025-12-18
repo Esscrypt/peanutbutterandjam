@@ -9,7 +9,7 @@ import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
-import { FuzzMessageType } from '@pbnj/types'
+import { FuzzMessageType } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 
 // Test vectors directory (relative to workspace root)

@@ -26,7 +26,7 @@ export * from './src/pvm/deferred-transfer'
 export * from './src/pvm/import-reference'
 export * from './src/pvm/operand-tuple'
 // Types
-// Types are imported directly from @pbnj/types
+// Types are imported directly from @pbnjam/types
 
 export * from './src/work-package/availability-specification'
 export * from './src/work-package/context'

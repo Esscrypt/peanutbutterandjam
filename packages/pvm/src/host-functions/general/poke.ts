@@ -3,7 +3,7 @@ import type {
   HostFunctionResult,
   PVMGuest,
   RefineInvocationContext,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,

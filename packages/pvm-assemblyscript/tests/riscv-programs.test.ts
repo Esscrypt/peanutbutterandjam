@@ -9,7 +9,7 @@
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { executeTestVector, getTestVectorsDir, parseJsonSafe, type PVMTestVector, dumpParsedInstructions } from './test-vector-helper'
-import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
+import { PVMParser, InstructionRegistry } from '@pbnjam/pvm'
 
 
 const testVectorsDir = getTestVectorsDir()

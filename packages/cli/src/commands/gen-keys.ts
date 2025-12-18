@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { generateValidatorKeys } from '../utils/key-generation'
 
 export function createGenKeysCommand(_args: string[]): void {

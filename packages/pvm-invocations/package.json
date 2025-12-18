@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/pvm-invocations",
+  "name": "@pbnjam/pvm-invocations",
   "version": "0.0.1",
   "type": "module",
   "main": "src/index.ts",
@@ -15,14 +15,14 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/pvm": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/pvm": "workspace:*",
     "pino": "^9.6.0",
     "pino-pretty": "^11.0.0",
-    "@pbnj/types": "workspace:*"
+    "@pbnjam/types": "workspace:*"
   },
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "bun-types": "^1.3.1",
     "vitest": "^2.1.9"
   },

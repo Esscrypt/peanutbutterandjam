@@ -34,7 +34,7 @@
  * ✅ CORRECT: Handles work report and dependency set properly
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
@@ -42,8 +42,8 @@ import type {
   ReadyItem,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeSequenceGeneric,
   decodeVariableSequence,

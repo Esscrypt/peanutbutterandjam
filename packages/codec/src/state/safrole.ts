@@ -32,8 +32,8 @@
  * ✅ CORRECT: Variable-length ticketaccumulator with proper encoding
  */
 
-import { bytesToHex, concatBytes, hexToBytes, logger } from '@pbnj/core'
-import { isSafroleTicket } from '@pbnj/safrole'
+import { bytesToHex, concatBytes, hexToBytes, logger } from '@pbnjam/core'
+import { isSafroleTicket } from '@pbnjam/safrole'
 import type {
   DecodingResult,
   IConfigService,
@@ -41,8 +41,8 @@ import type {
   SafroleState,
   SafroleTicketWithoutProof,
   ValidatorPublicKeys,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
   decodeVariableSequence,

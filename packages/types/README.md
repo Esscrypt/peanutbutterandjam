@@ -1,4 +1,4 @@
-# @pbnj/types
+# @pbnjam/types
 
 Centralized type definitions for the JAM Protocol implementation.
 
@@ -29,21 +29,21 @@ import type {
   Ticket, 
   PVMState,
   VRFPublicKey 
-} from '@pbnj/types'
+} from '@pbnjam/types'
 ```
 
 ## Migration
 
-All packages have been updated to use this centralized types package. The following packages now depend on `@pbnj/types`:
+All packages have been updated to use this centralized types package. The following packages now depend on `@pbnjam/types`:
 
-- `@pbnj/core`
-- `@pbnj/safrole`
-- `@pbnj/pvm`
-- `@pbnj/cli`
-- `@pbnj/bandersnatch-vrf`
-- `@pbnj/block-authoring`
-- `@pbnj/codec`
-- `@pbnj/codec`
+- `@pbnjam/core`
+- `@pbnjam/safrole`
+- `@pbnjam/pvm`
+- `@pbnjam/cli`
+- `@pbnjam/bandersnatch-vrf`
+- `@pbnjam/block-authoring`
+- `@pbnjam/codec`
+- `@pbnjam/codec`
 
 ## Development
 

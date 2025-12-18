@@ -1,5 +1,5 @@
-import { bytesToHex } from '@pbnj/core'
-import type { HostFunctionResult } from '@pbnj/types'
+import { bytesToHex } from '@pbnjam/core'
+import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -31,7 +31,6 @@ import {
 export class SolicitHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.SOLICIT
   readonly name = 'solicit'
-
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context

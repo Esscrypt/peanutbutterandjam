@@ -6,7 +6,7 @@
  * Uses the ConfigService to get proper Gray Paper parameters
  */
 
-import { logger, EventBusService } from '@pbnj/core'
+import { logger, EventBusService } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'

@@ -8,11 +8,11 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { EventBusService, hexToBytes, type Hex } from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+import { EventBusService, hexToBytes, type Hex } from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@pbnj/types'
+import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 import { StatisticsService } from '../services/statistics-service'
 import { ClockService } from '../services/clock-service'

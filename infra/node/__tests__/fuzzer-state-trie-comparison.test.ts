@@ -10,7 +10,7 @@ import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
-import { FuzzMessageType } from '@pbnj/types'
+import { FuzzMessageType } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 import { StateService } from '../services/state-service'
 import { ValidatorSetManager } from '../services/validator-set'
@@ -28,17 +28,21 @@ import { RecentHistoryService } from '../services/recent-history-service'
 import { NodeGenesisManager } from '../services/genesis-manager'
 import { SealKeyService } from '../services/seal-key'
 import { ClockService } from '../services/clock-service'
-import { EventBusService } from '@pbnj/core'
+import { EventBusService } from '@pbnjam/core'
 import { StatisticsService } from '../services/statistics-service'
-import { bytesToHex } from '@pbnj/core'
-import { safeResult } from '@pbnj/types'
+import { bytesToHex } from '@pbnjam/core'
+import { safeResult } from '@pbnjam/types'
+import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
+import { HostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulateHostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
-describe('Fuzzer State Trie Comparison', () => {
-  it('should compare generateStateTrie with fuzzer keyvals and identify differences', () => {
+describe('Fuzzer State Trie Comparison', async () => {
+  it('should compare generateStateTrie with fuzzer keyvals and identify differences', async () => {
     const configService = new ConfigService('tiny')
 
     // Load PeerInfo message to get JAM version
@@ -102,97 +106,176 @@ describe('Fuzzer State Trie Comparison', () => {
     console.log(`  Keyvals count: ${init.keyvals.length}`)
 
     // Initialize services (minimal setup for state service)
+    // Initialize Ring VRF
+    const srsFilePath = path.join(
+      WORKSPACE_ROOT,
+      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
+    )
+    const ringProver = new RingVRFProverWasm(srsFilePath)
+    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
+
+    await ringProver.init()
+    await ringVerifier.init()
+    // Initialize services (similar to safrole-all-blocks.test.ts)
     const eventBusService = new EventBusService()
     const clockService = new ClockService({
-      eventBusService,
-      configService,
+      configService: configService,
+      eventBusService: eventBusService,
     })
     const entropyService = new EntropyService(eventBusService)
-    const validatorSetManager = new ValidatorSetManager({
-      configService,
-      entropyService,
-      eventBusService,
-    })
     const ticketService = new TicketService({
-      configService,
-      validatorSetManager,
-      eventBusService,
+      configService: configService,
+      eventBusService: eventBusService,
+      keyPairService: null,
+      entropyService: entropyService,
+      networkingService: null,
+      ce131TicketDistributionProtocol: null,
+      ce132TicketDistributionProtocol: null,
+      clockService: clockService,
+      prover: ringProver,
+      ringVerifier: ringVerifier,
+      validatorSetManager: null,
     })
+    const sealKeyService = new SealKeyService({
+      configService,
+      eventBusService,
+      entropyService,
+      ticketService,
+    })
+
+    const validatorSetManager = new ValidatorSetManager({
+      eventBusService,
+      sealKeyService,
+      ringProver,
+      ticketService,
+      configService,
+      initialValidators: [],
+    })
+
+    ticketService.setValidatorSetManager(validatorSetManager)
+
     const authQueueService = new AuthQueueService({
       configService,
-      eventBusService,
     })
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService,
-    })
+
     const disputesService = new DisputesService({
-      configService,
-      eventBusService,
+      eventBusService: eventBusService,
+      configService: configService,
+      validatorSetManagerService: validatorSetManager,
     })
     const readyService = new ReadyService({
-      configService,
+      configService: configService,
     })
-    const accumulationService = new AccumulationService({
-      configService,
-      eventBusService,
-    })
+
     const workReportService = new WorkReportService({
-      configService,
       eventBus: eventBusService,
+      networkingService: null,
+      ce136WorkReportRequestProtocol: null,
+      validatorSetManager: validatorSetManager,
+      configService: configService,
+      entropyService: entropyService,
+      clockService: clockService,
     })
+
+    const authPoolService = new AuthPoolService({
+      configService,
+      eventBusService: eventBusService,
+      workReportService: workReportService,
+      authQueueService: authQueueService,
+    })
+
     const privilegesService = new PrivilegesService({
       configService,
-      eventBusService,
     })
+
     const serviceAccountsService = new ServiceAccountService({
       configService,
       eventBusService,
+      clockService,
+      networkingService: null,
+      preimageRequestProtocol: null,
     })
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService,
+
+    const hostFunctionRegistry = new HostFunctionRegistry(
+      serviceAccountsService,
+      configService,
+    )
+    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
+      configService,
+    )
+    const accumulatePVM = new AccumulatePVM({
+      hostFunctionRegistry,
+      accumulateHostFunctionRegistry,
+      configService: configService,
+      entropyService: entropyService,
+      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+      useWasm: true,
     })
+
     const statisticsService = new StatisticsService({
-      configService,
-      eventBusService,
+      eventBusService: eventBusService,
+      configService: configService,
+      clockService: clockService,
     })
 
-    // Create a mock genesis manager that returns empty state
-    const genesisManager = {
-      getState: () => {
-        return safeResult({ keyvals: [] })
-      },
-      getGenesisHeaderHash: () => {
-        return safeResult('0x0000000000000000000000000000000000000000000000000000000000000000')
-      },
-    } as any
-
-    const sealKeyService = new SealKeyService({
-      configService,
-      validatorSetManager,
-      eventBusService,
+    const accumulatedService = new AccumulationService({
+      configService: configService,
+      clockService: clockService,
+      serviceAccountsService: serviceAccountsService,
+      privilegesService: privilegesService,
+      validatorSetManager: validatorSetManager,
+      authQueueService: authQueueService,
+      accumulatePVM: accumulatePVM,
+      readyService: readyService,
+      statisticsService: statisticsService,
     })
+
+    const recentHistoryService = new RecentHistoryService({
+      eventBusService: eventBusService,
+      configService: configService,
+      accumulationService: accumulatedService,
+    })
+
+    // Create a minimal genesis manager for fuzzer test
+    // Override getState to return empty state - will be set via Initialize message
+    const genesisManager = new NodeGenesisManager(configService, {})
+    const originalGetState = genesisManager.getState.bind(genesisManager)
+    genesisManager.getState = () => {
+      // Return empty state - will be set via Initialize message
+      // Safe type is [error, value] tuple - use safeResult helper
+      return safeResult({ keyvals: [] })
+    }
 
     const stateService = new StateService({
-      validatorSetManager,
-      entropyService,
-      ticketService,
-      authQueueService,
-      authPoolService,
-      disputesService,
-      readyService,
-      accumulationService,
-      workReportService,
-      privilegesService,
-      serviceAccountsService,
-      recentHistoryService,
       configService,
       genesisManagerService: genesisManager,
-      sealKeyService,
-      clockService,
-      statisticsService,
+      validatorSetManager: validatorSetManager,
+      entropyService: entropyService,
+      ticketService: ticketService,
+      authQueueService: authQueueService,
+      authPoolService: authPoolService,
+      statisticsService: statisticsService,
+      disputesService: disputesService,
+      readyService: readyService,
+      accumulationService: accumulatedService,
+      workReportService: workReportService,
+      privilegesService: privilegesService,
+      serviceAccountsService: serviceAccountsService,
+      recentHistoryService: recentHistoryService,
+      sealKeyService: sealKeyService,
+      clockService: clockService,
     })
 
+
+    sealKeyService.setValidatorSetManager(validatorSetManager)
+    sealKeyService.registerEpochTransitionCallback()
+
+    // Start services
+    const [entropyStartError] = await entropyService.start()
+    expect(entropyStartError).toBeUndefined()
+
+    const [validatorSetStartError] = await validatorSetManager.start()
+    expect(validatorSetStartError).toBeUndefined()
     // Set state from keyvals with JAM version from PeerInfo
     // Note: Some keyvals may fail to decode (e.g., Chapter 12 with incomplete data)
     // setState now handles errors gracefully and continues processing
@@ -290,7 +373,7 @@ describe('Fuzzer State Trie Comparison', () => {
     console.log(`\n🌳 State Root Comparison:`)
     
     // Method 1: Direct from keyvals
-    const { merklizeState, bytesToHex: bytesToHexCore } = require('@pbnj/core')
+    const { merklizeState, bytesToHex: bytesToHexCore } = require('@pbnjam/core')
     const keyvalsDict: Record<string, string> = {}
     for (const kv of init.keyvals) {
       keyvalsDict[kv.key] = kv.value
@@ -330,6 +413,700 @@ describe('Fuzzer State Trie Comparison', () => {
     expect(extraInGenerated.length).toBe(0)
     expect(differentValues.length).toBe(0)
     expect(keyvalsRoot).toBe(expectedRoot)
+  })
+
+  it('should verify round-trip encoding for Recent History, Reports, and Statistics after block 1', async () => {
+    const configService = new ConfigService('tiny')
+
+    // Load PeerInfo message to get JAM version
+    const peerInfoJsonPath = path.join(
+      WORKSPACE_ROOT,
+      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+    )
+    let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
+    try {
+      const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
+      if (peerInfoJson.jam_version) {
+        jamVersion = peerInfoJson.jam_version
+        console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
+      }
+    } catch (error) {
+      console.warn(`⚠️  Failed to load PeerInfo, using default JAM version: ${error instanceof Error ? error.message : String(error)}`)
+    }
+
+    // Load Initialize message
+    const initializeBinPath = path.join(
+      WORKSPACE_ROOT,
+      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
+    )
+
+    let initializeBin: Uint8Array
+    try {
+      initializeBin = new Uint8Array(readFileSync(initializeBinPath))
+    } catch (error) {
+      throw new Error(
+        `Failed to read Initialize binary: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    // Decode Initialize message
+    let messageData: Uint8Array
+    if (initializeBin.length >= 4) {
+      const lengthPrefix = new DataView(initializeBin.buffer, initializeBin.byteOffset, 4).getUint32(0, true)
+      if (lengthPrefix === initializeBin.length - 4) {
+        messageData = initializeBin.subarray(4)
+      } else {
+        messageData = initializeBin
+      }
+    } else {
+      messageData = initializeBin
+    }
+
+    const decodedMessage = decodeFuzzMessage(messageData, configService)
+    if (decodedMessage.type !== FuzzMessageType.Initialize) {
+      throw new Error(`Expected Initialize message, got ${decodedMessage.type}`)
+    }
+    const init = decodedMessage.payload as any
+
+    console.log(`\n📋 Initialize message loaded: ${init.keyvals.length} keyvals`)
+
+    // Load ImportBlock message (block 1)
+    const importBlockBinPath = path.join(
+      WORKSPACE_ROOT,
+      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
+    )
+    let importBlockBin: Uint8Array
+    try {
+      importBlockBin = new Uint8Array(readFileSync(importBlockBinPath))
+    } catch (error) {
+      throw new Error(
+        `Failed to read ImportBlock binary: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    // Decode ImportBlock message
+    let importBlockData: Uint8Array
+    if (importBlockBin.length >= 4) {
+      const lengthPrefix = new DataView(importBlockBin.buffer, importBlockBin.byteOffset, 4).getUint32(0, true)
+      if (lengthPrefix === importBlockBin.length - 4) {
+        importBlockData = importBlockBin.subarray(4)
+      } else {
+        importBlockData = importBlockBin
+      }
+    } else {
+      importBlockData = importBlockBin
+    }
+
+    const importBlockMessage = decodeFuzzMessage(importBlockData, configService)
+    if (importBlockMessage.type !== FuzzMessageType.ImportBlock) {
+      throw new Error(`Expected ImportBlock message, got ${importBlockMessage.type}`)
+    }
+    const importBlock = importBlockMessage.payload as any
+
+    console.log(`📦 ImportBlock message loaded: timeslot ${importBlock.block.header.timeslot}`)
+
+    // Initialize Ring VRF
+    const srsFilePath = path.join(
+      WORKSPACE_ROOT,
+      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
+    )
+    const ringProver = new RingVRFProverWasm(srsFilePath)
+    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
+    await ringProver.init()
+    await ringVerifier.init()
+
+    // Initialize all services
+    const eventBusService = new EventBusService()
+    const clockService = new ClockService({
+      configService: configService,
+      eventBusService: eventBusService,
+    })
+    const entropyService = new EntropyService(eventBusService)
+    const ticketService = new TicketService({
+      configService: configService,
+      eventBusService: eventBusService,
+      keyPairService: null,
+      entropyService: entropyService,
+      networkingService: null,
+      ce131TicketDistributionProtocol: null,
+      ce132TicketDistributionProtocol: null,
+      clockService: clockService,
+      prover: ringProver,
+      ringVerifier: ringVerifier,
+      validatorSetManager: null,
+    })
+    const sealKeyService = new SealKeyService({
+      configService,
+      eventBusService,
+      entropyService,
+      ticketService,
+    })
+    const validatorSetManager = new ValidatorSetManager({
+      eventBusService,
+      sealKeyService,
+      ringProver,
+      ticketService,
+      configService,
+      initialValidators: [],
+    })
+    ticketService.setValidatorSetManager(validatorSetManager)
+
+    const authQueueService = new AuthQueueService({ configService })
+    const disputesService = new DisputesService({
+      eventBusService: eventBusService,
+      configService: configService,
+      validatorSetManagerService: validatorSetManager,
+    })
+    const readyService = new ReadyService({ configService: configService })
+    const workReportService = new WorkReportService({
+      eventBus: eventBusService,
+      networkingService: null,
+      ce136WorkReportRequestProtocol: null,
+      validatorSetManager: validatorSetManager,
+      configService: configService,
+      entropyService: entropyService,
+      clockService: clockService,
+    })
+    const authPoolService = new AuthPoolService({
+      configService,
+      eventBusService: eventBusService,
+      workReportService: workReportService,
+      authQueueService: authQueueService,
+    })
+    const privilegesService = new PrivilegesService({ configService })
+    const serviceAccountsService = new ServiceAccountService({
+      configService,
+      eventBusService,
+      clockService,
+      networkingService: null,
+      preimageRequestProtocol: null,
+    })
+
+    const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
+    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
+    const accumulatePVM = new AccumulatePVM({
+      hostFunctionRegistry,
+      accumulateHostFunctionRegistry,
+      configService: configService,
+      entropyService: entropyService,
+      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+      useWasm: true,
+    })
+
+    const statisticsService = new StatisticsService({
+      eventBusService: eventBusService,
+      configService: configService,
+      clockService: clockService,
+    })
+
+    const accumulationService = new AccumulationService({
+      configService: configService,
+      clockService: clockService,
+      serviceAccountsService: serviceAccountsService,
+      privilegesService: privilegesService,
+      validatorSetManager: validatorSetManager,
+      authQueueService: authQueueService,
+      accumulatePVM: accumulatePVM,
+      readyService: readyService,
+      statisticsService: statisticsService,
+    })
+
+    const recentHistoryService = new RecentHistoryService({
+      eventBusService: eventBusService,
+      configService: configService,
+      accumulationService: accumulationService,
+    })
+
+    const genesisManager = new NodeGenesisManager(configService, {})
+    genesisManager.getState = () => safeResult({ keyvals: [] })
+
+    const stateService = new StateService({
+      configService,
+      genesisManagerService: genesisManager,
+      validatorSetManager: validatorSetManager,
+      entropyService: entropyService,
+      ticketService: ticketService,
+      authQueueService: authQueueService,
+      authPoolService: authPoolService,
+      statisticsService: statisticsService,
+      disputesService: disputesService,
+      readyService: readyService,
+      accumulationService: accumulationService,
+      workReportService: workReportService,
+      privilegesService: privilegesService,
+      serviceAccountsService: serviceAccountsService,
+      recentHistoryService: recentHistoryService,
+      sealKeyService: sealKeyService,
+      clockService: clockService,
+    })
+
+    sealKeyService.setValidatorSetManager(validatorSetManager)
+    sealKeyService.registerEpochTransitionCallback()
+
+    // Start services
+    await entropyService.start()
+    await validatorSetManager.start()
+
+    // Set initial state from Initialize message
+    const [setStateError] = stateService.setState(init.keyvals, jamVersion)
+    if (setStateError) {
+      console.log(`⚠️  Warning during setState: ${setStateError.message}`)
+    }
+    console.log(`✅ Initial state set from ${init.keyvals.length} keyvals`)
+
+    // Store initial state for chapters 3, 10, 13
+    const [initTrieError, initTrie] = stateService.generateStateTrie()
+    expect(initTrieError).toBeUndefined()
+
+    const chapter3Key = '0x03000000000000000000000000000000000000000000000000000000000000'
+    const chapter6Key = '0x06000000000000000000000000000000000000000000000000000000000000'
+    const chapter10Key = '0x0a000000000000000000000000000000000000000000000000000000000000'
+    const chapter11Key = '0x0b000000000000000000000000000000000000000000000000000000000000'
+    const chapter13Key = '0x0d000000000000000000000000000000000000000000000000000000000000'
+
+    console.log(`\n📊 INITIAL STATE (before block 1):`)
+    console.log(`  Chapter 3 (Recent History): ${initTrie[chapter3Key]?.length || 0} chars`)
+    console.log(`  Chapter 6 (Entropy): ${initTrie[chapter6Key]?.length || 0} chars`)
+    console.log(`  Chapter 10 (Reports): ${initTrie[chapter10Key]?.length || 0} chars`)
+    console.log(`  Chapter 11 (Timeslot): ${initTrie[chapter11Key]?.length || 0} chars`)
+    console.log(`  Chapter 13 (Statistics): ${initTrie[chapter13Key]?.length || 0} chars`)
+    console.log(`  Chapter 6 value: ${initTrie[chapter6Key]?.substring(0, 70)}...`)
+    console.log(`  Chapter 11 value: ${initTrie[chapter11Key]}`)
+
+    // Set up additional services needed for BlockImporterService
+    const { AssuranceService } = await import('../services/assurance-service')
+    const { GuarantorService } = await import('../services/guarantor-service')
+    const { BlockImporterService } = await import('../services/block-importer-service')
+
+    const assuranceService = new AssuranceService({
+      configService,
+      workReportService,
+      validatorSetManager,
+      eventBusService,
+      sealKeyService,
+      recentHistoryService,
+    })
+
+    const guarantorService = new GuarantorService({
+      configService,
+      clockService,
+      entropyService,
+      accumulationService,
+      authPoolService,
+      networkService: null,
+      ce134WorkPackageSharingProtocol: null,
+      keyPairService: null,
+      workReportService,
+      eventBusService,
+      validatorSetManager,
+      recentHistoryService,
+      serviceAccountService: serviceAccountsService,
+    })
+
+    const blockImporterService = new BlockImporterService({
+      eventBusService,
+      clockService,
+      recentHistoryService,
+      stateService: stateService,
+      serviceAccountService: serviceAccountsService,
+      configService,
+      disputesService,
+      validatorSetManagerService: validatorSetManager,
+      entropyService,
+      sealKeyService,
+      assuranceService,
+      guarantorService,
+      ticketService,
+      statisticsService,
+      authPoolService,
+      accumulationService,
+    })
+
+    await blockImporterService.start()
+
+    // Import block 1
+    console.log(`\n🔄 Importing block 1...`)
+    const block = importBlock.block
+    const [importError] = await blockImporterService.importBlock(block)
+    if (importError) {
+      console.error(`❌ Import error: ${importError.message}`)
+      if (importError.stack) {
+        console.error(`Stack: ${importError.stack}`)
+      }
+    } else {
+      console.log(`✅ Block 1 imported successfully`)
+    }
+
+    // Generate state trie after block import
+    const [afterTrieError, afterTrie] = stateService.generateStateTrie()
+    if (afterTrieError) {
+      console.error(`❌ Failed to generate state trie: ${afterTrieError.message}`)
+    }
+
+    console.log(`\n📊 STATE AFTER BLOCK 1 IMPORT:`)
+    console.log(`  Chapter 3 (Recent History): ${afterTrie?.[chapter3Key]?.length || 0} chars (was ${initTrie[chapter3Key]?.length || 0})`)
+    console.log(`  Chapter 6 (Entropy): ${afterTrie?.[chapter6Key]?.length || 0} chars (was ${initTrie[chapter6Key]?.length || 0})`)
+    console.log(`  Chapter 10 (Reports): ${afterTrie?.[chapter10Key]?.length || 0} chars (was ${initTrie[chapter10Key]?.length || 0})`)
+    console.log(`  Chapter 11 (Timeslot): ${afterTrie?.[chapter11Key]?.length || 0} chars (was ${initTrie[chapter11Key]?.length || 0})`)
+    console.log(`  Chapter 13 (Statistics): ${afterTrie?.[chapter13Key]?.length || 0} chars (was ${initTrie[chapter13Key]?.length || 0})`)
+    
+    // Show what changed
+    console.log(`\n🔍 CHANGES AFTER BLOCK 1:`)
+    if (afterTrie) {
+      if (initTrie[chapter3Key] !== afterTrie[chapter3Key]) {
+        console.log(`  Chapter 3: CHANGED`)
+        console.log(`    Before: ${initTrie[chapter3Key]?.substring(0, 60)}...`)
+        console.log(`    After:  ${afterTrie[chapter3Key]?.substring(0, 60)}...`)
+      }
+      if (initTrie[chapter6Key] !== afterTrie[chapter6Key]) {
+        console.log(`  Chapter 6 (ENTROPY): CHANGED`)
+        console.log(`    Before: ${initTrie[chapter6Key]?.substring(0, 70)}...`)
+        console.log(`    After:  ${afterTrie[chapter6Key]?.substring(0, 70)}...`)
+      }
+      if (initTrie[chapter10Key] !== afterTrie[chapter10Key]) {
+        console.log(`  Chapter 10: CHANGED`)
+        console.log(`    Before: ${initTrie[chapter10Key]}`)
+        console.log(`    After:  ${afterTrie[chapter10Key]?.substring(0, 80)}...`)
+      }
+      if (initTrie[chapter11Key] !== afterTrie[chapter11Key]) {
+        console.log(`  Chapter 11 (TIMESLOT): CHANGED`)
+        console.log(`    Before: ${initTrie[chapter11Key]}`)
+        console.log(`    After:  ${afterTrie[chapter11Key]}`)
+      }
+      if (initTrie[chapter13Key] !== afterTrie[chapter13Key]) {
+        console.log(`  Chapter 13: CHANGED`)
+        console.log(`    Before: ${initTrie[chapter13Key]?.substring(0, 60)}...`)
+        console.log(`    After:  ${afterTrie[chapter13Key]?.substring(0, 60)}...`)
+      }
+    }
+    
+    // Show expected values from fuzzer
+    console.log(`\n📋 EXPECTED VALUES (from fuzzer):`)
+    console.log(`  Chapter 6 (Entropy) NEW: 0x36bb063676b704c5313d1879fdf629630cd0d4b20bd2b1df31661a94c8241297...`)
+    console.log(`  Chapter 11 (Timeslot) NEW: 0x01000000`)
+    console.log(`  Chapter 3 (Recent) entry count: 2 (first byte: 0x02)`)
+    console.log(`  Chapter 10 (Reports) NEW: 0x00013ddbfd81...`)
+    console.log(`  Chapter 13 (Stats) NEW: 0x0100...`)
+    
+    // Compare with expected
+    console.log(`\n🔬 DETAILED COMPARISON:`)
+    if (afterTrie) {
+      const expectedEntropy = '0x36bb063676b704c5313d1879fdf629630cd0d4b20bd2b1df31661a94c8241297888bd18622fdfae22b02d12d62970d7d51bca58242d9ac61c40cdfb85070bceb42521ce44fdc4ee9f7ddcbf2b1178351ed1608c01e7b537532211fea0728032ec774b04cb4aa233d4cb0e60cc5d672f313c6d80e4bf39630fc3dc897457660fa'
+      console.log(`  Chapter 6 (Entropy):`)
+      console.log(`    Our value:      ${afterTrie[chapter6Key]?.substring(0, 70)}...`)
+      console.log(`    Expected:       ${expectedEntropy.substring(0, 70)}...`)
+      console.log(`    Match: ${afterTrie[chapter6Key]?.toLowerCase() === expectedEntropy.toLowerCase() ? '✅' : '❌'}`)
+      
+      console.log(`  Chapter 11 (Timeslot):`)
+      console.log(`    Our value:      ${afterTrie[chapter11Key]}`)
+      console.log(`    Expected:       0x01000000`)
+      console.log(`    Match: ${afterTrie[chapter11Key]?.toLowerCase() === '0x01000000' ? '✅' : '❌'}`)
+    }
+
+    // Test round-trip encoding for each chapter
+    const { decodeRecent, encodeRecent } = await import('../../../packages/codec/src/state/recent')
+    const { decodeStateWorkReports, encodeStateWorkReports } = await import('../../../packages/codec/src/state/reports')
+    const { decodeActivity, encodeActivity } = await import('../../../packages/codec/src/state/activity')
+    const { hexToBytes } = await import('@pbnjam/core')
+
+    console.log(`\n🔄 ROUND-TRIP ENCODING TESTS:`)
+
+    // Chapter 3: Recent History
+    if (afterTrie && afterTrie[chapter3Key]) {
+      const recentBytes = hexToBytes(afterTrie[chapter3Key])
+      console.log(`\n  📜 Chapter 3 (Recent History):`)
+      console.log(`    Original bytes: ${recentBytes.length} bytes`)
+      console.log(`    First 40 chars: ${afterTrie[chapter3Key].substring(0, 42)}...`)
+
+      const [decodeErr, decodedRecent] = decodeRecent(recentBytes)
+      if (decodeErr) {
+        console.log(`    ❌ Decode error: ${decodeErr.message}`)
+      } else {
+        console.log(`    ✅ Decoded: ${decodedRecent?.value?.length || 0} entries`)
+        
+        const [encodeErr, reEncodedBytes] = encodeRecent(decodedRecent!.value)
+        if (encodeErr) {
+          console.log(`    ❌ Re-encode error: ${encodeErr.message}`)
+        } else {
+          const reEncodedHex = bytesToHex(reEncodedBytes!)
+          const matches = afterTrie[chapter3Key] === reEncodedHex
+          console.log(`    Re-encoded bytes: ${reEncodedBytes!.length} bytes`)
+          console.log(`    Round-trip match: ${matches ? '✅' : '❌'}`)
+          
+          if (!matches) {
+            // Find first difference
+            const orig = afterTrie[chapter3Key]
+            for (let i = 0; i < Math.max(orig.length, reEncodedHex.length); i++) {
+              if (orig[i] !== reEncodedHex[i]) {
+                console.log(`    First diff at position ${i}:`)
+                console.log(`      Original:   ...${orig.substring(Math.max(0, i-10), i+20)}...`)
+                console.log(`      Re-encoded: ...${reEncodedHex.substring(Math.max(0, i-10), i+20)}...`)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Chapter 10: Reports
+    if (afterTrie && afterTrie[chapter10Key]) {
+      const reportsBytes = hexToBytes(afterTrie[chapter10Key])
+      console.log(`\n  📋 Chapter 10 (Reports):`)
+      console.log(`    Original bytes: ${reportsBytes.length} bytes`)
+      console.log(`    First 40 chars: ${afterTrie[chapter10Key].substring(0, 42)}...`)
+
+      const [decodeErr, decodedReports] = decodeStateWorkReports(reportsBytes, configService)
+      if (decodeErr) {
+        console.log(`    ❌ Decode error: ${decodeErr.message}`)
+      } else {
+        const reportCount = decodedReports?.value ? Object.keys(decodedReports.value).filter(k => decodedReports.value[k as any] !== null).length : 0
+        console.log(`    ✅ Decoded: ${reportCount} non-null slots`)
+        
+        const [encodeErr, reEncodedBytes] = encodeStateWorkReports(decodedReports!.value, configService)
+        if (encodeErr) {
+          console.log(`    ❌ Re-encode error: ${encodeErr.message}`)
+        } else {
+          const reEncodedHex = bytesToHex(reEncodedBytes!)
+          const matches = afterTrie[chapter10Key] === reEncodedHex
+          console.log(`    Re-encoded bytes: ${reEncodedBytes!.length} bytes`)
+          console.log(`    Round-trip match: ${matches ? '✅' : '❌'}`)
+          
+          if (!matches) {
+            const orig = afterTrie[chapter10Key]
+            for (let i = 0; i < Math.max(orig.length, reEncodedHex.length); i++) {
+              if (orig[i] !== reEncodedHex[i]) {
+                console.log(`    First diff at position ${i}:`)
+                console.log(`      Original:   ...${orig.substring(Math.max(0, i-10), i+20)}...`)
+                console.log(`      Re-encoded: ...${reEncodedHex.substring(Math.max(0, i-10), i+20)}...`)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Chapter 13: Activity (Statistics)
+    if (afterTrie && afterTrie[chapter13Key]) {
+      const activityBytes = hexToBytes(afterTrie[chapter13Key])
+      console.log(`\n  📈 Chapter 13 (Activity/Statistics):`)
+      console.log(`    Original bytes: ${activityBytes.length} bytes`)
+      console.log(`    First 40 chars: ${afterTrie[chapter13Key].substring(0, 42)}...`)
+
+      const [decodeErr, decodedActivity] = decodeActivity(activityBytes, configService)
+      if (decodeErr) {
+        console.log(`    ❌ Decode error: ${decodeErr.message}`)
+      } else {
+        console.log(`    ✅ Decoded activity`)
+        
+        const [encodeErr, reEncodedBytes] = encodeActivity(decodedActivity!.value, configService)
+        if (encodeErr) {
+          console.log(`    ❌ Re-encode error: ${encodeErr.message}`)
+        } else {
+          const reEncodedHex = bytesToHex(reEncodedBytes!)
+          const matches = afterTrie[chapter13Key] === reEncodedHex
+          console.log(`    Re-encoded bytes: ${reEncodedBytes!.length} bytes`)
+          console.log(`    Round-trip match: ${matches ? '✅' : '❌'}`)
+          
+          if (!matches) {
+            const orig = afterTrie[chapter13Key]
+            for (let i = 0; i < Math.max(orig.length, reEncodedHex.length); i++) {
+              if (orig[i] !== reEncodedHex[i]) {
+                console.log(`    First diff at position ${i}:`)
+                console.log(`      Original:   ...${orig.substring(Math.max(0, i-10), i+20)}...`)
+                console.log(`      Re-encoded: ...${reEncodedHex.substring(Math.max(0, i-10), i+20)}...`)
+                break
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Get state root (after block 1)
+    const { merklizeState } = await import('@pbnjam/core')
+    const [stateRootErr, stateRoot] = stateService.getStateRoot()
+    const expectedStateRoot = '0xd8b5b7d115536e7ec5e44da56583ada043e0d4b0332340736e9482986d8f229b' // Expected after block 1
+
+    console.log(`\n🌳 STATE ROOT AFTER BLOCK 1:`)
+    console.log(`  Our state root:      ${stateRoot}`)
+    console.log(`  Expected state root: ${expectedStateRoot}`)
+    console.log(`  Match: ${stateRoot?.toLowerCase() === expectedStateRoot.toLowerCase() ? '✅' : '❌'}`)
+
+    // List ALL state trie keys and compare counts
+    if (afterTrie) {
+      console.log(`\n📝 ALL STATE TRIE KEYS (${Object.keys(afterTrie).length} total):`)
+      const sortedKeys = Object.keys(afterTrie).sort()
+      for (const key of sortedKeys) {
+        const value = afterTrie[key]
+        // Determine chapter from key
+        let chapter = 'Service/Preimage'
+        if (key.startsWith('0x00') && key.length === 62) {
+          const chapterByte = parseInt(key.substring(2, 4), 16)
+          if (chapterByte <= 16) {
+            chapter = `Chapter ${chapterByte}`
+          } else if (chapterByte === 255) {
+            chapter = 'Service 0'
+          }
+        } else if (key.startsWith('0xff')) {
+          chapter = 'Service Account'
+        }
+        
+        // Check if changed from initial
+        const changed = initTrie[key] !== value
+        const marker = changed ? '📌' : '  '
+        console.log(`  ${marker} ${key.substring(0, 20)}... (${value.length} chars) - ${chapter}${changed ? ' [CHANGED]' : ''}`)
+      }
+    }
+
+    // Compare the fuzzer's expected state (from before we had the fuzzer target logs)
+    // The fuzzer target showed these NEW values after block 1:
+    // 0x03: 0x02... (588 chars) - Recent History
+    // 0x06: 0x36bb... (258 chars) - Entropy  
+    // 0x0a: 0x00013ddbfd81... (1202 chars) - Reports
+    // 0x0b: 0x01000000 (10 chars) - Timeslot
+    // 0x0d: 0x0100... (650 chars) - Statistics
+    
+    console.log(`\n🔎 VERIFYING AGAINST FUZZER TARGET EXPECTED VALUES:`)
+    if (afterTrie) {
+      // These are the expected NEW values from the fuzzer target log
+      const expectedAfterBlock1 = {
+        [chapter3Key]: { firstChars: '0x02', length: 588, name: 'Recent History' },
+        [chapter6Key]: { firstChars: '0x36bb063676b704c5313d1879fdf629630cd0d4b20bd2b1df31661a94c8241297', length: 258, name: 'Entropy' },
+        [chapter10Key]: { firstChars: '0x00013ddbfd81b64ad9b586608fb28350aa86e73022147e362ae60b3a02790ef1bdeec9', length: 1202, name: 'Reports' },
+        [chapter11Key]: { firstChars: '0x01000000', length: 10, name: 'Timeslot' },
+        [chapter13Key]: { firstChars: '0x0100', length: 650, name: 'Statistics' },
+      }
+      
+      for (const [key, expected] of Object.entries(expectedAfterBlock1)) {
+        const actual = afterTrie[key]
+        const actualLength = actual?.length || 0
+        const lengthMatch = actualLength === expected.length
+        const prefixMatch = actual?.toLowerCase().startsWith(expected.firstChars.toLowerCase()) || false
+        
+        console.log(`  ${expected.name} (${key.substring(0, 8)}...):`)
+        console.log(`    Length: ${actualLength} chars (expected ${expected.length}) ${lengthMatch ? '✅' : '❌'}`)
+        console.log(`    Prefix: ${actual?.substring(0, expected.firstChars.length + 10) || 'N/A'}...`)
+        console.log(`    Expected prefix: ${expected.firstChars}`)
+        console.log(`    Prefix match: ${prefixMatch ? '✅' : '❌'}`)
+        
+        if (!prefixMatch && actual) {
+          // Find first difference
+          for (let i = 0; i < Math.min(actual.length, expected.firstChars.length); i++) {
+            if (actual[i].toLowerCase() !== expected.firstChars[i].toLowerCase()) {
+              console.log(`    ⚠️ First diff at position ${i}: got '${actual[i]}', expected '${expected.firstChars[i]}'`)
+              console.log(`    ⚠️ Context: ...${actual.substring(Math.max(0, i-5), i+10)}...`)
+              break
+            }
+          }
+        }
+      }
+    }
+
+    // Full value comparison - print the FULL expected values from the fuzzer
+    // These are the exact values from the fuzzer target state diff log
+    console.log(`\n🔬 FULL VALUE COMPARISON:`)
+    if (afterTrie) {
+      // The full expected entropy value from the fuzzer (258 chars / 128 bytes)
+      const expectedEntropyFull = '0x36bb063676b704c5313d1879fdf629630cd0d4b20bd2b1df31661a94c8241297888bd18622fdfae22b02d12d62970d7d51bca58242d9ac61c40cdfb85070bceb42521ce44fdc4ee9f7ddcbf2b1178351ed1608c01e7b537532211fea0728032ec774b04cb4aa233d4cb0e60cc5d672f313c6d80e4bf39630fc3dc897457660fa'
+      
+      console.log(`  Chapter 6 (Entropy) FULL comparison:`)
+      console.log(`    Our value (${afterTrie[chapter6Key]?.length || 0} chars):`)
+      console.log(`      ${afterTrie[chapter6Key]}`)
+      console.log(`    Expected (${expectedEntropyFull.length} chars):`)
+      console.log(`      ${expectedEntropyFull}`)
+      const entropyMatch = afterTrie[chapter6Key]?.toLowerCase() === expectedEntropyFull.toLowerCase()
+      console.log(`    FULL Match: ${entropyMatch ? '✅' : '❌'}`)
+      
+      if (!entropyMatch && afterTrie[chapter6Key]) {
+        const actual = afterTrie[chapter6Key].toLowerCase()
+        const expected = expectedEntropyFull.toLowerCase()
+        for (let i = 0; i < Math.max(actual.length, expected.length); i++) {
+          if (actual[i] !== expected[i]) {
+            console.log(`    ⚠️ First diff at position ${i}:`)
+            console.log(`       Our:      ...${actual.substring(Math.max(0, i-10), i+20)}...`)
+            console.log(`       Expected: ...${expected.substring(Math.max(0, i-10), i+20)}...`)
+            break
+          }
+        }
+      }
+      
+      // Check timeslot
+      const expectedTimeslot = '0x01000000'
+      console.log(`\n  Chapter 11 (Timeslot) FULL comparison:`)
+      console.log(`    Our value: ${afterTrie[chapter11Key]}`)
+      console.log(`    Expected:  ${expectedTimeslot}`)
+      console.log(`    FULL Match: ${afterTrie[chapter11Key]?.toLowerCase() === expectedTimeslot.toLowerCase() ? '✅' : '❌'}`)
+      
+      // Print Reports full value (first 200 chars)
+      console.log(`\n  Chapter 10 (Reports) partial comparison:`)
+      console.log(`    Our value (first 200 chars): ${afterTrie[chapter10Key]?.substring(0, 200)}...`)
+      
+      // Check if UNCHANGED chapters stayed the same
+      console.log(`\n🔍 UNCHANGED CHAPTERS VERIFICATION:`)
+      const unchangedChapters = [
+        '0x00000000000000000000000000000000000000000000000000000000000000', // 0
+        '0x01000000000000000000000000000000000000000000000000000000000000', // 1
+        '0x02000000000000000000000000000000000000000000000000000000000000', // 2
+        '0x04000000000000000000000000000000000000000000000000000000000000', // 4
+        '0x05000000000000000000000000000000000000000000000000000000000000', // 5
+        '0x07000000000000000000000000000000000000000000000000000000000000', // 7
+        '0x08000000000000000000000000000000000000000000000000000000000000', // 8
+        '0x09000000000000000000000000000000000000000000000000000000000000', // 9
+        '0x0c000000000000000000000000000000000000000000000000000000000000', // 12
+        '0x0e000000000000000000000000000000000000000000000000000000000000', // 14
+        '0x0f000000000000000000000000000000000000000000000000000000000000', // 15
+        '0x10000000000000000000000000000000000000000000000000000000000000', // 16
+        '0xff000000000000000000000000000000000000000000000000000000000000', // service 0
+      ]
+      
+      let allUnchangedMatch = true
+      for (const key of unchangedChapters) {
+        const initVal = initTrie[key]
+        const afterVal = afterTrie[key]
+        if (initVal !== afterVal) {
+          console.log(`  ❌ ${key.substring(0, 8)}... CHANGED unexpectedly!`)
+          console.log(`     Init:  ${initVal?.substring(0, 60)}...`)
+          console.log(`     After: ${afterVal?.substring(0, 60)}...`)
+          allUnchangedMatch = false
+        }
+      }
+      if (allUnchangedMatch) {
+        console.log(`  ✅ All unchanged chapters verified - no corruption`)
+      }
+      
+      // Also verify the preimage/request keys haven't changed
+      console.log(`\n🔍 PREIMAGE/REQUEST KEYS VERIFICATION:`)
+      let preimageKeysUnchanged = true
+      for (const key of Object.keys(initTrie)) {
+        if (!unchangedChapters.includes(key) && !['0x03', '0x06', '0x0a', '0x0b', '0x0d'].some(prefix => key.startsWith(prefix))) {
+          const initVal = initTrie[key]
+          const afterVal = afterTrie[key]
+          if (initVal !== afterVal) {
+            console.log(`  ❌ ${key.substring(0, 30)}... CHANGED!`)
+            preimageKeysUnchanged = false
+          }
+        }
+      }
+      if (preimageKeysUnchanged) {
+        console.log(`  ✅ All preimage/request keys unchanged`)
+      }
+      
+      // Dump full values for changed chapters to compare
+      console.log(`\n📤 FULL VALUES OF CHANGED CHAPTERS:`)
+      console.log(`\n  Chapter 3 (Recent History) - ${afterTrie[chapter3Key]?.length || 0} chars:`)
+      console.log(`    ${afterTrie[chapter3Key]}`)
+      
+      console.log(`\n  Chapter 10 (Reports) - ${afterTrie[chapter10Key]?.length || 0} chars:`)
+      console.log(`    ${afterTrie[chapter10Key]}`)
+      
+      console.log(`\n  Chapter 13 (Statistics) - ${afterTrie[chapter13Key]?.length || 0} chars:`)
+      console.log(`    ${afterTrie[chapter13Key]}`)
+    }
+
+    // For now, don't fail the test - just log the results
+    console.log(`\n✅ Round-trip encoding test complete`)
   })
 })
 

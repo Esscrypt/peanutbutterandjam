@@ -2,16 +2,16 @@ import {
   getBanderoutFromGamma,
   IETFVRFProver,
   IETFVRFVerifier,
-} from '@pbnj/bandersnatch-vrf'
-import { bytesToHex, logger } from '@pbnj/core'
-import { encodeUnsignedHeader } from '@pbnj/codec'
+} from '@pbnjam/bandersnatch-vrf'
+import { encodeUnsignedHeader } from '@pbnjam/codec'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   IConfigService,
   Safe,
   SafroleTicket,
   UnsignedBlockHeader,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Generate ticket-based seal signature according to Gray Paper Eq. 147-148
@@ -35,69 +35,68 @@ export function generateTicketBasedSealSignature(
   slot: bigint,
   config: IConfigService,
 ): Safe<Uint8Array> {
-    // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
-    const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
+  // Gray Paper Eq. 161: Xticket = "$jam_ticket_seal"
+  const XTICKET_SEAL = new TextEncoder().encode('jam_ticket_seal')
 
-    // Gray Paper Eq. 148: Build VRF context
-    // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
-    // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
-    const entryIndexBytes = new Uint8Array(1)
-    entryIndexBytes[0] = Number(ticket.entryIndex)
+  // Gray Paper Eq. 148: Build VRF context
+  // context = Xticket ∥ entropy'_3 ∥ i_st_entryindex
+  // Cticketentries = 2, so entryIndex can only be 0 or 1 (1 byte sufficient)
+  const entryIndexBytes = new Uint8Array(1)
+  entryIndexBytes[0] = Number(ticket.entryIndex)
 
-    const context = new Uint8Array(
-      XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
+  const context = new Uint8Array(
+    XTICKET_SEAL.length + entropy3.length + entryIndexBytes.length,
+  )
+  let offset = 0
+  context.set(XTICKET_SEAL, offset)
+  offset += XTICKET_SEAL.length
+  context.set(entropy3, offset)
+  offset += entropy3.length
+  context.set(entryIndexBytes, offset)
+
+  // Encode unsigned header for VRF message
+  const [encodeError, encodedUnsignedHeader] = encodeUnsignedHeader(
+    unsignedHeader,
+    config,
+  )
+  if (encodeError) {
+    return safeError(encodeError)
+  }
+
+  // Generate IETF VRF signature using ticket context
+  // Gray Paper Eq. 148: bssignature{H_authorbskey}{Xticket ∥ entropy'_3 ∥ i_st_entryindex}{encodeunsignedheader{H}}
+  const vrfResult = IETFVRFProver.prove(
+    authorPrivateKey,
+    encodedUnsignedHeader, // message
+    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex
+  )
+
+  // Gray Paper Eq. 147: Validate ticket ID matches VRF output
+  // i_st_id = banderout{H_sealsig}
+  const vrfOutput = getBanderoutFromGamma(vrfResult.gamma)
+  const expectedTicketId = bytesToHex(vrfOutput)
+
+  if (ticket.id !== expectedTicketId) {
+    return safeError(
+      new Error(
+        `Ticket ID mismatch: expected ${expectedTicketId}, got ${ticket.id}`,
+      ),
     )
-    let offset = 0
-    context.set(XTICKET_SEAL, offset)
-    offset += XTICKET_SEAL.length
-    context.set(entropy3, offset)
-    offset += entropy3.length
-    context.set(entryIndexBytes, offset)
+  }
 
-    // Encode unsigned header for VRF message
-    const [encodeError, encodedUnsignedHeader] = encodeUnsignedHeader(
-      unsignedHeader,
-      config,
-    )
-    if (encodeError) {
-      return safeError(encodeError)
-    }
+  logger.debug('Generated ticket-based seal signature', {
+    slot,
+    authorIndex: unsignedHeader.authorIndex,
+    ticketId: ticket.id,
+    entryIndex: ticket.entryIndex.toString(),
+    entropy3Length: entropy3.length,
+    signatureLength: vrfResult.proof.length,
+    vrfOutputLength: vrfOutput.length,
+    sealingType: 'ticket-based', // Gray Paper: isticketed = 1
+  })
 
-    // Generate IETF VRF signature using ticket context
-    // Gray Paper Eq. 148: bssignature{H_authorbskey}{Xticket ∥ entropy'_3 ∥ i_st_entryindex}{encodeunsignedheader{H}}
-    const vrfResult = IETFVRFProver.prove(
-      authorPrivateKey,
-      encodedUnsignedHeader, // message
-      context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex
-    )
-
-    // Gray Paper Eq. 147: Validate ticket ID matches VRF output
-    // i_st_id = banderout{H_sealsig}
-    const vrfOutput = getBanderoutFromGamma(vrfResult.gamma)
-    const expectedTicketId = bytesToHex(vrfOutput)
-
-    if (ticket.id !== expectedTicketId) {
-      return safeError(
-        new Error(
-          `Ticket ID mismatch: expected ${expectedTicketId}, got ${ticket.id}`,
-        ),
-      )
-    }
-
-    logger.debug('Generated ticket-based seal signature', {
-      slot,
-      authorIndex: unsignedHeader.authorIndex,
-      ticketId: ticket.id,
-      entryIndex: ticket.entryIndex.toString(),
-      entropy3Length: entropy3.length,
-      signatureLength: vrfResult.proof.length,
-      vrfOutputLength: vrfOutput.length,
-      sealingType: 'ticket-based', // Gray Paper: isticketed = 1
-    })
-
-    // Return the VRF output hash (banderout result) for entropy generation
-    return safeResult(vrfOutput)
-
+  // Return the VRF output hash (banderout result) for entropy generation
+  return safeResult(vrfOutput)
 }
 
 /**

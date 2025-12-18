@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { Disputes } from '@pbnj/types'
-import type { Hex } from '@pbnj/core'
+import type { Disputes } from '@pbnjam/types'
+import type { Hex } from '@pbnjam/core'
 import { decodeDisputeState, encodeDisputeState } from '../state/disputes'
 
 describe('Dispute State Serialization', () => {

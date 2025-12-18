@@ -4,8 +4,8 @@ import type {
   PVMGuest,
   RefineInvocationContext,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,

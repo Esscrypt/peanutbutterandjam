@@ -1,5 +1,4 @@
-
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -31,11 +30,9 @@ export class SHLO_L_32Instruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -66,7 +63,6 @@ export class SHLO_R_32Instruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -106,7 +102,6 @@ export class SHAR_R_32Instruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

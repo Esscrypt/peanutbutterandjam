@@ -42,9 +42,9 @@
  * - Efficient: State lookups reference specific known blocks
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, RefineContext, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
+import type { DecodingResult, RefineContext, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

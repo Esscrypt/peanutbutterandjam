@@ -11,15 +11,15 @@ import {
   type EpochTransitionEvent,
   type EventBusService,
   logger,
-} from '@pbnj/core'
-import { generateFallbackKeySequence, isSafroleTicket } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import { generateFallbackKeySequence, isSafroleTicket } from '@pbnjam/safrole'
 import {
   BaseService,
   type Safe,
   type SafroleTicketWithoutProof,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'
 import type { TicketService } from './ticket-service'
@@ -164,9 +164,12 @@ export class SealKeyService extends BaseService {
    * This will be used to set seal keys on the next epoch transition
    */
   setWinnersMark(winnersMark: SafroleTicketWithoutProof[]): void {
-    logger.info('[SealKeyService] Storing winnersMark for next epoch transition', {
-      winnersMarkLength: winnersMark.length,
-    })
+    logger.info(
+      '[SealKeyService] Storing winnersMark for next epoch transition',
+      {
+        winnersMarkLength: winnersMark.length,
+      },
+    )
     this.pendingWinnersMark = winnersMark
   }
 

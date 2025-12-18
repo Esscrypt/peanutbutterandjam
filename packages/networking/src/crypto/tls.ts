@@ -4,10 +4,10 @@
  * Provides TLS 1.3 handshake with certificate authentication
  */
 
-import { generateAlternativeName } from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/codec'
-import type { Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { decodeFixedLength } from '@pbnjam/codec'
+import { generateAlternativeName } from '@pbnjam/core'
+import type { Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { validateDERCertificate } from './certificates-manual'
 
 /**

@@ -17,8 +17,8 @@ import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { decodeFuzzMessage, encodeFuzzMessage } from '../fuzz'
 import { ConfigService } from '../../../../infra/node/services/config-service'
-import { FuzzMessageType, type Initialize } from '@pbnj/types'
-import { merklizeState, bytesToHex } from '@pbnj/core'
+import { FuzzMessageType, type Initialize } from '@pbnjam/types'
+import { merklizeState, bytesToHex } from '@pbnjam/core'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')

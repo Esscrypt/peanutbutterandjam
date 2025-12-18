@@ -25,12 +25,12 @@ import {
   type Hex,
   logger,
   type WorkReportJudgmentEvent,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import {
   validateCulpritSignature,
   validateFaultSignature,
   validateVerdicts,
-} from '@pbnj/disputes'
+} from '@pbnjam/disputes'
 import {
   BaseService,
   type Dispute,
@@ -38,7 +38,7 @@ import {
   type Safe,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 import type { ValidatorSetManager } from './validator-set'
 

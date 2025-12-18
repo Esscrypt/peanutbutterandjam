@@ -4,8 +4,13 @@
  * Serves as the main entry point and orchestrates all other services
  * Manages the service registry and provides the application lifecycle
  */
-import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
-import { bytesToHex, EventBusService, type Hex, logger } from '@pbnj/core'
+
+import path from 'node:path'
+import {
+  RingVRFProverWasm,
+  RingVRFVerifierWasm,
+} from '@pbnjam/bandersnatch-vrf'
+import { bytesToHex, EventBusService, type Hex, logger } from '@pbnjam/core'
 import {
   AuditAnnouncementProtocol,
   AuditShardRequestProtocol,
@@ -22,20 +27,20 @@ import {
   WorkPackageSubmissionProtocol,
   WorkReportDistributionProtocol,
   WorkReportRequestProtocol,
-} from '@pbnj/networking'
+} from '@pbnjam/networking'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
-// import { TelemetryClient } from '@pbnj/telemetry'
-import type { NodeType, StreamKind, TelemetryConfig } from '@pbnj/types'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+// import { TelemetryClient } from '@pbnjam/telemetry'
+import type { NodeType, StreamKind, TelemetryConfig } from '@pbnjam/types'
 import {
   BaseService,
   type SafePromise,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 // import { WorkPackageProcessor } from './work-package-processor'
 import { AccumulationService } from './accumulation-service'
 import { AssuranceService } from './assurance-service'
@@ -70,7 +75,6 @@ import { StatisticsService } from './statistics-service'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 import { WorkReportService } from './work-report-service'
-import path from 'node:path'
 /**
  * Main service configuration
  */
@@ -172,7 +176,7 @@ export class MainService extends BaseService {
     )
     this.ringProver = new RingVRFProverWasm(srsFilePath)
     this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-    
+
     this.initNetworkingProtocols()
     this.initProtocolRegistry()
 
@@ -536,7 +540,7 @@ export class MainService extends BaseService {
   async init(): SafePromise<boolean> {
     await this.ringProver.init()
     await this.ringVerifier.init()
-    
+
     logger.info('Initializing main service...')
 
     // Block authoring service is already configured in constructor
@@ -579,7 +583,6 @@ export class MainService extends BaseService {
 
     return safeResult(true)
   }
-
 
   initNetworkingProtocols(): void {
     this.ce131TicketDistributionProtocol = new CE131TicketDistributionProtocol(

@@ -6,8 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { SafroleState, SafroleTicket, ValidatorPublicKeys } from '@pbnj/types'
-import { CORE_CONSTANTS } from '@pbnj/types'
+import type { SafroleState, SafroleTicket, ValidatorPublicKeys } from '@pbnjam/types'
+import { CORE_CONSTANTS } from '@pbnjam/types'
 import { decodeSafrole, encodeSafrole } from '../state/safrole'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 const configService = new ConfigService('tiny')

@@ -16,6 +16,7 @@
  * 3. Verify signature: verify(s, l, public_key)
  */
 
+import { encodeWorkReport } from '@pbnjam/codec'
 import {
   blake2bHash,
   bytesToHex,
@@ -23,16 +24,15 @@ import {
   hexToBytes,
   signEd25519,
   verifySignature,
-} from '@pbnj/core'
-import { encodeWorkReport } from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   Guarantee,
   GuaranteeSignature,
   IValidatorSetManager,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Create signature for work-report

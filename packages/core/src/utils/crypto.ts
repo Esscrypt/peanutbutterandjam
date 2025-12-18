@@ -13,7 +13,7 @@ import { sha512 } from '@noble/hashes/sha2'
 // Configure Ed25519 with SHA-512
 ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
 
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 import {
   bytesToBigInt,
   bytesToHex,

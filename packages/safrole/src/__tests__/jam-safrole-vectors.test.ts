@@ -5,12 +5,12 @@
 //  * from submodules/jamtestvectors/stf/safrole/tiny/
 //  */
 
-// import { logger } from '@pbnj/core'
+// import { logger } from '@pbnjam/core'
 // import { readFileSync, readdirSync } from 'fs'
 // import { join } from 'path'
 // import { beforeAll, describe, expect, it } from 'vitest'
-// import { executeSafroleSTF } from '@pbnj/safrole'
-// import type { SafroleInput, SafroleOutput, SafroleState, ValidatorPublicKeys } from '@pbnj/types'
+// import { executeSafroleSTF } from '@pbnjam/safrole'
+// import type { SafroleInput, SafroleOutput, SafroleState, ValidatorPublicKeys } from '@pbnjam/types'
 
 // beforeAll(() => {
 //   logger.init()

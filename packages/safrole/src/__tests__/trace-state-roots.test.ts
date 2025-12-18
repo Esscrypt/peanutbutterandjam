@@ -8,7 +8,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { stateRoot } from '@pbnj/core'
+import { stateRoot } from '@pbnjam/core'
 
 /**
  * Load a trace file from the test vectors

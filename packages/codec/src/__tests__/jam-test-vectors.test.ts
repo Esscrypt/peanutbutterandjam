@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeBlock, encodeBlock } from '../block/body'
-import type { IConfigService } from '@pbnj/types'
+import type { IConfigService } from '@pbnjam/types'
 
 describe('JAM Test Vectors - Round Trip Encoding/Decoding', () => {
   const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')

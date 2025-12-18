@@ -4,13 +4,13 @@
  * Defines the base interfaces and abstract class for all PVM instructions.
  */
 
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex } from '@pbnjam/core'
 import type {
   InstructionContext,
   InstructionResult,
   RegisterIndex,
   RegisterState,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { isTerminationInstruction, RESULT_CODES } from '../config'
 
 /**
@@ -332,7 +332,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    * Parse branch instruction operands (One Register, One Immediate, One Offset)
    * Returns: {registerA, immediateX, offset, targetAddress}
    * Gray Paper pvm.tex line 394: immed_Y = ι + signfunc{l_Y}(decode[l_Y]{instructions[ι+2+l_X:l_Y]})
-   * 
+   *
    * signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
    */
   protected parseBranchOperands(
@@ -351,10 +351,14 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     // Offset Y starts after immediate X
     // Gray Paper: l_Y = min(4, max(0, ℓ - l_X - 1))
     const lengthY = Math.min(4, Math.max(0, operands.length - lengthX - 1))
-    
+
     // Read offset as unsigned first
-    const rawOffset = this.getImmediateValueUnsigned(operands, 1 + lengthX, lengthY)
-    
+    const rawOffset = this.getImmediateValueUnsigned(
+      operands,
+      1 + lengthX,
+      lengthY,
+    )
+
     // Apply Gray Paper signfunc: signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
     // This converts unsigned value to signed in range [-2^{8n-1}, 2^{8n-1}-1]
     const signBitPosition = BigInt(8 * lengthY - 1)
@@ -404,7 +408,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
    * Parse register-to-register branch operands (Two Registers & One Offset)
    * Returns: {registerA, registerB, targetAddress}
    * Gray Paper pvm.tex line 541: immed_X = ι + signfunc{l_X}(decode[l_X]{instructions[ι+2:l_X]})
-   * 
+   *
    * signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
    */
   protected parseRegisterBranchOperands(
@@ -422,10 +426,10 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     // Gray Paper: l_X = min(4, max(0, ℓ - 1))
     // Offset starts at operands[1] (after register byte at ι+1, so offset is at ι+2)
     const lengthX = Math.min(4, Math.max(0, operands.length - 1))
-    
+
     // Read offset as unsigned first
     const rawOffset = this.getImmediateValueUnsigned(operands, 1, lengthX)
-    
+
     // Apply Gray Paper signfunc: signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
     // This converts unsigned value to signed in range [-2^{8n-1}, 2^{8n-1}-1]
     const signBitPosition = BigInt(8 * lengthX - 1)
@@ -460,12 +464,19 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     // l_X = min(4, ℓ)
     const lengthX = Math.min(4, fskip)
 
+    // Edge case: if lengthX is 0, offset is 0 (no bytes to read)
+    if (lengthX === 0) {
+      return currentPC
+    }
+
     // Read the offset bytes starting from operands[0] (which is ι+1)
     // Gray Paper: \signfunc{l_X}(\decode[l_X]{\instructions\subrange{\imath+1}{l_X}})
     const rawOffset = this.getImmediateValueUnsigned(operands, 0, lengthX)
 
     // Apply Gray Paper sign function: \signfunc{l_X}
+    // Gray Paper pvm.tex equation 159-164:
     // signfunc{n}(a) = { a if a < 2^{8n-1}, a - 2^{8n} otherwise }
+    // This converts unsigned value to signed in range [-2^{8n-1}, 2^{8n-1}-1]
     const signBitPosition = BigInt(8 * lengthX - 1)
     const signBit = (rawOffset >> signBitPosition) & 1n
     const offset =
@@ -743,7 +754,7 @@ export abstract class BaseInstruction implements PVMInstructionHandler {
     // The intersection requires BOTH conditions:
     // 1. Target is in {0} ∪ {n + 1 + Fskip(n) | ...} (address 0 OR follows termination)
     // 2. Target is in {n | k[n] = 1 ∧ c[n] ∈ U} (valid opcode position)
-    
+
     // Check if target is a valid opcode position (bitmask check) - required by intersection
     // This must be checked even for address 0
     if (

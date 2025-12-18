@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
 import {
   FuzzMessageType,
   type FuzzPeerInfo,
@@ -10,7 +10,7 @@ import {
   type StateRoot,
   type ErrorMessage,
   type Block,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { decodeFuzzMessage, encodeFuzzMessage } from '../fuzz'
 import { decodeBlock, encodeBlock } from '../block/body'
 import { ConfigService } from '../../../../infra/node/services/config-service'

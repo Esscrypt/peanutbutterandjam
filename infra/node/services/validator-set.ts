@@ -5,7 +5,7 @@
  * Handles epoch transitions and validator metadata
  */
 
-import { getRingRoot, type RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
+import { getRingRoot, type RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   bytesToHex,
   type EpochTransitionEvent,
@@ -15,8 +15,8 @@ import {
   logger,
   type ValidatorSetChangeEvent,
   zeroHash,
-} from '@pbnj/core'
-import { isSafroleTicket } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import { isSafroleTicket } from '@pbnjam/safrole'
 import {
   BaseService,
   type ConnectionEndpoint,
@@ -26,7 +26,7 @@ import {
   safeError,
   safeResult,
   type ValidatorPublicKeys,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 import type { SealKeyService } from './seal-key'
 import type { TicketService } from './ticket-service'
@@ -143,7 +143,9 @@ export class ValidatorSetManager
    * Gray Paper Eq. 248-257: epoch mark contains [(k_bs, k_ed) | k ∈ pendingSet']
    * The epoch mark's pendingSet' is already Φ(stagingSet), so we use it directly.
    */
-  private async handleEpochTransition(event: EpochTransitionEvent): SafePromise<void> {
+  private async handleEpochTransition(
+    event: EpochTransitionEvent,
+  ): SafePromise<void> {
     if (!event.epochMark) {
       return safeError(new Error('Epoch mark is not present'))
     }
@@ -624,19 +626,24 @@ export class ValidatorSetManager
     // No private key needed - this is deterministic
     // Extract keys in order (Map preserves insertion order)
     // Convert to array of Bandersnatch keys for ring root computation
-    const bandersnatchKeys = Array.from(this.pendingSet.values()).map((validator) =>
-      hexToBytes(validator.bandersnatch),
+    const bandersnatchKeys = Array.from(this.pendingSet.values()).map(
+      (validator) => hexToBytes(validator.bandersnatch),
     )
-    
+
     // If pending set is empty, return a zero-padded 144-byte epoch root
     // Gray Paper: epochRoot must be 144 bytes (ringroot ⊂ blob[144])
     if (bandersnatchKeys.length === 0) {
-      logger.warn('Pending set is empty, returning zero-padded 144-byte epoch root')
+      logger.warn(
+        'Pending set is empty, returning zero-padded 144-byte epoch root',
+      )
       // Return 144 bytes of zeros (288 hex chars)
       return ('0x' + '00'.repeat(144)) as Hex
     }
-    
-    const [epochRootError, epochRoot] = getRingRoot(bandersnatchKeys, this.ringProver)
+
+    const [epochRootError, epochRoot] = getRingRoot(
+      bandersnatchKeys,
+      this.ringProver,
+    )
     if (epochRootError) {
       logger.error('Failed to get epoch root', { error: epochRootError })
       // Return zero-padded 144-byte epoch root instead of 32-byte zeroHash
@@ -645,10 +652,12 @@ export class ValidatorSetManager
     }
 
     const epochRootHex = bytesToHex(epochRoot)
-    
+
     // Verify epoch root is 144 bytes (safety check)
     if (hexToBytes(epochRootHex).length !== 144) {
-      logger.error(`Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`)
+      logger.error(
+        `Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`,
+      )
       return ('0x' + '00'.repeat(144)) as Hex
     }
 
@@ -659,8 +668,12 @@ export class ValidatorSetManager
     // Validate epoch root is 144 bytes (Gray Paper: ringroot ⊂ blob[144])
     const epochRootBytes = hexToBytes(epochRoot)
     if (epochRootBytes.length !== 144) {
-      logger.error(`setEpochRoot: Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`)
-      throw new Error(`Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`)
+      logger.error(
+        `setEpochRoot: Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`,
+      )
+      throw new Error(
+        `Epoch root must be 144 bytes, got ${epochRootBytes.length} bytes`,
+      )
     }
     this.epochRoot = epochRoot
   }
@@ -728,7 +741,7 @@ export class ValidatorSetManager
   /**
    * Create a set of null validators of the specified length
    * Used to pad validator sets to Cvalcount
-   * 
+   *
    * Gray Paper: null keys replace blacklisted validators (equation 122-123)
    * Each validator key is 336 bytes with all fields zeroed
    */

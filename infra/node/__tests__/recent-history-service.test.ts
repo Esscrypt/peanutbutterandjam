@@ -8,8 +8,8 @@ import { describe, it, expect} from 'bun:test'
 import { 
   RecentHistoryService, 
 } from '../services/recent-history-service'
-import { BlockProcessedEvent, EventBusService, Hex } from '@pbnj/core'
-import type { Recent, RecentHistoryTestVector } from '@pbnj/types'
+import { BlockProcessedEvent, EventBusService, Hex } from '@pbnjam/core'
+import type { Recent, RecentHistoryTestVector } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 import * as fs from 'fs'
 import * as path from 'path'

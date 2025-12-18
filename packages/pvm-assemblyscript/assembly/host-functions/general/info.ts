@@ -1,7 +1,7 @@
 import { CompleteServiceAccount, ServiceAccountData } from '../../codec'
 import { HostFunctionResult } from '../accumulate/base'
 import { HostFunctionContext, HostFunctionParams, InfoParams } from './base'
-import { encodeServiceAccount } from '../../codec'
+import { encodeServiceAccount, decodeServiceAccount } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -72,6 +72,7 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 466-473: Encode service account info
+    // Auto-detect JAM version by attempting round-trip encoding/decoding
     // Convert CompleteServiceAccount to ServiceAccountData for encoding
     const accountData = new ServiceAccountData(
       serviceAccount.codehash,
@@ -85,7 +86,76 @@ export class InfoHostFunction extends BaseHostFunction {
       serviceAccount.lastacc,
       serviceAccount.parent
     )
-    const info = encodeServiceAccount(accountData)
+    
+    // Try different JAM versions in order: 0.7.2, 0.7.1, 0.7.0 (prefer newer versions)
+    let info: Uint8Array | null = null
+    
+    // Try JAM 0.7.2
+    let encoded = encodeServiceAccount(accountData, 0, 7, 2)
+    let decoded = decodeServiceAccount(encoded, 0, 7, 2)
+    if (decoded) {
+      // Verify round-trip: re-encode and compare
+      const reEncoded = encodeServiceAccount(decoded.value, 0, 7, 2)
+      if (reEncoded.length === encoded.length) {
+        let matches = true
+        for (let i = 0; i < encoded.length; i++) {
+          if (reEncoded[i] !== encoded[i]) {
+            matches = false
+            break
+          }
+        }
+        if (matches) {
+          info = encoded
+        }
+      }
+    }
+    
+    // Try JAM 0.7.1 if 0.7.2 didn't work
+    if (!info) {
+      encoded = encodeServiceAccount(accountData, 0, 7, 1)
+      decoded = decodeServiceAccount(encoded, 0, 7, 1)
+      if (decoded) {
+        const reEncoded = encodeServiceAccount(decoded.value, 0, 7, 1)
+        if (reEncoded.length === encoded.length) {
+          let matches = true
+          for (let i = 0; i < encoded.length; i++) {
+            if (reEncoded[i] !== encoded[i]) {
+              matches = false
+              break
+            }
+          }
+          if (matches) {
+            info = encoded
+          }
+        }
+      }
+    }
+    
+    // Try JAM 0.7.0 if 0.7.1 didn't work
+    if (!info) {
+      encoded = encodeServiceAccount(accountData, 0, 7, 0)
+      decoded = decodeServiceAccount(encoded, 0, 7, 0)
+      if (decoded) {
+        const reEncoded = encodeServiceAccount(decoded.value, 0, 7, 0)
+        if (reEncoded.length === encoded.length) {
+          let matches = true
+          for (let i = 0; i < encoded.length; i++) {
+            if (reEncoded[i] !== encoded[i]) {
+              matches = false
+              break
+            }
+          }
+          if (matches) {
+            info = encoded
+          }
+        }
+      }
+    }
+    
+    // If no version worked, fall back to default (0.7.2)
+    if (!info) {
+      info = encodeServiceAccount(accountData)
+    }
 
     // Gray Paper equation 475-476: Calculate slice parameters
     // f = min(registers[9], len(v))
@@ -100,7 +170,24 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 480: Extract slice v[f:f+l]
-    const dataToWrite = info.slice(f, f + l)
+    const dataSlice = info.slice(f, f + l)
+    
+    // Pad to requested length if needed (to match jamduna behavior)
+    // Gray Paper equation 478: Write to memory[o:o+l]
+    // Note: l is the actual slice length, but if requested length > actual length,
+    // jamduna pads with zeros to the requested length
+    const requestedWriteLength = i32(length)
+    let dataToWrite: Uint8Array
+    if (requestedWriteLength > dataSlice.length) {
+      // Pad with zeros to requested length
+      dataToWrite = new Uint8Array(requestedWriteLength)
+      for (let i = 0; i < dataSlice.length; i++) {
+        dataToWrite[i] = dataSlice[i]
+      }
+      // Remaining bytes are already zero (default Uint8Array initialization)
+    } else {
+      dataToWrite = dataSlice
+    }
 
     // Gray Paper equation 478: Write to memory[o:o+l]
     const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)

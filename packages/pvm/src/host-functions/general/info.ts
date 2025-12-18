@@ -1,11 +1,12 @@
-import { encodeServiceAccount } from '@pbnj/codec'
+import { decodeServiceAccount, encodeServiceAccount } from '@pbnjam/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   InfoParams,
+  JamVersion,
   ServiceAccount,
   ServiceAccountCore,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -74,13 +75,57 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 466-473: Encode service account info
-    const [error, info] = encodeServiceAccount(
-      serviceAccount as ServiceAccountCore,
-    )
-    if (error) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
+    // Auto-detect JAM version by attempting round-trip encoding/decoding
+    // Try different JAM versions in order: 0.7.2, 0.7.1, 0.7.0 (prefer newer versions)
+    const versionsToTry: JamVersion[] = [
+      { major: 0, minor: 7, patch: 2 },
+      { major: 0, minor: 7, patch: 1 },
+      { major: 0, minor: 7, patch: 0 },
+    ]
+
+    let info: Uint8Array | undefined
+
+    for (const version of versionsToTry) {
+      const [encodeError, encoded] = encodeServiceAccount(
+        serviceAccount as ServiceAccountCore,
+        version,
+      )
+      if (encodeError || !encoded) {
+        continue
       }
+
+      // Try to decode and verify round-trip
+      const [decodeError, decoded] = decodeServiceAccount(encoded, version)
+      if (!decodeError && decoded) {
+        // Verify round-trip: re-encode and compare
+        const [reEncodeError, reEncoded] = encodeServiceAccount(
+          decoded.value,
+          version,
+        )
+        if (
+          !reEncodeError &&
+          reEncoded &&
+          reEncoded.length === encoded.length &&
+          reEncoded.every((byte, i) => byte === encoded[i])
+        ) {
+          // Round-trip successful, use this version
+          info = encoded
+          break
+        }
+      }
+    }
+
+    // If no version worked, fall back to default (0.7.2)
+    if (!info) {
+      const [defaultError, defaultEncoded] = encodeServiceAccount(
+        serviceAccount as ServiceAccountCore,
+      )
+      if (defaultError || !defaultEncoded) {
+        return {
+          resultCode: RESULT_CODES.PANIC,
+        }
+      }
+      info = defaultEncoded
     }
 
     // Gray Paper equation 475-476: Calculate slice parameters
@@ -98,9 +143,23 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 480: Extract slice v[f:f+l]
-    const dataToWrite = info.slice(f, f + l)
+    const dataSlice = info.slice(f, f + l)
 
+    // Pad to requested length if needed (to match jamduna behavior)
     // Gray Paper equation 478: Write to memory[o:o+l]
+    // Note: l is the actual slice length, but if requested length > actual length,
+    // jamduna pads with zeros to the requested length
+    const requestedWriteLength = Number(length)
+    let dataToWrite: Uint8Array
+    if (requestedWriteLength > dataSlice.length) {
+      // Pad with zeros to requested length
+      dataToWrite = new Uint8Array(requestedWriteLength)
+      dataToWrite.set(dataSlice, 0)
+      // Remaining bytes are already zero (default Uint8Array initialization)
+    } else {
+      dataToWrite = dataSlice
+    }
+
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress) {
       // Gray Paper: Return panic if memory not writable

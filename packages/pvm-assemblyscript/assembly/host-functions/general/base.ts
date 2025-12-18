@@ -1,4 +1,4 @@
-import { PVM, PVMState } from '../../pvm'
+import { PVM } from '../../pvm'
 import { RAM, RegisterState } from '../../types'
 import { HostFunctionResult } from '../accumulate/base'
 import { CompleteServiceAccount, WorkPackage, WorkItem } from '../../codec'

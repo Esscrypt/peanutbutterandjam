@@ -1,9 +1,9 @@
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   LookupParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -45,7 +45,6 @@ export class LookupHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     lookupParams: LookupParams,
   ): HostFunctionResult {
-
     const serviceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]

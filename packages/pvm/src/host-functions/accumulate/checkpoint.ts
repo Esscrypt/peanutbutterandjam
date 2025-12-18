@@ -3,7 +3,7 @@ import type {
   Implications,
   PartialState,
   ServiceAccount,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS } from '../../config'
 import {
   type AccumulateHostFunctionContext,

@@ -5,11 +5,14 @@
  * Generator validator sends ticket to deterministically-selected proxy validator
  */
 
-import { concatBytes, type EventBusService, type Hex } from '@pbnj/core'
-
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
-import type { Safe, SafePromise, TicketDistributionRequest } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
+import { concatBytes, type EventBusService, type Hex } from '@pbnjam/core'
+import type {
+  Safe,
+  SafePromise,
+  TicketDistributionRequest,
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

@@ -6,10 +6,10 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { EventBusService } from '@pbnj/core'
+import { EventBusService } from '@pbnjam/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { DisputesTestVector, WorkReport } from '@pbnj/types'
+import type { DisputesTestVector, WorkReport } from '@pbnjam/types'
 import { DisputesService } from '../services/disputes-service'
 import { ConfigService } from '../services/config-service'
 import { ValidatorSetManager } from '../services/validator-set'

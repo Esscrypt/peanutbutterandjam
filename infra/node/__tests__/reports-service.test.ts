@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { EventBusService, type Hex } from '@pbnj/core'
+import { EventBusService, type Hex } from '@pbnjam/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnj/types'
+import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnjam/types'
 import { ValidatorSetManager } from '../services/validator-set'
 import { EntropyService } from '../services/entropy'
 import { RecentHistoryService } from '../services/recent-history-service'
@@ -25,7 +25,7 @@ import { WorkReportService } from '../services/work-report-service'
 import { GuarantorService } from '../services/guarantor-service'
 import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
-import { AccumulateHostFunctionRegistry, AccumulatePVM, HostFunctionRegistry } from '@pbnj/pvm'
+import { AccumulateHostFunctionRegistry, AccumulatePVM, HostFunctionRegistry } from '@pbnjam/pvm'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 

@@ -5,13 +5,13 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { encodeFixedLength, encodeNatural } from '@pbnj/codec'
-import { blake2bHash, concatBytes, hexToBytes, logger } from '@pbnj/core'
+import { encodeFixedLength, encodeNatural } from '@pbnjam/codec'
+import { blake2bHash, concatBytes, hexToBytes, logger } from '@pbnjam/core'
 import type {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { ACCUMULATE_INVOCATION_CONFIG } from '@pbnj/pvm'
+} from '@pbnjam/pvm'
+import { ACCUMULATE_INVOCATION_CONFIG } from '@pbnjam/pvm'
 import type {
   AccumulateInput,
   AccumulateInvocationResult,
@@ -25,8 +25,8 @@ import type {
   ResultCode,
   Safe,
   WorkItem,
-} from '@pbnj/types'
-import { RESULT_CODES, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 import {
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
@@ -50,7 +50,7 @@ export class AccumulatePVM {
     useWasm: boolean
   }) {
     this.useWasm = options.useWasm
-    
+
     // Create PVM executor based on useWasm flag
     if (options.useWasm) {
       // Create WASM executor - module will be loaded from pvm-assemblyscript/build/pvm.wasm
@@ -112,208 +112,202 @@ export class AccumulatePVM {
     inputs: AccumulateInput[],
     workItems: WorkItem[] = [],
   ): Promise<AccumulateInvocationResult> {
-    logger.debug('[AccumulatePVM] executeAccumulate called', {
-      serviceId: serviceId.toString(),
-      timeslot: timeslot.toString(),
-      gas: gas.toString(),
-      inputCount: inputs.length,
-      totalAccounts: partialState.accounts.size,
-    })
-      // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
-      const serviceAccount = partialState.accounts.get(serviceId)
-      if (!serviceAccount) {
-        logger.error('[AccumulatePVM] Service account not found', {
-          serviceId: serviceId.toString(),
-          availableServiceIds: Array.from(partialState.accounts.keys()).map(
-            (id) => id.toString(),
-          ),
-        })
-        return { ok: false, err: 'BAD' }
-      }
+    // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
+    const serviceAccount = partialState.accounts.get(serviceId)
+    if (!serviceAccount) {
+      logger.error('[AccumulatePVM] Service account not found', {
+        serviceId: serviceId.toString(),
+        availableServiceIds: Array.from(partialState.accounts.keys()).map(
+          (id) => id.toString(),
+        ),
+      })
+      return { ok: false, err: 'BAD' }
+    }
 
-      logger.debug('[AccumulatePVM] Service account found', {
+    logger.debug('[AccumulatePVM] Service account found', {
+      serviceId: serviceId.toString(),
+      codeHash: serviceAccount.codehash,
+      preimagesCount: serviceAccount.preimages.size,
+      storageSize: serviceAccount.storage.size,
+    })
+
+    // Gray Paper: Get service code from preimages using codehash
+    const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
+    if (!serviceCode) {
+      logger.error('[AccumulatePVM] Service code not found in preimages', {
         serviceId: serviceId.toString(),
         codeHash: serviceAccount.codehash,
-        preimagesCount: serviceAccount.preimages.size,
-        storageSize: serviceAccount.storage.size,
+        availablePreimageHashes: Array.from(serviceAccount.preimages.keys()),
       })
+      return { ok: false, err: 'BAD' }
+    }
 
-      // Gray Paper: Get service code from preimages using codehash
-      const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
-      if (!serviceCode) {
-        logger.error('[AccumulatePVM] Service code not found in preimages', {
-          serviceId: serviceId.toString(),
-          codeHash: serviceAccount.codehash,
-          availablePreimageHashes: Array.from(serviceAccount.preimages.keys()),
-        })
-        return { ok: false, err: 'BAD' }
-      }
-
-      // Check for null code or oversized code (Gray Paper pvm_invocations.tex line 162)
-      // Gray Paper: when c = none ∨ len(c) > Cmaxservicecodesize → error result
-      // reporting_assurance.tex line 115: BIG indicates code was beyond Cmaxservicecodesize
-      if (!serviceCode || serviceCode.length === 0) {
-        logger.warn('[AccumulatePVM] Service code not found or empty', {
-          serviceId: serviceId.toString(),
-          codeHash: serviceAccount.codehash,
-        })
-        return { ok: false, err: 'BAD' }
-      }
-
-      if (
-        serviceCode.length > ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE
-      ) {
-        logger.warn('[AccumulatePVM] Service code exceeds maximum size', {
-          serviceId: serviceId.toString(),
-          codeLength: serviceCode.length,
-          maxSize:
-            ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE.toString(),
-        })
-        // Gray Paper: BIG error when code > Cmaxservicecodesize
-        return { ok: false, err: 'BIG' }
-      }
-
-      // Calculate post-transfer state (apply deferred transfers to service balance)
-      logger.debug('[AccumulatePVM] Calculating post-transfer state', {
+    // Check for null code or oversized code (Gray Paper pvm_invocations.tex line 162)
+    // Gray Paper: when c = none ∨ len(c) > Cmaxservicecodesize → error result
+    // reporting_assurance.tex line 115: BIG indicates code was beyond Cmaxservicecodesize
+    if (!serviceCode || serviceCode.length === 0) {
+      logger.warn('[AccumulatePVM] Service code not found or empty', {
         serviceId: serviceId.toString(),
-        inputCount: inputs.length,
-        currentBalance: serviceAccount.balance?.toString() || 'N/A',
+        codeHash: serviceAccount.codehash,
       })
-      const postTransferState = this.calculatePostTransferState(
-        partialState,
-        serviceId,
-        inputs,
-      )
+      return { ok: false, err: 'BAD' }
+    }
 
-      // Initialize Implications context
-      logger.debug('[AccumulatePVM] Initializing implications context', {
+    if (
+      serviceCode.length > ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE
+    ) {
+      logger.warn('[AccumulatePVM] Service code exceeds maximum size', {
         serviceId: serviceId.toString(),
-        timeslot: timeslot.toString(),
+        codeLength: serviceCode.length,
+        maxSize: ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE.toString(),
       })
-      const [initError, implicationsPair] = this.initializeImplicationsContext(
-        postTransferState,
-        serviceId,
-        timeslot,
-      )
-      if (initError) {
-        logger.error(
-          '[AccumulatePVM] Failed to initialize implications context',
-          {
-            serviceId: serviceId.toString(),
-            timeslot: timeslot.toString(),
-            error: initError.message,
-          },
-        )
-        return { ok: false, err: 'BAD' }
-      }
+      // Gray Paper: BIG error when code > Cmaxservicecodesize
+      return { ok: false, err: 'BIG' }
+    }
 
-      // logger.debug('[AccumulatePVM] Implications context initialized', {
-      //   serviceId: serviceId.toString(),
-      //   nextFreeId: implicationsPair[0].nextfreeid.toString(),
-      // })
+    const postTransferState = this.calculatePostTransferState(
+      partialState,
+      serviceId,
+      inputs,
+    )
 
-      // Encode arguments: timeslot, serviceId, input length
-      const [encodedArgsError, encodedArgs] = this.encodeAccumulateArguments(
-        timeslot,
-        serviceId,
-        BigInt(inputs.length),
-      )
-      if (encodedArgsError) {
-        logger.error('[AccumulatePVM] Failed to encode accumulate arguments', {
-          error: encodedArgsError.message,
-        })
-        return { ok: false, err: 'BAD' }
-      }
-      // Execute accumulation invocation
-      // Use the useWasm flag to determine which executor method to call
-      let error: Error | undefined
-      let marshallingResult: {
-        gasConsumed: bigint
-        result: Uint8Array | 'PANIC' | 'OOG'
-        context: ImplicationsPair
-      } | undefined
-
-      if (this.useWasm) {
-        // WASM executor - use direct accumulation method
-        const [wasmError, wasmResult] =
-          await this.pvmExecutor.executeAccumulationInvocation(
-            serviceCode,
-            gas,
-            encodedArgs,
-            implicationsPair,
-            timeslot,
-            inputs,
-            workItems,
-            serviceId,
-          )
-        error = wasmError
-        marshallingResult = wasmResult
-      } else {
-        // TypeScript executor - use executeAccumulationInvocation
-        const [tsError, tsResult] =
-          await this.pvmExecutor.executeAccumulationInvocation(
-            serviceCode,
-            gas,
-            encodedArgs,
-            implicationsPair,
-            timeslot,
-            inputs,
-            workItems,
-            serviceId,
-          )
-        error = tsError
-        marshallingResult = tsResult
-      }
-
-      if (error || !marshallingResult) {
-        logger.error('[AccumulatePVM] Accumulation invocation failed', {
-          serviceId: serviceId.toString(),
-          error: error?.message,
-        })
-        return { ok: false, err: 'BAD' }
-      }
-
-      // Extract values from execution return: (gas consumed, result, updated context)
-      const {
-        gasConsumed,
-        result: marshallingResultValue,
-        context: updatedImplicationsPair,
-      } = marshallingResult
-
-      // Panic dump and host function logs are now handled inside executeMarshallingInvocation in the PVM class
-
-      // Determine result code from marshalling result
-      let resultCode: ResultCode
-      if (marshallingResultValue === 'OOG') {
-        resultCode = RESULT_CODES.OOG
-      } else if (marshallingResultValue === 'PANIC') {
-        resultCode = RESULT_CODES.PANIC
-      } else {
-        // Valid blob result means HALT
-        resultCode = RESULT_CODES.HALT
-      }
-
-      // Collapse result based on termination type using updated context from Ψ_M
-      logger.debug('[AccumulatePVM] Collapsing accumulate result', {
-        serviceId: serviceId.toString(),
-        resultCode,
-        gasConsumed: gasConsumed.toString(),
-      })
-      // In accumulate context, the context is always ImplicationsPair
-      const collapsedResult = this.collapseAccumulateResult(
+    // Initialize Implications context
+    logger.debug('[AccumulatePVM] Initializing implications context', {
+      serviceId: serviceId.toString(),
+      timeslot: timeslot.toString(),
+    })
+    const [initError, implicationsPair] = this.initializeImplicationsContext(
+      postTransferState,
+      serviceId,
+      timeslot,
+    )
+    if (initError) {
+      logger.error(
+        '[AccumulatePVM] Failed to initialize implications context',
         {
-          resultCode,
-          gasUsed: gasConsumed,
+          serviceId: serviceId.toString(),
+          timeslot: timeslot.toString(),
+          error: initError.message,
         },
-        updatedImplicationsPair as ImplicationsPair, // Use updated context from Ψ_M
       )
+      return { ok: false, err: 'BAD' }
+    }
 
-      return collapsedResult
+    // logger.debug('[AccumulatePVM] Implications context initialized', {
+    //   serviceId: serviceId.toString(),
+    //   nextFreeId: implicationsPair[0].nextfreeid.toString(),
+    // })
 
+    // Encode arguments: timeslot, serviceId, input length
+    const [encodedArgsError, encodedArgs] = this.encodeAccumulateArguments(
+      timeslot,
+      serviceId,
+      BigInt(inputs.length),
+    )
+    if (encodedArgsError) {
+      logger.error('[AccumulatePVM] Failed to encode accumulate arguments', {
+        error: encodedArgsError.message,
+      })
+      return { ok: false, err: 'BAD' }
+    }
+    // Execute accumulation invocation
+    // Use the useWasm flag to determine which executor method to call
+    let error: Error | undefined
+    let marshallingResult:
+      | {
+          gasConsumed: bigint
+          result: Uint8Array | 'PANIC' | 'OOG'
+          context: ImplicationsPair
+        }
+      | undefined
+
+    if (this.useWasm) {
+      // WASM executor - use direct accumulation method
+      const [wasmError, wasmResult] =
+        await this.pvmExecutor.executeAccumulationInvocation(
+          serviceCode,
+          gas,
+          encodedArgs,
+          implicationsPair,
+          timeslot,
+          inputs,
+          workItems,
+          serviceId,
+        )
+      error = wasmError
+      marshallingResult = wasmResult
+    } else {
+      // TypeScript executor - use executeAccumulationInvocation
+      const [tsError, tsResult] =
+        await this.pvmExecutor.executeAccumulationInvocation(
+          serviceCode,
+          gas,
+          encodedArgs,
+          implicationsPair,
+          timeslot,
+          inputs,
+          workItems,
+          serviceId,
+        )
+      error = tsError
+      marshallingResult = tsResult
+    }
+
+    if (error || !marshallingResult) {
+      logger.error('[AccumulatePVM] Accumulation invocation failed', {
+        serviceId: serviceId.toString(),
+        error: error?.message,
+      })
+      return { ok: false, err: 'BAD' }
+    }
+
+    // Extract values from execution return: (gas consumed, result, updated context)
+    const {
+      gasConsumed,
+      result: marshallingResultValue,
+      context: updatedImplicationsPair,
+    } = marshallingResult
+
+    // Panic dump and host function logs are now handled inside executeMarshallingInvocation in the PVM class
+
+    // Determine result code from marshalling result
+    let resultCode: ResultCode
+    if (marshallingResultValue === 'OOG') {
+      resultCode = RESULT_CODES.OOG
+    } else if (marshallingResultValue === 'PANIC') {
+      resultCode = RESULT_CODES.PANIC
+    } else {
+      // Valid blob result means HALT
+      resultCode = RESULT_CODES.HALT
+    }
+
+    // Collapse result based on termination type using updated context from Ψ_M
+    logger.debug('[AccumulatePVM] Collapsing accumulate result', {
+      serviceId: serviceId.toString(),
+      resultCode,
+      gasConsumed: gasConsumed.toString(),
+      resultIsBlob: marshallingResultValue instanceof Uint8Array,
+      resultLength:
+        marshallingResultValue instanceof Uint8Array
+          ? marshallingResultValue.length
+          : 0,
+    })
+    // In accumulate context, the context is always ImplicationsPair
+    // Gray Paper equation 217: C takes (gas, blob ∪ {oog, panic}, implicationspair)
+    const collapsedResult = this.collapseAccumulateResult(
+      {
+        resultCode,
+        gasUsed: gasConsumed,
+        resultBlob:
+          marshallingResultValue instanceof Uint8Array
+            ? marshallingResultValue
+            : null,
+      },
+      updatedImplicationsPair as ImplicationsPair, // Use updated context from Ψ_M
+    )
+
+    return collapsedResult
   }
-
-
-
 
   /**
    * Calculate post-transfer state
@@ -535,10 +529,14 @@ export class AccumulatePVM {
   /**
    * Encode accumulate arguments according to Gray Paper specification
    *
-   * Gray Paper: encode(timeslot, serviceid, len(inputs))
-   * - timeslot: encode[4]{thetime} (4 bytes) - merklization.tex C(11)
-   * - serviceid: encode[4]{serviceid} (4 bytes) - work package/item patterns
-   * - len(inputs): encodeNatural (variable) - sequence length pattern
+   * Gray Paper pvm_invocations.tex equation 163: encode{t, s, len(i)}
+   * All values use variable-length natural number encoding (encodeNatural):
+   * - t (timeslot): encodeNatural
+   * - s (serviceId): encodeNatural
+   * - len(i) (input length): encodeNatural
+   *
+   * Note: This differs from fixed-length encodings used elsewhere (e.g. encode[4] in headers).
+   * The general encode{} notation uses variable-length encoding.
    */
   private encodeAccumulateArguments(
     timeslot: bigint,
@@ -547,24 +545,30 @@ export class AccumulatePVM {
   ): Safe<Uint8Array> {
     const parts: Uint8Array[] = []
 
-    // 1. Timeslot (4 bytes) - Gray Paper: encode[4]{thetime}
-    const [timeslotError, timeslotBytes] = encodeFixedLength(timeslot, 4n)
+    // 1. Timeslot - Gray Paper: encode{t} (variable-length natural number)
+    const [timeslotError, timeslotBytes] = encodeNatural(timeslot)
     if (timeslotError) {
-      return safeError(new Error(`Failed to encode timeslot: ${timeslotError.message}`))
+      return safeError(
+        new Error(`Failed to encode timeslot: ${timeslotError.message}`),
+      )
     }
     parts.push(timeslotBytes)
 
-    // 2. Service ID (4 bytes) - Gray Paper: encode[4]{serviceid}
-    const [serviceIdError, serviceIdBytes] = encodeFixedLength(serviceId, 4n)
+    // 2. Service ID - Gray Paper: encode{s} (variable-length natural number)
+    const [serviceIdError, serviceIdBytes] = encodeNatural(serviceId)
     if (serviceIdError) {
-      return safeError(new Error(`Failed to encode service ID: ${serviceIdError.message}`))
+      return safeError(
+        new Error(`Failed to encode service ID: ${serviceIdError.message}`),
+      )
     }
     parts.push(serviceIdBytes)
 
-    // 3. Input length (variable) - Gray Paper: encodeNatural pattern
+    // 3. Input length - Gray Paper: encode{len(i)} (variable-length natural number)
     const [error, lengthEncoded] = encodeNatural(inputLength)
     if (error) {
-      throw new Error(`Failed to encode input length: ${error.message}`)
+      return safeError(
+        new Error(`Failed to encode input length: ${error.message}`),
+      )
     }
     parts.push(lengthEncoded)
 
@@ -574,48 +578,70 @@ export class AccumulatePVM {
 
   /**
    * Collapse accumulate result
-   * Gray Paper equation 217: C: (gas, blob ∪ {oog, panic}, implicationspair) → acconeout
+   * Gray Paper equation 217-241: C: (gas, blob ∪ {oog, panic}, implicationspair) → acconeout
+   *
+   * Three cases:
+   * 1. When o ∈ {oog, panic}: Use imY (exceptional dimension)
+   * 2. When o ∈ hash: Use imX but set yield = o (the hash from result)
+   * 3. Otherwise: Use imX with yield = imX.yield
    */
   private collapseAccumulateResult(
-    executionResult: { resultCode: ResultCode; gasUsed: bigint },
+    executionResult: {
+      resultCode: ResultCode
+      gasUsed: bigint
+      resultBlob: Uint8Array | null
+    },
     implicationsPair: ImplicationsPair,
   ): AccumulateInvocationResult {
     const [imX, imY] = implicationsPair
+    const { resultCode, gasUsed, resultBlob } = executionResult
 
-    // Gray Paper: Use exceptional dimension (imY) for panic/oog, regular dimension (imX) for normal termination
-    const finalImplications =
-      executionResult.resultCode === RESULT_CODES.PANIC ||
-      executionResult.resultCode === RESULT_CODES.OOG
-        ? imY
-        : imX
-
-    // Debug: Check account balances in poststate
-    // const poststateAccountBalances = Array.from(
-    //   finalImplications.state.accounts.entries(),
-    // ).map(([id, account]) => ({
-    //   serviceId: id.toString(),
-    //   balance: account.balance.toString(),
-    // }))
-    // logger.debug('[AccumulatePVM] Poststate account balances', {
-    //   accountBalances: poststateAccountBalances,
-    //   defxfersCount: finalImplications.xfers.length,
-    //   accumulatedServiceId: finalImplications.id.toString(),
-    //   // Verify reference chain: check if the account object in poststate is the same as in imX
-    //   accumulatedServiceBalance: finalImplications.state.accounts
-    //     .get(finalImplications.id)
-    //     ?.balance.toString(),
-    // })
-
-    return {
-      ok: true,
-      value: {
-        poststate: finalImplications.state,
-        defxfers: finalImplications.xfers,
-        yield: finalImplications.yield,
-        gasused: executionResult.gasUsed,
-        provisions: finalImplications.provisions,
-        resultCode: executionResult.resultCode,
-      },
+    // Gray Paper equation 217-241: Three cases for collapse function
+    if (resultCode === RESULT_CODES.PANIC || resultCode === RESULT_CODES.OOG) {
+      // Case 1: o ∈ {oog, panic} → Use imY (exceptional dimension)
+      return {
+        ok: true,
+        value: {
+          poststate: imY.state,
+          defxfers: imY.xfers,
+          yield: imY.yield,
+          gasused: gasUsed,
+          provisions: imY.provisions,
+          resultCode,
+        },
+      }
+    } else if (resultBlob && resultBlob.length === 32) {
+      // Case 2: o ∈ hash → Use imX but set yield = o (the hash from result)
+      // Gray Paper equation 232: provisions = imXY_provisions (union of both)
+      // Merge provisions from both implications dimensions
+      const mergedProvisions = new Map(imX.provisions)
+      for (const [serviceId, blob] of imY.provisions) {
+        mergedProvisions.set(serviceId, blob)
+      }
+      return {
+        ok: true,
+        value: {
+          poststate: imX.state,
+          defxfers: imX.xfers,
+          yield: resultBlob, // Use the hash from result, not imX.yield
+          gasused: gasUsed,
+          provisions: mergedProvisions, // Gray Paper: imXY_provisions (union of both)
+          resultCode,
+        },
+      }
+    } else {
+      // Case 3: Otherwise → Use imX with yield = imX.yield
+      return {
+        ok: true,
+        value: {
+          poststate: imX.state,
+          defxfers: imX.xfers,
+          yield: imX.yield,
+          gasused: gasUsed,
+          provisions: imX.provisions,
+          resultCode,
+        },
+      }
     }
   }
 }

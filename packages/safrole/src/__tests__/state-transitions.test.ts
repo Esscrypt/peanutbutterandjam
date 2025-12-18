@@ -5,14 +5,14 @@
 //  * Reference: graypaper/text/safrole.tex
 //  */
 
-// import { logger } from '@pbnj/core'
+// import { logger } from '@pbnjam/core'
 // import { beforeAll, describe, expect, it } from 'vitest'
 // import { executeSafroleSTF } from '../state-transitions'
 // import type { 
 //   SafroleInput, 
 //   SafroleState,
 //   ValidatorPublicKeys
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 // import * as fs from 'node:fs'
 // import * as path from 'node:path'
 

@@ -2,13 +2,13 @@ import { describe, test, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { instantiate } from '@pbnj/pvm-assemblyscript/wasmAsInit'
-import { FetchHostFunction, PVMRAM } from '@pbnj/pvm'
+import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
+import { FetchHostFunction, PVMRAM } from '@pbnjam/pvm'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 import { EntropyService } from '../../../../infra/node/services/entropy'
-import { EventBusService, bytesToHex, concatBytes } from '@pbnj/core'
-import type { HostFunctionContext, FetchParams, PartialState, Implications, ImplicationsPair, ServiceAccount } from '@pbnj/types'
-import { encodeImplicationsPair, encodeFixedLength, encodeNatural, encodeProgram, encodeServiceCodeToPreimage, encodeBlob } from '@pbnj/codec'
+import { EventBusService, bytesToHex, concatBytes } from '@pbnjam/core'
+import type { HostFunctionContext, FetchParams, PartialState, Implications, ImplicationsPair, ServiceAccount } from '@pbnjam/types'
+import { encodeImplicationsPair, encodeFixedLength, encodeNatural, encodeProgram, encodeServiceCodeToPreimage, encodeBlob } from '@pbnjam/codec'
 
 /**
  * Test to compare FETCH host function results between TypeScript and AssemblyScript implementations
@@ -391,7 +391,6 @@ describe('FETCH Host Function Comparison', () => {
     const fromOffset = 0n
     const length = 0n
     const selector = 0n
-    const pageSize = 4096
 
     // Create RAM for TypeScript execution
     const tsRam = new PVMRAM()

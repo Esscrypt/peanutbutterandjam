@@ -44,9 +44,13 @@
  * This is critical for JAM's accumulation output tracking and audit trail.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, LastAccumulationOutput, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
+import type {
+  DecodingResult,
+  LastAccumulationOutput,
+  Safe,
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,

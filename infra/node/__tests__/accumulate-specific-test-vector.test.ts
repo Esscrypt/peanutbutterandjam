@@ -10,15 +10,15 @@ import type {
   ReadyItem,
   WorkReport,
   PreimageRequestStatus,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
-import { HostFunctionRegistry, AccumulateHostFunctionRegistry } from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+import { HostFunctionRegistry, AccumulateHostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { hexToBytes, zeroHash } from '../../../packages/core/src/utils/crypto'
 import { ServiceAccountService } from '../services/service-account-service'
-import { EventBusService } from '@pbnj/core'
+import { EventBusService } from '@pbnjam/core'
 import { ClockService } from '../services/clock-service'
-import { PreimageRequestProtocol } from '@pbnj/networking'
+import { PreimageRequestProtocol } from '@pbnjam/networking'
 import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
 import { EntropyService } from '../services/entropy'
@@ -26,7 +26,7 @@ import { StatisticsService } from '../services/statistics-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ValidatorSetManager } from '../services/validator-set'
 import { PrivilegesService } from '../services/privileges-service'
-import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -157,7 +157,7 @@ describe('Accumulate Test Vector Execution', () => {
               accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
               configService: configService,
               entropyService: entropyService,
-              pvmOptions: { gasCounter: 10000n },
+              pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) }, // Use config's maxBlockGas (20M)
               useWasm: true,
             })
             const privilegesService = new PrivilegesService({

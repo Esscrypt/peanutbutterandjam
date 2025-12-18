@@ -5,8 +5,8 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { decodeBlob, decodeProgramFromPreimage } from '@pbnj/codec'
-import { logger } from '@pbnj/core'
+import { decodeBlob, decodeProgramFromPreimage } from '@pbnjam/codec'
+import { logger } from '@pbnjam/core'
 import type {
   ContextMutator,
   ImplicationsPair,
@@ -20,8 +20,8 @@ import type {
   Safe,
   SafePromise,
   WorkError,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { alignToZone } from './alignment-helpers'
 import {
   GAS_CONFIG,
@@ -113,7 +113,6 @@ export class PVM implements IPVM {
     await this.run(programBlob)
   }
 
-
   /**
    * Y - Standard initialization function
    * Gray Paper equation 753-760: Y(blob, blob) → (blob, registers, ram)?
@@ -134,7 +133,8 @@ export class PVM implements IPVM {
     if (error) {
       return safeError(error)
     }
-    const { code, roData, rwData, stackSize, heapZeroPaddingSize } = result.value
+    const { code, roData, rwData, stackSize, heapZeroPaddingSize } =
+      result.value
 
     // Gray Paper equation 767: Validate condition
     // 5*Cpvminitzonesize + rnq(len(o)) + rnq(len(w) + z*Cpvmpagesize) + rnq(s) + Cpvminitinputsize <= 2^32
@@ -179,16 +179,22 @@ export class PVM implements IPVM {
    * Initialize PVM registers according to Gray Paper equation 803-811
    * Reference: https://graypaper.fluffylabs.dev/#/579bd12/2c7c012cb101
    *
-   * All registers are initialized to 0 in constructor, then specific ones are set here:
+   * All registers are explicitly set for each invocation:
    * - r0: HALT address (2^32 - 2^16)
    * - r1: Stack segment end address (2^32 - 2*Cpvminitzonesize - Cpvminitinputsize)
    * - r7: Arguments segment start address (2^32 - Cpvminitzonesize - Cpvminitinputsize)
    * - r8: Argument data length
-   * - r2-r6, r9-r12: Remain 0
+   * - r2-r6, r9-r12: Set to 0
    *
    * @param argumentDataLength - Length of argument data (a) in bytes
    */
   private initializeRegisters(argumentDataLength: number): void {
+    // First, clear ALL registers to 0 (important when PVM instance is reused)
+    // This ensures no leftover values from previous invocations
+    for (let i = 0; i < 13; i++) {
+      this.state.registerState[i] = 0n
+    }
+
     // r0: HALT address - jumping to this address causes the PVM to halt gracefully
     // Gray Paper equation 803: registers[0] = 2^32 - 2^16
     // This is equivalent to the HALT_ADDRESS constant (0xffff0000)
@@ -211,7 +217,7 @@ export class PVM implements IPVM {
     // Stores the length of the argument data in bytes
     this.state.registerState[8] = BigInt(argumentDataLength)
 
-    // Registers r2-r6 and r9-r12 remain 0 (already initialized in constructor)
+    // r2-r6 and r9-r12 are now 0 (explicitly cleared above)
   }
 
   /**
@@ -242,7 +248,6 @@ export class PVM implements IPVM {
       stackSize,
       heapZeroPaddingSize,
     )
-
   }
 
   /**
@@ -389,31 +394,30 @@ export class PVM implements IPVM {
       // Gray Paper equation 831-832: Check if Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
       // Nrange{registers'[7]}{registers'[8]} means range from startOffset to startOffset+length
 
-        // Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
-        // return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
-        const [memoryResult, readFaultAddress] = finalMemory.readOctets(
-          startOffset,
-          length,
-        )
+      // Gray Paper equation 831: If ε = halt AND Nrange{registers'[7]}{registers'[8]} ⊆ readable{mem'}
+      // return (u, mem'[registers'[7]..registers'[7]+registers'[8]], x')
+      const [memoryResult, readFaultAddress] = finalMemory.readOctets(
+        startOffset,
+        length,
+      )
 
-        // If readOctets returns a fault, this is an inconsistency (range was readable but read failed)
-        // Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
-        if (readFaultAddress) {
-          return new Uint8Array(0)
-        }
+      // If readOctets returns a fault, this is an inconsistency (range was readable but read failed)
+      // Gray Paper equation 832: If ε = halt AND range not readable: return (u, [], x')
+      if (readFaultAddress) {
+        return new Uint8Array(0)
+      }
 
-        // If memoryResult is null, also treat as error (should not happen if range is readable)
-        if (!memoryResult) {
-          logger.error('ExtractResultFromExecution: Memory result is null', {
-            startOffset: startOffset.toString(),
-            length: length.toString(),
-            faultAddress: readFaultAddress?.toString() ?? 'null',
-          })
-          return 'PANIC'
-        }
+      // If memoryResult is null, also treat as error (should not happen if range is readable)
+      if (!memoryResult) {
+        logger.error('ExtractResultFromExecution: Memory result is null', {
+          startOffset: startOffset.toString(),
+          length: length.toString(),
+          faultAddress: readFaultAddress?.toString() ?? 'null',
+        })
+        return 'PANIC'
+      }
 
-        return memoryResult
-
+      return memoryResult
     }
 
     // Gray Paper equation 833: Otherwise: return (u, panic, x')
@@ -450,30 +454,28 @@ export class PVM implements IPVM {
     const resultCode = this.executeInstruction(instruction)
 
     if (resultCode === RESULT_CODES.HOST) {
-      // Extract host call ID from registers (typically r0 or r1)
-      const hostCallId = this.state.registerState[0] // Assuming host call ID is in r0
+      // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
+      // Gray Paper pvm.tex §7.4.1: ε = host × immed_X, where immed_X is the immediate operand
+      // For ECALLI, the host function ID is in operands[0] (sign-extended, but IDs are small)
+      const hostCallId = BigInt(instruction.operands[0])
       this.state.hostCallId = hostCallId
       if (this.state.gasCounter <= 0n) {
         this.state.resultCode = RESULT_CODES.OOG
         return RESULT_CODES.OOG
       }
 
-        // Use context mutator if available (for accumulate/refine invocations)
-        const resultCode = this.contextMutator(
-            hostCallId,
-          )
+      // Use context mutator if available (for accumulate/refine invocations)
+      const resultCode = this.contextMutator(hostCallId)
 
-          // If host function returns null (continue), advance PC by instruction length
-          // The PC was not advanced in executeInstruction() because it returned HOST early
-          if (resultCode === null) {
-            const instructionLength = BigInt(1 + instruction.fskip)
-            this.state.programCounter += instructionLength
-          }
+      // If host function returns null (continue), advance PC by instruction length
+      // The PC was not advanced in executeInstruction() because it returned HOST early
+      if (resultCode === null) {
+        const instructionLength = BigInt(1 + instruction.fskip)
+        this.state.programCounter += instructionLength
+      }
 
-          // Check if mutator wants to halt execution
-          return resultCode
-
-
+      // Check if mutator wants to halt execution
+      return resultCode
     }
 
     return resultCode
@@ -608,7 +610,18 @@ export class PVM implements IPVM {
     this.state.bitmask = extendedBitmask
 
     let resultCode: ResultCode | null = null
-    while (resultCode === null) {
+    let steps = 0
+    // Safety limit to prevent infinite loops in synchronous JS execution
+    // Gray Paper uses gas as the bound, but practical JS execution requires step limits
+    // Hard cap at 100,000 steps for TypeScript - use WASM executor for realistic gas limits
+    const MAX_TS_STEPS = 100_000
+    const maxSteps = Math.min(
+      Number(this.state.gasCounter) + 1000,
+      MAX_TS_STEPS,
+    )
+
+    while (resultCode === null && steps < maxSteps) {
+      steps++
       const instructionIndex = Number(this.state.programCounter)
 
       // Bounds check: instruction pointer must be within valid code range
@@ -620,20 +633,6 @@ export class PVM implements IPVM {
         })
         this.state.resultCode = RESULT_CODES.PANIC
         return
-      }
-
-      // Debug: Log bitmask and code at PC for debugging trace differences
-      if (instructionIndex === 5) {
-        logger.debug('[TypeScript PVM] PC=5 debug info', {
-          pc: this.state.programCounter.toString(),
-          codeAt5: extendedCode[5],
-          codeAt5Hex: `0x${extendedCode[5]?.toString(16) || 'undefined'}`,
-          bitmaskAt5: extendedBitmask[5],
-          bitmaskLength: extendedBitmask.length,
-          codeLength: extendedCode.length,
-          codeSlice: Array.from(extendedCode.slice(0, 20)).map(b => `0x${b.toString(16)}`),
-          bitmaskSlice: Array.from(extendedBitmask.slice(0, 20)),
-        })
       }
 
       const opcode = extendedCode[instructionIndex]
@@ -684,11 +683,25 @@ export class PVM implements IPVM {
         instructionName,
         opcode: `0x${instruction.opcode.toString(16)}`,
         gas: this.state.gasCounter,
-        registers: Array.from(this.state.registerState.slice(0, 13)).map((r) => r.toString()),
+        registers: Array.from(this.state.registerState.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
       })
     }
 
-    this.state.resultCode = resultCode
+    // If we exited due to step limit, treat as OOG
+    if (resultCode === null && steps >= maxSteps) {
+      logger.warn('Run: Step limit reached, treating as OOG', {
+        steps,
+        maxSteps,
+        gasRemaining: this.state.gasCounter.toString(),
+      })
+      this.state.resultCode = RESULT_CODES.OOG
+      return
+    }
+
+    // At this point, resultCode must be non-null (we exited the while loop with a result)
+    this.state.resultCode = resultCode!
 
     // Gray Paper: Only HALT sets PC to 0 (successful completion)
     // PANIC keeps PC at the instruction that caused the panic (for debugging)
@@ -831,10 +844,10 @@ export class PVM implements IPVM {
 
   /**
    * Get parser instance
-   * 
+   *
    * Returns a PVMParser instance for parsing program blobs.
    * Used by WASM wrapper to parse programs before execution.
-   * 
+   *
    * @returns PVMParser instance
    */
   public getParser(): PVMParser {
@@ -843,12 +856,12 @@ export class PVM implements IPVM {
 
   /**
    * Execute single instruction step
-   * 
+   *
    * Gray Paper: Ψ_1 - Execute one instruction and return result code
-   * 
+   *
    * This method executes exactly one PVM instruction and returns the result code.
    * Used by the WASM wrapper for step-by-step execution.
-   * 
+   *
    * @returns Safe<ResultCode | null> - Result code or null to continue
    */
   public executeSingleStep(): Safe<ResultCode | null> {
@@ -859,7 +872,9 @@ export class PVM implements IPVM {
       }
 
       // Get current instruction
-      const instruction = this.state.instructions.get(Number(this.state.programCounter))
+      const instruction = this.state.instructions.get(
+        Number(this.state.programCounter),
+      )
 
       if (!instruction) {
         logger.error('PVM: No instruction at PC', {
@@ -880,7 +895,9 @@ export class PVM implements IPVM {
         error: error instanceof Error ? error.message : String(error),
         pc: this.state.programCounter.toString(),
       })
-      return safeError(error instanceof Error ? error : new Error(String(error)))
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
     }
   }
 }

@@ -14,8 +14,8 @@
  * - Always Accers: Services that automatically accumulate with basic gas
  */
 
-import { logger } from '@pbnj/core'
-import { BaseService, type Privileges } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import { BaseService, type Privileges } from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 
 /**

@@ -59,20 +59,15 @@
  * - Compact state commitments (32-byte hash)
  */
 
-import {
-  blake2bHash,
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-} from '@pbnj/core'
+import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   GlobalState,
   IConfigService,
   JamVersion,
   Safe,
   StateTrie,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { encodeFixedLength } from '../core/fixed-length'
 import { encodeVariableSequence } from '../core/sequence'
 import { encodeAccumulated } from './accumulated'

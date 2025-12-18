@@ -27,28 +27,28 @@ import {
   EventBusService,
   Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
   type WorkReport,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
-  AccumulatePVM,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
+} from '@pbnjam/pvm'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
 import { StatisticsService } from '../../services/statistics-service'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
@@ -120,7 +120,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,
@@ -146,7 +145,6 @@ describe('Genesis Parse Tests', () => {
       })
 
       const workReportService = new WorkReportService({
-        workStore: null,
         eventBus: eventBusService,
         networkingService: null,
         ce136WorkReportRequestProtocol: null,
@@ -169,7 +167,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        preimageStore: null,
         configService,
         eventBusService,
         clockService,
@@ -184,7 +181,14 @@ describe('Genesis Parse Tests', () => {
         accumulateHostFunctionRegistry,
         configService: configService,
         entropyService: entropyService,
-        pvmOptions: { gasCounter: 1_000_000n },
+        pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+        useWasm: true,
+      })
+
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
+        configService: configService,
+        clockService: clockService,
       })
 
       const accumulatedService = new AccumulationService({
@@ -196,18 +200,13 @@ describe('Genesis Parse Tests', () => {
         authQueueService: authQueueService,
         accumulatePVM: accumulatePVM,
         readyService: readyService,
+        statisticsService: statisticsService,
       })
             
       const recentHistoryService = new RecentHistoryService({
         eventBusService: eventBusService,
         configService: configService,
         accumulationService: accumulatedService,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
       })
 
 
@@ -269,7 +268,6 @@ describe('Genesis Parse Tests', () => {
         validatorSetManagerService: validatorSetManager,
         entropyService: entropyService,
         sealKeyService: sealKeyService,
-        blockStore: null,
         assuranceService: assuranceService,
         guarantorService: guarantorService,
         ticketService: ticketService,

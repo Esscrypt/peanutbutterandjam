@@ -21,14 +21,14 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

@@ -38,7 +38,7 @@
  * possible to compute Merkle proofs for individual components.
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   Block,
   BlockBody,
@@ -46,8 +46,8 @@ import type {
   Dispute,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeAssurances, encodeAssurances } from './assurance'
 import { decodeDisputes, encodeDisputes } from './dispute'
 import { decodeGuarantees, encodeGuarantees } from './guarantee'

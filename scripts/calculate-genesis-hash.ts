@@ -6,9 +6,13 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { blake2bHash, type GenesisHeader, parseGenesisHeader } from '@pbnj/core'
-import { encodeHeader } from '@pbnj/codec'
-import type { BlockHeader, EpochMark, ValidatorKeyTuple } from '@pbnj/types'
+import { encodeHeader } from '@pbnjam/codec'
+import {
+  blake2bHash,
+  type GenesisHeader,
+  parseGenesisHeader,
+} from '@pbnjam/core'
+import type { BlockHeader, EpochMark, ValidatorKeyTuple } from '@pbnjam/types'
 import { ConfigService } from '../infra/node/services/config-service'
 
 // Expected hash from JAM documentation

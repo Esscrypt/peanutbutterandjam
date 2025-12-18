@@ -13,8 +13,8 @@ import {
   hexToBytes,
   logger,
   type SlotChangeEvent,
-} from '@pbnj/core'
-import type { PreimageRequestProtocol } from '@pbnj/networking'
+} from '@pbnjam/core'
+import type { PreimageRequestProtocol } from '@pbnjam/networking'
 import {
   BaseService,
   type IServiceAccountService,
@@ -29,7 +29,7 @@ import {
   type ServiceAccounts,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { NetworkingService } from './networking-service'
@@ -349,7 +349,6 @@ export class ServiceAccountService
    */
   async handleSlotChanged(slotChangeEvent: SlotChangeEvent): SafePromise<void> {
     const CEXPUNGE_PERIOD = BigInt(this.configService.preimageExpungePeriod) // Gray Paper constant
-
 
     // update all requests (per service)
     for (const [_, hashMap] of this.serviceRequests.entries()) {

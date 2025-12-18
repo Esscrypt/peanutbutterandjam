@@ -44,9 +44,9 @@ See **[Testnet Documentation](docs/TESTNET_README.md)** for detailed setup instr
 
 ## Packages
 
-- `@pbnj/core` - Core types and utilities
-- `@pbnj/cli` - Command-line interface
-- `@pbnj/safrole` - Safrole consensus protocol implementation
-- `@pbnj/bandersnatch-vrf` - Bandersnatch VRF implementation
-- `@pbnj/pvm` - Polkadot Virtual Machine
-- `@pbnj/rpc-server` - RPC server implementation
+- `@pbnjam/core` - Core types and utilities
+- `@pbnjam/cli` - Command-line interface
+- `@pbnjam/safrole` - Safrole consensus protocol implementation
+- `@pbnjam/bandersnatch-vrf` - Bandersnatch VRF implementation
+- `@pbnjam/pvm` - Polkadot Virtual Machine
+- `@pbnjam/rpc-server` - RPC server implementation

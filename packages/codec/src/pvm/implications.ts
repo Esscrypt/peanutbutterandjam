@@ -40,19 +40,16 @@
  * 6. im_provisions: encode{var{sequence{sorted(serviceid, blob)}}} (protected set as sorted sequence)
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
   Implications,
   ImplicationsPair,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
-import {
-  decodeOptional,
-  encodeOptional,
-} from '../core/discriminator'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
+import { decodeOptional, encodeOptional } from '../core/discriminator'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -63,10 +60,7 @@ import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
 } from './deferred-transfer'
-import {
-  decodePartialState,
-  encodePartialState,
-} from './partial-state'
+import { decodePartialState, encodePartialState } from './partial-state'
 
 /**
  * Encode Implications according to Gray Paper specification.
@@ -262,7 +256,9 @@ export function decodeImplications(
     (data: Uint8Array) => {
       if (data.length < 32) {
         return safeError(
-          new Error(`Insufficient data for yield hash: need 32 bytes, got ${data.length}`),
+          new Error(
+            `Insufficient data for yield hash: need 32 bytes, got ${data.length}`,
+          ),
         )
       }
       const hash = data.slice(0, 32)
@@ -426,4 +422,3 @@ export function decodeImplicationsPair(
     consumed: data.length - exceptionalRemaining.length,
   })
 }
-

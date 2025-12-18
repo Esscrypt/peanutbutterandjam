@@ -27,24 +27,24 @@ import {
   EventBusService,
   Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'

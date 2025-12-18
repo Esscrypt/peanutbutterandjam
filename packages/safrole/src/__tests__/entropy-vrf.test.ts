@@ -11,13 +11,13 @@ import {
   verifyEntropyVRFSignature,
   banderout,
   IETFVRFProver,
-} from '@pbnj/bandersnatch-vrf'
-import { generateBandersnatchKeyPairFromSeed } from '@pbnj/core'
-import { encodeUnsignedHeader } from '@pbnj/codec'
+} from '@pbnjam/bandersnatch-vrf'
+import { generateBandersnatchKeyPairFromSeed } from '@pbnjam/core'
+import { encodeUnsignedHeader } from '@pbnjam/codec'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BlockTraceTestVector, IConfigService, UnsignedBlockHeader } from '@pbnj/types'
-import { hexToBytes } from '@pbnj/core'
+import type { BlockTraceTestVector, IConfigService, UnsignedBlockHeader } from '@pbnjam/types'
+import { hexToBytes } from '@pbnjam/core'
 
 describe('Entropy VRF Functions', () => {
   test('generateEntropyVRFSignature should create valid 96-byte signature', () => {

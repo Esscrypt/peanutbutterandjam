@@ -13,7 +13,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@pbnj/core': resolve(__dirname, '../core/src'),
+      '@pbnjam/core': resolve(__dirname, '../core/src'),
     },
   },
 })

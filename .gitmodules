@@ -35,3 +35,6 @@
 [submodule "packages/bandersnatch"]
 	path = packages/bandersnatch
 	url = git@github.com:Esscrypt/bandersnatch.git
+[submodule "packages/bandersnatch-vrf"]
+	path = packages/bandersnatch-vrf
+	url = git@github.com:Esscrypt/bandersnatch-vrf.git

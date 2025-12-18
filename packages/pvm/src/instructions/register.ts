@@ -4,10 +4,10 @@
  * MOVE_REG, SBRK, and bit manipulation instructions
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
+import { alignToPage } from '../alignment-helpers'
 import { MEMORY_CONFIG, OPCODES } from '../config'
 import { BaseInstruction } from './base'
-import { alignToPage } from '../alignment-helpers'
 
 /**
  * MOVE_REG instruction (opcode 0x100)
@@ -38,7 +38,7 @@ export class MOVE_REGInstruction extends BaseInstruction {
       value: value.toString(),
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
-      registers: [...context.registers].map(r => r.toString()), // Copy array to show post-update state
+      registers: [...context.registers].map((r) => r.toString()), // Copy array to show post-update state
       r10AfterUpdate: context.registers[10]?.toString(), // Explicitly log r10 to verify update
     })
 
@@ -90,11 +90,10 @@ export class SBRKInstruction extends BaseInstruction {
     const newHeapPointer = ram.currentHeapPointer + Number(valueA)
 
     // https://paritytech.github.io/matrix-archiver/archive/_21ddsEwXlCWnreEGuqXZ_3Apolkadot.io/index.html#$_RkIlMDNZrROw_6WDXpbllO2VSbjY1FNTIfDjVZhhdw
-    if(newHeapPointer > MEMORY_CONFIG.MAX_MEMORY_ADDRESS) { 
+    if (newHeapPointer > MEMORY_CONFIG.MAX_MEMORY_ADDRESS) {
       this.setRegisterValue(context.registers, registerD, 0n)
       return { resultCode: null }
     }
-
 
     // If new heap pointer exceeds next page boundary, allocate pages
     if (newHeapPointer > nextPageBoundary) {
@@ -232,15 +231,18 @@ export class LEADING_ZERO_BITS_64Instruction extends BaseInstruction {
 
     this.setRegisterValue(context.registers, registerD, count)
 
-    context.log('LEADING_ZERO_BITS_64: Count leading zero bits in 64-bit register', {
-      registerD,
-      registerA,
-      value: value.toString(),
-      count: count.toString(),
-      pc: context.pc.toString(),
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
+    context.log(
+      'LEADING_ZERO_BITS_64: Count leading zero bits in 64-bit register',
+      {
+        registerD,
+        registerA,
+        value: value.toString(),
+        count: count.toString(),
+        pc: context.pc.toString(),
+        operands: Array.from(context.instruction.operands),
+        fskip: context.fskip,
+      },
+    )
 
     return { resultCode: null }
   }
@@ -279,15 +281,18 @@ export class LEADING_ZERO_BITS_32Instruction extends BaseInstruction {
 
     this.setRegisterValue(context.registers, registerD, count)
 
-    context.log('LEADING_ZERO_BITS_32: Count leading zero bits in 32-bit register', {
-      registerD,
-      registerA,
-      value: value.toString(),
-      count: count.toString(),
-      pc: context.pc.toString(),
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
+    context.log(
+      'LEADING_ZERO_BITS_32: Count leading zero bits in 32-bit register',
+      {
+        registerD,
+        registerA,
+        value: value.toString(),
+        count: count.toString(),
+        pc: context.pc.toString(),
+        operands: Array.from(context.instruction.operands),
+        fskip: context.fskip,
+      },
+    )
 
     return { resultCode: null }
   }
@@ -325,19 +330,21 @@ export class TRAILING_ZERO_BITS_64Instruction extends BaseInstruction {
 
     this.setRegisterValue(context.registers, registerD, count)
 
-    context.log('TRAILING_ZERO_BITS_64: Count trailing zero bits in 64-bit register', {
-      registerD,
-      registerA,
-      value: value.toString(),
-      count: count.toString(),
-      pc: context.pc.toString(),
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
+    context.log(
+      'TRAILING_ZERO_BITS_64: Count trailing zero bits in 64-bit register',
+      {
+        registerD,
+        registerA,
+        value: value.toString(),
+        count: count.toString(),
+        pc: context.pc.toString(),
+        operands: Array.from(context.instruction.operands),
+        fskip: context.fskip,
+      },
+    )
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -374,15 +381,18 @@ export class TRAILING_ZERO_BITS_32Instruction extends BaseInstruction {
 
     this.setRegisterValue(context.registers, registerD, count)
 
-    context.log('TRAILING_ZERO_BITS_32: Count trailing zero bits in 32-bit register', {
-      registerD,
-      registerA,
-      value: value.toString(),
-      count: count.toString(),
-      pc: context.pc.toString(),
-      operands: Array.from(context.instruction.operands),
-      fskip: context.fskip,
-    })
+    context.log(
+      'TRAILING_ZERO_BITS_32: Count trailing zero bits in 32-bit register',
+      {
+        registerD,
+        registerA,
+        value: value.toString(),
+        count: count.toString(),
+        pc: context.pc.toString(),
+        operands: Array.from(context.instruction.operands),
+        fskip: context.fskip,
+      },
+    )
 
     return { resultCode: null }
   }
@@ -452,7 +462,8 @@ export class SIGN_EXTEND_16Instruction extends BaseInstruction {
     // signedn{2}(x) = signfunc{2}(x) = x if x < 0x8000, else x - 0x10000
     // unsigned{} converts signed value back to unsigned 64-bit
     const signedValue = value < 0x8000n ? value : value - 0x10000n
-    const extendedValue = signedValue < 0n ? signedValue + 2n ** 64n : signedValue
+    const extendedValue =
+      signedValue < 0n ? signedValue + 2n ** 64n : signedValue
 
     this.setRegisterValue(context.registers, registerD, extendedValue)
 

@@ -1,5 +1,5 @@
-import { logger } from '@pbnj/core'
-import type { DeferredTransfer, HostFunctionResult } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { DeferredTransfer, HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,

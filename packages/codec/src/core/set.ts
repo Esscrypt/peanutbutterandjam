@@ -34,8 +34,8 @@
  * where order doesn't matter but deterministic encoding is required.
  */
 
-import type { Decoder, Encoder, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type { Decoder, Encoder, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**

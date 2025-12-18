@@ -5,31 +5,31 @@
 //  * Reference: Gray Paper block authoring specifications
 //  */
 
-// import { generateVRFSignature } from '@pbnj/block-authoring'
+// import { generateVRFSignature } from '@pbnjam/block-authoring'
 // import {
 //   bytesToHex,
 //   type EventBusService,
 //   logger,
 //   type SlotChangeEvent,
-// } from '@pbnj/core'
+// } from '@pbnjam/core'
 // import {
 //   generateFallbackSealSignature,
 //   generateTicketBasedSealSignature,
 //   isSafroleTicket,
-// } from '@pbnj/safrole'
+// } from '@pbnjam/safrole'
 // import type {
 //   Block,
 //   BlockHeader,
 //   Extrinsic,
 //   UnsignedBlockHeader,
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 // import {
 //   BaseService,
 //   type Safe,
 //   type SafePromise,
 //   safeError,
 //   safeResult,
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 // // import type { WorkPackageProcessor } from './work-package-processor'
 // import type { ClockService } from './clock-service'
 // import type { ConfigService } from './config-service'
@@ -116,8 +116,6 @@
 //       // if (workPackagesError) {
 //       //   return safeError(workPackagesError)
 //       // }
-
-
 
 //       // TODO: get parent header from recent history
 

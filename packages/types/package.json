@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/types",
+  "name": "@pbnjam/types",
   "version": "0.1.0",
   "description": "Centralized type definitions for the JAM protocol",
   "main": "src/index.ts",
@@ -19,7 +19,7 @@
   "author": "JAM Protocol Team",
   "license": "MIT",
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "typescript": "catalog:",
     "bun-types": "catalog:"
   },

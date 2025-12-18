@@ -20,21 +20,26 @@
  * correctness. See packages/assurance/KNOWN_ISSUES.md for full details.
  */
 
-import { verifyAssuranceSignature } from '@pbnj/assurance'
+import { verifyAssuranceSignature } from '@pbnjam/assurance'
 import {
   type AssuranceDistributionEvent,
   type EventBusService,
   hexToBytes,
   logger,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   Assurance,
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { BaseService, safeError, safeResult, TIME_CONSTANTS } from '@pbnj/types'
+} from '@pbnjam/types'
+import {
+  BaseService,
+  safeError,
+  safeResult,
+  TIME_CONSTANTS,
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
@@ -320,7 +325,9 @@ export class AssuranceService extends BaseService {
 
     logger.debug('[AssuranceService] Work reports became available', {
       count: availableWorkReports.length,
-      packageHashes: availableWorkReports.map(wr => wr.package_spec.hash.slice(0, 40)),
+      packageHashes: availableWorkReports.map((wr) =>
+        wr.package_spec.hash.slice(0, 40),
+      ),
     })
 
     return safeResult(availableWorkReports)

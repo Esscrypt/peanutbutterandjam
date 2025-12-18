@@ -4,7 +4,7 @@
  * STORE_IND and LOAD_IND variants - Store/Load to/from register + immediate address
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { INIT_CONFIG, OPCODES, RESULT_CODES } from '../config'
 import { PVMRAM } from '../ram'
 import { BaseInstruction } from './base'
@@ -61,11 +61,14 @@ export class STORE_IND_U8Instruction extends BaseInstruction {
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_IND_U8: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     // Write 8-bit value to memory
@@ -131,7 +134,6 @@ export class STORE_IND_U16Instruction extends BaseInstruction {
   readonly opcode = OPCODES.STORE_IND_U16
   readonly name = 'STORE_IND_U16'
   execute(context: InstructionContext): InstructionResult {
-
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
         context.instruction.operands,
@@ -379,7 +381,9 @@ export class STORE_IND_U64Instruction extends BaseInstruction {
       registerA,
       registerB,
       immediateX,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       registerAValue: registerAValue.toString(),
       registerBValue: registerBValue.toString(),
       address: address.toString(),
@@ -429,16 +433,12 @@ export class LOAD_IND_U8Instruction extends BaseInstruction {
 
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 8-bit unsigned value from memory
@@ -479,7 +479,7 @@ export class LOAD_IND_U8Instruction extends BaseInstruction {
  *
  * Gray Paper pvm.tex line 484:
  * reg'_A = unsigned{signedn{1}{memr_{\reg_B + \immed_X}}}
- * 
+ *
  * signedn{1}(x) = signfunc{1}(x) = x if x < 2^7, else x - 2^8
  * unsigned{} converts signed value back to unsigned 64-bit
  */
@@ -508,25 +508,24 @@ export class LOAD_IND_I8Instruction extends BaseInstruction {
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-    context.log('LOAD_IND_I8: Load from register + immediate address (8-bit signed)', {
-      registerA,
-      registerB,
-      immediateX,
-      address,
-    })
+    context.log(
+      'LOAD_IND_I8: Load from register + immediate address (8-bit signed)',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        address,
+      },
+    )
 
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 8-bit value from memory
@@ -554,14 +553,20 @@ export class LOAD_IND_I8Instruction extends BaseInstruction {
 
     // Gray Paper: memr_{\reg_B + \immed_X} - read single byte
     const decodedValue = BigInt(bytes[0]) & 0xffn
-    
+
     // Gray Paper: signedn{1}(x) = signfunc{1}(x) = x if x < 2^7, else x - 2^8
-    const signedValue = decodedValue < 0x80n ? decodedValue : decodedValue - 0x100n
-    
+    const signedValue =
+      decodedValue < 0x80n ? decodedValue : decodedValue - 0x100n
+
     // Gray Paper: unsigned{} converts signed value back to unsigned 64-bit
-    const unsignedValue = signedValue < 0n ? signedValue + 2n ** 64n : signedValue
-    
-    this.setRegisterValueWith64BitResult(context.registers, registerA, unsignedValue)
+    const unsignedValue =
+      signedValue < 0n ? signedValue + 2n ** 64n : signedValue
+
+    this.setRegisterValueWith64BitResult(
+      context.registers,
+      registerA,
+      unsignedValue,
+    )
 
     // Interaction already tracked with value above
     return { resultCode: null }
@@ -624,22 +629,27 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
     }
 
     const value = this.bytesToBigIntLE(bytes)
-    
+
     // Log BEFORE modification to capture the before state
     const beforeValue = context.registers[registerA]
-    context.log('LOAD_IND_U16: Load from register + immediate address (16-bit unsigned)', {
-      operands: Array.from(context.instruction.operands),
-      registerB,
-      registerA,
-      immediateX,
-      registerBValue,
-      address,
-      value,
-      bytesReadFromMemory: bytes,
-      beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-      pc: context.pc,
-    })
+    context.log(
+      'LOAD_IND_U16: Load from register + immediate address (16-bit unsigned)',
+      {
+        operands: Array.from(context.instruction.operands),
+        registerB,
+        registerA,
+        immediateX,
+        registerBValue,
+        address,
+        value,
+        bytesReadFromMemory: bytes,
+        beforeValue: beforeValue.toString(),
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+        pc: context.pc,
+      },
+    )
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, value)
 
@@ -668,7 +678,7 @@ export class LOAD_IND_U16Instruction extends BaseInstruction {
  *
  * Gray Paper pvm.tex line 486:
  * reg'_A = unsigned{signedn{2}{decode[2](mem[reg_B + immed_X:2])}}
- * 
+ *
  * signedn{2}(x) = signfunc{2}(x) = x if x < 2^15, else x - 2^16
  * unsigned{} converts signed value back to unsigned 64-bit
  * TODO: verify against pvm.tex
@@ -697,25 +707,24 @@ export class LOAD_IND_I16Instruction extends BaseInstruction {
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-    context.log('LOAD_IND_I16: Load from registerB + immediateX address to registerA (16-bit signed)', {
-      registerB,
-      registerA,
-      immediateX,
-      address,
-    })
+    context.log(
+      'LOAD_IND_I16: Load from registerB + immediateX address to registerA (16-bit signed)',
+      {
+        registerB,
+        registerA,
+        immediateX,
+        address,
+      },
+    )
 
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 16-bit value from memory (little-endian)
@@ -740,17 +749,23 @@ export class LOAD_IND_I16Instruction extends BaseInstruction {
         },
       }
     }
-    
+
     // Gray Paper: decode[2](mem[...]) - decode 2 bytes as little-endian
     const decodedValue = this.bytesToBigIntLE(bytes) & 0xffffn
-    
+
     // Gray Paper: signedn{2}(x) = signfunc{2}(x) = x if x < 2^15, else x - 2^16
-    const signedValue = decodedValue < 0x8000n ? decodedValue : decodedValue - 0x10000n
-    
+    const signedValue =
+      decodedValue < 0x8000n ? decodedValue : decodedValue - 0x10000n
+
     // Gray Paper: unsigned{} converts signed value back to unsigned 64-bit
-    const unsignedValue = signedValue < 0n ? signedValue + 2n ** 64n : signedValue
-    
-    this.setRegisterValueWith64BitResult(context.registers, registerA, unsignedValue)
+    const unsignedValue =
+      signedValue < 0n ? signedValue + 2n ** 64n : signedValue
+
+    this.setRegisterValueWith64BitResult(
+      context.registers,
+      registerA,
+      unsignedValue,
+    )
 
     // Interaction already tracked with value above
     return { resultCode: null }
@@ -782,33 +797,33 @@ export class LOAD_IND_U32Instruction extends BaseInstruction {
     // This matches JUMP_IND behavior: (reg_A + immed_X) mod 2^32
     const address = (registerBValue + immediateX) & 0xffffffffn
 
-    context.log('LOAD_IND_U32: Load from registerB + immediateX address to registerA (32-bit unsigned)', {
-      registerB,
-      registerA,
-      immediateX,
-      address,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-      pc: context.pc,
-    })
+    context.log(
+      'LOAD_IND_U32: Load from registerB + immediateX address to registerA (32-bit unsigned)',
+      {
+        registerB,
+        registerA,
+        immediateX,
+        address,
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+        pc: context.pc,
+      },
+    )
 
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('LOAD_IND_U32: Address < 2^16, returning PANIC')
       return { resultCode: RESULT_CODES.PANIC }
     }
 
-
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 32-bit unsigned value from memory (little-endian)
@@ -847,7 +862,7 @@ export class LOAD_IND_U32Instruction extends BaseInstruction {
  *
  * Gray Paper pvm.tex line 488:
  * reg'_A = unsigned{signedn{4}{decode[4](mem[reg_B + immed_X:4])}}
- * 
+ *
  * signedn{4}(x) = signfunc{4}(x) = x if x < 2^31, else x - 2^32
  * unsigned{} converts signed value back to unsigned 64-bit
  */
@@ -877,31 +892,32 @@ export class LOAD_IND_I32Instruction extends BaseInstruction {
 
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 32-bit value from memory (little-endian)
     const [bytes, faultAddress] = context.ram.readOctets(address, 4n)
-    context.log('LOAD_IND_I32: Load from registerB + immediateX address to registerA (32-bit signed)', {
-      registerA,
-      registerB,
-      immediateX,
-      address,
-      bytesReadFromMemory: bytes,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-      pc: context.pc,
-      faultAddress: faultAddress?.toString(),
-      bytes: bytes ? Array.from(bytes) : [],
-    })
+    context.log(
+      'LOAD_IND_I32: Load from registerB + immediateX address to registerA (32-bit signed)',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        address,
+        bytesReadFromMemory: bytes,
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+        pc: context.pc,
+        faultAddress: faultAddress?.toString(),
+        bytes: bytes ? Array.from(bytes) : [],
+      },
+    )
     if (faultAddress) {
       return {
         resultCode: RESULT_CODES.FAULT,
@@ -922,17 +938,23 @@ export class LOAD_IND_I32Instruction extends BaseInstruction {
         },
       }
     }
-    
+
     // Gray Paper: decode[4](mem[...]) - decode 4 bytes as little-endian
     const decodedValue = this.bytesToBigIntLE(bytes) & 0xffffffffn
-    
+
     // Gray Paper: signedn{4}(x) = signfunc{4}(x) = x if x < 2^31, else x - 2^32
-    const signedValue = decodedValue < 0x80000000n ? decodedValue : decodedValue - 0x100000000n
-    
+    const signedValue =
+      decodedValue < 0x80000000n ? decodedValue : decodedValue - 0x100000000n
+
     // Gray Paper: unsigned{} converts signed value back to unsigned 64-bit
-    const unsignedValue = signedValue < 0n ? signedValue + 2n ** 64n : signedValue
-    
-    this.setRegisterValueWith64BitResult(context.registers, registerA, unsignedValue)
+    const unsignedValue =
+      signedValue < 0n ? signedValue + 2n ** 64n : signedValue
+
+    this.setRegisterValueWith64BitResult(
+      context.registers,
+      registerA,
+      unsignedValue,
+    )
 
     // Interaction already tracked with value above
     return { resultCode: null }
@@ -972,16 +994,12 @@ export class LOAD_IND_U64Instruction extends BaseInstruction {
 
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        address,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(address, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     // Load 64-bit unsigned value from memory (little-endian)
@@ -1025,16 +1043,19 @@ export class LOAD_IND_U64Instruction extends BaseInstruction {
       )
     }
 
-    context.log('LOAD_IND_U64: Load from registerB + immediateX address to registerA (64-bit unsigned)', {
-      registerA,
-      registerB,
-      registerBValue,
-      immediateX,
-      address,
-      storedValueInRegisterA: value,
-      bytesReadFromMemory: bytes,
-      pc: context.pc,
-    })
+    context.log(
+      'LOAD_IND_U64: Load from registerB + immediateX address to registerA (64-bit unsigned)',
+      {
+        registerA,
+        registerB,
+        registerBValue,
+        immediateX,
+        address,
+        storedValueInRegisterA: value,
+        bytesReadFromMemory: bytes,
+        pc: context.pc,
+      },
+    )
     return { resultCode: null }
   }
 }

@@ -30,8 +30,8 @@
  * common integer sizes and memory alignment requirements.
  */
 
-import type { DecodingResult, FixedLengthSize, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type { DecodingResult, FixedLengthSize, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Encode natural number using fixed-length little-endian encoding

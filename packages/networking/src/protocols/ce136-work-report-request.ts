@@ -5,20 +5,20 @@
  * This is a Common Ephemeral (CE) stream for requesting missing work reports.
  */
 
+import { decodeWorkReport, encodeWorkReport } from '@pbnjam/codec'
 import {
   bytesToHex,
   type EventBusService,
   type Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { decodeWorkReport, encodeWorkReport } from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
   WorkReportRequest,
   WorkReportResponse,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

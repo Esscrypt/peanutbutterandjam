@@ -1,9 +1,9 @@
-import { bytesToHex } from '@pbnj/core'
+import { bytesToHex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   ReadParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -46,7 +46,7 @@ export class ReadHostFunction extends BaseHostFunction {
     const serviceAccount =
       requestedServiceId === params.serviceId
         ? params.serviceAccount
-        : params.accounts.get(requestedServiceId) ?? null
+        : (params.accounts.get(requestedServiceId) ?? null)
 
     const keyOffset = context.registers[8]
     const keyLength = context.registers[9]

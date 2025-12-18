@@ -333,5 +333,5 @@ export interface Validator {
   isActive: boolean
 }
 
-// Note: Genesis types moved to @pbnj/types/genesis and @pbnj/types/genesis-config
+// Note: Genesis types moved to @pbnjam/types/genesis and @pbnjam/types/genesis-config
 // for Gray Paper compliance. Use those instead of non-compliant types.

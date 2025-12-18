@@ -1,5 +1,5 @@
 /**
- * @pbnj/assurance
+ * @pbnjam/assurance
  *
  * Assurance signature creation and validation for JAM protocol
  */

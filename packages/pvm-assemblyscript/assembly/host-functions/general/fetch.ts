@@ -11,11 +11,9 @@ import { PVM } from '../../pvm'
 import {
   AUTHORIZATION_CONSTANTS,
   DEPOSIT_CONSTANTS,
-  GAS_CONSTANTS,
   HISTORY_CONSTANTS,
   SEGMENT_CONSTANTS,
   SERVICE_CONSTANTS,
-  TICKET_CONSTANTS,
   TIME_CONSTANTS,
   TRANSFER_CONSTANTS,
   WORK_PACKAGE_CONSTANTS,
@@ -75,32 +73,38 @@ export class FetchHostFunction extends BaseHostFunction {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
     } else {
-      // Write data to memory
-      // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
-      // Note: When length = 0, it means "all available data" (common API pattern)
-      // First clamp fromOffset to available data length
+      // Gray Paper pvm_invocations.tex lines 363-370:
+      // f = min(registers_8, len(v))
+      // l = min(registers_9, len(v) - f)
+      // (execst', registers'_7, memory'[o:l]) ≡ {
+      //   (panic, registers_7, memory[o:l])  when Nrange{o}{l} ⊄ writable(memory)
+      //   (continue, NONE, memory[o:l])       when v = none
+      //   (continue, len(v), v[f:l])          otherwise
+      // }
       const clampedFromOffset = min(i32(fromOffset), fetchedData.length)
-      // Then calculate available length after fromOffset
       const availableLength = fetchedData.length - clampedFromOffset
-      // Finally clamp requested length to available data
-      // If length = 0, use all available data; otherwise use min(length, availableLength)
-      const actualLength = length === u64(0) ? availableLength : min(i32(length), availableLength)
-      const dataToWrite = fetchedData.slice(
-        clampedFromOffset,
-        clampedFromOffset + actualLength,
-      )
+      // Gray Paper: l = min(registers_9, len(v) - f)
+      // When registers_9 = 0, l = 0 (no write operation)
+      const actualLength = min(i32(length), availableLength)
 
-      // Gray Paper: Empty range (length = 0) is always writable
-      // An empty set is a subset of any set, so \Nrange{o}{0} ⊆ \writable{\memory} is always true
-      if (dataToWrite.length > 0) {
-        // Write data (may be empty if length was 0 or fromOffset beyond data)
+      // Only perform memory write when l > 0
+      // Gray Paper: Empty range (l = 0) is always writable, but we don't write anything
+      if (actualLength > 0) {
+        const dataToWrite = fetchedData.slice(
+          clampedFromOffset,
+          clampedFromOffset + actualLength,
+        )
+
+        // Check if memory range is writable before writing
+        // Gray Paper: panic when Nrange{o}{l} ⊄ writable(memory)
         const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
         if (writeResult.hasFault) {
           return new HostFunctionResult(RESULT_CODES.PANIC)
         }
       }
 
-      // Return length of fetched data
+      // Return length of fetched data (len(v))
+      // Gray Paper: registers'_7 = len(v)
       context.registers[7] = u64(fetchedData.length)
     }
 
@@ -325,6 +329,8 @@ export class FetchHostFunction extends BaseHostFunction {
         // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
         // Returns: encode(i) when i ≠ none
         // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
+        // Note: workItemsSequence should always be an array (never null) during accumulation
+        // If it's null, return null (i = none). If it's an empty array, return encoded empty sequence.
         if(!params.workItemsSequence) {
           return null
         }
@@ -334,6 +340,8 @@ export class FetchHostFunction extends BaseHostFunction {
         for (let i: i32 = 0; i < workItemsSequence14.length; i++) {
           encodedWorkItems[i] = encodeWorkItem(workItemsSequence14[i])
         }
+        // encodeVariableSequence will encode length prefix (0 for empty array) + items
+        // This always returns a Uint8Array (even for empty sequence, it's length prefix 0x00)
         const encoded = encodeVariableSequence(encodedWorkItems)
         return encoded
       }
@@ -409,19 +417,23 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 8
 
     // encode[2]{Ccorecount = 341}
-    const numCores = this.pvmInstance ? this.pvmInstance!.configNumCores : 341
+    if (!this.pvmInstance) {
+      abort('getSystemConstants: pvmInstance not set - config values required')
+      unreachable()
+    }
+    const numCores = this.pvmInstance!.configNumCores
     const coreCountBytes = this.encodeU16(u16(numCores))
     buffer.set(coreCountBytes, offset)
     offset += 2
 
     // encode[4]{Cexpungeperiod = 19200}
-    const preimageExpungePeriod = this.pvmInstance ? this.pvmInstance!.configPreimageExpungePeriod : 19200
+    const preimageExpungePeriod = this.pvmInstance!.configPreimageExpungePeriod
     const expungePeriodBytes = this.encodeU32(preimageExpungePeriod)
     buffer.set(expungePeriodBytes, offset)
     offset += 4
 
     // encode[4]{Cepochlen = 600}
-    const epochDuration = this.pvmInstance ? this.pvmInstance!.configEpochDuration : 600
+    const epochDuration = this.pvmInstance!.configEpochDuration
     const epochLenBytes = this.encodeU32(epochDuration)
     buffer.set(epochLenBytes, offset)
     offset += 4
@@ -437,13 +449,13 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 8
 
     // encode[8]{Cpackagerefgas = configMaxRefineGas}
-    const maxRefineGas = this.pvmInstance ? this.pvmInstance!.configMaxRefineGas : u64(5000000000)
+    const maxRefineGas = this.pvmInstance!.configMaxRefineGas
     const packageRefGasBytes = this.encodeU64(maxRefineGas)
     buffer.set(packageRefGasBytes, offset)
     offset += 8
 
     // encode[8]{Cblockaccgas = 3500000000}
-    const maxBlockGas = this.pvmInstance ? this.pvmInstance!.configMaxBlockGas : u64(3500000000)
+    const maxBlockGas = this.pvmInstance!.configMaxBlockGas
     const blockAccGasBytes = this.encodeU64(maxBlockGas)
     buffer.set(blockAccGasBytes, offset)
     offset += 8
@@ -464,19 +476,19 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cmaxblocktickets = configMaxTicketsPerExtrinsic}
-    const maxTicketsPerExtrinsic = this.pvmInstance ? this.pvmInstance!.configMaxTicketsPerExtrinsic : 16
+    const maxTicketsPerExtrinsic = this.pvmInstance!.configMaxTicketsPerExtrinsic
     const maxBlockTicketsBytes = this.encodeU16(u16(maxTicketsPerExtrinsic))
     buffer.set(maxBlockTicketsBytes, offset)
     offset += 2
 
     // encode[4]{Cmaxlookupanchorage = 14400}
-    const maxLookupAnchorage = this.pvmInstance ? this.pvmInstance!.configMaxLookupAnchorage : TIME_CONSTANTS.C_MAXLOOKUPANCHORAGE
+    const maxLookupAnchorage = this.pvmInstance!.configMaxLookupAnchorage
     const maxLookupAnchorageBytes = this.encodeU32(maxLookupAnchorage)
     buffer.set(maxLookupAnchorageBytes, offset)
     offset += 4
 
     // encode[2]{Cticketentries = 2}
-    const ticketsPerValidator = this.pvmInstance ? this.pvmInstance!.configTicketsPerValidator : 2
+    const ticketsPerValidator = this.pvmInstance!.configTicketsPerValidator
     const ticketEntriesBytes = this.encodeU16(ticketsPerValidator)
     buffer.set(ticketEntriesBytes, offset)
     offset += 2
@@ -487,11 +499,9 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cslotseconds = 6}
-    // Convert from milliseconds to seconds (configSlotDuration is in milliseconds)
-    // const slotDuration = this.pvmInstance ? this.pvmInstance!.configSlotDuration : 6
-    const slotDurationMs = this.pvmInstance ? this.pvmInstance!.configSlotDuration : 6
-    const slotDurationSeconds = slotDurationMs / 1000 // Convert milliseconds to seconds
-    const slotSecondsBytes = this.encodeU16(u16(slotDurationSeconds))
+    // Note: configSlotDuration is in seconds (not milliseconds like TypeScript)
+    const slotDuration = this.pvmInstance!.configSlotDuration
+    const slotSecondsBytes = this.encodeU16(slotDuration)
     buffer.set(slotSecondsBytes, offset)
     offset += 2
 
@@ -501,7 +511,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Crotationperiod = 10}
-    const rotationPeriod = this.pvmInstance ? this.pvmInstance!.configRotationPeriod : 10
+    const rotationPeriod = this.pvmInstance!.configRotationPeriod
     const rotationPeriodBytes = this.encodeU16(rotationPeriod)
     buffer.set(rotationPeriodBytes, offset)
     offset += 2
@@ -517,7 +527,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 2
 
     // encode[2]{Cvalcount = 1023}
-    const numValidators = this.pvmInstance ? this.pvmInstance!.configNumValidators : 1023
+    const numValidators = this.pvmInstance!.configNumValidators
     const valCountBytes = this.encodeU16(numValidators)
     buffer.set(valCountBytes, offset)
     offset += 2
@@ -538,7 +548,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Cecpiecesize = 684}
-    const ecPieceSize = this.pvmInstance ? this.pvmInstance!.configEcPieceSize : SEGMENT_CONSTANTS.C_ECPIECESIZE
+    const ecPieceSize = this.pvmInstance!.configEcPieceSize
     const ecPieceSizeBytes = this.encodeU32(ecPieceSize)
     buffer.set(ecPieceSizeBytes, offset)
     offset += 4
@@ -549,7 +559,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Csegmentecpieces = configNumEcPiecesPerSegment}
-    const numEcPiecesPerSegment = this.pvmInstance ? this.pvmInstance!.configNumEcPiecesPerSegment : 6
+    const numEcPiecesPerSegment = this.pvmInstance!.configNumEcPiecesPerSegment
     const segmentEcPiecesBytes = this.encodeU32(numEcPiecesPerSegment)
     buffer.set(segmentEcPiecesBytes, offset)
     offset += 4
@@ -570,7 +580,7 @@ export class FetchHostFunction extends BaseHostFunction {
     offset += 4
 
     // encode[4]{Cepochtailstart = configContestDuration}
-    const contestDuration = this.pvmInstance ? this.pvmInstance!.configContestDuration : 500
+    const contestDuration = this.pvmInstance!.configContestDuration
     const epochTailStartBytes = this.encodeU32(contestDuration)
     buffer.set(epochTailStartBytes, offset)
 

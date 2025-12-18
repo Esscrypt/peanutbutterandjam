@@ -7,12 +7,12 @@
  * 2. Message content encoded as per regular JAM serialization
  */
 
-import { numberToBytes } from '@pbnj/core'
 import {
   encodeFixedLength,
   encodeNatural,
   encodeVariableLength,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
+import { numberToBytes } from '@pbnjam/core'
 import type {
   AccumulateCost,
   BlockOutline,
@@ -27,8 +27,8 @@ import type {
   WorkItemOutline,
   WorkPackageOutline,
   WorkReportOutline,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Concatenate multiple Uint8Arrays

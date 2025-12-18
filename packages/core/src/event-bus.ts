@@ -44,8 +44,8 @@ import type {
   WorkReportOutline,
   WorkReportRequest,
   WorkReportResponse,
-} from '@pbnj/types'
-import { BaseService, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { logger } from './logger'
 

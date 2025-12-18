@@ -50,9 +50,9 @@ import {
   type Hex,
   hexToBytes,
   numberToBytes,
-} from '@pbnj/core'
-import type { DecodingResult, Safe, WorkReport } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/core'
+import type { DecodingResult, Safe, WorkReport } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {

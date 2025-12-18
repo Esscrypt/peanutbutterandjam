@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import {
   encodeImplications,
   decodeImplications,
@@ -15,10 +15,10 @@ import {
   encodePartialState,
   decodePartialState,
   type ImplicationsPair,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import { ConfigService, type IConfigService } from '../../../infra/node/services/config-service'
-import { hexToBytes, type Hex } from '@pbnj/core'
-import type { Implications, PartialState, ServiceAccount, PreimageRequestStatus } from '@pbnj/types'
+import { hexToBytes, type Hex } from '@pbnjam/core'
+import type { Implications, PartialState, ServiceAccount, PreimageRequestStatus } from '@pbnjam/types'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

@@ -6,13 +6,14 @@
  */
 
 import { existsSync } from 'node:fs'
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import type {
   ChainSpecJson,
   ChainSpecValidator,
   GenesisHeaderState,
   GenesisJson,
   Hex,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import {
   computeGenesisHeaderHash,
   convertGenesisToBlockHeader,
@@ -20,15 +21,14 @@ import {
   loadGenesisHeaderAndComputeHash,
   loadGenesisJson,
   parseBootnode,
-} from '@pbnj/genesis'
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
+} from '@pbnjam/genesis'
 import type {
   BlockHeader,
   IConfigService,
   ParsedBootnode,
   ValidatorKeyPair,
-} from '@pbnj/types'
-import { BaseService, type Safe, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, type Safe, safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Node Genesis Manager Service

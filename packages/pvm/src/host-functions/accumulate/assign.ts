@@ -1,4 +1,4 @@
-import type { HostFunctionResult, IConfigService } from '@pbnj/types'
+import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,

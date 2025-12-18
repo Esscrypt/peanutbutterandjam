@@ -27,24 +27,25 @@ import {
   EventBusService,
   Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+  logger,
+} from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
   type WorkReport,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
@@ -56,8 +57,18 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
 
+  // Initialize logger to ensure LOG host function messages are visible
+  logger.init()
+
   describe('Safrole Genesis', () => {
-    it('should parse genesis.json from traces/preimages_light', async () => {
+    // Run with both TypeScript and WASM executors
+    const executorTypes: Array<{ name: string; useWasm: boolean }> = [
+      { name: 'TypeScript', useWasm: false },
+      { name: 'WASM', useWasm: true },
+    ]
+
+    for (const executorType of executorTypes) {
+      it(`should process all blocks with ${executorType.name} executor`, async () => {
       const genesisJsonPath = path.join(
         WORKSPACE_ROOT,
         'submodules/jam-test-vectors/traces/preimages_light/genesis.json',
@@ -176,15 +187,16 @@ describe('Genesis Parse Tests', () => {
 
       const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
       const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
+      
+      // Create PVM instance for this executor type
       const accumulatePVM = new AccumulatePVM({
         hostFunctionRegistry,
         accumulateHostFunctionRegistry,
         configService: configService,
         entropyService: entropyService,
-        pvmOptions: { gasCounter: 10000n },
-        useWasm: true,
+        pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+        useWasm: executorType.useWasm,
       })
-
 
       const statisticsService = new StatisticsService({
         eventBusService: eventBusService,
@@ -1014,21 +1026,22 @@ describe('Genesis Parse Tests', () => {
             console.log('='.repeat(80))
           }
 
-          console.log(`✅ Block ${blockNumber} imported and verified successfully`)
+          console.log(`✅ [${executorType.name}] Block ${blockNumber} imported and verified successfully`)
 
           blockNumber++
         } catch (error: any) {
           // If file doesn't exist, stop processing
           if (error.code === 'ENOENT') {
             hasMoreBlocks = false
-            console.log(`\n📋 Processed ${blockNumber - 1} blocks total`)
+            console.log(`\n📋 [${executorType.name}] Processed ${blockNumber - 1} blocks total`)
           } else {
             // Re-throw other errors
             throw error
           }
         }
       }
-    })
+      })
+    }
   })
 })
 

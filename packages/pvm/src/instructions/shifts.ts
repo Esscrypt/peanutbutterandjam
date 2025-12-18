@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -27,15 +27,18 @@ export class SHLO_L_IMM_32Instruction extends BaseInstruction {
     const shifted = registerValue << shiftAmount
     const result = shifted & 0xffffffffn // Mask to 32 bits
 
-    context.log('SHLO_L_IMM_32: Logical left shift of registerB by immediate (32-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      shiftAmount,
-      shifted,
-      result,
-    })
+    context.log(
+      'SHLO_L_IMM_32: Logical left shift of registerB by immediate (32-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerValue,
+        shiftAmount,
+        shifted,
+        result,
+      },
+    )
     this.setRegisterValueWith32BitResult(
       context.registers,
       registerA, // Destination register
@@ -44,7 +47,6 @@ export class SHLO_L_IMM_32Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -72,15 +74,18 @@ export class SHLO_R_IMM_32Instruction extends BaseInstruction {
     const shifted = registerValue >> shiftAmount // Right shift for bigint
     const result = shifted & 0xffffffffn // Mask to 32 bits
 
-    context.log('SHLO_R_IMM_32: Logical right shift of registerB by immediate (32-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      shiftAmount,
-      shifted,
-      result,
-    })
+    context.log(
+      'SHLO_R_IMM_32: Logical right shift of registerB by immediate (32-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerValue,
+        shiftAmount,
+        shifted,
+        result,
+      },
+    )
     this.setRegisterValueWith32BitResult(
       context.registers,
       registerA, // Destination register
@@ -89,7 +94,6 @@ export class SHLO_R_IMM_32Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -120,16 +124,19 @@ export class SHAR_R_IMM_32Instruction extends BaseInstruction {
     const shifted = signedValue >> shiftAmount // Arithmetic right shift
     const result = shifted & 0xffffffffn // Convert back to unsigned 32-bit
 
-    context.log('SHAR_R_IMM_32: Arithmetic right shift of registerB by immediate (32-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      signedValue,
-      shiftAmount,
-      shifted,
-      result,
-    })
+    context.log(
+      'SHAR_R_IMM_32: Arithmetic right shift of registerB by immediate (32-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerValue,
+        signedValue,
+        shiftAmount,
+        shifted,
+        result,
+      },
+    )
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
     return { resultCode: null }

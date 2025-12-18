@@ -4,7 +4,7 @@
  * LOAD_IMM_64, STORE_IMM variants, LOAD/STORE variants
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { INIT_CONFIG, OPCODES, RESULT_CODES } from '../config'
 import { PVMRAM } from '../ram'
 import { BaseInstruction } from './base'
@@ -25,11 +25,11 @@ export class LOAD_IMM_64Instruction extends BaseInstruction {
     // r_A = min(12, instructions[ι+1] mod 16)
     // immed_X = decode[8]{instructions[ι+2:8]} - decode 8 bytes as unsigned (no sign extension)
     const registerA = this.getRegisterA(context.instruction.operands)
-    
+
     // Read 8 bytes (64 bits) as unsigned little-endian
     // Gray Paper: decode[8] means read 8 bytes without sign extension
     let immediateX = 0n
-    for (let i = 0; i < 8 && (1 + i) < context.instruction.operands.length; i++) {
+    for (let i = 0; i < 8 && 1 + i < context.instruction.operands.length; i++) {
       immediateX |= BigInt(context.instruction.operands[1 + i]) << BigInt(i * 8)
     }
 
@@ -312,7 +312,9 @@ export class LOAD_IMMInstruction extends BaseInstruction {
       registerA,
       immediateX: immediateX.toString(),
       beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       pc: context.pc,
     })
 
@@ -324,7 +326,9 @@ export class LOAD_IMMInstruction extends BaseInstruction {
       registerA,
       immediateX: immediateX.toString(),
       afterValue: context.registers[registerA].toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       pc: context.pc,
     })
 
@@ -357,7 +361,9 @@ export class LOAD_U8Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     const [bytes, faultAddress] = context.ram.readOctets(immediateX, 1n)
@@ -433,7 +439,9 @@ export class LOAD_I8Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     const [bytes, faultAddress] = context.ram.readOctets(immediateX, 1n)
@@ -507,7 +515,9 @@ export class LOAD_U16Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     const [bytes, faultAddress] = context.ram.readOctets(immediateX, 2n)
@@ -581,7 +591,9 @@ export class LOAD_I16Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     const [bytes, faultAddress] = context.ram.readOctets(immediateX, 2n)
@@ -654,16 +666,21 @@ export class LOAD_U32Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     if (immediateX < INIT_CONFIG.ZONE_SIZE) {
       context.log('LOAD_U32: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_read',
-        address: immediateX,
-        details: 'Memory not readable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: immediateX,
+          details: 'Memory not readable',
+        },
+      }
     }
     const [bytes, faultAddress] = context.ram.readOctets(immediateX, 4n)
     if (faultAddress) {
@@ -733,11 +750,14 @@ export class LOAD_I32Instruction extends BaseInstruction {
     const address = immediateX & 0xffffffffn
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('LOAD_I32: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_read',
-        address: address,
-        details: 'Memory not readable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: address,
+          details: 'Memory not readable',
+        },
+      }
     }
 
     context.log('Executing LOAD_I32 instruction', {
@@ -746,7 +766,9 @@ export class LOAD_I32Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     const [bytes, faultAddress] = context.ram.readOctets(address, 4n)
@@ -815,24 +837,23 @@ export class LOAD_U64Instruction extends BaseInstruction {
 
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('LOAD_U64: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_read',
-        address: immediateX,
-        details: 'Memory not readable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_read',
+          address: immediateX,
+          details: 'Memory not readable',
+        },
+      }
     }
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
-      context.ram.trackInteraction(
-        immediateX,
-        'read',
-        {
-          pc: context.pc,
-          opcode: context.instruction.opcode,
-          name: this.name,
-          operands: Array.from(context.instruction.operands),
-        },
-      )
+      context.ram.trackInteraction(immediateX, 'read', {
+        pc: context.pc,
+        opcode: context.instruction.opcode,
+        name: this.name,
+        operands: Array.from(context.instruction.operands),
+      })
     }
 
     const [bytes, faultAddress] = context.ram.readOctets(address, 8n)
@@ -842,7 +863,9 @@ export class LOAD_U64Instruction extends BaseInstruction {
       pc: context.pc,
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       bytes: bytes ? Array.from(bytes) : [],
       faultAddress: faultAddress?.toString(),
     })
@@ -927,11 +950,14 @@ export class STORE_U8Instruction extends BaseInstruction {
 
     if (immediateX < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_U8: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: immediateX,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: immediateX,
+          details: 'Memory not writable',
+        },
+      }
     }
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
@@ -999,11 +1025,14 @@ export class STORE_U16Instruction extends BaseInstruction {
 
     if (immediateX < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_U16: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: immediateX,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: immediateX,
+          details: 'Memory not writable',
+        },
+      }
     }
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
@@ -1067,11 +1096,14 @@ export class STORE_U32Instruction extends BaseInstruction {
 
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_U32: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
@@ -1136,11 +1168,14 @@ export class STORE_U64Instruction extends BaseInstruction {
 
     if (immediateX < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_U64: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: immediateX,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: immediateX,
+          details: 'Memory not writable',
+        },
+      }
     }
     // Track interaction with instruction context
     if (context.ram instanceof PVMRAM) {
@@ -1162,12 +1197,15 @@ export class STORE_U64Instruction extends BaseInstruction {
       immediateX,
       this.bigIntToBytesLE(value, 8),
     )
-    context.log('STORE_U64: Store 64-bit from register A to immediate address', {
-      registerA,
-      immediateX,
-      value,
-      faultAddress: faultAddress?.toString(),
-    })
+    context.log(
+      'STORE_U64: Store 64-bit from register A to immediate address',
+      {
+        registerA,
+        immediateX,
+        value,
+        faultAddress: faultAddress?.toString(),
+      },
+    )
     if (faultAddress) {
       return {
         resultCode: RESULT_CODES.FAULT,
@@ -1213,11 +1251,14 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
 
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_IMM_IND_U8: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     const value = immediateY & 0xffn
@@ -1243,13 +1284,16 @@ export class STORE_IMM_IND_U8Instruction extends BaseInstruction {
       this.bigIntToBytesLE(value, 1),
     )
 
-    context.log('STORE_IMM_IND_U8: Store 8-bit immediate to register + immediate address', {
-      registerA,
-      registerAValue,
-      address,
-      value,
-      faultAddress: faultAddress?.toString(),
-    })
+    context.log(
+      'STORE_IMM_IND_U8: Store 8-bit immediate to register + immediate address',
+      {
+        registerA,
+        registerAValue,
+        address,
+        value,
+        faultAddress: faultAddress?.toString(),
+      },
+    )
 
     if (faultAddress) {
       return {
@@ -1293,21 +1337,27 @@ export class STORE_IMM_IND_U16Instruction extends BaseInstruction {
     )
     const address = registerAValue + immediateX
 
-    context.log('STORE_IMM_IND_U16: Store 16-bit immediate to register + immediate address', {
-      registerA,
-      registerAValue,
-      immediateX,
-      address,
-    })
+    context.log(
+      'STORE_IMM_IND_U16: Store 16-bit immediate to register + immediate address',
+      {
+        registerA,
+        registerAValue,
+        immediateX,
+        address,
+      },
+    )
 
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_IMM_IND_U16: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     // mem'[reg_A + immed_X] = immed_Y mod 2^16
@@ -1380,11 +1430,14 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_IMM_IND_U32: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     // mem'[reg_A + immed_X] = immed_Y mod 2^32
@@ -1406,11 +1459,14 @@ export class STORE_IMM_IND_U32Instruction extends BaseInstruction {
       )
     }
 
-    context.log('STORE_IMM_IND_U32: Store 32-bit immediate to register + immediate address', {
-      registerA,
-      address,
-      value,
-    })
+    context.log(
+      'STORE_IMM_IND_U32: Store 32-bit immediate to register + immediate address',
+      {
+        registerA,
+        address,
+        value,
+      },
+    )
 
     const faultAddress = context.ram.writeOctets(
       address,
@@ -1461,11 +1517,14 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
     // Check memory access - addresses < 2^16 cause PANIC
     if (address < INIT_CONFIG.ZONE_SIZE) {
       context.log('STORE_IMM_IND_U64: Address < 2^16, returning PANIC')
-      return { resultCode: RESULT_CODES.PANIC, faultInfo: {
-        type: 'memory_write',
-        address: address,
-        details: 'Memory not writable',
-      } }
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+          address: address,
+          details: 'Memory not writable',
+        },
+      }
     }
 
     // mem'[reg_A + immed_X] = immed_Y mod 2^64
@@ -1489,17 +1548,20 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
 
     const bytes = this.bigIntToBytesLE(value, 8)
     const faultAddress = context.ram.writeOctets(address, bytes)
-    context.log('STORE_IMM_IND_U64: Store 64-bit immediate to register + immediate address', {
-      registerA,
-      immediateX,
-      immediateY,
-      registerAValue,
-      address,
-      value,
-      bytes: Array.from(bytes),
-      faultAddress: faultAddress?.toString(),
-      pc: context.pc,
-    })
+    context.log(
+      'STORE_IMM_IND_U64: Store 64-bit immediate to register + immediate address',
+      {
+        registerA,
+        immediateX,
+        immediateY,
+        registerAValue,
+        address,
+        value,
+        bytes: Array.from(bytes),
+        faultAddress: faultAddress?.toString(),
+        pc: context.pc,
+      },
+    )
     if (faultAddress) {
       return {
         resultCode: RESULT_CODES.FAULT,
@@ -1515,4 +1577,3 @@ export class STORE_IMM_IND_U64Instruction extends BaseInstruction {
     return { resultCode: null }
   }
 }
-

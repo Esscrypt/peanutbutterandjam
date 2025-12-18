@@ -30,16 +30,16 @@ import {
   bytesToHex,
   EventBusService,
   type Hex,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { StatisticsService } from '../../services/statistics-service'
 
 // Test vectors directory (relative to workspace root)

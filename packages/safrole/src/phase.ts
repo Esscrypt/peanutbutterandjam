@@ -1,4 +1,4 @@
-import type { IConfigService } from '@pbnj/types'
+import type { IConfigService } from '@pbnjam/types'
 
 /**
  * Calculate epoch and slot phase from slot number

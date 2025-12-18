@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeServiceAccount, decodeServiceAccount } from '../state/service-account'
-import type { ServiceAccountCore } from '@pbnj/types'
+import type { ServiceAccountCore } from '@pbnjam/types'
 
 describe('Service Account Serialization', () => {
   const mockServiceAccount: ServiceAccountCore = {

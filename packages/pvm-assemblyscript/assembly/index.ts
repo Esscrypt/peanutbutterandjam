@@ -183,6 +183,7 @@ export function accumulateInvocation(
   numValidators: i32,
   authQueueSize: i32,
   entropyAccumulator: Uint8Array,
+  encodedWorkItems: Uint8Array,
   configNumCores: i32 = 341,
   configPreimageExpungePeriod: u32 = 19200,
   configEpochDuration: u32 = 600,
@@ -209,6 +210,7 @@ export function accumulateInvocation(
     numValidators,
     authQueueSize,
     entropyAccumulator,
+    encodedWorkItems,
     configNumCores,
     configPreimageExpungePeriod,
     configEpochDuration,
@@ -239,6 +241,7 @@ export function setupAccumulateInvocation(
   numValidators: i32,
   authQueueSize: i32,
   entropyAccumulator: Uint8Array,
+  encodedWorkItems: Uint8Array,
   configNumCores: i32 = 341,
   configPreimageExpungePeriod: u32 = 19200,
   configEpochDuration: u32 = 600,
@@ -264,6 +267,7 @@ export function setupAccumulateInvocation(
     numValidators,
     authQueueSize,
     entropyAccumulator,
+    encodedWorkItems,
     configNumCores,
     configPreimageExpungePeriod,
     configEpochDuration,
@@ -281,6 +285,14 @@ export function setupAccumulateInvocation(
   )
 }
 
+/**
+ * Set work items sequence for FETCH host function
+ * This is called from the WASM executor to provide work items for selectors 14 and 15
+ */
+export function setWorkItemsSequence(workItems: Array<WorkItem> | null): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.setWorkItemsSequence(workItems)
+}
 
 export function runProgram(
 ): RunProgramResult {

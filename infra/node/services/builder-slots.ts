@@ -5,7 +5,7 @@
 //  * Handles builder registration, slot assignment, and connection management
 //  */
 
-// import type { NodeType, ValidatorMetadata } from '@pbnj/types'
+// import type { NodeType, ValidatorMetadata } from '@pbnjam/types'
 
 // /**
 //  * Builder information interface

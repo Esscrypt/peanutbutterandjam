@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/guarantor",
+  "name": "@pbnjam/guarantor",
   "version": "0.0.1",
   "description": "JAM Protocol Guarantor Implementation",
   "main": "./src/index.ts",
@@ -9,9 +9,9 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*",
-    "@pbnj/codec": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
     "@noble/ed25519": "^2.1.0",
     "viem": "^2.21.54"
   },

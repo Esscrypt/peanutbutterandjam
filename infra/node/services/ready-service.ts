@@ -13,15 +13,15 @@
  * - Dependency tracking: Each ready item has work report and dependencies
  */
 
-import { logger } from '@pbnj/core'
-import { calculateWorkReportHash } from '@pbnj/codec'
+import { calculateWorkReportHash } from '@pbnjam/codec'
+import { logger } from '@pbnjam/core'
 import {
   BaseService,
   type IConfigService,
   type Ready,
   type ReadyItem,
   type WorkReport,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 
 /**

@@ -27,7 +27,7 @@ import {
   hexToBytes,
   logger,
   type WorkReportProcessedEvent,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   Activity,
   Assurance,
@@ -39,8 +39,8 @@ import type {
   ServiceStats,
   ValidatorStats,
   WorkReport,
-} from '@pbnj/types'
-import { BaseService, SEGMENT_CONSTANTS, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, SEGMENT_CONSTANTS, safeResult } from '@pbnjam/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 
@@ -250,9 +250,12 @@ export class StatisticsService extends BaseService {
         exportCount: 0,
       }
       this.activity.serviceStats.set(serviceId, serviceStats)
-      logger.debug('[StatisticsService] Created new serviceStats entry for accumulation', {
-        serviceId: serviceId.toString(),
-      })
+      logger.debug(
+        '[StatisticsService] Created new serviceStats entry for accumulation',
+        {
+          serviceId: serviceId.toString(),
+        },
+      )
     }
 
     // Gray Paper: accumulation = accumulationstatistics[s]
@@ -536,10 +539,9 @@ export class StatisticsService extends BaseService {
     // - provision: created by updateServiceStatistics() when processing preimages
     // - refinement: created by updateServiceStatisticsFromReports() when processing work reports
     // - accumulation: created by AccumulationService.updateServiceAccumulationStats() when accumulation succeeds
-    // 
+    //
     // This ensures serviceStats only contains entries for services with actual non-zero activity,
     // not just services that appear in work reports or preimages but have no activity.
-
   }
 
   /**

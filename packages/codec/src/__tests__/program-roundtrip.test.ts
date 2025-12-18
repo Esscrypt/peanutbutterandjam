@@ -2,7 +2,7 @@ import { describe, test, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { hexToBytes } from '@pbnj/core'
+import { hexToBytes } from '@pbnjam/core'
 import {
   decodeProgram,
   decodeProgramFromPreimage,

@@ -34,14 +34,14 @@
  * the entire system's data remains accessible.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   Assurance,
   DecodingResult,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'

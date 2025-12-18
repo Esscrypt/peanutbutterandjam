@@ -8,13 +8,13 @@
 import { bls12_381 } from '@noble/curves/bls12-381'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2'
-import { BandersnatchCurveNoble } from '@pbnj/bandersnatch'
+import { BandersnatchCurve } from '@pbnjam/bandersnatch'
 import type {
   ConnectionEndpoint,
   KeyPair,
   ValidatorCredentials,
-} from '@pbnj/types'
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 import {
   deriveSecretSeeds,
   generateEd25519KeyPairFromSeed,
@@ -60,7 +60,7 @@ export function generateBandersnatchKeyPairFromSeed(
     }
 
     // Step 3: Reduce "v" modulo the prime order of the field to get the secret
-    const privateKeyScalar = mod(v, BandersnatchCurveNoble.CURVE_ORDER)
+    const privateKeyScalar = mod(v, BandersnatchCurve.CURVE_ORDER)
 
     // Ensure the scalar is not zero (invalid for bandersnatch)
     if (privateKeyScalar === 0n) {
@@ -71,14 +71,14 @@ export function generateBandersnatchKeyPairFromSeed(
       )
     }
 
-    // Generate public key using BandersnatchCurveNoble
-    const publicKeyPoint = BandersnatchCurveNoble.scalarMultiply(
-      BandersnatchCurveNoble.GENERATOR,
+    // Generate public key using BandersnatchCurve
+    const publicKeyPoint = BandersnatchCurve.scalarMultiply(
+      BandersnatchCurve.GENERATOR,
       privateKeyScalar,
     )
 
     // Convert public key point to bytes (32 bytes as per Gray Paper)
-    const publicKey = BandersnatchCurveNoble.pointToBytes(publicKeyPoint)
+    const publicKey = BandersnatchCurve.pointToBytes(publicKeyPoint)
 
     // Convert scalar to 32-byte little-endian format for private key
     const privateKeyBytes = new Uint8Array(32)

@@ -5,19 +5,19 @@
  * and executes a single accumulation using the WASM PVM implementation
  */
 
-import { logger, hexToBytes, blake2bHash, bytesToHex } from '@pbnj/core'
+import { logger, hexToBytes, blake2bHash, bytesToHex } from '@pbnjam/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { type PartialState, type ServiceAccount, type ImplicationsPair, type Implications } from '@pbnj/types'
+import { type PartialState, type ServiceAccount, type ImplicationsPair, type Implications } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
-import { encodeImplicationsPair, decodeImplicationsPair } from '@pbnj/codec'
-import { decodeProgramFromPreimage } from '@pbnj/codec'
+import { encodeImplicationsPair, decodeImplicationsPair } from '@pbnjam/codec'
+import { decodeProgramFromPreimage } from '@pbnjam/codec'
 import { describe, expect, beforeEach, test } from 'bun:test'
 import type { Hex } from 'viem'
-import { instantiate } from '../../../packages/pvm-assemblyscript/tests/wasmAsInit'
+import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
+import { PVMParser, InstructionRegistry } from '@pbnjam/pvm'
 
 const WORKSPACE_ROOT = process.cwd().includes('/packages/pvm')
   ? process.cwd().split('/packages/pvm')[0]

@@ -17,7 +17,8 @@
  * - Assignment is deterministic based on: entropy_2, thetime, and validator index
  */
 
-import { bytesToHex, type EventBusService, hexToBytes } from '@pbnj/core'
+import { calculateWorkPackageHash } from '@pbnjam/codec'
+import { bytesToHex, type EventBusService, hexToBytes } from '@pbnjam/core'
 import {
   createGuaranteeSignature,
   getAssignedCore,
@@ -25,9 +26,8 @@ import {
   sortGuaranteeSignatures,
   verifyGuaranteeSignature,
   verifyWorkReportDistributionSignature,
-} from '@pbnj/guarantor'
-import type { CE134WorkPackageSharingProtocol } from '@pbnj/networking'
-import { calculateWorkPackageHash } from '@pbnj/codec'
+} from '@pbnjam/guarantor'
+import type { CE134WorkPackageSharingProtocol } from '@pbnjam/networking'
 import type {
   Guarantee,
   GuaranteeSignature,
@@ -41,13 +41,13 @@ import type {
   WorkPackageSharing,
   WorkPackageSharingResponse,
   WorkReport,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   BaseService,
   safeError,
   safeResult,
   WORK_REPORT_CONSTANTS,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { AccumulationService } from './accumulation-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -160,7 +160,6 @@ export class GuarantorService extends BaseService {
     this.validatorIndex = validatorIndex
     return safeResult(true)
   }
-
 
   /**
    * Compute segments root mappings for a work package
@@ -1357,7 +1356,7 @@ export class GuarantorService extends BaseService {
         // Get recent history entry for anchor validation
         const recentEntry =
           this.recentHistoryService.getRecentHistoryForBlock(anchorHash)
-        
+
         // Gray Paper equation 335: Validate state_root matches
         const contextStateRoot = guarantee.report.context.state_root
         let expectedStateRoot: Hex | null = null
@@ -1375,7 +1374,11 @@ export class GuarantorService extends BaseService {
             if (genesisManager) {
               const [genesisHashError, genesisHash] =
                 genesisManager.getGenesisHeaderHash()
-              if (!genesisHashError && genesisHash && anchorHash === genesisHash) {
+              if (
+                !genesisHashError &&
+                genesisHash &&
+                anchorHash === genesisHash
+              ) {
                 // Anchor is genesis - use the current state root from state service
                 // This matches the pre_state that was set before processing the first block
                 const [currentStateRootError, currentStateRoot] =
@@ -1383,18 +1386,22 @@ export class GuarantorService extends BaseService {
                 if (!currentStateRootError && currentStateRoot) {
                   expectedStateRoot = currentStateRoot
                   // Genesis beefy root is typically zero hash
-                  expectedBeefyRoot = '0x0000000000000000000000000000000000000000000000000000000000000000'
+                  expectedBeefyRoot =
+                    '0x0000000000000000000000000000000000000000000000000000000000000000'
                 }
               }
             }
           }
-          
+
           // If we still don't have expected values, check if anchor is valid in recent history
           // (This check happens after genesis check to allow genesis anchors)
-          if (!expectedStateRoot && !this.recentHistoryService.isValidAnchor(anchorHash)) {
+          if (
+            !expectedStateRoot &&
+            !this.recentHistoryService.isValidAnchor(anchorHash)
+          ) {
             return safeError(new Error('anchor_not_recent'))
           }
-          
+
           // If we still don't have expected values after all checks, anchor is not valid
           if (!expectedStateRoot) {
             return safeError(new Error('anchor_not_recent'))
@@ -1475,7 +1482,7 @@ export class GuarantorService extends BaseService {
       // - Previous rotation: used for rotation-based validation (assignment checks, etc.)
       const previousValidators =
         this.validatorSetManager.getPreviousValidators()
-      
+
       // Calculate epochs to determine which validator set to use
       // previousValidators contains validators from the previous epoch,
       // while activeValidators contains validators from the current epoch
@@ -1672,7 +1679,9 @@ export class GuarantorService extends BaseService {
         knownPackages = new Set<Hex>()
       } else {
         knownPackages = new Set<Hex>(
-          accumulated.packages.flatMap((packageSet) => (packageSet ? Array.from(packageSet) : [])), // protoset{hash}
+          accumulated.packages.flatMap((packageSet) =>
+            packageSet ? Array.from(packageSet) : [],
+          ), // protoset{hash}
         )
       }
 

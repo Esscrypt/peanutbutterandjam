@@ -8,12 +8,12 @@
 //  * with the proper error string as specified in the Gray Paper.
 //  */
 
-// import { logger } from '@pbnj/core'
+// import { logger } from '@pbnjam/core'
 // import { readFileSync, readdirSync } from 'fs'
 // import { join } from 'path'
 // import { beforeAll, describe, expect, it } from 'vitest'
 // import { executeSafroleSTF } from '../state-transitions'
-// import type { SafroleInput, SafroleState, ValidatorPublicKeys } from '@pbnj/types'
+// import type { SafroleInput, SafroleState, ValidatorPublicKeys } from '@pbnjam/types'
 
 // beforeAll(() => {
 //   logger.init()

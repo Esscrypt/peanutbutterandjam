@@ -41,6 +41,7 @@ import {
   decodeDisputeState,
   decodeEntropy,
   decodeLastAccumulationOutputs,
+  decodeNatural,
   decodePrivileges,
   decodeReady,
   decodeRecent,
@@ -49,15 +50,14 @@ import {
   decodeStateWorkReports,
   decodeTheTime,
   decodeValidatorSet,
-  decodeVariableSequence,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import {
   blake2bHash,
   bytesToHex,
   hexToBytes,
   logger,
   merklizeState,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   Accumulated,
   Activity,
@@ -78,8 +78,8 @@ import type {
   StateComponent,
   StateTrie,
   ValidatorPublicKeys,
-} from '@pbnj/types'
-import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { AccumulationService } from './accumulation-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -203,7 +203,9 @@ export class StateService {
     this.stateTypeRegistry.set(16, (data) =>
       decodeLastAccumulationOutputs(data),
     ) // Chapter 16 - LastAccout (C(16))
-    this.stateTypeRegistry.set(255, (data) => decodeServiceAccount(data, this.jamVersion)) // Chapter 255 - Service Accounts (C(255, s))
+    this.stateTypeRegistry.set(255, (data) =>
+      decodeServiceAccount(data, this.jamVersion),
+    ) // Chapter 255 - Service Accounts (C(255, s))
 
     this.validatorSetManager = options.validatorSetManager
     this.entropyService = options.entropyService
@@ -558,16 +560,23 @@ export class StateService {
    * @param keyvals - Array of key-value pairs
    * @param jamVersion - Optional JAM version (defaults to 0.7.2)
    */
-  setState(keyvals: { key: Hex; value: Hex }[], jamVersion?: JamVersion): Safe<void> {
+  setState(
+    keyvals: { key: Hex; value: Hex }[],
+    jamVersion?: JamVersion,
+  ): Safe<void> {
     // Update JAM version if provided
     if (jamVersion) {
       this.setJamVersion(jamVersion)
     }
-    
+
     // First pass: Process all simple chapters (C(1) through C(16) and C(255, s))
     // This ensures service accounts exist before processing C(s, h) keys
     // Store C(s, h) keys in the order they appear to preserve insertion order
-    const cshKeys: Array<{ key: Hex; value: Hex; parsedStateKey: { serviceId: bigint; hash: Hex } }> = []
+    const cshKeys: Array<{
+      key: Hex
+      value: Hex
+      parsedStateKey: { serviceId: bigint; hash: Hex }
+    }> = []
 
     for (const keyval of keyvals) {
       const [stateKeyError, parsedStateKey] = this.parseStateKey(keyval.key)
@@ -581,7 +590,8 @@ export class StateService {
           if (parsedValue) {
             // For C(255, s) keys, serviceId is required and should be present
             const serviceId =
-              parsedStateKey.chapterIndex === 255 && 'serviceId' in parsedStateKey
+              parsedStateKey.chapterIndex === 255 &&
+              'serviceId' in parsedStateKey
                 ? parsedStateKey.serviceId
                 : undefined
             this.setStateComponent(
@@ -629,11 +639,11 @@ export class StateService {
       const bValueBytes = hexToBytes(b.value)
       const aBlakeHash = a.parsedStateKey.hash
       const bBlakeHash = b.parsedStateKey.hash
-      
+
       // Determine types by trying determineKeyType (may throw, so catch)
       let aType: 'preimage' | 'request' | 'storage' | 'unknown'
       let bType: 'preimage' | 'request' | 'storage' | 'unknown'
-      
+
       try {
         const aResponse = this.determineKeyType(aValueBytes, aBlakeHash)
         aType = aResponse.keyType
@@ -641,7 +651,7 @@ export class StateService {
         // If we can't determine, assume storage (processed last)
         aType = 'storage'
       }
-      
+
       try {
         const bResponse = this.determineKeyType(bValueBytes, bBlakeHash)
         bType = bResponse.keyType
@@ -649,22 +659,25 @@ export class StateService {
         // If we can't determine, assume storage (processed last)
         bType = 'storage'
       }
-      
+
       // Order: preimage (0), request (1), storage (2)
       const typeOrder = { preimage: 0, request: 1, storage: 2, unknown: 2 }
       const aOrder = typeOrder[aType]
       const bOrder = typeOrder[bType]
-      
+
       if (aOrder !== bOrder) {
         return aOrder - bOrder
       }
-      
+
       // Within same type, maintain original order
       return 0
     })
-    
-    for (const { key: keyvalKey, value: keyvalValue, parsedStateKey } of sortedCshKeys) {
 
+    for (const {
+      key: keyvalKey,
+      value: keyvalValue,
+      parsedStateKey,
+    } of sortedCshKeys) {
       // Determine the type from the value format
       const valueBytes = hexToBytes(keyvalValue)
       const serviceId = parsedStateKey.serviceId
@@ -758,17 +771,20 @@ export class StateService {
             logger.debug('Determined C(s, h) key type: REQUEST', {
               key: keyvalKey,
               serviceId: serviceId.toString(),
-              timeslots: response.timeslots.map(t => t.toString()),
+              timeslots: response.timeslots.map((t) => t.toString()),
             })
 
             // Try to verify by matching against known preimages for this service
             // Gray Paper: C(s, encode[4]{l} ∥ h) where l=blob_length, h=preimage_hash
             const servicePreimages = this.preimageInfo.get(serviceId)
-            let matchedPreimageHash: Hex | undefined 
+            let matchedPreimageHash: Hex | undefined
 
             if (servicePreimages && servicePreimages.size > 0) {
               // Try each known preimage for this service
-              for (const [preimageHash, blobLength] of servicePreimages.entries()) {
+              for (const [
+                preimageHash,
+                blobLength,
+              ] of servicePreimages.entries()) {
                 // Compute blake(encode[4]{l} ∥ h) where l=blobLength, h=preimageHash
                 const lengthPrefix = new Uint8Array(4)
                 const lengthView = new DataView(lengthPrefix.buffer)
@@ -784,7 +800,8 @@ export class StateService {
                 const [combinedRequestHashError, combinedRequestHash] =
                   blake2bHash(combinedRequestKey)
                 if (!combinedRequestHashError && combinedRequestHash) {
-                  const combinedRequestHashBytes = hexToBytes(combinedRequestHash)
+                  const combinedRequestHashBytes =
+                    hexToBytes(combinedRequestHash)
                   const combinedRequestHashHex = bytesToHex(
                     combinedRequestHashBytes.slice(0, 27),
                   ) // First 27 bytes
@@ -814,8 +831,7 @@ export class StateService {
                   key: keyvalKey,
                   serviceId: serviceId.toString(),
                   stateKeyHash: blakeHashFromKey,
-                  checkedPreimages:
-                    servicePreimages?.size ?? 0,
+                  checkedPreimages: servicePreimages?.size ?? 0,
                   note: 'This may be a request for a preimage that has not been provided yet',
                 },
               )
@@ -885,7 +901,9 @@ export class StateService {
         ),
         // Use stored epochRoot from Initialize message if available, otherwise compute it
         // This ensures we match the fuzzer's expected state root
-        epochRoot: this.validatorSetManager.getStoredEpochRoot() ?? this.validatorSetManager.getEpochRoot(),
+        epochRoot:
+          this.validatorSetManager.getStoredEpochRoot() ??
+          this.validatorSetManager.getEpochRoot(),
         sealTickets: this.sealKeyService.getSealKeys(),
         ticketAccumulator: this.ticketService.getTicketAccumulator(),
       },
@@ -1165,12 +1183,13 @@ export class StateService {
    * - Request: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}} (variable-length sequence of up to 3 timeslots)
    *
    * Strategy:
-   * 1. Try to decode as request (variable-length sequence of 4-byte timeslots, max 3)
+   * 1. Check if it's a request by reading available bytes, splitting into 4-byte
+   *    little-endian chunks, and verifying length <= 3
    * 2. If that fails, try to determine if it's a preimage by:
    *    - Computing h = blake(value)
    *    - Computing blake(encode[4]{0xFFFFFFFE} ∥ h)
    *    - Comparing first 27 bytes with the Blake hash from the key
-   * 3. Otherwise, it's storage
+   * 3. Otherwise, it's storage (storage keys k are arbitrary and cannot be verified)
    *
    * @param valueBytes - The value bytes from the state
    * @param blakeHashFromKey - The Blake hash extracted from the state key (first 27 bytes)
@@ -1193,28 +1212,38 @@ export class StateService {
         'C(s, h) key value is empty - cannot be storage (storage values must be non-empty raw blobs)',
       )
     }
-    // Try to decode as request first (variable-length sequence of 4-byte timeslots)
+
+    // Try to check if it's a request
     // Gray Paper: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
     // Request values are sequences of up to 3 timeslots (4-byte each)
-    const [requestError, requestResult] = decodeVariableSequence<bigint>(
-      valueBytes,
-      (data: Uint8Array) => {
-        if (data.length < 4) {
-          return safeError(new Error('Insufficient data for timeslot'))
-        }
-        const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-        const timeslot = BigInt(view.getUint32(0, true)) // little-endian
-        return safeResult({
-          value: timeslot,
-          remaining: data.slice(4),
-          consumed: 4,
-        })
-      },
-    )
+    // Format: var{length} || timeslot0 || timeslot1 || ...
+    // We decode the var{} length prefix, then read that many 4-byte timeslots
+    const [lengthError, lengthResult] = decodeNatural(valueBytes)
+    if (!lengthError && lengthResult) {
+      const timeslotCount = Number(lengthResult.value)
+      const lengthPrefixBytes = lengthResult.consumed
+      const remainingBytes = valueBytes.length - lengthPrefixBytes
+      const expectedBytes = timeslotCount * 4
 
-    // If decoding succeeds and has 0-3 timeslots, it's a request
-    if (!requestError && requestResult.value.length <= 3) {
-      return { keyType: 'request', timeslots: requestResult.value }
+      // Check if we have enough bytes for the timeslots and length is <= 3
+      if (timeslotCount <= 3 && remainingBytes >= expectedBytes) {
+        const timeslots: bigint[] = []
+        for (let i = 0; i < timeslotCount; i++) {
+          const offset = lengthPrefixBytes + i * 4
+          if (offset + 4 <= valueBytes.length) {
+            const view = new DataView(
+              valueBytes.buffer,
+              valueBytes.byteOffset + offset,
+              4,
+            )
+            const timeslot = BigInt(view.getUint32(0, true)) // little-endian
+            timeslots.push(timeslot)
+          }
+        }
+        if (timeslots.length === timeslotCount) {
+          return { keyType: 'request', timeslots }
+        }
+      }
     }
 
     // Not a request - try to determine if it's a preimage
@@ -1249,33 +1278,12 @@ export class StateService {
       }
     }
 
-    // Try to verify storage by computing blake(encode[4]{0xFFFFFFFF} ∥ blake(value))
-    const [valueHashError, valueHash] = blake2bHash(valueBytes)
-    if (!valueHashError && valueHash) {
-      const storagePrefix = new Uint8Array(4)
-      const storagePrefixView = new DataView(storagePrefix.buffer)
-      storagePrefixView.setUint32(0, 0xffffffff, true) // little-endian
-      const valueHashBytes = hexToBytes(valueHash)
-      const storageCombinedKey = new Uint8Array(
-        storagePrefix.length + valueHashBytes.length,
-      )
-      storageCombinedKey.set(storagePrefix, 0)
-      storageCombinedKey.set(valueHashBytes, storagePrefix.length)
-      const [storageHashError, storageHash] = blake2bHash(storageCombinedKey)
-      if (!storageHashError && storageHash) {
-        const storageHashBytes = hexToBytes(storageHash)
-        const storageHashHex = bytesToHex(storageHashBytes.slice(0, 27)) // First 27 bytes
-        if (storageHashHex === blakeHashFromKey) {
-          // It's storage (matched using blake(value) as h)
-          return { keyType: 'storage', key: storageHashHex, value: valueBytes }
-        }
-      }
-    }
-
-    // If we can't verify it's storage by matching the hash, throw an error
-    throw new Error(
-      'C(s, h) key does not match any known type: not request, not preimage, and storage verification failed (blake(encode[4]{0xFFFFFFFF} ∥ blake(value)) did not match)',
-    )
+    // Not a request or preimage - default to storage
+    // Gray Paper: C(s, encode[4]{0xFFFFFFFF} ∥ k) ↦ v
+    // Storage keys k are arbitrary blobs chosen by the service, not related to blake(value)
+    // We cannot verify storage keys from the state key alone (k is hashed and unrecoverable)
+    // Therefore, if it's not a request or preimage, we assume it's storage
+    return { keyType: 'storage', key: blakeHashFromKey, value: valueBytes }
   }
 
   /**

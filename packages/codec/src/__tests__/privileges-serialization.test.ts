@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodePrivileges, decodePrivileges } from '../state/privileges'
-import type { IConfigService, Privileges } from '@pbnj/types'
+import type { IConfigService, Privileges } from '@pbnjam/types'
 
 describe('Privileges Serialization', () => {
   const configService: IConfigService = {

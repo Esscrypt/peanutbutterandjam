@@ -8,6 +8,8 @@
  * This implementation is a placeholder and will be replaced with a more complete
  * implementation in the future.
  */
+
+import { decodeFixedLength, decodeHeader, encodeHeader } from '@pbnjam/codec'
 import {
   bytesToHex,
   concatBytes,
@@ -15,12 +17,7 @@ import {
   hexToBytes,
   logger,
   numberToBytes,
-} from '@pbnj/core'
-import {
-  decodeFixedLength,
-  decodeHeader,
-  encodeHeader,
-} from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   BlockAnnouncement,
   BlockAnnouncementHandshake,
@@ -28,8 +25,8 @@ import type {
   IConfigService,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -224,7 +221,10 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
    * Create block announcement message
    */
   createBlockAnnouncement(blockHeader: Uint8Array): BlockAnnouncement {
-    const [error, blockHeaderResult] = decodeHeader(blockHeader, this.configService)
+    const [error, blockHeaderResult] = decodeHeader(
+      blockHeader,
+      this.configService,
+    )
     if (error) {
       throw error
     }

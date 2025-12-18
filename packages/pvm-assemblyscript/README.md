@@ -1,4 +1,4 @@
-# @pbnj/pvm-assemblyscript
+# @pbnjam/pvm-assemblyscript
 
 PVM implementation in AssemblyScript that compiles to **true WebAssembly**.
 

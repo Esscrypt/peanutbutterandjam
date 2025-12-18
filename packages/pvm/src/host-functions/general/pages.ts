@@ -5,7 +5,7 @@ import type {
   PVMGuest,
   RAM,
   RefineInvocationContext,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -51,7 +51,7 @@ import { BaseHostFunction } from './base'
 /**
  * Pages host function parameters matching Gray Paper signature
  * Gray Paper: Ω_Z(gascounter, registers, memory, (m, e))
- * 
+ *
  * @param refineContext - Refine context pair (m, e) - machines and export segments
  */
 export interface PagesParams {
@@ -86,7 +86,7 @@ export class PagesHostFunction extends BaseHostFunction {
     // Gray Paper equation 618: Validate parameters
     // Return HUH if r > 4 ∨ p < 16 ∨ p+c >= 2^32/Cpvmpagesize
     const MIN_PAGE_INDEX = 16n // Gray Paper: p < 16 is invalid
-    const MAX_PAGE_INDEX = (2n ** 32n) / BigInt(MEMORY_CONFIG.PAGE_SIZE) // Gray Paper: p+c >= 2^32/Cpvmpagesize is invalid
+    const MAX_PAGE_INDEX = 2n ** 32n / BigInt(MEMORY_CONFIG.PAGE_SIZE) // Gray Paper: p+c >= 2^32/Cpvmpagesize is invalid
 
     if (
       accessRights > 4n ||
@@ -117,12 +117,7 @@ export class PagesHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 605-614: Set memory page access rights and data
-    this.setMemoryPageAccessRights(
-      machine,
-      pageStart,
-      pageCount,
-      accessRights,
-    )
+    this.setMemoryPageAccessRights(machine, pageStart, pageCount, accessRights)
 
     // Gray Paper equation 620: Return OK for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
@@ -180,11 +175,7 @@ export class PagesHostFunction extends BaseHostFunction {
 
       // Gray Paper equation 606-609: Clear page data when r < 3
       if (accessRights < 3n) {
-        this.clearPageData(
-          machine.pvm.state.ram,
-          pageAddress,
-          PAGE_SIZE,
-        )
+        this.clearPageData(machine.pvm.state.ram, pageAddress, PAGE_SIZE)
       }
 
       // Gray Paper equation 610-614: Set access rights

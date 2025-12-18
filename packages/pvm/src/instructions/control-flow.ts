@@ -4,7 +4,7 @@
  * NOP, HALT, ERROR, CALL, RETURN, JUMP, JUMP_IF, JUMP_IF_NOT
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES, REGISTER_INIT, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -45,7 +45,7 @@ export class FALLTHROUGHInstruction extends BaseInstruction {
 /**
  * JUMP instruction (opcode 0x40)
  * Unconditional jump with offset as specified in Gray Paper
- * 
+ *
  * Gray Paper (pvm.tex line 322):
  * Format: "One Offset" (lines 308-314)
  * immed_X ≡ ι + signfunc{l_X}(decode[l_X]{instructions[ι+1:l_X]})
@@ -58,10 +58,12 @@ export class JUMPInstruction extends BaseInstruction {
   execute(context: InstructionContext): InstructionResult {
     // Gray Paper: Instructions with Arguments of One Offset
     // immed_X = ι + signfunc{l_X}(decode[l_X]{instructions[ι+1:l_X]})
+    // Use instruction.pc (the PC where the instruction is located) instead of context.pc
+    // context.pc may have been modified by previous instructions in the same execution step
     const targetAddress = this.parseOneOffset(
       context.instruction.operands,
       context.fskip,
-      context.pc,
+      context.instruction.pc,
     )
 
     // Gray Paper: Static jumps must target basic block starts
@@ -132,7 +134,9 @@ export class JUMP_INDInstruction extends BaseInstruction {
     const a = (registerValue + immediateX) & 0xffffffffn
 
     context.log('JUMP_IND: Jump calculation', {
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       registerA,
       registerValue,
       immediateX,
@@ -203,7 +207,7 @@ export class JUMP_INDInstruction extends BaseInstruction {
 /**
  * LOAD_IMM_JUMP instruction (opcode 0x80)
  * Load immediate and jump as specified in Gray Paper
- * 
+ *
  * Gray Paper (pvm.tex line 404):
  * Format: "One Register, One Immediate and One Offset" (lines 385-396)
  * r_A = min(12, instructions[ι+1] mod 16)
@@ -278,7 +282,7 @@ export class LOAD_IMM_JUMPInstruction extends BaseInstruction {
 /**
  * LOAD_IMM_JUMP_IND instruction (opcode 0x180)
  * Load immediate and indirect jump as specified in Gray Paper
- * 
+ *
  * Gray Paper (pvm.tex lines 583-586):
  * Format: "Two Registers and Two Immediates" (lines 560-575)
  * r_A = min(12, instructions[ι+1] mod 16)

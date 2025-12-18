@@ -5,11 +5,11 @@
  * and executes a single accumulation to verify gas consumption
  */
 
-import { EventBusService, logger, hexToBytes, blake2bHash, zeroHash } from '@pbnj/core'
-import { decodeProgramFromPreimage, encodeValidatorPublicKeys } from '@pbnj/codec'
+import { EventBusService, logger, hexToBytes, blake2bHash, zeroHash } from '@pbnjam/core'
+import { decodeProgramFromPreimage, encodeValidatorPublicKeys } from '@pbnjam/codec'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { type AccumulateInput, type PartialState, type ServiceAccount, type OperandTuple } from '@pbnj/types'
+import { type AccumulateInput, type PartialState, type ServiceAccount, type OperandTuple } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 import { ClockService } from '../services/clock-service'
 import { ValidatorSetManager } from '../services/validator-set'
@@ -17,12 +17,12 @@ import { ServiceAccountService } from '../services/service-account-service'
 import { AccumulationService } from '../services/accumulation-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ReadyService } from '../services/ready-service'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
-import { HostFunctionRegistry, AccumulateHostFunctionRegistry, PVMParser, InstructionRegistry } from '@pbnj/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import { HostFunctionRegistry, AccumulateHostFunctionRegistry, PVMParser, InstructionRegistry } from '@pbnjam/pvm'
 import { describe, expect, beforeEach, test } from 'bun:test'
 import { StatisticsService } from '../services/statistics-service'
 import { PrivilegesService } from '../services/privileges-service'
-import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import { EntropyService } from '../services/entropy'
 import type { Hex } from 'viem'
 
@@ -290,7 +290,7 @@ describe('Accumulation Gas Debug Tests', () => {
       accumulateHostFunctionRegistry,
       configService: configService,
       entropyService: entropyService,
-      pvmOptions: { gasCounter: 100000n }, // High gas limit for debugging
+      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) }, // Use config's maxBlockGas (20M)
       useWasm: true,
     })
 

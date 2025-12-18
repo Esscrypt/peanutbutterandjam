@@ -1,4 +1,4 @@
-import type { IConfigService } from '@pbnj/types'
+import type { IConfigService } from '@pbnjam/types'
 import { AssignHostFunction } from './assign'
 import type { BaseAccumulateHostFunction } from './base'
 import { BlessHostFunction } from './bless'

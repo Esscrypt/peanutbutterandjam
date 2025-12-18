@@ -2,15 +2,15 @@
 
 ## Overview
 
-This project uses a centralized logging system from `@pbnj/core` instead of direct console methods. All logging must go through the standardized logger to ensure consistent formatting, log levels, and output handling.
+This project uses a centralized logging system from `@pbnjam/core` instead of direct console methods. All logging must go through the standardized logger to ensure consistent formatting, log levels, and output handling.
 
 ## Core Requirements
 
 ### 1. Logger Import and Usage
 
-**Always use the logger from `@pbnj/core`:**
+**Always use the logger from `@pbnjam/core`:**
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 ```
 
 **Never use console methods directly:**
@@ -34,7 +34,7 @@ logger.debug('Debug message')
 
 #### CLI Entrypoint (`packages/cli/src/index.ts`)
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 // Initialize logger at the very beginning
 logger.init()
@@ -44,7 +44,7 @@ logger.init()
 
 #### RPC Server Entrypoint (`apis/rpc-server/src/index.ts`)
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 // Initialize logger before any other operations
 logger.init()
@@ -54,7 +54,7 @@ logger.init()
 
 #### Any Other Main Entrypoint
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 // Initialize logger first
 logger.init()
@@ -132,7 +132,7 @@ try {
 **In any module that needs logging:**
 
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 export class SomeService {
   async processData(data: unknown) {
@@ -161,7 +161,7 @@ export class SomeService {
 **In CLI commands:**
 
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 export class TestSafroleCommand implements ICommand<TestSafroleOptions> {
   async execute(options: TestSafroleOptions): Promise<void> {
@@ -186,7 +186,7 @@ export class TestSafroleCommand implements ICommand<TestSafroleOptions> {
 **In RPC server handlers:**
 
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 app.post('/api/process', async (req, res) => {
   const requestId = generateId()
@@ -235,7 +235,7 @@ NODE_ENV=development
 
 ### Logger Configuration
 
-The logger configuration is handled internally by the `@pbnj/core` package based on environment variables. The logger.init() call initializes the logger with the appropriate settings.
+The logger configuration is handled internally by the `@pbnjam/core` package based on environment variables. The logger.init() call initializes the logger with the appropriate settings.
 
 ## Migration Guide
 
@@ -250,7 +250,7 @@ console.warn('Deprecated method called')
 
 **After:**
 ```typescript
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 logger.info('User logged in', { userId })
 logger.error('Database error', { error: error.message })
@@ -261,7 +261,7 @@ logger.warn('Deprecated method called')
 
 1. **Import the logger:**
    ```typescript
-   import { logger } from '@pbnj/core'
+   import { logger } from '@pbnjam/core'
    ```
 
 2. **Replace console calls:**
@@ -294,7 +294,7 @@ The project includes pre-commit hooks that will:
 
 Before merging code, ensure:
 - [ ] No console.log, console.error, etc. usage
-- [ ] All logging uses `@pbnj/core` logger
+- [ ] All logging uses `@pbnjam/core` logger
 - [ ] Logger is initialized in main entrypoints
 - [ ] Log messages include appropriate context
 - [ ] Log levels are appropriate for the message
@@ -331,7 +331,7 @@ The project's linting configuration will:
 
 ## Remember
 
-- **Always import logger from `@pbnj/core`**
+- **Always import logger from `@pbnjam/core`**
 - **Never use console methods directly**
 - **Initialize logger in main entrypoints with logger.init()**
 - **Use structured logging with context**

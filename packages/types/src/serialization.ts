@@ -527,6 +527,65 @@ export interface PackageSpec {
 export type WorkExecutionResult = Uint8Array | WorkError
 
 /**
+ * Gray Paper Compliant Work Digest Structure
+ *
+ * Gray Paper Reference: Section "Work Packages and Work Reports" - Work Digest
+ * Location: text/reporting_assurance.tex, equation 88-103
+ *
+ * Work digest is the data conduit by which services' states may be altered
+ * through the computation done within a work-package. It's created from a
+ * work item via the itemtodigest function (work_packages_and_reports.tex, equation 130-151).
+ *
+ * Gray Paper Equation 88-103:
+ * workdigest ≡ tuple{
+ *   wd_serviceindex: serviceid,
+ *   wd_codehash: hash,
+ *   wd_payloadhash: hash,
+ *   wd_gaslimit: gas,
+ *   wd_result: blob ∪ workerror,
+ *   wd_gasused: gas,
+ *   wd_importcount: N,
+ *   wd_xtcount: N,
+ *   wd_xtsize: N,
+ *   wd_exportcount: N
+ * }
+ *
+ * Structure Compliance:
+ * ✅ serviceindex: ServiceId - service identifier
+ * ✅ codehash: OpaqueHash - service code hash
+ * ✅ payloadhash: OpaqueHash - payload hash (blake of payload)
+ * ✅ gaslimit: Gas - gas limit for accumulation
+ * ✅ result: WorkExecutionResult - execution result (blob or error)
+ * ✅ gasused: Gas - actual gas used during refinement
+ * ✅ importcount: N - number of imported segments
+ * ✅ xtcount: N - number of extrinsics
+ * ✅ xtsize: N - total size of extrinsics
+ * ✅ exportcount: N - number of exported segments
+ */
+export interface WorkDigest {
+  /** Service index (wd_serviceindex) */
+  serviceindex: bigint
+  /** Code hash (wd_codehash) */
+  codehash: Hex
+  /** Payload hash (wd_payloadhash) - blake of payload */
+  payloadhash: Hex
+  /** Gas limit for accumulation (wd_gaslimit) */
+  gaslimit: bigint
+  /** Execution result (wd_result) */
+  result: WorkExecutionResult
+  /** Gas used during refinement (wd_gasused) */
+  gasused: bigint
+  /** Number of imported segments (wd_importcount) */
+  importcount: bigint
+  /** Number of extrinsics (wd_xtcount) */
+  xtcount: bigint
+  /** Total size of extrinsics (wd_xtsize) */
+  xtsize: bigint
+  /** Number of exported segments (wd_exportcount) */
+  exportcount: bigint
+}
+
+/**
  * Refine load structure
  */
 export interface RefineLoad {
@@ -1139,7 +1198,7 @@ export interface ServiceAccount extends ServiceAccountCore {
   requests: Map<Hex, Map<bigint, PreimageRequestStatus>> // sa_requests - ✅ GRAY PAPER COMPLIANT (nested map)
 }
 
-// Note: GenesisState moved to @pbnj/types/genesis for Gray Paper compliance
+// Note: GenesisState moved to @pbnjam/types/genesis for Gray Paper compliance
 
 /**
  * State trie entry structure

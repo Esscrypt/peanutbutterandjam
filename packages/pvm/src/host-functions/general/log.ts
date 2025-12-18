@@ -1,9 +1,9 @@
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   LogParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { GENERAL_FUNCTIONS } from '../../config'
 import { BaseHostFunction } from './base'
 
@@ -26,10 +26,7 @@ export class LogHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.LOG
   readonly name = 'log'
 
-  execute(
-    context: HostFunctionContext,
-    params: LogParams,
-  ): HostFunctionResult {
+  execute(context: HostFunctionContext, params: LogParams): HostFunctionResult {
     const level = context.registers[7]
     const targetOffset = context.registers[8]
     const targetLength = context.registers[9]
@@ -38,7 +35,7 @@ export class LogHostFunction extends BaseHostFunction {
 
     // Read target from memory if both offset and length are non-zero
     let target: string | null = null
-    if (targetOffset !== 0n || targetLength !== 0n) {
+    if (targetOffset !== 0n && targetLength !== 0n) {
       const [targetData, faultAddress] = context.ram.readOctets(
         targetOffset,
         targetLength,
@@ -140,7 +137,6 @@ export class LogHostFunction extends BaseHostFunction {
       core: coreIndex === null ? null : coreIndex.toString(),
     }
     context.log('PVM Log', jsonLog)
-    logger.info(consoleMessage)
 
     return {
       resultCode: null, // continue execution

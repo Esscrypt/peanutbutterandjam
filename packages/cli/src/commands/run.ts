@@ -1,5 +1,5 @@
-import { logger } from '@pbnj/core'
-import { MainService } from '@pbnj/node'
+import { logger } from '@pbnjam/core'
+import { MainService } from '@pbnjam/node'
 import { Command } from 'commander'
 import {
   isValidHex,

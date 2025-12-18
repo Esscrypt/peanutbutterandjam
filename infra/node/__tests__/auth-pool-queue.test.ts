@@ -8,13 +8,13 @@
 import { describe, expect, it } from 'bun:test'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { AuthPool, AuthQueue } from '@pbnj/types'
+import type { AuthPool, AuthQueue } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { AuthPoolService } from '../services/auth-pool-service'
 import { AuthQueueService } from '../services/auth-queue-service'
 import { ConfigService } from '../services/config-service'
 import { WorkReportService } from '../services/work-report-service'
-import { EventBusService } from '@pbnj/core'
+import { EventBusService } from '@pbnjam/core'
 
 // Test vector interface
 interface AuthorizationTestVector {

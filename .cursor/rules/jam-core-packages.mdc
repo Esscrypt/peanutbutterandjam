@@ -1,4 +1,4 @@
-##### 2. **`@pbnj/core`** - ✅ **FULLY IMPLEMENTED & TESTED**
+##### 2. **`@pbnjam/core`** - ✅ **FULLY IMPLEMENTED & TESTED**
 - **Status**: ✅ Complete and passing type checks
 - **Test Results**: ✅ TypeScript compilation successful
 - **Features Implemented**:
@@ -17,7 +17,7 @@
 alwaysApply: true
 ---
 
-##### 5. **`@pbnj/safrole`** - ✅ **FULLY IMPLEMENTED & TESTED**
+##### 5. **`@pbnjam/safrole`** - ✅ **FULLY IMPLEMENTED & TESTED**
 - **Status**: ✅ Complete and passing all tests
 - **Test Results**: 6/6 tests passing (100% success rate)
 - **Features Implemented**:
@@ -35,7 +35,7 @@ alwaysApply: true
 - **Priority**: High - Critical for consensus mechanism
 - **Last Updated**: August 2, 2025 - All tests passing, VRF validation TODO
 
-##### 3. **`@pbnj/cli`** - ✅ **FULLY IMPLEMENTED & TESTED**
+##### 3. **`@pbnjam/cli`** - ✅ **FULLY IMPLEMENTED & TESTED**
 - **Status**: ✅ Complete and passing all tests
 - **Test Results**: 3/3 tests passing (100% success rate)
 - **Features Implemented**:
@@ -49,7 +49,7 @@ alwaysApply: true
 - **Priority**: High - Primary user interface
 - **Last Updated**: August 2, 2025 - All commands implemented and tested
 
-##### 4. **`@pbnj/pvm`** - ✅ **FULLY IMPLEMENTED & TESTED**
+##### 4. **`@pbnjam/pvm`** - ✅ **FULLY IMPLEMENTED & TESTED**
 - **Status**: ✅ Complete and passing type checks
 - **Test Results**: ✅ TypeScript compilation successful
 - **Features Implemented**:

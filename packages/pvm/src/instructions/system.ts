@@ -4,7 +4,7 @@
  * ECALLI - Host call with immediate value
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES, RESULT_CODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -27,14 +27,15 @@ export class ECALLIInstruction extends BaseInstruction {
   readonly name = 'ECALLI'
 
   execute(context: InstructionContext): InstructionResult {
-
-    context.registers[0] = BigInt(context.instruction.operands[0])
+    // Gray Paper pvm.tex §7.4.1 line 264: ε = host × immed_X
+    // The host function ID is in the immediate operand, not in r0
+    // We do NOT set r0 - the Gray Paper doesn't require it
 
     context.log('ECALLI: Host call with immediate value', {
       operands: Array.from(context.instruction.operands),
       fskip: context.fskip,
       currentPC: context.pc,
-      registerZero: context.registers[0].toString(),
+      hostCallId: context.instruction.operands[0],
     })
     const result = {
       resultCode: RESULT_CODES.HOST,

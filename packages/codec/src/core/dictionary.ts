@@ -31,9 +31,9 @@
  * structures. Large dictionaries use the Merkle trie for efficiency.
  */
 
-import { bytesToHex } from '@pbnj/core'
-import type { DecodingResult, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex } from '@pbnjam/core'
+import type { DecodingResult, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeVariableLength, encodeVariableLength } from './discriminator'
 import { decodeNatural } from './natural-number'
 
@@ -172,11 +172,11 @@ export function decodeDictionary(
       currentData = currentData.slice(valueLength)
 
       result.push({ key, value })
-      
+
       // Update processed length
       const pairLength = keyConsumed + valueConsumed
       processedLength += pairLength
-      
+
       // Check if we've processed all bytes
       if (processedLength >= totalPairsLength) {
         break

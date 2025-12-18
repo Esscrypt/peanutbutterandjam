@@ -13,10 +13,10 @@
   <-- FIN
  */
 
-import type { EventBusService, Hex } from '@pbnj/core'
-import { bytesToHex, hexToBytes } from '@pbnj/core'
-import type { PreimageAnnouncement, Safe, SafePromise } from '@pbnj/types'
-import { safeResult } from '@pbnj/types'
+import type { EventBusService, Hex } from '@pbnjam/core'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import type { PreimageAnnouncement, Safe, SafePromise } from '@pbnjam/types'
+import { safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

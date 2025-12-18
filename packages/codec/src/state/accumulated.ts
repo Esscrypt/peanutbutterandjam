@@ -48,15 +48,15 @@
  * This is critical for JAM's work-package dependency resolution and accumulation tracking.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   Accumulated,
   AccumulatedItem,
   DecodingResult,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
@@ -65,19 +65,21 @@ import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
  * Convert Accumulated to AccumulatedItem[]
  * Each Set<Hex> is converted to concatenated 32-byte hashes
  */
-function convertAccumulatedToAccumulatedItems(accumulated: Accumulated): AccumulatedItem[] {
+function convertAccumulatedToAccumulatedItems(
+  accumulated: Accumulated,
+): AccumulatedItem[] {
   return accumulated.packages.map((hashes) => {
     if (hashes.size === 0) {
       return { data: new Uint8Array(0) }
     }
-    
+
     // Concatenate all hashes into a single byte array
     const hashArrays: Uint8Array[] = []
     for (const hash of hashes) {
       const hashBytes = hexToBytes(hash)
       hashArrays.push(hashBytes)
     }
-    
+
     const data = concatBytes(hashArrays)
     return { data }
   })
@@ -148,11 +150,13 @@ export function encodeAccumulated(
  * Convert AccumulatedItem[] to Accumulated
  * Each AccumulatedItem.data contains concatenated 32-byte hashes
  */
-function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumulated {
+function convertAccumulatedItemsToAccumulated(
+  items: AccumulatedItem[],
+): Accumulated {
   const packages: Set<Hex>[] = items.map((item) => {
     const hashes = new Set<Hex>()
     const data = item.data
-    
+
     // Each hash is 32 bytes, split data into 32-byte chunks
     for (let i = 0; i < data.length; i += 32) {
       if (i + 32 <= data.length) {
@@ -161,10 +165,10 @@ function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumul
         hashes.add(hashHex)
       }
     }
-    
+
     return hashes
   })
-  
+
   return { packages }
 }
 
@@ -175,7 +179,7 @@ function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumul
  * Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
  * This is a FIXED-LENGTH sequence of C_epochlen elements (no sequence length prefix)
  * Each element i is decoded as var{i} (variable-length with length prefix)
- * 
+ *
  * Returns Accumulated directly (not AccumulatedItem[])
  */
 export function decodeAccumulated(

@@ -1,8 +1,8 @@
 import type {
+  ExpungeParams,
   HostFunctionContext,
   HostFunctionResult,
-  ExpungeParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -41,7 +41,6 @@ export class ExpungeHostFunction extends BaseHostFunction {
     params: ExpungeParams,
   ): HostFunctionResult {
     const machineId = context.registers[7]
-
 
     const machines = params.refineContext.machines
 

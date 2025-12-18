@@ -2,8 +2,8 @@ import { describe, test, expect, beforeEach } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { instantiate } from '../../../packages/pvm-assemblyscript/tests/wasmAsInit'
-import { decodeProgramFromPreimage } from '@pbnj/codec'
-import { logger, hexToBytes } from '@pbnj/core'
+import { decodeProgramFromPreimage } from '@pbnjam/codec'
+import { logger, hexToBytes } from '@pbnjam/core'
 import type { Hex } from 'viem'
 
 const WORKSPACE_ROOT = process.cwd().includes('/packages/pvm')

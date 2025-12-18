@@ -46,15 +46,15 @@
  * that other work items can safely consume with full provenance.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   OperandTuple,
   Safe,
   WorkError,
   WorkExecutionResult,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

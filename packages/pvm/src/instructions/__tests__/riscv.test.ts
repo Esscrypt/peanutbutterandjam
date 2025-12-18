@@ -12,7 +12,7 @@
  * - rv64si: System instructions
  */
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { loadTestVectorsByPrefix, executeTestVector } from './test-vector-helper'
 

@@ -3,9 +3,9 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { Hex } from '@pbnj/core'
+import type { Hex } from '@pbnjam/core'
 import { decodeEntropy, encodeEntropy, } from '../state/entropy'
-import type { EntropyState } from '@pbnj/types'
+import type { EntropyState } from '@pbnjam/types'
 
 describe('Entropy State Serialization', () => {
   it('should encode and decode entropy state', () => {

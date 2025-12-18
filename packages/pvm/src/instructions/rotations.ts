@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -29,12 +29,9 @@ export class ROT_R_64_IMMInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerA, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
-
 
   private rotateRight64(value: bigint, amount: bigint): bigint {
     // Handle negative rotation amounts
@@ -73,22 +70,23 @@ export class ROT_R_64_IMM_ALTInstruction extends BaseInstruction {
     const rotationAmount = Number(registerBValue % 64n)
     const result = this.rotateRight64(immediateValue, rotationAmount)
 
-    context.log('ROT_R_64_IMM_ALT: Alternative rotate right by immediate (64-bit)', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      rotationAmount,
-      result,
-    })
+    context.log(
+      'ROT_R_64_IMM_ALT: Alternative rotate right by immediate (64-bit)',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        rotationAmount,
+        result,
+      },
+    )
     this.setRegisterValue(context.registers, registerA, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 
   private rotateRight64(value: bigint, amount: number): bigint {
     // Handle negative rotation amounts
@@ -138,11 +136,9 @@ export class ROT_R_32_IMMInstruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 
   private rotateRight32(value: bigint, amount: number): bigint {
     // Handle negative rotation amounts
@@ -182,19 +178,21 @@ export class ROT_R_32_IMM_ALTInstruction extends BaseInstruction {
     const rotationAmount = Number(registerBValue % 32n)
     const result = this.rotateRight32(immediateValue, rotationAmount)
 
-    context.log('ROT_R_32_IMM_ALT: Alternative rotate right by immediate (32-bit)', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      rotationAmount,
-      result,
-    })
+    context.log(
+      'ROT_R_32_IMM_ALT: Alternative rotate right by immediate (32-bit)',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        rotationAmount,
+        result,
+      },
+    )
     // Gray Paper: reg'_A = sext{4}{x} - sign-extend 32-bit result to 64 bits
     this.setRegisterValueWith32BitResult(context.registers, registerA, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

@@ -5,7 +5,7 @@
  * Reference: JAMNP-S specification
  */
 
-import type { Hex } from '@pbnj/core'
+import type { Hex } from '@pbnjam/core'
 import type { Block } from './block-authoring'
 import type { ValidatorPublicKeys } from './consensus'
 import type { BlockHeader } from './global-state'

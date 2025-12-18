@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/codec",
+  "name": "@pbnjam/codec",
   "version": "0.1.0",
   "description": "Gray Paper-compliant serialization for JAM Protocol",
   "main": "dist/index.js",
@@ -14,8 +14,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.8.2",

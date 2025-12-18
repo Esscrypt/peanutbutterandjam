@@ -17,10 +17,14 @@
  * - Service account updated with new storage and metadata
  */
 
-import { calculateWorkReportHash, encodeValidatorPublicKeys } from '@pbnj/codec'
-import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
-import { RESULT_CODES } from '@pbnj/pvm'
-import type { AccumulatePVM } from '@pbnj/pvm-invocations'
+import {
+  calculateWorkReportHash,
+  decodeWorkPackage,
+  encodeValidatorPublicKeys,
+} from '@pbnjam/codec'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
+import { RESULT_CODES } from '@pbnjam/pvm'
+import type { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import {
   type Accumulated,
   type AccumulateInput,
@@ -34,8 +38,10 @@ import {
   WORK_REPORT_CONSTANTS,
   type WorkExecResultValue,
   type WorkExecutionResult,
+  type WorkItem,
+  type WorkPackage,
   type WorkReport,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 
 import type { Hex } from 'viem'
 import type { AuthQueueService } from './auth-queue-service'
@@ -252,6 +258,13 @@ export class AccumulationService extends BaseService {
    * 6. Clean up processed work-reports from ready queue
    */
   async processAccumulation(currentSlot: bigint): Promise<void> {
+    logger.info('[AccumulationService] processAccumulation called', {
+      slot: currentSlot.toString(),
+      epochSlot: (
+        Number(currentSlot) % this.configService.epochDuration
+      ).toString(),
+    })
+
     // Clear accumulation outputs at start to track only the latest accumulation
     this.accumulationOutputs.clear()
 
@@ -269,7 +282,7 @@ export class AccumulationService extends BaseService {
     // Use Q function iteratively to process all accumulatable items
     // Gray Paper equation 63-73: Q recursively finds all items with satisfied dependencies
     let iterationCount = 0
-    const maxIterations = 100 // Safety limit (not in Gray Paper, but needed to prevent infinite loops)
+    const maxIterations = 10 // Safety limit - Gray Paper uses gas as bound, this is just for safety
     const epochLength = this.configService.epochDuration
 
     // Track defxfers across iterations (Gray Paper equation 166: accseq recursively passes 𝐭*)
@@ -282,16 +295,28 @@ export class AccumulationService extends BaseService {
     while (iterationCount < maxIterations) {
       iterationCount++
 
-      // Step 1: Collect all ready items from ALL slots
-      const allReadyItems = this.collectAllReadyItems(epochLength)
+      // Step 1: Collect all ready items from ALL slots (in rotated order: [m:] then [:m])
+      const allReadyItems = this.collectAllReadyItems(epochLength, currentSlot)
 
       if (allReadyItems.length === 0) {
-        logger.debug('[AccumulationService] No ready items in any slot', {
-          slot: currentSlot.toString(),
-          iteration: iterationCount,
-        })
+        logger.info(
+          '[AccumulationService] No ready items in any slot - breaking accumulation loop',
+          {
+            slot: currentSlot.toString(),
+            iteration: iterationCount,
+          },
+        )
         break
       }
+
+      logger.info(
+        '[AccumulationService] Found ready items - proceeding with accumulation',
+        {
+          slot: currentSlot.toString(),
+          readyItemsCount: allReadyItems.length,
+          iteration: iterationCount,
+        },
+      )
 
       // Step 2: Use Q function to get all currently accumulatable items
       const accumulatableItems = this.getAccumulatableItemsQ(
@@ -412,9 +437,7 @@ export class AccumulationService extends BaseService {
         epochSlotIndex,
         partialStateAccountsPerInvocation,
       )
-
     }
-
   }
 
   /**
@@ -464,13 +487,33 @@ export class AccumulationService extends BaseService {
 
   /**
    * Collect all ready items from all epoch slots
+   *
+   * Gray Paper equation 89: q = E(concatall{ready[m:]} concat concatall{ready[:m]} ...)
+   * This processes items from ALL slots, but only those with satisfied dependencies (via Q function).
+   *
+   * However, according to equation 419-423, items expire when their slot is cleared after time advancement.
+   * Items should only be processed when their slot comes around again (after a full epoch rotation).
+   *
+   * According to jamduna reference implementation, accumulation only happens when items have been in the queue
+   * for a full epoch (when their slot comes around again). So we should only process items from the current slot.
+   *
+   * FIX: Only process items from the current epoch slot to match jamduna behavior.
    */
-  private collectAllReadyItems(epochLength: number): ReadyItem[] {
+  private collectAllReadyItems(
+    epochLength: number,
+    currentSlot: bigint,
+  ): ReadyItem[] {
     const allReadyItems: ReadyItem[] = []
-    for (let slotIdx = 0; slotIdx < epochLength; slotIdx++) {
-      const slotItems = this.readyService.getReadyItemsForSlot(BigInt(slotIdx))
-      allReadyItems.push(...slotItems)
-    }
+    const currentEpochSlot = Number(currentSlot) % epochLength
+
+    // Only process items from the current slot (when their slot comes around again after a full epoch)
+    // This matches jamduna behavior where accumulation only happens when items have been in queue for a full epoch
+    // Since we now process accumulation BEFORE adding new items, all items in the queue are from previous blocks
+    const slotItems = this.readyService.getReadyItemsForSlot(
+      BigInt(currentEpochSlot),
+    )
+    allReadyItems.push(...slotItems)
+
     return allReadyItems
   }
 
@@ -722,6 +765,14 @@ export class AccumulationService extends BaseService {
       pendingDefxfers,
     )
 
+    // Extract workItems from serviceItems for FETCH host function
+    // WorkItems are the original work items from the work packages that produced these work reports
+    // We reconstruct them from WorkReport.results, even though we don't have the full payload
+    const workItems = this.extractWorkItemsFromReadyItems(
+      serviceItems,
+      serviceId,
+    )
+
     // Execute accumulate invocation
     const result = await this.executeAccumulateInvocation(
       partialState,
@@ -729,6 +780,7 @@ export class AccumulationService extends BaseService {
       serviceId,
       gasLimit,
       inputs,
+      workItems,
     )
 
     // Track accumulation output and statistics
@@ -763,7 +815,7 @@ export class AccumulationService extends BaseService {
    */
   /**
    * Create partial state for PVM invocation
-   * 
+   *
    * Gray Paper accumulation.tex equation 134 (eq:partialstate):
    * partialstate ≡ tuple{
    *   ps_accounts: dictionary{serviceid}{serviceaccount},
@@ -775,47 +827,55 @@ export class AccumulationService extends BaseService {
    *   ps_registrar: serviceid,
    *   ps_alwaysaccers: dictionary{serviceid}{gas}
    * }
-   * 
+   *
    * The staging set MUST be a fixed-length sequence of exactly Cvalcount validators.
    * If not initialized, we pad with null validators (all zeros) to meet the requirement.
    */
   private createPartialState(): PartialState {
     // Get staging validators - MUST have exactly Cvalcount elements
     let stagingset: Uint8Array[] = []
-    
+
     const stagingValidatorsMap = this.validatorSetManager.getStagingValidators()
     const stagingValidatorsArray = Array.from(stagingValidatorsMap.values())
-    
+
     // Convert to Uint8Array format
     stagingset = stagingValidatorsArray.map(encodeValidatorPublicKeys)
-  
-    
+
     // Gray Paper requires exactly Cvalcount validators in the staging set
     // If we have fewer (or zero), pad with null validators
     const requiredCount = this.configService.numValidators
     if (stagingset.length < requiredCount) {
-      logger.debug('[AccumulationService] Staging set has fewer than Cvalcount validators, padding with null validators', {
-        currentCount: stagingset.length,
-        requiredCount,
-      })
-      
+      logger.debug(
+        '[AccumulationService] Staging set has fewer than Cvalcount validators, padding with null validators',
+        {
+          currentCount: stagingset.length,
+          requiredCount,
+        },
+      )
+
       // Create null validators using ValidatorSetManager's method
       // Gray Paper: null keys replace blacklisted validators (equation 122-123)
-      const nullValidators = this.validatorSetManager.createNullValidatorSet(requiredCount - stagingset.length)
-        
-      
+      const nullValidators = this.validatorSetManager.createNullValidatorSet(
+        requiredCount - stagingset.length,
+      )
+
       // Encode null validators to Uint8Array format and append
-      const nullValidatorsEncoded = nullValidators.map(encodeValidatorPublicKeys)
+      const nullValidatorsEncoded = nullValidators.map(
+        encodeValidatorPublicKeys,
+      )
       stagingset = [...stagingset, ...nullValidatorsEncoded]
     } else if (stagingset.length > requiredCount) {
       // Truncate if somehow we have more than required (shouldn't happen, but be safe)
-      logger.warn('[AccumulationService] Staging set has more than Cvalcount validators, truncating', {
-        currentCount: stagingset.length,
-        requiredCount,
-      })
+      logger.warn(
+        '[AccumulationService] Staging set has more than Cvalcount validators, truncating',
+        {
+          currentCount: stagingset.length,
+          requiredCount,
+        },
+      )
       stagingset = stagingset.slice(0, requiredCount)
     }
-    
+
     return {
       accounts: this.serviceAccountsService.getServiceAccounts().accounts,
       stagingset,
@@ -869,8 +929,13 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Track accumulation statistics for successful accumulations
-   * Gray Paper: accumulationstatistics[s] = tuple{N, gas}
+   * Track accumulation statistics for all accumulations (including panics/OOG)
+   * Gray Paper equation 390-404: accumulationstatistics[s] = tuple{G(s), N(s)}
+   * where G(s) = sum of gas used from all accumulations (including panics)
+   * and N(s) = count of work-items accumulated
+   *
+   * Gray Paper equation 217-241: C function always returns ao_gasused regardless of result
+   * Gray Paper equation 196-200: u includes gas from all accone calls
    */
   private trackAccumulationStatistics(
     serviceId: bigint,
@@ -879,42 +944,33 @@ export class AccumulationService extends BaseService {
   ): void {
     const { gasused, resultCode } = output
 
-    // Only track statistics for successful (HALT) accumulations
-    if (resultCode === RESULT_CODES.HALT) {
-      const currentStats = this.accumulationStatistics.get(serviceId) || [0, 0]
-      const newStats: [number, number] = [
-        currentStats[0] + 1, // Increment count
-        currentStats[1] + Number(gasused), // Add gas used
-      ]
-      this.accumulationStatistics.set(serviceId, newStats)
+    // Track statistics for ALL accumulations (including panics/OOG)
+    // Gray Paper: gas used is always tracked regardless of result code
+    const currentStats = this.accumulationStatistics.get(serviceId) || [0, 0]
 
-      // Update serviceStats.accumulation in activity state
-      if (this.statisticsService) {
-        this.statisticsService.updateServiceAccumulationStats(
-          serviceId,
-          newStats,
-        )
-      }
+    // Only increment count for successful (HALT) accumulations
+    // Gray Paper equation 399-403: N(s) counts accumulated work-items (only successful ones)
+    const countIncrement = resultCode === RESULT_CODES.HALT ? 1 : 0
 
-      logger.debug(
-        '[AccumulationService] Tracked accumulation statistics for successful accumulation',
-        {
-          serviceId: serviceId.toString(),
-          slot: currentSlot.toString(),
-          count: newStats[0],
-          gas: newStats[1],
-        },
-      )
-    } else {
-      logger.debug(
-        '[AccumulationService] Skipping accumulation statistics for failed accumulation',
-        {
-          serviceId: serviceId.toString(),
-          slot: currentSlot.toString(),
-          resultCode,
-        },
-      )
+    const newStats: [number, number] = [
+      currentStats[0] + countIncrement, // Increment count only for HALT
+      currentStats[1] + Number(gasused), // Always add gas used (even for panics/OOG)
+    ]
+    this.accumulationStatistics.set(serviceId, newStats)
+
+    // Update serviceStats.accumulation in activity state
+    if (this.statisticsService) {
+      this.statisticsService.updateServiceAccumulationStats(serviceId, newStats)
     }
+
+    logger.debug('[AccumulationService] Tracked accumulation statistics', {
+      serviceId: serviceId.toString(),
+      slot: currentSlot.toString(),
+      resultCode,
+      count: newStats[0],
+      gas: newStats[1],
+      gasUsed: gasused.toString(),
+    })
   }
 
   /**
@@ -1231,16 +1287,25 @@ export class AccumulationService extends BaseService {
         )
 
         // Create OperandTuple from work result
-        // Gray Paper: ot_gaslimit = wd_gaslimit (from work digest)
-        // accumulate_gas is the gas limit for this specific work digest
+        // Gray Paper equation 323-338: i^U = sequence of operand tuples
+        // ot_result = d_wd_result (from work digest)
+        // ot_gaslimit = d_wd_gaslimit (from work digest)
+        // ot_payloadhash = d_wd_payloadhash (from work digest)
+        // ot_authtrace = r_wr_authtrace (from work report)
+        // ot_segroot = (r_wr_avspec)_as_segroot (from work report's availability spec)
+        // ot_packagehash = (r_wr_avspec)_as_packagehash (from work report's availability spec)
+        // ot_authorizer = r_wr_authorizer (from work report)
+        //
+        // IMPORTANT: Gray Paper equation 329 specifies ot_segroot = (r_wr_avspec)_as_segroot
+        // This is the segment root (exports_root), NOT the erasure root (erasure_root)
         const operandTuple = {
-          packageHash: workReport.package_spec.hash,
-          segmentRoot: workReport.package_spec.erasure_root,
-          authorizer: workReport.authorizer_hash,
-          payloadHash: workResult.payload_hash,
-          gasLimit: workResult.accumulate_gas, // wd_gaslimit from work digest
-          result: executionResult,
-          authTrace: hexToBytes(workReport.auth_output),
+          packageHash: workReport.package_spec.hash, // (r_wr_avspec)_as_packagehash
+          segmentRoot: workReport.package_spec.exports_root, // (r_wr_avspec)_as_segroot (FIXED: was erasure_root)
+          authorizer: workReport.authorizer_hash, // r_wr_authorizer
+          payloadHash: workResult.payload_hash, // d_wd_payloadhash
+          gasLimit: workResult.accumulate_gas, // d_wd_gaslimit
+          result: executionResult, // d_wd_result
+          authTrace: hexToBytes(workReport.auth_output), // r_wr_authtrace
         }
 
         if (!inputsByService.has(serviceId)) {
@@ -1272,6 +1337,151 @@ export class AccumulationService extends BaseService {
   }
 
   /**
+   * Extract WorkItem[] from ReadyItem[] for a specific service
+   *
+   * Gray Paper pvm_invocations.tex line 148-150: Ψ_A signature is
+   * (partialstate, timeslot, serviceid, gas, sequence{accinput}) → acconeout
+   *
+   * Work items are NOT part of the formal Ψ_A signature, BUT they ARE needed for
+   * the FETCH host call (selector 14) which is called via the context mutator F.
+   *
+   * Gray Paper pvm_invocations.tex line 189: Context mutator F passes \mathbf{i} (work items sequence)
+   * to FETCH host call: Ω_Y(..., \none, \entropyaccumulator', \none, \none, \none, \none, \mathbf{i}, \imXY)
+   *
+   * Gray Paper pvm_invocations.tex line 359: FETCH selector 14 returns encode(var{\mathbf{i}})
+   * where \mathbf{i} is the work items sequence from work packages being accumulated.
+   *
+   * The \mathbf{i} in the context mutator is a free variable that must be provided by the
+   * implementation when creating the context mutator F. It's not part of Ψ_A's signature.
+   *
+   * CAN WE DERIVE WORK ITEMS FROM WORK DIGESTS?
+   *
+   * NO - Work digests are a lossy transformation (Gray Paper equation 130-151, itemtodigest):
+   * - wi_payload → wd_payloadhash (loses payload blob)
+   * - wi_importsegments → wd_importcount (loses segments array)
+   * - wi_extrinsics → wd_xtcount, wd_xtsize (loses extrinsics array)
+   * - wi_refgaslimit → not in work digest (only accgaslimit is preserved)
+   *
+   * Therefore, we CANNOT fully reconstruct work items from work digests alone.
+   *
+   * HOW TO GET WORK ITEMS:
+   *
+   * 1. **Fetch from D³L** (Distributed, Decentralized, Data Lake):
+   *    - Work packages are erasure-coded and distributed off-chain via D³L
+   *    - Use package hash (from workReport.package_spec.hash) to fetch the work package
+   *    - This is the standard way to retrieve work packages
+   *
+   * 2. **Check preimages** (if stored):
+   *    - Work packages COULD be stored as preimages in service accounts (sa_preimages)
+   *    - This is not standard but possible
+   *    - We attempt this lookup first as a convenience
+   *
+   * 3. **Reconstruct incomplete** (fallback):
+   *    - If work package not available, reconstruct from WorkReport.results
+   *    - This is INCOMPLETE and missing:
+   *      - payload: Empty (only have payload_hash)
+   *      - importsegments: Empty array (only have importcount)
+   *      - extrinsics: Empty array (only have xtcount, xtsize)
+   *      - refgaslimit: Using refine_load.gas_used (actual consumed, not original limit)
+   *
+   * IMPORTANT: Work packages are NOT stored in blockchain state. They are:
+   * - Submitted by builders and processed by guarantors
+   * - Erasure coded and distributed off-chain via D³L
+   * - Only work REPORTS (not packages) are stored on-chain in the reports state component
+   *
+   * @param readyItems - Ready items containing work reports
+   * @param serviceId - Service ID to filter work items for
+   * @returns Array of WorkItem structures (may be incomplete if work package not available)
+   */
+  private extractWorkItemsFromReadyItems(
+    readyItems: ReadyItem[],
+    serviceId: bigint,
+  ): WorkItem[] {
+    const workItems: WorkItem[] = []
+
+    for (const readyItem of readyItems) {
+      const workReport = readyItem.workReport
+      const packageHash = workReport.package_spec.hash
+
+      // Try to look up the original work package from preimages
+      // Work packages are NOT stored in blockchain state - they're distributed off-chain via D³L
+      // However, they COULD be stored as preimages in service accounts (sa_preimages)
+      // We try to look it up, but in practice they're unlikely to be there
+      let workPackage: WorkPackage | null = null
+
+      // Try to get work package from preimages
+      // Note: We don't know which service stored it, so we'd need to check all services
+      // For now, we skip this lookup as work packages are typically not in preimages
+      // TODO: If needed, iterate through all service accounts to find the preimage
+      const [preimageError, preimage] =
+        this.serviceAccountsService.getPreimage(packageHash)
+      if (!preimageError && preimage) {
+        // Try to decode as work package
+        const [decodeError, decodeResult] = decodeWorkPackage(
+          hexToBytes(preimage.blob),
+        )
+        if (!decodeError && decodeResult) {
+          workPackage = decodeResult.value
+        }
+      }
+
+      // Extract work items from work report results
+      // Each result corresponds to one work item
+      for (const workResult of workReport.results) {
+        // Only include work items for the specified service
+        if (workResult.service_id !== serviceId) {
+          continue
+        }
+
+        let workItem: WorkItem
+
+        if (workPackage) {
+          // Found the original work package in preimages - use it!
+          // Find the matching work item by service_id and code_hash
+          const originalWorkItem = workPackage.workItems.find(
+            (wi) =>
+              wi.serviceindex === workResult.service_id &&
+              wi.codehash === workResult.code_hash,
+          )
+          if (originalWorkItem) {
+            workItem = originalWorkItem
+          } else {
+            // Fallback: reconstruct from WorkResult
+            workItem = {
+              serviceindex: workResult.service_id,
+              codehash: workResult.code_hash,
+              payload: new Uint8Array(0),
+              refgaslimit: workResult.refine_load.gas_used,
+              accgaslimit: workResult.accumulate_gas,
+              exportcount: workResult.refine_load.exports,
+              importsegments: [],
+              extrinsics: [],
+            }
+          }
+        } else {
+          // Work package not found in preimages - reconstruct from WorkResult
+          // NOTE: This is incomplete - we don't have access to the original work package
+          // WorkResult only contains execution metadata, not the original work item structure
+          workItem = {
+            serviceindex: workResult.service_id,
+            codehash: workResult.code_hash,
+            payload: new Uint8Array(0), // Empty payload - we only have payload_hash
+            refgaslimit: workResult.refine_load.gas_used, // WRONG: This is gas_used, not refgaslimit
+            accgaslimit: workResult.accumulate_gas,
+            exportcount: workResult.refine_load.exports,
+            importsegments: [], // Not available in WorkResult
+            extrinsics: [], // Not available in WorkResult
+          }
+        }
+
+        workItems.push(workItem)
+      }
+    }
+
+    return workItems
+  }
+
+  /**
    * Execute PVM accumulate invocation
    *
    * This method calls the PVM's executeAccumulate method with the provided
@@ -1284,6 +1494,7 @@ export class AccumulationService extends BaseService {
     serviceId: bigint,
     gas: bigint,
     inputs: AccumulateInput[],
+    workItems: WorkItem[] = [],
   ): Promise<AccumulateInvocationResult> {
     const result = await this.accumulatePVM.executeAccumulate(
       partialState,
@@ -1291,6 +1502,7 @@ export class AccumulationService extends BaseService {
       serviceId,
       gas,
       inputs,
+      workItems,
     )
 
     return result
@@ -1337,17 +1549,18 @@ export class AccumulationService extends BaseService {
       this.shiftReadyQueue(slotDelta, epochDuration, currentEpochSlot)
     }
 
-    // Step 3: Process immediate items first
+    // Step 3: Add immediate items to ready queue FIRST so they can be processed immediately
+    // Gray Paper equation 39: justbecameavailable^! = reports with zero prerequisites AND empty segment_root_lookup
+    // These should be accumulated immediately when they become available
     await this.processImmediateItems(immediateItems, slot)
 
-    // Get accumulated packages from immediate items for queue editing (after shift and immediate processing)
-    const accumulatedFromImmediate =
-      this.accumulated.packages[epochDuration - 1] || new Set<Hex>()
+    // Step 4: Build and edit queue, then process accumulation
+    // Gray Paper equation 89: q = E(..., P(justbecameavailable^!))
+    // The E function uses P(justbecameavailable^!) to edit dependencies in the existing queue
+    const packagesFromImmediate = this.extractPackageHashesP(immediateItems)
+    await this.buildAndEditQueue(queuedItems, packagesFromImmediate, slot)
 
-    // Step 4: Build and edit queue
-    await this.buildAndEditQueue(queuedItems, accumulatedFromImmediate, slot)
-
-    // Step 5: Process queue with Q function
+    // Step 5: Process accumulation on items in the queue (including newly added immediate items)
     await this.processAccumulation(slot)
 
     // Update last processed slot to reflect that state now represents this slot
@@ -1450,7 +1663,8 @@ export class AccumulationService extends BaseService {
   /**
    * Process immediate items first (justbecameavailable^!)
    * Gray Paper equation 39: justbecameavailable^! = reports with zero prerequisites AND empty segment_root_lookup
-   * These are accumulated immediately before processing the queue
+   *
+   * These items should be added to the ready queue immediately so they can be processed in the current block.
    */
   private async processImmediateItems(
     immediateItems: ReadyItem[],
@@ -1463,18 +1677,20 @@ export class AccumulationService extends BaseService {
     const epochDuration = this.configService.epochDuration
     const newReportsSlot = Number(slot) % epochDuration
 
-    // Add immediate items to ready queue for processing
+    // Add immediate items to ready queue at current slot
+    // They will be processed immediately when processAccumulation is called
     for (const item of immediateItems) {
       this.readyService.addReadyItemToSlot(BigInt(newReportsSlot), item)
     }
-
-    // Process immediate items
-    await this.processAccumulation(slot)
   }
 
   /**
    * Build queue q = E(rotated ready queue + queued items, P(justbecameavailable^!))
    * Gray Paper equation 89: q = E(concatall{ready[m:]} concat concatall{ready[:m]} concat justbecameavailable^Q, P(justbecameavailable^!))
+   *
+   * IMPORTANT: This is called AFTER processImmediateItems, so the ready queue already contains
+   * the immediate items. The E function uses P(justbecameavailable^!) to edit dependencies in the
+   * existing queue, removing dependencies that are satisfied by the newly accumulated immediate items.
    */
   private async buildAndEditQueue(
     queuedItems: ReadyItem[],
@@ -1485,7 +1701,7 @@ export class AccumulationService extends BaseService {
     const m = Number(slot) % epochDuration
 
     // Gray Paper equation 89: q = E(concatall{ready[m:]} concat concatall{ready[:m]} concat justbecameavailable^Q, P(justbecameavailable^!))
-    // Get current ready queue BEFORE adding new items
+    // Get current ready queue (which now includes immediate items added in processImmediateItems)
     const currentReady = this.readyService.getReady()
 
     // Apply E function to existing ready queue items to remove accumulated dependencies
@@ -1500,11 +1716,32 @@ export class AccumulationService extends BaseService {
     const newReadySlots: ReadyItem[][] = new Array(epochDuration)
     for (let slotIdx = 0; slotIdx < epochDuration; slotIdx++) {
       const slotItems = currentReady.epochSlots[slotIdx] || []
-      const editedSlotItems = this.applyQueueEditingFunctionE(
-        slotItems,
+      // Apply E function to remove dependencies that are satisfied by newly accumulated immediate items
+      // BUT: Don't remove the immediate items themselves - they need to be accumulated first
+      // The E function should only remove dependencies, not items whose package hash is in accumulatedFromImmediate
+      // So we filter out immediate items first, apply E to the rest, then add immediate items back
+      const immediateItemsInSlot: ReadyItem[] = []
+      const otherItemsInSlot: ReadyItem[] = []
+
+      for (const item of slotItems) {
+        const packageHash = item.workReport.package_spec.hash
+        if (accumulatedFromImmediate.has(packageHash)) {
+          // This is an immediate item that was just added - keep it for accumulation
+          immediateItemsInSlot.push(item)
+        } else {
+          // This is an existing item - apply E function to remove satisfied dependencies
+          otherItemsInSlot.push(item)
+        }
+      }
+
+      // Apply E function only to non-immediate items
+      const editedOtherItems = this.applyQueueEditingFunctionE(
+        otherItemsInSlot,
         accumulatedFromImmediate,
       )
-      newReadySlots[slotIdx] = editedSlotItems
+
+      // Combine: immediate items (unchanged) + edited other items
+      newReadySlots[slotIdx] = [...immediateItemsInSlot, ...editedOtherItems]
     }
 
     // Now add newly queued items to their appropriate slot (current slot m)
@@ -1517,6 +1754,8 @@ export class AccumulationService extends BaseService {
       ),
     })
 
+    // Add queued items to their slot
+    // Since this is called AFTER processAccumulation, these items won't be processed until next epoch
     newReadySlots[m].push(...queuedItems)
 
     // Update ready queue once with the complete state
@@ -1639,17 +1878,17 @@ export class AccumulationService extends BaseService {
         },
       )
 
-      if (
-        result?.ok &&
-        result.value?.resultCode === RESULT_CODES.HALT &&
-        result.value?.yield !== null
-      ) {
+      // Gray Paper equation 417: accumulated'_{E-1} = P(justbecameavailable^*[:n])
+      // Packages are added to accumulated for ALL successfully processed work reports,
+      // regardless of whether they produce a yield. Yield is only for lastaccout'.
+      if (result?.ok && result.value?.resultCode === RESULT_CODES.HALT) {
         // Service invocation succeeded - add all its work reports to accumulated
         for (const workReport of serviceWorkReports) {
           newPackages.add(workReport.package_spec.hash)
           logger.debug('[AccumulationService] Adding package to newPackages', {
             packageHash: workReport.package_spec.hash.slice(0, 40),
             serviceIdx,
+            hasYield: result.value?.yield !== null,
           })
         }
       }
@@ -1926,21 +2165,24 @@ export class AccumulationService extends BaseService {
     // dependencies from remaining entries
 
     // Use newPackages (successfully accumulated) for queue editing
-    // Only remove work reports and dependencies for successfully accumulated packages
+    // Only successfully accumulated packages go into the accumulated history for dependency tracking
     const accumulatedPackageHashes = newPackages
 
-    // First, remove entries whose package hash was successfully accumulated
-    // Gray Paper E function (equation 48-61): Only remove if (r_avspec)_packagehash ∈ x (accumulated set)
+    // Remove ALL processed work reports from ready queue, regardless of success/failure
+    // Gray Paper: A work report is "processed" once accumulation is attempted, even if it fails
+    // Failed work reports (PANIC/OOG) should NOT be re-processed - they are consumed by the attempt
     for (const processedReport of processedWorkReports) {
-      // Only remove if this work report was successfully accumulated
-      if (!accumulatedPackageHashes.has(processedReport.package_spec.hash)) {
+      // Log whether this was successfully accumulated (for debugging)
+      const wasSuccessful = accumulatedPackageHashes.has(
+        processedReport.package_spec.hash,
+      )
+      if (!wasSuccessful) {
         logger.debug(
-          '[AccumulationService] Skipping removal - not accumulated',
+          '[AccumulationService] Removing failed work report from queue',
           {
             packageHash: processedReport.package_spec.hash.slice(0, 40),
           },
         )
-        continue
       }
 
       const [hashError, workReportHash] =

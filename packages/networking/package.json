@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/networking",
+  "name": "@pbnjam/networking",
   "version": "0.0.1",
   "description": "JAM Simple Networking Protocol (JAMNP-S) implementation",
   "type": "module",
@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@infisical/quic": "^1.0.0",
-    "@pbnj/core": "workspace:*",
-    "@pbnj/codec": "workspace:*",
-    "@pbnj/types": "workspace:*",
-    "@pbnj/audit": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/audit": "workspace:*",
     "@peculiar/webcrypto": "1.5.0",
     "@peculiar/x509": "1.14.0",
     "asn1js": "3.0.6",
@@ -31,7 +31,7 @@
     "vitest": "^2.1.9",
     "typescript": "^5.8.2",
     "biome": "^0.3.3",
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "@types/node": "^20.0.0"
   },
   "exports": {

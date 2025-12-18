@@ -1,12 +1,12 @@
 import {
   decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import type {
   HostFunctionResult,
   IConfigService,
   ValidatorPublicKeys,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,

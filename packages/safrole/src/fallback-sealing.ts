@@ -39,15 +39,15 @@ import {
   getBanderoutFromGamma,
   IETFVRFProver,
   IETFVRFVerifier,
-} from '@pbnj/bandersnatch-vrf'
-import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnj/core'
-import { encodeUnsignedHeader } from '@pbnj/codec'
+} from '@pbnjam/bandersnatch-vrf'
+import { encodeUnsignedHeader } from '@pbnjam/codec'
+import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   IConfigService,
   IValidatorSetManager,
   UnsignedBlockHeader,
-} from '@pbnj/types'
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Gray Paper hardcoded context string for fallback sealing

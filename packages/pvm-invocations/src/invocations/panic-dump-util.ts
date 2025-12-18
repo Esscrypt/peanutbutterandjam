@@ -7,9 +7,9 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
-import type { RAM } from '@pbnj/types'
-import { RESULT_CODES, type InstructionRegistry } from '@pbnj/pvm'
+import { logger } from '@pbnjam/core'
+import { type InstructionRegistry, RESULT_CODES } from '@pbnjam/pvm'
+import type { RAM } from '@pbnjam/types'
 
 export interface PanicDumpData {
   timestamp: string
@@ -164,8 +164,15 @@ export function buildPanicDumpData(params: {
     pc: bigint | null
   }>
 }): PanicDumpData {
-  const { serviceId, gasConsumed, postState, lastInstruction, ram, executionLogs, hostFunctionLogs } =
-    params
+  const {
+    serviceId,
+    gasConsumed,
+    postState,
+    lastInstruction,
+    ram,
+    executionLogs,
+    hostFunctionLogs,
+  } = params
 
   // Get address interaction history
   const addressInteractionHistory = Array.from(
@@ -456,7 +463,7 @@ export function decodeLastInstruction(params: {
                   if (immediateX & signBit) {
                     // Sign extend: fill upper bits with 1s
                     const mask = (1n << BigInt(lengthX * 8)) - 1n
-                    immediateX = immediateX | (~mask)
+                    immediateX = immediateX | ~mask
                   }
                 }
               } else {
@@ -496,7 +503,7 @@ export function decodeLastInstruction(params: {
                   const signBit = 1n << BigInt(lengthX * 8 - 1)
                   if (immediateX & signBit) {
                     const mask = (1n << BigInt(lengthX * 8)) - 1n
-                    immediateX = immediateX | (~mask)
+                    immediateX = immediateX | ~mask
                   }
                 }
               } else {
@@ -512,11 +519,14 @@ export function decodeLastInstruction(params: {
           }
         } catch (error) {
           // If decoding fails, continue without decoded info
-          logger.debug('[PanicDumpUtil] Failed to decode instruction operands', {
-            error,
-            opcode: opcode.toString(16),
-            operands,
-          })
+          logger.debug(
+            '[PanicDumpUtil] Failed to decode instruction operands',
+            {
+              error,
+              opcode: opcode.toString(16),
+              operands,
+            },
+          )
         }
       }
 
@@ -550,4 +560,3 @@ export function decodeLastInstruction(params: {
 
   return null
 }
-

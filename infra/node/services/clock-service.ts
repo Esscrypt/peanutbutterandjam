@@ -10,7 +10,7 @@ import {
   type AuditTrancheEvent,
   type EventBusService,
   logger,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import {
   AUDIT_CONSTANTS,
   BaseService,
@@ -19,7 +19,7 @@ import {
   type SafePromise,
   safeResult,
   type TicketDistributionEvent,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 import type { ValidatorSetManager } from './validator-set'
 

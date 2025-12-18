@@ -49,14 +49,14 @@
  * This is critical for JAM's authorization management and core assignment.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   AuthQueue,
   DecodingResult,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnjam/types'
 import { encodeSequenceGeneric } from '../core/sequence'
 
 /**

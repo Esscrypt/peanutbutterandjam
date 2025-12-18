@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs'
 import * as path from 'node:path'
 import type tyGenesisJsoncore
 import { convertGenesisToBlockHeaderggggggggggggggggenesis
-import { calculateBlockHashFromHeaderkHashFrom@pbnjaserialization
+import { calculateBlockHashFromHeaderkHashFrom@pbnjamaserialization
 import fiConfigService../../../../infra/node/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service/services/config-service'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../')

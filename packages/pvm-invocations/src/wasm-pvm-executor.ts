@@ -1,22 +1,25 @@
 /**
  * WASM PVM Executor
- * 
+ *
  * Wraps the WASM PVM implementation to implement IPVMExecutor.
- * 
+ *
  * Supports both generic marshalling invocations and accumulation-specific invocations.
- * 
+ *
  * The WASM module is loaded from a file path in the constructor and initialized on first use.
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   decodeBlob,
   decodeProgramFromPreimage,
   encodeImplicationsPair,
-} from '@pbnj/codec'
-import { writeTraceDump } from '@pbnj/pvm'
+  encodeVariableSequence,
+  encodeWorkItem,
+} from '@pbnjam/codec'
+import { writeTraceDump } from '@pbnjam/pvm'
+import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import type {
   AccumulateInput,
   IConfigService,
@@ -28,11 +31,10 @@ import type {
   ResultCode,
   SafePromise,
   WorkItem,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
 import { InstructionRegistry } from '../../pvm/src/instructions/registry'
-import { instantiate } from './wasmAsInit'
 
 /**
  * WASM module exports type from instantiate function
@@ -44,6 +46,7 @@ export class WasmPVMExecutor {
   private readonly wasmModuleBytes: ArrayBuffer
   private readonly configService: IConfigService
   private readonly entropyService: IEntropyService
+  private readonly workspaceRoot: string
   private initializationPromise: Promise<void> | null = null
 
   private currentState: PVMState | null = null
@@ -62,37 +65,60 @@ export class WasmPVMExecutor {
     gasAfter: bigint
     serviceId?: bigint
   }> = []
-  private readonly instructionRegistry: InstructionRegistry = new InstructionRegistry()
+  private readonly instructionRegistry: InstructionRegistry =
+    new InstructionRegistry()
   private code: Uint8Array = new Uint8Array(0)
   private bitmask: Uint8Array = new Uint8Array(0)
 
   /**
    * Create a new WasmPVMExecutor instance
-   * 
+   *
    * The WASM module is loaded from the pvm-assemblyscript package's build directory
    * and will be instantiated on first use (lazy initialization).
-   * 
+   *
    * Host function handling is now done internally in AssemblyScript, so no registries are needed.
-   * 
+   *
    * @param configService - Configuration service (required for accumulation invocations)
    * @param entropyService - Entropy service (required for accumulation invocations)
    */
-  constructor(
-    configService: IConfigService,
-    entropyService: IEntropyService,
-  ) {
+  constructor(configService: IConfigService, entropyService: IEntropyService) {
     // Resolve path to WASM file in pvm-assemblyscript package
     // Path: packages/pvm-assemblyscript/build/pvm.wasm
-    const currentDir = typeof __dirname !== 'undefined'
-      ? __dirname
-      : dirname(fileURLToPath(import.meta.url))
-    
+    const currentDir =
+      typeof __dirname !== 'undefined'
+        ? __dirname
+        : dirname(fileURLToPath(import.meta.url))
+
     // Go up from src/ to packages/, then to pvm-assemblyscript/build/pvm.wasm
     // currentDir = packages/pvm-invocations/src/
     // .. = packages/pvm-invocations/
     // ../.. = packages/
+    // ../../.. = workspace root
     const packagesDir = join(currentDir, '..', '..')
-    const wasmPath = join(packagesDir, 'pvm-assemblyscript', 'build', 'pvm.wasm')
+    this.workspaceRoot = join(packagesDir, '..')
+
+    // Try to load from pvm-assemblyscript build directory first
+    // Path: packages/pvm-assemblyscript/build/pvm.wasm
+    const buildWasmPath = join(
+      packagesDir,
+      'pvm-assemblyscript',
+      'build',
+      'pvm.wasm',
+    )
+
+    // Fallback to local wasm directory if build directory doesn't exist
+    // Local path: packages/pvm-invocations/src/wasm/pvm.wasm (for development/testing)
+    const localWasmPath = join(currentDir, 'wasm', 'pvm.wasm')
+
+    let wasmPath: string
+    if (existsSync(buildWasmPath)) {
+      wasmPath = buildWasmPath
+    } else if (existsSync(localWasmPath)) {
+      wasmPath = localWasmPath
+    } else {
+      // If neither exists, try the build path anyway (will throw a clear error)
+      wasmPath = buildWasmPath
+    }
 
     // Read WASM file
     const wasmBytes = readFileSync(wasmPath)
@@ -133,11 +159,10 @@ export class WasmPVMExecutor {
     await this.initializationPromise
   }
 
-
   /**
    * Execute accumulation invocation using setupAccumulateInvocation
    * Similar to accumulate-wasm.test.ts
-   * 
+   *
    * This is the public method that AccumulatePVM should call directly for WASM execution.
    */
   async executeAccumulationInvocation(
@@ -196,10 +221,13 @@ export class WasmPVMExecutor {
     // Decode preimage blob to get code and bitmask for instruction decoding
     // Follow the same flow as WASM: decodeProgramFromPreimage → decodeBlob(code)
     // This matches what initializeProgram does in AssemblyScript
-    const [programError, programResult] = decodeProgramFromPreimage(preimageBlob)
+    const [programError, programResult] =
+      decodeProgramFromPreimage(preimageBlob)
     if (programError || !programResult) {
       return safeError(
-        new Error(`Failed to decode program from preimage: ${programError?.message}`),
+        new Error(
+          `Failed to decode program from preimage: ${programError?.message}`,
+        ),
       )
     }
 
@@ -208,47 +236,72 @@ export class WasmPVMExecutor {
     const [decodeError, decoded] = decodeBlob(programResult.value.code)
     if (decodeError || !decoded) {
       return safeError(
-        new Error(`Failed to decode code as deblob format: ${decodeError?.message}`),
+        new Error(
+          `Failed to decode code as deblob format: ${decodeError?.message}`,
+        ),
       )
     }
     const { code, bitmask } = decoded.value
-    
+
     // Extend code with zeros (Gray Paper: ζ ≡ c ⌢ [0, 0, . . . ])
     const extendedCode = new Uint8Array(code.length + 16)
     extendedCode.set(code)
     extendedCode.fill(0, code.length)
-    
+
     // Extend bitmask with ones (for final instruction)
     const extendedBitmask = new Uint8Array(bitmask.length + 25)
     extendedBitmask.set(bitmask)
     extendedBitmask.fill(1, bitmask.length)
-    
+
     this.code = extendedCode
     this.bitmask = extendedBitmask
 
-    // Set up accumulation invocation with config parameters
-      this.wasm.setupAccumulateInvocation(
-        Number(gasLimit),
-        preimageBlob,
-        encodedArgs,
-        encodedContext,
-        numCores,
-        numValidators,
-        authQueueSize,
-        entropyAccumulator,
-        this.configService.numCores,
-        this.configService.preimageExpungePeriod,
-        this.configService.epochDuration,
-        BigInt(this.configService.maxBlockGas),
-        BigInt(this.configService.maxRefineGas),
-        this.configService.maxTicketsPerExtrinsic,
-        this.configService.ticketsPerValidator,
-        this.configService.slotDuration,
-        this.configService.rotationPeriod,
-        this.configService.numValidators,
-        this.configService.numEcPiecesPerSegment,
-        this.configService.contestDuration,
+    // Encode work items sequence for FETCH host function
+    // Always encode the sequence, even if empty (to match Rust reference expectations)
+    // An empty sequence is encoded as: encode(0) = 0x00 (length prefix for 0 items)
+    const workItemsToEncode =
+      _workItems && _workItems.length > 0 ? _workItems : []
+    const [encodeError, encoded] = encodeVariableSequence(
+      workItemsToEncode,
+      (workItem: WorkItem) => {
+        const [itemError, itemEncoded] = encodeWorkItem(workItem)
+        if (itemError) {
+          return safeError(itemError)
+        }
+        return safeResult(itemEncoded)
+      },
+    )
+    if (encodeError || !encoded) {
+      return safeError(
+        new Error(`Failed to encode work items: ${encodeError?.message}`),
       )
+    }
+    const encodedWorkItems = encoded
+
+    // Set up accumulation invocation with config parameters
+    this.wasm.setupAccumulateInvocation(
+      Number(gasLimit),
+      preimageBlob,
+      encodedArgs,
+      encodedContext,
+      numCores,
+      numValidators,
+      authQueueSize,
+      entropyAccumulator,
+      encodedWorkItems,
+      this.configService.numCores,
+      this.configService.preimageExpungePeriod,
+      this.configService.epochDuration,
+      BigInt(this.configService.maxBlockGas),
+      BigInt(this.configService.maxRefineGas),
+      this.configService.maxTicketsPerExtrinsic,
+      this.configService.ticketsPerValidator,
+      this.configService.slotDuration,
+      this.configService.rotationPeriod,
+      this.configService.numValidators,
+      this.configService.numEcPiecesPerSegment,
+      this.configService.contestDuration,
+    )
 
     // Clear execution logs at the start of each execution run
     this.executionLogs = []
@@ -266,30 +319,61 @@ export class WasmPVMExecutor {
     while (steps < maxSteps) {
       const pcBefore = BigInt(this.wasm.getProgramCounter())
       const gasBefore = BigInt(this.wasm.getGasLeft())
-      
+
       // On first step, get WASM code/bitmask arrays (they're extended in run())
       if (steps === 0 && this.wasm.getCode && this.wasm.getBitmask) {
         wasmCode = this.wasm.getCode()
         wasmBitmask = this.wasm.getBitmask()
       }
-      
+
       // Decode instruction at PC BEFORE step to check if it's ECALLI
       const codeArray = wasmCode || this.code
       const bitmaskArray = wasmBitmask || this.bitmask
       const pcIndex = Number(pcBefore)
       let isEcalli = false
       let hostCallId: bigint | null = null
-      
-      if (pcIndex >= 0 && pcIndex < codeArray.length && pcIndex < bitmaskArray.length) {
+
+      if (
+        pcIndex >= 0 &&
+        pcIndex < codeArray.length &&
+        pcIndex < bitmaskArray.length
+      ) {
         if (bitmaskArray[pcIndex] === 1) {
           const instructionOpcode = codeArray[pcIndex]
           // ECALLI opcode is 10 (0x0A)
           if (instructionOpcode === 10) {
             isEcalli = true
+            // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
+            // Gray Paper pvm.tex §7.4.1: l_X = min(4, ℓ), immed_X = sext(l_X, decode[l_X](instructions[i+1:i+1+l_X]))
+            // For ECALLI, we need to calculate Fskip to get the operand length
+            // Fskip(i) = min(24, j ∈ N : (k ∥ {1,1,...})_{i+1+j} = 1)
+            let fskip = 0
+            for (
+              let j = 0;
+              j < 24 && pcIndex + 1 + j < bitmaskArray.length;
+              j++
+            ) {
+              if (bitmaskArray[pcIndex + 1 + j] === 1) {
+                fskip = j
+                break
+              }
+            }
+            // If we didn't find a 1 in the bitmask, use the remaining code length
+            if (fskip === 0 && pcIndex + 1 < codeArray.length) {
+              fskip = Math.min(24, codeArray.length - pcIndex - 1)
+            }
+            // Extract operands (Gray Paper: operands are at instructions[i+1:i+1+l_X])
+            // For ECALLI, the immediate is typically just 1 byte (host function IDs are 0-26)
+            // Gray Paper: l_X = min(4, ℓ), but for host function IDs, it's just 1 byte
+            const operandStart = pcIndex + 1
+            if (operandStart < codeArray.length) {
+              // Read the first byte (host function ID)
+              hostCallId = BigInt(codeArray[operandStart])
+            }
           }
         }
       }
-      
+
       // Execute one step
       const shouldContinue = this.wasm.nextStep()
       steps++
@@ -303,16 +387,18 @@ export class WasmPVMExecutor {
         registerStateAfter[i] = registerViewAfter.getBigUint64(i * 8, true)
       }
 
-      // If this was an ECALLI and status is HOST, log the host function call
-      // Note: Host functions are now handled internally in AssemblyScript,
-      // but we still log them for trace comparison
+      // Get status after step (needed for host function detection and loop control)
       const status = this.wasm.getStatus()
-      if (isEcalli && status === 4) {
-        // Status 4 = HOST (RESULT_CODE_HOST) - handled internally, execution continues
-        // Host call ID is in register[0] after ECALLI
-        hostCallId = registerStateAfter[0]
-        
+
+      // If this was an ECALLI, log the host function call
+      // Note: Host functions are handled internally in AssemblyScript during accumulation,
+      // so status might not be HOST (4) - it could be OK (0) or HALT (1) after handling.
+      // We detect host function calls by checking if ECALLI was executed.
+      if (isEcalli && hostCallId !== null) {
+        // Host call ID was extracted from instruction operands above (Gray Paper: immed_X from ECALLI)
         // Log host function call (for trace comparison with TypeScript)
+        // Even if status is not HOST (4), we still log it because the host function
+        // was handled internally and execution continued
         this.traceHostFunctionLogs.push({
           step: steps,
           hostCallId,
@@ -321,16 +407,22 @@ export class WasmPVMExecutor {
           serviceId,
         })
       }
-      
+
       let instructionName = 'UNKNOWN'
       let opcode = '0x00'
-      
-      if (pcIndex >= 0 && pcIndex < codeArray.length && pcIndex < bitmaskArray.length) {
+
+      if (
+        pcIndex >= 0 &&
+        pcIndex < codeArray.length &&
+        pcIndex < bitmaskArray.length
+      ) {
         if (bitmaskArray[pcIndex] === 1) {
           const instructionOpcode = codeArray[pcIndex]
-        const handler = this.instructionRegistry.getHandler(BigInt(instructionOpcode))
-        instructionName = handler?.name ?? 'UNKNOWN'
-        opcode = `0x${instructionOpcode.toString(16)}`
+          const handler = this.instructionRegistry.getHandler(
+            BigInt(instructionOpcode),
+          )
+          instructionName = handler?.name ?? 'UNKNOWN'
+          opcode = `0x${instructionOpcode.toString(16)}`
         } else {
           instructionName = 'INVALID_POSITION'
           opcode = `0x${codeArray[pcIndex]?.toString(16) || 'undefined'}`
@@ -350,12 +442,20 @@ export class WasmPVMExecutor {
 
       // Check if execution should stop
       // Host function calls are now handled internally in AssemblyScript,
-      // so we just check if execution should continue
+      // but nextStep() returns false for HOST status, so we need to continue manually
       if (!shouldContinue) {
-        // Execution stopped (halted, panicked, OOG, or host function returned halt)
+        // If status is HOST (4), we should continue execution after the host function
+        // Host functions are handled internally, so we resume execution by calling nextStep() again
+        if (status === 4) {
+          // HOST status - host function was called, continue execution
+          // The host function has been handled internally, so we continue the loop
+          // Note: We don't increment steps here because we already did above
+          continue
+        }
+        // Otherwise, execution stopped (halted, panicked, OOG)
         break
       }
-      
+
       // Status 0 = OK, continue execution
       // Status 4 = HOST (handled internally in AssemblyScript, execution continues automatically)
       if (status !== 0 && status !== 4) {
@@ -386,14 +486,41 @@ export class WasmPVMExecutor {
     this.updateStateFromWasm()
 
     // Write trace dump if we have execution logs
+    console.log(
+      `[WasmPVMExecutor] Execution completed: steps=${steps}, executionLogs.length=${this.executionLogs.length}, status=${status}, workspaceRoot=${this.workspaceRoot}`,
+    )
     if (this.executionLogs.length > 0) {
-      // Use timeslot as block number for jamduna-style filename
-      writeTraceDump(
+      // Write to pvm-traces folder in workspace root
+      const traceOutputDir = join(this.workspaceRoot, 'pvm-traces')
+      console.log(
+        `[WasmPVMExecutor] Writing trace to: ${traceOutputDir}, timeslot=${timeslot.toString()}`,
+      )
+      // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
+      // Don't pass executorType to get jamduna format when blockNumber is provided
+      // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
+      // Since we always have timeslot (block number), we use jamduna format by default
+      // If trace format is needed, it can be enabled via a flag or by not passing timeslot
+      const filepath = writeTraceDump(
         this.executionLogs,
-        this.traceHostFunctionLogs.length > 0 ? this.traceHostFunctionLogs : undefined,
+        this.traceHostFunctionLogs.length > 0
+          ? this.traceHostFunctionLogs
+          : undefined,
+        traceOutputDir,
         undefined,
-        undefined,
-        timeslot,
+        timeslot, // blockNumber
+        'wasm', // executorType - generates wasm-{slot}.log format
+        undefined, // serviceId - not needed
+      )
+      if (filepath) {
+        console.log(`[WasmPVMExecutor] Trace written to: ${filepath}`)
+      } else {
+        console.warn(
+          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
+        )
+      }
+    } else {
+      console.warn(
+        `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
       )
     }
 
@@ -406,7 +533,6 @@ export class WasmPVMExecutor {
       context: implicationsPair,
     })
   }
-
 
   getState(): PVMState {
     if (!this.currentState) {
@@ -447,4 +573,3 @@ export class WasmPVMExecutor {
     }
   }
 }
-

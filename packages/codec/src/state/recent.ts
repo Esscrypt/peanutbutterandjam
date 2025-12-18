@@ -50,14 +50,14 @@
  * This is critical for JAM's recent block tracking and duplicate prevention.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   Recent,
   RecentHistoryEntry,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,

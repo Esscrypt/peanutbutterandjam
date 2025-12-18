@@ -1,4 +1,4 @@
-import { bytesToHex, type Hex, logger } from '@pbnj/core'
+import { bytesToHex, type Hex, logger } from '@pbnjam/core'
 import type { SubscriptionManager } from './subscription-manager'
 import type { Parameters, RpcParams, RpcResult, WebSocket } from './types'
 

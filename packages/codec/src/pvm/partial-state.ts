@@ -38,7 +38,7 @@
  * 8. ps_alwaysaccers: encode{var{sequence{sorted(serviceid, gas)}}}
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   AuthQueue,
   DecodingResult,
@@ -48,11 +48,9 @@ import type {
   Safe,
   ServiceAccount,
   ValidatorPublicKeys,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
-import {
-  decodeVariableLength,
-} from '../core/discriminator'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
+import { decodeVariableLength } from '../core/discriminator'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -161,18 +159,14 @@ function convertValidatorKeysToBytes(
  * Convert Uint8Array[][] to AuthQueue (Hex[][])
  */
 function convertAuthQueue(authqueue: Uint8Array[][]): AuthQueue {
-  return authqueue.map((coreQueue) =>
-    coreQueue.map((hash) => bytesToHex(hash)),
-  )
+  return authqueue.map((coreQueue) => coreQueue.map((hash) => bytesToHex(hash)))
 }
 
 /**
  * Convert AuthQueue (Hex[][]) to Uint8Array[][]
  */
 function convertAuthQueueToBytes(authqueue: AuthQueue): Uint8Array[][] {
-  return authqueue.map((coreQueue) =>
-    coreQueue.map((hash) => hexToBytes(hash)),
-  )
+  return authqueue.map((coreQueue) => coreQueue.map((hash) => hexToBytes(hash)))
 }
 
 /**
@@ -236,7 +230,9 @@ export function encodeCompleteServiceAccount(
   }
   const concatenatedStoragePairs = concatBytes(storagePairs)
   // Wrap with var{} discriminator
-  const [storageLengthError, encodedStorageLength] = encodeNatural(BigInt(concatenatedStoragePairs.length))
+  const [storageLengthError, encodedStorageLength] = encodeNatural(
+    BigInt(concatenatedStoragePairs.length),
+  )
   if (storageLengthError) {
     return safeError(storageLengthError)
   }
@@ -279,7 +275,9 @@ export function encodeCompleteServiceAccount(
   }
   const concatenatedPreimagePairs = concatBytes(preimagePairs)
   // Wrap with var{} discriminator
-  const [preimagesLengthError, encodedPreimagesLength] = encodeNatural(BigInt(concatenatedPreimagePairs.length))
+  const [preimagesLengthError, encodedPreimagesLength] = encodeNatural(
+    BigInt(concatenatedPreimagePairs.length),
+  )
   if (preimagesLengthError) {
     return safeError(preimagesLengthError)
   }
@@ -336,7 +334,9 @@ export function encodeCompleteServiceAccount(
   }
   const concatenatedRequestPairs = concatBytes(requestPairs)
   // Wrap with var{} discriminator
-  const [requestsLengthError, encodedRequestsLength] = encodeNatural(BigInt(concatenatedRequestPairs.length))
+  const [requestsLengthError, encodedRequestsLength] = encodeNatural(
+    BigInt(concatenatedRequestPairs.length),
+  )
   if (requestsLengthError) {
     return safeError(requestsLengthError)
   }
@@ -353,10 +353,7 @@ export function encodeCompleteServiceAccount(
   parts.push(hexToBytes(account.codehash))
 
   // sa_balance: encode[8]{balance} (8-byte fixed-length)
-  const [balanceError, encodedBalance] = encodeFixedLength(
-    account.balance,
-    8n,
-  )
+  const [balanceError, encodedBalance] = encodeFixedLength(account.balance, 8n)
   if (balanceError) {
     return safeError(balanceError)
   }
@@ -383,30 +380,21 @@ export function encodeCompleteServiceAccount(
   parts.push(encodedMinMemoGas)
 
   // sa_created: encode[4]{timeslot} (4-byte fixed-length)
-  const [createdError, encodedCreated] = encodeFixedLength(
-    account.created,
-    4n,
-  )
+  const [createdError, encodedCreated] = encodeFixedLength(account.created, 4n)
   if (createdError) {
     return safeError(createdError)
   }
   parts.push(encodedCreated)
 
   // sa_lastacc: encode[4]{timeslot} (4-byte fixed-length)
-  const [lastAccError, encodedLastAcc] = encodeFixedLength(
-    account.lastacc,
-    4n,
-  )
+  const [lastAccError, encodedLastAcc] = encodeFixedLength(account.lastacc, 4n)
   if (lastAccError) {
     return safeError(lastAccError)
   }
   parts.push(encodedLastAcc)
 
   // sa_parent: encode[4]{serviceid} (4-byte fixed-length)
-  const [parentError, encodedParent] = encodeFixedLength(
-    account.parent,
-    4n,
-  )
+  const [parentError, encodedParent] = encodeFixedLength(account.parent, 4n)
   if (parentError) {
     return safeError(parentError)
   }
@@ -453,7 +441,9 @@ export function encodePartialState(
   }
   const concatenatedAccountPairs = concatBytes(accountPairs)
   // Wrap with var{} discriminator
-  const [accountsLengthError, encodedAccountsLength] = encodeNatural(BigInt(concatenatedAccountPairs.length))
+  const [accountsLengthError, encodedAccountsLength] = encodeNatural(
+    BigInt(concatenatedAccountPairs.length),
+  )
   if (accountsLengthError) {
     return safeError(accountsLengthError)
   }
@@ -558,11 +548,15 @@ export function encodePartialState(
   }
   const concatenatedAlwaysAccerPairs = concatBytes(alwaysAccerPairs)
   // Wrap with var{} discriminator
-  const [alwaysAccersLengthError, encodedAlwaysAccersLength] = encodeNatural(BigInt(concatenatedAlwaysAccerPairs.length))
+  const [alwaysAccersLengthError, encodedAlwaysAccersLength] = encodeNatural(
+    BigInt(concatenatedAlwaysAccerPairs.length),
+  )
   if (alwaysAccersLengthError) {
     return safeError(alwaysAccersLengthError)
   }
-  parts.push(concatBytes([encodedAlwaysAccersLength, concatenatedAlwaysAccerPairs]))
+  parts.push(
+    concatBytes([encodedAlwaysAccersLength, concatenatedAlwaysAccerPairs]),
+  )
 
   return safeResult(concatBytes(parts))
 }
@@ -637,7 +631,8 @@ export function decodeCompleteServiceAccount(
 
   // sa_preimages: decode{dictionary{hash}{blob}}
   // Manually decode dictionary with variable-length values
-  const [preimagesVarError, preimagesVarResult] = decodeVariableLength(currentData)
+  const [preimagesVarError, preimagesVarResult] =
+    decodeVariableLength(currentData)
   if (preimagesVarError) {
     return safeError(preimagesVarError)
   }
@@ -714,7 +709,8 @@ export function decodeCompleteServiceAccount(
     const elementCount = Number(lengthPrefixResult.value)
     // Each timeslot is 4 bytes (encode[4]{timeslot})
     const elementSize = 4
-    const totalValueLength = lengthPrefixResult.consumed + (elementCount * elementSize)
+    const totalValueLength =
+      lengthPrefixResult.consumed + elementCount * elementSize
     if (pairsData.length < totalValueLength) {
       return safeError(
         new Error(
@@ -864,7 +860,8 @@ export function decodePartialState(
   // ps_accounts: decode{var{sequence{sorted(serviceid, serviceaccount)}}}
   // For dictionaries with variable-length values (service accounts), we need to decode
   // each value to know where it ends, since service accounts are self-delimiting
-  const [accountsVarError, accountsVarResult] = decodeVariableLength(currentData)
+  const [accountsVarError, accountsVarResult] =
+    decodeVariableLength(currentData)
   if (accountsVarError) {
     return safeError(accountsVarError)
   }
@@ -875,7 +872,10 @@ export function decodePartialState(
   let accountsRemaining = accountsData
   while (accountsRemaining.length >= 4) {
     // Decode service ID (4 bytes)
-    const [serviceIdError, serviceIdResult] = decodeFixedLength(accountsRemaining, 4n)
+    const [serviceIdError, serviceIdResult] = decodeFixedLength(
+      accountsRemaining,
+      4n,
+    )
     if (serviceIdError) {
       break
     }
@@ -883,7 +883,8 @@ export function decodePartialState(
     accountsRemaining = serviceIdResult.remaining
 
     // Decode complete service account (self-delimiting)
-    const [accountError, accountResult] = decodeCompleteServiceAccount(accountsRemaining)
+    const [accountError, accountResult] =
+      decodeCompleteServiceAccount(accountsRemaining)
     if (accountError) {
       break
     }
@@ -961,7 +962,8 @@ export function decodePartialState(
 
   // ps_alwaysaccers: decode{var{sequence{sorted(serviceid, gas)}}}
   // Manually decode dictionary with fixed-length keys and values
-  const [alwaysAccersVarError, alwaysAccersVarResult] = decodeVariableLength(currentData)
+  const [alwaysAccersVarError, alwaysAccersVarResult] =
+    decodeVariableLength(currentData)
   if (alwaysAccersVarError) {
     return safeError(alwaysAccersVarError)
   }
@@ -971,9 +973,13 @@ export function decodePartialState(
   const alwaysaccers = new Map<bigint, bigint>()
   let alwaysAccersData = alwaysAccersPairs
   // Decode pairs until we've processed all bytes
-  while (alwaysAccersData.length >= 8) { // 4 bytes key + 4 bytes value
+  while (alwaysAccersData.length >= 8) {
+    // 4 bytes key + 4 bytes value
     // Decode key: encode[4]{serviceid} (4 bytes fixed)
-    const [serviceIdError, serviceIdResult] = decodeFixedLength(alwaysAccersData, 4n)
+    const [serviceIdError, serviceIdResult] = decodeFixedLength(
+      alwaysAccersData,
+      4n,
+    )
     if (serviceIdError) {
       break
     }

@@ -47,22 +47,22 @@ import {
   getBanderoutFromGamma,
   IETFVRFProver,
   IETFVRFVerifier,
-} from '@pbnj/bandersnatch-vrf'
+} from '@pbnjam/bandersnatch-vrf'
+import { encodeWorkReport } from '@pbnjam/codec'
 import {
   blake2bHash,
   type Hex,
   hexToBytes,
   jamShuffle,
   logger,
-} from '@pbnj/core'
-import { encodeWorkReport } from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   AuditAnnouncement,
   IConfigService,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Gray Paper hardcoded context string for audit VRF

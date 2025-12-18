@@ -4,24 +4,27 @@
  * Handles ticket accumulation and clearing according to Gray Paper Eq. 321-329
  */
 
-import type { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import type {
+  RingVRFProverWasm,
+  RingVRFVerifierWasm,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   bytesToHex,
   type EventBusService,
   type Hex,
   hexToBytes,
   logger,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
-} from '@pbnj/networking'
+} from '@pbnjam/networking'
 import {
   determineProxyValidator,
   generateTicketsForEpoch,
   getTicketIdFromProof,
   verifyTicket,
-} from '@pbnj/safrole'
+} from '@pbnjam/safrole'
 import {
   BaseService,
   type ITicketService,
@@ -33,7 +36,7 @@ import {
   safeError,
   safeResult,
   type TicketDistributionRequest,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'

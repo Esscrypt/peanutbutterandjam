@@ -16,9 +16,9 @@ import {
   decodeImplicationsPair,
   type Implications,
   type ImplicationsPair,
-} from '@pbnj/codec'
-import { logger, hexToBytes, bytesToHex, type Hex } from '@pbnj/core'
-import type { ServiceAccount, DeferredTransfer, PreimageRequestStatus, IConfigService } from '@pbnj/types'
+} from '@pbnjam/codec'
+import { logger, hexToBytes, bytesToHex, type Hex } from '@pbnjam/core'
+import type { ServiceAccount, DeferredTransfer, PreimageRequestStatus, IConfigService } from '@pbnjam/types'
 import { ConfigService } from '../../../infra/node/services/config-service'
 
 /**
