@@ -42,6 +42,8 @@
     "@noble/curves": "2.0.1",
     "@types/bun": "1.3.2",
     "bun-types": "1.3.2",
+    "@pbnjam/bandersnatch": "0.7.2-rc0",
+    "@pbnjam/bandersnatch-vrf": "0.7.2-rc1",
     "viem": "2.32.0",
     "zod": "3.25.76",
     "@types/hapi__catbox": "12.1.0",

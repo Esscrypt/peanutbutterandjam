@@ -22,7 +22,7 @@
     "@pbnjam/codec": "workspace:*",
     "@pbnjam/pvm": "workspace:*",
     "@pbnjam/pvm-invocations": "workspace:*",
-    "@pbnjam/bandersnatch-vrf": "workspace:*",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
     "@pbnjam/erasure-coding": "workspace:*",
     "@pbnjam/networking": "workspace:*",
     "@pbnjam/telemetry": "workspace:*",
