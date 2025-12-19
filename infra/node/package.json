@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc",
     "build:bin": "bun build ./services/main-service.ts --compile --outfile ./bin --sourcemap",
+    "build:fuzzer": "bun build ./fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --sourcemap",
     "check": "tsc --pretty --noEmit",
     "test": "vitest run",
     "test:watch": "vitest run --watch",
