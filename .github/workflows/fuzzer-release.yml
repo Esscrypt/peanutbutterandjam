@@ -55,8 +55,7 @@ jobs:
 
       - name: Copy binary to output directory
         run: |
-          cd infra/node
-          cp bin/fuzzer-target dist/fuzzer-binaries/${{ matrix.binary_name }}
+          cp infra/node/bin/fuzzer-target dist/fuzzer-binaries/${{ matrix.binary_name }}
           chmod +x dist/fuzzer-binaries/${{ matrix.binary_name }}
 
       - name: Create checksum
