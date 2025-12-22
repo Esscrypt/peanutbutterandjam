@@ -103,12 +103,6 @@ export class SealKeyService extends BaseService {
   private readonly handleEpochTransition = (
     event: EpochTransitionEvent,
   ): Safe<void> => {
-    logger.info(
-      '[SealKeyService] Epoch transition - calculating new seal key sequence',
-      {
-        slot: event.slot.toString(),
-      },
-    )
 
     // Save old entropy2 BEFORE entropy rotation
     // This allows us to test if test vectors use old entropy2 instead of entropy'_2
@@ -262,12 +256,6 @@ export class SealKeyService extends BaseService {
     // If oldEntropy2BeforeRotation is null, fall back to entropy'_2 (after rotation)
     const entropy2 =
       this.oldEntropy2BeforeRotation ?? this.entropyService.getEntropy2()
-    const entropy2Hex = bytesToHex(entropy2)
-
-    logger.info('[SealKeyService] Using entropy for fallback key generation', {
-      usingOldEntropy2: this.oldEntropy2BeforeRotation !== null,
-      entropy2: entropy2Hex,
-    })
 
     // Gray Paper Eq. 202-207: F(entropy'_2, activeset')
     // The epoch mark contains pendingSet' (validators for NEXT epoch), NOT activeSet'
@@ -282,17 +270,6 @@ export class SealKeyService extends BaseService {
         ),
       )
     }
-
-    logger.info('[SealKeyService] Generating fallback key sequence', {
-      entropy2: entropy2Hex,
-      activeValidatorsSize: activeValidators.size,
-      activeValidators: Array.from(activeValidators.values())
-        .slice(0, 6)
-        .map((v, idx) => ({
-          index: idx,
-          bandersnatch: v.bandersnatch,
-        })),
-    })
 
     const [error, fallbackKeys] = generateFallbackKeySequence(
       entropy2,
@@ -322,11 +299,6 @@ export class SealKeyService extends BaseService {
         })
       }
     }
-
-    logger.info('[SealKeyService] Fallback key sequence generated', {
-      totalPhases: this.configService.epochDuration,
-      phase12Key: fallbackKeys[12] ? bytesToHex(fallbackKeys[12]) : 'undefined',
-    })
 
     return safeResult(undefined)
   }

@@ -14,9 +14,9 @@ import {
   encodeImplicationsPair,
   PartialState,
   CompleteServiceAccount,
-  WorkItem,
-  decodeWorkItem,
   decodeVariableSequence,
+  AccumulateInput,
+  decodeAccumulateInput,
 } from './codec'
 import { ImplicationsPair } from './codec'
 import {
@@ -134,7 +134,7 @@ export class PVM {
   accumulationContext: ImplicationsPair | null = null
   timeslot: u64 = u64(0) // Current timeslot for accumulation
   entropyAccumulator: Uint8Array | null = null // Entropy accumulator for FETCH host function
-  workItemsSequence: Array<WorkItem> | null = null // Work items sequence for FETCH host function (selector 14, 15)
+  accumulateInputs: Array<AccumulateInput> | null = null // Accumulate inputs for FETCH host function (selectors 14, 15)
   
   // Config parameters (set during setupAccumulateInvocation)
   configNumCores: i32 = 341
@@ -680,9 +680,9 @@ export class PVM {
         return null
       }
       case u32(1): {
-        // fetch - FetchParams with timeslot and workItemsSequence
+        // fetch - FetchParams with timeslot and accumulateInputs
         const fetchParams = new FetchParams(this.timeslot, u64(0))
-        fetchParams.workItemsSequence = this.workItemsSequence
+        fetchParams.accumulateInputs = this.accumulateInputs
         return fetchParams
       }
       case u32(2): {
@@ -1108,6 +1108,16 @@ export class PVM {
     configMaxLookupAnchorage: u32 = 14400,
     configEcPieceSize: u32 = 684,
   ): void {
+    // CRITICAL: Reset PVM state completely before each accumulation invocation
+    // This ensures no state leaks between invocations
+    this.reset()
+    
+    // Also clear accumulation-specific state
+    this.accumulationContext = null
+    this.entropyAccumulator = null
+    this.accumulateInputs = null
+    this.timeslot = u64(0)
+    
     // Store config parameters
     this.configNumCores = configNumCores
     this.configPreimageExpungePeriod = configPreimageExpungePeriod
@@ -1155,25 +1165,28 @@ export class PVM {
     // Store entropy accumulator for FETCH host function
     this.entropyAccumulator = entropyAccumulator
     
-    // Decode and store work items sequence for FETCH host function
-    // encodedWorkItems should always be present (even if empty, it's encoded as length prefix 0 = 0x00)
-    // An empty encoded sequence has length 1 (just the 0x00 byte for length 0)
+    // Decode and store accumulate inputs for FETCH host function (selectors 14 and 15)
+    // encodedWorkItems is now actually encoded AccumulateInputs
+    // Gray Paper pvm_invocations.tex lines 359-360:
+    // - Selector 14: encode{var{i}} - sequence of AccumulateInputs
+    // - Selector 15: encode{i[registers[11]]} - single AccumulateInput
+    // Should always be present (even if empty, it's encoded as length prefix 0 = 0x00)
     if (encodedWorkItems.length === 0) {
       // Truly empty (no data at all) - this shouldn't happen if we always encode
       // But handle it gracefully by setting empty array
-      this.workItemsSequence = new Array<WorkItem>()
+      this.accumulateInputs = new Array<AccumulateInput>()
     } else {
-      const workItemsResult = decodeVariableSequence<WorkItem>(
+      const inputsResult = decodeVariableSequence<AccumulateInput>(
         encodedWorkItems,
-        (data: Uint8Array) => decodeWorkItem(data),
+        (data: Uint8Array) => decodeAccumulateInput(data),
       )
-      if (workItemsResult) {
-        this.workItemsSequence = workItemsResult.value
-        // workItemsSequence is now an array (possibly empty, but never null)
+      if (inputsResult) {
+        this.accumulateInputs = inputsResult.value
+        // accumulateInputs is now an array (possibly empty, but never null)
       } else {
         // Decoding failed - this is a problem
         abort(
-          `setupAccumulateInvocation: decodeVariableSequence failed for encodedWorkItems.length=${encodedWorkItems.length}`
+          `setupAccumulateInvocation: decodeVariableSequence failed for encodedAccumulateInputs.length=${encodedWorkItems.length}`
         )
         unreachable()
       }
@@ -1207,11 +1220,11 @@ export class PVM {
   }
 
   /**
-   * Set work items sequence for FETCH host function
-   * This is called from the WASM executor to provide work items for selectors 14 and 15
+   * Set accumulate inputs for FETCH host function
+   * This is called from the WASM executor to provide accumulate inputs for selectors 14 and 15
    */
-  public setWorkItemsSequence(workItems: Array<WorkItem> | null): void {
-    this.workItemsSequence = workItems
+  public setAccumulateInputs(inputs: Array<AccumulateInput> | null): void {
+    this.accumulateInputs = inputs
   }
 
   /**

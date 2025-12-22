@@ -32,7 +32,7 @@ import {
  * 4. Update state with new privileges
  */
 export class BlessHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(16) // BLESS function ID
+  functionId: u64 = u64(14) // BLESS function ID
   name: string = 'bless'
   gasCost: u64 = u64(10)
 

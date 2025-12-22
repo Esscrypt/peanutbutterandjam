@@ -71,6 +71,9 @@ export class SBRKInstruction extends BaseInstruction {
       return new InstructionResult(-1)
     }
 
+    // Record current heap pointer to return (before allocation)
+    const result = currentHeapPointer
+
     const nextPageBoundary = alignToPage(ram.currentHeapPointer)
     const newHeapPointer: u32 = ram.currentHeapPointer + u32(valueA)
 
@@ -93,7 +96,7 @@ export class SBRKInstruction extends BaseInstruction {
     ram.currentHeapPointer = newHeapPointer
 
     // Return the previous heap pointer (before allocation)
-    this.setRegisterValue(context.registers, registerD, u64(newHeapPointer))
+    this.setRegisterValue(context.registers, registerD, result)
 
     return new InstructionResult(-1)
   }

@@ -1,7 +1,7 @@
 import {
+  encodeAccumulateInput,
   encodeRefineContext,
   encodeVariableSequence,
-  encodeWorkItem,
   encodeWorkItemSummary,
   encodeWorkPackage,
 } from '@pbnjam/codec'
@@ -314,16 +314,17 @@ export class FetchHostFunction extends BaseHostFunction {
 
       case 14n: {
         // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
-        // Returns: encode(i) when i ≠ none
-        // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
-        // Note: workItemsSequence should always be an array (never null) during accumulation
-        // If it's null, return null (i = none). If it's an empty array, return encoded empty sequence.
-        if (!params.workItemsSequence) {
+        // Returns: encode{var{i}} when i ≠ none
+        // Where i is sequence{accinput} - the accumulate inputs sequence
+        // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
+        // Gray Paper equations 289-292: encode(AccumulateInput) format
+        if (!params.accumulateInputs) {
           return null
         }
+
         const [error, encoded] = encodeVariableSequence(
-          params.workItemsSequence,
-          encodeWorkItem,
+          params.accumulateInputs,
+          encodeAccumulateInput,
         )
         if (error || !encoded) {
           return null
@@ -334,9 +335,9 @@ export class FetchHostFunction extends BaseHostFunction {
 
       case 15n: {
         // Gray Paper pvm_invocations.tex line 360: registers[10] = 15
-        // Returns: encode(i[registers[11]]) when i ≠ none ∧ registers[11] < len(i)
-        // Encoded work item at index registers[11] from work items sequence i
-        return this.getWorkItemByIndex(params, context.registers[11])
+        // Returns: encode{i[registers[11]]} when i ≠ none ∧ registers[11] < len(i)
+        // Encoded single AccumulateInput at index registers[11] from i sequence
+        return this.getAccumulateInputByIndex(params, context.registers[11])
       }
       default:
         // Unknown selector - return NONE
@@ -539,27 +540,28 @@ export class FetchHostFunction extends BaseHostFunction {
     return workItem.payload
   }
 
-  private getWorkItemByIndex(
+  private getAccumulateInputByIndex(
     params: FetchParams,
     itemIndex: bigint,
   ): Uint8Array | null {
-    // Gray Paper: encode(i[registers[11]]) when i ≠ none ∧ registers[10] = 15
-    // Returns encoded work item at index registers[11] from work items sequence i
-    // Note: i is the second 'i' parameter (workItemsSequence), not workPackage.workItems
+    // Gray Paper pvm_invocations.tex line 360: registers[10] = 15
+    // Returns: encode{i[registers[11]]} when i ≠ none ∧ registers[11] < len(i)
+    // Where i is sequence{accinput} - the accumulate inputs sequence
+    // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
 
-    if (!params.workItemsSequence) {
+    if (!params.accumulateInputs) {
       return null
     }
 
-    const workItems = params.workItemsSequence
-    const itemIdx = Number(itemIndex)
+    const inputs = params.accumulateInputs
+    const idx = Number(itemIndex)
 
-    if (itemIdx >= workItems.length) {
+    if (idx >= inputs.length) {
       return null
     }
 
-    const workItem = workItems[itemIdx]
-    const [error, encoded] = encodeWorkItem(workItem)
+    const input = inputs[idx]
+    const [error, encoded] = encodeAccumulateInput(input)
     if (error || !encoded) {
       return null
     }

@@ -34,6 +34,7 @@ import {
 export class NewHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.NEW
   readonly name = 'new'
+  readonly gasCost = 10n // Gray Paper pvm_invocations.tex line 760: g = 10
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context
@@ -41,19 +42,30 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // This is the current block's timeslot passed from the Accumulate invocation
 
     // Extract parameters from registers
+    // Gray Paper: (o, l, minaccgas, minmemogas, gratis, desiredid) = registers[7:6]
+    // o = code hash offset
+    // l = expected code length (NOT the hash length - hash is always 32 bytes)
     const [
       codeHashOffset,
-      codeHashLength,
+      expectedCodeLength,  // This is the expected length of the code preimage, NOT the hash length
       minAccGas,
       minMemoGas,
       gratis,
       desiredId,
     ] = registers.slice(7, 13)
 
+    // Gray Paper: l must be a valid 32-bit number
+    if (expectedCodeLength > 0xFFFFFFFFn) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
     // Log all input parameters
     context.log('NEW host function invoked', {
       codeHashOffset: codeHashOffset.toString(),
-      codeHashLength: codeHashLength.toString(),
+      expectedCodeLength: expectedCodeLength.toString(),
       minAccGas: minAccGas.toString(),
       minMemoGas: minMemoGas.toString(),
       gratis: gratis.toString(),
@@ -64,10 +76,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       nextFreeId: implications[0].nextfreeid.toString(),
     })
 
-    // Read code hash from memory (32 bytes)
+    // Gray Paper: codehash = memory[o:32] - ALWAYS read 32 bytes for the hash
+    // The hash is a blake2b hash which is always 32 bytes
     const [codeHashData, faultAddress] = ram.readOctets(
       codeHashOffset,
-      codeHashLength,
+      32n,  // Always read 32 bytes for the code hash
     )
     if (faultAddress) {
       this.setAccumulateError(registers, 'WHAT')
@@ -116,45 +129,66 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     }
 
     // Determine new service ID
+    // Gray Paper lines 788-792:
+    // - If registrar and desiredId < Cminpublicindex: use desiredId, keep nextfreeid unchanged
+    // - Otherwise: use imX.nextfreeid directly, then update nextfreeid to i*
     let newServiceId: bigint
+    let updateNextFreeId = false
     const C_MIN_PUBLIC_INDEX = 65536n // 2^16
 
-    if (gratis === 0n) {
-      // Paid service - use desired ID if valid
-      if (desiredId < C_MIN_PUBLIC_INDEX) {
-        // Check if desired ID is already taken
-        if (imX.state.accounts.has(desiredId)) {
-          this.setAccumulateError(registers, 'FULL')
-          return {
-            resultCode: null, // continue execution
-          }
+    if (gratis === 0n && imX.id === imX.state.registrar && desiredId < C_MIN_PUBLIC_INDEX) {
+      // Registrar creating reserved service with specific ID
+      // Gray Paper line 788: check if desired ID is already taken
+      if (imX.state.accounts.has(desiredId)) {
+        this.setAccumulateError(registers, 'FULL')
+        return {
+          resultCode: null, // continue execution
         }
-        newServiceId = desiredId
-      } else {
-        // Use next free ID
-        newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
       }
+      newServiceId = desiredId
+      // nextfreeid stays unchanged for registrar with reserved ID
     } else {
-      // Free service - use next free ID
-      newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+      // Non-registrar OR registrar with public ID - use imX.nextfreeid directly
+      // Gray Paper line 790: returns imX.nextfreeid as the new service ID
+      newServiceId = imX.nextfreeid
+      updateNextFreeId = true
     }
 
+    logger.debug('[NEW Host Function] Determining service ID', {
+      gratis: gratis.toString(),
+      isRegistrar: (imX.id === imX.state.registrar).toString(),
+      desiredId: desiredId.toString(),
+      currentNextFreeId: imX.nextfreeid.toString(),
+      newServiceId: newServiceId.toString(),
+      updateNextFreeId,
+    })
+
     // Create new service account
+    // Gray Paper line 770: sa_requests = {(c, l): []}
+    // where c = codehash and l = codeHashLength (expected code length)
     const codeHashHex = bytesToHex(codeHashData)
+
+    // Calculate items and octets for the new service account
+    // Gray Paper: items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
+    // Gray Paper: octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
+    const initialItems = 2n // 2 * 1 request + 0 storage
+    const initialOctets = 81n + expectedCodeLength // 81 + expected code length
+
     const newServiceAccount: ServiceAccount = {
       codehash: codeHashHex,
       balance: minBalance,
       minaccgas: minAccGas,
       minmemogas: minMemoGas,
-      octets: 0n, // Will be calculated
+      octets: initialOctets,
       gratis: gratis,
-      items: 0n, // Will be calculated
+      items: initialItems,
       created: timeslot,
       lastacc: 0n,
       parent: imX.id,
       storage: new Map(),
       preimages: new Map(),
-      requests: new Map([[codeHashHex, new Map([[0n, []]])]]), // Initial request for code
+      // Gray Paper line 770: requests = {(codehash, expectedCodeLength): []}
+      requests: new Map([[codeHashHex, new Map([[expectedCodeLength, []]])]]),
     }
 
     logger.info('[NEW Host Function] Creating new service account', {
@@ -176,8 +210,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Add new service to accounts
     imX.state.accounts.set(newServiceId, newServiceAccount)
 
-    // Update next free ID
-    imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    // Update next free ID only for non-registrar cases
+    // Gray Paper line 791: i* = check(Cminpublicindex + (imX.nextfreeid - Cminpublicindex + 42) mod ...)
+    if (updateNextFreeId) {
+      imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    }
 
     logger.info(
       '[NEW Host Function] New service account created successfully',
@@ -185,6 +222,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
         newServiceId: newServiceId.toString(),
         nextFreeId: imX.nextfreeid.toString(),
         totalAccounts: imX.state.accounts.size,
+        updateNextFreeId,
       },
     )
 

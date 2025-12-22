@@ -26,7 +26,6 @@ import {
   type Hex,
   hexToBytes,
   logger,
-  type WorkReportProcessedEvent,
 } from '@pbnjam/core'
 import type {
   Activity,
@@ -76,6 +75,13 @@ export class StatisticsService extends BaseService {
       coreStats: this.createEmptyCoreStats(),
       serviceStats: new Map(),
     }
+
+    // Register epoch transition handler in constructor to ensure it's always active
+    // This MUST happen BEFORE any validator stats are updated (like guarantees)
+    // The epoch transition event is emitted early in block processing, before guarantees
+    this.eventBusService.addEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
   }
 
   override start(): Safe<boolean> {
@@ -83,20 +89,11 @@ export class StatisticsService extends BaseService {
     this.eventBusService.addBlockProcessedCallback(
       this.handleBlockProcessed.bind(this),
     )
-    this.eventBusService.addWorkReportProcessedCallback(
-      this.handleWorkReportProcessed.bind(this),
-    )
 
     return safeResult(true)
   }
 
   override stop(): Safe<boolean> {
-    // Remove event handlers
-    // Note: EventBusService doesn't have remove methods for the new callbacks yet
-    // this.eventBusService.removeBlockProcessedCallback(this.handleBlockProcessed.bind(this))
-    // this.eventBusService.removeWorkReportProcessedCallback(this.handleWorkReportProcessed.bind(this))
-    // No epoch transition callback removal needed
-
     logger.info('Statistics service stopped')
     return safeResult(true)
   }
@@ -121,27 +118,6 @@ export class StatisticsService extends BaseService {
   }
 
   // Explicit epoch transition handler removed; handled within handleBlockProcessed
-
-  /**
-   * Handle work report processing event
-   * Updates core and service statistics based on work reports
-   *
-   * Gray Paper Reference: Equations (106-188) for core/service stats
-   */
-  private async handleWorkReportProcessed(
-    event: WorkReportProcessedEvent,
-  ): Promise<Safe<void>> {
-    // Update core statistics based on incoming reports
-    this.updateCoreStatisticsFromReports(
-      event.incomingReports,
-      event.availableReports,
-    )
-
-    // Update service statistics based on incoming reports
-    this.updateServiceStatisticsFromReports(event.incomingReports)
-
-    return safeResult(undefined)
-  }
 
   // ============================================================================
   // Public API - Getters
@@ -250,21 +226,40 @@ export class StatisticsService extends BaseService {
         exportCount: 0,
       }
       this.activity.serviceStats.set(serviceId, serviceStats)
-      logger.debug(
-        '[StatisticsService] Created new serviceStats entry for accumulation',
-        {
-          serviceId: serviceId.toString(),
-        },
-      )
     }
 
     // Gray Paper: accumulation = accumulationstatistics[s]
     serviceStats.accumulation = accumulationStats
-    logger.debug('[StatisticsService] Updated accumulation stats', {
-      serviceId: serviceId.toString(),
-      count: accumulationStats[0],
-      gas: accumulationStats[1],
-    })
+  }
+
+  /**
+   * Update DA load statistics from available work reports
+   *
+   * Gray Paper equation (134-140): D(c) for each core c
+   * D(c) = sum of (bundlelen + C_SEGMENTSIZE * ceil(segcount * 65/64))
+   *
+   * This method is called by AccumulationService after processing available reports.
+   *
+   * @param availableReports - Work reports that just became available
+   */
+  updateDaLoadFromAvailableReports(availableReports: WorkReport[]): void {
+    const C_SEGMENTSIZE = SEGMENT_CONSTANTS.C_SEGMENTSIZE
+
+    for (const report of availableReports) {
+      const coreIdx = Number(report.core_index)
+      if (coreIdx < 0 || coreIdx >= this.activity.coreStats.length) {
+        continue
+      }
+
+      const coreStats = this.activity.coreStats[coreIdx]
+      const bundleLen = Number(report.package_spec.length)
+      const segCount = Number(report.package_spec.exports_count)
+
+      // Calculate: bundlelen + C_SEGMENTSIZE * ceil(segcount * 65/64)
+      // Gray Paper equation (134-140)
+      const segLoad = Math.ceil((segCount * 65) / 64) * C_SEGMENTSIZE
+      coreStats.daLoad += bundleLen + segLoad
+    }
   }
 
   /**
@@ -379,12 +374,21 @@ export class StatisticsService extends BaseService {
   // ============================================================================
 
   public updateGuarantees(guarantees: Guarantee[]): void {
-    // Track guarantees per validator: each guarantee has signatures from multiple validators
-    // Each validator who signs a guarantee gets credit for that guarantee
+    // Gray Paper equation 62-63: vs_guarantees += (activeset'[v] ∈ reporters)
+    // This is a BOOLEAN increment - each validator gets +1 if they signed ANY guarantee in this block
+    // NOT +1 for each guarantee they signed
+    // Collect unique validator indices from all guarantee signatures (this is the "reporters" set)
+    const reporters = new Set<number>()
     for (const guarantee of guarantees) {
       if (guarantee.signatures) {
         for (const signature of guarantee.signatures) {
-          const validatorIdx = signature.validator_index
+          reporters.add(signature.validator_index)
+        }
+      }
+    }
+
+    // Increment guarantees count by 1 for each validator who is a reporter
+    for (const validatorIdx of reporters) {
           let validatorStats =
             this.activity.validatorStatsAccumulator[validatorIdx]
           if (!validatorStats) {
@@ -394,6 +398,35 @@ export class StatisticsService extends BaseService {
           this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
         }
       }
+
+  /**
+   * Reset per-block statistics (coreStats and serviceStats)
+   * Must be called at the START of each block's processing, before accumulation
+   *
+   * Gray Paper: coreStats and serviceStats are per-block, not cumulative across blocks
+   * Only validatorStats accumulate across the epoch
+   */
+  public resetPerBlockStats(): void {
+    // Clear serviceStats completely - will be rebuilt from this block's activity
+    this.activity.serviceStats.clear()
+
+    // Reset coreStats metrics that are per-block (all except popularity which is set per-block anyway)
+    for (let i = 0; i < this.activity.coreStats.length; i++) {
+      this.activity.coreStats[i] = this.createEmptyCoreStat()
+    }
+  }
+
+  /**
+   * Handle epoch transition for validator statistics
+   * Called by the event bus when an epoch transition occurs
+   * This MUST happen BEFORE any validator stats are updated (like guarantees)
+   * to ensure stats go into the correct epoch's accumulator
+   */
+  public handleEpochTransition(): void {
+    this.activity = {
+      ...this.activity,
+      validatorStatsPrevious: [...this.activity.validatorStatsAccumulator],
+      validatorStatsAccumulator: this.createEmptyValidatorStats(),
     }
   }
   /**
@@ -407,25 +440,19 @@ export class StatisticsService extends BaseService {
    */
   public applyBlockDeltas(
     body: BlockBody,
-    currentSlot: bigint,
+    _currentSlot: bigint,
     authorIndex: number,
-    accumulationOutputs?: Map<bigint, Hex>,
+    _accumulationOutputs?: Map<bigint, Hex>,
   ): void {
-    // Check epoch based on slot and rotate if needed
-    const isTransition = this.clockService.isEpochTransition(currentSlot)
-    if (isTransition) {
-      this.activity = {
-        ...this.activity,
-        validatorStatsPrevious: [...this.activity.validatorStatsAccumulator],
-        validatorStatsAccumulator: this.createEmptyValidatorStats(),
-      }
-    }
+    // NOTE: Epoch transition is now handled by handleEpochTransitionIfNeeded()
+    // which MUST be called at the START of block processing, BEFORE any validator
+    // stats updates (like guarantees). This ensures stats go into the correct epoch.
 
     // Gray Paper: Service Statistics (π_S) are per-block tracking
-    // Clear serviceStats at the start of each block - they will be repopulated
-    // based on the current block's activity (provision, refinement, accumulation)
-    // This ensures serviceStats only contains entries for services with activity in THIS block
-    this.activity.serviceStats.clear()
+    // NOTE: We do NOT clear serviceStats here anymore because accumulation stats are
+    // set by AccumulationService BEFORE applyBlockDeltas is called.
+    // Individual update functions handle resetting their respective fields while
+    // preserving accumulation stats.
     let stats = this.activity.validatorStatsAccumulator[authorIndex]
 
     // Ensure we have stats for the author
@@ -487,8 +514,8 @@ export class StatisticsService extends BaseService {
     // Gray Paper equation 166-169: servicesactive includes keys{accumulationstatistics}
     // Include services from accumulation outputs (from previous block's accumulation)
     // These services should be in serviceStats even if they don't appear in work reports or preimages
-    if (accumulationOutputs) {
-      for (const serviceId of accumulationOutputs.keys()) {
+    if (_accumulationOutputs) {
+      for (const serviceId of _accumulationOutputs.keys()) {
         // Ensure service stats exist for services with accumulation outputs
         // NOTE: This is legacy code - accumulation outputs don't create serviceStats entries
         // ServiceStats entries are only created when there's actual activity (provision, refinement, or accumulation)
@@ -649,11 +676,16 @@ export class StatisticsService extends BaseService {
     incomingReports: WorkReport[],
     availableReports: WorkReport[],
   ): void {
-    // Reset core stats (except popularity which is set separately by updateCoreStatistics)
+    // Reset core stats (except popularity and daLoad which are set separately)
+    // - popularity: set by updateCoreStatistics from assurances
+    // - daLoad: set earlier in block by updateDaLoadFromAvailableReports (via accumulation)
+    // We preserve both since they were already calculated for this block
     for (let i = 0; i < this.activity.coreStats.length; i++) {
       const popularity = this.activity.coreStats[i].popularity
+      const daLoad = this.activity.coreStats[i].daLoad
       this.activity.coreStats[i] = this.createEmptyCoreStat()
       this.activity.coreStats[i].popularity = popularity
+      this.activity.coreStats[i].daLoad = daLoad
     }
 
     // Gray Paper equation (106-114): Calculate R(c) and L(c) from incomingReports
@@ -684,12 +716,6 @@ export class StatisticsService extends BaseService {
             ? Number(report.package_spec.length)
             : report.package_spec.length
         coreStats.bundleLength += bundleLen
-        logger.debug('Updated bundle length for core', {
-          coreIdx,
-          bundleLen,
-          totalBundleLength: coreStats.bundleLength,
-          originalLength: report.package_spec.length.toString(),
-        })
       } else {
         logger.warn('Work report missing package_spec.length', {
           coreIdx,
@@ -866,19 +892,20 @@ export class StatisticsService extends BaseService {
         this.activity.serviceStats.set(serviceId, serviceStats)
       }
 
-      // Reset metrics that come from work reports (but preserve provision from preimages)
+      // Reset metrics that come from work reports (but preserve provision and accumulation)
       // Gray Paper: refinement, importCount, xtcount, xtsize, exportcount come from R(s)
       // provision comes from preimages (sum over preimages)
-      // accumulation comes from accumulationstatistics (set separately)
+      // accumulation comes from accumulationstatistics (set by AccumulationService)
       const provision = serviceStats.provision // tuple{N, N} - preserve [count, size] from preimages
+      const accumulation = serviceStats.accumulation // tuple{N, gas} - preserve [count, gas] from accumulation
       serviceStats.refinement = [0, 0] // tuple{N, gas} - reset [count, gas] (will be updated from work reports)
       serviceStats.importCount = 0
       serviceStats.extrinsicCount = 0
       serviceStats.extrinsicSize = 0
       serviceStats.exportCount = 0
-      // Preserve provision (from preimages)
-      // Note: accumulation will be set from accumulationStatistics later in applyBlockDeltas
+      // Preserve provision (from preimages) and accumulation (from AccumulationService)
       serviceStats.provision = provision
+      serviceStats.accumulation = accumulation
     }
 
     // Second pass: sum R(s) over all digests in incoming reports

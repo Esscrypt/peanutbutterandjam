@@ -18,7 +18,8 @@ import { hexToBytes, zeroHash } from '../../../packages/core/src/utils/crypto'
 import { ServiceAccountService } from '../services/service-account-service'
 import { EventBusService } from '@pbnjam/core'
 import { ClockService } from '../services/clock-service'
-import { PreimageRequestProtocol } from '@pbnjam/networking'
+// Lazy import to avoid @peculiar/x509 initialization issues
+// import { PreimageRequestProtocol } from '@pbnjam/networking'
 import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
 import { EntropyService } from '../services/entropy'
@@ -35,13 +36,19 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 const tinyConfigService = new ConfigService('tiny')
 const fullConfigService = new ConfigService('full')
 
-// Module-level flag to stop execution on first failure
-let shouldStopOnFailure = false
+// Note: Removed shouldStopOnFailure mechanism - all tests will run
+// This ensures accurate test results (failures are properly reported)
 
 // Get test vector name from CLI argument: bun test <file> -- <test-vector-name>
 // Example: bun test accumulate-specific-test-vector.test.ts -- accumulate_ready_queued_reports-1
+// Bun test passes arguments after -- differently, so we check both process.argv and Bun's test filter
 const args = process.argv.slice(2)
-const testVectorArg = args.find((arg) => !arg.startsWith('-'))
+// Try to find test vector name in args (not starting with -)
+let testVectorArg = args.find((arg) => !arg.startsWith('-') && !arg.includes('/') && !arg.includes('\\'))
+// Also check environment variable as fallback
+if (!testVectorArg && process.env.TEST_VECTOR) {
+  testVectorArg = process.env.TEST_VECTOR
+}
 const SPECIFIC_TEST_VECTOR: string | null = testVectorArg || null
 
 console.log('Test execution settings:')
@@ -114,16 +121,12 @@ describe('Accumulate Test Vector Execution', () => {
       const configService = configType === 'tiny' ? tinyConfigService : fullConfigService
       const testVectors = loadTestVectors(configType)
 
-      // Test each vector sequentially, stopping on first failure
+      // Test each vector
       for (const { name, vector } of testVectors) {
         describe(`Test Vector: ${name}`, () => {
           it(
             'should correctly transition accumulation state',
             async () => {
-              // Skip if a previous test failed
-              if (shouldStopOnFailure) {
-                return
-              }
               
               try {
             const testStartTime = performance.now()
@@ -136,13 +139,15 @@ describe('Accumulate Test Vector Execution', () => {
               eventBusService: eventBusService,
               configService: configService,
             })
-            const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
+            // Lazy import to avoid @peculiar/x509 initialization issues
+            // const { PreimageRequestProtocol } = await import('@pbnjam/networking')
+            // const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
             const serviceAccountService = new ServiceAccountService({
               configService: configService,
               eventBusService: eventBusService,
               clockService: clockService,
               networkingService: null,
-              preimageRequestProtocol: preimageRequestProtocol,
+              preimageRequestProtocol: null,
             })
             const statisticsService = new StatisticsService({
               configService: configService,
@@ -157,8 +162,12 @@ describe('Accumulate Test Vector Execution', () => {
               accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
               configService: configService,
               entropyService: entropyService,
-              pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) }, // Use config's maxBlockGas (20M)
-              useWasm: true,
+              // CRITICAL: Always use block gas limit from config, NOT test vector values
+              // Gray Paper: Cmaxblockgas is the total gas available per block for accumulation
+              // The accumulation service's calculateTotalGasLimit() also uses configService.maxBlockGas
+              pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+              useWasm: false,
+              traceSubfolder: `accumulate-stf/${configType}/${name}`, // Write traces to separate folder for STF tests
             })
             const privilegesService = new PrivilegesService({
               configService: configService,
@@ -366,8 +375,6 @@ describe('Accumulate Test Vector Execution', () => {
             console.log(`  - Transition: ${(transitionEndTime - transitionStartTime).toFixed(2)}ms`)
             console.log(`  - Verification: ${(verificationEndTime - verificationStartTime).toFixed(2)}ms`)
               } catch (error) {
-                // Mark that we should stop on first failure
-                shouldStopOnFailure = true
                 throw error
               }
             },
@@ -407,25 +414,54 @@ function convertToAccounts(accounts: AccumulateTestVector['pre_state']['accounts
       serviceAccount.storage.set(storageEntry.key as Hex, hexToBytes(storageEntry.value as Hex))
     }
 
-    // Convert preimages
-    for (const preimageEntry of accountData.data.preimages_blob) {
-      serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
+    // Convert preimages (if present)
+    // Note: Test vectors use "preimage_blobs" (not "preimages_blob")
+    // Use type assertion to handle both field names
+    const accountDataAny = accountData.data as any
+    if (accountDataAny.preimage_blobs) {
+      for (const preimageEntry of accountDataAny.preimage_blobs) {
+        serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
+      }
+    }
+    // Also check for "preimages_blob" for backwards compatibility
+    if (accountData.data.preimages_blob) {
+      for (const preimageEntry of accountData.data.preimages_blob) {
+        serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
+      }
     }
 
-    // Convert preimage status (requests)
+    // Convert preimage requests (if present)
     // requests is Map<Hex, Map<bigint, PreimageRequestStatus>>
     // where PreimageRequestStatus = bigint[]
-    // Test vector has preimages_status with hash and status array
-    // We need to map status array to PreimageRequestStatus for each hash
-    // The test vector doesn't provide length, so we'll use 0 as default
-    for (const statusEntry of accountData.data.preimages_status) {
-      const hash = statusEntry.hash as Hex
-      const statusMap = new Map<bigint, PreimageRequestStatus>()
-      // Convert status array to PreimageRequestStatus (bigint[])
-      const status: PreimageRequestStatus = statusEntry.status.map(BigInt)
-      // Use 0 as default length (test vectors don't provide length)
-      statusMap.set(0n, status)
-      serviceAccount.requests.set(hash, statusMap)
+    // Test vector has preimage_requests with key.hash, key.length, and value array
+    if (accountDataAny.preimage_requests) {
+      for (const requestEntry of accountDataAny.preimage_requests) {
+        const hash = requestEntry.key.hash as Hex
+        const length = BigInt(requestEntry.key.length)
+        const status: PreimageRequestStatus = requestEntry.value.map(BigInt)
+        
+        // Get or create the request map for this hash
+        let requestMap = serviceAccount.requests.get(hash)
+        if (!requestMap) {
+          requestMap = new Map<bigint, PreimageRequestStatus>()
+          serviceAccount.requests.set(hash, requestMap)
+        }
+        
+        // Set the status for this length
+        requestMap.set(length, status)
+      }
+    }
+    // Also check for "preimages_status" for backwards compatibility
+    if (accountData.data.preimages_status) {
+      for (const statusEntry of accountData.data.preimages_status) {
+        const hash = statusEntry.hash as Hex
+        const statusMap = new Map<bigint, PreimageRequestStatus>()
+        // Convert status array to PreimageRequestStatus (bigint[])
+        const status: PreimageRequestStatus = statusEntry.status.map(BigInt)
+        // Use 0 as default length (test vectors don't provide length)
+        statusMap.set(0n, status)
+        serviceAccount.requests.set(hash, statusMap)
+      }
     }
 
     result.set(serviceId, serviceAccount)

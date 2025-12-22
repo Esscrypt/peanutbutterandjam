@@ -46,6 +46,14 @@ export interface IReadyService {
   updateDependencies(workReportHash: Hex, dependencies: Set<Hex>): void
   removeDependency(workReportHash: Hex, dependencyHash: Hex): void
   addDependency(workReportHash: Hex, dependencyHash: Hex): void
+
+  // Queue editing function E - modifies state directly
+  // Gray Paper equation 50-60: E removes items whose package hash is in accumulated set,
+  // and removes any dependencies which appear in said set
+  applyQueueEditingFunctionEToSlot(
+    slotIndex: bigint,
+    accumulatedPackages: Set<Hex>,
+  ): void
 }
 
 /**
@@ -86,6 +94,9 @@ export class ReadyService extends BaseService implements IReadyService {
    * Gray Paper: ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
    */
   getReadyItemsForSlot(slotIndex: bigint): ReadyItem[] {
+    if(slotIndex > this.configService.epochDuration) {
+      throw new Error('Slot index out of bounds')
+    }
     return this.ready.epochSlots[Number(slotIndex)] || []
   }
 
@@ -243,6 +254,52 @@ export class ReadyService extends BaseService implements IReadyService {
     if (readyItem) {
       readyItem.dependencies.add(dependencyHash)
       logger.debug('Dependency added', { workReportHash, dependencyHash })
+    }
+  }
+
+  /**
+   * Apply queue editing function E to a specific slot - modifies state directly
+   * Gray Paper equation 50-60: E removes items whose package hash is in accumulated set,
+   * and removes any dependencies which appear in said set
+   *
+   * This modifies the ready state in place, removing accumulated items and filtering dependencies
+   *
+   * @param slotIndex - Epoch slot index to edit
+   * @param accumulatedPackages - Set of accumulated work-package hashes
+   */
+  applyQueueEditingFunctionEToSlot(
+    slotIndex: bigint,
+    accumulatedPackages: Set<Hex>,
+  ): void {
+    const slotIndexNum = Number(slotIndex)
+    if (slotIndexNum >= this.configService.epochDuration) {
+      throw new Error('Slot index out of bounds')
+    }
+
+    const slotItems = this.ready.epochSlots[slotIndexNum]
+    if (!slotItems) {
+      return
+    }
+
+    // Gray Paper equation 50-60: E removes items whose package hash is in accumulated set,
+    // and removes any dependencies which appear in said set
+    // Modify items in place - remove accumulated items and filter dependencies
+    for (let i = slotItems.length - 1; i >= 0; i--) {
+      const item = slotItems[i]
+      const packageHash = item.workReport.package_spec.hash
+
+      // Remove if package was already accumulated
+      if (accumulatedPackages.has(packageHash)) {
+        slotItems.splice(i, 1)
+        continue
+      }
+
+      // Remove satisfied dependencies in place
+      for (const dep of item.dependencies) {
+        if (accumulatedPackages.has(dep)) {
+          item.dependencies.delete(dep)
+        }
+      }
     }
   }
 }

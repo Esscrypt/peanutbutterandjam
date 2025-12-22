@@ -3,7 +3,7 @@
 // Implications Encoding/Decoding Wrappers for Round-Trip Testing
 // =============================================================================
 
-import { decodeImplicationsPair, encodeImplicationsPair, decodeImplications, encodeImplications, decodeCompleteServiceAccount, encodeCompleteServiceAccount, decodePartialState, encodePartialState, decodeProgramFromPreimage, DecodedProgram } from './codec'
+import { decodeImplicationsPair, encodeImplicationsPair, decodeImplications, encodeImplications, decodeCompleteServiceAccount, encodeCompleteServiceAccount, decodePartialState, encodePartialState, decodeProgramFromPreimage, DecodedProgram, decodeAccumulateInput, encodeAccumulateInput, decodeVariableSequence, encodeVariableSequenceGeneric, AccumulateInput } from './codec'
 
 /**
  * Round-trip decode and encode single Implications
@@ -206,4 +206,75 @@ export function getDecodedProgramFields(preimageBlob: Uint8Array): DecodedProgra
     decoded.codeSize,
     decoded.code,
   )
+}
+
+// =============================================================================
+// AccumulateInput Encoding/Decoding Wrappers for Round-Trip Testing
+// =============================================================================
+
+/**
+ * Round-trip decode and encode AccumulateInputs sequence
+ * Used for testing interoperability between TypeScript and AssemblyScript
+ * 
+ * This function decodes the input bytes as a variable-length sequence of AccumulateInputs,
+ * then re-encodes them back to bytes, returning the encoded result.
+ * 
+ * @param data - Encoded AccumulateInputs sequence bytes (var{sequence{accinput}})
+ * @returns Re-encoded AccumulateInputs sequence bytes (or empty array on error)
+ */
+export function roundTripAccumulateInputs(data: Uint8Array): Uint8Array {
+  // Decode variable-length sequence of AccumulateInputs from bytes
+  const decodeResult = decodeVariableSequence<AccumulateInput>(
+    data,
+    (inputData: Uint8Array) => decodeAccumulateInput(inputData),
+  )
+  
+  if (!decodeResult) {
+    // Decode failed - return empty array
+    return new Uint8Array(0)
+  }
+  
+  const inputs = decodeResult.value
+  
+  // Encode the sequence back to bytes using encodeVariableSequenceGeneric
+  const encoded = encodeVariableSequenceGeneric<AccumulateInput>(
+    inputs,
+    (input: AccumulateInput) => encodeAccumulateInput(input),
+  )
+  
+  // Ensure we always return a valid Uint8Array (not null/undefined)
+  if (encoded === null || encoded.length === 0) {
+    return new Uint8Array(0)
+  }
+  
+  return encoded
+}
+
+/**
+ * Round-trip decode and encode a single AccumulateInput
+ * Used for testing interoperability between TypeScript and AssemblyScript
+ * 
+ * This function decodes a single AccumulateInput from bytes, then re-encodes it.
+ * 
+ * @param data - Encoded AccumulateInput bytes
+ * @returns Re-encoded AccumulateInput bytes (or empty array on error)
+ */
+export function roundTripSingleAccumulateInput(data: Uint8Array): Uint8Array {
+  // Decode single AccumulateInput from bytes
+  const decodeResult = decodeAccumulateInput(data)
+  
+  if (!decodeResult) {
+    // Decode failed - return empty array
+    return new Uint8Array(0)
+  }
+  
+  // Encode the input back to bytes
+  const encoded = encodeAccumulateInput(decodeResult.value)
+  
+  // Ensure we always return a valid Uint8Array (not null/undefined)
+  if (encoded === null || encoded.length === 0) {
+    return new Uint8Array(0)
+  }
+  
+  return encoded
 }

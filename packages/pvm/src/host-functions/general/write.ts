@@ -66,6 +66,31 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Check if this is a delete operation (value length = 0)
     if (valueLength === 0n) {
+      // Gray Paper: Calculate new account state with deletion, then check balance
+      // Calculate what the new storage footprint would be after deletion
+      const newItems = this.calculateItems(serviceAccount, key, true)
+      const newOctets = this.calculateOctets(serviceAccount, key, new Uint8Array(0), true)
+      const newMinBalance = this.calculateMinBalance(
+        newItems,
+        newOctets,
+        serviceAccount.gratis,
+      )
+
+      // Gray Paper equation 450: Check if new minbalance > balance
+      // If so, return FULL and keep old state
+      if (newMinBalance > serviceAccount.balance) {
+        context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
+        context.log('Write host function: Insufficient balance for delete operation', {
+          balance: serviceAccount.balance.toString(),
+          requiredBalance: newMinBalance.toString(),
+          newItems: newItems.toString(),
+          newOctets: newOctets.toString(),
+        })
+        return {
+          resultCode: null, // continue execution
+        }
+      }
+
       // Delete the key
       const previousLength = this.deleteStorage(serviceAccount, key)
       context.registers[7] = previousLength
@@ -185,7 +210,9 @@ export class WriteHostFunction extends BaseHostFunction {
         // If deleting, skip this entry
       } else {
         // Different key: use existing value
-        totalOctets += 34 + existingValue.length + existingKeyHex.length
+        // Convert hex string length to bytes: subtract "0x" prefix (2 chars), divide by 2
+        const existingKeyBytes = (existingKeyHex.length - 2) / 2
+        totalOctets += 34 + existingValue.length + existingKeyBytes
       }
     }
 
@@ -227,6 +254,13 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Write key-value pair to service account's storage
     serviceAccount.storage.set(keyHex, value)
+
+    // DEBUG: Log the write operation
+    console.log('[WRITE Host Function] Storage key written', {
+      keyHex: keyHex.slice(0, 20) + '...',
+      valueLength: value.length,
+      storageSize: serviceAccount.storage.size,
+    })
 
     // Update storage footprint
     serviceAccount.items = this.calculateItems(serviceAccount, key, false)

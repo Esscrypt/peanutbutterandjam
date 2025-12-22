@@ -45,15 +45,13 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read code hash from memory (32 bytes)
+    // Gray Paper pvm_invocations.tex lines 803-806:
+    // c = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
     const [codeHashData, faultAddress] = ram.readOctets(codeHashOffset, 32n)
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!codeHashData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 808: (panic, registers_7, ...) when c = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (faultAddress || !codeHashData) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }

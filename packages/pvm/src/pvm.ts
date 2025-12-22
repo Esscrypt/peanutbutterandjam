@@ -457,7 +457,11 @@ export class PVM implements IPVM {
       // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
       // Gray Paper pvm.tex §7.4.1: ε = host × immed_X, where immed_X is the immediate operand
       // For ECALLI, the host function ID is in operands[0] (sign-extended, but IDs are small)
-      const hostCallId = BigInt(instruction.operands[0])
+      const operand0 = instruction.operands[0]
+      // Gray Paper pvm.tex line 251-255: immed_X with l_X=0 bytes defaults to 0
+      // If fskip=0, there are no operand bytes, so host call ID is 0
+      // This is valid per the Gray Paper - host call ID 0 (READ) will be handled by contextMutator
+      const hostCallId = operand0 !== undefined && operand0 !== null ? BigInt(operand0) : 0n
       this.state.hostCallId = hostCallId
       if (this.state.gasCounter <= 0n) {
         this.state.resultCode = RESULT_CODES.OOG
@@ -610,18 +614,9 @@ export class PVM implements IPVM {
     this.state.bitmask = extendedBitmask
 
     let resultCode: ResultCode | null = null
-    let steps = 0
-    // Safety limit to prevent infinite loops in synchronous JS execution
-    // Gray Paper uses gas as the bound, but practical JS execution requires step limits
-    // Hard cap at 100,000 steps for TypeScript - use WASM executor for realistic gas limits
-    const MAX_TS_STEPS = 100_000
-    const maxSteps = Math.min(
-      Number(this.state.gasCounter) + 1000,
-      MAX_TS_STEPS,
-    )
+    // Gray Paper uses gas as the bound - execution continues until gas is exhausted or a halting condition is reached
 
-    while (resultCode === null && steps < maxSteps) {
-      steps++
+    while (resultCode === null) {
       const instructionIndex = Number(this.state.programCounter)
 
       // Bounds check: instruction pointer must be within valid code range
@@ -673,8 +668,15 @@ export class PVM implements IPVM {
       const handler = this.registry.getHandler(instruction.opcode)
       const instructionName = handler?.name ?? 'UNKNOWN'
 
+      // Save gas before step to detect if instruction was actually executed
+      // If gas is 0, step() returns OOG immediately without executing
+      const gasBeforeStep = this.state.gasCounter
       resultCode = await this.step(instruction)
 
+      // Only log if the instruction was actually executed
+      // If gas was 0 before step(), step() returns OOG immediately without executing
+      // In that case, we shouldn't log a "phantom" instruction
+      if (gasBeforeStep > 0n) {
       // Log execution step with PC before instruction execution
       // This shows where the instruction was executed, not where it jumped to
       this.executionLogs.push({
@@ -688,27 +690,10 @@ export class PVM implements IPVM {
         ),
       })
     }
-
-    // If we exited due to step limit, treat as OOG
-    if (resultCode === null && steps >= maxSteps) {
-      logger.warn('Run: Step limit reached, treating as OOG', {
-        steps,
-        maxSteps,
-        gasRemaining: this.state.gasCounter.toString(),
-      })
-      this.state.resultCode = RESULT_CODES.OOG
-      return
     }
 
     // At this point, resultCode must be non-null (we exited the while loop with a result)
     this.state.resultCode = resultCode!
-
-    // Gray Paper: Only HALT sets PC to 0 (successful completion)
-    // PANIC keeps PC at the instruction that caused the panic (for debugging)
-    // TODO: Uncomment this for PRODUCTION
-    // if (resultCode === RESULT_CODES.HALT || resultCode === RESULT_CODES.PANIC) {
-    //   this.state.programCounter = 0n
-    // }
   }
 
   /**

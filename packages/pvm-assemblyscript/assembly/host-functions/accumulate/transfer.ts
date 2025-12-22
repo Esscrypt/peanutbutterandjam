@@ -14,7 +14,7 @@ import {
  * - Gas Cost: 10
  */
 export class TransferHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(26)
+  functionId: u64 = u64(20) // TRANSFER function ID
   name: string = 'transfer'
   gasCost: u64 = u64(10)
 

@@ -3,15 +3,36 @@
  * 3-Way PVM Trace Comparison
  *
  * Compares three trace files: expected (jamduna), TypeScript executor, and WASM executor
+ * Supports both text format and modular binary format (0.7.2+)
  *
- * Usage: bun scripts/compare-3way-traces.ts [block_number]
+ * Usage:
+ *   bun scripts/compare-3way-traces.ts [block_number]
+ *   bun scripts/compare-3way-traces.ts --modular <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --modular-refine <work_package_hash> [work_item_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --preimages-light <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --preimages-all <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --storage-light <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --storage-all <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --fuzzy <timeslot> [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --fuzzy-light <timeslot> [ordered_index] [service_id]
  *
- * Example:
+ * Examples:
  *   bun scripts/compare-3way-traces.ts 2
+ *   bun scripts/compare-3way-traces.ts --modular 151 0 0
+ *   bun scripts/compare-3way-traces.ts --modular-refine 0xf1166dc1... 0 39711455
+ *   bun scripts/compare-3way-traces.ts --preimages-light 2 0 0
+ *   bun scripts/compare-3way-traces.ts --preimages-all 2 0 0
+ *   bun scripts/compare-3way-traces.ts --storage-light 2 0 0
+ *   bun scripts/compare-3way-traces.ts --storage-all 2 0 0
+ *   bun scripts/compare-3way-traces.ts --fuzzy 2 0 0
+ *   bun scripts/compare-3way-traces.ts --fuzzy-light 2 0 0
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
+import { OPCODES } from '@pbnjam/pvm'
 
 // ANSI color codes
 const colors = {
@@ -141,7 +162,292 @@ function parseExpectedTraceLine(line: string, lineNumber: number): TraceLine {
   return { lineNumber, raw: line, type: 'comment' }
 }
 
+// Create reverse mapping from opcode number to instruction name from OPCODES
+const OPCODE_NAMES: Record<number, string> = {}
+for (const [name, opcode] of Object.entries(OPCODES)) {
+  OPCODE_NAMES[Number(opcode)] = name
+}
+
+function getOpcodeName(opcode: number): string {
+  return OPCODE_NAMES[opcode] || `unknown_0x${opcode.toString(16).padStart(2, '0')}`
+}
+
+// Read little-endian uint8
+function readUint8(buffer: Buffer, offset: number): number {
+  return buffer.readUInt8(offset)
+}
+
+// Read little-endian uint64
+function readUint64(buffer: Buffer, offset: number): bigint {
+  return buffer.readBigUInt64LE(offset)
+}
+
+// Read file, handling both compressed (.gz) and uncompressed formats
+function readTraceFile(filepath: string): Buffer {
+  const compressed = readFileSync(filepath)
+  // Check if file is gzip compressed by checking magic bytes
+  if (compressed.length >= 2 && compressed[0] === 0x1f && compressed[1] === 0x8b) {
+  return gunzipSync(compressed)
+  }
+  // Uncompressed file
+  return compressed
+}
+
+// Read modular trace directory (accumulate format: timeslot/ordered_index/service_id)
+async function readModularTraceDirectory(
+  baseDir: string,
+  timeslot?: string,
+  orderedIndex?: number,
+  serviceId?: number,
+): Promise<TraceLine[]> {
+  let traceDir = baseDir
+
+  // Navigate to the specific trace directory
+  if (timeslot !== undefined) {
+    traceDir = join(traceDir, timeslot.padStart(8, '0'))
+    if (orderedIndex !== undefined) {
+      traceDir = join(traceDir, String(orderedIndex))
+      if (serviceId !== undefined) {
+        traceDir = join(traceDir, String(serviceId))
+      } else {
+        // If serviceId not specified, use the first available service
+        const entries = await readdir(traceDir, { withFileTypes: true })
+        const serviceDirs = entries
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+          .sort()
+        if (serviceDirs.length === 0) {
+          throw new Error(`No service directories found in ${traceDir}`)
+        }
+        traceDir = join(traceDir, serviceDirs[0]!)
+        console.log(
+          `${colors.yellow}Using first available service: ${serviceDirs[0]}${colors.reset}`,
+        )
+      }
+    }
+  }
+
+  if (!existsSync(traceDir)) {
+    throw new Error(`Trace directory not found: ${traceDir}`)
+  }
+
+  const stat = statSync(traceDir)
+  if (!stat.isDirectory()) {
+    throw new Error(`Path is not a directory: ${traceDir}`)
+  }
+
+  // Read all stream files (try both .gz and uncompressed)
+  const opcodePathGz = join(traceDir, 'opcode.gz')
+  const opcodePath = join(traceDir, 'opcode')
+  const pcPathGz = join(traceDir, 'pc.gz')
+  const pcPath = join(traceDir, 'pc')
+  const gasPathGz = join(traceDir, 'gas.gz')
+  const gasPath = join(traceDir, 'gas')
+  
+  const finalOpcodePath = existsSync(opcodePathGz) ? opcodePathGz : opcodePath
+  const finalPcPath = existsSync(pcPathGz) ? pcPathGz : pcPath
+  const finalGasPath = existsSync(gasPathGz) ? gasPathGz : (existsSync(gasPath) ? gasPath : null)
+
+  if (!existsSync(finalOpcodePath) || !existsSync(finalPcPath)) {
+    throw new Error(
+      `Required trace files not found in ${traceDir}. Expected opcode.gz/opcode and pc.gz/pc`,
+    )
+  }
+
+  const registerPaths: (string | null)[] = []
+  for (let i = 0; i <= 12; i++) {
+    const regPathGz = join(traceDir, `r${i}.gz`)
+    const regPath = join(traceDir, `r${i}`)
+    registerPaths.push(existsSync(regPathGz) ? regPathGz : (existsSync(regPath) ? regPath : null))
+  }
+
+  // Read all streams
+  const opcodes = readTraceFile(finalOpcodePath)
+  const pcs = readTraceFile(finalPcPath)
+  const gas = finalGasPath ? readTraceFile(finalGasPath) : null
+  const registers: (Buffer | null)[] = []
+  for (const regPath of registerPaths) {
+    registers.push(regPath ? readTraceFile(regPath) : null)
+  }
+
+  // Determine number of steps (opcode file size = number of steps)
+  const numSteps = opcodes.length
+  if (pcs.length < numSteps * 8) {
+    throw new Error(
+      `PC stream has insufficient data: expected ${numSteps * 8} bytes, got ${pcs.length}`,
+    )
+  }
+
+  // Convert to TraceLine format
+  const traceLines: TraceLine[] = []
+  for (let step = 0; step < numSteps; step++) {
+    const opcode = readUint8(opcodes, step)
+    const pc = Number(readUint64(pcs, step * 8))
+    const gasValue = gas ? Number(readUint64(gas, step * 8)) : undefined
+
+    const regValues: string[] = []
+    for (let r = 0; r <= 12; r++) {
+      if (registers[r]) {
+        const regValue = readUint64(registers[r]!, step * 8)
+        regValues.push(regValue.toString())
+      } else {
+        regValues.push('0')
+      }
+    }
+
+    const instruction = getOpcodeName(opcode)
+    const raw = `${instruction} ${step + 1} ${pc} Gas: ${gasValue ?? 'N/A'} Registers:[${regValues.join(', ')}]`
+
+    traceLines.push({
+      lineNumber: step + 1,
+      raw,
+      type: 'instruction',
+      instruction,
+      step: step + 1,
+      pc,
+      gas: gasValue,
+      registers: regValues,
+    })
+  }
+
+  return traceLines
+}
+
+// Read modular trace directory (refine format: work_package_hash/work_item_index_service_id/child_n_m)
+async function readModularRefineTraceDirectory(
+  baseDir: string,
+  workPackageHash: string,
+  workItemIndex?: number,
+  serviceId?: number,
+  childSlot?: number,
+  childInstance?: number,
+): Promise<TraceLine[]> {
+  let traceDir = baseDir
+
+  // Navigate to work package hash directory
+  if (workPackageHash.startsWith('0x')) {
+    traceDir = join(traceDir, workPackageHash)
+  } else {
+    traceDir = join(traceDir, `0x${workPackageHash}`)
+  }
+
+  if (workItemIndex !== undefined && serviceId !== undefined) {
+    traceDir = join(traceDir, `${workItemIndex}_${serviceId}`)
+    if (childSlot !== undefined && childInstance !== undefined) {
+      traceDir = join(traceDir, `child_${childSlot}_${childInstance}`)
+    }
+  } else {
+    // Try to find auth directory first, then work items
+    const entries = await readdir(traceDir, { withFileTypes: true })
+    const authDir = entries.find((e) => e.isDirectory() && e.name === 'auth')
+    if (authDir) {
+      traceDir = join(traceDir, 'auth')
+    } else {
+      // Use first work item directory
+      const workItemDirs = entries
+        .filter((e) => e.isDirectory() && /^\d+_\d+$/.test(e.name))
+        .map((e) => e.name)
+        .sort()
+      if (workItemDirs.length === 0) {
+        throw new Error(`No work item directories found in ${traceDir}`)
+      }
+      traceDir = join(traceDir, workItemDirs[0]!)
+      console.log(
+        `${colors.yellow}Using first available work item: ${workItemDirs[0]}${colors.reset}`,
+      )
+    }
+  }
+
+  if (!existsSync(traceDir)) {
+    throw new Error(`Trace directory not found: ${traceDir}`)
+  }
+
+  // Read all stream files from the trace directory (try both .gz and uncompressed)
+  const opcodePathGz = join(traceDir, 'opcode.gz')
+  const opcodePath = join(traceDir, 'opcode')
+  const pcPathGz = join(traceDir, 'pc.gz')
+  const pcPath = join(traceDir, 'pc')
+  const gasPathGz = join(traceDir, 'gas.gz')
+  const gasPath = join(traceDir, 'gas')
+  
+  const finalOpcodePath = existsSync(opcodePathGz) ? opcodePathGz : opcodePath
+  const finalPcPath = existsSync(pcPathGz) ? pcPathGz : pcPath
+  const finalGasPath = existsSync(gasPathGz) ? gasPathGz : (existsSync(gasPath) ? gasPath : null)
+
+  if (!existsSync(finalOpcodePath) || !existsSync(finalPcPath)) {
+    throw new Error(
+      `Required trace files not found in ${traceDir}. Expected opcode.gz/opcode and pc.gz/pc`,
+    )
+  }
+
+  const registerPaths: (string | null)[] = []
+  for (let i = 0; i <= 12; i++) {
+    const regPathGz = join(traceDir, `r${i}.gz`)
+    const regPath = join(traceDir, `r${i}`)
+    registerPaths.push(existsSync(regPathGz) ? regPathGz : (existsSync(regPath) ? regPath : null))
+  }
+
+  // Read all streams
+  const opcodes = readTraceFile(finalOpcodePath)
+  const pcs = readTraceFile(finalPcPath)
+  const gas = finalGasPath ? readTraceFile(finalGasPath) : null
+  const registers: (Buffer | null)[] = []
+  for (const regPath of registerPaths) {
+    registers.push(regPath ? readTraceFile(regPath) : null)
+  }
+
+  // Determine number of steps (opcode file size = number of steps)
+  const numSteps = opcodes.length
+  if (pcs.length < numSteps * 8) {
+    throw new Error(
+      `PC stream has insufficient data: expected ${numSteps * 8} bytes, got ${pcs.length}`,
+    )
+  }
+
+  // Convert to TraceLine format
+  const traceLines: TraceLine[] = []
+  for (let step = 0; step < numSteps; step++) {
+    const opcode = readUint8(opcodes, step)
+    const pc = Number(readUint64(pcs, step * 8))
+    const gasValue = gas ? Number(readUint64(gas, step * 8)) : undefined
+
+    const regValues: string[] = []
+    for (let r = 0; r <= 12; r++) {
+      if (registers[r]) {
+        const regValue = readUint64(registers[r]!, step * 8)
+        regValues.push(regValue.toString())
+      } else {
+        regValues.push('0')
+      }
+    }
+
+    const instruction = getOpcodeName(opcode)
+    const raw = `${instruction} ${step + 1} ${pc} Gas: ${gasValue ?? 'N/A'} Registers:[${regValues.join(', ')}]`
+
+    traceLines.push({
+      lineNumber: step + 1,
+      raw,
+      type: 'instruction',
+      instruction,
+      step: step + 1,
+      pc,
+      gas: gasValue,
+      registers: regValues,
+    })
+  }
+
+  return traceLines
+}
+
 function parseTraceFile(filepath: string, isExpected: boolean): TraceLine[] {
+  // Check if it's a directory (modular format) or file (text format)
+  const stat = statSync(filepath)
+  if (stat.isDirectory()) {
+    throw new Error(
+      `Directory path provided but no modular format specified. Use --modular or --modular-refine flags.`,
+    )
+  }
+
   const content = readFileSync(filepath, 'utf-8')
   const lines = content.split('\n')
   return lines.map((line, idx) =>
@@ -158,6 +464,154 @@ interface ComparisonResult {
   typescript?: TraceLine
   wasm?: TraceLine
   details?: string
+}
+
+interface TwoWayComparisonResult {
+  differences: ComparisonResult[]
+  stats: {
+    totalExpected: number
+    totalActual: number
+    matching: number
+  }
+}
+
+function compareTwoTraces(
+  expectedLines: TraceLine[],
+  actualLines: TraceLine[],
+): TwoWayComparisonResult {
+  const differences: ComparisonResult[] = []
+
+  // Filter to only instruction and host function lines
+  const expectedInstrs = expectedLines.filter(
+    (l) => l.type === 'instruction' || l.type === 'host_function',
+  )
+  const actualInstrs = actualLines.filter(
+    (l) => l.type === 'instruction' || l.type === 'host_function',
+  )
+
+  const maxSteps = Math.max(expectedInstrs.length, actualInstrs.length)
+  let matching = 0
+
+  for (let i = 0; i < maxSteps; i++) {
+    const expected = expectedInstrs[i]
+    const actual = actualInstrs[i]
+
+    // Check if both are present
+    if (!expected || !actual) {
+      differences.push({
+        step: i + 1,
+        type: 'missing',
+        expected,
+        typescript: actual,
+        details: `Missing in: ${!expected ? 'expected ' : ''}${!actual ? 'actual' : ''}`,
+      })
+      continue
+    }
+
+    // Compare instruction names
+    if (
+      expected.type === 'instruction' &&
+      actual.type === 'instruction'
+    ) {
+      const instrMatch = expected.instruction === actual.instruction
+
+      if (!instrMatch) {
+        differences.push({
+          step: i + 1,
+          type: 'instruction',
+          expected,
+          typescript: actual,
+          details: `Expected: ${expected.instruction}, Actual: ${actual.instruction}`,
+        })
+        continue
+      }
+
+      // Compare PC
+      if (expected.pc !== actual.pc) {
+        differences.push({
+          step: i + 1,
+          type: 'pc',
+          expected,
+          typescript: actual,
+          details: `Expected PC: ${expected.pc}, Actual PC: ${actual.pc}`,
+        })
+        continue
+      }
+
+      // Compare gas (if available)
+      if (expected.gas !== undefined && actual.gas !== undefined) {
+        if (expected.gas !== actual.gas) {
+          differences.push({
+            step: i + 1,
+            type: 'gas',
+            expected,
+            typescript: actual,
+            details: `Expected gas: ${expected.gas}, Actual gas: ${actual.gas}, diff: ${expected.gas - actual.gas}`,
+          })
+          continue
+        }
+      }
+
+      // Compare registers (if available)
+      if (expected.registers && actual.registers) {
+        const regDiffs: string[] = []
+        for (
+          let r = 0;
+          r < Math.max(expected.registers.length, actual.registers.length);
+          r++
+        ) {
+          const expReg = expected.registers[r] || '0'
+          const actReg = actual.registers[r] || '0'
+          if (expReg !== actReg) {
+            regDiffs.push(`r${r}: Expected=${expReg}, Actual=${actReg}`)
+          }
+        }
+        if (regDiffs.length > 0) {
+          differences.push({
+            step: i + 1,
+            type: 'registers',
+            expected,
+            typescript: actual,
+            details: `Register diffs: ${regDiffs.join('; ')}`,
+          })
+          continue
+        }
+      }
+
+      matching++
+    }
+
+    // Compare host function calls
+    if (
+      expected.type === 'host_function' &&
+      actual.type === 'host_function'
+    ) {
+      const nameMatch = expected.hostFunction?.name === actual.hostFunction?.name
+      const idMatch = expected.hostFunction?.id === actual.hostFunction?.id
+
+      if (!nameMatch || !idMatch) {
+        differences.push({
+          step: i + 1,
+          type: 'host_function',
+          expected,
+          typescript: actual,
+          details: `Expected: ${expected.hostFunction?.name} ${expected.hostFunction?.id}, Actual: ${actual.hostFunction?.name} ${actual.hostFunction?.id}`,
+        })
+        continue
+      }
+
+      matching++
+    }
+  }
+
+  return {
+    differences,
+    stats: {
+      totalExpected: expectedInstrs.length,
+      totalActual: actualInstrs.length,
+      matching,
+    },
+  }
 }
 
 function compareThreeTraces(
@@ -335,8 +789,161 @@ function compareThreeTraces(
   }
 }
 
+function printTwoWayComparison(
+  label: string | number,
+  expectedPath: string,
+  actualPath: string,
+  executorType: 'typescript' | 'wasm',
+  result: TwoWayComparisonResult,
+) {
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}📊 2-Way Trace Comparison: ${label} (${executorType})${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log()
+  console.log(
+    `${colors.cyan}Expected (jamduna):${colors.reset} ${expectedPath}`,
+  )
+  console.log(
+    `${colors.cyan}${executorType === 'typescript' ? 'TypeScript' : 'WASM'}:${colors.reset}        ${actualPath}`,
+  )
+  console.log()
+
+  // Summary
+  console.log(`${colors.bold}📈 Summary${colors.reset}`)
+  console.log(`   Expected instructions:  ${result.stats.totalExpected}`)
+  console.log(`   ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} instructions: ${result.stats.totalActual}`)
+  console.log(`   Matching:                ${result.stats.matching}`)
+  console.log(`   Differences:              ${result.differences.length}`)
+  console.log()
+
+  // Match percentage
+  const matchPercent =
+    result.stats.totalExpected > 0
+      ? ((result.stats.matching / result.stats.totalExpected) * 100).toFixed(2)
+      : '0'
+  const matchColor =
+    Number.parseFloat(matchPercent) >= 99
+      ? colors.green
+      : Number.parseFloat(matchPercent) >= 90
+        ? colors.yellow
+        : colors.red
+  console.log(`   ${matchColor}Match rate: ${matchPercent}%${colors.reset}`)
+  console.log()
+
+  // Show first N differences
+  const maxDiffsToShow = 20
+  if (result.differences.length > 0) {
+    console.log(
+      `${colors.bold}📋 First ${Math.min(maxDiffsToShow, result.differences.length)} Differences${colors.reset}`,
+    )
+    console.log()
+
+    for (
+      let i = 0;
+      i < Math.min(maxDiffsToShow, result.differences.length);
+      i++
+    ) {
+      const diff = result.differences[i]
+      const typeIcon = {
+        instruction: '🔀',
+        pc: '📍',
+        gas: '⛽',
+        registers: '📊',
+        missing: '❌',
+        host_function: '📞',
+      }[diff.type]
+
+      console.log(`   ${typeIcon} Step ${diff.step}: ${diff.type}`)
+      if (diff.details) {
+        console.log(`      ${colors.dim}${diff.details}${colors.reset}`)
+      }
+
+      if (diff.expected) {
+        console.log(
+          `      ${colors.green}Expected:${colors.reset} ${diff.expected.raw.substring(0, 100)}`,
+        )
+      }
+      if (diff.typescript) {
+        const label = executorType === 'typescript' ? 'TypeScript' : 'WASM'
+        const color = executorType === 'typescript' ? colors.blue : colors.magenta
+        console.log(
+          `      ${color}${label}:${colors.reset} ${diff.typescript.raw.substring(0, 100)}`,
+        )
+      }
+      console.log()
+    }
+
+    if (result.differences.length > maxDiffsToShow) {
+      console.log(
+        `   ${colors.dim}... and ${result.differences.length - maxDiffsToShow} more differences${colors.reset}`,
+      )
+      console.log()
+    }
+  }
+
+  // Analyze termination points
+  const missingDiffs = result.differences.filter((d) => d.type === 'missing')
+  if (missingDiffs.length > 0) {
+    console.log(`${colors.bold}🔍 Termination Analysis${colors.reset}`)
+    console.log()
+
+    const expectedOnly = missingDiffs.filter(
+      (d) => d.expected && !d.typescript,
+    )
+    const actualOnly = missingDiffs.filter(
+      (d) => d.typescript && !d.expected,
+    )
+
+    if (expectedOnly.length > 0) {
+      console.log(
+        `${colors.yellow}⚠️  Expected trace continues beyond ${executorType} trace${colors.reset}`,
+      )
+      console.log(
+        `   ${expectedOnly.length} instructions in expected but not in ${executorType}`,
+      )
+      if (expectedOnly[0]?.expected) {
+        console.log(
+          `   Last expected instruction: ${expectedOnly[0].expected.instruction} at PC ${expectedOnly[0].expected.pc}`,
+        )
+      }
+    }
+
+    if (actualOnly.length > 0) {
+      console.log(
+        `${executorType === 'typescript' ? colors.blue : colors.magenta}ℹ️  ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace has ${actualOnly.length} extra instructions${colors.reset}`,
+      )
+    }
+
+    // Find where traces diverge
+    const firstMissing = missingDiffs[0]
+    if (firstMissing) {
+      console.log()
+      console.log(
+        `${colors.bold}📍 First divergence at step ${firstMissing.step}${colors.reset}`,
+      )
+      if (firstMissing.expected) {
+        console.log(
+          `   Expected: ${firstMissing.expected.instruction || 'host_function'} at PC ${firstMissing.expected.pc}`,
+        )
+      }
+      if (firstMissing.typescript) {
+        console.log(
+          `   ${executorType === 'typescript' ? 'TypeScript' : 'WASM'}: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
+        )
+      }
+    }
+    console.log()
+  }
+}
+
 function printComparison(
-  blockNumber: number,
+  label: string | number,
   expectedPath: string,
   typescriptPath: string,
   wasmPath: string,
@@ -346,7 +953,7 @@ function printComparison(
     `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
   )
   console.log(
-    `${colors.bold}📊 3-Way Trace Comparison for Block ${blockNumber}${colors.reset}`,
+    `${colors.bold}📊 3-Way Trace Comparison: ${label}${colors.reset}`,
   )
   console.log(
     `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
@@ -507,73 +1114,1591 @@ function printComparison(
   }
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2)
 
   if (args.length === 0) {
-    console.log(`${colors.bold}3-Way PVM Trace Comparison Tool${colors.reset}`)
+    console.log(`${colors.bold}PVM Trace Comparison Tool${colors.reset}`)
     console.log()
-    console.log('Usage: bun scripts/compare-3way-traces.ts [block_number]')
+    console.log('Usage (2-way comparison):')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] [block_number]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --modular <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --preimages-light <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --preimages-all <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --storage-light <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --storage-all <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --fuzzy <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --fuzzy-light <timeslot> [ordered_index] [service_id]')
     console.log()
-    console.log('Example:')
+    console.log('Usage (3-way comparison):')
+    console.log('  bun scripts/compare-3way-traces.ts [block_number]')
+    console.log('  bun scripts/compare-3way-traces.ts --modular <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --modular-refine <work_package_hash> [work_item_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --preimages-light <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --preimages-all <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --storage-light <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --storage-all <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --fuzzy <timeslot> [ordered_index] [service_id]')
+    console.log('  bun scripts/compare-3way-traces.ts --fuzzy-light <timeslot> [ordered_index] [service_id]')
+    console.log()
+    console.log('Examples:')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --preimages-light 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --wasm --preimages-light 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --storage-light 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --preimages-all 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --storage-all 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --fuzzy 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --2way --typescript --fuzzy-light 2 0 0')
     console.log('  bun scripts/compare-3way-traces.ts 2')
+    console.log('  bun scripts/compare-3way-traces.ts --modular 151 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --modular-refine 0xf1166dc1... 0 39711455')
+    console.log('  bun scripts/compare-3way-traces.ts --preimages-light 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --preimages-all 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --storage-light 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --storage-all 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --fuzzy 2 0 0')
+    console.log('  bun scripts/compare-3way-traces.ts --fuzzy-light 2 0 0')
     return
   }
 
-  const blockNumber = Number.parseInt(args[0], 10)
-
-  if (Number.isNaN(blockNumber)) {
-    console.error(
-      `${colors.red}Error: Invalid block number: ${args[0]}${colors.reset}`,
-    )
-    process.exit(1)
-  }
-
   const workspaceRoot = join(__dirname, '..')
+  let expectedLines: TraceLine[]
+  let typescriptLines: TraceLine[] = []
+  let wasmLines: TraceLine[] = []
+  let expectedPath: string
+  let typescriptPath: string
+  let wasmPath: string
+  let comparisonLabel: string
 
-  const expectedPath = join(
-    workspaceRoot,
-    'pvm-expected',
-    `expected-${blockNumber}.log`,
-  )
-  const typescriptPath = join(
-    workspaceRoot,
-    'pvm-traces',
-    `typescript-${blockNumber}.log`,
-  )
-  const wasmPath = join(workspaceRoot, 'pvm-traces', `wasm-${blockNumber}.log`)
+  // Check for 2-way comparison mode
+  const isTwoWay = args[0] === '--2way'
+  let executorType: 'typescript' | 'wasm' | undefined
+  let formatArgs: string[] = args
 
-  if (!existsSync(expectedPath)) {
-    console.error(
-      `${colors.red}Error: Expected trace not found: ${expectedPath}${colors.reset}`,
-    )
-    process.exit(1)
+  if (isTwoWay) {
+    // Parse executor type
+    if (args[1] === '--typescript') {
+      executorType = 'typescript'
+      formatArgs = args.slice(2)
+    } else if (args[1] === '--wasm') {
+      executorType = 'wasm'
+      formatArgs = args.slice(2)
+    } else {
+      // Default to typescript if not specified
+      executorType = 'typescript'
+      formatArgs = args.slice(1)
+      console.log(
+        `${colors.yellow}No executor type specified, defaulting to --typescript${colors.reset}`,
+      )
+    }
+
+    if (formatArgs.length === 0) {
+      console.error(
+        `${colors.red}Error: Format and arguments required after --2way [--typescript|--wasm]${colors.reset}`,
+      )
+      process.exit(1)
+    }
   }
 
-  if (!existsSync(typescriptPath)) {
-    console.error(
-      `${colors.red}Error: TypeScript trace not found: ${typescriptPath}${colors.reset}`,
+  // Check for modular format flags (use formatArgs if in 2-way mode)
+  const formatFlag = isTwoWay ? formatArgs[0] : args[0]
+  if (formatFlag === '--modular') {
+    // Modular accumulate format
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --modular format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'fuzzy',
     )
-    process.exit(1)
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'modular-wasm')
+
+    comparisonLabel = `Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading modular traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+          } else {
+            wasmLines = actualLines
+          }
+        } catch {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, skipping...${colors.reset}`,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      } else {
+        if (executorType === 'typescript') {
+          typescriptLines = []
+        } else {
+          wasmLines = []
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+    // For now, TypeScript and WASM traces in modular format would need to be generated
+    // Fall back to text format if modular doesn't exist
+    if (existsSync(typescriptPath)) {
+      try {
+        typescriptLines = await readModularTraceDirectory(
+          typescriptPath,
+          timeslot,
+          orderedIndex,
+          serviceId,
+        )
+      } catch {
+        console.log(
+          `${colors.yellow}TypeScript modular trace not found, skipping...${colors.reset}`,
+        )
+        typescriptLines = []
+      }
+    } else {
+      typescriptLines = []
+    }
+
+    if (existsSync(wasmPath)) {
+      try {
+        wasmLines = await readModularTraceDirectory(
+          wasmPath,
+          timeslot,
+          orderedIndex,
+          serviceId,
+        )
+      } catch {
+        console.log(
+          `${colors.yellow}WASM modular trace not found, skipping...${colors.reset}`,
+        )
+        wasmLines = []
+      }
+    } else {
+      wasmLines = []
+      }
+    }
+  } else if (formatFlag === '--preimages-light') {
+    // Preimages light format (uncompressed binary files in preimages_light directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --preimages-light format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'preimages_light',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', 'modular-wasm')
+
+    comparisonLabel = `Preimages Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading preimages_light traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages_light', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (formatFlag === '--storage-light') {
+    // Storage light format (uncompressed binary files in storage_light directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --storage-light format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'storage_light',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'storage_light', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'storage_light', 'modular-wasm')
+
+    comparisonLabel = `Storage Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading storage_light traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage_light', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (formatFlag === '--preimages-all') {
+    // Preimages format (uncompressed binary files in preimages directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --preimages-all format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'preimages',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'preimages', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'preimages', 'modular-wasm')
+
+    comparisonLabel = `Preimages Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading preimages traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'preimages', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (formatFlag === '--storage-all') {
+    // Storage format (uncompressed binary files in storage directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --storage-all format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'storage',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'storage', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'storage', 'modular-wasm')
+
+    comparisonLabel = `Storage Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading storage traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'storage', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (formatFlag === '--fuzzy') {
+    // Fuzzy format (uncompressed binary files in fuzzy directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --fuzzy format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'fuzzy',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', 'modular-wasm')
+
+    comparisonLabel = `Fuzzy Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading fuzzy traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (formatFlag === '--fuzzy-light') {
+    // Fuzzy light format (uncompressed binary files in fuzzy_light directory)
+    const timeslot = isTwoWay ? formatArgs[1] : args[1]
+    const orderedIndex = isTwoWay
+      ? formatArgs[2]
+        ? Number.parseInt(formatArgs[2], 10)
+        : undefined
+      : args[2]
+        ? Number.parseInt(args[2], 10)
+        : undefined
+    const serviceId = isTwoWay
+      ? formatArgs[3]
+        ? Number.parseInt(formatArgs[3], 10)
+        : undefined
+      : args[3]
+        ? Number.parseInt(args[3], 10)
+        : undefined
+
+    if (!timeslot) {
+      console.error(
+        `${colors.red}Error: Timeslot required for --fuzzy-light format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'fuzzy_light',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', 'modular-wasm')
+
+    comparisonLabel = `Fuzzy Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
+
+    console.log(
+      `${colors.cyan}Reading fuzzy_light traces (accumulate format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularTraceDirectory(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
+
+    // In 2-way mode, only load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            actualPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          } else {
+            wasmLines = actualLines
+            wasmPath = join(actualPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+          }
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `${executorType}-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(textPath, false)
+            if (executorType === 'typescript') {
+              typescriptLines = actualLines
+              typescriptPath = textPath
+            } else {
+              wasmLines = actualLines
+              wasmPath = textPath
+            }
+          } else {
+            console.log(
+              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            if (executorType === 'typescript') {
+              typescriptLines = []
+            } else {
+              wasmLines = []
+            }
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `${executorType}-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          const actualLines = parseTraceFile(textPath, false)
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+            typescriptPath = textPath
+          } else {
+            wasmLines = actualLines
+            wasmPath = textPath
+          }
+        } else {
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else {
+            wasmLines = []
+          }
+        }
+      }
+    } else {
+      // 3-way mode: load both TypeScript and WASM
+      // Try modular format first, then fall back to text format
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularTraceDirectory(
+            typescriptPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          typescriptPath = join(typescriptPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `typescript-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}TypeScript modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            typescriptLines = parseTraceFile(textPath, false)
+            typescriptPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}TypeScript trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            typescriptLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `typescript-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}TypeScript modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          typescriptLines = parseTraceFile(textPath, false)
+          typescriptPath = textPath
+        } else {
+          typescriptLines = []
+        }
+      }
+
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(wasmPath, timeslot.padStart(8, '0'), String(orderedIndex ?? 0), String(serviceId ?? 0))
+        } catch {
+          // Fall back to text format
+          const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `wasm-${timeslot}.log`)
+          if (existsSync(textPath)) {
+            console.log(
+              `${colors.yellow}WASM modular trace not found, using text format: ${textPath}${colors.reset}`,
+            )
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
+          } else {
+            console.log(
+              `${colors.yellow}WASM trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            wasmLines = []
+          }
+        }
+      } else {
+        // Try text format directly
+        const textPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', `wasm-${timeslot}.log`)
+        if (existsSync(textPath)) {
+          console.log(
+            `${colors.yellow}WASM modular directory not found, using text format: ${textPath}${colors.reset}`,
+          )
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+    }
+  } else if (args[0] === '--modular-refine') {
+    // Modular refine format
+    const workPackageHash = args[1]
+    const workItemIndex = args[2] ? Number.parseInt(args[2], 10) : undefined
+    const serviceId = args[3] ? Number.parseInt(args[3], 10) : undefined
+    const childSlot = args[4] ? Number.parseInt(args[4], 10) : undefined
+    const childInstance = args[5] ? Number.parseInt(args[5], 10) : undefined
+
+    if (!workPackageHash) {
+      console.error(
+        `${colors.red}Error: Work package hash required for --modular-refine format${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const testVectorsDir = join(
+      workspaceRoot,
+      'submodules',
+      'jamduna',
+      'jam-test-vectors',
+      '0.7.2',
+      'storage',
+    )
+
+    expectedPath = testVectorsDir
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'modular-refine')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'modular-refine-wasm')
+
+    comparisonLabel = `Work Package ${workPackageHash.substring(0, 16)}...`
+
+    console.log(
+      `${colors.cyan}Reading modular traces (refine format)...${colors.reset}`,
+    )
+
+    expectedLines = await readModularRefineTraceDirectory(
+      expectedPath,
+      workPackageHash,
+      workItemIndex,
+      serviceId,
+      childSlot,
+      childInstance,
+    )
+
+    if (existsSync(typescriptPath)) {
+      try {
+        typescriptLines = await readModularRefineTraceDirectory(
+          typescriptPath,
+          workPackageHash,
+          workItemIndex,
+          serviceId,
+          childSlot,
+          childInstance,
+        )
+      } catch {
+        console.log(
+          `${colors.yellow}TypeScript modular trace not found, skipping...${colors.reset}`,
+        )
+        typescriptLines = []
+      }
+    } else {
+      typescriptLines = []
+    }
+
+    if (existsSync(wasmPath)) {
+      try {
+        wasmLines = await readModularRefineTraceDirectory(
+          wasmPath,
+          workPackageHash,
+          workItemIndex,
+          serviceId,
+          childSlot,
+          childInstance,
+        )
+      } catch {
+        console.log(
+          `${colors.yellow}WASM modular trace not found, skipping...${colors.reset}`,
+        )
+        wasmLines = []
+      }
+    } else {
+      wasmLines = []
+    }
+  } else {
+    // Legacy text format
+    const blockNumberArg = isTwoWay ? formatArgs[0] : args[0]
+    const blockNumber = Number.parseInt(blockNumberArg, 10)
+
+    if (Number.isNaN(blockNumber)) {
+      console.error(
+        `${colors.red}Error: Invalid block number: ${blockNumberArg}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    expectedPath = join(
+      workspaceRoot,
+      'pvm-expected',
+      `expected-${blockNumber}.log`,
+    )
+    typescriptPath = join(
+      workspaceRoot,
+      'pvm-traces',
+      `typescript-${blockNumber}.log`,
+    )
+    wasmPath = join(workspaceRoot, 'pvm-traces', `wasm-${blockNumber}.log`)
+    comparisonLabel = `Block ${blockNumber}`
+
+    if (!existsSync(expectedPath)) {
+      console.error(
+        `${colors.red}Error: Expected trace not found: ${expectedPath}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    // In 2-way mode, only check and load the selected executor
+    if (isTwoWay && executorType) {
+      const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      if (!existsSync(actualPath)) {
+        console.error(
+          `${colors.red}Error: ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found: ${actualPath}${colors.reset}`,
+        )
+        process.exit(1)
+      }
+
+      // Parse traces
+      expectedLines = parseTraceFile(expectedPath, true)
+      const actualLines = parseTraceFile(actualPath, false)
+      if (executorType === 'typescript') {
+        typescriptLines = actualLines
+      } else {
+        wasmLines = actualLines
+      }
+    } else {
+      // 3-way mode: check and load both
+    if (!existsSync(typescriptPath)) {
+      console.error(
+        `${colors.red}Error: TypeScript trace not found: ${typescriptPath}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    if (!existsSync(wasmPath)) {
+      console.error(
+        `${colors.red}Error: WASM trace not found: ${wasmPath}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    // Parse traces
+    expectedLines = parseTraceFile(expectedPath, true)
+    typescriptLines = parseTraceFile(typescriptPath, false)
+    wasmLines = parseTraceFile(wasmPath, false)
+  }
   }
 
-  if (!existsSync(wasmPath)) {
-    console.error(
-      `${colors.red}Error: WASM trace not found: ${wasmPath}${colors.reset}`,
+  // Compare and print results
+  if (isTwoWay && executorType) {
+    // 2-way comparison
+    const actualLines = executorType === 'typescript' ? typescriptLines : wasmLines
+    const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+    const result = compareTwoTraces(expectedLines, actualLines)
+    printTwoWayComparison(
+      comparisonLabel,
+      expectedPath,
+      actualPath,
+      executorType,
+      result,
     )
-    process.exit(1)
-  }
-
-  // Parse traces
-  const expectedLines = parseTraceFile(expectedPath, true)
-  const typescriptLines = parseTraceFile(typescriptPath, false)
-  const wasmLines = parseTraceFile(wasmPath, false)
-
-  // Compare
+  } else {
+    // 3-way comparison
   const result = compareThreeTraces(expectedLines, typescriptLines, wasmLines)
-
-  // Print results
-  printComparison(blockNumber, expectedPath, typescriptPath, wasmPath, result)
+  printComparison(
+    comparisonLabel,
+    expectedPath,
+    typescriptPath,
+    wasmPath,
+    result,
+  )
+  }
 }
 
 main()

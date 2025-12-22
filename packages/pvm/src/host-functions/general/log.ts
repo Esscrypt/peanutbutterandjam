@@ -106,37 +106,49 @@ export class LogHostFunction extends BaseHostFunction {
     const consoleMessage = `${timestamp} ${levelString}${corePart}${servicePart}${targetPart} ${message}`
 
     // Log according to level
+    // Wrap logger calls in try-catch to prevent exceptions from stopping execution
+    // JIP-1: LOG should never cause side effects that stop execution
     const levelNum = Number(level)
-    switch (levelNum) {
-      case 0: // Fatal error
-        logger.error(consoleMessage)
-        break
-      case 1: // Warning
-        logger.warn(consoleMessage)
-        break
-      case 2: // Important information
-        logger.info(consoleMessage)
-        break
-      case 3: // Helpful information
-        logger.debug(consoleMessage)
-        break
-      case 4: // Pedantic information
-        logger.debug(consoleMessage)
-        break
-      default:
-        logger.info(consoleMessage)
+    try {
+      switch (levelNum) {
+        case 0: // Fatal error
+          logger.error(consoleMessage)
+          break
+        case 1: // Warning
+          logger.warn(consoleMessage)
+          break
+        case 2: // Important information
+          logger.info(consoleMessage)
+          break
+        case 3: // Helpful information
+          logger.debug(consoleMessage)
+          break
+        case 4: // Pedantic information
+          logger.debug(consoleMessage)
+          break
+        default:
+          logger.info(consoleMessage)
+      }
+    } catch (error) {
+      // Logger error should not stop execution - silently continue
+      // This ensures LOG host function never causes a panic
     }
 
     // Also log structured JSON format for programmatic access
-    const jsonLog = {
-      time: timestamp,
-      level: levelString,
-      message,
-      target: target ?? null,
-      service: serviceId === null ? null : serviceId.toString(),
-      core: coreIndex === null ? null : coreIndex.toString(),
+    // Wrap context.log in try-catch as well
+    try {
+      const jsonLog = {
+        time: timestamp,
+        level: levelString,
+        message,
+        target: target ?? null,
+        service: serviceId === null ? null : serviceId.toString(),
+        core: coreIndex === null ? null : coreIndex.toString(),
+      }
+      context.log('PVM Log', jsonLog)
+    } catch (error) {
+      // Context log error should not stop execution - silently continue
     }
-    context.log('PVM Log', jsonLog)
 
     return {
       resultCode: null, // continue execution

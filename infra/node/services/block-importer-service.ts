@@ -341,6 +341,11 @@ export class BlockImporterService extends BaseService {
       return safeError(authPoolError)
     }
 
+    // Reset per-block statistics (coreStats and serviceStats) at the START of block processing
+    // Gray Paper: These stats are per-block, not cumulative across blocks
+    // Must be called BEFORE accumulation so accumulation stats are fresh for this block
+    this.statisticsService.resetPerBlockStats()
+
     // Process accumulations for this block
     // Gray Paper accumulation.tex: Process newly available work-reports (ρ̂)
     // These are work reports that just became available (reached super-majority assurances)

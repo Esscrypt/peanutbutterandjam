@@ -123,48 +123,6 @@ export class PVMRAM implements RAM {
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
 
-    console.log('\n=== initializeMemoryLayout - Input Data Summary ===')
-    console.log('Argument Data:', {
-      length: argumentDataLength,
-      firstBytes:
-        argumentDataLength > 0
-          ? Array.from(argumentData.slice(0, Math.min(32, argumentDataLength)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' ')
-          : 'empty',
-    })
-    console.log('Read-Only Data:', {
-      length: readOnlyDataLength,
-      firstBytes:
-        readOnlyDataLength > 0
-          ? Array.from(readOnlyData.slice(0, Math.min(32, readOnlyDataLength)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' ')
-          : 'empty',
-    })
-    console.log('Heap Data:', {
-      length: heap.length,
-      firstBytes:
-        heap.length > 0
-          ? Array.from(heap.slice(0, Math.min(32, heap.length)))
-              .map((b) => b.toString(16).padStart(2, '0'))
-              .join(' ')
-          : 'empty',
-    })
-    console.log('Stack:', {
-      size: stackSize,
-      initialization: 'ZEROS (per Gray Paper - no data from program blob)',
-    })
-    console.log('Heap Zero Padding Size:', heapZeroPaddingSize)
-
-    console.log('\n=== initializeMemoryLayout - Address Layout ===')
-    console.log({
-      readOnlyZone: `[0x${readOnlyZoneStartAddress.toString(16)}, 0x${readOnlyZoneEndAddress.toString(16)})`,
-      heap: `[0x${heapStartAddress.toString(16)}, 0x${heapEndAddress.toString(16)})`,
-      heapWithPadding: `[0x${heapStartAddress.toString(16)}, 0x${heapZerosEndAddress.toString(16)})`,
-      stack: `[0x${stackStartAddress.toString(16)}, 0x${stackEndAddress.toString(16)})`,
-      argumentData: `[0x${argumentDataStartAddress.toString(16)}, 0x${argumentDataZeroPaddingEndAddress.toString(16)})`,
-    })
 
     // Always reinitialize structure with actual sizes from the program
     // This ensures the structure matches the program's memory layout
@@ -174,29 +132,10 @@ export class PVMRAM implements RAM {
     this.roData = new Uint8Array(readOnlyDataLength)
     this.argumentData = new Uint8Array(argumentDataLength)
 
-    console.log('\n=== initializeMemoryLayout - Setting Initial Data ===')
-    console.log(
-      'Setting argument data...',
-      argumentDataLength > 0 ? `${argumentDataLength} bytes` : 'none',
-    )
     this.argumentData.set(argumentData, 0)
 
-    console.log(
-      'Setting read-only data...',
-      readOnlyDataLength > 0 ? `${readOnlyDataLength} bytes` : 'none',
-    )
     this.roData.set(readOnlyData, 0)
-
-    console.log(
-      'Setting heap data...',
-      heap.length > 0 ? `${heap.length} bytes` : 'none',
-    )
     this.heap.set(heap, 0)
-
-    console.log(
-      'Stack initialized to ZEROS (per Gray Paper - no data from program blob)',
-    )
-    console.log('=== initializeMemoryLayout Complete ===\n')
 
     // Update variable addresses (fixed addresses are already set in constructor)
     // currentHeapPointer extends to heapZerosEnd (includes heap length + jump table)

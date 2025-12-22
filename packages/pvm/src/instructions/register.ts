@@ -82,6 +82,9 @@ export class SBRKInstruction extends BaseInstruction {
       return { resultCode: null }
     }
 
+    // Record current heap pointer to return (before allocation)
+    const result = currentHeapPointer
+
     // P_func: page alignment function (rnp in Gray Paper)
     // Aligns address up to next page boundary: Cpvmpagesize * ceil(x / Cpvmpagesize)
     const pageSize = MEMORY_CONFIG.PAGE_SIZE // Z_P = Cpvmpagesize = 4096
@@ -109,7 +112,7 @@ export class SBRKInstruction extends BaseInstruction {
     ram.currentHeapPointer = newHeapPointer
 
     // Return the previous heap pointer (before allocation)
-    this.setRegisterValue(context.registers, registerD, BigInt(newHeapPointer))
+    this.setRegisterValue(context.registers, registerD, result)
 
     return { resultCode: null }
   }

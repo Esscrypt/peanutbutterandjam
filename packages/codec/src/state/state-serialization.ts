@@ -527,7 +527,37 @@ export function createStateTrie(
   // ServiceAccounts.accounts is a Map<bigint, ServiceAccount>, not a plain object
   for (const [serviceId, account] of globalState.accounts.accounts) {
     const accountKey = createStateKey(255, serviceId)
-    const [error17, accountData] = encodeServiceAccount(account, jamVersion)
+
+    // Gray Paper accounts.tex: items and octets are DERIVED values that must be recalculated
+    // items = 2 * len(requests) + len(storage)
+    // octets = sum((81 + z) for (h, z) in keys(requests)) + sum((34 + len(y) + len(x)) for (x, y) in storage)
+    // Count unique request keys (hash, length pairs)
+    let requestKeyCount = 0
+    let computedOctets = 0n
+    for (const [_hash, lengthMap] of account.requests) {
+      for (const [length, _status] of lengthMap) {
+        requestKeyCount++
+        computedOctets += 81n + length
+      }
+    }
+    // Add storage octets: 34 + len(key) + len(value) for each storage entry
+    for (const [storageKey, storageValue] of account.storage) {
+      const keyBytes = hexToBytes(storageKey)
+      computedOctets += 34n + BigInt(keyBytes.length) + BigInt(storageValue.length)
+    }
+    const computedItems = BigInt(2 * requestKeyCount + account.storage.size)
+
+    // Update account with computed values before encoding
+    const accountWithComputed = {
+      ...account,
+      items: computedItems,
+      octets: computedOctets,
+    }
+
+    const [error17, accountData] = encodeServiceAccount(
+      accountWithComputed,
+      jamVersion,
+    )
     if (error17) {
       return safeError(error17)
     }

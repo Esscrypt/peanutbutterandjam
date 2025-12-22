@@ -177,6 +177,7 @@ describe('Genesis Round-Trip Encoding/Decoding', () => {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: 1_000_000n },
+      traceSubfolder: 'safrole',
     })
 
     const statisticsService = new StatisticsService({

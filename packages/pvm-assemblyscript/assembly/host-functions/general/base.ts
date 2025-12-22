@@ -1,7 +1,7 @@
 import { PVM } from '../../pvm'
 import { RAM, RegisterState } from '../../types'
 import { HostFunctionResult } from '../accumulate/base'
-import { CompleteServiceAccount, WorkPackage, WorkItem } from '../../codec'
+import { CompleteServiceAccount, WorkPackage, WorkItem, AccumulateInput } from '../../codec'
 import { RefineInvocationContext } from '../../pbnj-types-compat'
 
 /**
@@ -182,10 +182,13 @@ export class FetchParams extends HostFunctionParams {
   workPackage: WorkPackage | null = null
   workPackageHash: Uint8Array | null = null
   authorizerTrace: Uint8Array | null = null
-  workItemIndex: u64 = u64(0) // Use 0 as sentinel for null
+  workItemIndex: u64 = u64(0xFFFFFFFFFFFFFFFF) // Use MAX_VALUE as sentinel for null (0 is a valid index)
   importSegments: Array<Array<Uint8Array>> | null = null
   exportSegments: Array<Array<Uint8Array>> | null = null
-  workItemsSequence: Array<WorkItem> | null = null
+  // i (mathbf{i}): accumulate inputs sequence (or null)
+  // Gray Paper pvm_invocations.tex line 150: sequence{accinput}
+  // Used by selectors 14 and 15 in accumulation context
+  accumulateInputs: Array<AccumulateInput> | null = null
 
   constructor(timeslot: u64, offset: u64) {
     super()

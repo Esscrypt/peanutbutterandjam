@@ -30,7 +30,7 @@ import {
  *    - Otherwise: Error HUH (cannot forget)
  */
 export class ForgetHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(21) // FORGET function ID
+  functionId: u64 = u64(24) // FORGET function ID (Gray Paper: 24)
   name: string = 'forget'
   gasCost: u64 = u64(10)
 
@@ -95,6 +95,20 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
           break
         }
       }
+      // Gray Paper: Update items and octets when removing a request
+      // items -= 2 for each removed request (h, z)
+      // octets -= (81 + z) for each removed request
+      if (serviceAccount.items >= u32(2)) {
+        serviceAccount.items -= u32(2)
+      } else {
+        serviceAccount.items = u32(0)
+      }
+      const octetsDelta = u32(81) + preimageLength
+      if (serviceAccount.octets >= octetsDelta) {
+        serviceAccount.octets -= octetsDelta
+      } else {
+        serviceAccount.octets = u64(0)
+      }
     } else if (timeslots.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
       const y = u64(timeslots[1])
@@ -107,6 +121,18 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
             serviceAccount.preimages.entries.splice(i, 1)
             break
           }
+        }
+        // Gray Paper: Update items and octets when removing a request
+        if (serviceAccount.items >= u64(2)) {
+          serviceAccount.items -= u32(2)
+        } else {
+          serviceAccount.items = u32(0)
+        }
+        const octetsDelta2 = u64(81) + preimageLength
+        if (serviceAccount.octets >= octetsDelta2) {
+          serviceAccount.octets -= octetsDelta2
+        } else {
+          serviceAccount.octets = u64(0)
         }
       } else {
         // Gray Paper line 938: otherwise → error (HUH)

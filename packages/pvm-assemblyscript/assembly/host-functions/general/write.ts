@@ -64,6 +64,23 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Check if this is a delete operation (value length = 0)
     if (valueLength === u64(0)) {
+      // Gray Paper: Calculate new account state with deletion, then check balance
+      // Calculate what the new storage footprint would be after deletion
+      const newItems = this.calculateItems(serviceAccount, key!, true)
+      const newOctets = this.calculateOctets(serviceAccount, key!, new Uint8Array(0), true)
+      const newMinBalance = this.calculateMinBalance(
+        newItems,
+        newOctets,
+        serviceAccount.gratis,
+      )
+
+      // Gray Paper equation 450: Check if new minbalance > balance
+      // If so, return FULL and keep old state
+      if (newMinBalance > serviceAccount.balance) {
+        context.registers[7] = ACCUMULATE_ERROR_FULL
+        return new HostFunctionResult(255) // continue execution
+      }
+
       // Delete the key
       const previousLength = this.deleteStorage(serviceAccount, key!)
       context.registers[7] = u64(previousLength)

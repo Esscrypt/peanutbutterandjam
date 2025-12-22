@@ -1,5 +1,19 @@
 # PBNJ Scripts
 
+```
+# Compare TypeScript traces
+bun scripts/compare-3way-traces.ts --2way --typescript --preimages-light 2 0 0
+
+# Compare WASM traces
+bun scripts/compare-3way-traces.ts --2way --wasm --preimages-light 2 0 0
+
+# Defaults to TypeScript if executor not specified
+bun scripts/compare-3way-traces.ts --2way --preimages-light 2 0 0
+
+# Works with legacy text format too
+bun scripts/compare-3way-traces.ts --2way --typescript 2
+```
+
 This directory contains various scripts for building, testing, and managing the PBNJ (PeanutButterAndJam) project.
 
 ## CLI Build Scripts

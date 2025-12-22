@@ -26,7 +26,7 @@ import {
  * 4. Return OK on success, HUH if not delegator, PANIC on error
  */
 export class DesignateHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(17) // DESIGNATE function ID
+  functionId: u64 = u64(16) // DESIGNATE function ID
   name: string = 'designate'
   gasCost: u64 = u64(10)
 

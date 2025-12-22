@@ -3,6 +3,7 @@ import type {
   HostFunctionContext,
   HostFunctionResult,
   LookupParams,
+  ServiceAccount,
 } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
@@ -16,25 +17,41 @@ import { BaseHostFunction } from './base'
  *
  * Looks up preimages from service account storage
  *
- * Gray Paper Specification:
+ * Gray Paper Specification (pvm_invocations.tex lines 374-396):
  * - Function ID: 2 (lookup)
  * - Gas Cost: 10
- * - Uses registers[7] to specify which service account to query
- * - Uses registers[8:2] to specify hash and output offset in memory
- * - Uses registers[10:2] to specify from offset and length
- * - Looks up preimage by hash from service account's preimages
- * - Writes result to memory at specified offset
- * - Returns NONE if not found, length if found
+ * - Signature: Ω_L(gascounter, registers, memory, s, s, d)
+ *   - s = current service account
+ *   - s = current service ID
+ *   - d = accounts dictionary
  *
- * Gray Paper Logic:
- * a = service account (self if registers[7] = s or NONE, otherwise accounts[registers[7]])
- * h = memory[registers[8]:32] (hash)
- * o = registers[9] (output offset)
- * f = registers[10] (from offset)
- * l = registers[11] (length)
- * v = a.preimages[h] if exists, NONE otherwise
- * if v != NONE: write v[f:f+l] to memory[o:o+l], return len(v)
- * else: return NONE
+ * Service account selection (a):
+ *   a = s (current service)       when registers[7] ∈ {s, 2^64 - 1}
+ *   a = d[registers[7]]           when registers[7] ∈ keys{d}
+ *   a = none                      otherwise
+ *
+ * Register usage:
+ *   registers[7] = service ID to query (or s/2^64-1 for self)
+ *   registers[8] = hash offset (h) - 32 bytes to read from memory
+ *   registers[9] = output offset (o) - where to write result
+ *   registers[10] = from offset (f) in preimage
+ *   registers[11] = length (l) to copy
+ *
+ * Value lookup (v):
+ *   v = error  when hash memory not readable
+ *   v = none   when a = none OR memory[h:32] ∉ keys{a.preimages}
+ *   v = a.preimages[memory[h:32]] otherwise
+ *
+ * Slice parameters:
+ *   f = min(registers[10], len{v})
+ *   l = min(registers[11], len{v} - f)
+ *
+ * Result:
+ *   - PANIC if v = error OR output memory not writable
+ *   - registers[7] = NONE if v = none
+ *   - registers[7] = len{v}, memory[o:l] = v[f:l] otherwise
+ *
+ * NOTE: LOOKUP is READ-ONLY - it does NOT modify service accounts!
  */
 
 export class LookupHostFunction extends BaseHostFunction {
@@ -45,86 +62,128 @@ export class LookupHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     lookupParams: LookupParams,
   ): HostFunctionResult {
-    const serviceId = context.registers[7]
+    const queryServiceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]
     const fromOffset = context.registers[10]
     const length = context.registers[11]
 
-    // Get service account
-    const serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
-    if (!serviceAccount) {
-      context.log('Lookup host function: Service account error', {
-        serviceId: lookupParams.serviceId.toString(),
-      })
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-    if (!serviceAccount) {
-      // Return NONE (2^64 - 1) for not found
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Lookup host function: Service account not found', {
-        serviceId: serviceId.toString(),
-      })
-      return {
-        resultCode: null, // continue execution
-      }
+    // Gray Paper: a = service account to query
+    // a = s (self)       when registers_7 ∈ {s, 2^64 - 1}
+    // a = d[registers_7] when registers_7 ∈ keys{d}
+    // a = none           otherwise
+    let serviceAccount: ServiceAccount | undefined
+
+    const MAX_U64 = BigInt('0xFFFFFFFFFFFFFFFF') // 2^64 - 1
+
+    if (
+      queryServiceId === lookupParams.serviceId ||
+      queryServiceId === MAX_U64
+    ) {
+      // Query self
+      serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
+    } else if (lookupParams.accounts.has(queryServiceId)) {
+      // Query another service from accounts dictionary
+      serviceAccount = lookupParams.accounts.get(queryServiceId)
+    } else {
+      // Service not found - a = none
+      serviceAccount = undefined
     }
 
     // Read hash from memory (32 bytes)
-    const [hashData, _faultAddress] = context.ram.readOctets(hashOffset, 32n)
+    // Gray Paper: v = error when N[h,32] ⊄ readable{memory}
+    const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
     if (!hashData) {
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-
-    // Look up preimage by hash
-    const preimage = serviceAccount.preimages.get(bytesToHex(hashData))
-    if (!preimage) {
-      // Return NONE (2^64 - 1) for not found
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-
-    // Calculate slice parameters
-    const f = Number(fromOffset)
-    const l = Number(length)
-    const preimageLength = preimage.length
-
-    // Calculate actual slice length
-    const actualLength = Math.min(l, preimageLength - f)
-
-    if (actualLength <= 0) {
-      // Return NONE if no data to copy
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-
-    // Extract data slice
-    const dataToWrite = preimage.subarray(f, f + actualLength)
-
-    // Write preimage slice to memory
-    const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
-    if (faultAddress) {
+      // v = error - memory not readable
+      context.log('Lookup host function: Hash memory not readable', {
+        hashOffset: hashOffset.toString(),
+        faultAddress: readFaultAddress?.toString() ?? 'null',
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
-          type: 'memory_write',
-          address: faultAddress,
-          details: 'Memory not writable',
+          type: 'memory_read',
+          address: readFaultAddress ?? 0n,
+          details: 'Hash memory not readable',
         },
       }
     }
 
-    // Return length of preimage
-    context.registers[7] = BigInt(preimageLength)
+    // Gray Paper: v = none when a = none ∨ memory[h:32] ∉ keys{a.preimages}
+    if (!serviceAccount) {
+      context.log('Lookup host function: Service account not found (a = none)', {
+        queryServiceId: queryServiceId.toString(),
+        selfServiceId: lookupParams.serviceId.toString(),
+      })
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Look up preimage by hash
+    const hashHex = bytesToHex(hashData)
+    const preimage = serviceAccount.preimages.get(hashHex)
+
+    if (!preimage) {
+      // v = none - preimage not found
+      context.log('Lookup host function: Preimage not found', {
+        hashHex,
+        queryServiceId: queryServiceId.toString(),
+        preimagesKeys: Array.from(serviceAccount.preimages.keys()).slice(0, 5),
+      })
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // v found - calculate slice parameters
+    // Gray Paper: f = min(registers[10], len{v})
+    //             l = min(registers[11], len{v} - f)
+    const preimageLength = BigInt(preimage.length)
+    const f = fromOffset < preimageLength ? Number(fromOffset) : preimage.length
+    const remainingAfterF = preimage.length - f
+    const l = length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF
+
+    // Only write if there's data to write
+    if (l > 0) {
+    // Extract data slice
+      const dataToWrite = preimage.subarray(f, f + l)
+
+    // Write preimage slice to memory
+      // Gray Paper: PANIC if N[o,l] ⊄ writable{memory}
+      const writeFaultAddress = context.ram.writeOctets(
+        outputOffset,
+        dataToWrite,
+      )
+      if (writeFaultAddress) {
+        context.log('Lookup host function: Output memory not writable', {
+          outputOffset: outputOffset.toString(),
+          length: l.toString(),
+          faultAddress: writeFaultAddress.toString(),
+        })
+      return {
+        resultCode: RESULT_CODES.PANIC,
+        faultInfo: {
+          type: 'memory_write',
+            address: writeFaultAddress,
+            details: 'Output memory not writable',
+        },
+        }
+      }
+    }
+
+    // Gray Paper: Return len{v} (full preimage length, not slice length)
+    context.registers[7] = preimageLength
+
+    context.log('Lookup host function: Success', {
+      queryServiceId: queryServiceId.toString(),
+      hashHex,
+      preimageLength: preimageLength.toString(),
+      f,
+      l,
+    })
 
     return {
       resultCode: null, // continue execution

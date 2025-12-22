@@ -58,19 +58,17 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read auth queue from memory (80 entries * 32 bytes each)
+    // Gray Paper pvm_invocations.tex lines 717-720:
+    // q = sequence{memory[o+32i:32] for i in N_Cauthqueuesize} when Nrange(o,32*Cauthqueuesize) ⊆ readable(memory), error otherwise
     const authQueueLength = C_AUTH_QUEUE_SIZE * 32n
     const [authQueueData, faultAddress] = ram.readOctets(
       authQueueOffset,
       authQueueLength,
     )
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!authQueueData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 722: (panic, registers_7, ...) when q = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (faultAddress || !authQueueData) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }

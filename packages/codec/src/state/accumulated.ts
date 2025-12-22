@@ -73,9 +73,13 @@ function convertAccumulatedToAccumulatedItems(
       return { data: new Uint8Array(0) }
     }
 
+    // Convert Set to sorted array for deterministic serialization
+    // Gray Paper: protoset is an unordered set, so we sort lexicographically for canonical encoding
+    const sortedHashes = Array.from(hashes).sort()
+
     // Concatenate all hashes into a single byte array
     const hashArrays: Uint8Array[] = []
-    for (const hash of hashes) {
+    for (const hash of sortedHashes) {
       const hashBytes = hexToBytes(hash)
       hashArrays.push(hashBytes)
     }
@@ -123,14 +127,15 @@ export function encodeAccumulated(
 
     // Gray Paper: sq{build{var{i}}{i ∈ accumulated}}
     // Fixed-length sequence (no length prefix), each element encoded as var{i}
+    // Where i is a protoset{hash}, so var{i} is encoded as COUNT of hashes (not byte length!)
     const [error, encodedData] = encodeSequenceGeneric(
       accumulatedToEncode,
       (item: AccumulatedItem) => {
-        // Gray Paper: var{i} - variable-length blob with natural number length prefix
-        // var{x} ≡ tuple{len{x}, x} thus encode{var{x}} ≡ encode{len{x}} ∥ encode{x}
-        const [lengthError, lengthEncoded] = encodeNatural(
-          BigInt(item.data.length),
-        )
+        // Gray Paper: var{i} where i ∈ protoset{hash}
+        // Each hash is 32 bytes, so count = data.length / 32
+        // Encode as: count (natural) + concatenated hashes
+        const hashCount = item.data.length / 32
+        const [lengthError, lengthEncoded] = encodeNatural(BigInt(hashCount))
         if (lengthError) {
           return safeError(lengthError)
         }
@@ -192,25 +197,27 @@ export function decodeAccumulated(
 
   // Gray Paper: decode sq{build{var{i}}{i ∈ accumulated}}
   // Fixed-length sequence (no length prefix), each element decoded as var{i}
+  // Where i is a protoset{hash}, so the length prefix is hash COUNT (not byte length!)
   const [error, decodedData] = decodeSequenceGeneric<AccumulatedItem>(
     data,
     (itemData: Uint8Array) => {
-      // Gray Paper: decode var{i} - variable-length blob with natural number length prefix
-      // var{x} ≡ tuple{len{x}, x} thus decode{var{x}} ≡ decode{len{x}} ∥ decode{x}
+      // Gray Paper: decode var{i} where i ∈ protoset{hash}
+      // The length prefix is hash COUNT, then we read count * 32 bytes
       const [lengthError, lengthResult] = decodeNatural(itemData)
       if (lengthError) {
         return safeError(lengthError)
       }
 
-      const length = Number(lengthResult.value)
+      const hashCount = Number(lengthResult.value)
+      const byteLength = hashCount * 32 // Each hash is 32 bytes
       const remainingAfterLength = lengthResult.remaining
 
-      if (remainingAfterLength.length < length) {
+      if (remainingAfterLength.length < byteLength) {
         return safeError(new Error('Insufficient data for accumulated item'))
       }
 
-      const itemBytes = remainingAfterLength.slice(0, length)
-      const remaining = remainingAfterLength.slice(length)
+      const itemBytes = remainingAfterLength.slice(0, byteLength)
+      const remaining = remainingAfterLength.slice(byteLength)
 
       return safeResult({
         value: { data: itemBytes },

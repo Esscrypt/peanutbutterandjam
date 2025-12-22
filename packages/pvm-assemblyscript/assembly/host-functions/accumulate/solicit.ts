@@ -32,7 +32,7 @@ import {
  * 4. Update service account with new request
  */
 export class SolicitHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(24) // SOLICIT function ID
+  functionId: u64 = u64(23) // SOLICIT function ID (Gray Paper: 23)
   name: string = 'solicit'
   gasCost: u64 = u64(10)
 
@@ -97,8 +97,19 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
+    // Track if this is a new request (affects items/octets)
+    const isNewRequest = existingRequestStatus === null
+
     // Update the service account with the new request
     serviceAccount.requests.set(hashData, preimageLength, newRequestStatus)
+
+    // Gray Paper: Update items and octets when creating a new request
+    // items += 2 for each new request (h, z)
+    // octets += (81 + z) for each new request
+    if (isNewRequest) {
+      serviceAccount.items += u32(2)
+      serviceAccount.octets += u32(81) + preimageLength
+    }
 
     // Set success result
     this.setAccumulateSuccess(registers)

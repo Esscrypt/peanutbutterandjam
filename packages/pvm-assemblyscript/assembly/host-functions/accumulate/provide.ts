@@ -1,3 +1,4 @@
+import { blake2b256 } from '../../crypto'
 import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_HUH,
@@ -30,7 +31,7 @@ import {
  * 6. Add the preimage to provisions
  */
 export class ProvideHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(22) // PROVIDE function ID
+  functionId: u64 = u64(26) // PROVIDE function ID (Gray Paper line 965)
   name: string = 'provide'
   gasCost: u64 = u64(10)
 
@@ -77,9 +78,10 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
     const serviceAccount = accountEntry.account
 
     // Check if there's a matching request for this hash and size
-    // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
-    // preimageData is already the hash as Uint8Array
-    const requestStatus = serviceAccount.requests.get(preimageData, preimageLength)
+    // Gray Paper line 985: a.sa_requests[(blake(i), z)] ≠ []
+    // Compute blake2b hash of the preimage data
+    const preimageHash = blake2b256(preimageData)
+    const requestStatus = serviceAccount.requests.get(preimageHash, preimageLength)
     if (requestStatus === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution

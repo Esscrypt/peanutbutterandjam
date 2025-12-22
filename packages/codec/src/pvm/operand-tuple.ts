@@ -55,47 +55,89 @@ import type {
   WorkExecutionResult,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
-import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
+
+/**
+ * Map error strings to Gray Paper discriminator values.
+ *
+ * Gray Paper encodeResult discriminators:
+ * - 0: Success (blob)
+ * - 1: ∞ (OOG/infinity/timeout)
+ * - 2: panic
+ * - 3: badexports
+ * - 4: oversize
+ * - 5: BAD
+ * - 6: BIG
+ */
+const ERROR_DISCRIMINATORS: Record<WorkError, number> = {
+  OOG: 1,
+  PANIC: 2,
+  BADEXPORTS: 3,
+  OVERSIZE: 4,
+  BAD: 5,
+  BIG: 6,
+}
 
 /**
  * Encode work result according to Gray Paper specification.
  *
- * Gray Paper encodeResult semantics:
- * - Success: var{output_data} - variable-length blob with actual result data
- * - Error codes: specific discriminators for different error types
- *
- * Error discriminators (Gray Paper):
- * - "oversize": Result data exceeds size limits
- * - "bad_exports": Invalid export segment structure
- * - "invalid_result": Result format validation failed
- * - "gas_limit_exceeded": Execution ran out of gas
+ * Gray Paper encodeResult semantics (Equation 294-302):
+ * encodeResult{o ∈ workerror ∪ blob} ≡
+ *   (0, var{o})  when o ∈ blob
+ *   1            when o = ∞
+ *   2            when o = panic
+ *   3            when o = badexports
+ *   4            when o = oversize
+ *   5            when o = BAD
+ *   6            when o = BIG
  *
  * @param result - Work result (success data or error string)
  * @returns Encoded result with proper Gray Paper encoding
  */
 function encodeWorkResult(result: WorkExecutionResult): Safe<Uint8Array> {
   if (typeof result === 'string') {
-    // Error result: encode as UTF-8 string with length prefix
-    const errorBytes = new TextEncoder().encode(result)
-    const [error, lengthEncoded] = encodeNatural(BigInt(errorBytes.length))
-    if (error) {
-      return safeError(error)
+    // Error result: single discriminator byte
+    const discriminator = ERROR_DISCRIMINATORS[result as WorkError]
+    if (discriminator === undefined) {
+      return safeError(new Error(`Unknown work error: ${result}`))
     }
-    return safeResult(concatBytes([lengthEncoded, errorBytes]))
+    return safeResult(new Uint8Array([discriminator]))
   } else {
-    // Success result: encode as variable-length blob
+    // Success result: discriminator 0 + var{blob}
     const resultBytes = result as Uint8Array
     const [error, lengthEncoded] = encodeNatural(BigInt(resultBytes.length))
     if (error) {
       return safeError(error)
     }
-    return safeResult(concatBytes([lengthEncoded, resultBytes]))
+    // Discriminator 0 + length + data
+    return safeResult(concatBytes([new Uint8Array([0]), lengthEncoded, resultBytes]))
   }
 }
 
 /**
+ * Map Gray Paper discriminator values to error strings.
+ */
+const DISCRIMINATOR_TO_ERROR: Record<number, WorkError> = {
+  1: 'OOG',
+  2: 'PANIC',
+  3: 'BADEXPORTS',
+  4: 'OVERSIZE',
+  5: 'BAD',
+  6: 'BIG',
+}
+
+/**
  * Decode work result according to Gray Paper specification.
+ *
+ * Gray Paper encodeResult semantics (Equation 294-302):
+ * encodeResult{o ∈ workerror ∪ blob} ≡
+ *   (0, var{o})  when o ∈ blob
+ *   1            when o = ∞
+ *   2            when o = panic
+ *   3            when o = badexports
+ *   4            when o = oversize
+ *   5            when o = BAD
+ *   6            when o = BIG
  *
  * @param data - Octet sequence to decode
  * @returns Decoded work result and remaining data
@@ -103,43 +145,49 @@ function encodeWorkResult(result: WorkExecutionResult): Safe<Uint8Array> {
 function decodeWorkResult(
   data: Uint8Array,
 ): Safe<DecodingResult<WorkExecutionResult>> {
-  // Decode length prefix
-  const [error1, lengthResult] = decodeNatural(data)
+  if (data.length < 1) {
+    return safeError(new Error('Insufficient data for work result decoding'))
+  }
+
+  const discriminator = data[0]
+  let currentData = data.slice(1)
+
+  // Check if it's an error (discriminators 1-6)
+  if (discriminator >= 1 && discriminator <= 6) {
+    const errorValue = DISCRIMINATOR_TO_ERROR[discriminator]
+    if (errorValue) {
+      return safeResult({
+        value: errorValue,
+        remaining: currentData,
+        consumed: 1,
+      })
+    }
+    return safeError(new Error(`Unknown error discriminator: ${discriminator}`))
+  }
+
+  // Success: discriminator 0 + var{blob}
+  if (discriminator !== 0) {
+    return safeError(
+      new Error(`Invalid work result discriminator: ${discriminator}`),
+    )
+  }
+
+  // Decode var{blob}
+  const [error1, lengthResult] = decodeNatural(currentData)
   if (error1) {
     return safeError(error1)
   }
 
   const resultLength = Number(lengthResult.value)
-  let currentData = lengthResult.remaining
+  currentData = new Uint8Array(lengthResult.remaining)
 
   if (currentData.length < resultLength) {
-    return safeError(new Error('Insufficient data for work result decoding'))
+    return safeError(new Error('Insufficient data for work result blob'))
   }
 
-  const resultBytes = currentData.slice(0, resultLength)
+  const resultBytes = new Uint8Array(currentData.slice(0, resultLength))
   currentData = currentData.slice(resultLength)
 
-  // Try to decode as error string first
-  try {
-    const resultString = new TextDecoder().decode(resultBytes)
-    const knownErrors = [
-      'oversize',
-      'bad_exports',
-      'invalid_result',
-      'gas_limit_exceeded',
-    ]
-    if (knownErrors.includes(resultString)) {
-      return safeResult({
-        value: resultString as WorkError,
-        remaining: currentData,
-        consumed: data.length - currentData.length,
-      })
-    }
-  } catch {
-    // Not a valid string, fall through to bytes
-  }
-
-  // Return as success result (bytes)
   return safeResult({
     value: resultBytes,
     remaining: currentData,
@@ -209,8 +257,8 @@ export function encodeOperandTuple(
   // OT_payloadhash: 32-byte hash of input data
   parts.push(hexToBytes(operandTuple.payloadHash))
 
-  // OT_gaslimit: 8-byte fixed-length gas limit
-  const [error1, gasEncoded] = encodeFixedLength(operandTuple.gasLimit, 8n)
+  // OT_gaslimit: Natural number encoding (Gray Paper uses encode{} not encode[8]{})
+  const [error1, gasEncoded] = encodeNatural(operandTuple.gasLimit)
   if (error1) {
     return safeError(error1)
   }
@@ -309,8 +357,8 @@ export function decodeOperandTuple(
   const payloadHash = bytesToHex(currentData.slice(0, 32))
   currentData = currentData.slice(32)
 
-  // OT_gaslimit: 8-byte fixed-length gas limit
-  const [error1, gasResult] = decodeFixedLength(currentData, 8n)
+  // OT_gaslimit: Natural number decoding (Gray Paper uses encode{} not encode[8]{})
+  const [error1, gasResult] = decodeNatural(currentData)
   if (error1) {
     return safeError(error1)
   }

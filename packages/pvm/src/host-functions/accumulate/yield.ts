@@ -40,15 +40,13 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read hash from memory (32 bytes)
+    // Gray Paper pvm_invocations.tex lines 953-956:
+    // h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
     const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!hashData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 958: (panic, registers_7, ...) when h = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (faultAddress || !hashData) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }

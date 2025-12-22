@@ -219,12 +219,13 @@ export class ServiceAccountService
     }
 
     // Gray Paper: preimage hash is computed over the blob only
-    const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
+    const blobBytes = hexToBytes(preimage.blob)
+    const [hashError, hash] = blake2bHash(blobBytes)
     if (hashError) {
       return safeError(hashError)
     }
 
-    const blobLength = BigInt(hexToBytes(preimage.blob).length)
+    const blobLength = BigInt(blobBytes.length)
     const serviceBucket = this.serviceRequests.get(preimage.requester)!
 
     // Store the preimage
@@ -232,7 +233,7 @@ export class ServiceAccountService
     const perServiceBucket =
       this.servicePreimages.get(preimage.requester) ??
       new Map<Hex, Uint8Array>()
-    perServiceBucket.set(hash, hexToBytes(preimage.blob))
+    perServiceBucket.set(hash, blobBytes)
     this.servicePreimages.set(preimage.requester, perServiceBucket)
 
     // fill/update the preimage request status for this service
@@ -598,7 +599,10 @@ export class ServiceAccountService
     this.coreServiceAccounts.set(serviceId, serviceAccount)
     this.serviceStorage.set(serviceId, serviceAccount.storage)
 
-    // set per-service preimages bucket
+    // REPLACE preimages bucket with the complete state from PVM
+    // Note: The PVM returns the complete service account for modified accounts.
+    // Preimages not in the partial state were not in the accumulation context,
+    // but the poststate.accounts should include all preimages for the service.
     const preimageBucket = new Map<Hex, Uint8Array>()
     for (const [hash, preimage] of serviceAccount.preimages.entries()) {
       preimageBucket.set(hash, preimage)
@@ -608,10 +612,9 @@ export class ServiceAccountService
       })
     }
     this.servicePreimages.set(serviceId, preimageBucket)
-    // populate per-service requests bucket
-    const bucket =
-      this.serviceRequests.get(serviceId) ??
-      new Map<Hex, Map<bigint, PreimageRequestStatus>>()
+
+    // REPLACE requests bucket with the complete state from PVM
+    const bucket = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
     for (const [
       hash,
       requestStatusByLen,

@@ -42,14 +42,22 @@ function getHostFunctionName(hostCallId: bigint): string {
 export function generateTraceFilename(
   blockNumber?: number | bigint | string,
   executorType?: 'wasm' | 'typescript',
-  _serviceId?: number | bigint | string,
+  serviceId?: number | bigint | string,
 ): string {
-  // If executor type is provided with block number, use {executorType}-{blockNumber}.log
+  // If executor type is provided with block number, use {executorType}-{blockNumber}-{serviceId}.log
+  // Include serviceId to avoid collisions when multiple services execute in the same slot
   if (executorType !== undefined && blockNumber !== undefined) {
     const blockNum =
       typeof blockNumber === 'string'
         ? Number.parseInt(blockNumber, 10)
         : Number(blockNumber)
+    if (serviceId !== undefined) {
+      const svcId =
+        typeof serviceId === 'string'
+          ? Number.parseInt(serviceId, 10)
+          : Number(serviceId)
+      return `${executorType}-${blockNum}-${svcId}.log`
+    }
     return `${executorType}-${blockNum}.log`
   }
 
@@ -143,6 +151,9 @@ export function writeTraceDump(
       }
     }
 
+    // Track which steps have execution logs to ensure host function logs appear
+    const executionLogSteps = new Set(executionLogs.map(log => log.step))
+
     // Format trace lines in jamduna format
     for (const log of executionLogs) {
       // Check if there's a host function call before this instruction
@@ -154,6 +165,8 @@ export function writeTraceDump(
         traceLines.push(
           `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`,
         )
+        // Remove from map so we don't duplicate it
+        hostLogsByStep.delete(log.step)
       }
 
       // Format registers as comma-separated values (jamduna format)
@@ -165,6 +178,20 @@ export function writeTraceDump(
       traceLines.push(
         `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}]`,
       )
+    }
+
+    // Add any remaining host function logs that don't have corresponding instruction logs
+    // This can happen if execution stops immediately after a host function panic
+    // Iterate through remaining entries in hostLogsByStep (those not matched to instruction logs)
+    for (const hostLog of hostLogsByStep.values()) {
+      if (hostLog && !executionLogSteps.has(hostLog.step)) {
+        const hostFunctionName = getHostFunctionName(hostLog.hostCallId)
+        const gasUsed = hostLog.gasBefore - hostLog.gasAfter
+        const serviceId = hostLog.serviceId ?? 0n
+        traceLines.push(
+          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`,
+        )
+      }
     }
 
     // Create filename (use provided filename, or generate based on parameters)

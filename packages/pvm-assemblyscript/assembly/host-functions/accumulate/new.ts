@@ -50,17 +50,27 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // This is the current block's timeslot passed from the Accumulate invocation
 
     // Extract parameters from registers
+    // Gray Paper: (o, l, minaccgas, minmemogas, gratis, desiredid) = registers[7:6]
+    // o = code hash offset
+    // l = expected code length (NOT the hash length - hash is always 32 bytes)
     const codeHashOffset = u64(registers[7])
-    const codeHashLength = u64(registers[8])
+    const expectedCodeLength = u64(registers[8])  // Expected length of the code preimage
     const minAccGas = u64(registers[9])
     const minMemoGas = u64(registers[10])
     const gratis = u64(registers[11])
     const desiredId = u64(registers[12])
 
-    // Read code hash from memory (32 bytes)
+    // Gray Paper: l must be a valid 32-bit number
+    if (expectedCodeLength > u64(0xFFFFFFFF)) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+      return new HostFunctionResult(RESULT_CODE_PANIC)
+    }
+
+    // Gray Paper: codehash = memory[o:32] - ALWAYS read 32 bytes for the hash
+    // The hash is a blake2b hash which is always 32 bytes
     const readResult_codeHash = ram.readOctets(
       u32(codeHashOffset),
-      u32(codeHashLength),
+      u32(32),  // Always read 32 bytes for the code hash
     )
     if (readResult_codeHash.faultAddress !== 0) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
@@ -101,42 +111,49 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     }
 
     // Determine new service ID
+    // Gray Paper lines 788-792:
+    // - If registrar and desiredId < Cminpublicindex: use desiredId, keep nextfreeid unchanged
+    // - Otherwise: use imX.nextfreeid directly, then update nextfreeid to i*
     let newServiceId: u64
+    let updateNextFreeId = false
     const C_MIN_PUBLIC_INDEX: u64 = u64(65536) // 2^16
 
-    if (gratis === u64(0)) {
-      // Paid service - use desired ID if valid
-      if (desiredId < C_MIN_PUBLIC_INDEX) {
-        // Check if desired ID is already taken
-        if (this.hasAccountEntry(imX.state.accounts, desiredId)) {
-          this.setAccumulateError(registers, ACCUMULATE_ERROR_FULL)
-          return new HostFunctionResult(255) // continue execution
-        }
-        newServiceId = desiredId
-      } else {
-        // Use next free ID
-        newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    if (gratis === u64(0) && imX.id === imX.state.registrar && desiredId < C_MIN_PUBLIC_INDEX) {
+      // Registrar creating reserved service with specific ID
+      // Gray Paper line 788: check if desired ID is already taken
+      if (this.hasAccountEntry(imX.state.accounts, desiredId)) {
+        this.setAccumulateError(registers, ACCUMULATE_ERROR_FULL)
+        return new HostFunctionResult(255) // continue execution
       }
+      newServiceId = desiredId
+      // nextfreeid stays unchanged for registrar with reserved ID
     } else {
-      // Free service - use next free ID
-      newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+      // Non-registrar OR registrar with public ID - use imX.nextfreeid directly
+      // Gray Paper line 790: returns imX.nextfreeid as the new service ID
+      newServiceId = u64(imX.nextfreeid)
+      updateNextFreeId = true
     }
 
     // Create new service account
+    // Gray Paper line 770: sa_requests = {(c, l): []}
+    // where c = codehash and l = expectedCodeLength (expected code length)
     const newServiceAccount = new CompleteServiceAccount()
     newServiceAccount.codehash = codeHashData
     newServiceAccount.balance = minBalance
     newServiceAccount.minaccgas = minAccGas
     newServiceAccount.minmemogas = minMemoGas
-    newServiceAccount.octets = u64(0) // Will be calculated
+    // Calculate items and octets for the new service account
+    // Gray Paper: items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
+    // Gray Paper: octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
+    newServiceAccount.octets = u64(81) + expectedCodeLength
     newServiceAccount.gratis = gratis
-    newServiceAccount.items = 0 // Will be calculated
+    newServiceAccount.items = 2 // 2 * 1 request + 0 storage
     newServiceAccount.created = u32(timeslot)
     newServiceAccount.lastacc = 0
     newServiceAccount.parent = u32(imX.id)
-    // Initial request for code: requests[codeHashData][0] = []
+    // Gray Paper line 770: Initial request for code: requests[(codeHashData, expectedCodeLength)] = []
     const initialStatus = new PreimageRequestStatus()
-    newServiceAccount.requests.set(codeHashData, u64(0), initialStatus)
+    newServiceAccount.requests.set(codeHashData, expectedCodeLength, initialStatus)
 
     // Deduct balance from current service
     currentService.balance -= minBalance
@@ -144,8 +161,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Add new service to accounts
     this.setAccountEntry(imX.state.accounts, newServiceId, newServiceAccount)
 
-    // Update next free ID
-    imX.nextfreeid = u32(this.getNextFreeId(u64(imX.nextfreeid), imX.state.accounts))
+    // Update next free ID only for non-registrar cases
+    // Gray Paper line 791: i* = check(Cminpublicindex + (imX.nextfreeid - Cminpublicindex + 42) mod ...)
+    if (updateNextFreeId) {
+      imX.nextfreeid = u32(this.getNextFreeId(u64(imX.nextfreeid), imX.state.accounts))
+    }
 
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)

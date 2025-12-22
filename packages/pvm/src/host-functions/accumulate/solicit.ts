@@ -108,6 +108,9 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       }
 
       // Update the service account with the new request
+      // Track if this is a new request (affects items/octets)
+      const isNewRequest = !existingRequest
+      
       if (requestMap) {
         // Update existing request map
         requestMap.set(preimageLength, newRequest)
@@ -117,6 +120,14 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
           hashHex,
           new Map([[preimageLength, newRequest]]),
         )
+      }
+
+      // Gray Paper: Update items and octets when creating a new request
+      // items += 2 for each new request (h, z)
+      // octets += (81 + z) for each new request
+      if (isNewRequest) {
+        serviceAccount.items += 2n
+        serviceAccount.octets += 81n + preimageLength
       }
 
       // Set success result

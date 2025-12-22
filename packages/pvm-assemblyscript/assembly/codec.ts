@@ -2285,18 +2285,13 @@ export function decodeDeferredTransfer(
   transfer.amount = amountResult.value
   currentData = currentData.slice(amountResult.consumed)
   
-  // Memo: DX_memo (variable-length octet sequence)
-  const memoLengthResult = decodeNatural(currentData)
-  if (!memoLengthResult) {
+  // Memo: DX_memo (fixed 128-byte blob, Cmemosize = 128)
+  // Gray Paper specifies memo is exactly 128 bytes, no length prefix
+  if (currentData.length < 128) {
     return null
   }
-  const memoLength = i32(memoLengthResult.value)
-  const memoRemaining = currentData.slice(memoLengthResult.consumed)
-  if (memoRemaining.length < memoLength) {
-    return null
-  }
-  transfer.memo = memoRemaining.slice(0, memoLength)
-  currentData = memoRemaining.slice(memoLength)
+  transfer.memo = currentData.slice(0, 128)
+  currentData = currentData.slice(128)
   
   // Gas: decode[8]{DX_gas} (8-byte fixed-length)
   const gasResult = decodeFixedLength(currentData, 8)
@@ -2593,14 +2588,347 @@ export function encodeDeferredTransfer(transfer: DeferredTransfer): Uint8Array {
   // Amount: encode[8]{DX_amount} (8-byte fixed-length)
   parts.push(encodeFixedLength(transfer.amount, 8))
   
-  // Memo: DX_memo (variable-length with length prefix)
-  parts.push(encodeNatural(u64(transfer.memo.length)))
-  parts.push(transfer.memo)
+  // Memo: DX_memo (fixed 128-byte blob, Cmemosize = 128)
+  // Gray Paper specifies memo is exactly 128 bytes, no length prefix
+  if (transfer.memo.length != 128) {
+    // Pad or truncate to exactly 128 bytes
+    const fixedMemo = new Uint8Array(128)
+    const copyLen = i32(min(u64(transfer.memo.length), u64(128)))
+    for (let i = 0; i < copyLen; i++) {
+      fixedMemo[i] = transfer.memo[i]
+    }
+    parts.push(fixedMemo)
+  } else {
+    parts.push(transfer.memo)
+  }
   
   // Gas: encode[8]{DX_gas} (8-byte fixed-length)
   parts.push(encodeFixedLength(transfer.gasLimit, 8))
   
   return concatBytes(parts)
+}
+
+// ============================================================================
+// Accumulate Input Structures and Encoding (Gray Paper compliant)
+// ============================================================================
+
+/**
+ * OperandTuple structure for work item results
+ * 
+ * Gray Paper Equation 279-287: encode[U]{OT ∈ operandtuple}
+ */
+export class OperandTuple {
+  packageHash: Uint8Array    // 32-byte hash
+  segmentRoot: Uint8Array    // 32-byte hash
+  authorizer: Uint8Array     // 32-byte public key
+  payloadHash: Uint8Array    // 32-byte hash
+  gasLimit: u64              // 8-byte gas limit
+  result: Uint8Array         // Variable-length result (success blob or empty for error)
+  resultType: u8             // 0 = success, 1-6 = error types
+  authTrace: Uint8Array      // Variable-length authorization trace
+  
+  constructor() {
+    this.packageHash = new Uint8Array(32)
+    this.segmentRoot = new Uint8Array(32)
+    this.authorizer = new Uint8Array(32)
+    this.payloadHash = new Uint8Array(32)
+    this.gasLimit = u64(0)
+    this.result = new Uint8Array(0)
+    this.resultType = 0 // Success by default
+    this.authTrace = new Uint8Array(0)
+  }
+}
+
+/**
+ * AccumulateInput structure (discriminated union)
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export class AccumulateInput {
+  inputType: u8  // 0 = OperandTuple, 1 = DeferredTransfer
+  operandTuple: OperandTuple | null
+  deferredTransfer: DeferredTransfer | null
+  
+  constructor(inputType: u8) {
+    this.inputType = inputType
+    this.operandTuple = null
+    this.deferredTransfer = null
+  }
+  
+  static fromOperandTuple(ot: OperandTuple): AccumulateInput {
+    const input = new AccumulateInput(0)
+    input.operandTuple = ot
+    return input
+  }
+  
+  static fromDeferredTransfer(dt: DeferredTransfer): AccumulateInput {
+    const input = new AccumulateInput(1)
+    input.deferredTransfer = dt
+    return input
+  }
+}
+
+/**
+ * Encode work result according to Gray Paper specification
+ * 
+ * Gray Paper pvm_invocations.tex encodeResult:
+ * 0 = success (followed by var{blob})
+ * 1 = ∞ (out of gas)
+ * 2 = panic
+ * 3 = badexports
+ * 4 = oversize
+ * 5 = BAD
+ * 6 = BIG
+ */
+export function encodeWorkResult(resultType: u8, result: Uint8Array): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // Discriminator byte
+  const discriminatorByte = new Uint8Array(1)
+  discriminatorByte[0] = resultType
+  parts.push(discriminatorByte)
+  
+  // If success (type 0), append the variable-length result blob
+  if (resultType == 0) {
+    parts.push(encodeNatural(u64(result.length)))
+    parts.push(result)
+  }
+  // For error types 1-6, no additional data
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Encode OperandTuple according to Gray Paper specification
+ * 
+ * Gray Paper Equation 279-287:
+ * encode[U]{OT ∈ operandtuple} ≡ encode{
+ *   OT_packagehash,
+ *   OT_segroot,
+ *   OT_authorizer,
+ *   OT_payloadhash,
+ *   OT_gaslimit,
+ *   encodeResult{OT_result},
+ *   var{OT_authtrace}
+ * }
+ * 
+ * Note: OT_gaslimit uses natural encoding (no encode[8]{} wrapper)
+ */
+export function encodeOperandTuple(ot: OperandTuple): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // packageHash: 32-byte hash
+  parts.push(ot.packageHash)
+  
+  // segmentRoot: 32-byte hash
+  parts.push(ot.segmentRoot)
+  
+  // authorizer: 32-byte public key
+  parts.push(ot.authorizer)
+  
+  // payloadHash: 32-byte hash
+  parts.push(ot.payloadHash)
+  
+  // gasLimit: natural encoding (Gray Paper uses encode{} not encode[8]{})
+  parts.push(encodeNatural(ot.gasLimit))
+  
+  // encodeResult{result}: discriminator + optional var{blob}
+  parts.push(encodeWorkResult(ot.resultType, ot.result))
+  
+  // var{authTrace}: variable-length with length prefix
+  parts.push(encodeNatural(u64(ot.authTrace.length)))
+  parts.push(ot.authTrace)
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Encode AccumulateInput according to Gray Paper specification
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export function encodeAccumulateInput(input: AccumulateInput): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // Type discriminator
+  const discriminatorByte = new Uint8Array(1)
+  discriminatorByte[0] = input.inputType
+  parts.push(discriminatorByte)
+  
+  if (input.inputType == 0 && input.operandTuple != null) {
+    // OperandTuple encoding
+    parts.push(encodeOperandTuple(input.operandTuple!))
+  } else if (input.inputType == 1 && input.deferredTransfer != null) {
+    // DeferredTransfer encoding
+    parts.push(encodeDeferredTransfer(input.deferredTransfer!))
+  }
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Decode work result according to Gray Paper specification
+ * 
+ * Gray Paper pvm_invocations.tex encodeResult:
+ * 0 = success (followed by var{blob})
+ * 1-6 = error types (no additional data)
+ */
+export function decodeWorkResult(data: Uint8Array): DecodingResult<OperandTuple> | null {
+  if (data.length === 0) {
+    return null
+  }
+  
+  const ot = new OperandTuple()
+  ot.resultType = data[0]
+  
+  if (ot.resultType == 0) {
+    // Success: var{result_blob}
+    const lengthResult = decodeNatural(data.slice(1))
+    if (!lengthResult) {
+      return null
+    }
+    const blobLength = i32(lengthResult.value)
+    const remaining = data.slice(1 + lengthResult.consumed)
+    if (remaining.length < blobLength) {
+      return null
+    }
+    ot.result = remaining.slice(0, blobLength)
+    return new DecodingResult<OperandTuple>(ot, 1 + lengthResult.consumed + blobLength)
+  }
+  
+  // Error types 1-6: no additional data
+  return new DecodingResult<OperandTuple>(ot, 1)
+}
+
+/**
+ * Decode OperandTuple according to Gray Paper specification
+ * 
+ * Gray Paper Equation 279-287:
+ * encode[U]{OT ∈ operandtuple} ≡ encode{
+ *   OT_packagehash,
+ *   OT_segroot,
+ *   OT_authorizer,
+ *   OT_payloadhash,
+ *   OT_gaslimit,
+ *   encodeResult{OT_result},
+ *   var{OT_authtrace}
+ * }
+ */
+export function decodeOperandTuple(data: Uint8Array): DecodingResult<OperandTuple> | null {
+  if (data.length < 128) { // Minimum: 32+32+32+32 = 128 bytes for fixed hash fields
+    return null
+  }
+  
+  const ot = new OperandTuple()
+  let offset = 0
+  
+  // packageHash: 32 bytes
+  ot.packageHash = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // segmentRoot: 32 bytes
+  ot.segmentRoot = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // authorizer: 32 bytes
+  ot.authorizer = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // payloadHash: 32 bytes
+  ot.payloadHash = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // gasLimit: natural encoding (Gray Paper uses encode{} not encode[8]{})
+  const gasResult = decodeNatural(data.slice(offset))
+  if (!gasResult) {
+    return null
+  }
+  ot.gasLimit = gasResult.value
+  offset += gasResult.consumed
+  
+  // decodeResult: discriminator + optional var{blob}
+  const resultDisc = data[offset]
+  ot.resultType = resultDisc
+  offset += 1
+  
+  if (resultDisc == 0) {
+    // Success: var{result_blob}
+    const lengthResult = decodeNatural(data.slice(offset))
+    if (!lengthResult) {
+      return null
+    }
+    const blobLength = i32(lengthResult.value)
+    offset += lengthResult.consumed
+    
+    if (offset + blobLength > data.length) {
+      return null
+    }
+    ot.result = data.slice(offset, offset + blobLength)
+    offset += blobLength
+  }
+  // For error types 1-6: no additional data, result stays empty
+  
+  // var{authTrace}: variable-length with length prefix
+  const authTraceLengthResult = decodeNatural(data.slice(offset))
+  if (!authTraceLengthResult) {
+    return null
+  }
+  const authTraceLength = i32(authTraceLengthResult.value)
+  offset += authTraceLengthResult.consumed
+  
+  if (offset + authTraceLength > data.length) {
+    return null
+  }
+  ot.authTrace = data.slice(offset, offset + authTraceLength)
+  offset += authTraceLength
+  
+  return new DecodingResult<OperandTuple>(ot, offset)
+}
+
+/**
+ * Decode AccumulateInput according to Gray Paper specification
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export function decodeAccumulateInput(data: Uint8Array): DecodingResult<AccumulateInput> | null {
+  if (data.length === 0) {
+    return null
+  }
+  
+  const inputType = data[0]
+  const remaining = data.slice(1)
+  
+  if (inputType == 0) {
+    // OperandTuple
+    const otResult = decodeOperandTuple(remaining)
+    if (!otResult) {
+      return null
+    }
+    const input = AccumulateInput.fromOperandTuple(otResult.value)
+    return new DecodingResult<AccumulateInput>(input, 1 + otResult.consumed)
+  } else if (inputType == 1) {
+    // DeferredTransfer
+    const dtResult = decodeDeferredTransfer(remaining)
+    if (!dtResult) {
+      return null
+    }
+    const input = AccumulateInput.fromDeferredTransfer(dtResult.value)
+    return new DecodingResult<AccumulateInput>(input, 1 + dtResult.consumed)
+  }
+  
+  return null
 }
 
 /**

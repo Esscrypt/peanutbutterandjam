@@ -50,10 +50,8 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read hash from memory (32 bytes)
-    const [hashData, faultAddress] = ram.readOctets(
-      preimageOffset,
-      preimageLength,
-    )
+    // Gray Paper: h = memory[o:32] - always reads 32 bytes (hash size)
+    const [hashData, faultAddress] = ram.readOctets(preimageOffset, 32n)
     if (faultAddress || !hashData) {
       return {
         resultCode: RESULT_CODES.PANIC,

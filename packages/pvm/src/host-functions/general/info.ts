@@ -1,12 +1,12 @@
-import { decodeServiceAccount, encodeServiceAccount } from '@pbnjam/codec'
+import { encodeServiceAccountForInfo } from '@pbnjam/codec'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   InfoParams,
-  JamVersion,
   ServiceAccount,
   ServiceAccountCore,
 } from '@pbnjam/types'
+import { DEPOSIT_CONSTANTS } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -74,58 +74,33 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Gray Paper equation 466-473: Encode service account info
-    // Auto-detect JAM version by attempting round-trip encoding/decoding
-    // Try different JAM versions in order: 0.7.2, 0.7.1, 0.7.0 (prefer newer versions)
-    const versionsToTry: JamVersion[] = [
-      { major: 0, minor: 7, patch: 2 },
-      { major: 0, minor: 7, patch: 1 },
-      { major: 0, minor: 7, patch: 0 },
-    ]
+    // Gray Paper equation 466-473: Encode service account info for INFO host function
+    // INFO uses a different format than merklization (pvm_invocations.tex vs merklization.tex)
+    // Format: codehash + encode[8]{balance, minbalance, minaccgas, minmemogas, octets} +
+    //         encode[4]{items} + encode[8]{gratis} + encode[4]{created, lastacc, parent}
+    // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
 
-    let info: Uint8Array | undefined
+    // Calculate minbalance: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    const baseDeposit = BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT)
+    const itemDeposit =
+      BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * serviceAccount.items
+    const byteDeposit =
+      BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT) * serviceAccount.octets
+    const totalDeposit = baseDeposit + itemDeposit + byteDeposit
+    const minbalance =
+      totalDeposit > serviceAccount.gratis
+        ? totalDeposit - serviceAccount.gratis
+        : 0n
 
-    for (const version of versionsToTry) {
-      const [encodeError, encoded] = encodeServiceAccount(
-        serviceAccount as ServiceAccountCore,
-        version,
-      )
-      if (encodeError || !encoded) {
-        continue
+    // Encode using INFO-specific format (96 bytes, includes minbalance)
+    const [encodeError, info] = encodeServiceAccountForInfo(
+      serviceAccount as ServiceAccountCore,
+      minbalance,
+    )
+    if (encodeError || !info) {
+      return {
+        resultCode: RESULT_CODES.PANIC,
       }
-
-      // Try to decode and verify round-trip
-      const [decodeError, decoded] = decodeServiceAccount(encoded, version)
-      if (!decodeError && decoded) {
-        // Verify round-trip: re-encode and compare
-        const [reEncodeError, reEncoded] = encodeServiceAccount(
-          decoded.value,
-          version,
-        )
-        if (
-          !reEncodeError &&
-          reEncoded &&
-          reEncoded.length === encoded.length &&
-          reEncoded.every((byte, i) => byte === encoded[i])
-        ) {
-          // Round-trip successful, use this version
-          info = encoded
-          break
-        }
-      }
-    }
-
-    // If no version worked, fall back to default (0.7.2)
-    if (!info) {
-      const [defaultError, defaultEncoded] = encodeServiceAccount(
-        serviceAccount as ServiceAccountCore,
-      )
-      if (defaultError || !defaultEncoded) {
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      info = defaultEncoded
     }
 
     // Gray Paper equation 475-476: Calculate slice parameters
@@ -173,8 +148,9 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Gray Paper equation 480: Return length of info
-    context.registers[7] = BigInt(info.length)
+    // Gray Paper equation 480: Return length of written data (requested length if padded)
+    // Match jamduna behavior: return the length that was actually written
+    context.registers[7] = BigInt(dataToWrite.length)
 
     return {
       resultCode: null, // continue execution

@@ -64,38 +64,34 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read assigners array from memory (341 cores * 4 bytes each)
+    // Gray Paper pvm_invocations.tex lines 696-699:
+    // a = decode[4]{memory[a:4*Ccorecount]} when Nrange(a,4*Ccorecount) ⊆ readable(memory), error otherwise
     const assignersLength = BigInt(this.configService.numCores) * 4n
     const [assignersData, faultAddress] = ram.readOctets(
       assignersOffset,
       assignersLength,
     )
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!assignersData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (faultAddress || !assignersData) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
 
     // Read always accessors array from memory (n entries * 12 bytes each)
+    // Gray Paper pvm_invocations.tex lines 700-703:
+    // z = {build{...}} when Nrange(o,12n) ⊆ readable(memory), error otherwise
     const accessorsLength = numberOfAlwaysAccessors * 12n
     const [accessorsData, accessorsFaultAddress] = ram.readOctets(
       alwaysAccessorsOffset,
       accessorsLength,
     )
-    if (!accessorsData) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (accessorsFaultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (!accessorsData || accessorsFaultAddress) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }

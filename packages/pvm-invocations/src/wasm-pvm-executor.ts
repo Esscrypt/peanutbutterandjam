@@ -13,10 +13,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   decodeBlob,
+  decodeImplicationsPair,
   decodeProgramFromPreimage,
+  encodeAccumulateInput,
   encodeImplicationsPair,
   encodeVariableSequence,
-  encodeWorkItem,
 } from '@pbnjam/codec'
 import { writeTraceDump } from '@pbnjam/pvm'
 import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
@@ -30,7 +31,6 @@ import type {
   RAM,
   ResultCode,
   SafePromise,
-  WorkItem,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
@@ -47,6 +47,7 @@ export class WasmPVMExecutor {
   private readonly configService: IConfigService
   private readonly entropyService: IEntropyService
   private readonly workspaceRoot: string
+  private readonly traceSubfolder?: string
   private initializationPromise: Promise<void> | null = null
 
   private currentState: PVMState | null = null
@@ -80,8 +81,13 @@ export class WasmPVMExecutor {
    *
    * @param configService - Configuration service (required for accumulation invocations)
    * @param entropyService - Entropy service (required for accumulation invocations)
+   * @param traceSubfolder - Optional subfolder name for trace output (e.g., 'preimages_light', 'storage_light')
    */
-  constructor(configService: IConfigService, entropyService: IEntropyService) {
+  constructor(
+    configService: IConfigService,
+    entropyService: IEntropyService,
+    traceSubfolder?: string,
+  ) {
     // Resolve path to WASM file in pvm-assemblyscript package
     // Path: packages/pvm-assemblyscript/build/pvm.wasm
     const currentDir =
@@ -96,6 +102,7 @@ export class WasmPVMExecutor {
     // ../../.. = workspace root
     const packagesDir = join(currentDir, '..', '..')
     this.workspaceRoot = join(packagesDir, '..')
+    this.traceSubfolder = traceSubfolder
 
     // Try to load from pvm-assemblyscript build directory first
     // Path: packages/pvm-assemblyscript/build/pvm.wasm
@@ -160,6 +167,24 @@ export class WasmPVMExecutor {
   }
 
   /**
+   * Force re-instantiation of WASM module
+   * This ensures completely fresh state between invocations
+   */
+  private async reinitializeWasm(): Promise<void> {
+    // Clear existing module
+    this.wasm = null
+    this.initializationPromise = null
+
+    // Instantiate fresh WASM module
+    const wasm = await instantiate(this.wasmModuleBytes, {})
+
+    // Initialize PVM with PVMRAM
+    wasm.init(wasm.RAMType.PVMRAM)
+
+    this.wasm = wasm
+  }
+
+  /**
    * Execute accumulation invocation using setupAccumulateInvocation
    * Similar to accumulate-wasm.test.ts
    *
@@ -172,14 +197,15 @@ export class WasmPVMExecutor {
     implicationsPair: ImplicationsPair,
     timeslot: bigint,
     _inputs: AccumulateInput[],
-    _workItems: WorkItem[],
     serviceId: bigint,
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
     context: ImplicationsPair
   }> {
-    await this.ensureInitialized()
+    // CRITICAL: Re-instantiate WASM module for each invocation to ensure completely fresh state
+    // This prevents any state leakage between accumulation invocations
+    await this.reinitializeWasm()
 
     if (!this.wasm) {
       return safeError(new Error('Failed to initialize WASM module'))
@@ -256,27 +282,21 @@ export class WasmPVMExecutor {
     this.code = extendedCode
     this.bitmask = extendedBitmask
 
-    // Encode work items sequence for FETCH host function
+    // Encode accumulate inputs sequence for FETCH host function (selectors 14 and 15)
     // Always encode the sequence, even if empty (to match Rust reference expectations)
     // An empty sequence is encoded as: encode(0) = 0x00 (length prefix for 0 items)
-    const workItemsToEncode =
-      _workItems && _workItems.length > 0 ? _workItems : []
+    // Gray Paper pvm_invocations.tex lines 359-360: i = sequence{accinput}
+    const inputsToEncode = _inputs && _inputs.length > 0 ? _inputs : []
     const [encodeError, encoded] = encodeVariableSequence(
-      workItemsToEncode,
-      (workItem: WorkItem) => {
-        const [itemError, itemEncoded] = encodeWorkItem(workItem)
-        if (itemError) {
-          return safeError(itemError)
-        }
-        return safeResult(itemEncoded)
-      },
+      inputsToEncode,
+      encodeAccumulateInput,
     )
     if (encodeError || !encoded) {
       return safeError(
-        new Error(`Failed to encode work items: ${encodeError?.message}`),
+        new Error(`Failed to encode accumulate inputs: ${encodeError?.message}`),
       )
     }
-    const encodedWorkItems = encoded
+    const encodedAccumulateInputs = encoded
 
     // Set up accumulation invocation with config parameters
     this.wasm.setupAccumulateInvocation(
@@ -288,7 +308,7 @@ export class WasmPVMExecutor {
       numValidators,
       authQueueSize,
       entropyAccumulator,
-      encodedWorkItems,
+      encodedAccumulateInputs,
       this.configService.numCores,
       this.configService.preimageExpungePeriod,
       this.configService.epochDuration,
@@ -485,21 +505,19 @@ export class WasmPVMExecutor {
     // Update state
     this.updateStateFromWasm()
 
-    // Write trace dump if we have execution logs
-    console.log(
-      `[WasmPVMExecutor] Execution completed: steps=${steps}, executionLogs.length=${this.executionLogs.length}, status=${status}, workspaceRoot=${this.workspaceRoot}`,
-    )
     if (this.executionLogs.length > 0) {
       // Write to pvm-traces folder in workspace root
-      const traceOutputDir = join(this.workspaceRoot, 'pvm-traces')
-      console.log(
-        `[WasmPVMExecutor] Writing trace to: ${traceOutputDir}, timeslot=${timeslot.toString()}`,
-      )
+      // If traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
+      const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
+      const traceOutputDir = this.traceSubfolder
+        ? join(baseTraceDir, this.traceSubfolder)
+        : baseTraceDir
       // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
       // Don't pass executorType to get jamduna format when blockNumber is provided
       // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
       // Since we always have timeslot (block number), we use jamduna format by default
       // If trace format is needed, it can be enabled via a flag or by not passing timeslot
+      // Include serviceId to avoid collisions when multiple services execute in the same slot
       const filepath = writeTraceDump(
         this.executionLogs,
         this.traceHostFunctionLogs.length > 0
@@ -508,12 +526,10 @@ export class WasmPVMExecutor {
         traceOutputDir,
         undefined,
         timeslot, // blockNumber
-        'wasm', // executorType - generates wasm-{slot}.log format
-        undefined, // serviceId - not needed
+        'wasm', // executorType - generates wasm-{slot}-{serviceId}.log format
+        serviceId, // serviceId - included to prevent file collisions
       )
-      if (filepath) {
-        console.log(`[WasmPVMExecutor] Trace written to: ${filepath}`)
-      } else {
+      if (!filepath) {
         console.warn(
           `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
         )
@@ -524,13 +540,37 @@ export class WasmPVMExecutor {
       )
     }
 
-    // Note: WASM clears accumulationContext after execution, so we return the original context
-    // In a full implementation, we would need to decode the updated context from WASM memory
-    // For now, we return the original context (it will be updated by the caller if needed)
+    // Get the updated implications from WASM after execution
+    // This is critical for host functions like SOLICIT that modify service account state
+    const updatedEncodedContext = this.wasm.getAccumulationContext(
+      numCores,
+      numValidators,
+      authQueueSize,
+    )
+
+    let updatedContext: ImplicationsPair = implicationsPair
+    if (updatedEncodedContext && updatedEncodedContext.length > 0) {
+      const [decodeError, decodeResult] = decodeImplicationsPair(
+        updatedEncodedContext,
+        this.configService,
+      )
+      if (!decodeError && decodeResult) {
+        updatedContext = decodeResult.value
+      } else {
+        console.warn(
+          `[WasmPVMExecutor] Failed to decode updated implications: ${decodeError?.message}`,
+        )
+      }
+    } else {
+      console.warn(
+        `[WasmPVMExecutor] No updated implications from WASM (updatedEncodedContext.length=${updatedEncodedContext?.length ?? 0})`,
+      )
+    }
+
     return safeResult({
       gasConsumed,
       result,
-      context: implicationsPair,
+      context: updatedContext,
     })
   }
 

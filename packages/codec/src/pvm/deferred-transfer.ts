@@ -48,7 +48,12 @@ import { concatBytes } from '@pbnjam/core'
 import type { DecodingResult, DeferredTransfer, Safe } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
-import { decodeNatural, encodeNatural } from '../core/natural-number'
+
+/**
+ * Fixed size of transfer memo in octets.
+ * Gray Paper: Cmemosize = 128
+ */
+const MEMO_SIZE = 128
 
 /**
  * Encode deferred transfer according to Gray Paper specification.
@@ -70,7 +75,7 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * 1. encode[4]{DX_source}: 4-byte fixed-length source service index
  * 2. encode[4]{DX_dest}: 4-byte fixed-length destination service index
  * 3. encode[8]{DX_amount}: 8-byte fixed-length transfer amount
- * 4. DX_memo: Variable-length memo data with length prefix
+ * 4. DX_memo: Fixed 128-byte memo blob (Cmemosize = 128)
  * 5. encode[8]{DX_gas}: 8-byte fixed-length gas provided for processing
  *
  * Transfer semantics:
@@ -82,7 +87,7 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * ✅ CORRECT: All 5 fields present in correct Gray Paper order
  * ✅ CORRECT: Uses encode[4] for service indices (4-byte fixed-length)
  * ✅ CORRECT: Uses encode[8] for amount and gas (8-byte fixed-length)
- * ✅ CORRECT: Uses variable-length encoding for memo data
+ * ✅ CORRECT: Uses fixed 128-byte encoding for memo (Cmemosize = 128)
  *
  * @param deferredTransfer - Deferred transfer to encode
  * @returns Encoded octet sequence
@@ -113,12 +118,15 @@ export function encodeDeferredTransfer(
   }
   parts.push(encoded3)
 
-  // Memo: dxX_memo (variable-length octet sequence)
-  const [error4, encoded4] = encodeNatural(BigInt(deferredTransfer.memo.length))
-  if (error4) {
-    return safeError(error4)
+  // Memo: dxX_memo (fixed 128-byte blob, Cmemosize = 128)
+  // Gray Paper specifies memo is exactly 128 bytes, no length prefix
+  if (deferredTransfer.memo.length !== MEMO_SIZE) {
+    return safeError(
+      new Error(
+        `Memo must be exactly ${MEMO_SIZE} bytes, got ${deferredTransfer.memo.length}`,
+      ),
+    )
   }
-  parts.push(encoded4)
   parts.push(deferredTransfer.memo)
 
   // Gas: encode[8](dxX_gas) (8-byte fixed-length)
@@ -150,13 +158,13 @@ export function encodeDeferredTransfer(
  * 1. decode[4]{DX_source}: 4-byte fixed-length source service index
  * 2. decode[4]{DX_dest}: 4-byte fixed-length destination service index
  * 3. decode[8]{DX_amount}: 8-byte fixed-length transfer amount
- * 4. DX_memo: Variable-length memo data with length prefix
+ * 4. DX_memo: Fixed 128-byte memo blob (Cmemosize = 128)
  * 5. decode[8]{DX_gas}: 8-byte fixed-length gas provided for processing
  *
  * ✅ CORRECT: All 5 fields decoded in correct Gray Paper order
  * ✅ CORRECT: Uses decode[4] for service indices (4-byte fixed-length)
  * ✅ CORRECT: Uses decode[8] for amount and gas (8-byte fixed-length)
- * ✅ CORRECT: Uses variable-length decoding for memo data
+ * ✅ CORRECT: Uses fixed 128-byte decoding for memo (Cmemosize = 128)
  * ✅ CORRECT: Uses safeError instead of throw for error handling
  *
  * @param data - Octet sequence to decode
@@ -194,21 +202,16 @@ export function decodeDeferredTransfer(
   const amountRemaining = amountResult.remaining
   currentData = amountRemaining
 
-  // Memo: dxX_memo (variable-length octet sequence)
-  const [error4, memoLengthResult] = decodeNatural(currentData)
-  if (error4) {
-    return safeError(error4)
-  }
-  const memoLength = memoLengthResult.value
-  const memoLengthRemaining = memoLengthResult.remaining
-  const memoLengthNum = Number(memoLength)
-  if (memoLengthRemaining.length < memoLengthNum) {
+  // Memo: dxX_memo (fixed 128-byte blob, Cmemosize = 128)
+  if (currentData.length < MEMO_SIZE) {
     return safeError(
-      new Error('Insufficient data for deferred transfer memo decoding'),
+      new Error(
+        `Insufficient data for deferred transfer memo decoding (need ${MEMO_SIZE}, have ${currentData.length})`,
+      ),
     )
   }
-  const memo = memoLengthRemaining.slice(0, memoLengthNum)
-  currentData = memoLengthRemaining.slice(memoLengthNum)
+  const memo = currentData.slice(0, MEMO_SIZE)
+  currentData = currentData.slice(MEMO_SIZE)
 
   // Gas: encode[8](dxX_gas) (8-byte fixed-length)
   const [error5, gasResult] = decodeFixedLength(currentData, 8n)

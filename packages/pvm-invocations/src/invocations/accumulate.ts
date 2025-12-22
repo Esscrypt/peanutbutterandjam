@@ -5,8 +5,12 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { encodeFixedLength, encodeNatural } from '@pbnjam/codec'
-import { blake2bHash, concatBytes, hexToBytes, logger } from '@pbnjam/core'
+import {
+  encodeAccumulateInput,
+  encodeNatural,
+  encodeVariableSequence,
+} from '@pbnjam/codec'
+import { blake2bHash, bytesToHex, concatBytes, type Hex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
@@ -21,10 +25,11 @@ import type {
   Implications,
   ImplicationsPair,
   PartialState,
+  PreimageRequestStatus,
   PVMOptions,
   ResultCode,
   Safe,
-  WorkItem,
+  ServiceAccount,
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 import {
@@ -48,6 +53,7 @@ export class AccumulatePVM {
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
     useWasm: boolean
+    traceSubfolder?: string
   }) {
     this.useWasm = options.useWasm
 
@@ -58,6 +64,7 @@ export class AccumulatePVM {
       this.pvmExecutor = new WasmPVMExecutor(
         options.configService,
         options.entropyService,
+        options.traceSubfolder,
       )
     } else {
       this.pvmExecutor = new TypeScriptPVMExecutor(
@@ -71,6 +78,7 @@ export class AccumulatePVM {
             options.pvmOptions?.gasCounter ||
             BigInt(options.configService.maxBlockGas),
         },
+        options.traceSubfolder,
       )
     }
     this.entropyService = options.entropyService
@@ -100,8 +108,7 @@ export class AccumulatePVM {
    * @param timeslot - Current block timeslot
    * @param serviceId - Service account ID
    * @param gas - Available gas
-   * @param inputs - Sequence of accumulation inputs
-   * @param workItems - Work items from work packages being accumulated (for fetch host function)
+   * @param inputs - Sequence of accumulation inputs (used for FETCH selectors 14/15)
    * @returns AccumulateInvocationResult
    */
   public async executeAccumulate(
@@ -110,7 +117,6 @@ export class AccumulatePVM {
     serviceId: bigint,
     gas: bigint,
     inputs: AccumulateInput[],
-    workItems: WorkItem[] = [],
   ): Promise<AccumulateInvocationResult> {
     // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
     const serviceAccount = partialState.accounts.get(serviceId)
@@ -124,33 +130,63 @@ export class AccumulatePVM {
       return { ok: false, err: 'BAD' }
     }
 
-    logger.debug('[AccumulatePVM] Service account found', {
-      serviceId: serviceId.toString(),
-      codeHash: serviceAccount.codehash,
-      preimagesCount: serviceAccount.preimages.size,
-      storageSize: serviceAccount.storage.size,
-    })
-
     // Gray Paper: Get service code from preimages using codehash
+    // Gray Paper accounts.tex equation 42-43: c = none when codehash not in preimages
     const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
+    
+    // Gray Paper pvm_invocations.tex line 162: Process deferred transfers FIRST,
+    // even when c = none or len(c) > Cmaxservicecodesize
+    // postxferstate = basestate except balance += sum of deferred transfer amounts
+    const postTransferState = this.calculatePostTransferState(
+      partialState,
+      serviceId,
+      inputs,
+    )
+
+    // Gray Paper pvm_invocations.tex line 162: when c = none ∨ len(c) > Cmaxservicecodesize
+    // Return: (poststate=postxferstate, defxfers=[], yield=none, gasused=0, provisions=[])
     if (!serviceCode) {
-      logger.error('[AccumulatePVM] Service code not found in preimages', {
+      logger.warn('[AccumulatePVM] Service code not found in preimages', {
         serviceId: serviceId.toString(),
         codeHash: serviceAccount.codehash,
         availablePreimageHashes: Array.from(serviceAccount.preimages.keys()),
       })
-      return { ok: false, err: 'BAD' }
+      // Gray Paper: Return valid acconeout with post-transfer state, 0 gas, empty defxfers/provisions
+      // resultCode = HALT since no execution occurred (but not an error)
+      return {
+        ok: true,
+        value: {
+          poststate: postTransferState,
+          defxfers: [],
+          yield: null,
+          gasused: 0n,
+          provisions: new Set(),
+          resultCode: 0, // HALT - no execution occurred but not an error
+        },
+      }
     }
 
     // Check for null code or oversized code (Gray Paper pvm_invocations.tex line 162)
     // Gray Paper: when c = none ∨ len(c) > Cmaxservicecodesize → error result
     // reporting_assurance.tex line 115: BIG indicates code was beyond Cmaxservicecodesize
-    if (!serviceCode || serviceCode.length === 0) {
-      logger.warn('[AccumulatePVM] Service code not found or empty', {
+    if (serviceCode.length === 0) {
+      logger.warn('[AccumulatePVM] Service code is empty', {
         serviceId: serviceId.toString(),
         codeHash: serviceAccount.codehash,
       })
-      return { ok: false, err: 'BAD' }
+      // Gray Paper: Return valid acconeout with post-transfer state, 0 gas, empty defxfers/provisions
+      // resultCode = HALT since no execution occurred (but not an error)
+      return {
+        ok: true,
+        value: {
+          poststate: postTransferState,
+          defxfers: [],
+          yield: null,
+          gasused: 0n,
+          provisions: new Set(),
+          resultCode: 0, // HALT - no execution occurred but not an error
+        },
+      }
     }
 
     if (
@@ -161,21 +197,24 @@ export class AccumulatePVM {
         codeLength: serviceCode.length,
         maxSize: ACCUMULATE_INVOCATION_CONFIG.MAX_SERVICE_CODE_SIZE.toString(),
       })
-      // Gray Paper: BIG error when code > Cmaxservicecodesize
-      return { ok: false, err: 'BIG' }
+      // Gray Paper: Return valid acconeout with post-transfer state, 0 gas, empty defxfers/provisions
+      // Note: BIG error is for work reports, not accumulate invocation output
+      // resultCode = HALT since no execution occurred (but not an error)
+      return {
+        ok: true,
+        value: {
+          poststate: postTransferState,
+          defxfers: [],
+          yield: null,
+          gasused: 0n,
+          provisions: new Set(),
+          resultCode: 0, // HALT - no execution occurred but not an error
+        },
+      }
     }
 
-    const postTransferState = this.calculatePostTransferState(
-      partialState,
-      serviceId,
-      inputs,
-    )
-
     // Initialize Implications context
-    logger.debug('[AccumulatePVM] Initializing implications context', {
-      serviceId: serviceId.toString(),
-      timeslot: timeslot.toString(),
-    })
+
     const [initError, implicationsPair] = this.initializeImplicationsContext(
       postTransferState,
       serviceId,
@@ -193,16 +232,22 @@ export class AccumulatePVM {
       return { ok: false, err: 'BAD' }
     }
 
-    // logger.debug('[AccumulatePVM] Implications context initialized', {
-    //   serviceId: serviceId.toString(),
-    //   nextFreeId: implicationsPair[0].nextfreeid.toString(),
-    // })
 
-    // Encode arguments: timeslot, serviceId, input length
+    // Gray Paper pvm_invocations.tex equation 163: encode{t, s, len(i)}
+    // Where len(i) is the COUNT of elements in the sequence i, not the byte length!
+    // Evidence: Line 360 uses len(i) as array index: registers[11] < len(i)
+    // This means len(i) must be the count of elements, not byte length.
+    // 
+    // Gray Paper equation 163: C(Ψ_M(c, 5, g, encode{t, s, len(i)}, F, I(...)))
+    // The inputs sequence i is accessed via FETCH host function (selectors 14 and 15),
+    // not from memory, so len(i) is used to validate array bounds, not to read bytes.
+    const inputLength = BigInt(inputs.length)
+
+    // Encode arguments: timeslot, serviceId, input length (count of elements, not byte length!)
     const [encodedArgsError, encodedArgs] = this.encodeAccumulateArguments(
       timeslot,
       serviceId,
-      BigInt(inputs.length),
+      inputLength,
     )
     if (encodedArgsError) {
       logger.error('[AccumulatePVM] Failed to encode accumulate arguments', {
@@ -231,7 +276,6 @@ export class AccumulatePVM {
           implicationsPair,
           timeslot,
           inputs,
-          workItems,
           serviceId,
         )
       error = wasmError
@@ -246,7 +290,6 @@ export class AccumulatePVM {
           implicationsPair,
           timeslot,
           inputs,
-          workItems,
           serviceId,
         )
       error = tsError
@@ -268,6 +311,18 @@ export class AccumulatePVM {
       context: updatedImplicationsPair,
     } = marshallingResult
 
+    // DEBUG: Check transfers in updated implications before collapsing
+    const updatedImX = (updatedImplicationsPair as ImplicationsPair)[0]
+    logger.debug('[AccumulatePVM] Before collapse - checking transfers', {
+      serviceId: serviceId.toString(),
+      xfersCount: updatedImX.xfers.length,
+      xfers: updatedImX.xfers.map(t => ({
+        source: t.source.toString(),
+        dest: t.dest.toString(),
+        amount: t.amount.toString(),
+      })),
+    })
+
     // Panic dump and host function logs are now handled inside executeMarshallingInvocation in the PVM class
 
     // Determine result code from marshalling result
@@ -281,10 +336,11 @@ export class AccumulatePVM {
       resultCode = RESULT_CODES.HALT
     }
 
+   
     // Collapse result based on termination type using updated context from Ψ_M
     logger.debug('[AccumulatePVM] Collapsing accumulate result', {
       serviceId: serviceId.toString(),
-      resultCode,
+      resultCode: marshallingResultValue.toString(),
       gasConsumed: gasConsumed.toString(),
       resultIsBlob: marshallingResultValue instanceof Uint8Array,
       resultLength:
@@ -335,9 +391,11 @@ export class AccumulatePVM {
       .reduce((sum, transfer) => sum + transfer.amount, 0n)
 
     // Gray Paper equation 167: Only update if there are incoming transfers
-    // Create minimal copy: only the accounts Map and only the service account that needs updating
+    // Note: Even with no transfers, we proceed to ensure proper state handling
+    // The deep cloning happens in initializeImplicationsContext, not here
     if (totalTransferAmount === 0n) {
-      // No incoming transfers, return state as-is (preserve reference)
+      // No incoming transfers, but we still need to return a proper state
+      // The state will be deep-cloned in initializeImplicationsContext
       return partialState
     }
 
@@ -356,12 +414,14 @@ export class AccumulatePVM {
       return partialState
     }
 
-    // Update only the balance field - create new account object to preserve immutability
-    // This object will be modified by transfer host function during execution
-    updatedAccounts.set(serviceId, {
+    // Update only the balance field - create DEEP CLONE to preserve immutability
+    // This object will be modified by host functions during execution
+    // CRITICAL: Must deep clone storage, preimages, and requests Maps to prevent
+    // modifications from affecting other invocations or the original state
+    updatedAccounts.set(serviceId, this.deepCloneServiceAccount({
       ...serviceAccount,
       balance: serviceAccount.balance + totalTransferAmount,
-    })
+    }))
 
     // Return new PartialState with updated accounts Map
     // All other fields (stagingset, authqueue, privileges) are preserved by reference
@@ -438,16 +498,18 @@ export class AccumulatePVM {
       )
     }
 
-    // Step 2: Encode serviceid (4 bytes) - Gray Paper: encode[4]{im_id}
-    const [serviceIdError, encodedServiceId] = encodeFixedLength(serviceId, 4n)
+    // Step 2: Encode serviceid (natural encoding) - Gray Paper: encode{im_id, ...}
+    // The Gray Paper uses encode{...} NOT encode[4]{...}, so we use natural encoding
+    const [serviceIdError, encodedServiceId] = encodeNatural(serviceId)
     if (serviceIdError) {
       return safeError(
         new Error(`Failed to encode service ID: ${serviceIdError.message}`),
       )
     }
 
-    // Step 3: Encode timeslot (4 bytes) - Gray Paper: encode[4]{H_timeslot}
-    const [timeslotError, encodedTimeslot] = encodeFixedLength(timeslot, 4n)
+    // Step 3: Encode timeslot (natural encoding) - Gray Paper: encode{..., H_timeslot}
+    // The Gray Paper uses encode{...} NOT encode[4]{...}, so we use natural encoding
+    const [timeslotError, encodedTimeslot] = encodeNatural(timeslot)
     if (timeslotError) {
       return safeError(
         new Error(`Failed to encode timeslot: ${timeslotError.message}`),
@@ -475,7 +537,8 @@ export class AccumulatePVM {
       )
     }
 
-    // Step 6: Decode first 4 bytes as uint32 (big-endian) - Gray Paper: decode[4]{...}
+    // Step 6: Decode first 4 bytes as uint32 (LITTLE-ENDIAN) - Gray Paper: decode[4]{...}
+    // Gray Paper serialization.tex line 100: "Values are encoded in a regular little-endian fashion"
     const hash = hexToBytes(hashHex)
     if (hash.length < 4) {
       return safeError(
@@ -485,45 +548,76 @@ export class AccumulatePVM {
       )
     }
     const hashView = new DataView(hash.buffer, hash.byteOffset, hash.byteLength)
-    const decodedHash = BigInt(hashView.getUint32(0, false)) // big-endian
+    const decodedHash = BigInt(hashView.getUint32(0, true)) // true = little-endian (FIXED!)
 
-    // Step 7: Calculate nextfreeid - Gray Paper formula
-    // im_nextfreeid = (decode[4]{blake{...}} mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex
+    // Step 7: Calculate nextfreeid candidate - Gray Paper formula
+    // im_nextfreeid = check((decode[4]{blake{...}} mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex)
     const MIN_PUBLIC_INDEX = ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX // 2^16 = 65,536
     const MODULUS_BASE = 2n ** 32n // 2^32
     const MODULUS = MODULUS_BASE - MIN_PUBLIC_INDEX - 2n ** 8n // 2^32 - 65536 - 256
-    const nextfreeid = (decodedHash % MODULUS) + MIN_PUBLIC_INDEX
+    const candidateId = (decodedHash % MODULUS) + MIN_PUBLIC_INDEX
 
-    // logger.debug('[AccumulatePVM] Calculated nextfreeid', {
-    //   serviceId: serviceId.toString(),
-    //   decodedHash: decodedHash.toString(),
-    //   modulus: MODULUS.toString(),
-    //   minPublicIndex: MIN_PUBLIC_INDEX.toString(),
-    //   nextfreeid: nextfreeid.toString(),
-    // })
+    // Step 7b: Apply check function to find available ID - Gray Paper equation 251-255
+    const nextfreeid = this.checkServiceId(candidateId, partialState.accounts)
 
     // Step 8: Create implications structure - Gray Paper equation 177-184
+    // CRITICAL: Deep clone the partial state to prevent mutations from affecting other invocations
+    const clonedPartialState = this.deepClonePartialState(partialState)
     const implications: Implications = {
       id: serviceId,
-      state: partialState,
+      state: clonedPartialState,
       nextfreeid,
       xfers: [],
       yield: null,
-      provisions: new Map(),
+      provisions: new Set(),
     }
 
     // Step 9: Return implications pair - Gray Paper: I(postxferstate, s)²
     // First element: regular dimension (imX)
     // Second element: exceptional dimension (imY) - initialized identically
+    // CRITICAL: Each dimension needs its OWN deep-cloned state to prevent cross-contamination
     return safeResult([
       implications, // Regular dimension (imX)
       {
-        ...implications,
+        id: serviceId,
+        state: this.deepClonePartialState(partialState), // Separate clone for imY
+        nextfreeid,
         xfers: [],
         yield: null,
-        provisions: new Map(),
+        provisions: new Set(),
       }, // Exceptional dimension (imY)
     ])
+  }
+
+  /**
+   * Check function from Gray Paper equation 251-255
+   *
+   * Gray Paper pvm_invocations.tex:
+   * check(i ∈ serviceid) = {
+   *   i                          if i ∉ keys(accounts)
+   *   check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)  otherwise
+   * }
+   *
+   * Recursively finds the first available service ID starting from the given candidate.
+   */
+  private checkServiceId(
+    id: bigint,
+    accounts: Map<bigint, ServiceAccount>,
+  ): bigint {
+    const C_MIN_PUBLIC_INDEX = ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX // 2^16
+    const MODULUS = 2n ** 32n - 2n ** 8n - C_MIN_PUBLIC_INDEX // 2^32 - 2^8 - Cminpublicindex
+
+    // If ID is not in accounts, return it
+    if (!accounts.has(id)) {
+      return id
+    }
+
+    // Otherwise, recursively check the next candidate
+    // (i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex
+    const nextCandidate =
+      C_MIN_PUBLIC_INDEX + ((id - C_MIN_PUBLIC_INDEX + 1n) % MODULUS)
+
+    return this.checkServiceId(nextCandidate, accounts)
   }
 
   /**
@@ -599,11 +693,17 @@ export class AccumulatePVM {
     // Gray Paper equation 217-241: Three cases for collapse function
     if (resultCode === RESULT_CODES.PANIC || resultCode === RESULT_CODES.OOG) {
       // Case 1: o ∈ {oog, panic} → Use imY (exceptional dimension)
+      // Gray Paper equation 220-226: When o ∈ {oog, panic}:
+      //   poststate = imY.state
+      //   defxfers = imY.xfers (NOT imX.xfers - transfers in imX are discarded on panic/OOG)
+      //   yield = imY.yield
+      //   provisions = imY.provisions
+      // Transfers executed in imX are NOT applied on panic/OOG - they are discarded
       return {
         ok: true,
         value: {
           poststate: imY.state,
-          defxfers: imY.xfers,
+          defxfers: imY.xfers, // Use imY.xfers, not imX.xfers (Gray Paper equation 222)
           yield: imY.yield,
           gasused: gasUsed,
           provisions: imY.provisions,
@@ -613,10 +713,10 @@ export class AccumulatePVM {
     } else if (resultBlob && resultBlob.length === 32) {
       // Case 2: o ∈ hash → Use imX but set yield = o (the hash from result)
       // Gray Paper equation 232: provisions = imXY_provisions (union of both)
-      // Merge provisions from both implications dimensions
-      const mergedProvisions = new Map(imX.provisions)
-      for (const [serviceId, blob] of imY.provisions) {
-        mergedProvisions.set(serviceId, blob)
+      // Merge provisions from both implications dimensions using Set union
+      const mergedProvisions = new Set<[bigint, Uint8Array]>(imX.provisions)
+      for (const provision of imY.provisions) {
+        mergedProvisions.add(provision)
       }
       return {
         ok: true,
@@ -631,6 +731,13 @@ export class AccumulatePVM {
       }
     } else {
       // Case 3: Otherwise → Use imX with yield = imX.yield
+      // DEBUG: Log poststate accounts after accumulation
+      logger.debug('[AccumulatePVM] Poststate accounts after accumulation', {
+        serviceId: imX.id.toString(),
+        accountsCount: imX.state.accounts.size,
+        accountIds: Array.from(imX.state.accounts.keys()).map((id) => id.toString()),
+        service0Balance: imX.state.accounts.get(0n)?.balance.toString(),
+      })
       return {
         ok: true,
         value: {
@@ -642,6 +749,69 @@ export class AccumulatePVM {
           resultCode,
         },
       }
+    }
+  }
+
+  /**
+   * Deep clone the partial state to prevent mutations from affecting other invocations
+   *
+   * @param partialState - Partial state to clone
+   * @returns Deep cloned partial state with new Map instances for accounts
+   */
+  private deepClonePartialState(partialState: PartialState): PartialState {
+    const clonedAccounts = new Map<bigint, ServiceAccount>()
+    for (const [serviceId, account] of partialState.accounts) {
+      clonedAccounts.set(serviceId, this.deepCloneServiceAccount(account))
+    }
+
+    return {
+      ...partialState,
+      accounts: clonedAccounts,
+      // Note: stagingset, authqueue, etc are not modified by host functions,
+      // so we can keep the same references
+    }
+  }
+
+  /**
+   * Deep clone a service account to prevent mutations from affecting other invocations
+   *
+   * CRITICAL: This is necessary because accumulation invocations share the same
+   * partial state reference. Without deep cloning, WRITE/SOLICIT/etc host functions
+   * in one invocation would modify storage/preimages/requests that affect subsequent
+   * invocations, leading to incorrect state.
+   *
+   * @param account - Service account to clone
+   * @returns Deep cloned service account with new Map instances
+   */
+  private deepCloneServiceAccount(account: ServiceAccount): ServiceAccount {
+    // Deep clone storage Map
+    const clonedStorage = new Map<Hex, Uint8Array>()
+    for (const [key, value] of account.storage) {
+      clonedStorage.set(key, new Uint8Array(value))
+    }
+
+    // Deep clone preimages Map
+    const clonedPreimages = new Map<Hex, Uint8Array>()
+    for (const [key, value] of account.preimages) {
+      clonedPreimages.set(key, new Uint8Array(value))
+    }
+
+    // Deep clone requests Map (Map<Hex, Map<bigint, PreimageRequestStatus>>)
+    const clonedRequests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
+    for (const [hash, lengthMap] of account.requests) {
+      const clonedLengthMap = new Map<bigint, PreimageRequestStatus>()
+      for (const [length, status] of lengthMap) {
+        // Clone the status array
+        clonedLengthMap.set(length, [...status])
+      }
+      clonedRequests.set(hash, clonedLengthMap)
+    }
+
+    return {
+      ...account,
+      storage: clonedStorage,
+      preimages: clonedPreimages,
+      requests: clonedRequests,
     }
   }
 }

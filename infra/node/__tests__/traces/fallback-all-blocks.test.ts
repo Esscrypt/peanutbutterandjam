@@ -52,6 +52,20 @@ import { StatisticsService } from '../../services/statistics-service'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
+// Helper function to parse CLI arguments for starting block
+function getStartBlock(): number {
+  const args = process.argv.slice(2)
+  const startBlockIndex = args.indexOf('--start-block')
+  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
+    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
+    if (Number.isNaN(startBlock) || startBlock < 1) {
+      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
+    }
+    return startBlock
+  }
+  return 1 // Default to block 1 (genesis)
+}
+
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
 
@@ -184,6 +198,7 @@ describe('Genesis Parse Tests', () => {
         configService: configService,
         entropyService: entropyService,
         pvmOptions: { gasCounter: 1_000_000n },
+        traceSubfolder: 'fallback',
       })
 
       const accumulatedService = new AccumulationService({
@@ -616,8 +631,13 @@ describe('Genesis Parse Tests', () => {
       }
 
       // Process blocks sequentially
-      // Start from block 1 and continue until we run out of block files
-      let blockNumber = 1
+      // Support --start-block CLI argument to start from a specific block
+      const startBlock = getStartBlock()
+      if (startBlock > 1) {
+        console.log(`\n🚀 Starting from block ${startBlock} (--start-block ${startBlock})`)
+      }
+
+      let blockNumber = startBlock
       let hasMoreBlocks = true
 
       while (hasMoreBlocks) {
@@ -635,8 +655,8 @@ describe('Genesis Parse Tests', () => {
 
           console.log(`\n📦 Processing Block ${blockNumber}...`)
 
-          // Only set pre-state for the first block
-          if (blockNumber === 1) {
+          // Only set pre-state for the starting block
+          if (blockNumber === startBlock) {
             // Set pre_state from test vector BEFORE validating the block
             // This ensures entropy3 and other state components match what was used to create the seal signature
             if (blockJsonData.pre_state?.keyvals) {

@@ -323,11 +323,16 @@ export class AssuranceService extends BaseService {
       }
     }
 
+    // Gray Paper equation 174: justbecameavailable must be ordered by core index
+    // "c ∈ordered coreindex" means we iterate cores in ascending order
+    availableWorkReports.sort((a, b) => Number(a.core_index - b.core_index))
+
     logger.debug('[AssuranceService] Work reports became available', {
       count: availableWorkReports.length,
       packageHashes: availableWorkReports.map((wr) =>
         wr.package_spec.hash.slice(0, 40),
       ),
+      coreIndices: availableWorkReports.map((wr) => Number(wr.core_index)),
     })
 
     return safeResult(availableWorkReports)

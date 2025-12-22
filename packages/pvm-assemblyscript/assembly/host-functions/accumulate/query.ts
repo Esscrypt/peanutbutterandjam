@@ -30,7 +30,7 @@ import {
  *    - 3 + 2^32 * x, y + 2^32 * z: request has three entries [x, y, z]
  */
 export class QueryHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(23) // QUERY function ID
+  functionId: u64 = u64(22) // QUERY function ID (Gray Paper: query = 22)
   name: string = 'query'
   gasCost: u64 = u64(10)
 
@@ -46,10 +46,8 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
     const preimageLength = u64(registers[8])
 
     // Read hash from memory (32 bytes)
-    const readResult_hash = ram.readOctets(
-      u32(preimageOffset),
-      u32(preimageLength),
-    )
+    // Gray Paper: h = memory[o:32] - always reads 32 bytes (hash size)
+    const readResult_hash = ram.readOctets(u32(preimageOffset), 32)
     if (readResult_hash.faultAddress !== 0) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }

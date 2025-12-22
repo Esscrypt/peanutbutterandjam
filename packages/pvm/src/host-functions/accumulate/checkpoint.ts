@@ -36,13 +36,20 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     // 1. After checkpoint, execution continues and modifies imX (regular dimension)
     // 2. If imY was just a reference to imX, those modifications would also affect imY
     // 3. When rolling back to imY on panic/OOG, we'd get the modified state instead of the checkpoint
+    // Deep copy provisions Set (Set<[bigint, Uint8Array]>)
+    // Each tuple contains a Uint8Array that must be copied
+    const provisionsCopy = new Set<[bigint, Uint8Array]>()
+    for (const [serviceId, blob] of imX.provisions) {
+      provisionsCopy.add([serviceId, new Uint8Array(blob)])
+    }
+
     const checkpointState: Implications = {
       id: imX.id,
       state: this.deepCopyPartialState(imX.state),
       nextfreeid: imX.nextfreeid,
       xfers: [...imX.xfers], // Copy array
       yield: imX.yield ? new Uint8Array(imX.yield) : null,
-      provisions: new Map(imX.provisions), // Copy map
+      provisions: provisionsCopy, // Copy Set with deep-copied tuples
     }
 
     // Set the exceptional dimension to the checkpoint

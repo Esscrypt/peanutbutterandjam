@@ -6,8 +6,8 @@
  */
 
 import type { Hex } from 'viem'
-import type { OperandTuple, ServiceAccount, WorkPackage, WorkItem } from './serialization'
 import type { Safe } from './safe'
+import type { OperandTuple, ServiceAccount, WorkItem, WorkPackage } from './serialization'
 
 // Register indices: 0-7 are 64-bit, 8-12 are 32-bit
 // All 13 registers (r0-r12) can store 64-bit values
@@ -503,7 +503,8 @@ export interface Implications {
   nextfreeid: bigint
   xfers: DeferredTransfer[]
   yield: Uint8Array | null
-  provisions: Map<bigint, Uint8Array>
+  // Gray Paper: protoset<tuple{serviceid, blob}> - allows multiple provisions per service
+  provisions: Set<[bigint, Uint8Array]>
 }
 
 export type ImplicationsPair = [Implications, Implications]
@@ -525,7 +526,8 @@ export interface AccumulateOutput {
   defxfers: DeferredTransfer[]
   yield: Uint8Array | null
   gasused: bigint
-  provisions: Map<bigint, Uint8Array>
+  // Gray Paper: protoset<tuple{serviceid, blob}> - allows multiple provisions per service
+  provisions: Set<[bigint, Uint8Array]>
   resultCode: ResultCode // HALT, PANIC, or OOG - needed to determine if accumulation was successful
 }
 

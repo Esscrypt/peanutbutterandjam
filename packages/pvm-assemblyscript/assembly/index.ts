@@ -286,12 +286,12 @@ export function setupAccumulateInvocation(
 }
 
 /**
- * Set work items sequence for FETCH host function
- * This is called from the WASM executor to provide work items for selectors 14 and 15
+ * Set accumulate inputs for FETCH host function
+ * This is called from the WASM executor to provide accumulate inputs for selectors 14 and 15
  */
-export function setWorkItemsSequence(workItems: Array<WorkItem> | null): void {
+export function setAccumulateInputs(inputs: Array<AccumulateInput> | null): void {
   if (!pvmInstance) return
-  pvmInstance!.pvm.setWorkItemsSequence(workItems)
+  pvmInstance!.pvm.setAccumulateInputs(inputs)
 }
 
 export function runProgram(
@@ -446,6 +446,31 @@ export function getPageDump(pageIndex: i32): i32 {
 export function setMemory(address: u32, data: Uint8Array): void {
   if (!pvmInstance) return
   pvmInstance!.setMemory(address, data)
+}
+
+/**
+ * Get the current accumulation context (ImplicationsPair) after execution
+ * 
+ * This function encodes the current ImplicationsPair from the PVM's accumulationContext
+ * and returns it as bytes, which can be decoded by the TypeScript side.
+ * 
+ * @param numCores - Number of cores for encoding
+ * @param numValidators - Number of validators for encoding
+ * @param authQueueSize - Auth queue size for encoding
+ * @returns Encoded ImplicationsPair bytes, or empty array if no context
+ */
+export function getAccumulationContext(
+  numCores: i32,
+  numValidators: i32,
+  authQueueSize: i32,
+): Uint8Array {
+  if (!pvmInstance) return new Uint8Array(0)
+  const context = pvmInstance!.pvm.accumulationContext
+  if (context === null) return new Uint8Array(0)
+  
+  // Encode the ImplicationsPair using the codec
+  const encoded = encodeImplicationsPair(context, numCores, numValidators, authQueueSize)
+  return encoded
 }
 
 /**
