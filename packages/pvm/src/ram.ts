@@ -592,6 +592,11 @@ export class PVMRAM implements RAM {
     address: bigint,
     count: bigint,
   ): [Uint8Array | null, bigint | null] {
+    // Gray Paper: Empty range is trivially readable - return empty array
+    if (count === 0n) {
+      return [new Uint8Array(0), null]
+    }
+
     // Check if entire range is readable first
     const [readable, faultAddress] = this.isReadableWithFault(address, count)
     if (!readable) {
@@ -844,6 +849,12 @@ export class PVMRAM implements RAM {
   }
 
   isReadableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
+    // Gray Paper: Empty range is trivially readable
+    // Nrange{a}{0} ⊆ readable(mem) is always true for any address a
+    if (size === 0n) {
+      return [true, null]
+    }
+
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
       return [false, address]
@@ -851,25 +862,49 @@ export class PVMRAM implements RAM {
 
     // Gray Paper: readable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] ≠ none}
     // This means both 'read' and 'write' pages are readable (anything ≠ none)
-    // Check all pages that the address range spans
-    // Note: endAddress in stored ranges is exclusive, so we check if [address, address + size) is contained
+    // Check that EVERY address in the range is covered by SOME page access entry with non-'none' access
+    // This handles cases where the heap was grown via multiple SBRK calls creating separate entries
     const endRequestedAddress = address + size
+
+    // First, try to find a single entry that covers the entire range (fast path)
     for (const [
       [startAddress, endAddress],
       pageAccess,
     ] of this.pageAccess.entries()) {
-      // Range [startAddress, endAddress) contains [address, address + size) if:
-      // startAddress <= address AND endAddress >= address + size
       if (startAddress <= address && endAddress >= endRequestedAddress) {
         if (pageAccess !== 'none') {
           return [true, null]
         }
       }
     }
-    return [false, this.getPageIndex(address) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
+
+    // Slow path: check each address individually to handle fragmented ranges
+    for (let addr = address; addr < endRequestedAddress; addr++) {
+      let isReadable = false
+      for (const [
+        [startAddress, endAddress],
+        pageAccess,
+      ] of this.pageAccess.entries()) {
+        if (addr >= startAddress && addr < endAddress && pageAccess !== 'none') {
+          isReadable = true
+          break
+        }
+      }
+      if (!isReadable) {
+        // Found an address that's not readable - return fault at page boundary
+        return [false, this.getPageIndex(addr) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
+      }
+    }
+    return [true, null]
   }
 
   isWritableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
+    // Gray Paper: Empty range is trivially writable
+    // Nrange{a}{0} ⊆ writable(mem) is always true for any address a
+    if (size === 0n) {
+      return [true, null]
+    }
+
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
       const faultAddress =

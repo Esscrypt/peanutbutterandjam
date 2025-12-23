@@ -346,23 +346,6 @@ export class BlockImporterService extends BaseService {
     // Must be called BEFORE accumulation so accumulation stats are fresh for this block
     this.statisticsService.resetPerBlockStats()
 
-    // Process accumulations for this block
-    // Gray Paper accumulation.tex: Process newly available work-reports (ρ̂)
-    // These are work reports that just became available (reached super-majority assurances)
-    // in the current block, returned from applyAssurances above
-    // The accumulation service will partition them into:
-    // - ρ̂! (no dependencies) → accumulated immediately
-    // - ρ̂Q (with dependencies) → added to ready queue at current slot
-
-    logger.info('[BlockImporter] Processing accumulations', {
-      slot: block.header.timeslot.toString(),
-      guaranteesCount: block.body.guarantees.length,
-      availableWorkReportsCount: availableWorkReports.length,
-      availablePackageHashes: availableWorkReports.map((wr) =>
-        wr.package_spec.hash.slice(0, 40),
-      ),
-    })
-
     const accumulationResult = await this.accumulationService.applyTransition(
       block.header.timeslot,
       availableWorkReports, // Newly available work reports (ρ̂) from assurances
@@ -375,7 +358,6 @@ export class BlockImporterService extends BaseService {
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     // where s is the encoded accumulation outputs from this block
     // Note: merklizewb([]) returns zero hash, so we always update even with empty outputs
-    // TODO: add last accumulation outputs to the accout belt
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
 

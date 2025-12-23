@@ -474,6 +474,15 @@ export function getAccumulationContext(
 }
 
 /**
+ * Check if accumulation context is set
+ * @returns true if accumulationContext is not null
+ */
+export function hasAccumulationContext(): bool {
+  if (!pvmInstance) return false
+  return pvmInstance!.pvm.accumulationContext !== null
+}
+
+/**
  * Initialize a memory page (like TypeScript ram.initializePage)
  * Sets up page access rights and grows memory arrays.
  * @param address - Starting address

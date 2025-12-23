@@ -194,8 +194,13 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Gray Paper: On success, gas cost is 10 + l (where l = gasLimit)
+    // The base 10 gas is deducted in the context mutator, so we return
+    // the gasLimit as additionalGasCost to be deducted there
     return {
       resultCode: null, // continue execution
+      additionalGasCost: gasLimit,
     }
   }
 }

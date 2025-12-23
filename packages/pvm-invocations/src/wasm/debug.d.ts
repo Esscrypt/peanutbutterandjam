@@ -208,6 +208,11 @@ export declare function setMemory(address: number, data: Uint8Array): void;
  */
 export declare function getAccumulationContext(numCores: number, numValidators: number, authQueueSize: number): Uint8Array;
 /**
+ * assembly/index/hasAccumulationContext
+ * @returns `bool`
+ */
+export declare function hasAccumulationContext(): boolean;
+/**
  * assembly/index/initPage
  * @param address `u32`
  * @param length `u32`

@@ -43,9 +43,11 @@ export function generateTraceFilename(
   blockNumber?: number | bigint | string,
   executorType?: 'wasm' | 'typescript',
   serviceId?: number | bigint | string,
+  invocationIndex?: number, // The accseq iteration index (0-based) - determines directory structure in jamduna format
 ): string {
-  // If executor type is provided with block number, use {executorType}-{blockNumber}-{serviceId}.log
-  // Include serviceId to avoid collisions when multiple services execute in the same slot
+  // If executor type is provided with block number, use {executorType}-{blockNumber}-{invocationIndex}-{serviceId}.log
+  // This format enables the converter to group services by invocation index (accseq iteration)
+  // jamduna structure: {timeslot}/{invocation_index}/{service_id}/
   if (executorType !== undefined && blockNumber !== undefined) {
     const blockNum =
       typeof blockNumber === 'string'
@@ -56,7 +58,8 @@ export function generateTraceFilename(
         typeof serviceId === 'string'
           ? Number.parseInt(serviceId, 10)
           : Number(serviceId)
-      return `${executorType}-${blockNum}-${svcId}.log`
+      const invIdx = invocationIndex ?? 0
+      return `${executorType}-${blockNum}-${invIdx}-${svcId}.log`
     }
     return `${executorType}-${blockNum}.log`
   }
@@ -94,6 +97,8 @@ export function generateTraceFilename(
  * @param blockNumber - Optional block number for jamduna-style filename (e.g., 4 -> "00000004.log")
  * @param executorType - Optional executor type ('wasm' or 'ts') for trace-style filename
  * @param serviceId - Optional service ID to include in trace-style filename
+ * @param accumulateInput - Optional accumulate input bytes (encoded args) to write alongside trace
+ * @param invocationIndex - Optional invocation index (accseq iteration) for jamduna directory structure
  * @returns The filepath where the trace was written, or undefined if writing failed
  */
 export function writeTraceDump(
@@ -117,6 +122,8 @@ export function writeTraceDump(
   blockNumber?: number | bigint | string,
   executorType?: 'wasm' | 'typescript',
   serviceId?: number | bigint | string,
+  accumulateInput?: Uint8Array,
+  invocationIndex?: number,
 ): string | undefined {
   if (executionLogs.length === 0) {
     // No logs to write
@@ -196,11 +203,23 @@ export function writeTraceDump(
 
     // Create filename (use provided filename, or generate based on parameters)
     const traceFilename =
-      filename ?? generateTraceFilename(blockNumber, executorType, serviceId)
+      filename ?? generateTraceFilename(blockNumber, executorType, serviceId, invocationIndex)
     const filepath = join(targetDir, traceFilename)
 
     // Write to file
     writeFileSync(filepath, traceLines.join('\n') + '\n', 'utf-8')
+
+    // Write accumulate_input file if provided
+    // This matches the jamduna format where accumulate_input is a binary file
+    // alongside the trace log with the same naming pattern
+    if (accumulateInput && accumulateInput.length > 0) {
+      // Generate accumulate_input filename based on trace filename
+      // e.g., typescript-2-0.log -> typescript-2-0-accumulate_input.bin
+      const accumulateInputFilename = traceFilename.replace('.log', '-accumulate_input.bin')
+      const accumulateInputPath = join(targetDir, accumulateInputFilename)
+      writeFileSync(accumulateInputPath, accumulateInput)
+      logger.debug(`[TraceDump] Wrote accumulate_input to: ${accumulateInputPath}`)
+    }
 
     return filepath
   } catch (error) {

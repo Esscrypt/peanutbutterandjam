@@ -148,9 +148,9 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Gray Paper equation 480: Return length of written data (requested length if padded)
-    // Match jamduna behavior: return the length that was actually written
-    context.registers[7] = BigInt(dataToWrite.length)
+    // Gray Paper equation 480: Return total length of encoded data (len(v))
+    // NOT the length of the slice that was written - the Gray Paper specifies registers'_7 = len(v)
+    context.registers[7] = BigInt(info.length)
 
     return {
       resultCode: null, // continue execution

@@ -336,23 +336,31 @@ export function defaultKeccakHash(data: Uint8Array): Safe<Uint8Array> {
  * - Small data sequences (≤32 bytes per item)
  * - Accumulation output logs
  *
- * Formula: merklizewb(v) ≡ {
+ * Formula: merklizewb(v, H) ≡ {
+ *   zerohash when |v| = 0
  *   H(v₀) when |v| = 1
- *   N(v) otherwise
+ *   N(v, H) otherwise
  * }
+ *
+ * @param values - Sequence of byte arrays to merklize
+ * @param hashFn - Hash function to use (defaults to blake2b, use keccak for accoutBelt)
  */
-export function merklizewb(values: Uint8Array[]): Safe<Uint8Array> {
+export function merklizewb(
+  values: Uint8Array[],
+  hashFn: HashFunction = defaultBlake2bHash,
+): Safe<Uint8Array> {
   if (values.length === 0) {
-    return safeResult(new Uint8Array(32)) // Zero hash
+    // Gray Paper: merklizewb([]) = zerohash (32 bytes of zeros)
+    return safeResult(new Uint8Array(32))
   }
 
   if (values.length === 1) {
     // Single value: hash it directly per Gray Paper Equation 218
-    return defaultBlake2bHash(values[0])
+    return hashFn(values[0])
   }
 
   // Multiple values: use Gray Paper node function N per Equation 219
-  return merkleNodeWB(values)
+  return merkleNodeWB(values, hashFn)
 }
 
 /**
@@ -360,13 +368,16 @@ export function merklizewb(values: Uint8Array[]): Safe<Uint8Array> {
  *
  * Gray Paper Reference: merklization.tex (Equation 174-182)
  *
- * N(v) ≡ {
+ * N(v, H) ≡ {
  *   zerohash when |v| = 0
  *   v₀ when |v| = 1
- *   H($node concat N(left) concat N(right)) otherwise
+ *   H($node concat N(left, H) concat N(right, H)) otherwise
  * }
  */
-function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
+function merkleNodeWB(
+  values: Uint8Array[],
+  hashFn: HashFunction = defaultBlake2bHash,
+): Safe<Uint8Array> {
   if (values.length === 0) {
     return safeResult(new Uint8Array(32)) // Zero hash
   }
@@ -382,12 +393,12 @@ function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
   const right = values.slice(mid)
 
   // Recursively compute left and right subtrees
-  const [leftError, leftHash] = merkleNodeWB(left)
+  const [leftError, leftHash] = merkleNodeWB(left, hashFn)
   if (leftError) {
     return safeError(leftError)
   }
 
-  const [rightError, rightHash] = merkleNodeWB(right)
+  const [rightError, rightHash] = merkleNodeWB(right, hashFn)
   if (rightError) {
     return safeError(rightError)
   }
@@ -401,7 +412,7 @@ function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
   combined.set(leftHash, nodePrefix.length)
   combined.set(rightHash, nodePrefix.length + leftHash.length)
 
-  return defaultBlake2bHash(combined)
+  return hashFn(combined)
 }
 
 /**
@@ -501,7 +512,7 @@ function merkleNodeCD(values: Uint8Array[]): Safe<Uint8Array> {
     return safeError(rightError)
   }
 
-  // Hash the concatenation with "$node" prefix
+  // Hash the concatenation with "node" prefix
   const nodePrefix = new TextEncoder().encode('node')
   const combined = new Uint8Array(
     nodePrefix.length + leftHash.length + rightHash.length,

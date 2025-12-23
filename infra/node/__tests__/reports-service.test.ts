@@ -25,7 +25,8 @@ import { WorkReportService } from '../services/work-report-service'
 import { GuarantorService } from '../services/guarantor-service'
 import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
-import { AccumulateHostFunctionRegistry, AccumulatePVM, HostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulateHostFunctionRegistry, HostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
@@ -298,6 +299,8 @@ describe('Reports - JAM Test Vectors', () => {
             accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
             configService: configService,
             entropyService: entropyService,
+            pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+            useWasm: true,
           })
 
           const accumulatedService = new AccumulationService({

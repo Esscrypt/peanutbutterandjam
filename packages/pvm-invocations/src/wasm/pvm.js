@@ -188,6 +188,10 @@ async function instantiate(module, imports = {}) {
       // assembly/index/getAccumulationContext(i32, i32, i32) => ~lib/typedarray/Uint8Array
       return __liftTypedArray(Uint8Array, exports.getAccumulationContext(numCores, numValidators, authQueueSize) >>> 0);
     },
+    hasAccumulationContext() {
+      // assembly/index/hasAccumulationContext() => bool
+      return exports.hasAccumulationContext() != 0;
+    },
     initializeProgram(program, args) {
       // assembly/index/initializeProgram(~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array) => void
       program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
@@ -852,6 +856,7 @@ export const {
   getPageDump,
   setMemory,
   getAccumulationContext,
+  hasAccumulationContext,
   initPage,
   initializeProgram,
   alignToPage,

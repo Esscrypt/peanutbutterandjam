@@ -480,8 +480,12 @@ export class PVM {
     if (resultCode === i32(RESULT_CODE_HOST)) {
       // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
       // Gray Paper pvm.tex §7.4.1: ε = host × immed_X, where immed_X is the immediate operand
-      // For ECALLI, the host function ID is in operands[0] (sign-extended, but IDs are small)
-      const hostCallId = u64(instruction.operands[0])
+      // Gray Paper pvm.tex line 251-255: If l_X=0 (no operand bytes), immed_X defaults to 0
+      // This happens when fskip=0, meaning operands array is empty
+      let hostCallId: u64 = 0
+      if (instruction.operands.length > 0) {
+        hostCallId = u64(instruction.operands[0])
+      }
       this.state.hostCallId = u32(hostCallId)
       
       if (this.state.gasCounter === 0) {

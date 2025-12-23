@@ -56,10 +56,9 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     implications[1] = checkpointState
 
     // Gray Paper line 753: registers'_7 = gascounter'
-    // Note: gascounter' = gascounter - 10 (gas cost already deducted by context mutator)
-    // Since we don't have access to gas counter in the signature, we set it to OK
-    // The context mutator should handle setting registers[7] to the actual gas counter
-    this.setAccumulateSuccess(registers, gasCounter - this.gasCost)
+    // Note: gasCounter passed here is already gascounter' (after gas cost deduction by the executor)
+    // So we should return gasCounter directly, not gasCounter - gasCost
+    this.setAccumulateSuccess(registers, gasCounter)
 
     return {
       resultCode: null, // continue execution

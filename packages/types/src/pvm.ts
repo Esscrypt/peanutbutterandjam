@@ -290,6 +290,12 @@ export interface InstructionResult {
 export interface HostFunctionResult {
   resultCode: ResultCode | null // null = continue execution
   faultInfo?: FaultInfo
+  /**
+   * Additional gas cost beyond the base 10 gas.
+   * Used by TRANSFER to deduct gas_limit on success.
+   * Gray Paper: TRANSFER gas cost is 10 + l on success (where l = gas_limit)
+   */
+  additionalGasCost?: bigint
 }
 
 export interface SingleStepResult {

@@ -367,7 +367,7 @@ export class WasmPVMExecutor {
             // Gray Paper pvm.tex §7.4.1: l_X = min(4, ℓ), immed_X = sext(l_X, decode[l_X](instructions[i+1:i+1+l_X]))
             // For ECALLI, we need to calculate Fskip to get the operand length
             // Fskip(i) = min(24, j ∈ N : (k ∥ {1,1,...})_{i+1+j} = 1)
-            let fskip = 0
+            let fskip = -1 // -1 means "not found yet"
             for (
               let j = 0;
               j < 24 && pcIndex + 1 + j < bitmaskArray.length;
@@ -379,16 +379,26 @@ export class WasmPVMExecutor {
               }
             }
             // If we didn't find a 1 in the bitmask, use the remaining code length
-            if (fskip === 0 && pcIndex + 1 < codeArray.length) {
+            // This only applies when we scanned the full 24 bytes without finding a 1
+            if (fskip === -1 && pcIndex + 1 < codeArray.length) {
               fskip = Math.min(24, codeArray.length - pcIndex - 1)
+            } else if (fskip === -1) {
+              fskip = 0
             }
             // Extract operands (Gray Paper: operands are at instructions[i+1:i+1+l_X])
             // For ECALLI, the immediate is typically just 1 byte (host function IDs are 0-26)
-            // Gray Paper: l_X = min(4, ℓ), but for host function IDs, it's just 1 byte
+            // Gray Paper: l_X = min(4, ℓ), where ℓ = fskip
+            // Gray Paper pvm.tex line 251-255: If l_X=0 (no operand bytes), immed_X defaults to 0
+            if (fskip > 0) {
             const operandStart = pcIndex + 1
             if (operandStart < codeArray.length) {
               // Read the first byte (host function ID)
               hostCallId = BigInt(codeArray[operandStart])
+              }
+            } else {
+              // No operand bytes - host call ID defaults to 0
+              // This matches TypeScript executor behavior
+              hostCallId = 0n
             }
           }
         }
@@ -463,6 +473,8 @@ export class WasmPVMExecutor {
       // Check if execution should stop
       // Host function calls are now handled internally in AssemblyScript,
       // but nextStep() returns false for HOST status, so we need to continue manually
+      // Status enum from wasm-wrapper.ts (different from internal RESULT_CODES!):
+      // OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
       if (!shouldContinue) {
         // If status is HOST (4), we should continue execution after the host function
         // Host functions are handled internally, so we resume execution by calling nextStep() again
@@ -489,6 +501,8 @@ export class WasmPVMExecutor {
     const status = this.wasm.getStatus()
 
     // Determine result
+    // Status enum from wasm-wrapper.ts:
+    // OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
     let result: Uint8Array | 'PANIC' | 'OOG'
     if (status === 5) {
       // OOG
@@ -505,13 +519,13 @@ export class WasmPVMExecutor {
     // Update state
     this.updateStateFromWasm()
 
-    if (this.executionLogs.length > 0) {
+    // Only write trace dump if traceSubfolder is configured (enables trace dumping)
+    // When traceSubfolder is undefined, trace dumping is disabled
+    if (this.executionLogs.length > 0 && this.traceSubfolder) {
       // Write to pvm-traces folder in workspace root
-      // If traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
+      // traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
       const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
-      const traceOutputDir = this.traceSubfolder
-        ? join(baseTraceDir, this.traceSubfolder)
-        : baseTraceDir
+      const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
       // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
       // Don't pass executorType to get jamduna format when blockNumber is provided
       // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format

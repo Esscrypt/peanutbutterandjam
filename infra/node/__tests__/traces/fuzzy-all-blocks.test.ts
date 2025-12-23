@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
 import { StateService } from '../../services/state-service'
@@ -53,8 +53,151 @@ import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
-// Helper function to parse CLI arguments for starting block
+// Cache directory for storing unhashed state after each block
+// This allows starting from any block without losing original storage keys
+const STATE_CACHE_DIR = path.join(WORKSPACE_ROOT, '.state-cache/fuzzy')
+
+// Ensure cache directory exists
+function ensureCacheDir(): void {
+  if (!existsSync(STATE_CACHE_DIR)) {
+    mkdirSync(STATE_CACHE_DIR, { recursive: true })
+  }
+}
+
+// Save full service account state after a block (with original storage keys)
+function saveStateCache(
+  blockNumber: number,
+  serviceAccountsService: InstanceType<typeof import('../../services/service-account-service').ServiceAccountService>,
+): void {
+  ensureCacheDir()
+  const cacheFile = path.join(STATE_CACHE_DIR, `block-${blockNumber.toString().padStart(8, '0')}.json`)
+  
+  // Get all service accounts with their full storage/preimages/requests
+  const serviceAccounts = serviceAccountsService.getServiceAccounts()
+  
+  // Serialize to JSON with BigInt support
+  const serializedAccounts: Record<string, any> = {}
+  for (const [serviceId, account] of serviceAccounts.accounts.entries()) {
+    const storageObj: Record<string, string> = {}
+    for (const [key, value] of account.storage.entries()) {
+      storageObj[key] = Buffer.from(value).toString('hex')
+    }
+    
+    const preimagesObj: Record<string, string> = {}
+    for (const [key, value] of account.preimages.entries()) {
+      preimagesObj[key] = Buffer.from(value).toString('hex')
+    }
+    
+    const requestsObj: Record<string, Record<string, string[]>> = {}
+    for (const [hash, byLen] of account.requests.entries()) {
+      requestsObj[hash] = {}
+      for (const [len, status] of byLen.entries()) {
+        // PreimageRequestStatus is bigint[] - serialize each timeslot
+        requestsObj[hash][len.toString()] = status.map((t: bigint) => t.toString())
+      }
+    }
+    
+    serializedAccounts[serviceId.toString()] = {
+      codehash: account.codehash,
+      balance: account.balance.toString(),
+      minaccgas: account.minaccgas.toString(),
+      minmemogas: account.minmemogas.toString(),
+      octets: account.octets.toString(),
+      gratis: account.gratis.toString(),
+      items: account.items.toString(),
+      created: account.created.toString(),
+      lastacc: account.lastacc.toString(),
+      parent: account.parent.toString(),
+      storage: storageObj,
+      preimages: preimagesObj,
+      requests: requestsObj,
+    }
+  }
+  
+  writeFileSync(cacheFile, JSON.stringify(serializedAccounts, null, 2))
+  console.log(`💾 Saved state cache for block ${blockNumber} (${Object.keys(serializedAccounts).length} services)`)
+}
+
+// Load cached state for a specific block
+function loadStateCache(
+  blockNumber: number,
+  serviceAccountsService: InstanceType<typeof import('../../services/service-account-service').ServiceAccountService>,
+): boolean {
+  const cacheFile = path.join(STATE_CACHE_DIR, `block-${blockNumber.toString().padStart(8, '0')}.json`)
+  
+  if (!existsSync(cacheFile)) {
+    console.log(`⚠️  No state cache found for block ${blockNumber}`)
+    return false
+  }
+  
+  try {
+    const data = JSON.parse(readFileSync(cacheFile, 'utf-8'))
+    
+    for (const [serviceIdStr, account] of Object.entries(data) as [string, any][]) {
+      const serviceId = BigInt(serviceIdStr)
+      
+      // Reconstruct storage map with original keys (cast to Hex)
+      const storage = new Map<Hex, Uint8Array>()
+      for (const [key, valueHex] of Object.entries(account.storage) as [string, string][]) {
+        storage.set(key as Hex, Buffer.from(valueHex, 'hex'))
+      }
+      
+      // Reconstruct preimages map (cast to Hex)
+      const preimages = new Map<Hex, Uint8Array>()
+      for (const [key, valueHex] of Object.entries(account.preimages) as [string, string][]) {
+        preimages.set(key as Hex, Buffer.from(valueHex, 'hex'))
+      }
+      
+      // Reconstruct requests map - PreimageRequestStatus is bigint[]
+      const requests = new Map<Hex, Map<bigint, bigint[]>>()
+      for (const [hash, byLen] of Object.entries(account.requests) as [string, any][]) {
+        const byLenMap = new Map<bigint, bigint[]>()
+        for (const [lenStr, statusArr] of Object.entries(byLen) as [string, string[]][]) {
+          // statusArr is array of timeslot strings - convert to bigint[]
+          byLenMap.set(BigInt(lenStr), statusArr.map((t: string) => BigInt(t)))
+        }
+        requests.set(hash as Hex, byLenMap)
+      }
+      
+      // Set the full service account with original storage keys
+      serviceAccountsService.setServiceAccount(serviceId, {
+        codehash: account.codehash as Hex,
+        balance: BigInt(account.balance),
+        minaccgas: BigInt(account.minaccgas),
+        minmemogas: BigInt(account.minmemogas),
+        octets: BigInt(account.octets),
+        gratis: BigInt(account.gratis),
+        items: BigInt(account.items),
+        created: BigInt(account.created),
+        lastacc: BigInt(account.lastacc),
+        parent: BigInt(account.parent),
+        storage,
+        preimages,
+        requests,
+      })
+    }
+    
+    console.log(`📂 Loaded state cache for block ${blockNumber} (${Object.keys(data).length} services)`)
+    return true
+  } catch (error) {
+    console.error(`❌ Failed to load state cache for block ${blockNumber}:`, error)
+    return false
+  }
+}
+
+// Helper function to parse CLI arguments or environment variable for starting block
+// Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
 function getStartBlock(): number {
+  // Check environment variable first (most reliable with bun test)
+  const envStartBlock = process.env.START_BLOCK
+  if (envStartBlock) {
+    const startBlock = Number.parseInt(envStartBlock, 10)
+    if (!Number.isNaN(startBlock) && startBlock >= 1) {
+      return startBlock
+    }
+  }
+  
+  // Fallback to CLI argument (requires -- separator with bun test)
   const args = process.argv.slice(2)
   const startBlockIndex = args.indexOf('--start-block')
   if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
@@ -190,6 +333,8 @@ describe('Genesis Parse Tests', () => {
 
       const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
       const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
+      // Only dump traces if DUMP_TRACES=true is set
+      const shouldDumpTraces = process.env.DUMP_TRACES === 'true'
       const accumulatePVM = new AccumulatePVM({
         hostFunctionRegistry,
         accumulateHostFunctionRegistry,
@@ -197,7 +342,7 @@ describe('Genesis Parse Tests', () => {
         entropyService: entropyService,
         pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
         useWasm: false,
-        traceSubfolder: 'fuzzy',
+        traceSubfolder: shouldDumpTraces ? 'fuzzy' : undefined,
       })
 
       const statisticsService = new StatisticsService({
@@ -651,18 +796,40 @@ describe('Genesis Parse Tests', () => {
 
           // Only set pre-state for the starting block
           if (blockNumber === startBlock) {
-            // Set pre_state from test vector BEFORE validating the block
+            // Set pre_state from test vector FIRST
             // This ensures entropy3 and other state components match what was used to create the seal signature
+            // Use raw keyvals mode (3rd param = true) to bypass decode/encode roundtrip issues
+            // for the initial state root verification
             if (blockJsonData.pre_state?.keyvals) {
-              const [setStateError] = stateService.setState(blockJsonData.pre_state.keyvals)
+              const [setStateError] = stateService.setState(
+                blockJsonData.pre_state.keyvals,
+                undefined, // jamVersion
+                true, // useRawKeyvals - store raw keyvals for pre-state root calculation
+              )
               if (setStateError) {
                 throw new Error(`Failed to set pre-state: ${setStateError.message}`)
               }
             } else {
               // Fallback to genesis state if pre_state is not available
-              const [setStateError] = stateService.setState(genesisJson?.state?.keyvals ?? [])
+              const [setStateError] = stateService.setState(
+                genesisJson?.state?.keyvals ?? [],
+                undefined,
+                true, // useRawKeyvals
+              )
               if (setStateError) {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
+              }
+            }
+            
+            // For non-genesis starts, load from state cache AFTER setState
+            // This overwrites the service accounts with versions that have original (unhashed) storage keys
+            // The C(s, h) keys from test vectors only contain blake hashes, not original keys
+            if (startBlock > 1) {
+              const previousBlock = startBlock - 1
+              const cacheLoaded = loadStateCache(previousBlock, serviceAccountsService)
+              if (!cacheLoaded) {
+                console.warn(`⚠️  No state cache for block ${previousBlock}. Run from block 1 first to build cache.`)
+                console.warn(`   Storage keys will use blake hashes instead of original keys.`)
               }
             }
 
@@ -676,6 +843,7 @@ describe('Genesis Parse Tests', () => {
                 `⚠️  [Block ${blockNumber}] Pre-state root doesn't match block header: computed ${preStateRoot}, expected ${blockJsonData.block.header.parent_state_root}`,
               )
             }
+            // Note: Don't clear raw keyvals here - the block importer also needs them for prior state root validation
           } else {
             // For subsequent blocks, verify that the current state root matches the block's parent_state_root
             const [currentStateRootError, currentStateRoot] = stateService.getStateRoot()
@@ -699,8 +867,18 @@ describe('Genesis Parse Tests', () => {
           }
           expect(importError).toBeUndefined()
 
+          // Clear raw keyvals mode after block import
+          // This switches back to normal state trie generation for post-state verification
+          // The post-state should be verified against what our services actually produce,
+          // not the raw keyvals from pre_state
+          stateService.clearRawKeyvals()
+
           // Verify post-state matches expected post_state from test vector
           verifyPostState(blockNumber, blockJsonData)
+
+          // Save state cache after successful block processing
+          // This preserves original storage keys for future --start-block runs
+          saveStateCache(blockNumber, serviceAccountsService)
 
           console.log(`✅ Block ${blockNumber} imported and verified successfully`)
 

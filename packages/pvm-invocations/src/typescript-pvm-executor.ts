@@ -6,6 +6,7 @@
 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { encodeAccumulateInput, encodeVariableSequence } from '@pbnjam/codec'
 import { logger } from '@pbnjam/core'
 import {
   type AccumulateHostFunctionRegistry,
@@ -92,6 +93,7 @@ export class TypeScriptPVMExecutor extends PVM {
     timeslot: bigint,
     inputs: AccumulateInput[],
     _serviceId: bigint,
+    invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -123,17 +125,21 @@ export class TypeScriptPVMExecutor extends PVM {
       implicationsPair,
     )
 
-    // Write trace dump if we have execution logs
+    // Write trace dump if we have execution logs AND traceSubfolder is configured
+    // When traceSubfolder is undefined, trace dumping is disabled
     const executionLogs = this.getExecutionLogs()
-    if (executionLogs.length > 0) {
+    if (executionLogs.length > 0 && this.traceSubfolder) {
       // Write to pvm-traces folder in workspace root (same as WasmPVMExecutor)
-      // If traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
+      // traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
       const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
-      const traceOutputDir = this.traceSubfolder
-        ? join(baseTraceDir, this.traceSubfolder)
-        : baseTraceDir
+      const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
       // Write trace with typescript executor type, block number, and serviceId
       // Include serviceId to avoid collisions when multiple services execute in the same slot
+      // Encode full accumulate inputs for comparison with jamduna traces (not just encodedArgs which is t+s+len)
+      const [encodeError, encodedInputs] = encodeVariableSequence(
+        inputs,
+        encodeAccumulateInput,
+      )
       const filepath = writeTraceDump(
         executionLogs,
         this.traceHostFunctionLogs.length > 0
@@ -142,8 +148,10 @@ export class TypeScriptPVMExecutor extends PVM {
         traceOutputDir,
         undefined,
         timeslot, // blockNumber
-        'typescript', // executorType - generates typescript-{slot}-{serviceId}.log format
-        _serviceId, // serviceId - included to prevent file collisions
+        'typescript', // executorType - generates typescript-{slot}-{invocationIndex}-{serviceId}.log format
+        _serviceId, // serviceId - unique per service, matches jamduna trace structure
+        encodeError ? undefined : encodedInputs, // Full encoded accumulate inputs for jamduna format comparison
+        invocationIndex, // Invocation index (accseq iteration) - same for all services in a batch
       )
       if (!filepath) {
         console.warn(
@@ -317,7 +325,16 @@ export class TypeScriptPVMExecutor extends PVM {
     }
 
     const result = hostFunction.execute(hostFunctionContext)
-    
+
+    // Deduct additional gas cost if specified (e.g., TRANSFER deducts gas_limit on success)
+    // Gray Paper: TRANSFER gas cost is 10 + l on success (base 10 already deducted in context mutator)
+    if (result.additionalGasCost !== undefined && result.additionalGasCost > 0n) {
+      if (this.state.gasCounter < result.additionalGasCost) {
+        return RESULT_CODES.OOG
+      }
+      this.state.gasCounter -= result.additionalGasCost
+    }
+
     // Log panic for debugging
     if (result.resultCode === RESULT_CODES.PANIC) {
       const hostFunctionName = this.getHostFunctionName(hostCallId)
@@ -333,7 +350,7 @@ export class TypeScriptPVMExecutor extends PVM {
         faultInfo: result.faultInfo,
       })
     }
-    
+
     return result.resultCode
   }
 
@@ -389,8 +406,7 @@ export class TypeScriptPVMExecutor extends PVM {
         // write
         const writeParams = this.buildWriteParams(implicationsPair)
         result = hostFunction.execute(hostFunctionContext, writeParams)
-        // DEBUG: Check if storage was modified
-        const storageAfter = implicationsPair[0].state.accounts.get(implicationsPair[0].id)?.storage
+
         break
       }
       case 5n: {

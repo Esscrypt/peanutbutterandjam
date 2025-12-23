@@ -86,7 +86,7 @@ const DEFAULT_JAM_VERSION: JamVersion = { major: 0, minor: 7, patch: 2 }
  *
  * **v0.7.1+** (Gray Paper v0.7.1+):
  * - C(12) ↦ encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
- * - Structure: manager, delegator, registrar, assigners, alwaysaccers
+ * - Encoding order: manager, assigners, delegator, registrar, alwaysaccers
  *
  * Privileges define the privileged service indices that have special
  * capabilities within the JAM protocol.
@@ -119,7 +119,7 @@ export function encodePrivileges(
 
   // Determine version: default to latest (v0.7.2) with registrar
   // Versions <= 0.7.0: manager, assigners, delegator, alwaysaccers (no registrar)
-  // Versions >= 0.7.1: manager, delegator, registrar, assigners, alwaysaccers
+  // Versions >= 0.7.1: manager, assigners, delegator, registrar, alwaysaccers
   const version = jamVersion ?? DEFAULT_JAM_VERSION
   // Check if version is <= 0.7.0 (old format without registrar)
   // Versions >= 0.7.1 (including 0.7.2, 0.8.0, etc.) use the new format with registrar
@@ -159,23 +159,9 @@ export function encodePrivileges(
     if (delegatorError) return safeError(delegatorError)
     parts.push(delegatorBytes)
   } else {
-    // v0.7.1+ encoding: manager, delegator, registrar, assigners, alwaysaccers
-    // Delegator (4 bytes)
-    const [delegatorError, delegatorBytes] = encodeFixedLength(
-      privileges.delegator,
-      4n,
-    )
-    if (delegatorError) return safeError(delegatorError)
-    parts.push(delegatorBytes)
-
-    // Registrar (4 bytes)
-    const [registrarError, registrarBytes] = encodeFixedLength(
-      privileges.registrar,
-      4n,
-    )
-    if (registrarError) return safeError(registrarError)
-    parts.push(registrarBytes)
-
+    // v0.7.1+ encoding: manager, assigners, delegator, registrar, alwaysaccers
+    // Gray Paper merklization.tex C(12): encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
+    
     // Assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
     const coreCount = configService.numCores
     const paddedAssigners = Array.from(privileges.assigners)
@@ -191,6 +177,22 @@ export function encodePrivileges(
     )
     if (assignersError) return safeError(assignersError)
     parts.push(assignersBytes)
+
+    // Delegator (4 bytes)
+    const [delegatorError, delegatorBytes] = encodeFixedLength(
+      privileges.delegator,
+      4n,
+    )
+    if (delegatorError) return safeError(delegatorError)
+    parts.push(delegatorBytes)
+
+    // Registrar (4 bytes)
+    const [registrarError, registrarBytes] = encodeFixedLength(
+      privileges.registrar,
+      4n,
+    )
+    if (registrarError) return safeError(registrarError)
+    parts.push(registrarBytes)
   }
 
   // Gray Paper: alwaysaccers - dictionary{serviceid}{gas}
@@ -233,7 +235,7 @@ export function encodePrivileges(
  * - Registrar is set to 0 when decoding v0.7.0 format
  *
  * **v0.7.1+** (Gray Paper v0.7.1+):
- * - Structure: manager, delegator, registrar, assigners, alwaysaccers
+ * - Encoding order: manager, assigners, delegator, registrar, alwaysaccers
  *
  * Each field is decoded according to its Gray Paper specification:
  * - manager, delegator, registrar: 4-byte service IDs
@@ -254,7 +256,7 @@ export function decodePrivileges(
 
   // Determine version: default to latest (v0.7.2) with registrar
   // Versions <= 0.7.0: manager, assigners, delegator, alwaysaccers (no registrar)
-  // Versions >= 0.7.1: manager, delegator, registrar, assigners, alwaysaccers
+  // Versions >= 0.7.1: manager, assigners, delegator, registrar, alwaysaccers
   const version = jamVersion ?? DEFAULT_JAM_VERSION
   // Check if version is <= 0.7.0 (old format without registrar)
   // Versions >= 0.7.1 (including 0.7.2, 0.8.0, etc.) use the new format with registrar
@@ -314,7 +316,27 @@ export function decodePrivileges(
     // v0.7.0 has no registrar - set to 0
     registrar = 0n
   } else {
-    // v0.7.1+ decoding: manager, delegator, registrar, assigners, alwaysaccers
+    // v0.7.1+ decoding: manager, assigners, delegator, registrar, alwaysaccers
+    // Gray Paper merklization.tex C(12): encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
+    
+    // Decode assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
+    // Gray Paper: assigners ∈ sequence[Ccorecount]{serviceid}
+    // This is ALWAYS exactly Ccorecount elements (one per core), not variable
+    const coreCount = configService.numCores
+    for (let i = 0; i < coreCount; i++) {
+      if (currentData.length < 4) {
+        return safeError(
+          new Error(
+            `Insufficient data for assigner service ID at index ${i} (expected ${coreCount} total, got ${currentData.length} bytes remaining)`,
+          ),
+        )
+      }
+      const [error, result] = decodeFixedLength(currentData.slice(0, 4), 4n)
+      if (error) return safeError(error)
+      assigners.push(result.value)
+      currentData = currentData.slice(4)
+    }
+
     // Decode delegator (4 bytes)
     if (currentData.length < 4) {
       return safeError(new Error('Insufficient data for delegator'))
@@ -338,24 +360,6 @@ export function decodePrivileges(
     if (registrarError) return safeError(registrarError)
     registrar = registrarResult.value
     currentData = currentData.slice(4)
-
-    // Decode assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
-    // Gray Paper: assigners ∈ sequence[Ccorecount]{serviceid}
-    // This is ALWAYS exactly Ccorecount elements (one per core), not variable
-    const coreCount = configService.numCores
-    for (let i = 0; i < coreCount; i++) {
-      if (currentData.length < 4) {
-        return safeError(
-          new Error(
-            `Insufficient data for assigner service ID at index ${i} (expected ${coreCount} total, got ${currentData.length} bytes remaining)`,
-          ),
-        )
-      }
-      const [error, result] = decodeFixedLength(currentData.slice(0, 4), 4n)
-      if (error) return safeError(error)
-      assigners.push(result.value)
-      currentData = currentData.slice(4)
-    }
   }
 
   // Gray Paper: alwaysaccers - dictionary{serviceid}{gas}

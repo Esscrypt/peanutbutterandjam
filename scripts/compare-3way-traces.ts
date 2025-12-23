@@ -942,6 +942,161 @@ function printTwoWayComparison(
   }
 }
 
+/**
+ * Print comparison of TypeScript vs WASM traces (without expected/jamduna trace)
+ */
+function printTwoWayComparisonTsVsWasm(
+  label: string,
+  typescriptPath: string,
+  wasmPath: string,
+  result: TwoWayComparisonResult,
+) {
+  console.log()
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}📊 TypeScript vs WASM Comparison: ${label}${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log()
+  console.log(`${colors.blue}TypeScript:${colors.reset} ${typescriptPath}`)
+  console.log(`${colors.magenta}WASM:${colors.reset}       ${wasmPath}`)
+  console.log()
+
+  // Summary
+  console.log(`${colors.bold}📈 Summary${colors.reset}`)
+  console.log(`   TypeScript instructions: ${result.stats.totalExpected}`)
+  console.log(`   WASM instructions:       ${result.stats.totalActual}`)
+  console.log(`   Matching:                ${result.stats.matching}`)
+  console.log(`   Differences:             ${result.differences.length}`)
+  console.log()
+
+  // Match percentage
+  const maxInstructions = Math.max(result.stats.totalExpected, result.stats.totalActual)
+  const matchPercent = maxInstructions > 0
+    ? ((result.stats.matching / maxInstructions) * 100).toFixed(2)
+    : '0'
+  const matchColor =
+    Number.parseFloat(matchPercent) >= 99
+      ? colors.green
+      : Number.parseFloat(matchPercent) >= 90
+        ? colors.yellow
+        : colors.red
+  console.log(`   ${matchColor}Match rate: ${matchPercent}%${colors.reset}`)
+  console.log()
+
+  // Show first N differences
+  const maxDiffsToShow = 30
+  if (result.differences.length > 0) {
+    console.log(
+      `${colors.bold}🔍 First ${Math.min(result.differences.length, maxDiffsToShow)} Differences${colors.reset}`,
+    )
+    console.log()
+
+    for (let i = 0; i < Math.min(result.differences.length, maxDiffsToShow); i++) {
+      const diff = result.differences[i]!
+      const stepLabel = `Step ${diff.step}`.padEnd(12)
+
+      if (diff.type === 'instruction_mismatch') {
+        console.log(
+          `   ${colors.red}${stepLabel} Instruction mismatch:${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.blue}TS:   ${diff.expected?.instruction?.padEnd(20) ?? 'N/A'} PC: ${diff.expected?.pc?.toString().padEnd(8) ?? 'N/A'} Gas: ${diff.expected?.gas ?? 'N/A'}${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.magenta}WASM: ${diff.typescript?.instruction?.padEnd(20) ?? 'N/A'} PC: ${diff.typescript?.pc?.toString().padEnd(8) ?? 'N/A'} Gas: ${diff.typescript?.gas ?? 'N/A'}${colors.reset}`,
+        )
+      } else if (diff.type === 'pc_mismatch') {
+        console.log(
+          `   ${colors.yellow}${stepLabel} PC mismatch: TS=${diff.expected?.pc}, WASM=${diff.typescript?.pc}${colors.reset}`,
+        )
+      } else if (diff.type === 'gas_mismatch') {
+        console.log(
+          `   ${colors.cyan}${stepLabel} Gas mismatch: TS=${diff.expected?.gas}, WASM=${diff.typescript?.gas}${colors.reset}`,
+        )
+      } else if (diff.type === 'missing') {
+        if (diff.expected && !diff.typescript) {
+          console.log(
+            `   ${colors.blue}${stepLabel} Only in TS: ${diff.expected.instruction} at PC ${diff.expected.pc}${colors.reset}`,
+          )
+        } else if (diff.typescript && !diff.expected) {
+          console.log(
+            `   ${colors.magenta}${stepLabel} Only in WASM: ${diff.typescript.instruction} at PC ${diff.typescript.pc}${colors.reset}`,
+          )
+        }
+      }
+    }
+
+    if (result.differences.length > maxDiffsToShow) {
+      console.log(
+        `   ${colors.dim}... and ${result.differences.length - maxDiffsToShow} more differences${colors.reset}`,
+      )
+    }
+    console.log()
+  } else {
+    console.log(`${colors.green}✅ Traces match perfectly!${colors.reset}`)
+    console.log()
+  }
+
+  // Termination analysis
+  const missingDiffs = result.differences.filter((d) => d.type === 'missing')
+  if (missingDiffs.length > 0) {
+    console.log(`${colors.bold}🔍 Termination Analysis${colors.reset}`)
+    console.log()
+
+    const tsOnly = missingDiffs.filter((d) => d.expected && !d.typescript)
+    const wasmOnly = missingDiffs.filter((d) => d.typescript && !d.expected)
+
+    if (tsOnly.length > 0) {
+      console.log(
+        `${colors.blue}ℹ️  TypeScript has ${tsOnly.length} more instructions than WASM${colors.reset}`,
+      )
+      const lastTsInstr = tsOnly[tsOnly.length - 1]?.expected
+      if (lastTsInstr) {
+        console.log(
+          `   Last TS-only instruction: ${lastTsInstr.instruction} at PC ${lastTsInstr.pc} (step ${lastTsInstr.step})`,
+        )
+      }
+    }
+
+    if (wasmOnly.length > 0) {
+      console.log(
+        `${colors.magenta}ℹ️  WASM has ${wasmOnly.length} more instructions than TypeScript${colors.reset}`,
+      )
+      const lastWasmInstr = wasmOnly[wasmOnly.length - 1]?.typescript
+      if (lastWasmInstr) {
+        console.log(
+          `   Last WASM-only instruction: ${lastWasmInstr.instruction} at PC ${lastWasmInstr.pc} (step ${lastWasmInstr.step})`,
+        )
+      }
+    }
+
+    // Find first divergence
+    const firstMissing = missingDiffs[0]
+    if (firstMissing) {
+      console.log()
+      console.log(
+        `${colors.bold}📍 First divergence at step ${firstMissing.step}${colors.reset}`,
+      )
+      if (firstMissing.expected) {
+        console.log(
+          `   TypeScript: ${firstMissing.expected.instruction || 'host_function'} at PC ${firstMissing.expected.pc}`,
+        )
+      }
+      if (firstMissing.typescript) {
+        console.log(
+          `   WASM: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
+        )
+      }
+    }
+    console.log()
+  }
+}
+
 function printComparison(
   label: string | number,
   expectedPath: string,
@@ -2519,6 +2674,102 @@ async function main() {
           wasmLines = []
         }
       }
+    }
+  } else if (formatFlag === '--accumulate-stf') {
+    // Accumulate STF test vector format
+    // Usage: --accumulate-stf <config> <test_vector_name> <slot> <service_id>
+    // Example: --accumulate-stf full transfer_for_ejected_service-1 19211 0
+    const config = isTwoWay ? formatArgs[1] : args[1]
+    const testVectorName = isTwoWay ? formatArgs[2] : args[2]
+    const slot = isTwoWay ? formatArgs[3] : args[3]
+    const serviceId = isTwoWay ? formatArgs[4] : args[4]
+
+    if (!config || !testVectorName || !slot || !serviceId) {
+      console.error(
+        `${colors.red}Error: --accumulate-stf requires <config> <test_vector_name> <slot> <service_id>${colors.reset}`,
+      )
+      console.error(
+        `${colors.yellow}Example: --accumulate-stf full transfer_for_ejected_service-1 19211 0${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    const traceDir = join(
+      workspaceRoot,
+      'pvm-traces',
+      'accumulate-stf',
+      config,
+      testVectorName,
+    )
+
+    if (!existsSync(traceDir)) {
+      console.error(
+        `${colors.red}Error: Trace directory not found: ${traceDir}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+
+    typescriptPath = join(traceDir, `typescript-${slot}-${serviceId}.log`)
+    wasmPath = join(traceDir, `wasm-${slot}-${serviceId}.log`)
+    comparisonLabel = `Accumulate STF: ${config}/${testVectorName} slot=${slot} service=${serviceId}`
+
+    console.log(
+      `${colors.cyan}Comparing accumulate-stf traces (TypeScript vs WASM)...${colors.reset}`,
+    )
+    console.log(`  ${colors.dim}TypeScript: ${typescriptPath}${colors.reset}`)
+    console.log(`  ${colors.dim}WASM: ${wasmPath}${colors.reset}`)
+
+    // For accumulate-stf, we don't have expected traces (from jamduna)
+    // So we'll do a TypeScript vs WASM comparison (2-way without expected)
+    expectedLines = []
+    expectedPath = ''
+
+    if (existsSync(typescriptPath)) {
+      typescriptLines = parseTraceFile(typescriptPath, false)
+      console.log(`  ${colors.green}TypeScript trace: ${typescriptLines.length} lines${colors.reset}`)
+    } else {
+      console.log(`${colors.yellow}TypeScript trace not found: ${typescriptPath}${colors.reset}`)
+      typescriptLines = []
+    }
+
+    if (existsSync(wasmPath)) {
+      wasmLines = parseTraceFile(wasmPath, false)
+      console.log(`  ${colors.green}WASM trace: ${wasmLines.length} lines${colors.reset}`)
+    } else {
+      console.log(`${colors.yellow}WASM trace not found: ${wasmPath}${colors.reset}`)
+      wasmLines = []
+    }
+
+    // Special handling: compare TypeScript vs WASM directly
+    if (typescriptLines.length > 0 && wasmLines.length > 0) {
+      const result = compareTwoTraces(typescriptLines, wasmLines)
+      printTwoWayComparisonTsVsWasm(
+        comparisonLabel,
+        typescriptPath,
+        wasmPath,
+        result,
+      )
+      return
+    } else if (typescriptLines.length === 0 && wasmLines.length === 0) {
+      console.error(`${colors.red}Error: Both traces are empty or not found${colors.reset}`)
+      process.exit(1)
+    } else {
+      // One trace exists, show summary
+      const availableLines = typescriptLines.length > 0 ? typescriptLines : wasmLines
+      const availablePath = typescriptLines.length > 0 ? typescriptPath : wasmPath
+      const executorName = typescriptLines.length > 0 ? 'TypeScript' : 'WASM'
+      console.log(`\n${colors.bold}${executorName} Trace Summary (${availableLines.length} lines):${colors.reset}`)
+      console.log(`  Path: ${availablePath}`)
+      const instructions = availableLines.filter(l => l.type === 'instruction')
+      const hostCalls = availableLines.filter(l => l.type === 'host_function')
+      console.log(`  Instructions: ${instructions.length}`)
+      console.log(`  Host calls: ${hostCalls.length}`)
+      if (instructions.length > 0) {
+        const lastInstr = instructions[instructions.length - 1]
+        console.log(`  Last instruction: ${lastInstr?.instruction} at PC ${lastInstr?.pc} (step ${lastInstr?.step})`)
+        console.log(`  Final gas: ${lastInstr?.gas}`)
+      }
+      return
     }
   } else if (args[0] === '--modular-refine') {
     // Modular refine format

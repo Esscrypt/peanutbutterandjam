@@ -320,12 +320,23 @@ export function decodeRecent(data: Uint8Array): Safe<DecodingResult<Recent>> {
 
   const consumed = data.length - beltResult.remaining.length
 
+  // Calculate totalCount from the peaks structure
+  // In an MMR, totalCount can be inferred from which peaks are set
+  // totalCount = sum of 2^i for each position i where peak is not null
+  let totalCount = 0n
+  for (let i = 0; i < beltResult.value.length; i++) {
+    if (beltResult.value[i] !== null) {
+      totalCount += 1n << BigInt(i)
+    }
+  }
+
   return safeResult({
     value: {
-      history: historyResult.value, // Single history entry for now
+      history: historyResult.value,
       accoutBelt: {
-        peaks: beltResult.value.filter((peak): peak is Hex => peak !== null), // Filter out None values
-        totalCount: BigInt(beltResult.value.length), // Total count including None values
+        // Keep peaks as-is with nulls preserved for positional indexing
+        peaks: beltResult.value as (Hex | null)[],
+        totalCount,
       },
     },
     remaining: beltResult.remaining,

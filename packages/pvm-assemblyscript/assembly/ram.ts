@@ -443,6 +443,11 @@ export class PVMRAM implements RAM {
   }
 
   isReadableWithFault(address: u32, size: u32 = u32(1)): FaultCheckResult {
+    // Gray Paper: Empty range is trivially readable - return empty array
+    if (size === 0) {
+      return new FaultCheckResult(true, 0)
+    }
+
     if (address + size > this.MAX_ADDRESS) {
       return new FaultCheckResult(false, address)
     }

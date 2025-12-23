@@ -63,14 +63,16 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       numCores: this.configService.numCores.toString(),
     })
 
-    // Read assigners array from memory (341 cores * 4 bytes each)
+    // Read assigners array from memory (Ccorecount * 4 bytes)
     // Gray Paper pvm_invocations.tex lines 696-699:
     // a = decode[4]{memory[a:4*Ccorecount]} when Nrange(a,4*Ccorecount) ⊆ readable(memory), error otherwise
     const assignersLength = BigInt(this.configService.numCores) * 4n
+    
     const [assignersData, faultAddress] = ram.readOctets(
       assignersOffset,
       assignersLength,
     )
+    
     // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (faultAddress || !assignersData) {
@@ -84,10 +86,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper pvm_invocations.tex lines 700-703:
     // z = {build{...}} when Nrange(o,12n) ⊆ readable(memory), error otherwise
     const accessorsLength = numberOfAlwaysAccessors * 12n
+    
     const [accessorsData, accessorsFaultAddress] = ram.readOctets(
       alwaysAccessorsOffset,
       accessorsLength,
     )
+    
     // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (!accessorsData || accessorsFaultAddress) {
@@ -98,27 +102,31 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     }
 
     // Parse assigners array (4 bytes per core ID)
+    // IMPORTANT: Must account for byteOffset when creating DataView, as assignersData
+    // may be a slice of a larger buffer, and .buffer returns the entire underlying ArrayBuffer
     const assigners: bigint[] = []
+    const assignersView = new DataView(
+      assignersData.buffer,
+      assignersData.byteOffset,
+      assignersData.length,
+    )
     for (let i = 0; i < this.configService.numCores; i++) {
-      const coreId = new DataView(assignersData.buffer, i * 4, 4).getUint32(
-        0,
-        true,
-      )
+      const coreId = assignersView.getUint32(i * 4, true)
       assigners.push(BigInt(coreId))
     }
 
     // Parse always accessors array (12 bytes per accessor: 4 bytes service ID + 8 bytes gas)
+    // IMPORTANT: Must account for byteOffset when creating DataView, as accessorsData
+    // may be a slice of a larger buffer, and .buffer returns the entire underlying ArrayBuffer
     const alwaysAccessors: Map<bigint, bigint> = new Map()
+    const accessorsView = new DataView(
+      accessorsData.buffer,
+      accessorsData.byteOffset,
+      accessorsData.length,
+    )
     for (let i = 0; i < Number(numberOfAlwaysAccessors); i++) {
-      const serviceId = new DataView(accessorsData.buffer, i * 12, 4).getUint32(
-        0,
-        true,
-      )
-      const gas = new DataView(
-        accessorsData.buffer,
-        i * 12 + 4,
-        8,
-      ).getBigUint64(0, true)
+      const serviceId = accessorsView.getUint32(i * 12, true)
+      const gas = accessorsView.getBigUint64(i * 12 + 4, true)
       alwaysAccessors.set(BigInt(serviceId), gas)
     }
 

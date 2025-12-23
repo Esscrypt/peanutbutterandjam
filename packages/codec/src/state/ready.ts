@@ -168,13 +168,15 @@ export function decodeReady(
   // Outer sequence is fixed-length (C_epochlen), inner sequences are variable-length
   const [error, result] = decodeSequenceGeneric<ReadyItem[]>(
     data,
-    (data) => {
+    (slotData) => {
       // Decode each slot as a variable-length sequence of ready items
-      return decodeVariableSequence<ReadyItem>(data, decodeReadyItem)
+      return decodeVariableSequence<ReadyItem>(slotData, decodeReadyItem)
     },
     configService.epochDuration, // Fixed length: C_epochlen
   )
-  if (error) return safeError(error)
+  if (error) {
+    return safeError(error)
+  }
 
   const ready: Ready = {
     epochSlots: result.value,

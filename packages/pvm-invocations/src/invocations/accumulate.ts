@@ -6,11 +6,9 @@
  */
 
 import {
-  encodeAccumulateInput,
   encodeNatural,
-  encodeVariableSequence,
 } from '@pbnjam/codec'
-import { blake2bHash, bytesToHex, concatBytes, type Hex, hexToBytes, logger } from '@pbnjam/core'
+import { blake2bHash, concatBytes, type Hex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
@@ -117,6 +115,7 @@ export class AccumulatePVM {
     serviceId: bigint,
     gas: bigint,
     inputs: AccumulateInput[],
+    orderedIndex?: number, // Ordered index for trace file naming
   ): Promise<AccumulateInvocationResult> {
     // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
     const serviceAccount = partialState.accounts.get(serviceId)
@@ -146,10 +145,9 @@ export class AccumulatePVM {
     // Gray Paper pvm_invocations.tex line 162: when c = none ∨ len(c) > Cmaxservicecodesize
     // Return: (poststate=postxferstate, defxfers=[], yield=none, gasused=0, provisions=[])
     if (!serviceCode) {
-      logger.warn('[AccumulatePVM] Service code not found in preimages', {
+      logger.debug('[AccumulatePVM] Service code not found in preimages - returning post-transfer state', {
         serviceId: serviceId.toString(),
         codeHash: serviceAccount.codehash,
-        availablePreimageHashes: Array.from(serviceAccount.preimages.keys()),
       })
       // Gray Paper: Return valid acconeout with post-transfer state, 0 gas, empty defxfers/provisions
       // resultCode = HALT since no execution occurred (but not an error)
@@ -277,6 +275,7 @@ export class AccumulatePVM {
           timeslot,
           inputs,
           serviceId,
+          orderedIndex, // Pass ordered index for trace file naming
         )
       error = wasmError
       marshallingResult = wasmResult
@@ -291,6 +290,7 @@ export class AccumulatePVM {
           timeslot,
           inputs,
           serviceId,
+          orderedIndex, // Pass ordered index for trace file naming
         )
       error = tsError
       marshallingResult = tsResult

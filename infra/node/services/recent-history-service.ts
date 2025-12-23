@@ -134,18 +134,8 @@ export class RecentHistoryService extends BaseServiceClass {
     // Add to circular buffer
     this.addToHistory(newEntry)
 
-    // Update accumulation belt using accumulation outputs from AccumulationService
-    // Gray Paper: lastaccout' comes from local_fnservouts (accumulation output pairings)
-    if (this.accumulationService) {
-      const accumulationOutputs =
-        this.accumulationService.getLastAccumulationOutputs()
-      this.updateAccoutBelt(accumulationOutputs)
-    } else {
-      // Fallback: extract from block body (legacy behavior, not Gray Paper compliant)
-      logger.warn(
-        'RecentHistoryService: AccumulationService not provided, falling back to block body extraction',
-      )
-    }
+    // NOTE: updateAccoutBelt is called explicitly from BlockImporterService.importBlock()
+    // BEFORE this event is triggered. Do NOT call it here to avoid double-updating the MMR.
 
     // Increment block counter
     this.currentBlockNumber++
@@ -522,27 +512,38 @@ export class RecentHistoryService extends BaseServiceClass {
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
     // This comes from local_fnservouts tracked during accumulation
 
+    // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    // This is called for EVERY block, even when s is empty.
+    // When s is empty, merklizewb([]) = H([]) = keccak(empty bytes)
+
     // Step 2: Encode the sequence per Gray Paper equation 29
     // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
     const encodedSequence: Uint8Array[] = Array.from(lastaccout.entries()).map(
       ([serviceId, hash]) => {
-        // encode[4](serviceId) - 4-byte encoding
+        // encode[4](serviceId) - 4-byte little-endian encoding (Gray Paper convention)
         const serviceIdBytes = new Uint8Array(4)
         const view = new DataView(serviceIdBytes.buffer)
-        view.setUint32(0, Number(serviceId), false) // big-endian
+        view.setUint32(0, Number(serviceId), true) // little-endian per Gray Paper
 
-        // Concatenate serviceId + hash
-        const combined = new Uint8Array(4 + hash.length)
+        // Convert hash hex string to bytes
+        const hashBytes = hexToBytes(hash)
+
+        // Concatenate serviceId (4 bytes) + hash (32 bytes)
+        const combined = new Uint8Array(4 + hashBytes.length)
         combined.set(serviceIdBytes, 0)
-        combined.set(hexToBytes(hash), 4)
+        combined.set(hashBytes, 4)
 
         return combined
       },
     )
 
-    // Step 3: Merklize the encoded sequence
-    // merklizewb(s, keccak) creates a well-balanced merkle tree
-    const [merklizeError, merklizedRoot] = merklizewb(encodedSequence)
+    // Step 3: Merklize the encoded sequence using keccak (per Gray Paper equation 29)
+    // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    // Note: merklizewb with keccak is required here, not blake2b
+    const [merklizeError, merklizedRoot] = merklizewb(
+      encodedSequence,
+      defaultKeccakHash,
+    )
     if (merklizeError) {
       logger.error('Failed to merklize accumulation outputs', {
         error: merklizeError,

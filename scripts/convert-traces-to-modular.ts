@@ -16,6 +16,7 @@
  */
 
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -122,6 +123,7 @@ function convertTraceToModular(
   inputFile: string,
   outputDir: string,
   compress = false,
+  accumulateInputPath?: string,
 ): void {
   if (!existsSync(inputFile)) {
     throw new Error(`Input file not found: ${inputFile}`)
@@ -209,6 +211,15 @@ function convertTraceToModular(
   writeStream('loads' + (compress ? '.gz' : ''), loadsBuffer)
   writeStream('stores' + (compress ? '.gz' : ''), storesBuffer)
 
+  // Copy accumulate_input file if provided
+  // This matches the jamduna format where accumulate_input is in the same directory
+  if (accumulateInputPath && existsSync(accumulateInputPath)) {
+    const accumulateInputOutputPath = join(outputDir, 'accumulate_input')
+    copyFileSync(accumulateInputPath, accumulateInputOutputPath)
+    const stats = readFileSync(accumulateInputPath)
+    console.log(`  Copied accumulate_input (${stats.length} bytes)`)
+  }
+
   console.log(`\nSuccessfully converted trace to modular format in: ${outputDir}`)
 }
 
@@ -217,7 +228,10 @@ interface TraceFile {
   filepath: string
   executorType: 'typescript' | 'wasm'
   timeslot: string
+  serviceId: string
+  orderedIndex: number // Computed based on order within timeslot
   subfolder?: string
+  accumulateInputPath?: string // Path to the accumulate_input binary file if present
 }
 
 function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] {
@@ -226,7 +240,19 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
     return []
   }
 
-  const traceFiles: TraceFile[] = []
+  // Temporary structure to collect files before computing orderedIndex
+  interface RawTraceFile {
+    filename: string
+    filepath: string
+    executorType: 'typescript' | 'wasm'
+    timeslot: string
+    serviceId: string
+    invocationIndex?: number // Parsed from new filename format (if present)
+    subfolder?: string
+    accumulateInputPath?: string
+  }
+
+  const rawTraceFiles: RawTraceFile[] = []
 
   // Recursively search for trace files
   function searchDirectory(dir: string, currentSubfolder?: string): void {
@@ -244,25 +270,75 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
           searchDirectory(fullPath, newSubfolder)
         }
       } else if (entry.isFile()) {
-        // Match patterns: typescript-{timeslot}.log, wasm-{timeslot}.log
-        const tsMatch = entry.name.match(/^typescript-(\d+)\.log$/)
-        const wasmMatch = entry.name.match(/^wasm-(\d+)\.log$/)
+        // Match patterns (jamduna-compatible format):
+        // - typescript-{timeslot}-{invocationIndex}-{serviceId}.log (e.g., typescript-118-0-1985398916.log)
+        // - wasm-{timeslot}-{invocationIndex}-{serviceId}.log
+        // - typescript-{timeslot}-{serviceId}.log (legacy format, invocationIndex defaults to 0)
+        // - wasm-{timeslot}-{serviceId}.log (legacy format, invocationIndex defaults to 0)
+        // - typescript-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
+        // - wasm-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
+        const tsMatch = entry.name.match(/^typescript-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/)
+        const wasmMatch = entry.name.match(/^wasm-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/)
 
         if (tsMatch) {
-          traceFiles.push({
+          const timeslot = tsMatch[1]!
+          // New format: typescript-{timeslot}-{invocationIndex}-{serviceId}.log
+          // Legacy format 1: typescript-{timeslot}-{serviceId}.log (invocationIndex defaults to computed)
+          // Legacy format 2: typescript-{timeslot}.log (both default to 0)
+          let invocationIndex: number | undefined
+          let serviceId: string
+          if (tsMatch[3] !== undefined) {
+            // New format: group 2 = invocationIndex, group 3 = serviceId
+            invocationIndex = Number.parseInt(tsMatch[2]!, 10)
+            serviceId = tsMatch[3]
+          } else {
+            // Legacy format: group 2 = serviceId (or undefined)
+            invocationIndex = undefined
+            serviceId = tsMatch[2] ?? '0'
+          }
+          // Check for accompanying accumulate_input file
+          // Pattern: typescript-{timeslot}-{invocationIndex}-{serviceId}-accumulate_input.bin or legacy
+          const accumulateInputFilename = invocationIndex !== undefined
+            ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
+            : `typescript-${timeslot}-${serviceId}-accumulate_input.bin`
+          const accumulateInputPath = join(dir, accumulateInputFilename)
+          
+          rawTraceFiles.push({
             filename: entry.name,
             filepath: fullPath,
             executorType: 'typescript',
-            timeslot: tsMatch[1]!,
+            timeslot,
+            serviceId,
+            invocationIndex,
             subfolder: currentSubfolder,
+            accumulateInputPath: existsSync(accumulateInputPath) ? accumulateInputPath : undefined,
           })
         } else if (wasmMatch) {
-          traceFiles.push({
+          const timeslot = wasmMatch[1]!
+          let invocationIndex: number | undefined
+          let serviceId: string
+          if (wasmMatch[3] !== undefined) {
+            invocationIndex = Number.parseInt(wasmMatch[2]!, 10)
+            serviceId = wasmMatch[3]
+          } else {
+            invocationIndex = undefined
+            serviceId = wasmMatch[2] ?? '0'
+          }
+          // Check for accompanying accumulate_input file
+          const accumulateInputFilename = invocationIndex !== undefined
+            ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
+            : `wasm-${timeslot}-${serviceId}-accumulate_input.bin`
+          const accumulateInputPath = join(dir, accumulateInputFilename)
+          
+          rawTraceFiles.push({
             filename: entry.name,
             filepath: fullPath,
             executorType: 'wasm',
-            timeslot: wasmMatch[1]!,
+            timeslot,
+            serviceId,
+            invocationIndex,
             subfolder: currentSubfolder,
+            accumulateInputPath: existsSync(accumulateInputPath) ? accumulateInputPath : undefined,
           })
         }
       }
@@ -272,14 +348,52 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
   // Start recursive search
   searchDirectory(tracesDir, subfolder)
 
-  // Sort by subfolder, then timeslot, then executor type
-  traceFiles.sort((a, b) => {
+  // Sort by subfolder, then timeslot, then invocationIndex (if present), then serviceId, then executor type
+  rawTraceFiles.sort((a, b) => {
     const subfolderCompare = (a.subfolder || '').localeCompare(b.subfolder || '')
     if (subfolderCompare !== 0) return subfolderCompare
     const timeslotDiff = Number.parseInt(a.timeslot, 10) - Number.parseInt(b.timeslot, 10)
     if (timeslotDiff !== 0) return timeslotDiff
+    // Sort by invocationIndex first (if present in both)
+    const aInvIdx = a.invocationIndex ?? Number.MAX_SAFE_INTEGER
+    const bInvIdx = b.invocationIndex ?? Number.MAX_SAFE_INTEGER
+    const invIdxDiff = aInvIdx - bInvIdx
+    if (invIdxDiff !== 0) return invIdxDiff
+    // Then by serviceId numerically to establish consistent ordering
+    const serviceIdDiff = Number.parseInt(a.serviceId, 10) - Number.parseInt(b.serviceId, 10)
+    if (serviceIdDiff !== 0) return serviceIdDiff
     return a.executorType.localeCompare(b.executorType)
   })
+
+  // Use parsed invocationIndex if available, otherwise compute based on position
+  // jamduna structure: {timeslot}/{ordered_index}/{service_id}/
+  // ordered_index is the invocation order within a timeslot (0, 1, 2, ...)
+  const traceFiles: TraceFile[] = []
+  const orderCounters = new Map<string, number>() // Key: "subfolder|timeslot|executorType" (for legacy files without invocationIndex)
+
+  for (const raw of rawTraceFiles) {
+    // If the file has a parsed invocationIndex, use it directly
+    // Otherwise, compute based on position within the group (legacy behavior)
+    let orderedIndex: number
+    if (raw.invocationIndex !== undefined) {
+      orderedIndex = raw.invocationIndex
+    } else {
+      const groupKey = `${raw.subfolder ?? ''}|${raw.timeslot}|${raw.executorType}`
+      orderedIndex = orderCounters.get(groupKey) ?? 0
+      orderCounters.set(groupKey, orderedIndex + 1)
+    }
+
+    traceFiles.push({
+      filename: raw.filename,
+      filepath: raw.filepath,
+      executorType: raw.executorType,
+      timeslot: raw.timeslot,
+      serviceId: raw.serviceId,
+      orderedIndex,
+      subfolder: raw.subfolder,
+      accumulateInputPath: raw.accumulateInputPath,
+    })
+  }
 
   return traceFiles
 }
@@ -329,7 +443,8 @@ async function main() {
   console.log(`Found ${traceFiles.length} trace file(s):`)
   for (const tf of traceFiles) {
     const subfolderInfo = tf.subfolder ? ` (subfolder: ${tf.subfolder})` : ''
-    console.log(`  - ${tf.filename} (${tf.executorType}, timeslot ${tf.timeslot}${subfolderInfo})`)
+    const accInputInfo = tf.accumulateInputPath ? ' +accumulate_input' : ''
+    console.log(`  - ${tf.filename} (${tf.executorType}, timeslot ${tf.timeslot}, serviceId ${tf.serviceId}, orderedIndex ${tf.orderedIndex}${subfolderInfo}${accInputInfo})`)
   }
   console.log()
 
@@ -340,9 +455,10 @@ async function main() {
   for (const traceFile of traceFiles) {
     const inputFile = traceFile.filepath
 
-    // Build output directory structure matching the subfolder structure
-    // If trace is in pvm-traces/preimages_light/typescript-2.log,
-    // output goes to pvm-traces/preimages_light/modular[-wasm]/00000002/0/0/
+    // Build output directory structure matching jamduna exactly:
+    // jamduna: {timeslot}/{ordered_index}/{service_id}/
+    // e.g., 00000050/0/1985398916/
+    // Our output: pvm-traces/{subfolder}/modular/{timeslot}/{ordered_index}/{service_id}/
     const modularDir = traceFile.executorType === 'wasm' ? 'modular-wasm' : 'modular'
     const outputDirParts = [tracesDir]
     
@@ -353,9 +469,9 @@ async function main() {
     
     outputDirParts.push(
       modularDir,
-      traceFile.timeslot.padStart(8, '0'),
-      '0', // orderedIndex
-      '0', // serviceId
+      traceFile.timeslot.padStart(8, '0'),      // {timeslot} - 8-digit padded
+      String(traceFile.orderedIndex),            // {ordered_index} - invocation order within timeslot
+      traceFile.serviceId,                       // {service_id} - actual service ID from trace
     )
     
     const outputDir = join(...outputDirParts)
@@ -363,9 +479,12 @@ async function main() {
     console.log('-'.repeat(60))
     console.log(`Converting: ${traceFile.filename}`)
     console.log(`  Output: ${outputDir}`)
+    if (traceFile.accumulateInputPath) {
+      console.log(`  Accumulate input: ${traceFile.accumulateInputPath}`)
+    }
 
     try {
-      convertTraceToModular(inputFile, outputDir, compress)
+      convertTraceToModular(inputFile, outputDir, compress, traceFile.accumulateInputPath)
       successCount++
     } catch (error) {
       console.error(`  ERROR: ${error instanceof Error ? error.message : String(error)}`)
