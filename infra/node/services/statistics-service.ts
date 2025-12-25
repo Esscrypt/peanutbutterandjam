@@ -442,7 +442,7 @@ export class StatisticsService extends BaseService {
     body: BlockBody,
     _currentSlot: bigint,
     authorIndex: number,
-    _accumulationOutputs?: Map<bigint, Hex>,
+    _accumulationOutputs?: [bigint, Hex][],
   ): void {
     // NOTE: Epoch transition is now handled by handleEpochTransitionIfNeeded()
     // which MUST be called at the START of block processing, BEFORE any validator
@@ -515,7 +515,7 @@ export class StatisticsService extends BaseService {
     // Include services from accumulation outputs (from previous block's accumulation)
     // These services should be in serviceStats even if they don't appear in work reports or preimages
     if (_accumulationOutputs) {
-      for (const serviceId of _accumulationOutputs.keys()) {
+      for (const [serviceId, _yieldHash] of _accumulationOutputs) {
         // Ensure service stats exist for services with accumulation outputs
         // NOTE: This is legacy code - accumulation outputs don't create serviceStats entries
         // ServiceStats entries are only created when there's actual activity (provision, refinement, or accumulation)

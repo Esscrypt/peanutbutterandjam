@@ -47,7 +47,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // l = expected code length (NOT the hash length - hash is always 32 bytes)
     const [
       codeHashOffset,
-      expectedCodeLength,  // This is the expected length of the code preimage, NOT the hash length
+      expectedCodeLength, // This is the expected length of the code preimage, NOT the hash length
       minAccGas,
       minMemoGas,
       gratis,
@@ -55,8 +55,12 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     ] = registers.slice(7, 13)
 
     // Gray Paper: l must be a valid 32-bit number
-    if (expectedCodeLength > 0xFFFFFFFFn) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 763: l ∈ N_bits32, otherwise codehash = error → PANIC
+    // On PANIC, registers_7 remains unchanged
+    if (expectedCodeLength > 0xffffffffn) {
+      logger.debug('[NEW] PANIC: expectedCodeLength exceeds 32-bit', {
+        expectedCodeLength: expectedCodeLength.toString(),
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -80,16 +84,24 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // The hash is a blake2b hash which is always 32 bytes
     const [codeHashData, faultAddress] = ram.readOctets(
       codeHashOffset,
-      32n,  // Always read 32 bytes for the code hash
+      32n, // Always read 32 bytes for the code hash
     )
     if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
+      logger.debug('[NEW] PANIC: memory read fault for codehash', {
+        codeHashOffset: codeHashOffset.toString(),
+        faultAddress: faultAddress.toString(),
+      })
+      // Gray Paper: PANIC but registers_7 should remain UNCHANGED
+      // Do NOT call setAccumulateError - just return PANIC
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
     if (!codeHashData) {
-      this.setAccumulateError(registers, 'WHAT')
+      logger.debug('[NEW] PANIC: no codehash data', {
+        codeHashOffset: codeHashOffset.toString(),
+      })
+      // Gray Paper: PANIC but registers_7 should remain UNCHANGED
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -107,9 +119,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Check if gratis is set and validate permissions
-    if (gratis === 0n && imX.id !== imX.state.registrar) {
-      // Only registrar can create paid services
+    // Gray Paper line 787: HUH when gratis != 0 AND service is not the manager
+    // Only the manager can create services with gratis (free deposit allowance)
+    if (gratis !== 0n && imX.id !== imX.state.manager) {
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -125,25 +137,32 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     const C_BASE_DEPOSIT = 100n
     const C_ITEM_DEPOSIT = 10n
     const C_BYTE_DEPOSIT = 1n
-    
+
     const newServiceItems = 2n // 2 * 1 request + 0 storage
     const newServiceOctets = 81n + expectedCodeLength // 81 + expected code length
-    
+
     // Gray Paper: minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
-    const minBalanceBeforeGratis = C_BASE_DEPOSIT + C_ITEM_DEPOSIT * newServiceItems + C_BYTE_DEPOSIT * newServiceOctets
-    const minBalance = minBalanceBeforeGratis > gratis ? minBalanceBeforeGratis - gratis : 0n
+    const minBalanceBeforeGratis =
+      C_BASE_DEPOSIT +
+      C_ITEM_DEPOSIT * newServiceItems +
+      C_BYTE_DEPOSIT * newServiceOctets
+    const minBalance =
+      minBalanceBeforeGratis > gratis ? minBalanceBeforeGratis - gratis : 0n
 
     // Check if current service has sufficient balance
     // Gray Paper line 786: CASH when s.balance < self.minbalance
     const balanceAfterDeduction = currentService.balance - minBalance
-    if (balanceAfterDeduction < currentService.balance && balanceAfterDeduction < 0n) {
+    if (
+      balanceAfterDeduction < currentService.balance &&
+      balanceAfterDeduction < 0n
+    ) {
       // Would result in negative balance - insufficient funds
       this.setAccumulateError(registers, 'CASH')
       return {
         resultCode: null, // continue execution
       }
     }
-    
+
     // Also check that the remaining balance is at least the current service's minbalance
     // (This is calculated from the current service's storage footprint)
     // For simplicity, we check against the same formula for the current service
@@ -157,7 +176,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     let updateNextFreeId = false
     const C_MIN_PUBLIC_INDEX = 65536n // 2^16
 
-    if (gratis === 0n && imX.id === imX.state.registrar && desiredId < C_MIN_PUBLIC_INDEX) {
+    if (
+      gratis === 0n &&
+      imX.id === imX.state.registrar &&
+      desiredId < C_MIN_PUBLIC_INDEX
+    ) {
       // Registrar creating reserved service with specific ID
       // Gray Paper line 788: check if desired ID is already taken
       if (imX.state.accounts.has(desiredId)) {

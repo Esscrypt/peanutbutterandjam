@@ -62,7 +62,8 @@ export class ReadHostFunction extends BaseHostFunction {
         keyLength: keyLength.toString(),
         faultAddress: faultAddress?.toString() ?? 'null',
       })
-      context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      // Gray Paper line 420: registers_7 remains UNCHANGED on panic
+      // Do NOT set context.registers[7] - just return PANIC
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {

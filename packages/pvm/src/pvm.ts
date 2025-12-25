@@ -57,6 +57,11 @@ export class PVM implements IPVM {
     opcode: string
     gas: bigint
     registers: string[]
+    // JIP-6 trace support: load/store tracking
+    loadAddress: number
+    loadValue: bigint
+    storeAddress: number
+    storeValue: bigint
   }> = []
 
   /** Global log collection for host function execution (per execution run) */
@@ -437,6 +442,9 @@ export class PVM implements IPVM {
     }
 
     // Consume 1 gas for each instruction
+    // Note: ECALLI instructions cost 1 gas just like any other instruction.
+    // The host function's gas cost (10+) is handled separately in the context mutator.
+    // The host function will OOG if there's not enough gas for its operation.
     this.state.gasCounter -= 1n
 
     // logger.debug('Step: Instruction', {
@@ -546,6 +554,10 @@ export class PVM implements IPVM {
     opcode: string
     gas: bigint
     registers: string[]
+    loadAddress: number
+    loadValue: bigint
+    storeAddress: number
+    storeValue: bigint
   }> {
     // Return copy without sorting - logs are already in execution order
     return [...this.executionLogs]
@@ -671,25 +683,40 @@ export class PVM implements IPVM {
       // Save gas before step to detect if instruction was actually executed
       // If gas is 0, step() returns OOG immediately without executing
       const gasBeforeStep = this.state.gasCounter
+
+      // Clear load/store tracking before each instruction (JIP-6 trace support)
+      this.state.ram.clearLastMemoryOp()
+
       resultCode = await this.step(instruction)
 
       // Only log if the instruction was actually executed
       // If gas was 0 before step(), step() returns OOG immediately without executing
       // In that case, we shouldn't log a "phantom" instruction
-      if (gasBeforeStep > 0n) {
-      // Log execution step with PC before instruction execution
-      // This shows where the instruction was executed, not where it jumped to
-      this.executionLogs.push({
-        step: this.executionStep,
-        pc: pcBefore,
-        instructionName,
-        opcode: `0x${instruction.opcode.toString(16)}`,
-        gas: this.state.gasCounter,
-        registers: Array.from(this.state.registerState.slice(0, 13)).map((r) =>
-          r.toString(),
-        ),
-      })
-    }
+      // For ECALLI (host calls), distinguish between base-cost OOG vs additionalGasCost OOG:
+      // - Base-cost OOG (gas < 11): Don't log (instruction didn't fully execute)
+      // - additionalGasCost OOG (gas >= 11): Log (host function succeeded, then OOG'd on extra cost)
+      const shouldLog =
+        gasBeforeStep > 0n &&
+        (resultCode !== RESULT_CODES.OOG || gasBeforeStep >= 11n)
+      if (shouldLog) {
+        // Log execution step with PC before instruction execution
+        // This shows where the instruction was executed, not where it jumped to
+        this.executionLogs.push({
+          step: this.executionStep,
+          pc: pcBefore,
+          instructionName,
+          opcode: `0x${instruction.opcode.toString(16)}`,
+          gas: this.state.gasCounter,
+          registers: Array.from(this.state.registerState.slice(0, 13)).map((r) =>
+            r.toString(),
+          ),
+          // JIP-6 trace support: capture load/store from RAM
+          loadAddress: this.state.ram.lastLoadAddress,
+          loadValue: this.state.ram.lastLoadValue,
+          storeAddress: this.state.ram.lastStoreAddress,
+          storeValue: this.state.ram.lastStoreValue,
+        })
+      }
     }
 
     // At this point, resultCode must be non-null (we exited the while loop with a result)

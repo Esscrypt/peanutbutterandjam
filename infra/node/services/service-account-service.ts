@@ -596,7 +596,21 @@ export class ServiceAccountService
     serviceId: bigint,
     serviceAccount: ServiceAccount,
   ): Safe<void> {
-    this.coreServiceAccounts.set(serviceId, serviceAccount)
+    // Clone the core properties to prevent external mutations from affecting stored state
+    // This is critical because JavaScript objects are passed by reference
+    const clonedCore: ServiceAccountCore = {
+      codehash: serviceAccount.codehash,
+      balance: serviceAccount.balance,
+      minaccgas: serviceAccount.minaccgas,
+      minmemogas: serviceAccount.minmemogas,
+      octets: serviceAccount.octets,
+      gratis: serviceAccount.gratis,
+      items: serviceAccount.items,
+      created: serviceAccount.created,
+      lastacc: serviceAccount.lastacc,
+      parent: serviceAccount.parent,
+    }
+    this.coreServiceAccounts.set(serviceId, clonedCore)
     this.serviceStorage.set(serviceId, serviceAccount.storage)
 
     // REPLACE preimages bucket with the complete state from PVM

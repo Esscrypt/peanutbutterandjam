@@ -41,13 +41,13 @@ import {
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
-  AccumulatePVM,
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
 import { StatisticsService } from '../../services/statistics-service'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
@@ -133,7 +133,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,
@@ -159,7 +158,6 @@ describe('Genesis Parse Tests', () => {
       })
 
       const workReportService = new WorkReportService({
-        workStore: null,
         eventBus: eventBusService,
         networkingService: null,
         ce136WorkReportRequestProtocol: null,
@@ -182,7 +180,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        preimageStore: null,
         configService,
         eventBusService,
         clockService,
@@ -192,13 +189,11 @@ describe('Genesis Parse Tests', () => {
 
       const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
       const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-      const accumulatePVM = new AccumulatePVM({
-        hostFunctionRegistry,
-        accumulateHostFunctionRegistry,
+
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
         configService: configService,
-        entropyService: entropyService,
-        pvmOptions: { gasCounter: 1_000_000n },
-        traceSubfolder: 'fallback',
+        clockService: clockService,
       })
 
       const accumulatedService = new AccumulationService({
@@ -208,8 +203,17 @@ describe('Genesis Parse Tests', () => {
         privilegesService: privilegesService,
         validatorSetManager: validatorSetManager,
         authQueueService: authQueueService,
-        accumulatePVM: accumulatePVM,
         readyService: readyService,
+        statisticsService: statisticsService,
+        accumulatePVM: new AccumulatePVM({
+          hostFunctionRegistry,
+          accumulateHostFunctionRegistry,
+          configService: configService,
+          entropyService: entropyService,
+          pvmOptions: { gasCounter: 1_000_000n },
+          useWasm: false,
+          traceSubfolder: 'fallback',
+        }),
       })
             
       const recentHistoryService = new RecentHistoryService({
@@ -218,11 +222,6 @@ describe('Genesis Parse Tests', () => {
         accumulationService: accumulatedService,
       })
 
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
-      })
 
 
       const stateService = new StateService({
@@ -282,7 +281,6 @@ describe('Genesis Parse Tests', () => {
         validatorSetManagerService: validatorSetManager,
         entropyService: entropyService,
         sealKeyService: sealKeyService,
-        blockStore: null,
         assuranceService: assuranceService,
         guarantorService: guarantorService,
         ticketService: ticketService,
@@ -463,28 +461,28 @@ describe('Genesis Parse Tests', () => {
         console.log(`\n=== [Block ${blockNumber}] Safrole State (pendingSet & epochRoot) ===`)
         if (expectedSafrole) {
           console.log('Expected pendingSet:', JSON.stringify(
-            expectedSafrole.pendingSet?.map((v: any) => ({
+            (expectedSafrole as any).pendingSet?.map((v: any) => ({
               bandersnatch: v.bandersnatch,
               ed25519: v.ed25519,
             })),
             null,
             2
           ))
-          console.log('Expected epochRoot:', expectedSafrole.epochRoot)
+          console.log('Expected epochRoot:', (expectedSafrole as SafroleState).epochRoot)
         } else {
           console.log('Expected safrole: Not found in post_state')
         }
         
         if (actualSafrole && !('error' in actualSafrole)) {
           console.log('Actual pendingSet:', JSON.stringify(
-            actualSafrole.pendingSet?.map((v: any) => ({
+            (actualSafrole as SafroleState).pendingSet?.map((v: any) => ({
               bandersnatch: v.bandersnatch,
               ed25519: v.ed25519,
             })),
             null,
             2
           ))
-          console.log('Actual epochRoot:', actualSafrole.epochRoot)
+          console.log('Actual epochRoot:', (actualSafrole as SafroleState).epochRoot)
         } else {
           console.log('Actual safrole:', actualSafrole)
         }

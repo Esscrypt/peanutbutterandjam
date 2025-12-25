@@ -542,11 +542,17 @@ export class StateService {
         break
 
       // C(16) = lastaccout (θ) - Most recent accumulation result
-      case 16:
-        this.accumulationService.setLastAccumulationOutputs(
-          value as Map<bigint, Hex>,
-        )
+      case 16: {
+        // Decoder returns LastAccumulationOutput[] which is { serviceId, hash }[]
+        // Convert to [bigint, Hex][] tuples expected by setLastAccumulationOutputs
+        const decoded = value as unknown as { serviceId: bigint; hash: Hex }[]
+        const tuples: [bigint, Hex][] = decoded.map((item) => [
+          item.serviceId,
+          item.hash,
+        ])
+        this.accumulationService.setLastAccumulationOutputs(tuples)
         break
+      }
 
       // C(255, s) = accounts (δ) - Service accounts (handled separately per service)
       case 255: {

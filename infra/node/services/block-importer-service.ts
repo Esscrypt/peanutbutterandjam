@@ -20,6 +20,7 @@ import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import {
   bytesToHex,
   type EventBusService,
+  type Hex,
   hexToBytes,
   logger,
   zeroHash,
@@ -222,16 +223,51 @@ export class BlockImporterService extends BaseService {
       return safeError(blockHeaderValidationError)
     }
 
-    // Update previous block's state root to parent_state_root BEFORE processing guarantees
+    // Temporarily update previous block's state root for anchor validation
     // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
-    // This must happen before guarantee validation because guarantees may reference the parent block
-    // as an anchor, and the parent block's state root must be correct for validation to pass
+    // This is needed for validateGuarantees because anchor validation checks state_root
+    let previousStateRoot: Hex | null = null
     if (this.recentHistoryService.getRecentHistory().length > 0) {
       const previousEntry =
         this.recentHistoryService.getRecentHistory()[
           this.recentHistoryService.getRecentHistory().length - 1
         ]
+      previousStateRoot = previousEntry.stateRoot
       previousEntry.stateRoot = block.header.priorStateRoot
+    }
+
+    // PRE-VALIDATE guarantees BEFORE other state mutations (assurances, accumulation, etc.)
+    // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),
+    // the report is "simply ignored" - meaning NO state changes occur for the block.
+    const [validateError, validateResult] = this.guarantorService.validateGuarantees(
+      block.body.guarantees,
+      block.header.timeslot,
+    )
+    if (validateError) {
+      // Revert state_root change on error
+      if (previousStateRoot !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+        const previousEntry =
+          this.recentHistoryService.getRecentHistory()[
+            this.recentHistoryService.getRecentHistory().length - 1
+          ]
+        previousEntry.stateRoot = previousStateRoot
+      }
+      return safeError(validateError)
+    }
+    if (validateResult?.error) {
+      // Revert state_root change on validation failure
+      if (previousStateRoot !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+        const previousEntry =
+          this.recentHistoryService.getRecentHistory()[
+            this.recentHistoryService.getRecentHistory().length - 1
+          ]
+        previousEntry.stateRoot = previousStateRoot
+      }
+      logger.warn('[BlockImporter] Guarantee validation failed, no state changes applied', {
+        error: validateResult.error,
+        slot: block.header.timeslot.toString(),
+      })
+      return safeResult(undefined)
     }
 
     // Gray Paper: Process assurances FIRST, then guarantees
@@ -257,7 +293,7 @@ export class BlockImporterService extends BaseService {
 
     // Process guarantees AFTER assurances
     // This allows new work reports to be added to cores that were freed by assurances
-    const [guaranteeValidationError, reporters] =
+    const [guaranteeValidationError, guaranteeResult] =
       this.guarantorService.applyGuarantees(
         block.body.guarantees,
         block.header.timeslot,
@@ -265,16 +301,23 @@ export class BlockImporterService extends BaseService {
     if (guaranteeValidationError) {
       return safeError(guaranteeValidationError)
     }
-    if (!reporters) {
+    if (!guaranteeResult) {
       return safeError(new Error('Guarantee validation failed'))
     }
+    
+    // If guarantee returned an error after assurances, treat as block invalid
+    // (bad_code_hash for ejected services is caught by pre-validation above)
+    if (guaranteeResult.error) {
+      return safeError(new Error(`Guarantee validation failed: ${guaranteeResult.error}`))
+    }
 
-    // Process winnersMark from block header if present
+    // Process winnersMark from block header if present (for non-epoch-transition blocks)
     // Gray Paper Eq. 262-266: H_winnersmark = Z(ticketaccumulator) when e' = e ∧ m < Cepochtailstart ≤ m' ∧ |ticketaccumulator| = Cepochlen
     // winnersMark appears at the first block after contest period ends (phase >= contestDuration)
     // This contains the Z-sequenced tickets that will become seal tickets on the next epoch transition
-    if (block.header.winnersMark) {
-      logger.info('[BlockImporter] Processing winnersMark from block header', {
+    // Note: For epoch transition blocks, winnersMark is already processed above (before emitEpochTransition)
+    if (block.header.winnersMark && !isEpochTransition) {
+      logger.info('[BlockImporter] Processing winnersMark from block header (for next epoch)', {
         slot: block.header.timeslot.toString(),
         winnersMarkLength: block.header.winnersMark.length,
       })
@@ -286,14 +329,11 @@ export class BlockImporterService extends BaseService {
     // process tickets from block body
     // Gray Paper Eq. 289-292: xt_tickets ∈ sequence{⟨xt_entryindex, xt_proof⟩}
     // Gray Paper Eq. 321-324: Tickets in block body should be added to ticket accumulator
-    // Note: Extrinsic tickets include proof, but accumulator only stores (st_id, st_entryindex)  // Check if this is an epoch transition
-    const isNewEpoch = this.clockService.isEpochTransition(
-      block.header.timeslot,
-    )
-
+    // Note: Extrinsic tickets include proof, but accumulator only stores (st_id, st_entryindex)
+    // Use epochMark presence to determine if this is an epoch transition (consistent with above)
     const [ticketError] = await this.ticketService.applyTickets(
       block.body.tickets,
-      isNewEpoch,
+      isEpochTransition,
     )
     if (ticketError) {
       return safeError(ticketError)
@@ -346,6 +386,7 @@ export class BlockImporterService extends BaseService {
     // Must be called BEFORE accumulation so accumulation stats are fresh for this block
     this.statisticsService.resetPerBlockStats()
 
+    // Run accumulation for available work reports
     const accumulationResult = await this.accumulationService.applyTransition(
       block.header.timeslot,
       availableWorkReports, // Newly available work reports (ρ̂) from assurances
@@ -354,13 +395,15 @@ export class BlockImporterService extends BaseService {
       return safeError(accumulationResult.err)
     }
 
+    const lastAccumulationOutputs = this.accumulationService.getLastAccumulationOutputs()
+
+    logger.debug('[BlockImporter] Accumulation result', {
+      slot: block.header.timeslot.toString(),
+      accumulationOutputsSize: lastAccumulationOutputs.length,
+    })
+
     // Update accout belt before adding to recent history
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
-    // where s is the encoded accumulation outputs from this block
-    // Note: merklizewb([]) returns zero hash, so we always update even with empty outputs
-    const lastAccumulationOutputs =
-      this.accumulationService.getLastAccumulationOutputs()
-
     const [beltError] = this.recentHistoryService.updateAccoutBelt(
       lastAccumulationOutputs,
     )
@@ -369,7 +412,6 @@ export class BlockImporterService extends BaseService {
     }
 
     // Add block to recent history at the end, after all state updates are complete
-    // Gray Paper: recent (β) is part of the state and must be updated for every block
     const [headerHashForHistoryError, headerHashForHistory] =
       calculateBlockHashFromHeader(block.header, this.configService)
     if (headerHashForHistoryError) {
@@ -377,8 +419,6 @@ export class BlockImporterService extends BaseService {
     }
 
     // Add entry with temporary state root (will be updated after we calculate final state root)
-    // Note: Previous entry's state_root was already updated above before processing guarantees
-    // Gray Paper eq 41: New entry's state_root should be 0x0 initially
     this.recentHistoryService.addBlockWithSuperPeak(
       {
         headerHash: headerHashForHistory,
@@ -390,7 +430,7 @@ export class BlockImporterService extends BaseService {
           ]),
         ),
       },
-      block.header.priorStateRoot, // Still pass for consistency, but update already happened above
+      block.header.priorStateRoot,
     )
 
     // Update statistics (activity) for this block at the end, after accumulation is processed

@@ -110,4 +110,3 @@ execSync(`git checkout ${currentVersion}`, {
 
 console.log('\n✅ Done!')
 
-

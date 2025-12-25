@@ -581,13 +581,13 @@ function main() {
       const rawBytes = hexToBytes(rawLastaccout)
       const [decodeError, decoded] = decodeLastAccumulationOutputs(rawBytes)
       if (!decodeError && decoded) {
-        // Convert array to Map for encoding
-        const lastaccoutMap = new Map<bigint, Hex>()
-        for (const item of decoded.value) {
-          lastaccoutMap.set(item.serviceId, item.hash)
-        }
+        // Convert array to sequence format for encoding
+        const lastaccoutSeq: [bigint, Hex][] = decoded.value.map((item) => [
+          item.serviceId,
+          item.hash,
+        ])
         const [encodeError, encoded] =
-          encodeLastAccumulationOutputs(lastaccoutMap)
+          encodeLastAccumulationOutputs(lastaccoutSeq)
         if (!encodeError && encoded) {
           console.log('  Decoded and re-encoded lastaccout')
           compareBytes(rawBytes, encoded)

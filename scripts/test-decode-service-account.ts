@@ -143,4 +143,3 @@ if (error072Corr) {
   console.log('SUCCESS - Balance:', result072Corr.value.balance.toString())
 }
 
-

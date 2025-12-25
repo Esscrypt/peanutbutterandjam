@@ -39,6 +39,23 @@ export class PVMRAM implements RAM {
   private readonly pageAccess: Map<[bigint, bigint], MemoryAccessType> =
     new Map()
 
+  // JIP-6 trace support: Track last load/store for each instruction step
+  // These are updated by readOctets/writeOctets and should be cleared after each instruction
+  public lastLoadAddress = 0
+  public lastLoadValue = 0n
+  public lastStoreAddress = 0
+  public lastStoreValue = 0n
+
+  /**
+   * Clear last load/store tracking (call at start of each instruction)
+   */
+  public clearLastMemoryOp(): void {
+    this.lastLoadAddress = 0
+    this.lastLoadValue = 0n
+    this.lastStoreAddress = 0
+    this.lastStoreValue = 0n
+  }
+
   // Debug: Track full history of all instructions that interacted with each address
   private readonly addressInteractionHistory: Map<
     bigint,
@@ -122,7 +139,6 @@ export class PVMRAM implements RAM {
     const readOnlyZoneStartAddress = this.roDataAddress
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
-
 
     // Always reinitialize structure with actual sizes from the program
     // This ensures the structure matches the program's memory layout
@@ -609,6 +625,17 @@ export class PVMRAM implements RAM {
     const end = addr + length
 
     // Gray Paper pvm.tex line 145: fault address is page start: Cpvmpagesize × ⌊min(x) ÷ Cpvmpagesize⌋
+    // Helper to track load and return result
+    const trackLoadAndReturn = (data: Uint8Array): [Uint8Array, null] => {
+      this.lastLoadAddress = addr
+      // Convert bytes to u64 value (little-endian, pad to 8 bytes)
+      const padded = new Uint8Array(8)
+      padded.set(data.slice(0, Math.min(8, data.length)))
+      const view = new DataView(padded.buffer)
+      this.lastLoadValue = view.getBigUint64(0, true)
+      return [data, null]
+    }
+
     // Output section
     if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
       const offset = addr - this.argumentDataAddress
@@ -616,7 +643,7 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.argumentData.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.argumentData.slice(offset, offset + length))
     }
 
     // Stack section
@@ -626,7 +653,7 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.stack.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.stack.slice(offset, offset + length))
     }
 
     // heap region: from heapStartAddress to currentHeapPointer (includes padding)
@@ -636,7 +663,7 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.heap.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.heap.slice(offset, offset + length))
     }
 
     // Read-only data section: roDataAddress ≤ i < roDataAddressEnd (data)
@@ -650,7 +677,7 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.roData.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.roData.slice(offset, offset + length))
     }
 
     return [null, this.getPageIndex(address) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
@@ -673,6 +700,16 @@ export class PVMRAM implements RAM {
     const length = values.length
     const end = addr + length
 
+    // Helper to track store after successful write
+    const trackStore = (): void => {
+      this.lastStoreAddress = addr
+      // Convert bytes to u64 value (little-endian, pad to 8 bytes)
+      const padded = new Uint8Array(8)
+      padded.set(values.slice(0, Math.min(8, values.length)))
+      const view = new DataView(padded.buffer)
+      this.lastStoreValue = view.getBigUint64(0, true)
+    }
+
     // Match Go WriteRAMBytes structure exactly
     // Go implementation: checks bounds, then directly copies (no array growth)
     if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
@@ -684,6 +721,7 @@ export class PVMRAM implements RAM {
       // Go doesn't check array size - assumes it's correct if bounds check passes
       // If array is too small, this will throw (matching Go's behavior)
       this.argumentData.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -695,6 +733,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (no array growth)
       this.stack.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -708,6 +747,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (arrays are grown via allocatePages or here)
       this.heap.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -719,6 +759,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (no array growth)
       this.roData.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -885,14 +926,21 @@ export class PVMRAM implements RAM {
         [startAddress, endAddress],
         pageAccess,
       ] of this.pageAccess.entries()) {
-        if (addr >= startAddress && addr < endAddress && pageAccess !== 'none') {
+        if (
+          addr >= startAddress &&
+          addr < endAddress &&
+          pageAccess !== 'none'
+        ) {
           isReadable = true
           break
         }
       }
       if (!isReadable) {
         // Found an address that's not readable - return fault at page boundary
-        return [false, this.getPageIndex(addr) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
+        return [
+          false,
+          this.getPageIndex(addr) * BigInt(MEMORY_CONFIG.PAGE_SIZE),
+        ]
       }
     }
     return [true, null]

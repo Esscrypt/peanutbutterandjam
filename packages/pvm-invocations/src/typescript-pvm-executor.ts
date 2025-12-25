@@ -33,7 +33,11 @@ import type {
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import types that aren't exported from main index - use relative path to source
-import { ACCUMULATE_ERROR_CODES, ACCUMULATE_FUNCTIONS, GENERAL_FUNCTIONS } from '../../pvm/src/config'
+import {
+  ACCUMULATE_ERROR_CODES,
+  ACCUMULATE_FUNCTIONS,
+  GENERAL_FUNCTIONS,
+} from '../../pvm/src/config'
 import type { AccumulateHostFunctionContext } from '../../pvm/src/host-functions/accumulate/base'
 
 /**
@@ -129,35 +133,31 @@ export class TypeScriptPVMExecutor extends PVM {
     // When traceSubfolder is undefined, trace dumping is disabled
     const executionLogs = this.getExecutionLogs()
     if (executionLogs.length > 0 && this.traceSubfolder) {
-      // Write to pvm-traces folder in workspace root (same as WasmPVMExecutor)
-      // traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
-      const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
-      const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
-      // Write trace with typescript executor type, block number, and serviceId
-      // Include serviceId to avoid collisions when multiple services execute in the same slot
-      // Encode full accumulate inputs for comparison with jamduna traces (not just encodedArgs which is t+s+len)
-      const [encodeError, encodedInputs] = encodeVariableSequence(
-        inputs,
-        encodeAccumulateInput,
-      )
-      const filepath = writeTraceDump(
-        executionLogs,
-        this.traceHostFunctionLogs.length > 0
-          ? this.traceHostFunctionLogs
-          : undefined,
-        traceOutputDir,
-        undefined,
-        timeslot, // blockNumber
-        'typescript', // executorType - generates typescript-{slot}-{invocationIndex}-{serviceId}.log format
-        _serviceId, // serviceId - unique per service, matches jamduna trace structure
-        encodeError ? undefined : encodedInputs, // Full encoded accumulate inputs for jamduna format comparison
-        invocationIndex, // Invocation index (accseq iteration) - same for all services in a batch
-      )
-      if (!filepath) {
-        console.warn(
-          `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
-        )
+      // Extract yield from the updated implications pair (if execution succeeded)
+      const updatedContext = marshallingResult?.context as ImplicationsPair | undefined
+      const yieldHash = updatedContext?.[0].yield ?? undefined
+      
+      // Determine error code based on result
+      // result is Uint8Array (success), 'PANIC', or 'OOG'
+      let errorCode: number | undefined
+      if (error) {
+        errorCode = 1 // General error
+      } else if (marshallingResult?.result === 'PANIC') {
+        errorCode = 1 // PANIC = error code 1
+      } else if (marshallingResult?.result === 'OOG') {
+        errorCode = 2 // OOG = error code 2
       }
+      // If result is Uint8Array, it's a success - no error code
+      
+      this.writeTraceDumpWithOutput(
+        executionLogs,
+        inputs,
+        timeslot,
+        _serviceId,
+        invocationIndex ?? 0,
+        yieldHash,
+        errorCode,
+      )
     }
 
     if (error || !marshallingResult) {
@@ -186,7 +186,6 @@ export class TypeScriptPVMExecutor extends PVM {
       const currentStep = this.executionStep
       const gasBefore = this.state.gasCounter
       const serviceId = implicationsPair[0].id
-      
 
       // Gray Paper: Apply gas cost (10 gas for all host functions)
       const gasCost = 10n
@@ -198,12 +197,16 @@ export class TypeScriptPVMExecutor extends PVM {
         step: currentStep,
         hostCallId,
         gasBefore,
-        gasAfter: isOOG ? this.state.gasCounter : this.state.gasCounter - gasCost, // Will be updated after execution if not OOG
+        gasAfter: isOOG
+          ? this.state.gasCounter
+          : this.state.gasCounter - gasCost, // Will be updated after execution if not OOG
         serviceId,
       }
       this.traceHostFunctionLogs.push(hostLogEntry)
 
       if (isOOG) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
         return RESULT_CODES.OOG
       }
 
@@ -226,7 +229,9 @@ export class TypeScriptPVMExecutor extends PVM {
         // Log panic for debugging
         if (result === RESULT_CODES.PANIC) {
           const hostFunctionName = this.getHostFunctionName(hostCallId)
-          logger.error('[TypeScriptPVMExecutor] Accumulate host function PANIC', {
+          logger.error(
+            '[TypeScriptPVMExecutor] Accumulate host function PANIC',
+            {
             hostFunctionId: hostCallId.toString(),
             hostFunctionName,
             serviceId: serviceId.toString(),
@@ -236,7 +241,8 @@ export class TypeScriptPVMExecutor extends PVM {
             gasAfter: this.state.gasCounter.toString(),
             registers: this.state.registerState.map((r) => r.toString()),
             faultAddress: this.state.faultAddress?.toString() ?? null,
-          })
+            },
+          )
         }
 
         return result
@@ -328,17 +334,24 @@ export class TypeScriptPVMExecutor extends PVM {
 
     // Deduct additional gas cost if specified (e.g., TRANSFER deducts gas_limit on success)
     // Gray Paper: TRANSFER gas cost is 10 + l on success (base 10 already deducted in context mutator)
-    if (result.additionalGasCost !== undefined && result.additionalGasCost > 0n) {
+    if (
+      result.additionalGasCost !== undefined &&
+      result.additionalGasCost > 0n
+    ) {
       if (this.state.gasCounter < result.additionalGasCost) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
         return RESULT_CODES.OOG
       }
       this.state.gasCounter -= result.additionalGasCost
     }
-
+    
     // Log panic for debugging
     if (result.resultCode === RESULT_CODES.PANIC) {
       const hostFunctionName = this.getHostFunctionName(hostCallId)
-      logger.error('[TypeScriptPVMExecutor] Accumulate host function PANIC in handler', {
+      logger.error(
+        '[TypeScriptPVMExecutor] Accumulate host function PANIC in handler',
+        {
         hostFunctionId: hostCallId.toString(),
         hostFunctionName,
         serviceId: implicationsPair[0].id.toString(),
@@ -348,9 +361,10 @@ export class TypeScriptPVMExecutor extends PVM {
         registers: this.state.registerState.map((r) => r.toString()),
         faultAddress: this.state.faultAddress?.toString() ?? null,
         faultInfo: result.faultInfo,
-      })
+        },
+      )
     }
-
+    
     return result.resultCode
   }
 
@@ -433,7 +447,9 @@ export class TypeScriptPVMExecutor extends PVM {
     // Log panic for debugging
     if (result?.resultCode === RESULT_CODES.PANIC) {
       const hostFunctionName = this.getHostFunctionName(hostCallId)
-      logger.error('[TypeScriptPVMExecutor] General host function PANIC in handler', {
+      logger.error(
+        '[TypeScriptPVMExecutor] General host function PANIC in handler',
+        {
         hostFunctionId: hostCallId.toString(),
         hostFunctionName,
         serviceId: implicationsPair[0].id.toString(),
@@ -443,7 +459,8 @@ export class TypeScriptPVMExecutor extends PVM {
         registers: this.state.registerState.map((r) => r.toString()),
         faultAddress: this.state.faultAddress?.toString() ?? null,
         faultInfo: result.faultInfo,
-      })
+        },
+      )
     }
 
     return result?.resultCode ?? null
@@ -548,6 +565,61 @@ export class TypeScriptPVMExecutor extends PVM {
     return {
       serviceId: imX.id,
       accounts: imX.state.accounts,
+    }
+  }
+
+  /**
+   * Write trace dump with output/error files for jamduna format
+   */
+  private writeTraceDumpWithOutput(
+    executionLogs: Array<{
+      step: number
+      pc: bigint
+      instructionName: string
+      opcode: string
+      gas: bigint
+      registers: string[]
+      loadAddress?: number
+      loadValue?: bigint
+      storeAddress?: number
+      storeValue?: bigint
+    }>,
+    inputs: AccumulateInput[],
+    timeslot: bigint,
+    serviceId: bigint,
+    invocationIndex: number,
+    yieldHash: Uint8Array | undefined,
+    errorCode: number | undefined,
+  ): void {
+    const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
+    const traceOutputDir = join(baseTraceDir, this.traceSubfolder!)
+    
+    // Encode full accumulate inputs for comparison with jamduna traces
+    const [encodeError, encodedInputs] = encodeVariableSequence(
+      inputs,
+      encodeAccumulateInput,
+    )
+    
+    const filepath = writeTraceDump(
+      executionLogs,
+      this.traceHostFunctionLogs.length > 0
+        ? this.traceHostFunctionLogs
+        : undefined,
+      traceOutputDir,
+      undefined,
+      timeslot, // blockNumber
+      'typescript', // executorType
+      serviceId, // serviceId
+      encodeError ? undefined : encodedInputs, // accumulate_input
+      invocationIndex, // invocation index
+      yieldHash, // accumulate output (yield hash)
+      errorCode, // error code
+    )
+    
+    if (!filepath) {
+      console.warn(
+        `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
+      )
     }
   }
 }

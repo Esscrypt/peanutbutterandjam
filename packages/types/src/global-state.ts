@@ -458,7 +458,7 @@ export type StateComponent =
   /** Recent activity (β) - Recent blocks and accumulation outputs */
   | Recent
   /** Last accumulation output (θ) - Most recent accumulation result */
-  | Map<bigint, Hex>
+  | [bigint, Hex][]
   /** Safrole state (γ) - Consensus protocol internal state */
   | SafroleState
   /** Service accounts (δ) - All service (smart contract) state */
@@ -492,8 +492,10 @@ export interface GlobalState {
   /** 2. Recent activity (β) - Chapter C(3): Recent blocks and accumulation outputs */
   recent: Recent
   /** 3. Last accumulation output (θ) - Chapter C(16): Most recent accumulation result */
-  //lastaccout ∈ sequence{tuple{serviceid, hash}}
-  lastAccumulationOutput: Map<bigint, Hex>
+  // Gray Paper: lastaccout ∈ sequence{tuple{serviceid, hash}}
+  // CRITICAL: This is a SEQUENCE - same service can appear multiple times if it accumulates
+  // in different invocations with different yields. Order matters!
+  lastAccumulationOutput: [bigint, Hex][]
   /** 4. Safrole state (γ) - Chapter C(4): Consensus protocol internal state */
   safrole: SafroleState
   /** 5. Service accounts (δ) - Chapter C(255): All service (smart contract) state */

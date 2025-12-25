@@ -293,7 +293,9 @@ export class WasmPVMExecutor {
     )
     if (encodeError || !encoded) {
       return safeError(
-        new Error(`Failed to encode accumulate inputs: ${encodeError?.message}`),
+        new Error(
+          `Failed to encode accumulate inputs: ${encodeError?.message}`,
+        ),
       )
     }
     const encodedAccumulateInputs = encoded
@@ -390,10 +392,10 @@ export class WasmPVMExecutor {
             // Gray Paper: l_X = min(4, ℓ), where ℓ = fskip
             // Gray Paper pvm.tex line 251-255: If l_X=0 (no operand bytes), immed_X defaults to 0
             if (fskip > 0) {
-            const operandStart = pcIndex + 1
-            if (operandStart < codeArray.length) {
-              // Read the first byte (host function ID)
-              hostCallId = BigInt(codeArray[operandStart])
+              const operandStart = pcIndex + 1
+              if (operandStart < codeArray.length) {
+                // Read the first byte (host function ID)
+                hostCallId = BigInt(codeArray[operandStart])
               }
             } else {
               // No operand bytes - host call ID defaults to 0

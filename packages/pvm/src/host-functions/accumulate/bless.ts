@@ -67,12 +67,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper pvm_invocations.tex lines 696-699:
     // a = decode[4]{memory[a:4*Ccorecount]} when Nrange(a,4*Ccorecount) ⊆ readable(memory), error otherwise
     const assignersLength = BigInt(this.configService.numCores) * 4n
-    
+
     const [assignersData, faultAddress] = ram.readOctets(
       assignersOffset,
       assignersLength,
     )
-    
+
     // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (faultAddress || !assignersData) {
@@ -86,12 +86,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper pvm_invocations.tex lines 700-703:
     // z = {build{...}} when Nrange(o,12n) ⊆ readable(memory), error otherwise
     const accessorsLength = numberOfAlwaysAccessors * 12n
-    
+
     const [accessorsData, accessorsFaultAddress] = ram.readOctets(
       alwaysAccessorsOffset,
       accessorsLength,
     )
-    
+
     // Gray Paper line 705: (panic, registers_7, ...) when {z, a} ∋ error
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (!accessorsData || accessorsFaultAddress) {

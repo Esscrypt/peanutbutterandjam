@@ -99,6 +99,8 @@ export function generateTraceFilename(
  * @param serviceId - Optional service ID to include in trace-style filename
  * @param accumulateInput - Optional accumulate input bytes (encoded args) to write alongside trace
  * @param invocationIndex - Optional invocation index (accseq iteration) for jamduna directory structure
+ * @param accumulateOutput - Optional accumulate output (yield hash, 32 bytes) to write as 'output' file
+ * @param errorCode - Optional error code to write as 'err' file (1 byte)
  * @returns The filepath where the trace was written, or undefined if writing failed
  */
 export function writeTraceDump(
@@ -109,6 +111,11 @@ export function writeTraceDump(
     opcode: string
     gas: bigint
     registers: string[]
+    // JIP-6 trace support
+    loadAddress?: number
+    loadValue?: bigint
+    storeAddress?: number
+    storeValue?: bigint
   }>,
   hostFunctionLogs?: Array<{
     step: number
@@ -124,6 +131,8 @@ export function writeTraceDump(
   serviceId?: number | bigint | string,
   accumulateInput?: Uint8Array,
   invocationIndex?: number,
+  accumulateOutput?: Uint8Array,
+  errorCode?: number,
 ): string | undefined {
   if (executionLogs.length === 0) {
     // No logs to write
@@ -159,7 +168,7 @@ export function writeTraceDump(
     }
 
     // Track which steps have execution logs to ensure host function logs appear
-    const executionLogSteps = new Set(executionLogs.map(log => log.step))
+    const executionLogSteps = new Set(executionLogs.map((log) => log.step))
 
     // Format trace lines in jamduna format
     for (const log of executionLogs) {
@@ -180,10 +189,14 @@ export function writeTraceDump(
       const registersStr = log.registers.join(', ')
       const gasValue = log.gas.toString()
 
-      // Format: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
-      // Matches jamduna format exactly
+      // Format: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...] Load:[<ADDR>,<VALUE>] Store:[<ADDR>,<VALUE>]
+      // Extended format includes JIP-6 load/store info
+      const loadAddr = log.loadAddress ?? 0
+      const loadVal = log.loadValue ?? 0n
+      const storeAddr = log.storeAddress ?? 0
+      const storeVal = log.storeValue ?? 0n
       traceLines.push(
-        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}]`,
+        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}] Load:[${loadAddr},${loadVal}] Store:[${storeAddr},${storeVal}]`,
       )
     }
 
@@ -203,7 +216,13 @@ export function writeTraceDump(
 
     // Create filename (use provided filename, or generate based on parameters)
     const traceFilename =
-      filename ?? generateTraceFilename(blockNumber, executorType, serviceId, invocationIndex)
+      filename ??
+      generateTraceFilename(
+        blockNumber,
+        executorType,
+        serviceId,
+        invocationIndex,
+      )
     const filepath = join(targetDir, traceFilename)
 
     // Write to file
@@ -215,10 +234,29 @@ export function writeTraceDump(
     if (accumulateInput && accumulateInput.length > 0) {
       // Generate accumulate_input filename based on trace filename
       // e.g., typescript-2-0.log -> typescript-2-0-accumulate_input.bin
-      const accumulateInputFilename = traceFilename.replace('.log', '-accumulate_input.bin')
+      const accumulateInputFilename = traceFilename.replace(
+        '.log',
+        '-accumulate_input.bin',
+      )
       const accumulateInputPath = join(targetDir, accumulateInputFilename)
       writeFileSync(accumulateInputPath, accumulateInput)
-      logger.debug(`[TraceDump] Wrote accumulate_input to: ${accumulateInputPath}`)
+      logger.debug(
+        `[TraceDump] Wrote accumulate_input to: ${accumulateInputPath}`,
+      )
+    }
+
+    // Write accumulate output or error file if provided
+    // jamduna format: 'output' (32-byte yield hash) or 'err' (1-byte error code)
+    if (accumulateOutput && accumulateOutput.length > 0) {
+      const outputFilename = traceFilename.replace('.log', '-output.bin')
+      const outputPath = join(targetDir, outputFilename)
+      writeFileSync(outputPath, accumulateOutput)
+      logger.debug(`[TraceDump] Wrote output to: ${outputPath}`)
+    } else if (errorCode !== undefined) {
+      const errFilename = traceFilename.replace('.log', '-err.bin')
+      const errPath = join(targetDir, errFilename)
+      writeFileSync(errPath, new Uint8Array([errorCode]))
+      logger.debug(`[TraceDump] Wrote err to: ${errPath}`)
     }
 
     return filepath

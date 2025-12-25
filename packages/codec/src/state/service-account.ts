@@ -204,6 +204,7 @@ export function encodeServiceAccount(
 export function encodeServiceAccountForInfo(
   account: ServiceAccountCore,
   minbalance: bigint,
+  computedItems?: bigint, // Optional: computed items (2 * requests.size + storage.size)
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
@@ -235,9 +236,11 @@ export function encodeServiceAccountForInfo(
 
   // Gray Paper pvm_invocations.tex: encode[4]{items}
   // 1 × 4-byte field = 4 bytes
+  // Use computedItems if provided (dynamically computed from requests/storage sizes),
+  // otherwise fall back to stored account.items
   const itemsBytes = new Uint8Array(4)
   const itemsView = new DataView(itemsBytes.buffer)
-  itemsView.setUint32(0, Number(account.items), true)
+  itemsView.setUint32(0, Number(computedItems ?? account.items), true)
   parts.push(itemsBytes)
 
   // Gray Paper pvm_invocations.tex: encode[8]{gratis}

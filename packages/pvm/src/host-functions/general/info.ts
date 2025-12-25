@@ -80,10 +80,16 @@ export class InfoHostFunction extends BaseHostFunction {
     //         encode[4]{items} + encode[8]{gratis} + encode[4]{created, lastacc, parent}
     // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
 
+    // Gray Paper: items = 2 * len(requests) + len(storage)
+    // This MUST be computed dynamically, not read from the stored field,
+    // to reflect the current state of requests and storage Maps
+    const requestsSize = serviceAccount.requests?.size ?? 0
+    const storageSize = serviceAccount.storage?.size ?? 0
+    const computedItems = BigInt(2 * requestsSize + storageSize)
+
     // Calculate minbalance: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
     const baseDeposit = BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT)
-    const itemDeposit =
-      BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * serviceAccount.items
+    const itemDeposit = BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * computedItems
     const byteDeposit =
       BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT) * serviceAccount.octets
     const totalDeposit = baseDeposit + itemDeposit + byteDeposit
@@ -93,9 +99,11 @@ export class InfoHostFunction extends BaseHostFunction {
         : 0n
 
     // Encode using INFO-specific format (96 bytes, includes minbalance)
+    // Pass computedItems to ensure the encoded data reflects the current state
     const [encodeError, info] = encodeServiceAccountForInfo(
       serviceAccount as ServiceAccountCore,
       minbalance,
+      computedItems,
     )
     if (encodeError || !info) {
       return {

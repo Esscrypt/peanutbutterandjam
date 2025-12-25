@@ -61,4 +61,3 @@ if (storageHashHex !== blakeHashFromKey) {
   console.log('   This would mean the storage key k equals blake(value)')
 }
 
-

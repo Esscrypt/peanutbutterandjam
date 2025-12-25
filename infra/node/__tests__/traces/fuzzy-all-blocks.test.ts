@@ -28,6 +28,7 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
+import { decodeRecent } from '@pbnjam/codec'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
@@ -210,6 +211,20 @@ function getStartBlock(): number {
   return 1 // Default to block 1 (genesis)
 }
 
+// Helper function to parse CLI arguments or environment variable for stopping block
+// Usage: STOP_BLOCK=50 bun test ... to stop after processing block 50
+function getStopBlock(): number | undefined {
+  // Check environment variable
+  const envStopBlock = process.env.STOP_BLOCK
+  if (envStopBlock) {
+    const stopBlock = Number.parseInt(envStopBlock, 10)
+    if (!Number.isNaN(stopBlock) && stopBlock >= 1) {
+      return stopBlock
+    }
+  }
+  return undefined // No stop block by default
+}
+
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
 
@@ -368,7 +383,7 @@ describe('Genesis Parse Tests', () => {
         configService: configService,
         accumulationService: accumulatedService,
       })
-
+      recentHistoryService.start()
 
       const stateService = new StateService({
         configService,
@@ -748,6 +763,44 @@ describe('Genesis Parse Tests', () => {
                 2))
             }
             console.error('=====================================\n')
+            
+            // Dump expected and actual values to files for easier comparison
+            const mismatchDir = path.join(STATE_CACHE_DIR, 'mismatches')
+            if (!existsSync(mismatchDir)) {
+              mkdirSync(mismatchDir, { recursive: true })
+            }
+            const keyShort = keyval.key.slice(0, 20)
+            const chapterStr = 'chapterIndex' in keyInfo && !keyInfo.error ? `chapter${keyInfo.chapterIndex}` : 'unknown'
+            const filePrefix = `block${blockNumber.toString().padStart(8, '0')}-${chapterStr}-${keyShort}`
+            
+            // Write hex values
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-expected.hex`), keyval.value)
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-actual.hex`), expectedValue || '')
+            
+            // Write binary values
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-expected.bin`), hexToBytes(keyval.value as Hex))
+            if (expectedValue) {
+              writeFileSync(path.join(mismatchDir, `${filePrefix}-actual.bin`), hexToBytes(expectedValue as Hex))
+            }
+            
+            // Write decoded JSON values
+            if (decodedExpected) {
+              writeFileSync(
+                path.join(mismatchDir, `${filePrefix}-expected.json`),
+                JSON.stringify(decodedExpected, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2)
+              )
+            }
+            if (decodedActual) {
+              writeFileSync(
+                path.join(mismatchDir, `${filePrefix}-actual.json`),
+                JSON.stringify(decodedActual, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2)
+              )
+            }
+            console.log(`📁 Mismatch files dumped to: ${mismatchDir}/${filePrefix}-*`)
           }
           expect(keyval.value).toBe(expectedValue)
         }
@@ -772,8 +825,12 @@ describe('Genesis Parse Tests', () => {
       // Process blocks sequentially
       // Support --start-block CLI argument to start from a specific block
       const startBlock = getStartBlock()
+      const stopBlock = getStopBlock()
       if (startBlock > 1) {
-        console.log(`\n🚀 Starting from block ${startBlock} (--start-block ${startBlock})`)
+        console.log(`\n🚀 Starting from block ${startBlock} (START_BLOCK=${startBlock})`)
+      }
+      if (stopBlock !== undefined) {
+        console.log(`🛑 Will stop after block ${stopBlock} (STOP_BLOCK=${stopBlock})`)
       }
 
       let blockNumber = startBlock
@@ -832,6 +889,41 @@ describe('Genesis Parse Tests', () => {
                 console.warn(`   Storage keys will use blake hashes instead of original keys.`)
               }
             }
+            
+            // Initialize recent history service from pre-state beta chapter (key 0x03)
+            // This ensures the MMR state (accoutBelt) is properly initialized from the pre-state
+            const betaKeyval = blockJsonData.pre_state?.keyvals?.find(
+              (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
+            )
+            if (betaKeyval) {
+              const betaData = hexToBytes(betaKeyval.value as Hex)
+              const [decodeError, decodeResult] = decodeRecent(betaData)
+              if (!decodeError && decodeResult) {
+                console.log(`📂 Decoded recent history:`, {
+                  historyLength: decodeResult.value.history?.length ?? 0,
+                  peaks: decodeResult.value.accoutBelt?.peaks ?? [],
+                  totalCount: decodeResult.value.accoutBelt?.totalCount?.toString() ?? '0',
+                })
+                recentHistoryService.setRecent(decodeResult.value)
+                console.log(`📂 Loaded recent history from pre-state (totalCount: ${decodeResult.value.accoutBelt?.totalCount ?? 0})`)
+              } else {
+                console.warn(`⚠️  Failed to decode beta from pre-state:`, decodeError)
+              }
+            }
+            
+            // Note: stateService.setState already processes all chapters including:
+            // - Chapter 4 (safrole): sets seal keys via sealKeyService.setSealKeys()
+            // - Chapter 6 (entropy): sets entropy via entropyService.setEntropy()
+            // So we don't need to manually load these here.
+            // Just log what was loaded for debugging:
+            const entropyState = entropyService.getEntropy()
+            console.log(`📂 Entropy after setState:`, {
+              accumulator: entropyState.accumulator?.slice(0, 20) + '...',
+              entropy1: entropyState.entropy1?.slice(0, 20) + '...',
+              entropy2: entropyState.entropy2?.slice(0, 20) + '...',
+              entropy3: entropyState.entropy3?.slice(0, 20) + '...',
+            })
+            console.log(`📂 Seal keys after setState: ${sealKeyService.getSealKeys().length} keys`)
 
             // Verify pre-state root matches block header's priorStateRoot
             const [preStateRootError, preStateRoot] = stateService.getStateRoot()
@@ -863,7 +955,7 @@ describe('Genesis Parse Tests', () => {
           // Import the block
           const [importError] = await blockImporterService.importBlock(block)
           if (importError) {
-            throw new Error(`Failed to import block ${blockNumber}: ${importError.message}`)
+            throw new Error(`Failed to import block ${blockNumber}: ${importError.message}, stack: ${importError.stack}`)
           }
           expect(importError).toBeUndefined()
 
@@ -881,6 +973,12 @@ describe('Genesis Parse Tests', () => {
           saveStateCache(blockNumber, serviceAccountsService)
 
           console.log(`✅ Block ${blockNumber} imported and verified successfully`)
+
+          // Check if we should stop after this block
+          if (stopBlock !== undefined && blockNumber >= stopBlock) {
+            console.log(`\n🛑 Stopping after block ${blockNumber} (STOP_BLOCK=${stopBlock})`)
+            hasMoreBlocks = false
+          }
 
           blockNumber++
         } catch (error: any) {

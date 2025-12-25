@@ -93,18 +93,36 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     }
     const currentService = currentAccountEntry.account
 
-    // Check if gratis is set and validate permissions
-    if (gratis === u64(0) && imX.id !== imX.state.registrar) {
-      // Only registrar can create paid services
+    // Gray Paper line 787: HUH when gratis != 0 AND service is not the manager
+    // Only the manager can create services with gratis (free deposit allowance)
+    if (gratis !== u64(0) && imX.id !== imX.state.manager) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Calculate minimum balance required
-    const C_MIN_BALANCE: u64 = u64(1000000) // Gray Paper constant for minimum balance
-    const minBalance = C_MIN_BALANCE
+    // Calculate minimum balance required for the new service
+    // Gray Paper accounts.tex equation (deposits):
+    //   minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    // For a new service with one request entry (codehash, expectedCodeLength):
+    //   items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
+    //   octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
+    const C_BASE_DEPOSIT: u64 = u64(100)
+    const C_ITEM_DEPOSIT: u64 = u64(10)
+    const C_BYTE_DEPOSIT: u64 = u64(1)
+
+    const newServiceItems: u64 = u64(2) // 2 * 1 request + 0 storage
+    const newServiceOctets: u64 = u64(81) + expectedCodeLength // 81 + expected code length
+
+    // Gray Paper: minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    const minBalanceBeforeGratis: u64 =
+      C_BASE_DEPOSIT +
+      C_ITEM_DEPOSIT * newServiceItems +
+      C_BYTE_DEPOSIT * newServiceOctets
+    const minBalance: u64 =
+      minBalanceBeforeGratis > gratis ? minBalanceBeforeGratis - gratis : u64(0)
 
     // Check if current service has sufficient balance
+    // Gray Paper line 786: CASH when s.balance < self.minbalance
     if (currentService.balance < minBalance) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_CASH)
       return new HostFunctionResult(255) // continue execution
@@ -142,12 +160,10 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     newServiceAccount.balance = minBalance
     newServiceAccount.minaccgas = minAccGas
     newServiceAccount.minmemogas = minMemoGas
-    // Calculate items and octets for the new service account
-    // Gray Paper: items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
-    // Gray Paper: octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
-    newServiceAccount.octets = u64(81) + expectedCodeLength
+    // Use already-calculated items and octets for consistency
+    newServiceAccount.octets = newServiceOctets
     newServiceAccount.gratis = gratis
-    newServiceAccount.items = 2 // 2 * 1 request + 0 storage
+    newServiceAccount.items = u32(newServiceItems)
     newServiceAccount.created = u32(timeslot)
     newServiceAccount.lastacc = 0
     newServiceAccount.parent = u32(imX.id)

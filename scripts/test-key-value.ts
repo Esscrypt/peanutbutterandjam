@@ -79,4 +79,3 @@ if (storageHashHex === expectedHash) {
   console.log('   - From a different protocol version')
 }
 
-

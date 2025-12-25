@@ -80,8 +80,12 @@ function parseTraceLine(line: string, lineNumber: number): TraceLine | null {
     return null
   }
 
-  // Parse instruction line: "INSTRUCTION STEP PC Gas: GAS Registers:[r0, r1, ...]"
-  const match = trimmed.match(/^(\w+) (\d+) (\d+) Gas: (\d+) Registers:\[([^\]]+)\]/)
+  // Parse instruction line with optional Load/Store info:
+  // "INSTRUCTION STEP PC Gas: GAS Registers:[r0, r1, ...] Load:[ADDR,VALUE] Store:[ADDR,VALUE]"
+  // or legacy format: "INSTRUCTION STEP PC Gas: GAS Registers:[r0, r1, ...]"
+  const match = trimmed.match(
+    /^(\w+) (\d+) (\d+) Gas: (\d+) Registers:\[([^\]]+)\](?:\s+Load:\[(\d+),(\d+)\]\s+Store:\[(\d+),(\d+)\])?/,
+  )
   if (!match) {
     console.warn(`Failed to parse line ${lineNumber}: ${trimmed}`)
     return null
@@ -92,6 +96,12 @@ function parseTraceLine(line: string, lineNumber: number): TraceLine | null {
   const pc = BigInt(match[3]!)
   const gas = BigInt(match[4]!)
   const registersStr = match[5]!
+
+  // Parse optional load/store info (JIP-6 format)
+  const loadAddress = match[6] ? Number.parseInt(match[6], 10) : 0
+  const loadValue = match[7] ? BigInt(match[7]) : 0n
+  const storeAddress = match[8] ? Number.parseInt(match[8], 10) : 0
+  const storeValue = match[9] ? BigInt(match[9]) : 0n
 
   // Parse registers (comma-separated)
   const registers = registersStr
@@ -106,16 +116,16 @@ function parseTraceLine(line: string, lineNumber: number): TraceLine | null {
 
   const opcode = getOpcode(instructionName)
 
-  // TODO: Extract loads/stores from instruction if available
-  // For now, we'll set them to 0 (no load/store occurred)
-  // This would need to be enhanced based on your trace format
-
   return {
     step,
     pc,
     opcode,
     gas,
     registers,
+    loadAddress,
+    loadValue,
+    storeAddress,
+    storeValue,
   }
 }
 
@@ -124,6 +134,8 @@ function convertTraceToModular(
   outputDir: string,
   compress = false,
   accumulateInputPath?: string,
+  outputPath?: string,
+  errPath?: string,
 ): void {
   if (!existsSync(inputFile)) {
     throw new Error(`Input file not found: ${inputFile}`)
@@ -195,7 +207,9 @@ function convertTraceToModular(
     if (compress) {
       const compressed = gzipSync(buffer)
       writeFileSync(filepath, compressed)
-      console.log(`  Wrote ${filename} (${compressed.length} bytes compressed, ${buffer.length} bytes uncompressed)`)
+      console.log(
+        `  Wrote ${filename} (${compressed.length} bytes compressed, ${buffer.length} bytes uncompressed)`,
+      )
     } else {
       writeFileSync(filepath, buffer)
       console.log(`  Wrote ${filename} (${buffer.length} bytes)`)
@@ -220,7 +234,27 @@ function convertTraceToModular(
     console.log(`  Copied accumulate_input (${stats.length} bytes)`)
   }
 
-  console.log(`\nSuccessfully converted trace to modular format in: ${outputDir}`)
+  // Copy output file (yield hash) if provided
+  // jamduna format: 'output' - 32-byte yield hash
+  if (outputPath && existsSync(outputPath)) {
+    const outputOutputPath = join(outputDir, 'output')
+    copyFileSync(outputPath, outputOutputPath)
+    const stats = readFileSync(outputPath)
+    console.log(`  Copied output (${stats.length} bytes)`)
+  }
+
+  // Copy err file (error code) if provided
+  // jamduna format: 'err' - 1-byte error code
+  if (errPath && existsSync(errPath)) {
+    const errOutputPath = join(outputDir, 'err')
+    copyFileSync(errPath, errOutputPath)
+    const stats = readFileSync(errPath)
+    console.log(`  Copied err (${stats.length} bytes)`)
+  }
+
+  console.log(
+    `\nSuccessfully converted trace to modular format in: ${outputDir}`,
+  )
 }
 
 interface TraceFile {
@@ -232,9 +266,14 @@ interface TraceFile {
   orderedIndex: number // Computed based on order within timeslot
   subfolder?: string
   accumulateInputPath?: string // Path to the accumulate_input binary file if present
+  outputPath?: string // Path to the output binary file (yield hash) if present
+  errPath?: string // Path to the err binary file (error code) if present
 }
 
-function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] {
+function discoverTraceFiles(
+  tracesDir: string,
+  subfolder?: string,
+): TraceFile[] {
   if (!existsSync(tracesDir)) {
     console.warn(`Traces directory not found: ${tracesDir}`)
     return []
@@ -250,6 +289,8 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
     invocationIndex?: number // Parsed from new filename format (if present)
     subfolder?: string
     accumulateInputPath?: string
+    outputPath?: string
+    errPath?: string
   }
 
   const rawTraceFiles: RawTraceFile[] = []
@@ -277,8 +318,12 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
         // - wasm-{timeslot}-{serviceId}.log (legacy format, invocationIndex defaults to 0)
         // - typescript-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
         // - wasm-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
-        const tsMatch = entry.name.match(/^typescript-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/)
-        const wasmMatch = entry.name.match(/^wasm-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/)
+        const tsMatch = entry.name.match(
+          /^typescript-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/,
+        )
+        const wasmMatch = entry.name.match(
+          /^wasm-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/,
+        )
 
         if (tsMatch) {
           const timeslot = tsMatch[1]!
@@ -298,11 +343,26 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
           }
           // Check for accompanying accumulate_input file
           // Pattern: typescript-{timeslot}-{invocationIndex}-{serviceId}-accumulate_input.bin or legacy
-          const accumulateInputFilename = invocationIndex !== undefined
-            ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
-            : `typescript-${timeslot}-${serviceId}-accumulate_input.bin`
+          const accumulateInputFilename =
+            invocationIndex !== undefined
+              ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
+              : `typescript-${timeslot}-${serviceId}-accumulate_input.bin`
           const accumulateInputPath = join(dir, accumulateInputFilename)
           
+          // Check for output file (yield hash)
+          const outputFilename =
+            invocationIndex !== undefined
+              ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-output.bin`
+              : `typescript-${timeslot}-${serviceId}-output.bin`
+          const outputPath = join(dir, outputFilename)
+          
+          // Check for err file (error code)
+          const errFilename =
+            invocationIndex !== undefined
+              ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-err.bin`
+              : `typescript-${timeslot}-${serviceId}-err.bin`
+          const errPath = join(dir, errFilename)
+
           rawTraceFiles.push({
             filename: entry.name,
             filepath: fullPath,
@@ -311,7 +371,11 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
             serviceId,
             invocationIndex,
             subfolder: currentSubfolder,
-            accumulateInputPath: existsSync(accumulateInputPath) ? accumulateInputPath : undefined,
+            accumulateInputPath: existsSync(accumulateInputPath)
+              ? accumulateInputPath
+              : undefined,
+            outputPath: existsSync(outputPath) ? outputPath : undefined,
+            errPath: existsSync(errPath) ? errPath : undefined,
           })
         } else if (wasmMatch) {
           const timeslot = wasmMatch[1]!
@@ -325,11 +389,26 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
             serviceId = wasmMatch[2] ?? '0'
           }
           // Check for accompanying accumulate_input file
-          const accumulateInputFilename = invocationIndex !== undefined
-            ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
-            : `wasm-${timeslot}-${serviceId}-accumulate_input.bin`
+          const accumulateInputFilename =
+            invocationIndex !== undefined
+              ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
+              : `wasm-${timeslot}-${serviceId}-accumulate_input.bin`
           const accumulateInputPath = join(dir, accumulateInputFilename)
           
+          // Check for output file (yield hash)
+          const outputFilename =
+            invocationIndex !== undefined
+              ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-output.bin`
+              : `wasm-${timeslot}-${serviceId}-output.bin`
+          const outputPath = join(dir, outputFilename)
+          
+          // Check for err file (error code)
+          const errFilename =
+            invocationIndex !== undefined
+              ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-err.bin`
+              : `wasm-${timeslot}-${serviceId}-err.bin`
+          const errPath = join(dir, errFilename)
+
           rawTraceFiles.push({
             filename: entry.name,
             filepath: fullPath,
@@ -338,7 +417,11 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
             serviceId,
             invocationIndex,
             subfolder: currentSubfolder,
-            accumulateInputPath: existsSync(accumulateInputPath) ? accumulateInputPath : undefined,
+            accumulateInputPath: existsSync(accumulateInputPath)
+              ? accumulateInputPath
+              : undefined,
+            outputPath: existsSync(outputPath) ? outputPath : undefined,
+            errPath: existsSync(errPath) ? errPath : undefined,
           })
         }
       }
@@ -350,9 +433,12 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
 
   // Sort by subfolder, then timeslot, then invocationIndex (if present), then serviceId, then executor type
   rawTraceFiles.sort((a, b) => {
-    const subfolderCompare = (a.subfolder || '').localeCompare(b.subfolder || '')
+    const subfolderCompare = (a.subfolder || '').localeCompare(
+      b.subfolder || '',
+    )
     if (subfolderCompare !== 0) return subfolderCompare
-    const timeslotDiff = Number.parseInt(a.timeslot, 10) - Number.parseInt(b.timeslot, 10)
+    const timeslotDiff =
+      Number.parseInt(a.timeslot, 10) - Number.parseInt(b.timeslot, 10)
     if (timeslotDiff !== 0) return timeslotDiff
     // Sort by invocationIndex first (if present in both)
     const aInvIdx = a.invocationIndex ?? Number.MAX_SAFE_INTEGER
@@ -360,7 +446,8 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
     const invIdxDiff = aInvIdx - bInvIdx
     if (invIdxDiff !== 0) return invIdxDiff
     // Then by serviceId numerically to establish consistent ordering
-    const serviceIdDiff = Number.parseInt(a.serviceId, 10) - Number.parseInt(b.serviceId, 10)
+    const serviceIdDiff =
+      Number.parseInt(a.serviceId, 10) - Number.parseInt(b.serviceId, 10)
     if (serviceIdDiff !== 0) return serviceIdDiff
     return a.executorType.localeCompare(b.executorType)
   })
@@ -392,6 +479,8 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
       orderedIndex,
       subfolder: raw.subfolder,
       accumulateInputPath: raw.accumulateInputPath,
+      outputPath: raw.outputPath,
+      errPath: raw.errPath,
     })
   }
 
@@ -401,7 +490,7 @@ function discoverTraceFiles(tracesDir: string, subfolder?: string): TraceFile[] 
 async function main() {
   const args = process.argv.slice(2)
   const compress = args.includes('--compress')
-  
+
   // Parse --folder argument
   let targetFolder: string | undefined
   const folderIndex = args.indexOf('--folder')
@@ -425,18 +514,24 @@ async function main() {
 
   // Discover trace files (optionally filtered by folder)
   let traceFiles = discoverTraceFiles(tracesDir)
-  
+
   // Filter by target folder if specified
   if (targetFolder) {
-    traceFiles = traceFiles.filter(tf => 
-      tf.subfolder === targetFolder || tf.subfolder?.startsWith(targetFolder + '/')
+    traceFiles = traceFiles.filter(
+      (tf) =>
+        tf.subfolder === targetFolder ||
+        tf.subfolder?.startsWith(targetFolder + '/'),
     )
   }
 
   if (traceFiles.length === 0) {
     console.log('No trace files found in pvm-traces/')
-    console.log('Expected files matching: typescript-{timeslot}.log or wasm-{timeslot}.log')
-    console.log('Searches recursively in all subfolders (except modular output directories)')
+    console.log(
+      'Expected files matching: typescript-{timeslot}.log or wasm-{timeslot}.log',
+    )
+    console.log(
+      'Searches recursively in all subfolders (except modular output directories)',
+    )
     return
   }
 
@@ -444,7 +539,11 @@ async function main() {
   for (const tf of traceFiles) {
     const subfolderInfo = tf.subfolder ? ` (subfolder: ${tf.subfolder})` : ''
     const accInputInfo = tf.accumulateInputPath ? ' +accumulate_input' : ''
-    console.log(`  - ${tf.filename} (${tf.executorType}, timeslot ${tf.timeslot}, serviceId ${tf.serviceId}, orderedIndex ${tf.orderedIndex}${subfolderInfo}${accInputInfo})`)
+    const outputInfo = tf.outputPath ? ' +output' : ''
+    const errInfo = tf.errPath ? ' +err' : ''
+    console.log(
+      `  - ${tf.filename} (${tf.executorType}, timeslot ${tf.timeslot}, serviceId ${tf.serviceId}, orderedIndex ${tf.orderedIndex}${subfolderInfo}${accInputInfo}${outputInfo}${errInfo})`,
+    )
   }
   console.log()
 
@@ -459,21 +558,22 @@ async function main() {
     // jamduna: {timeslot}/{ordered_index}/{service_id}/
     // e.g., 00000050/0/1985398916/
     // Our output: pvm-traces/{subfolder}/modular/{timeslot}/{ordered_index}/{service_id}/
-    const modularDir = traceFile.executorType === 'wasm' ? 'modular-wasm' : 'modular'
+    const modularDir =
+      traceFile.executorType === 'wasm' ? 'modular-wasm' : 'modular'
     const outputDirParts = [tracesDir]
-    
+
     // Include subfolder in output path if present
     if (traceFile.subfolder) {
       outputDirParts.push(traceFile.subfolder)
     }
-    
+
     outputDirParts.push(
       modularDir,
-      traceFile.timeslot.padStart(8, '0'),      // {timeslot} - 8-digit padded
-      String(traceFile.orderedIndex),            // {ordered_index} - invocation order within timeslot
-      traceFile.serviceId,                       // {service_id} - actual service ID from trace
+      traceFile.timeslot.padStart(8, '0'), // {timeslot} - 8-digit padded
+      String(traceFile.orderedIndex), // {ordered_index} - invocation order within timeslot
+      traceFile.serviceId, // {service_id} - actual service ID from trace
     )
-    
+
     const outputDir = join(...outputDirParts)
 
     console.log('-'.repeat(60))
@@ -484,17 +584,28 @@ async function main() {
     }
 
     try {
-      convertTraceToModular(inputFile, outputDir, compress, traceFile.accumulateInputPath)
+      convertTraceToModular(
+        inputFile,
+        outputDir,
+        compress,
+        traceFile.accumulateInputPath,
+        traceFile.outputPath,
+        traceFile.errPath,
+      )
       successCount++
     } catch (error) {
-      console.error(`  ERROR: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(
+        `  ERROR: ${error instanceof Error ? error.message : String(error)}`,
+      )
       errorCount++
     }
   }
 
   console.log()
   console.log('='.repeat(60))
-  console.log(`Conversion complete: ${successCount} succeeded, ${errorCount} failed`)
+  console.log(
+    `Conversion complete: ${successCount} succeeded, ${errorCount} failed`,
+  )
   console.log('='.repeat(60))
 
   if (errorCount > 0) {
@@ -503,4 +614,3 @@ async function main() {
 }
 
 main()
-

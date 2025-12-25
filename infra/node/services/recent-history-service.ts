@@ -136,9 +136,7 @@ export class RecentHistoryService extends BaseServiceClass {
 
     // NOTE: updateAccoutBelt is called explicitly from BlockImporterService.importBlock()
     // BEFORE this event is triggered. Do NOT call it here to avoid double-updating the MMR.
-
-    // Increment block counter
-    this.currentBlockNumber++
+    // NOTE: currentBlockNumber is now incremented in updateAccoutBelt, not here.
 
     console.log('Recent history updated', {
       historyLength: this.recentHistory.length,
@@ -295,6 +293,12 @@ export class RecentHistoryService extends BaseServiceClass {
       // For decoded pre-state, peaks might be Hex[] (non-null only) or (Hex | null)[]
       // We need to handle both cases
       const peaksArray = recent.accoutBelt.peaks
+      logger.debug('[RecentHistoryService] setRecent: loading MMR peaks', {
+        peaksArrayLength: peaksArray.length,
+        peaksNonNull: peaksArray.filter((p: Hex | null) => p !== null).length,
+        firstPeak: peaksArray[0]?.slice(0, 18) ?? 'null',
+        lastPeak: peaksArray[peaksArray.length - 1]?.slice(0, 18) ?? 'null',
+      })
       this.mmrPeaks = peaksArray.map((p: Hex | null) =>
         p !== null ? hexToBytes(p) : null,
       )
@@ -303,15 +307,26 @@ export class RecentHistoryService extends BaseServiceClass {
       // The encoding expects the full MMR structure with null positions
       this.accoutBelt.peaks = peaksArray
 
-      // totalCount should be the full MMR length (including nulls)
-      // If totalCount is provided, use it; otherwise use the peaks array length
-      this.accoutBelt.totalCount =
-        recent.accoutBelt.totalCount ?? BigInt(this.mmrPeaks.length)
+      // totalCount is the number of items appended to the MMR (block number)
+      // Use the provided totalCount, falling back to 0 if not provided
+      this.accoutBelt.totalCount = recent.accoutBelt.totalCount ?? 0n
+      
+      // Also set currentBlockNumber to match totalCount so subsequent blocks
+      // will continue from the correct count
+      this.currentBlockNumber = this.accoutBelt.totalCount
+      
+      logger.debug('[RecentHistoryService] setRecent: final MMR state', {
+        mmrPeaksLength: this.mmrPeaks.length,
+        mmrPeaksNonNull: this.mmrPeaks.filter(p => p !== null).length,
+        currentBlockNumber: this.currentBlockNumber.toString(),
+        accoutBeltTotalCount: this.accoutBelt.totalCount.toString(),
+      })
     } else {
       // If no peaks provided, clear the belt
       this.mmrPeaks = []
       this.accoutBelt.peaks = []
       this.accoutBelt.totalCount = 0n
+      this.currentBlockNumber = 0n
     }
   }
 
@@ -341,7 +356,10 @@ export class RecentHistoryService extends BaseServiceClass {
       .map((peak) => (peak !== null ? bytesToHex(peak) : null))
       .filter((peak): peak is Hex => peak !== null)
 
-    this.accoutBelt.totalCount = BigInt(updatedRange.length)
+    // totalCount is the number of items appended to the MMR (block number)
+    // Increment currentBlockNumber and use it as totalCount
+    this.currentBlockNumber++
+    this.accoutBelt.totalCount = this.currentBlockNumber
 
     return safeResult(undefined)
   }
@@ -507,18 +525,21 @@ export class RecentHistoryService extends BaseServiceClass {
    *
    * @param lastaccout - Accumulation output pairings from AccumulationService
    */
-  public updateAccoutBelt(lastaccout: Map<bigint, Hex>): Safe<void> {
+  public updateAccoutBelt(lastaccout: [bigint, Hex][]): Safe<void> {
     // Step 1: lastaccout' is provided directly from AccumulationService
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
+    // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
     // This comes from local_fnservouts tracked during accumulation
-
+    
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     // This is called for EVERY block, even when s is empty.
     // When s is empty, merklizewb([]) = H([]) = keccak(empty bytes)
 
     // Step 2: Encode the sequence per Gray Paper equation 29
     // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
-    const encodedSequence: Uint8Array[] = Array.from(lastaccout.entries()).map(
+    // CRITICAL: Gray Paper says the sequence is in order of accumulation, NOT sorted by service ID
+    // The order is determined by the order of accumulation invocations
+    const encodedSequence: Uint8Array[] = lastaccout.map(
       ([serviceId, hash]) => {
         // encode[4](serviceId) - 4-byte little-endian encoding (Gray Paper convention)
         const serviceIdBytes = new Uint8Array(4)
@@ -551,10 +572,18 @@ export class RecentHistoryService extends BaseServiceClass {
       return safeResult(undefined) // Skip update on error
     }
 
-    // Step 4: Use mmrPeaks (full MMR structure with nulls) for mmrappend
-    // mmrappend requires the full MMR structure including null positions
-    // Step 5: Append to MMR belt
-    // accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    logger.debug('[RecentHistoryService] updateAccoutBelt', {
+      lastaccoutSize: lastaccout.length,
+      entries: lastaccout.map(([s, h]) => ({ serviceId: s.toString(), hash: h.slice(0, 18) + '...' })),
+      merklizedRoot: bytesToHex(merklizedRoot),
+      currentBlockNumber: this.currentBlockNumber.toString(),
+    })
+    
+    logger.debug('[RecentHistoryService] Before MMR append', {
+      mmrPeaksLength: this.mmrPeaks.length,
+      peakHashes: this.mmrPeaks.map((p, i) => p ? `[${i}]: ${bytesToHex(p).slice(0, 18)}...` : `[${i}]: null`),
+    })
+
     const [mmrError, updatedRange] = mmrappend(
       this.mmrPeaks,
       merklizedRoot,
@@ -566,6 +595,11 @@ export class RecentHistoryService extends BaseServiceClass {
       return safeResult(undefined) // Skip update on error
     }
 
+    logger.debug('[RecentHistoryService] After MMR append', {
+      updatedRangeLength: updatedRange.length,
+      updatedPeakHashes: updatedRange.map((p, i) => p ? `[${i}]: ${bytesToHex(p).slice(0, 18)}...` : `[${i}]: null`),
+    })
+
     // Step 6: Update internal MMR peaks (preserves null positions)
     this.mmrPeaks = updatedRange
 
@@ -575,8 +609,10 @@ export class RecentHistoryService extends BaseServiceClass {
       peak !== null ? bytesToHex(peak) : null,
     )
 
-    // totalCount should be the full MMR length (including nulls)
-    this.accoutBelt.totalCount = BigInt(updatedRange.length)
+    // totalCount is the number of items appended to the MMR (block number)
+    // Increment currentBlockNumber and use it as totalCount
+    this.currentBlockNumber++
+    this.accoutBelt.totalCount = this.currentBlockNumber
 
     return safeResult(undefined)
   }

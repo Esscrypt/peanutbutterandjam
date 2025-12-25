@@ -53,7 +53,10 @@ interface TraceLocation {
  * Get all trace locations for a block in fuzzy format
  * Returns array of {invocationIndex, serviceId} pairs
  */
-function getFuzzyTraceLocations(block: number, subpath: string): TraceLocation[] {
+function getFuzzyTraceLocations(
+  block: number,
+  subpath: string,
+): TraceLocation[] {
   const blockStr = block.toString().padStart(8, '0')
   const blockDir = join(
     process.cwd(),
@@ -74,17 +77,17 @@ function getFuzzyTraceLocations(block: number, subpath: string): TraceLocation[]
   try {
     // Read invocation directories (0, 1, etc.)
     const invocationDirs = readdirSync(blockDir, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name)
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => dirent.name)
       .sort((a, b) => Number.parseInt(a) - Number.parseInt(b))
 
     for (const invocationIndex of invocationDirs) {
       const invocationDir = join(blockDir, invocationIndex)
-      
+
       // Read service directories within each invocation
       const serviceDirs = readdirSync(invocationDir, { withFileTypes: true })
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name)
+        .filter((dirent) => dirent.isDirectory())
+        .map((dirent) => dirent.name)
         .sort((a, b) => Number.parseInt(a) - Number.parseInt(b))
 
       for (const serviceId of serviceDirs) {
@@ -156,7 +159,7 @@ async function runComparison(
 
     proc.on('close', (code) => {
       const output = stdout + stderr
-      
+
       // Check for missing trace directory error
       if (output.includes('Trace directory not found')) {
         resolve({
@@ -166,7 +169,7 @@ async function runComparison(
         })
         return
       }
-      
+
       // Check if there are differences in the output
       // The comparison script prints "Differences: X" where X > 0 means mismatch
       const diffMatch = output.match(/Differences:\s+(\d+)/)
@@ -219,11 +222,15 @@ async function main() {
 
   const isFuzzy = isFuzzyFormat(subpath)
 
-  console.log(`🔍 Searching for first trace mismatch in blocks ${startBlock}-${endBlock}...`)
+  console.log(
+    `🔍 Searching for first trace mismatch in blocks ${startBlock}-${endBlock}...`,
+  )
   console.log(`   Format: ${formatFlag}`)
   console.log(`   Executor: ${executorType}`)
   console.log(`   Subpath: ${subpath}`)
-  console.log(`   Mode: ${isFuzzy ? 'fuzzy (per invocation/service)' : 'standard'}\n`)
+  console.log(
+    `   Mode: ${isFuzzy ? 'fuzzy (per invocation/service)' : 'standard'}\n`,
+  )
 
   let checkedCount = 0
   let skippedCount = 0
@@ -239,13 +246,15 @@ async function main() {
     if (isFuzzy) {
       // For fuzzy formats, get all trace locations and compare each
       const locations = getFuzzyTraceLocations(block, subpath)
-      
+
       if (locations.length === 0) {
         skippedCount++
         continue
       }
 
-      process.stdout.write(`Checking Block ${block} (${locations.length} traces)... `)
+      process.stdout.write(
+        `Checking Block ${block} (${locations.length} traces)... `,
+      )
       checkedCount++
 
       let blockSuccess = true
@@ -277,10 +286,14 @@ async function main() {
       if (blockSuccess) {
         console.log('✅ Match')
       } else if (failedLocation) {
-        console.log(`❌ MISMATCH at invocation ${failedLocation.invocationIndex}, service ${failedLocation.serviceId}\n`)
+        console.log(
+          `❌ MISMATCH at invocation ${failedLocation.invocationIndex}, service ${failedLocation.serviceId}\n`,
+        )
         console.log('='.repeat(80))
         console.log(`First mismatch at Block ${block}`)
-        console.log(`Invocation: ${failedLocation.invocationIndex}, Service: ${failedLocation.serviceId}`)
+        console.log(
+          `Invocation: ${failedLocation.invocationIndex}, Service: ${failedLocation.serviceId}`,
+        )
         console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
         console.log('='.repeat(80))
         console.log('\nComparison output:')
@@ -293,7 +306,11 @@ async function main() {
       checkedCount++
       traceCount++
 
-      const { success, output, error } = await runComparison(block, formatFlag, executorType)
+      const { success, output, error } = await runComparison(
+        block,
+        formatFlag,
+        executorType,
+      )
 
       if (error === 'no_trace') {
         console.log('⏭️  No trace (skipped)')
@@ -314,7 +331,9 @@ async function main() {
   }
 
   console.log('\n' + '='.repeat(80))
-  console.log(`✅ Checked ${checkedCount} blocks, ${traceCount} traces, skipped ${skippedCount} blocks (no traces)`)
+  console.log(
+    `✅ Checked ${checkedCount} blocks, ${traceCount} traces, skipped ${skippedCount} blocks (no traces)`,
+  )
   console.log('✅ All checked blocks match!')
   console.log('='.repeat(80))
   process.exit(0)

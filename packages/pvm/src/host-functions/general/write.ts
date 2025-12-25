@@ -255,13 +255,6 @@ export class WriteHostFunction extends BaseHostFunction {
     // Write key-value pair to service account's storage
     serviceAccount.storage.set(keyHex, value)
 
-    // DEBUG: Log the write operation
-    console.log('[WRITE Host Function] Storage key written', {
-      keyHex: keyHex.slice(0, 20) + '...',
-      valueLength: value.length,
-      storageSize: serviceAccount.storage.size,
-    })
-
     // Update storage footprint
     serviceAccount.items = this.calculateItems(serviceAccount, key, false)
     serviceAccount.octets = this.calculateOctets(

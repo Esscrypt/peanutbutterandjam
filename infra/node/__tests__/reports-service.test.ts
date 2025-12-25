@@ -352,14 +352,38 @@ describe('Reports - JAM Test Vectors', () => {
             signatures: g.signatures,
           }))
 
-          const [applyError, reporters] = await guarantorService.applyGuarantees(
+          // First validate guarantees (this catches bad_code_hash, bad_service_id, etc.)
+          const [validateError, validateResult] = guarantorService.validateGuarantees(
             guarantees,
             BigInt(vector.input.slot)
           )
 
+          // Check for validation errors
+          if (validateError) {
+            throw validateError
+          }
+
+          // If validation returned an error, use it as the result
+          let result: { reporters: Hex[], error?: string }
+          if (validateResult?.error) {
+            result = { reporters: [], error: validateResult.error }
+          } else {
+            // Validation passed, now apply guarantees
+            const [applyError, applyResult] = guarantorService.applyGuarantees(
+              guarantees,
+              BigInt(vector.input.slot)
+            )
+
+            // Check for unexpected errors
+            if (applyError) {
+              throw applyError
+            }
+            result = applyResult
+          }
+
           // Update core statistics from guarantees (normally done in blockImporterService.applyBlockDeltas)
           // This is needed because the test calls applyGuarantees directly instead of importBlock
-          if (!applyError) {
+          if (!result.error) {
             // Create a mock block body with the guarantees for statistics update
             const mockBlockBody = {
               guarantees,
@@ -376,15 +400,15 @@ describe('Reports - JAM Test Vectors', () => {
           }
 
           // Check if error case is expected
-          if (applyError) {
+          if (result.error) {
             if (vector.output?.err !== undefined) {
               // Expected error case - validation will check output.err
-              expect(applyError.message).toBe(vector.output.err)
+              expect(result.error).toBe(vector.output.err)
               // When error is expected, skip post_state validation
               // return
             } else {
-              // Unexpected error - rethrow
-              throw applyError
+              // Unexpected error - throw it
+              throw new Error(result.error)
             }
           } else {
             // Success case - validate output.ok if present
@@ -399,11 +423,11 @@ describe('Reports - JAM Test Vectors', () => {
 
               // Validate reporters (Ed25519 public keys of validators who signed guarantees)
               if (outputOk.reporters) {
-                expect(reporters).toBeDefined()
-                expect(reporters).not.toBeNull()
+                expect(result.reporters).toBeDefined()
+                expect(result.reporters).not.toBeNull()
                 // Sort both arrays for comparison (order might differ)
                 const expectedReporters = [...outputOk.reporters].sort()
-                const actualReporters = [...(reporters || [])].sort()
+                const actualReporters = [...(result.reporters || [])].sort()
                 expect(actualReporters).toEqual(expectedReporters)
               }
 
@@ -433,7 +457,7 @@ describe('Reports - JAM Test Vectors', () => {
 
           // Step 8: Validate post_state against service states
           // Only validate post_state when there was no error (or error was not expected)
-          if (!applyError || vector.output?.err === undefined) {
+          if (!result.error || vector.output?.err === undefined) {
             // Smoke check: has at least one guarantee and recent history present
             expect(vector.input.guarantees.length).toBeGreaterThan(0)
             expect(vector.pre_state.recent_blocks.history.length).toBeGreaterThan(0)

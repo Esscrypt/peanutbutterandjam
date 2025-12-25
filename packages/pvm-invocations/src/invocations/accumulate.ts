@@ -5,10 +5,14 @@
  * Gray Paper Reference: pvm.tex
  */
 
+import { encodeNatural } from '@pbnjam/codec'
 import {
-  encodeNatural,
-} from '@pbnjam/codec'
-import { blake2bHash, concatBytes, type Hex, hexToBytes, logger } from '@pbnjam/core'
+  blake2bHash,
+  concatBytes,
+  type Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
 import type {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
@@ -132,7 +136,7 @@ export class AccumulatePVM {
     // Gray Paper: Get service code from preimages using codehash
     // Gray Paper accounts.tex equation 42-43: c = none when codehash not in preimages
     const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
-    
+
     // Gray Paper pvm_invocations.tex line 162: Process deferred transfers FIRST,
     // even when c = none or len(c) > Cmaxservicecodesize
     // postxferstate = basestate except balance += sum of deferred transfer amounts
@@ -145,10 +149,13 @@ export class AccumulatePVM {
     // Gray Paper pvm_invocations.tex line 162: when c = none ∨ len(c) > Cmaxservicecodesize
     // Return: (poststate=postxferstate, defxfers=[], yield=none, gasused=0, provisions=[])
     if (!serviceCode) {
-      logger.debug('[AccumulatePVM] Service code not found in preimages - returning post-transfer state', {
-        serviceId: serviceId.toString(),
-        codeHash: serviceAccount.codehash,
-      })
+      logger.debug(
+        '[AccumulatePVM] Service code not found in preimages - returning post-transfer state',
+        {
+          serviceId: serviceId.toString(),
+          codeHash: serviceAccount.codehash,
+        },
+      )
       // Gray Paper: Return valid acconeout with post-transfer state, 0 gas, empty defxfers/provisions
       // resultCode = HALT since no execution occurred (but not an error)
       return {
@@ -230,12 +237,11 @@ export class AccumulatePVM {
       return { ok: false, err: 'BAD' }
     }
 
-
     // Gray Paper pvm_invocations.tex equation 163: encode{t, s, len(i)}
     // Where len(i) is the COUNT of elements in the sequence i, not the byte length!
     // Evidence: Line 360 uses len(i) as array index: registers[11] < len(i)
     // This means len(i) must be the count of elements, not byte length.
-    // 
+    //
     // Gray Paper equation 163: C(Ψ_M(c, 5, g, encode{t, s, len(i)}, F, I(...)))
     // The inputs sequence i is accessed via FETCH host function (selectors 14 and 15),
     // not from memory, so len(i) is used to validate array bounds, not to read bytes.
@@ -316,7 +322,7 @@ export class AccumulatePVM {
     logger.debug('[AccumulatePVM] Before collapse - checking transfers', {
       serviceId: serviceId.toString(),
       xfersCount: updatedImX.xfers.length,
-      xfers: updatedImX.xfers.map(t => ({
+      xfers: updatedImX.xfers.map((t) => ({
         source: t.source.toString(),
         dest: t.dest.toString(),
         amount: t.amount.toString(),
@@ -336,7 +342,6 @@ export class AccumulatePVM {
       resultCode = RESULT_CODES.HALT
     }
 
-   
     // Collapse result based on termination type using updated context from Ψ_M
     logger.debug('[AccumulatePVM] Collapsing accumulate result', {
       serviceId: serviceId.toString(),
@@ -418,10 +423,13 @@ export class AccumulatePVM {
     // This object will be modified by host functions during execution
     // CRITICAL: Must deep clone storage, preimages, and requests Maps to prevent
     // modifications from affecting other invocations or the original state
-    updatedAccounts.set(serviceId, this.deepCloneServiceAccount({
-      ...serviceAccount,
-      balance: serviceAccount.balance + totalTransferAmount,
-    }))
+    updatedAccounts.set(
+      serviceId,
+      this.deepCloneServiceAccount({
+        ...serviceAccount,
+        balance: serviceAccount.balance + totalTransferAmount,
+      }),
+    )
 
     // Return new PartialState with updated accounts Map
     // All other fields (stagingset, authqueue, privileges) are preserved by reference
@@ -735,7 +743,9 @@ export class AccumulatePVM {
       logger.debug('[AccumulatePVM] Poststate accounts after accumulation', {
         serviceId: imX.id.toString(),
         accountsCount: imX.state.accounts.size,
-        accountIds: Array.from(imX.state.accounts.keys()).map((id) => id.toString()),
+        accountIds: Array.from(imX.state.accounts.keys()).map((id) =>
+          id.toString(),
+        ),
         service0Balance: imX.state.accounts.get(0n)?.balance.toString(),
       })
       return {

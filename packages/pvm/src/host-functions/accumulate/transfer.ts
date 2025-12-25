@@ -13,7 +13,7 @@ import {
  *
  * Gray Paper Specification:
  * - Function ID: 20 (transfer)
- * - Gas Cost: 10 + amount
+ * - Gas Cost: 10 + l (gasLimit) on success, 10 on error
  * - Parameters: registers[7-10] = dest, amount, l, o
  *   - dest: destination service account ID
  *   - amount: transfer amount
@@ -32,7 +32,7 @@ import {
 export class TransferHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.TRANSFER
   readonly name = 'transfer'
-  readonly gasCost = 10n // Base cost, actual cost is 10 + amount
+  readonly gasCost = 10n // Base cost, actual cost is 10 + gasLimit on success (Gray Paper: g = 10 + t)
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, gasCounter } = context
@@ -71,15 +71,10 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Calculate actual gas cost (10 + amount)
-    const actualGasCost = 10n + amount
-
-    // Validate execution
-    if (gasCounter < actualGasCost) {
-      return {
-        resultCode: RESULT_CODES.OOG,
-      }
-    }
+    // Gray Paper: Gas cost is 10 + t, where t = gasLimit on success, t = 0 on error
+    // We don't check OOG here - that's handled by the context mutator after we return
+    // The gas cost depends on success/failure, so we just validate the base cost of 10
+    // The additionalGasCost returned will be applied after this function returns
 
     // Get the current implications context
     const [imX] = implications
@@ -116,7 +111,7 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 835: CASH when b < (imX_self)_sa_minbalance
     // Gray Paper accounts.tex: sa_minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
     const balanceAfterTransfer = currentService.balance - amount
-    
+
     // Calculate minbalance according to Gray Paper accounts.tex
     const C_BASEDEPOSIT = 100n
     const C_ITEMDEPOSIT = 10n
@@ -125,9 +120,10 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const itemDeposit = C_ITEMDEPOSIT * currentService.items
     const byteDeposit = C_BYTEDEPOSIT * currentService.octets
     const totalDeposit = baseDeposit + itemDeposit + byteDeposit
-    const minbalance = totalDeposit > currentService.gratis 
-      ? totalDeposit - currentService.gratis 
-      : 0n
+    const minbalance =
+      totalDeposit > currentService.gratis
+        ? totalDeposit - currentService.gratis
+        : 0n
 
     if (balanceAfterTransfer < minbalance) {
       this.setAccumulateError(registers, 'CASH')
@@ -148,13 +144,13 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
 
     // Add transfer to xfers list
     imX.xfers.push(deferredTransfer)
-    
+
     logger.debug('[TransferHostFunction] Added transfer to xfers', {
       serviceId: imX.id.toString(),
       destinationServiceId: destinationServiceId.toString(),
       amount: amount.toString(),
       xfersLength: imX.xfers.length,
-      xfers: imX.xfers.map(t => ({
+      xfers: imX.xfers.map((t) => ({
         source: t.source.toString(),
         dest: t.dest.toString(),
         amount: t.amount.toString(),
@@ -174,9 +170,12 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
 
     // Verify we have the same reference (should always be true, but check for safety)
     if (accountInState !== currentService) {
-      logger.warn('[TransferHostFunction] Account reference mismatch, using account from state map', {
-        serviceId: imX.id.toString(),
-      })
+      logger.warn(
+        '[TransferHostFunction] Account reference mismatch, using account from state map',
+        {
+          serviceId: imX.id.toString(),
+        },
+      )
     }
 
     const balanceBefore = accountInState.balance

@@ -61,13 +61,15 @@ import {
  * var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
  */
 export function encodeLastAccumulationOutputs(
-  lastAccumulationOutput: Map<bigint, Hex>,
+  lastAccumulationOutput: [bigint, Hex][],
 ): Safe<Uint8Array> {
   try {
     // Gray Paper: var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
     // Variable-length sequence of tuples
+    // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
+    // Do NOT sort - the order is determined by the order of accumulation invocations.
     const [error, encodedData] = encodeVariableSequence(
-      Array.from(lastAccumulationOutput.entries()).map(([serviceId, hash]) => ({
+      lastAccumulationOutput.map(([serviceId, hash]) => ({
         serviceId,
         hash,
       })),

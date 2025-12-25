@@ -161,7 +161,7 @@ export function encodePrivileges(
   } else {
     // v0.7.1+ encoding: manager, assigners, delegator, registrar, alwaysaccers
     // Gray Paper merklization.tex C(12): encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
-    
+
     // Assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
     const coreCount = configService.numCores
     const paddedAssigners = Array.from(privileges.assigners)
@@ -318,7 +318,7 @@ export function decodePrivileges(
   } else {
     // v0.7.1+ decoding: manager, assigners, delegator, registrar, alwaysaccers
     // Gray Paper merklization.tex C(12): encode{encode[4]{manager, assigners, delegator, registrar}, alwaysaccers}
-    
+
     // Decode assigners: sequence[Ccorecount]{encode[4]{serviceid}} - fixed-length sequence, no length prefix
     // Gray Paper: assigners ∈ sequence[Ccorecount]{serviceid}
     // This is ALWAYS exactly Ccorecount elements (one per core), not variable
