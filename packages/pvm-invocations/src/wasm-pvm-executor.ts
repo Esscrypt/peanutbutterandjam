@@ -35,6 +35,7 @@ import type {
 import { safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
 import { InstructionRegistry } from '../../pvm/src/instructions/registry'
+import { logger } from '@pbnjam/core'
 
 /**
  * WASM module exports type from instantiate function
@@ -48,7 +49,6 @@ export class WasmPVMExecutor {
   private readonly entropyService: IEntropyService
   private readonly workspaceRoot: string
   private readonly traceSubfolder?: string
-  private initializationPromise: Promise<void> | null = null
 
   private currentState: PVMState | null = null
   private executionLogs: Array<{
@@ -142,29 +142,29 @@ export class WasmPVMExecutor {
   /**
    * Ensure WASM module is initialized (lazy initialization)
    */
-  private async ensureInitialized(): Promise<void> {
-    if (this.wasm) {
-      return
-    }
+  // private async ensureInitialized(): Promise<void> {
+  //   if (this.wasm) {
+  //     return
+  //   }
 
-    // If initialization is already in progress, wait for it
-    if (this.initializationPromise) {
-      return this.initializationPromise
-    }
+  //   // If initialization is already in progress, wait for it
+  //   if (this.initializationPromise) {
+  //     return this.initializationPromise
+  //   }
 
-    // Start initialization
-    this.initializationPromise = (async () => {
-      // Instantiate WASM module using wasmAsInit
-      const wasm = await instantiate(this.wasmModuleBytes, {})
+  //   // Start initialization
+  //   this.initializationPromise = (async () => {
+  //     // Instantiate WASM module using wasmAsInit
+  //     const wasm = await instantiate(this.wasmModuleBytes, {})
 
-      // Initialize PVM with PVMRAM
-      wasm.init(wasm.RAMType.PVMRAM)
+  //     // Initialize PVM with PVMRAM
+  //     wasm.init(wasm.RAMType.PVMRAM)
 
-      this.wasm = wasm
-    })()
+  //     this.wasm = wasm
+  //   })()
 
-    await this.initializationPromise
-  }
+  //   await this.initializationPromise
+  // }
 
   /**
    * Force re-instantiation of WASM module
@@ -173,7 +173,6 @@ export class WasmPVMExecutor {
   private async reinitializeWasm(): Promise<void> {
     // Clear existing module
     this.wasm = null
-    this.initializationPromise = null
 
     // Instantiate fresh WASM module
     const wasm = await instantiate(this.wasmModuleBytes, {})
@@ -546,12 +545,12 @@ export class WasmPVMExecutor {
         serviceId, // serviceId - included to prevent file collisions
       )
       if (!filepath) {
-        console.warn(
+        logger.warning(
           `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
         )
       }
     } else {
-      console.warn(
+      logger.warning(
         `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
       )
     }
@@ -573,12 +572,12 @@ export class WasmPVMExecutor {
       if (!decodeError && decodeResult) {
         updatedContext = decodeResult.value
       } else {
-        console.warn(
+        logger.warning(
           `[WasmPVMExecutor] Failed to decode updated implications: ${decodeError?.message}`,
         )
       }
     } else {
-      console.warn(
+      logger.warning(
         `[WasmPVMExecutor] No updated implications from WASM (updatedEncodedContext.length=${updatedEncodedContext?.length ?? 0})`,
       )
     }

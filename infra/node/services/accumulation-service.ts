@@ -84,6 +84,9 @@ export class AccumulationService extends BaseService {
   // Gray Paper: accumulationstatistics[s] = tuple{N, gas}
   // This tracks the count and total gas used for accumulations per service
   private accumulationStatistics: Map<bigint, [number, number]> = new Map()
+  // Track onTransfers statistics per service: tuple{count, gas}
+  // This tracks the count of deferred transfers received and gas used processing them
+  private onTransfersStatistics: Map<bigint, [number, number]> = new Map()
   // Track immediate items for current transition to ensure their packages are added to accumulated
   private currentImmediateItems: ReadyItem[] = []
   // Track package hashes of new queued items for slot m (justbecameavailable^Q)
@@ -978,6 +981,19 @@ export class AccumulationService extends BaseService {
     const workItemCount = operandTuples.filter(
       (input) => input.type === 0,
     ).length
+
+    // Track onTransfers statistics if service received deferred transfers
+    // Track even if result failed, since transfers were still received
+    // onTransfersCount and onTransfersGasUsed are only tracked for versions < 0.7.1
+    if (defxfersForService.length > 0) {
+      const gasUsed = result.ok ? result.value.gasused : 0n
+      this.trackOnTransfersStatistics(
+        serviceId,
+        defxfersForService.length,
+        gasUsed,
+      )
+    }
+
     if (result.ok) {
       this.trackAccumulationOutput(serviceId, result.value, currentSlot)
 
@@ -1104,62 +1120,6 @@ export class AccumulationService extends BaseService {
     return this.clonePartialState(this.createPartialState())
   }
 
-  /**
-   * Create a partial state snapshot using initial storage instead of current global state storage.
-   * Gray Paper: storage changes within accpar do NOT propagate between accseq iterations.
-   * Balances DO propagate (for transfer handling), but storage/preimages/requests are preserved.
-   */
-  private createPartialStateSnapshotWithInitialStorage(
-    initialStorageSnapshot?: Map<bigint, {
-      storage: Map<Hex, Uint8Array>
-      preimages: Map<Hex, Uint8Array>
-      requests: Map<Hex, Map<bigint, PreimageRequestStatus>>
-    }>,
-  ): PartialState {
-    if (!initialStorageSnapshot) {
-      return this.createPartialStateSnapshot()
-    }
-
-    // Start with current partial state (includes current balances from transfers)
-    const currentState = this.createPartialState()
-
-    // Replace storage/preimages/requests with initial snapshot
-    const accountsWithInitialStorage = new Map<bigint, ServiceAccount>()
-    for (const [serviceId, account] of currentState.accounts) {
-      const initialData = initialStorageSnapshot.get(serviceId)
-      if (initialData) {
-        // Use current account but with INITIAL storage
-        accountsWithInitialStorage.set(serviceId, {
-          ...account,
-          storage: new Map(Array.from(initialData.storage.entries()).map(([k, v]) => [k, new Uint8Array(v)])),
-          preimages: new Map(Array.from(initialData.preimages.entries()).map(([k, v]) => [k, new Uint8Array(v)])),
-          requests: new Map(Array.from(initialData.requests.entries()).map(([hash, byLen]) => [
-            hash,
-            new Map(Array.from(byLen.entries()).map(([len, status]) => [len, [...status]])),
-          ])),
-        })
-      } else {
-        // New service created during accumulation - use empty storage
-        accountsWithInitialStorage.set(serviceId, {
-          ...account,
-          storage: new Map(),
-          preimages: new Map(),
-          requests: new Map(),
-        })
-      }
-    }
-
-    console.log('[createPartialStateSnapshotWithInitialStorage] Created snapshot', {
-      service0CurrentBalance: currentState.accounts.get(0n)?.balance.toString(),
-      service0InitialStorageSize: initialStorageSnapshot.get(0n)?.storage.size ?? 0,
-      service0SnapshotStorageSize: accountsWithInitialStorage.get(0n)?.storage.size ?? 0,
-    })
-
-    return {
-      ...currentState,
-      accounts: accountsWithInitialStorage,
-    }
-  }
 
   /**
    * Deep clone a partial state to prevent modifications from affecting the original.
@@ -1212,53 +1172,13 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Deep clone accounts map to preserve storage state
-   */
-  private deepCloneAccounts(
-    accounts: Map<bigint, ServiceAccount>,
-  ): Map<bigint, ServiceAccount> {
-    const clonedAccounts = new Map<bigint, ServiceAccount>()
-    for (const [serviceId, account] of accounts) {
-      // Clone storage map
-      const clonedStorage = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.storage) {
-        clonedStorage.set(key, new Uint8Array(value))
-      }
-
-      // Clone preimages map
-      const clonedPreimages = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.preimages) {
-        clonedPreimages.set(key, new Uint8Array(value))
-      }
-
-      // Clone requests map (nested structure)
-      const clonedRequests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-      for (const [hash, byLen] of account.requests) {
-        const clonedByLen = new Map<bigint, PreimageRequestStatus>()
-        for (const [len, status] of byLen) {
-          clonedByLen.set(len, [...status])
-        }
-        clonedRequests.set(hash, clonedByLen)
-      }
-
-      clonedAccounts.set(serviceId, {
-        ...account,
-        storage: clonedStorage,
-        preimages: clonedPreimages,
-        requests: clonedRequests,
-      })
-    }
-    return clonedAccounts
-  }
-
-  /**
    * Track accumulation output for local_fnservouts
    * Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
    */
   private trackAccumulationOutput(
     serviceId: bigint,
     output: AccumulateOutput,
-    currentSlot: bigint,
+    _currentSlot: bigint,
   ): void {
     const { yield: yieldHash } = output
 
@@ -1312,6 +1232,35 @@ export class AccumulationService extends BaseService {
     // Update serviceStats.accumulation in activity state
     if (this.statisticsService) {
       this.statisticsService.updateServiceAccumulationStats(serviceId, newStats)
+    }
+  }
+
+  /**
+   * Track onTransfers statistics for a service
+   * Tracks the count of deferred transfers received and gas used processing them
+   * Only tracked for JAM versions < 0.7.1
+   *
+   * @param serviceId - Service ID that received the transfers
+   * @param transferCount - Number of deferred transfers received
+   * @param gasUsed - Gas used processing the transfers
+   */
+  private trackOnTransfersStatistics(
+    serviceId: bigint,
+    transferCount: number,
+    gasUsed: bigint,
+  ): void {
+    const currentStats = this.onTransfersStatistics.get(serviceId) || [0, 0]
+
+    const newStats: [number, number] = [
+      currentStats[0] + transferCount, // Count of deferred transfers received
+      currentStats[1] + Number(gasUsed), // Total gas used processing transfers
+    ]
+    this.onTransfersStatistics.set(serviceId, newStats)
+
+    // Update serviceStats.onTransfersCount and onTransfersGasUsed in activity state
+    // Only for versions < 0.7.1 (checked inside updateServiceOnTransfersStats)
+    if (this.statisticsService) {
+      this.statisticsService.updateServiceOnTransfersStats(serviceId, newStats)
     }
   }
 
@@ -1756,6 +1705,8 @@ export class AccumulationService extends BaseService {
     // are accumulated before processAccumulation and their statistics must be preserved
     this.accumulationOutputs = []
     this.accumulationStatistics.clear()
+    // Clear onTransfers statistics at start of each block (per-block, not cumulative)
+    this.onTransfersStatistics.clear()
     // Clear accumulated services for lastacc tracking (Gray Paper eq 410-412)
     this.accumulatedServicesForLastacc.clear()
 
@@ -2653,27 +2604,5 @@ export class AccumulationService extends BaseService {
       registrar: newRegistrar.toString(),
       assigners: newAssigners.map((a) => a.toString()),
     })
-  }
-
-  /**
-   * Helper method to compare two bigint arrays for equality
-   */
-  private arraysEqual(a: bigint[], b: bigint[]): boolean {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
-  }
-
-  /**
-   * Helper method to compare two Maps for equality
-   */
-  private mapsEqual(a: Map<bigint, bigint>, b: Map<bigint, bigint>): boolean {
-    if (a.size !== b.size) return false
-    for (const [key, value] of a) {
-      if (!b.has(key) || b.get(key) !== value) return false
-    }
-    return true
   }
 }

@@ -157,7 +157,7 @@ export class TypeScriptPVMExecutor extends PVM {
         invocationIndex ?? 0,
         yieldHash,
         errorCode,
-      )
+        )
     }
 
     if (error || !marshallingResult) {
@@ -617,7 +617,7 @@ export class TypeScriptPVMExecutor extends PVM {
     )
     
     if (!filepath) {
-      console.warn(
+      logger.warn(
         `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
       )
     }

@@ -305,10 +305,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,

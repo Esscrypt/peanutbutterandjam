@@ -72077,15 +72077,16 @@
   (local $4 i64)
   (local $5 i64)
   (local $6 i64)
-  (local $7 i64)
-  (local $8 i32)
-  (local $9 i64)
+  (local $7 i32)
+  (local $8 i64)
+  (local $9 i32)
   (local $10 i32)
-  (local $11 i32)
+  (local $11 i64)
   (local $12 i64)
   (local $13 i32)
   (local $14 i32)
-  (local $15 i32)
+  (local $15 i64)
+  (local $16 i32)
   global.get $~lib/memory/__stack_pointer
   i32.const 60
   i32.sub
@@ -72117,7 +72118,7 @@
        global.get $~lib/memory/__stack_pointer
        local.get $1
        i32.load offset=8
-       local.tee $10
+       local.tee $9
        i32.store offset=8
        global.get $~lib/memory/__stack_pointer
        local.get $1
@@ -72125,7 +72126,7 @@
        global.get $~lib/memory/__stack_pointer
        local.get $1
        i32.load offset=12
-       local.tee $11
+       local.tee $10
        i32.store offset=12
        global.get $~lib/memory/__stack_pointer
        local.get $1
@@ -72138,7 +72139,7 @@
        i32.store
        local.get $2
        i64.load offset=56
-       local.set $5
+       local.set $11
        global.get $~lib/memory/__stack_pointer
        local.get $2
        i32.store
@@ -72146,41 +72147,41 @@
        i32.const -64
        i32.sub
        i64.load
-       local.set $9
+       local.set $12
        global.get $~lib/memory/__stack_pointer
        local.get $2
        i32.store
        local.get $2
        i64.load offset=72
-       local.set $6
+       local.set $5
        global.get $~lib/memory/__stack_pointer
        local.get $2
        i32.store
        local.get $2
        i64.load offset=80
-       local.set $7
+       local.set $6
        global.get $~lib/memory/__stack_pointer
        local.get $2
        i32.store
        local.get $2
        i64.load offset=88
-       local.set $12
+       local.set $8
        global.get $~lib/memory/__stack_pointer
        local.get $2
        i32.store
        local.get $2
        i64.load offset=96
        local.set $3
-       local.get $9
+       local.get $12
        i64.const 4294967295
        i64.gt_u
        br_if $folding-inner1
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $10
-       local.get $5
+       local.get $9
+       local.get $11
        i32.wrap_i64
        i32.const 32
        call $assembly/types/RAM#readOctets@override
@@ -72208,82 +72209,97 @@
        local.tee $1
        i32.store offset=24
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.load
-       local.tee $10
+       local.tee $9
        i32.store offset=28
        global.get $~lib/memory/__stack_pointer
        local.get $0
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.store offset=36
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.load offset=4
-       local.tee $11
+       local.tee $10
        i32.store offset=32
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.load
-       local.tee $11
+       local.tee $10
        i32.store offset=16
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.store offset=32
        global.get $~lib/memory/__stack_pointer
-       local.get $11
        local.get $10
+       local.get $9
        i64.load32_u
        call $assembly/host-functions/accumulate/base/BaseAccumulateHostFunction#findAccountEntry
-       local.tee $11
+       local.tee $10
        i32.store offset=40
-       local.get $11
+       local.get $10
        i32.eqz
        br_if $folding-inner2
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.load offset=4
-       local.tee $11
+       local.tee $10
        i32.store offset=44
-       local.get $12
-       i64.eqz
+       local.get $8
+       i64.const 0
+       i64.ne
        if (result i32)
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store
-        local.get $10
+        local.get $9
         i32.load
         local.set $13
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store offset=16
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.load offset=4
         local.tee $14
         i32.store
         local.get $13
         local.get $14
-        i32.load offset=24
+        i32.load offset=12
         i32.ne
        else
         i32.const 0
        end
        br_if $folding-inner2
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.store
-       local.get $11
-       i64.load offset=8
-       i64.const 1000000
+       local.get $12
+       i64.const 81
+       i64.add
+       local.tee $11
+       i64.const 120
+       i64.add
+       local.tee $15
+       local.get $8
+       i64.sub
+       i64.const 0
+       local.get $8
+       local.get $15
        i64.lt_u
+       select
+       local.tee $15
+       local.get $10
+       i64.load offset=8
+       i64.gt_u
        if
         global.get $~lib/memory/__stack_pointer
         local.get $0
@@ -72300,25 +72316,25 @@
        i64.const 65536
        i64.lt_u
        local.set $13
-       local.get $12
+       local.get $8
        i64.eqz
        if (result i32)
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store
-        local.get $10
+        local.get $9
         i32.load
         local.set $14
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store offset=16
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.load offset=4
-        local.tee $15
+        local.tee $16
         i32.store
         local.get $14
-        local.get $15
+        local.get $16
         i32.load offset=24
         i32.eq
        else
@@ -72331,10 +72347,10 @@
         local.get $0
         i32.store
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store offset=36
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.load offset=4
         local.tee $13
         i32.store offset=32
@@ -72361,13 +72377,13 @@
         end
        else
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store
-        local.get $10
+        local.get $9
         i64.load32_u offset=8
         local.set $3
         i32.const 1
-        local.set $8
+        local.set $7
        end
        global.get $~lib/memory/__stack_pointer
        call $assembly/codec/CompleteServiceAccount#constructor
@@ -72390,33 +72406,31 @@
        local.get $13
        i32.store
        local.get $13
-       i64.const 1000000
+       local.get $15
        i64.store offset=8
        global.get $~lib/memory/__stack_pointer
        local.get $13
        i32.store
        local.get $13
-       local.get $6
+       local.get $5
        i64.store offset=16
        global.get $~lib/memory/__stack_pointer
        local.get $13
        i32.store
        local.get $13
-       local.get $7
+       local.get $6
        i64.store offset=24
        global.get $~lib/memory/__stack_pointer
        local.get $13
        i32.store
        local.get $13
-       local.get $9
-       i64.const 81
-       i64.add
+       local.get $11
        i64.store offset=32
        global.get $~lib/memory/__stack_pointer
        local.get $13
        i32.store
        local.get $13
-       local.get $12
+       local.get $8
        i64.store offset=40
        global.get $~lib/memory/__stack_pointer
        local.get $13
@@ -72440,10 +72454,10 @@
        local.get $13
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.store offset=16
        local.get $13
-       local.get $10
+       local.get $9
        i32.load
        i32.store offset=60
        global.get $~lib/memory/__stack_pointer
@@ -72456,7 +72470,7 @@
        global.get $~lib/memory/__stack_pointer
        local.get $13
        i32.load offset=72
-       local.tee $15
+       local.tee $16
        i32.store
        global.get $~lib/memory/__stack_pointer
        local.get $1
@@ -72464,31 +72478,31 @@
        global.get $~lib/memory/__stack_pointer
        local.get $14
        i32.store offset=32
-       local.get $15
+       local.get $16
        local.get $1
-       local.get $9
+       local.get $12
        local.get $14
        call $assembly/codec/ServiceAccountRequests#set
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $11
+       local.get $10
        i32.store offset=16
-       local.get $11
-       local.get $11
+       local.get $10
+       local.get $10
        i64.load offset=8
-       i64.const 1000000
+       local.get $15
        i64.sub
        i64.store offset=8
        global.get $~lib/memory/__stack_pointer
        local.get $0
        i32.store
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.store offset=56
        global.get $~lib/memory/__stack_pointer
-       local.get $10
+       local.get $9
        i32.load offset=4
        local.tee $1
        i32.store offset=36
@@ -72505,25 +72519,25 @@
        local.get $3
        local.get $13
        call $assembly/host-functions/accumulate/base/BaseAccumulateHostFunction#setAccountEntry
-       local.get $8
+       local.get $7
        if
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store
         global.get $~lib/memory/__stack_pointer
         local.get $0
         i32.store offset=16
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store offset=36
-        local.get $10
+        local.get $9
         i64.load32_u offset=8
         local.set $4
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.store offset=56
         global.get $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         i32.load offset=4
         local.tee $1
         i32.store offset=36
@@ -72564,7 +72578,7 @@
         i32.const 8
         i32.add
         global.set $~lib/memory/__stack_pointer
-        local.get $10
+        local.get $9
         local.get $4
         i64.store32 offset=8
        end

@@ -125,3 +125,5 @@ pvm-traces/
 pvm-expected/
 
 .state-cache/
+
+mismatch-logs/

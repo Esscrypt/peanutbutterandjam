@@ -1,7 +1,7 @@
 import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
-import type { EntropyState } from './global-state'
+import type { EntropyState, RecentHistoryEntry } from './global-state'
 import type { ValidatorCredentials } from './keys'
 import type { Safe, SafePromise } from './safe'
 
@@ -20,6 +20,7 @@ import type {
 import type { BaseService } from './service'
 
 export interface IValidatorSetManager extends BaseService {
+  getEpochRoot(): Hex
   getActiveValidatorKeys(): Uint8Array[]
   getValidatorIndex(ed25519PublicKey: Hex): Safe<number>
   getActiveValidators(): Map<number, ValidatorKeyTuple>
@@ -31,6 +32,34 @@ export interface IValidatorSetManager extends BaseService {
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
   setPendingSet(validatorSet: ValidatorPublicKeys[]): void
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void
+}
+
+export interface ISealKeyService extends BaseService {
+  getSealKeyForSlot(slot: bigint): Safe<SafroleTicketWithoutProof | Uint8Array>
+  setSealKeys(sealKeys: (SafroleTicketWithoutProof | Uint8Array)[]): void
+  getPendingWinnersMark(): SafroleTicketWithoutProof[] | null
+  calculateNewSealKeySequence(options?: {
+    pendingWinnersMarkOverride?: SafroleTicketWithoutProof[] | null
+    ticketAccumulatorOverride?: SafroleTicketWithoutProof[] | null
+    entropy2Override?: Uint8Array | null
+    activeValidatorsOverride?: Map<number, ValidatorPublicKeys> | null
+    storeInState?: boolean
+    phase?: number
+  }): Safe<SafroleTicketWithoutProof | Uint8Array | (SafroleTicketWithoutProof | Uint8Array)[] | void>
+}
+
+export interface IRecentHistoryService extends BaseService {
+  getRecentHistory(): RecentHistoryEntry[]
+  getRecentHistoryForBlock(blockHash: Hex): RecentHistoryEntry | null
+}
+
+export interface IStateService extends BaseService {
+  getStateRoot(): Safe<Hex>
+  getGenesisManager(): IGenesisManagerService 
+}
+
+export interface IGenesisManagerService extends BaseService {
+  getGenesisHeaderHash(): Safe<Hex>
 }
 
 export interface IServiceAccountService extends BaseService {
@@ -74,6 +103,7 @@ export interface IEntropyService extends BaseService {
 
 export interface ITicketService extends BaseService {
   getTicketAccumulator(): SafroleTicketWithoutProof[]
+  isAccumulatorFull(): boolean
   addReceivedTicket(ticket: SafroleTicket, publicKey: Hex): void
   addProxyValidatorTicket(ticket: SafroleTicket): void
   getProxyValidatorTickets(): SafroleTicket[]
@@ -107,6 +137,7 @@ export interface IConfigService extends BaseService {
 }
 
 export interface IClockService extends BaseService {
+  getSlotFromWallClock(): bigint
   getCurrentSlot(): bigint
   getCurrentEpoch(): bigint
   getCurrentPhase(): bigint

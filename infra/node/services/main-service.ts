@@ -282,10 +282,9 @@ export class MainService extends BaseService {
       configService: this.configService,
       initialValidators: null,
     })
-    // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-    // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-    // before SealKeyService calculates the new seal key sequence
-    this.sealKeyService.registerEpochTransitionCallback()
+    // SealKeyService epoch transition callback is registered in constructor
+    // ValidatorSetManager should be constructed before SealKeyService to ensure
+    // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
     this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.ticketService.setValidatorSetManager(this.validatorSetManagerService)
     this.networkingService.setValidatorSetManager(

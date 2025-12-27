@@ -68,9 +68,7 @@ export class RecentHistoryService extends BaseServiceClass {
   private readonly accoutBelt: AccoutBelt
   /** Full MMR range including null positions (for mmrappend/mmrsuperpeak operations) */
   private mmrPeaks: MMRRange = []
-  private currentBlockNumber = 0n
   private readonly configService: ConfigService
-  private accumulationService: AccumulationService | null
   constructor(options: {
     eventBusService: EventBusService
     configService: ConfigService
@@ -84,7 +82,6 @@ export class RecentHistoryService extends BaseServiceClass {
     }
     this.mmrPeaks = []
     this.configService = options.configService
-    this.accumulationService = options.accumulationService
   }
 
   override start(): Safe<boolean> {
@@ -118,12 +115,6 @@ export class RecentHistoryService extends BaseServiceClass {
   private async handleBlockProcessed(
     event: BlockProcessedEvent,
   ): Promise<Safe<void>> {
-    console.log('Processing block for recent history', {
-      slot: event.slot.toString(),
-      authorIndex: event.authorIndex,
-      blockNumber: this.currentBlockNumber.toString(),
-    })
-
     // Create new recent history entry
     const newEntry = this.createRecentHistoryEntry(
       event.header,
@@ -133,15 +124,6 @@ export class RecentHistoryService extends BaseServiceClass {
 
     // Add to circular buffer
     this.addToHistory(newEntry)
-
-    // NOTE: updateAccoutBelt is called explicitly from BlockImporterService.importBlock()
-    // BEFORE this event is triggered. Do NOT call it here to avoid double-updating the MMR.
-    // NOTE: currentBlockNumber is now incremented in updateAccoutBelt, not here.
-
-    console.log('Recent history updated', {
-      historyLength: this.recentHistory.length,
-      blockNumber: this.currentBlockNumber.toString(),
-    })
 
     return safeResult(undefined)
   }
@@ -254,7 +236,6 @@ export class RecentHistoryService extends BaseServiceClass {
   clearHistory(): void {
     this.recentHistory = []
     this.mmrPeaks = []
-    this.currentBlockNumber = 0n
     // this.persistenceCounter = 0
   }
 
@@ -311,22 +292,12 @@ export class RecentHistoryService extends BaseServiceClass {
       // Use the provided totalCount, falling back to 0 if not provided
       this.accoutBelt.totalCount = recent.accoutBelt.totalCount ?? 0n
       
-      // Also set currentBlockNumber to match totalCount so subsequent blocks
-      // will continue from the correct count
-      this.currentBlockNumber = this.accoutBelt.totalCount
-      
-      logger.debug('[RecentHistoryService] setRecent: final MMR state', {
-        mmrPeaksLength: this.mmrPeaks.length,
-        mmrPeaksNonNull: this.mmrPeaks.filter(p => p !== null).length,
-        currentBlockNumber: this.currentBlockNumber.toString(),
-        accoutBeltTotalCount: this.accoutBelt.totalCount.toString(),
-      })
     } else {
       // If no peaks provided, clear the belt
       this.mmrPeaks = []
       this.accoutBelt.peaks = []
       this.accoutBelt.totalCount = 0n
-      this.currentBlockNumber = 0n
+    
     }
   }
 
@@ -357,9 +328,7 @@ export class RecentHistoryService extends BaseServiceClass {
       .filter((peak): peak is Hex => peak !== null)
 
     // totalCount is the number of items appended to the MMR (block number)
-    // Increment currentBlockNumber and use it as totalCount
-    this.currentBlockNumber++
-    this.accoutBelt.totalCount = this.currentBlockNumber
+    this.accoutBelt.totalCount += 1n
 
     return safeResult(undefined)
   }
@@ -526,6 +495,7 @@ export class RecentHistoryService extends BaseServiceClass {
    * @param lastaccout - Accumulation output pairings from AccumulationService
    */
   public updateAccoutBelt(lastaccout: [bigint, Hex][]): Safe<void> {
+
     // Step 1: lastaccout' is provided directly from AccumulationService
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
     // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
@@ -572,18 +542,6 @@ export class RecentHistoryService extends BaseServiceClass {
       return safeResult(undefined) // Skip update on error
     }
 
-    logger.debug('[RecentHistoryService] updateAccoutBelt', {
-      lastaccoutSize: lastaccout.length,
-      entries: lastaccout.map(([s, h]) => ({ serviceId: s.toString(), hash: h.slice(0, 18) + '...' })),
-      merklizedRoot: bytesToHex(merklizedRoot),
-      currentBlockNumber: this.currentBlockNumber.toString(),
-    })
-    
-    logger.debug('[RecentHistoryService] Before MMR append', {
-      mmrPeaksLength: this.mmrPeaks.length,
-      peakHashes: this.mmrPeaks.map((p, i) => p ? `[${i}]: ${bytesToHex(p).slice(0, 18)}...` : `[${i}]: null`),
-    })
-
     const [mmrError, updatedRange] = mmrappend(
       this.mmrPeaks,
       merklizedRoot,
@@ -595,11 +553,6 @@ export class RecentHistoryService extends BaseServiceClass {
       return safeResult(undefined) // Skip update on error
     }
 
-    logger.debug('[RecentHistoryService] After MMR append', {
-      updatedRangeLength: updatedRange.length,
-      updatedPeakHashes: updatedRange.map((p, i) => p ? `[${i}]: ${bytesToHex(p).slice(0, 18)}...` : `[${i}]: null`),
-    })
-
     // Step 6: Update internal MMR peaks (preserves null positions)
     this.mmrPeaks = updatedRange
 
@@ -608,11 +561,6 @@ export class RecentHistoryService extends BaseServiceClass {
     this.accoutBelt.peaks = updatedRange.map((peak) =>
       peak !== null ? bytesToHex(peak) : null,
     )
-
-    // totalCount is the number of items appended to the MMR (block number)
-    // Increment currentBlockNumber and use it as totalCount
-    this.currentBlockNumber++
-    this.accoutBelt.totalCount = this.currentBlockNumber
 
     return safeResult(undefined)
   }

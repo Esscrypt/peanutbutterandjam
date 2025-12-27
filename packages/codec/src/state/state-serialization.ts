@@ -358,14 +358,7 @@ export function createStateTrie(
 
   // Chapter 3: recent
   const recentKey = createStateKey(3)
-  // Debug: Log accoutBelt peaks before encoding
-  console.log('[createStateTrie] Encoding recent with accoutBelt:', {
-    peaksLength: globalState.recent.accoutBelt.peaks.length,
-    peaks: globalState.recent.accoutBelt.peaks.map((p, i) => 
-      p ? `[${i}]: ${p.slice(0, 18)}...` : `[${i}]: null`
-    ),
-    totalCount: globalState.recent.accoutBelt.totalCount?.toString(),
-  })
+
   const [error3, recentData] = encodeRecent(globalState.recent)
   if (error3) {
     return safeError(error3)
@@ -481,6 +474,7 @@ export function createStateTrie(
   const [error13, activityData] = encodeActivity(
     globalState.activity,
     configService,
+    jamVersion,
   )
   if (error13) {
     return safeError(error13)

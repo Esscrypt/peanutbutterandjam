@@ -197,7 +197,7 @@ describe('FETCH Host Function Comparison', () => {
       nextfreeid: serviceId + 1n,
       xfers: [],
       yield: null,
-      provisions: new Map(),
+      provisions: new Set(),
     }
 
     const minimalImplicationsPair: ImplicationsPair = [minimalImplications, minimalImplications]
@@ -552,7 +552,7 @@ describe('FETCH Host Function Comparison', () => {
 
     // After importsegments: extrinsics length prefix
     // Note: Import references are 36 bytes each (32-byte hash + 4-byte index), not 4 bytes
-    const _extrinsicsOffset = importSegmentsOffset + 1 + (importSegmentsLength * 36)
+    // const _extrinsicsOffset = importSegmentsOffset + 1 + (importSegmentsLength * 36)
 
     // Create the work item with proper types matching WorkItem interface
     const decodedWorkItem: WorkItem = {
@@ -599,7 +599,7 @@ describe('FETCH Host Function Comparison', () => {
       workItemIndex: null,
       importSegments: null,
       exportSegments: null,
-      accumulateInputs: [decodedWorkItem],
+      accumulateInputs: [],
       entropyService: entropyService,
     }
 

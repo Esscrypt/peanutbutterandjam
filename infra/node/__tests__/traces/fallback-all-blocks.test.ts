@@ -28,6 +28,7 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
+import type { SafroleState } from '@pbnjam/types'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
@@ -291,10 +292,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
@@ -457,8 +457,8 @@ describe('Genesis Parse Tests', () => {
           }
         }
         
-        // Print only pendingSet and epochRoot
-        console.log(`\n=== [Block ${blockNumber}] Safrole State (pendingSet & epochRoot) ===`)
+        // Print full safrole state comparison
+        console.log(`\n=== [Block ${blockNumber}] Safrole State (Full Comparison) ===`)
         if (expectedSafrole) {
           console.log('Expected pendingSet:', JSON.stringify(
             (expectedSafrole as any).pendingSet?.map((v: any) => ({
@@ -469,11 +469,14 @@ describe('Genesis Parse Tests', () => {
             2
           ))
           console.log('Expected epochRoot:', (expectedSafrole as SafroleState).epochRoot)
+          console.log('Expected discriminator:', (expectedSafrole as any).discriminator ?? 'N/A')
+          console.log('Expected sealTickets length:', (expectedSafrole as SafroleState).sealTickets?.length ?? 0)
+          console.log('Expected ticketAccumulator length:', (expectedSafrole as SafroleState).ticketAccumulator?.length ?? 0)
         } else {
           console.log('Expected safrole: Not found in post_state')
         }
         
-        if (actualSafrole && !('error' in actualSafrole)) {
+        if (actualSafrole && typeof actualSafrole === 'object' && !('error' in actualSafrole)) {
           console.log('Actual pendingSet:', JSON.stringify(
             (actualSafrole as SafroleState).pendingSet?.map((v: any) => ({
               bandersnatch: v.bandersnatch,
@@ -483,6 +486,63 @@ describe('Genesis Parse Tests', () => {
             2
           ))
           console.log('Actual epochRoot:', (actualSafrole as SafroleState).epochRoot)
+          // Compute discriminator from sealTickets
+          const hasTickets = (actualSafrole as SafroleState).sealTickets?.every((ticket) => 
+            typeof ticket === 'object' && 'id' in ticket
+          ) ?? false
+          console.log('Actual discriminator:', hasTickets ? 0 : 1)
+          console.log('Actual sealTickets length:', (actualSafrole as SafroleState).sealTickets?.length ?? 0)
+          console.log('Actual ticketAccumulator length:', (actualSafrole as SafroleState).ticketAccumulator?.length ?? 0)
+          
+          // Compare sealTickets if lengths match
+          if (expectedSafrole && 
+              (expectedSafrole as SafroleState).sealTickets?.length === (actualSafrole as SafroleState).sealTickets?.length) {
+            const expectedSealTickets = (expectedSafrole as SafroleState).sealTickets
+            const actualSealTickets = (actualSafrole as SafroleState).sealTickets
+            let sealTicketsMatch = true
+            for (let i = 0; i < (expectedSealTickets?.length ?? 0); i++) {
+              const expected = expectedSealTickets![i]
+              const actual = actualSealTickets![i]
+              if (typeof expected === 'object' && 'id' in expected && typeof actual === 'object' && 'id' in actual) {
+                if (expected.id !== actual.id || expected.entryIndex !== actual.entryIndex) {
+                  sealTicketsMatch = false
+                  console.log(`  sealTickets[${i}] mismatch: expected id=${expected.id}, entryIndex=${expected.entryIndex}, actual id=${actual.id}, entryIndex=${actual.entryIndex}`)
+                }
+              } else if (expected instanceof Uint8Array && actual instanceof Uint8Array) {
+                const expectedHex = bytesToHex(expected)
+                const actualHex = bytesToHex(actual)
+                if (expectedHex !== actualHex) {
+                  sealTicketsMatch = false
+                  console.log(`  sealTickets[${i}] mismatch: expected=${expectedHex}, actual=${actualHex}`)
+                }
+              } else {
+                sealTicketsMatch = false
+                console.log(`  sealTickets[${i}] type mismatch: expected type=${typeof expected}, actual type=${typeof actual}`)
+              }
+            }
+            if (sealTicketsMatch) {
+              console.log('  sealTickets: MATCH')
+            }
+          }
+          
+          // Compare ticketAccumulator
+          if (expectedSafrole && 
+              (expectedSafrole as SafroleState).ticketAccumulator?.length === (actualSafrole as SafroleState).ticketAccumulator?.length) {
+            const expectedAccum = (expectedSafrole as SafroleState).ticketAccumulator
+            const actualAccum = (actualSafrole as SafroleState).ticketAccumulator
+            let accumMatch = true
+            for (let i = 0; i < (expectedAccum?.length ?? 0); i++) {
+              const expected = expectedAccum![i]
+              const actual = actualAccum![i]
+              if (expected.id !== actual.id || expected.entryIndex !== actual.entryIndex) {
+                accumMatch = false
+                console.log(`  ticketAccumulator[${i}] mismatch: expected id=${expected.id}, entryIndex=${expected.entryIndex}, actual id=${actual.id}, entryIndex=${actual.entryIndex}`)
+              }
+            }
+            if (accumMatch) {
+              console.log('  ticketAccumulator: MATCH')
+            }
+          }
         } else {
           console.log('Actual safrole:', actualSafrole)
         }

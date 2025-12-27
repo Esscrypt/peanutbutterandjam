@@ -12,32 +12,20 @@
  */
 
 import {
-  banderout,
-  verifyEntropyVRFSignature,
-  verifyEpochRoot,
-} from '@pbnjam/bandersnatch-vrf'
+  validateBlockHeader,
+  validatePreStateRoot,
+} from '@pbnjam/block-importer'
 import { calculateBlockHashFromHeader } from '@pbnjam/codec'
-import {
-  bytesToHex,
-  type EventBusService,
-  type Hex,
-  hexToBytes,
-  logger,
-  zeroHash,
-} from '@pbnjam/core'
-import {
-  isSafroleTicket,
-  verifyFallbackSealSignature,
-  verifyTicketBasedSealSignature,
-} from '@pbnjam/safrole'
-import type { Block, BlockHeader, ValidatorPublicKeys } from '@pbnjam/types'
+import { type EventBusService, type Hex, logger, zeroHash } from '@pbnjam/core'
+
+import type { Block } from '@pbnjam/types'
 import {
   BaseService,
-  type Safe,
   type SafePromise,
   safeError,
   safeResult,
 } from '@pbnjam/types'
+
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -77,6 +65,8 @@ export class BlockImporterService extends BaseService {
   private readonly statisticsService: StatisticsService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
+
+  private previousStateRootForAnchorValidation: Hex | null = null
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -118,156 +108,111 @@ export class BlockImporterService extends BaseService {
   // Public API
   // ============================================================================
 
+  async importBlock(block: Block): SafePromise<boolean> {
+    const isEpochTransition = this.clockService.isEpochTransition(
+      block.header.timeslot,
+    )
+    let epochTransitionEmitted = false
+
+    try {
+      validatePreStateRoot(block.header, this.stateService)
+      // Emit epoch transition before processing if needed
+      if (isEpochTransition && block.header.epochMark) {
+        const epochTransitionEvent = {
+          slot: block.header.timeslot,
+          epochMark: block.header.epochMark,
+        }
+        await this.eventBusService.emitEpochTransition(epochTransitionEvent)
+        epochTransitionEmitted = true
+      }
+
+      const [importError] = await this.importBlockInternal(block)
+      if (importError) {
+        // Revert epoch transition if it happened
+        if (epochTransitionEmitted) {
+          await this.eventBusService.emitRevertEpochTransition({
+            slot: block.header.timeslot,
+            epochMark: block.header.epochMark,
+          })
+        }
+        if (this.previousStateRootForAnchorValidation !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+          const previousEntry =
+            this.recentHistoryService.getRecentHistory()[
+              this.recentHistoryService.getRecentHistory().length - 1
+            ]
+          previousEntry.stateRoot = this.previousStateRootForAnchorValidation
+        }
+        return safeResult(false)
+      }
+      return safeResult(true)
+    } catch (error) {
+      // Revert epoch transition if it happened
+      if (epochTransitionEmitted) {
+        await this.eventBusService.emitRevertEpochTransition({
+          slot: block.header.timeslot,
+          epochMark: block.header.epochMark,
+        })
+      }
+      if (this.previousStateRootForAnchorValidation !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+        const previousEntry =
+          this.recentHistoryService.getRecentHistory()[
+            this.recentHistoryService.getRecentHistory().length - 1
+          ]
+        previousEntry.stateRoot = this.previousStateRootForAnchorValidation
+      }
+      logger.error('[BlockImporter] Failed to import block', {
+        error: error,
+        stack: new Error().stack,
+      })
+      return safeResult(false)
+    }
+  }
+
   /**
    * Import a block and validate its timeslot
    *
    * @param block The block to import
    * @returns Result of the import operation
    */
-  async importBlock(block: Block): SafePromise<void> {
-    // Log pre-state components for debugging
-    const [preStateTrieError, preStateTrie] =
-      this.stateService.generateStateTrie()
-    if (!preStateTrieError && preStateTrie) {
-      logger.debug('Pre-state components', {
-        entropyAccumulator: this.entropyService.getEntropyAccumulator().length,
-        thetime: this.clockService.getCurrentSlot().toString(),
-        ticketAccumulatorLength:
-          this.ticketService.getTicketAccumulator().length,
-        recentHistoryLength:
-          this.recentHistoryService.getRecentHistory().length,
-        stateRoot: this.stateService.getStateRoot()[1] || 'error',
-        stateTrieKeys: Object.keys(preStateTrie).length,
-      })
-    }
-
-    // Validate priorStateRoot matches pre-state root
-    // Gray Paper: H_priorstateroot ≡ merklizestate{thestate} (prior state)
-    //
-    // Note: When state is set from test vectors, the computed state root may differ
-    // because generateStateTrie() re-encodes all state components, which can produce
-    // different values than the original test vector values if decode/encode isn't
-    // perfectly round-trip, or if default/empty values are added for missing components.
-    //
-    // The block header's priorStateRoot is the authoritative value that was used
-    // when the block was created, so we validate against it.
-    const [preStateRootError, preStateRoot] = this.stateService.getStateRoot()
-    if (preStateRootError) {
-      return safeError(
-        new Error(`Failed to get pre-state root: ${preStateRootError.message}`),
-      )
-    }
-    if (block.header.priorStateRoot !== preStateRoot) {
-      // Debug: Compare state trie to understand the mismatch
-      const [trieError, stateTrie] = this.stateService.generateStateTrie()
-      if (!trieError && stateTrie) {
-        logger.debug('State root mismatch - debugging state trie', {
-          computedStateRoot: preStateRoot,
-          expectedStateRoot: block.header.priorStateRoot,
-          stateTrieKeys: Object.keys(stateTrie).length,
-          stateTrieKeysList: Object.keys(stateTrie).slice(0, 10), // First 10 keys for debugging
-        })
-
-        // Log potential causes
-        logger.debug(
-          'Possible causes: decode/encode round-trip issues, missing state components, or default values added',
-        )
-      }
-      return safeError(
-        new Error(
-          `Prior state root mismatch: computed ${preStateRoot}, expected ${block.header.priorStateRoot}. ` +
-            `This may indicate decode/encode round-trip issues or state components not being set correctly from test vectors.`,
-        ),
-      )
-    }
-
-    // Handle epoch transition BEFORE signature verification and state transitions
-    // Gray Paper order: epoch transition updates state (entropy, validator sets) BEFORE state transition function
-    // Gray Paper Eq. 179-181: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2) when e' > e
-    // Gray Paper Eq. 115-118: Validator sets rotate on epoch transition (activeSet' = pendingSet)
-    // The VRF and seal signatures use the validator's key from the active set AFTER epoch transition
-    // State transition function (guarantees, assurances, etc.) uses updated state after epoch transition
-    const isEpochTransition = this.clockService.isEpochTransition(
-      block.header.timeslot,
-    )
-
-    if (isEpochTransition) {
-      if (!block.header.epochMark) {
-        return safeError(new Error('Epoch mark is not present'))
-      }
-      logger.info('Epoch transition detected, emitting epoch transition event')
-
-      // Emit epoch transition event - this will execute all subscribed callbacks
-      // (entropy rotation, validator set rotation, seal key sequence update, etc.)
-      // The event bus waits for all callbacks to complete before continuing
-      // Gray Paper Eq. 179-181: entropy3 rotates on epoch transition
-      // Gray Paper Eq. 115-118: validator sets rotate on epoch transition
-      const epochTransitionEvent = {
-        slot: block.header.timeslot,
-        epochMark: block.header.epochMark,
-      }
-
-      await this.eventBusService.emitEpochTransition(epochTransitionEvent)
-
-      // Update clock service's current epoch and slot
-      // this.clockService.setLatestReportedBlockTimeslot(block.header.timeslot)
-    }
-
+  async importBlockInternal(block: Block): SafePromise<void> {
     // validate the block header
-    const [blockHeaderValidationError] = await this.validateBlockHeader(
+    const [blockHeaderValidationError] = await validateBlockHeader(
       block.header,
       this.clockService,
       this.configService,
+      this.stateService,
+      this.recentHistoryService,
+      this.validatorSetManagerService,
+      this.sealKeyService,
+      this.entropyService,
     )
     if (blockHeaderValidationError) {
       return safeError(blockHeaderValidationError)
     }
 
+
     // Temporarily update previous block's state root for anchor validation
     // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
     // This is needed for validateGuarantees because anchor validation checks state_root
-    let previousStateRoot: Hex | null = null
     if (this.recentHistoryService.getRecentHistory().length > 0) {
       const previousEntry =
         this.recentHistoryService.getRecentHistory()[
           this.recentHistoryService.getRecentHistory().length - 1
         ]
-      previousStateRoot = previousEntry.stateRoot
+      this.previousStateRootForAnchorValidation = previousEntry.stateRoot
       previousEntry.stateRoot = block.header.priorStateRoot
     }
+
 
     // PRE-VALIDATE guarantees BEFORE other state mutations (assurances, accumulation, etc.)
     // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),
     // the report is "simply ignored" - meaning NO state changes occur for the block.
-    const [validateError, validateResult] = this.guarantorService.validateGuarantees(
+    const [validateError] = this.guarantorService.validateGuarantees(
       block.body.guarantees,
       block.header.timeslot,
     )
     if (validateError) {
-      // Revert state_root change on error
-      if (previousStateRoot !== null && this.recentHistoryService.getRecentHistory().length > 0) {
-        const previousEntry =
-          this.recentHistoryService.getRecentHistory()[
-            this.recentHistoryService.getRecentHistory().length - 1
-          ]
-        previousEntry.stateRoot = previousStateRoot
-      }
       return safeError(validateError)
-    }
-    if (validateResult?.error) {
-      // Revert state_root change on validation failure
-      if (previousStateRoot !== null && this.recentHistoryService.getRecentHistory().length > 0) {
-        const previousEntry =
-          this.recentHistoryService.getRecentHistory()[
-            this.recentHistoryService.getRecentHistory().length - 1
-          ]
-        previousEntry.stateRoot = previousStateRoot
-      }
-      logger.warn('[BlockImporter] Guarantee validation failed, no state changes applied', {
-        error: validateResult.error,
-        slot: block.header.timeslot.toString(),
-      })
-      return safeResult(undefined)
     }
 
     // Gray Paper: Process assurances FIRST, then guarantees
@@ -277,8 +222,8 @@ export class BlockImporterService extends BaseService {
     // for new guarantees to be processed.
     // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
     // passed to accumulation
-    const [assuranceValidationError, availableWorkReports] =
-      this.assuranceService.applyAssurances(
+    const [assuranceValidationError, assuranceCounts] =
+      this.assuranceService.validateAssurances(
         block.body.assurances,
         Number(block.header.timeslot),
         block.header.parent,
@@ -287,8 +232,20 @@ export class BlockImporterService extends BaseService {
     if (assuranceValidationError) {
       return safeError(assuranceValidationError)
     }
-    if (!availableWorkReports) {
+    if (!assuranceCounts) {
       return safeError(new Error('Assurance validation failed'))
+    }
+    const [assuranceApplyError, availableWorkReports] =
+      this.assuranceService.applyAssurances(
+        assuranceCounts,
+        Number(block.header.timeslot),
+        this.configService,
+      )
+    if (assuranceApplyError) {
+      return safeError(assuranceApplyError)
+    }
+    if (!availableWorkReports) {
+      return safeError(new Error('Assurance application failed'))
     }
 
     // Process guarantees AFTER assurances
@@ -304,11 +261,13 @@ export class BlockImporterService extends BaseService {
     if (!guaranteeResult) {
       return safeError(new Error('Guarantee validation failed'))
     }
-    
+
     // If guarantee returned an error after assurances, treat as block invalid
     // (bad_code_hash for ejected services is caught by pre-validation above)
     if (guaranteeResult.error) {
-      return safeError(new Error(`Guarantee validation failed: ${guaranteeResult.error}`))
+      return safeError(
+        new Error(`Guarantee validation failed: ${guaranteeResult.error}`),
+      )
     }
 
     // Process winnersMark from block header if present (for non-epoch-transition blocks)
@@ -316,27 +275,28 @@ export class BlockImporterService extends BaseService {
     // winnersMark appears at the first block after contest period ends (phase >= contestDuration)
     // This contains the Z-sequenced tickets that will become seal tickets on the next epoch transition
     // Note: For epoch transition blocks, winnersMark is already processed above (before emitEpochTransition)
-    if (block.header.winnersMark && !isEpochTransition) {
-      logger.info('[BlockImporter] Processing winnersMark from block header (for next epoch)', {
-        slot: block.header.timeslot.toString(),
-        winnersMarkLength: block.header.winnersMark.length,
-      })
+    if (block.header.winnersMark) {
+      logger.info(
+        '[BlockImporter] Processing winnersMark from block header (for next epoch)',
+        {
+          slot: block.header.timeslot.toString(),
+          winnersMarkLength: block.header.winnersMark.length,
+        },
+      )
       // Store winnersMark in SealKeyService - it will be used to set seal keys on next epoch transition
       // Gray Paper Eq. 202-207: sealtickets' = Z(ticketaccumulator) when e' = e + 1 ∧ m ≥ Cepochtailstart ∧ |ticketaccumulator| = Cepochlen
       this.sealKeyService.setWinnersMark(block.header.winnersMark)
     }
 
-    // process tickets from block body
+    // Apply validated tickets to accumulator (already validated in Phase 1)
     // Gray Paper Eq. 289-292: xt_tickets ∈ sequence{⟨xt_entryindex, xt_proof⟩}
     // Gray Paper Eq. 321-324: Tickets in block body should be added to ticket accumulator
     // Note: Extrinsic tickets include proof, but accumulator only stores (st_id, st_entryindex)
-    // Use epochMark presence to determine if this is an epoch transition (consistent with above)
-    const [ticketError] = await this.ticketService.applyTickets(
+    const [ticketApplyError] = this.ticketService.applyTickets(
       block.body.tickets,
-      isEpochTransition,
     )
-    if (ticketError) {
-      return safeError(ticketError)
+    if (ticketApplyError) {
+      return safeError(ticketApplyError)
     }
 
     // apply the service account transition
@@ -348,13 +308,22 @@ export class BlockImporterService extends BaseService {
     if (serviceAccountValidationError) {
       return safeError(serviceAccountValidationError)
     }
-    //apply disputes
-    const [disputeValidationError] = this.disputesService.applyDisputes(
-      block.body.disputes,
-      block.header.timeslot,
-    )
+    // Apply disputes (validate first, then apply)
+    const [disputeValidationError, validatedDisputes] =
+      this.disputesService.validateDisputes(
+        block.body.disputes,
+        block.header.timeslot,
+      )
     if (disputeValidationError) {
       return safeError(disputeValidationError)
+    }
+    if (!validatedDisputes) {
+      return safeError(new Error('Dispute validation failed'))
+    }
+    const [disputeApplyError] =
+      this.disputesService.applyDisputes(validatedDisputes)
+    if (disputeApplyError) {
+      return safeError(disputeApplyError)
     }
 
     // Update entropy accumulator with VRF signature from block header
@@ -395,7 +364,8 @@ export class BlockImporterService extends BaseService {
       return safeError(accumulationResult.err)
     }
 
-    const lastAccumulationOutputs = this.accumulationService.getLastAccumulationOutputs()
+    const lastAccumulationOutputs =
+      this.accumulationService.getLastAccumulationOutputs()
 
     logger.debug('[BlockImporter] Accumulation result', {
       slot: block.header.timeslot.toString(),
@@ -446,358 +416,5 @@ export class BlockImporterService extends BaseService {
     )
 
     return safeResult(undefined)
-  }
-
-  // TODO: add VRF signature validation, seal signature validation, and block header validations according to GP
-  async validateBlockHeader(
-    header: BlockHeader,
-    clockService: ClockService,
-    configService: ConfigService,
-  ): SafePromise<void> {
-    const wallClockSlot = clockService.getSlotFromWallClock()
-
-    // according to the gray paper, the block header timeslot should be in the past
-    if (header.timeslot > wallClockSlot) {
-      return safeError(new Error('Block slot is in the future'))
-    }
-
-    // Validate parent block hash
-    if (header.parent !== zeroHash) {
-      const recentHistory = this.recentHistoryService.getRecentHistory()
-      const recentBlock = this.recentHistoryService.getRecentHistoryForBlock(
-        header.parent,
-      )
-
-      if (!recentBlock) {
-        // If recent history is empty, check if parent matches genesis hash
-        if (recentHistory.length === 0) {
-          // Get genesis hash from state service (via genesis manager)
-          const genesisManager = this.stateService.getGenesisManager()
-          if (genesisManager) {
-            const [genesisHashError, genesisHash] =
-              genesisManager.getGenesisHeaderHash()
-            if (genesisHashError || !genesisHash) {
-              return safeError(
-                new Error(
-                  'Parent block not found and cannot verify against genesis hash',
-                ),
-              )
-            }
-
-            if (header.parent !== genesisHash) {
-              return safeError(
-                new Error(
-                  `Parent block hash (${header.parent}) does not match genesis hash (${genesisHash})`,
-                ),
-              )
-            }
-
-            // Parent matches genesis, which is valid for the first block after genesis
-            logger.debug('Parent block matches genesis hash', {
-              parent: header.parent,
-              genesisHash,
-            })
-          } else {
-            return safeError(
-              new Error(
-                'Parent block not found and genesis manager not available',
-              ),
-            )
-          }
-        } else {
-          return safeError(new Error('Parent block not found'))
-        }
-      }
-    }
-
-    // validate that winners mark is present only at phase > contest duration and has correct number of tickets
-    const currentPhase = header.timeslot % BigInt(configService.epochDuration)
-    if (header.winnersMark) {
-      if (currentPhase < configService.contestDuration) {
-        return safeError(
-          new Error(
-            `winners mark is present at phase < contest duration: ${currentPhase} <= ${configService.contestDuration}`,
-          ),
-        )
-      }
-
-      // winners mark should contain exactly as amny tickets as number of slots in an epoch
-      if (header.winnersMark.length !== configService.epochDuration) {
-        return safeError(
-          new Error('winners mark contains incorrect number of tickets'),
-        )
-      }
-    }
-
-    // validate that epoch mark is present only at first slot of an epoch
-    if (header.epochMark) {
-      if (currentPhase !== BigInt(0)) {
-        return safeError(new Error('epoch mark is present at non-first slot'))
-      }
-      // if the validators are not as many as in config, return an error
-      if (header.epochMark.validators.length !== configService.numValidators) {
-        return safeError(
-          new Error('epoch mark contains incorrect number of validators'),
-        )
-      }
-
-      // Verify epoch root matches the validators in the epoch mark
-      // Convert ValidatorKeyPair[] to ValidatorPublicKeys[] for verification
-      // Note: verifyEpochRoot only uses bandersnatch keys, so we can use zero-filled bls/metadata
-      const pendingSet: ValidatorPublicKeys[] = header.epochMark.validators.map(
-        (validator) => ({
-          bandersnatch: validator.bandersnatch,
-          ed25519: validator.ed25519,
-          bls: zeroHash, // Not used in epoch root verification
-          metadata: zeroHash, // Not used in epoch root verification
-        }),
-      )
-
-      const nextEpochRoot = this.validatorSetManagerService.getEpochRoot()
-
-      const [verifyError, isValid] = verifyEpochRoot(nextEpochRoot, pendingSet)
-      if (verifyError) {
-        return safeError(
-          new Error(`Epoch root verification failed: ${verifyError.message}`),
-        )
-      }
-      if (!isValid) {
-        return safeError(
-          new Error(
-            'Epoch root does not match the validators in the epoch mark',
-          ),
-        )
-      }
-    }
-
-    // verify state against prior state root
-
-    //validate the vrf signature
-    const [vrfValidationError, isValid] = this.validateVRFSignature(
-      header,
-      this.validatorSetManagerService,
-    )
-    if (vrfValidationError) {
-      return safeError(vrfValidationError)
-    }
-    if (!isValid) {
-      return safeError(new Error('VRF signature is invalid'))
-    }
-
-    //validate the seal signature
-    const [sealValidationError] = this.validateSealSignature(
-      header,
-      this.sealKeyService,
-      this.validatorSetManagerService,
-    )
-    if (sealValidationError) {
-      return safeError(sealValidationError)
-    }
-
-    return safeResult(undefined)
-  }
-
-  /**
-   * Validate seal signature according to Gray Paper specifications
-   *
-   * Gray Paper safrole.tex equations 147-148 (ticket-based) and 154 (fallback):
-   *
-   * Ticket-based sealing (eq. 147-148):
-   * - i_st_id = banderout{H_sealsig}
-   * - H_sealsig ∈ bssignature{H_authorbskey}{Xticket ∥ entropy'_3 ∥ i_st_entryindex}{encodeunsignedheader{H}}
-   *
-   * Fallback sealing (eq. 154):
-   * - H_sealsig ∈ bssignature{H_authorbskey}{Xfallback ∥ entropy'_3}{encodeunsignedheader{H}}
-   *
-   * @param header Block header containing seal signature
-   * @param clockService Clock service for epoch information
-   * @param validatorSetManagerService Validator set manager service
-   * @returns Validation result
-   */
-  validateSealSignature(
-    header: BlockHeader,
-    sealKeyService: SealKeyService,
-    validatorSetManagerService: ValidatorSetManager,
-  ): Safe<void> {
-    const [sealKeyError, sealKey] = sealKeyService.getSealKeyForSlot(
-      header.timeslot,
-    )
-    if (sealKeyError) {
-      return safeError(sealKeyError)
-    }
-
-    // Get validator's Bandersnatch public key from active set
-    // According to Gray Paper equation 154, we use the validator from the active set
-    const activeValidators = validatorSetManagerService.getActiveValidators()
-    const validatorKeys = activeValidators.get(Number(header.authorIndex))
-    if (!validatorKeys) {
-      return safeError(
-        new Error(
-          `Validator at index ${header.authorIndex} not found in active set`,
-        ),
-      )
-    }
-    const publicKeys = validatorKeys
-
-    // Create unsigned header (header without seal signature)
-    const unsignedHeader = {
-      parent: header.parent,
-      priorStateRoot: header.priorStateRoot,
-      extrinsicHash: header.extrinsicHash,
-      timeslot: header.timeslot,
-      epochMark: header.epochMark,
-      winnersMark: header.winnersMark,
-      offendersMark: header.offendersMark,
-      authorIndex: header.authorIndex,
-      vrfSig: header.vrfSig,
-    }
-
-    // Get entropy_3 for seal signature validation
-    const entropy3 = this.entropyService.getEntropy3()
-
-    // Determine sealing mode and validate accordingly
-    const isTicketBased = sealKey && isSafroleTicket(sealKey)
-    if (isTicketBased) {
-      logger.info('Validating ticket-based seal signature', {
-        slot: header.timeslot.toString(),
-        authorIndex: header.authorIndex.toString(),
-        expectedSealKey: publicKeys.bandersnatch,
-        retrievedSealKey: sealKey ? sealKey.id : 'null',
-        activeValidatorsSize: activeValidators.size,
-      })
-      // Ticket-based sealing validation (Gray Paper eq. 147-148)
-      const [verificationError, isValid] = verifyTicketBasedSealSignature(
-        hexToBytes(publicKeys.bandersnatch),
-        hexToBytes(header.sealSig),
-        entropy3,
-        unsignedHeader,
-        sealKey,
-        this.configService,
-      )
-      if (verificationError) {
-        return safeError(verificationError)
-      }
-      if (!isValid) {
-        return safeError(new Error('Ticket-based seal signature is invalid'))
-      }
-    } else {
-      // Fallback sealing validation (Gray Paper eq. 154)
-      // H_sealsig ∈ bssignature{H_authorbskey}{Xfallback ∥ entropy'_3}{encodeunsignedheader{H}}
-      // where H_authorbskey ≡ activeset'[H_authorindex]_vk_bs (Gray Paper eq. 60)
-      // For fallback: i = H_authorbskey (Gray Paper eq. 152), so seal key equals H_authorbskey
-
-      // Validate that seal key matches the validator's Bandersnatch key
-      // This ensures the seal key sequence was calculated correctly for this epoch
-      const sealKeyHex = bytesToHex(sealKey as Uint8Array)
-      if (sealKeyHex !== publicKeys.bandersnatch) {
-        return safeError(
-          new Error(
-            `Seal key mismatch: expected ${publicKeys.bandersnatch}, got ${sealKeyHex}. ` +
-              `This may indicate the seal key sequence was not updated correctly on epoch transition.`,
-          ),
-        )
-      }
-
-      // But we use H_authorbskey from active set for verification
-      const [verificationError, isValid] = verifyFallbackSealSignature(
-        hexToBytes(publicKeys.bandersnatch), // H_authorbskey from activeset'[H_authorindex]_vk_bs
-        hexToBytes(header.sealSig),
-        entropy3,
-        unsignedHeader,
-        this.configService,
-      )
-      if (verificationError) {
-        return safeError(verificationError)
-      }
-      if (!isValid) {
-        return safeError(new Error('Fallback seal signature is invalid'))
-      }
-    }
-
-    return safeResult(undefined)
-  }
-
-  /**
-   * Validate VRF signature according to Gray Paper specifications
-   *
-   * Gray Paper safrole.tex equation 158:
-   * H_vrfsig ∈ bssignature{H_authorbskey}{Xentropy ∥ banderout{H_sealsig}}{[]}
-   * where Xentropy = "$jam_entropy"
-   *
-   * This verifies that:
-   * 1. The VRF signature was generated by the block author
-   * 2. The signature corresponds to the correct context (entropy + seal output)
-   * 3. The VRF output provides deterministic, verifiable randomness
-   *
-   * @param header Block header containing VRF signature
-   * @param sealKeyService Service to get seal key for this slot
-   * @param validatorSetManagerService Validator set manager service
-   * @returns Validation result
-   */
-  validateVRFSignature(
-    header: BlockHeader,
-    validatorSetManagerService: ValidatorSetManager,
-  ): Safe<boolean> {
-    // Get validator's Bandersnatch public key from active set
-    const activeValidators = validatorSetManagerService.getActiveValidators()
-
-    const validatorKeys = activeValidators.get(Number(header.authorIndex))
-    if (!validatorKeys) {
-      logger.error('Validator not found in active set', {
-        authorIndex: Number(header.authorIndex),
-        activeSetSize: activeValidators.size,
-        activeIndices: Array.from(activeValidators.keys()),
-      })
-      return safeError(
-        new Error(
-          `Validator at index ${header.authorIndex} not found in active set (size: ${activeValidators.size})`,
-        ),
-      )
-    }
-    const authorPublicKey = hexToBytes(validatorKeys.bandersnatch)
-
-    // Extract VRF output from seal signature using banderout function
-    // Gray Paper: banderout{H_sealsig} - first 32 bytes of VRF output hash
-    const [extractError, sealOutput] = banderout(hexToBytes(header.sealSig))
-    if (extractError) {
-      logger.error('Failed to extract seal output using banderout', {
-        error: extractError.message,
-        sealSigLength: header.sealSig.length,
-        sealSigHex: header.sealSig.substring(0, 20) + '...',
-      })
-      return safeError(extractError)
-    }
-
-    // Verify VRF signature using existing entropy VRF verification function
-    // Gray Paper Eq. 158: H_vrfsig ∈ bssignature{H_authorbskey}{Xentropy ∥ banderout{H_sealsig}}{[]}
-    const [verifyError, isValid] = verifyEntropyVRFSignature(
-      authorPublicKey,
-      hexToBytes(header.vrfSig),
-      sealOutput,
-    )
-    if (verifyError) {
-      logger.error('VRF signature verification error', {
-        error: verifyError.message,
-        authorIndex: Number(header.authorIndex),
-        timeslot: Number(header.timeslot),
-        publicKeyHex: validatorKeys.bandersnatch.substring(0, 20) + '...',
-        vrfSigHex: header.vrfSig.substring(0, 20) + '...',
-        sealOutputHex: bytesToHex(sealOutput).substring(0, 20) + '...',
-      })
-      return safeError(verifyError)
-    }
-
-    if (!isValid) {
-      logger.error('VRF signature is invalid', {
-        authorIndex: Number(header.authorIndex),
-        timeslot: Number(header.timeslot),
-        publicKeyHex: validatorKeys.bandersnatch.substring(0, 20) + '...',
-        vrfSigHex: header.vrfSig.substring(0, 20) + '...',
-        sealOutputHex: bytesToHex(sealOutput).substring(0, 20) + '...',
-        sealSigHex: header.sealSig.substring(0, 20) + '...',
-      })
-    }
-
-    return safeResult(isValid)
   }
 }

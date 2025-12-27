@@ -7,7 +7,7 @@
  * Reference: graypaper/text/utilities.tex, Equation 329 and 331
  */
 
-import { hash as blake2b } from '@stablelib/blake2b'
+import { blake2b } from '@noble/hashes/blake2.js'
 import type { Hex } from 'viem'
 import { logger } from './logger'
 
@@ -49,7 +49,7 @@ function computeQSequence(entropy: Uint8Array, length: number): number[] {
     preimage.set(toLittleEndianBytes(Math.floor(i / 8), 4), entropy.length)
 
     // Hash the preimage
-    const hashResult = blake2b(preimage, 32)
+    const hashResult = blake2b(preimage, { dkLen: 32 })
 
     // Extract 4 bytes at offset (4*i mod 32)
     const offset = (4 * i) % 32

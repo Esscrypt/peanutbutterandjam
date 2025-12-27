@@ -9,6 +9,7 @@ import {
   type EventBusService,
   hexToBytes,
   logger,
+  type RevertEpochTransitionEvent,
   zeroHash,
 } from '@pbnjam/core'
 import {
@@ -36,6 +37,8 @@ export class EntropyService extends BaseService {
   }
   // Event handlers
   private eventBusService: EventBusService
+  // Store state before epoch transition for revert
+  private preTransitionEntropy: EntropyState | null = null
 
   constructor(eventBusService: EventBusService) {
     super('entropy-service')
@@ -45,6 +48,9 @@ export class EntropyService extends BaseService {
     )
     this.eventBusService.addEpochTransitionCallback(
       this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.addRevertEpochTransitionCallback(
+      this.handleRevertEpochTransition.bind(this),
     )
     this.eventBusService.addBestBlockChangedCallback(
       this.handleBestBlockChanged.bind(this),
@@ -73,32 +79,35 @@ export class EntropyService extends BaseService {
    * Gray Paper: (entropy'_1, entropy'_2, entropy'_3) = (entropy_0, entropy_1, entropy_2)
    */
   private handleEpochTransition(event: EpochTransitionEvent): Safe<void> {
-    const oldEntropy1 = this.entropy.entropy1
-    const oldEntropy2 = this.entropy.entropy2
-    const oldEntropy3 = this.entropy.entropy3
-    const oldAccumulator = this.entropy.accumulator
-
-    logger.info('[EntropyService] Epoch transition - rotating entropy', {
-      slot: event.slot.toString(),
-      before: {
-        accumulator: oldAccumulator,
-        entropy1: oldEntropy1,
-        entropy2: oldEntropy2,
-        entropy3: oldEntropy3,
-      },
-    })
-
+    // Save state before rotation for potential revert
+    this.preTransitionEntropy = { ...this.entropy }
     this.rotateEntropyHistory(event.epochMark)
 
-    logger.info('[EntropyService] Epoch transition - entropy rotated', {
+    return safeResult(undefined)
+  }
+
+  /**
+   * Handle revert epoch transition event
+   * Restores entropy to its state before the epoch transition
+   */
+  private handleRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Safe<void> {
+    if (!this.preTransitionEntropy) {
+      logger.warn(
+        '[EntropyService] No pre-transition entropy to revert to',
+        { slot: event.slot.toString() },
+      )
+      return safeResult(undefined)
+    }
+
+    logger.info('[EntropyService] Reverting epoch transition', {
       slot: event.slot.toString(),
-      after: {
-        accumulator: this.entropy.accumulator,
-        entropy1: this.entropy.entropy1,
-        entropy2: this.entropy.entropy2, // This is now old entropy1, used for F(entropy'_2, activeset')
-        entropy3: this.entropy.entropy3, // This is now old entropy2, used for seal verification
-      },
     })
+
+    // Restore previous entropy state
+    this.entropy = { ...this.preTransitionEntropy }
+    this.preTransitionEntropy = null
 
     return safeResult(undefined)
   }

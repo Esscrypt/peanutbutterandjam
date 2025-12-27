@@ -27,12 +27,6 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# local env files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
 # turbo
 .turbo
 
@@ -43,7 +37,6 @@ yarn-error.log*
 .vercel
 
 # env
-.env
 skaffold.env
 
 # mesh
@@ -105,3 +98,47 @@ storybook-static
 
 # tines snapshots
 test/snapshots/
+
+# git
+.git
+.gitignore
+.gitattributes
+
+# submodules (not needed for fuzzer target)
+submodules/
+
+# test files and traces
+pvm-traces/
+*.log
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+__mocks__/
+
+# documentation
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts (will be rebuilt in container)
+dist/
+build/
+*.tsbuildinfo

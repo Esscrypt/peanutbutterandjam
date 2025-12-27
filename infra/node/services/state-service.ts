@@ -79,7 +79,7 @@ import type {
   StateTrie,
   ValidatorPublicKeys,
 } from '@pbnjam/types'
-import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
+import { BaseService, DEFAULT_JAM_VERSION, type IStateService, safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { AccumulationService } from './accumulation-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -105,7 +105,7 @@ import type { WorkReportService } from './work-report-service'
  * Manages the complete JAM global state according to Gray Paper specifications.
  * Delegates state management to specialized services for better modularity.
  */
-export class StateService {
+export class StateService extends BaseService implements IStateService {
   private readonly stateTypeRegistry = new Map<
     number,
     (data: Uint8Array) => Safe<DecodingResult<unknown>>
@@ -172,6 +172,7 @@ export class StateService {
     clockService: ClockService
     statisticsService: StatisticsService
   }) {
+    super('state-service')
     this.configService = options.configService
     // Map chapter indices to decoders (hardcoded according to Gray Paper)
     this.stateTypeRegistry.set(1, (data) =>
@@ -203,7 +204,7 @@ export class StateService {
       decodePrivileges(data, this.configService, this.jamVersion),
     ) // Chapter 12 - Privileges (C(12))
     this.stateTypeRegistry.set(13, (data) =>
-      decodeActivity(data, this.configService),
+      decodeActivity(data, this.configService, this.jamVersion),
     ) // Chapter 13 - Activity (C(13))
     this.stateTypeRegistry.set(14, (data) =>
       decodeReady(data, this.configService),
@@ -235,12 +236,17 @@ export class StateService {
     this.sealKeyService = options.sealKeyService
     this.clockService = options.clockService
 
+    // Initialize state from genesis if available, otherwise start with empty state
+    // This allows StateService to work without genesis (e.g., when using trace pre_state)
     const [genesisHeaderError, genesisHeader] =
       this.genesisManagerService.getState()
     if (genesisHeaderError) {
-      throw new Error('Failed to get genesis header')
+      // Genesis not available - start with empty state
+      // The state will be set from trace pre_state or other sources
+      this.setState([])
+    } else {
+      this.setState(genesisHeader.keyvals)
     }
-    this.setState(genesisHeader.keyvals)
   }
 
   /**

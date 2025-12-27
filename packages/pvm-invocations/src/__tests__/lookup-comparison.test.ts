@@ -1,6 +1,5 @@
 import { describe, test, expect, beforeEach } from 'vitest'
 import { LookupHostFunction, PVMRAM, ACCUMULATE_ERROR_CODES } from '@pbnjam/pvm'
-import { ConfigService } from '../../../../infra/node/services/config-service'
 import { bytesToHex, hexToBytes } from '@pbnjam/core'
 import type { HostFunctionContext, LookupParams, ServiceAccount } from '@pbnjam/types'
 
@@ -26,12 +25,10 @@ import type { HostFunctionContext, LookupParams, ServiceAccount } from '@pbnjam/
  * IMPORTANT: LOOKUP is a READ-ONLY operation - it does NOT modify service accounts!
  */
 describe('LOOKUP Host Function', () => {
-  let configService: ConfigService
   let lookupFunction: LookupHostFunction
 
   beforeEach(() => {
-    configService = new ConfigService('tiny')
-    lookupFunction = new LookupHostFunction(configService)
+    lookupFunction = new LookupHostFunction()
   })
 
   test('should return preimage data when preimage exists', () => {
@@ -93,6 +90,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: serviceAccount,
       serviceId,
       accounts,
     }
@@ -160,6 +158,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: serviceAccount,
       serviceId,
       accounts,
     }
@@ -223,6 +222,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: serviceAccount,
       serviceId,
       accounts,
     }
@@ -310,6 +310,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: selfAccount,
       serviceId: selfServiceId,
       accounts,
     }
@@ -384,6 +385,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: serviceAccount,
       serviceId,
       accounts,
     }
@@ -457,6 +459,7 @@ describe('LOOKUP Host Function', () => {
     }
 
     const lookupParams: LookupParams = {
+      serviceAccount: serviceAccount,
       serviceId,
       accounts,
     }

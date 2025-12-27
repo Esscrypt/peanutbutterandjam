@@ -191,14 +191,6 @@ export function encodeImplications(
   }
   parts.push(encodedProvisions)
 
-  // console.log('TS encodeImplications sizes:')
-  // console.log('id:', encodedId.length)
-  // console.log('state:', encodedState.length)
-  // console.log('nextfreeid:', encodedNextFreeId.length)
-  // console.log('xfers:', encodedXfers.length)
-  // console.log('yield:', encodedYield.length)
-  // console.log('provisions:', encodedProvisions.length)
-
   return safeResult(concatBytes(parts))
 }
 

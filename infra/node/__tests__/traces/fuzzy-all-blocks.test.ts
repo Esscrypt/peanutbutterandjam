@@ -4,6 +4,9 @@
  * Tests parsing of genesis.json files from test vectors using NodeGenesisManager
  */
 
+import { config } from 'dotenv'
+config() // Load environment variables from .env file
+
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -453,10 +456,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
