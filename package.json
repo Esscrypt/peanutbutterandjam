@@ -23,7 +23,7 @@
     "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
   "dependencies": {
-    "@peculiar/asn1-pfx": "^2.6.0",
+    "@peculiar/asn1-pfx": "2.6.0",
     "@types/hapi__catbox": "12.1.0",
     "@types/node": "24.2.1",
     "dotenv": "17.2.3"
@@ -50,9 +50,8 @@
     "@types/hapi__catbox": "12.1.0",
     "typescript": "5.9.2"
   },
-  "packageManager": "bun@1.2.19",
+  "packageManager": "bun@1.3.5",
   "trustedDependencies": [
-    "@biomejs/biome",
-    "c-kzg"
+    "@biomejs/biome"
   ]
 }
