@@ -9,8 +9,9 @@
  * Reference: graypaper/text/header.tex - "genesis header genesisheader"
  */
 
-import type { ChainSpecValidator, Hex } from '@pbnjam/core'
+import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
+import type { ChainSpecValidator } from './genesis-config'
 
 import type { BlockHeader, GlobalState } from './global-state'
 import type { SafroleTicket } from './serialization'

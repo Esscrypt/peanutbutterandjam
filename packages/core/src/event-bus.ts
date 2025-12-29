@@ -68,6 +68,11 @@ export interface EpochTransitionEvent {
   epochMark: EpochMark | null
 }
 
+export interface RevertEpochTransitionEvent {
+  slot: bigint
+  epochMark: EpochMark | null
+}
+
 export interface ValidatorSetChangeEvent {
   timestamp: number
   epoch: bigint
@@ -132,6 +137,7 @@ export interface AuditTrancheEvent {
 export interface EventMap {
   slotChange: [SlotChangeEvent]
   epochTransition: [EpochTransitionEvent]
+  revertEpochTransition: [RevertEpochTransitionEvent]
   validatorSetChange: [ValidatorSetChangeEvent]
   conectivityChange: [ConectivityChangeEvent]
   assuranceReceived: [AssuranceDistributionRequest, Hex]
@@ -364,6 +370,12 @@ export class EventBusService extends BaseService {
     callback: EventCallback<EventMap['epochTransition']>,
   ): void {
     this.on('epochTransition', callback)
+  }
+
+  addRevertEpochTransitionCallback(
+    callback: EventCallback<EventMap['revertEpochTransition']>,
+  ): void {
+    this.on('revertEpochTransition', callback)
   }
 
   // Aliases for compatibility (addXxxCallback methods)
@@ -1339,6 +1351,12 @@ export class EventBusService extends BaseService {
 
   async emitEpochTransition(event: EpochTransitionEvent): Promise<void> {
     await this.emit('epochTransition', event)
+  }
+
+  async emitRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Promise<void> {
+    await this.emit('revertEpochTransition', event)
   }
 
   async emitValidatorSetChange(event: ValidatorSetChangeEvent): Promise<void> {

@@ -1,4 +1,4 @@
-import type { Hex } from '@pbnjam/core'
+import type { Hex } from 'viem'
 import type { WorkPackage } from './block-authoring'
 import type { AccumulateInput, RefineInvocationContext } from './pvm'
 import type { ServiceAccount } from './serialization'

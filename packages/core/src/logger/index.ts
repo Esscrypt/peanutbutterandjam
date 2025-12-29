@@ -17,17 +17,26 @@ import pino from 'pino'
  * @description ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️ !IMPORTANT! Before using the logger, it must be initialized with this method at the top of the entry point file of a service.
  */
 export class LoggerProvider {
+  private readonly isEnabled: boolean
   private pino = pino(
     {
       level: process.env['PINO_LEVEL'] || 'info',
     },
-    pino.multistream([
-      { level: 'error', stream: process.stderr },
-      { level: 'fatal', stream: process.stderr },
-      { level: 'debug', stream: process.stdout },
-    ]),
+    pino.multistream(
+      [
+        { level: 'error', stream: process.stderr },
+        { level: 'fatal', stream: process.stderr },
+        { level: 'debug', stream: process.stdout },
+      ],
+      { dedupe: true },
+    ),
   )
   private hasBeenInitialized = false
+
+  constructor() {
+    // Check if logging is disabled via environment variable
+    this.isEnabled = process.env['ENABLE_LOGGER'] === 'true'
+  }
 
   get hasBeenInitializedValue() {
     return this.hasBeenInitialized
@@ -38,32 +47,54 @@ export class LoggerProvider {
   }
 
   init() {
+    if (!this.isEnabled) {
+      // Don't warn - logging is intentionally disabled
+      return
+    }
     //TODO: connect to Prometheus or other metrics service
     this.pino.info('LoggerProvider initialized')
     this.hasBeenInitialized = true
   }
 
   noInitLog(message: string) {
+    if (!this.isEnabled) {
+      return
+    }
     this.pino.info(message)
   }
 
   info(message: string, ...args: unknown[]) {
+    if (!this.isEnabled) {
+      return
+    }
     this._safeLog('info', message, args)
   }
 
   debug(message: string, ...args: unknown[]) {
+    if (!this.isEnabled) {
+      return
+    }
     this._safeLog('debug', message, args)
   }
 
   warn(message: string, ...args: unknown[]) {
+    if (!this.isEnabled) {
+      return
+    }
     this._safeLog('warn', message, args)
   }
 
   warning(message: string, ...args: unknown[]) {
+    if (!this.isEnabled) {
+      return
+    }
     this._safeLog('warn', message, args)
   }
 
   error(message: string, error?: unknown, ..._args: unknown[]) {
+    if (!this.isEnabled) {
+      return
+    }
     this._safeLog('error', message, [error, ..._args])
   }
 
@@ -75,6 +106,11 @@ export class LoggerProvider {
     message: string,
     args: unknown[],
   ) {
+    // Skip logging if disabled
+    if (!this.isEnabled) {
+      return
+    }
+
     if (!this.hasBeenInitialized) {
       // Log to console as fallback when logger is not initialized
       const timestamp = new Date().toISOString()

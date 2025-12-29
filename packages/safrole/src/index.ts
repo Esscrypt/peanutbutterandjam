@@ -5,6 +5,10 @@
  * Reference: graypaper/text/safrole.tex
  */
 
+// Re-export getTicketIdFromProof from core for backward compatibility
+export { getTicketIdFromProof } from '@pbnjam/core'
+// Re-export isSafroleTicket from types for backward compatibility
+export { isSafroleTicket } from '@pbnjam/types'
 export * from './epoch-marker'
 export * from './extrinsic-hash'
 export * from './fallback-sealing'

@@ -4,9 +4,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import { InfoHostFunction, PVMRAM, ACCUMULATE_ERROR_CODES } from '@pbnjam/pvm'
-import { ConfigService } from '../../../../infra/node/services/config-service'
-import { EntropyService } from '../../../../infra/node/services/entropy'
-import { EventBusService, bytesToHex } from '@pbnjam/core'
+import { bytesToHex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   InfoParams,
@@ -31,17 +29,11 @@ import type {
  * Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
  */
 describe('INFO Host Function Comparison', () => {
-  let configService: ConfigService
-  let entropyService: EntropyService
   let tsInfoFunction: InfoHostFunction
   let wasm: Awaited<ReturnType<typeof instantiate>>
   let workspaceRoot: string
 
   beforeEach(async () => {
-    configService = new ConfigService('tiny')
-    const eventBusService = new EventBusService()
-    entropyService = new EntropyService(eventBusService)
-
     // Initialize TypeScript INFO host function
     tsInfoFunction = new InfoHostFunction()
 
@@ -86,8 +78,6 @@ describe('INFO Host Function Comparison', () => {
     const fromOffset = 0n // Start from beginning of encoded data
     const length = 96n // Request 96 bytes (full encoded length per Gray Paper)
     const requestedServiceId = 0xffffffffffffffffn // NONE = request self (service ID 0)
-
-    const pageSize = 4096 // Page size for memory initialization
 
     // Create service account matching the expected hex value
     const serviceId = 0n

@@ -94,7 +94,7 @@ export class ReadyService extends BaseService implements IReadyService {
    * Gray Paper: ready ∈ sequence[C_epochlen]{sequence{⟨workreport, protoset{hash}⟩}}
    */
   getReadyItemsForSlot(slotIndex: bigint): ReadyItem[] {
-    if(slotIndex > this.configService.epochDuration) {
+    if (slotIndex > this.configService.epochDuration) {
       throw new Error('Slot index out of bounds')
     }
     return this.ready.epochSlots[Number(slotIndex)] || []

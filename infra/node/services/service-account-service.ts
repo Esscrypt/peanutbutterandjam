@@ -276,10 +276,14 @@ export class ServiceAccountService
   }
 
   /**
-   * Apply a batch of preimages for a given slot with ordering/uniqueness validation
-   * Returns error 'preimages_not_sorted_unique' when inputs violate sorting/uniqueness
+   * Validate preimages without modifying state
+   * This should be called BEFORE applyPreimages to check for errors
+   * that should cause the entire block to be skipped (no state changes).
+   *
+   * @param preimages - Preimages to validate
+   * @returns Safe result with error if validation fails, or validated preimages if successful
    */
-  applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
+  validatePreimages(preimages: Preimage[]): Safe<Preimage[]> {
     // Validate sorted by requester asc, then blob asc; and unique
     for (let i = 1; i < preimages.length; i++) {
       const a = preimages[i - 1]
@@ -303,6 +307,18 @@ export class ServiceAccountService
       }
     }
 
+    return safeResult(preimages)
+  }
+
+  /**
+   * Apply a batch of preimages for a given slot
+   * This should be called AFTER validatePreimages passes.
+   *
+   * @param preimages - Validated preimages from validatePreimages
+   * @param creationSlot - Slot when preimages are created
+   * @returns Safe result indicating success
+   */
+  applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
     // Apply each preimage
     for (const p of preimages) {
       const [err] = this.storePreimage(p, creationSlot)

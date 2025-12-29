@@ -188,10 +188,24 @@ describe('Disputes Service - JAM Test Vectors', () => {
               })),
             }]
 
-            // Step 4: Process disputes using the new applyDisputes method
+            // Step 4: Validate disputes first, then apply
             // Pass current timeslot (tau) from pre_state for age validation
             const currentTimeslot = BigInt(vector.pre_state.tau)
-            const [processError, offendersMark] = disputesService.applyDisputes(disputeInput, currentTimeslot)
+            const [validationError, validatedDisputes] =
+              disputesService.validateDisputes(disputeInput, currentTimeslot)
+            if (validationError) {
+              // Check if this was expected to fail
+              if (vector.output.err !== undefined) {
+                expect(validationError.message).toBe(vector.output.err)
+                continue
+              }
+              throw validationError
+            }
+            if (!validatedDisputes) {
+              throw new Error('Dispute validation failed')
+            }
+            const [processError, offendersMark] =
+              disputesService.applyDisputes(validatedDisputes)
 
             // Step 5: Check expected outcome
             if (vector.output.err !== undefined) {

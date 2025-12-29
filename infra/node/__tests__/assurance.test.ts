@@ -182,16 +182,29 @@ describe('Assurance Service - JAM Test Vectors', () => {
               }
             }
 
-            // Step 3: Validate assurances
-              // If validation didn't fail, try state transition (error might come from transition)
-              const [transitionError] = assuranceService.applyAssurances(
+            // Step 3: Validate assurances first
+            const [validationError, assuranceCounts] =
+              assuranceService.validateAssurances(
                 vector.input.assurances,
                 vector.input.slot,
                 vector.input.parent,
                 configService,
               )
-              
-            // Step 4: Check expected outcome
+
+            // Step 4: If validation passed, apply assurances
+            let transitionError: Error | null = null
+            if (!validationError && assuranceCounts) {
+              const [applyError] = assuranceService.applyAssurances(
+                assuranceCounts,
+                vector.input.slot,
+                configService,
+              )
+              transitionError = applyError
+            } else {
+              transitionError = validationError
+            }
+
+            // Step 5: Check expected outcome
             if (vector.output && 'err' in vector.output && vector.output.err) {
               // Expected to fail - check if error comes from validation
               if (transitionError) {

@@ -33,7 +33,7 @@ import { safeError, safeResult } from '@pbnjam/types'
 // Helper methods merged into main class
 
 /**
- * Load and parse chain-spec.json file (returns Zod-validated input)
+ * Load and parse chain-spec.json file
  */
 export function loadChainSpec(filePath: string): Safe<ChainSpecJson> {
   const content = readFileSync(filePath, 'utf8')

@@ -5,8 +5,7 @@
  * Reference: Gray Paper merklization.tex section D
  */
 
-import { keccak_256 } from '@noble/hashes/sha3'
-import { encodeVariableSequence } from '@pbnjam/codec'
+import { keccak_256 } from '@noble/hashes/sha3.js'
 import type { Encoder, Safe } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
 import { blake2bHash, bytesToHex, hexToBytes } from './utils/crypto'
@@ -700,16 +699,34 @@ export function mmrencode(range: MMRRange): Safe<Uint8Array> {
       }
     }
 
-    // Use variable length encoding from serialization package
-    const [encodeError, encoded] = encodeVariableSequence(
-      optionalHashes,
-      optionalHashEncoder,
-    )
-    if (encodeError) {
-      return safeError(encodeError)
+    // Encode sequence with length prefix (minimal implementation to avoid codec dependency)
+    const parts: Uint8Array[] = []
+
+    // Encode length as 4-byte little-endian
+    const lengthBytes = new Uint8Array(4)
+    const lengthView = new DataView(lengthBytes.buffer)
+    lengthView.setUint32(0, optionalHashes.length, true) // little-endian
+    parts.push(lengthBytes)
+
+    // Encode each element
+    for (const hash of optionalHashes) {
+      const [error, encoded] = optionalHashEncoder(hash)
+      if (error) {
+        return safeError(error)
+      }
+      parts.push(encoded)
     }
 
-    return safeResult(encoded)
+    // Concatenate all parts
+    const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
+    const result = new Uint8Array(totalLength)
+    let offset = 0
+    for (const part of parts) {
+      result.set(part, offset)
+      offset += part.length
+    }
+
+    return safeResult(result)
   } catch (error) {
     return safeError(error as Error)
   }

@@ -4,6 +4,9 @@
  * Tests parsing of genesis.json files from test vectors using NodeGenesisManager
  */
 
+import { config } from 'dotenv'
+config() // Load environment variables from .env file
+
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -33,6 +36,7 @@ import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
 import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
+  DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
@@ -438,10 +442,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
@@ -803,7 +806,7 @@ describe('Genesis Parse Tests', () => {
             if (blockJsonData.pre_state?.keyvals) {
               const [setStateError] = stateService.setState(
                 blockJsonData.pre_state.keyvals,
-                undefined, // jamVersion
+                DEFAULT_JAM_VERSION, // jamVersion
                 true, // useRawKeyvals - store raw keyvals for pre-state root calculation
               )
               if (setStateError) {
@@ -813,7 +816,7 @@ describe('Genesis Parse Tests', () => {
               // Fallback to genesis state if pre_state is not available
               const [setStateError] = stateService.setState(
                 genesisJson?.state?.keyvals ?? [],
-                undefined,
+                DEFAULT_JAM_VERSION,
                 true, // useRawKeyvals
               )
               if (setStateError) {

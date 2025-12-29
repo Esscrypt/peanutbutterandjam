@@ -59,7 +59,14 @@
  * - Compact state commitments (32-byte hash)
  */
 
-import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
+import {
+  blake2bHash,
+  bytesToHex,
+  calculateServiceAccountItems,
+  calculateServiceAccountOctets,
+  type Hex,
+  hexToBytes,
+} from '@pbnjam/core'
 import type {
   GlobalState,
   IConfigService,
@@ -159,21 +166,55 @@ export function createStateKey(
  * Storage keys use the pattern: C(s, encode[4]{0xFFFFFFFF} ∥ storage_key)
  * where s is the service ID and k is the storage key.
  *
+ * This function handles two cases:
+ * 1. Original storage key `k`: Computes blake(encode[4]{0xFFFFFFFF} || k) and uses first 27 bytes
+ * 2. Already-hashed storage key (27 bytes): Uses the hash directly to construct the state key
+ *
  * @param serviceId - Service account ID
- * @param storageKey - Storage key (blob)
+ * @param storageKey - Storage key (either original blob `k` or 27-byte Blake hash `h`)
  * @returns 31-byte state key for service storage
  */
 export function createServiceStorageKey(
   serviceId: bigint,
   storageKey: Hex,
 ): Uint8Array {
+  const storageKeyBytes = hexToBytes(storageKey)
+
+  // Check if storageKey is already a 27-byte Blake hash (from state loading)
+  // When loading from state, we store h (27-byte Blake hash) directly
+  // When creating new storage (from PVM), we have k (original storage key)
+  if (storageKeyBytes.length === 27) {
+    // Storage key is already a Blake hash - use it directly to construct state key
+    // C(s, h) where h is already blake(encode[4]{0xFFFFFFFF} || k)
+    // We just need to interleave serviceId with the 27-byte hash
+    const key = new Uint8Array(31)
+    const serviceUint8Array = new Uint8Array(4)
+    const view = new DataView(serviceUint8Array.buffer)
+    view.setUint32(0, Number(serviceId), true) // little-endian
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    // where n = encode[4](s), a = storageKeyBytes (already the 27-byte Blake hash)
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = storageKeyBytes[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = storageKeyBytes[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = storageKeyBytes[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = storageKeyBytes[3] // a₃
+    // Remaining bytes: a₄, a₅, ..., a₂₆ (23 bytes)
+    key.set(storageKeyBytes.slice(4), 8) // a₄...a₂₆
+
+    return key
+  }
+
+  // Storage key is the original key `k` - compute blake(encode[4]{0xFFFFFFFF} || k)
   // Create the prefix: encode[4]{2³²-1} = encode[4]{0xFFFFFFFF}
   const prefix = new Uint8Array(4)
   const prefixView = new DataView(prefix.buffer)
   prefixView.setUint32(0, 0xffffffff, true) // little-endian
 
   // Concatenate prefix with storage key
-  const storageKeyBytes = hexToBytes(storageKey)
   const combinedKey = new Uint8Array(prefix.length + storageKeyBytes.length)
   combinedKey.set(prefix, 0)
   combinedKey.set(storageKeyBytes, prefix.length)
@@ -181,7 +222,7 @@ export function createServiceStorageKey(
   // Convert to hex for createStateKey
   const combinedKeyHex = bytesToHex(combinedKey)
 
-  // Use C(s, combinedKey) pattern
+  // Use C(s, combinedKey) pattern - createStateKey will compute blake(combinedKey)
   return createStateKey(0, serviceId, combinedKeyHex)
 }
 
@@ -195,21 +236,50 @@ export function createServiceStorageKey(
  * Preimage keys use the pattern: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash)
  * where s is the service ID and h is the preimage hash.
  *
+ * This function handles two cases:
+ * 1. Full preimage hash `h` (32 bytes): Computes blake(encode[4]{0xFFFFFFFE} || h) and uses first 27 bytes
+ * 2. Already-hashed key (27 bytes): Uses the hash directly to construct the state key
+ *
  * @param serviceId - Service account ID
- * @param preimageHash - Preimage hash
+ * @param preimageHash - Preimage hash (either full 32-byte hash or 27-byte Blake hash)
  * @returns 31-byte state key for service preimage
  */
 export function createServicePreimageKey(
   serviceId: bigint,
   preimageHash: Hex,
 ): Uint8Array {
+  const preimageHashBytes = hexToBytes(preimageHash)
+
+  // Check if preimageHash is already a 27-byte Blake hash (from state loading)
+  if (preimageHashBytes.length === 27) {
+    // Preimage hash is already a Blake hash - use it directly to construct state key
+    // C(s, h) where h is already blake(encode[4]{0xFFFFFFFE} || preimage_hash)
+    const key = new Uint8Array(31)
+    const serviceUint8Array = new Uint8Array(4)
+    const view = new DataView(serviceUint8Array.buffer)
+    view.setUint32(0, Number(serviceId), true) // little-endian
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = preimageHashBytes[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = preimageHashBytes[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = preimageHashBytes[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = preimageHashBytes[3] // a₃
+    key.set(preimageHashBytes.slice(4), 8) // a₄...a₂₆
+
+    return key
+  }
+
+  // Preimage hash is the full 32-byte hash - compute blake(encode[4]{0xFFFFFFFE} || h)
   // Create the prefix: encode[4]{2³²-2} = encode[4]{0xFFFFFFFE}
   const prefix = new Uint8Array(4)
   const prefixView = new DataView(prefix.buffer)
   prefixView.setUint32(0, 0xfffffffe, true) // little-endian
 
   // Concatenate prefix with preimage hash
-  const preimageHashBytes = hexToBytes(preimageHash)
   const combinedKey = new Uint8Array(prefix.length + preimageHashBytes.length)
   combinedKey.set(prefix, 0)
   combinedKey.set(preimageHashBytes, prefix.length)
@@ -217,7 +287,7 @@ export function createServicePreimageKey(
   // Convert to hex for createStateKey
   const combinedKeyHex = bytesToHex(combinedKey)
 
-  // Use C(s, combinedKey) pattern
+  // Use C(s, combinedKey) pattern - createStateKey will compute blake(combinedKey)
   return createStateKey(0, serviceId, combinedKeyHex)
 }
 
@@ -231,8 +301,12 @@ export function createServicePreimageKey(
  * Request keys use the pattern: C(s, encode[4]{length} ∥ request_hash)
  * where s is the service ID, l is the blob length, and h is the request hash.
  *
+ * This function handles two cases:
+ * 1. Full request hash `h` (32 bytes): Computes blake(encode[4]{l} || h) and uses first 27 bytes
+ * 2. Already-hashed key (27 bytes): Uses the hash directly to construct the state key
+ *
  * @param serviceId - Service account ID
- * @param requestHash - Request hash
+ * @param requestHash - Request hash (either full 32-byte hash or 27-byte Blake hash)
  * @param length - Blob length
  * @returns 31-byte state key for service request
  */
@@ -241,13 +315,38 @@ export function createServiceRequestKey(
   requestHash: Hex,
   length: bigint,
 ): Uint8Array {
+  const requestHashBytes = hexToBytes(requestHash)
+
+  // Check if requestHash is already a 27-byte Blake hash (from state loading)
+  if (requestHashBytes.length === 27) {
+    // Request hash is already a Blake hash - use it directly to construct state key
+    // C(s, h) where h is already blake(encode[4]{l} || request_hash)
+    const key = new Uint8Array(31)
+    const serviceUint8Array = new Uint8Array(4)
+    const view = new DataView(serviceUint8Array.buffer)
+    view.setUint32(0, Number(serviceId), true) // little-endian
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = requestHashBytes[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = requestHashBytes[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = requestHashBytes[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = requestHashBytes[3] // a₃
+    key.set(requestHashBytes.slice(4), 8) // a₄...a₂₆
+
+    return key
+  }
+
+  // Request hash is the full 32-byte hash - compute blake(encode[4]{l} || h)
   // Create the prefix: encode[4]{length}
   const prefix = new Uint8Array(4)
   const prefixView = new DataView(prefix.buffer)
   prefixView.setUint32(0, Number(length), true) // little-endian
 
   // Concatenate prefix with request hash
-  const requestHashBytes = hexToBytes(requestHash)
   const combinedKey = new Uint8Array(prefix.length + requestHashBytes.length)
   combinedKey.set(prefix, 0)
   combinedKey.set(requestHashBytes, prefix.length)
@@ -255,7 +354,7 @@ export function createServiceRequestKey(
   // Convert to hex for createStateKey
   const combinedKeyHex = bytesToHex(combinedKey)
 
-  // Use C(s, combinedKey) pattern
+  // Use C(s, combinedKey) pattern - createStateKey will compute blake(combinedKey)
   return createStateKey(0, serviceId, combinedKeyHex)
 }
 
@@ -358,14 +457,7 @@ export function createStateTrie(
 
   // Chapter 3: recent
   const recentKey = createStateKey(3)
-  // Debug: Log accoutBelt peaks before encoding
-  console.log('[createStateTrie] Encoding recent with accoutBelt:', {
-    peaksLength: globalState.recent.accoutBelt.peaks.length,
-    peaks: globalState.recent.accoutBelt.peaks.map((p, i) => 
-      p ? `[${i}]: ${p.slice(0, 18)}...` : `[${i}]: null`
-    ),
-    totalCount: globalState.recent.accoutBelt.totalCount?.toString(),
-  })
+
   const [error3, recentData] = encodeRecent(globalState.recent)
   if (error3) {
     return safeError(error3)
@@ -481,6 +573,7 @@ export function createStateTrie(
   const [error13, activityData] = encodeActivity(
     globalState.activity,
     configService,
+    jamVersion,
   )
   if (error13) {
     return safeError(error13)
@@ -539,21 +632,55 @@ export function createStateTrie(
     // Gray Paper accounts.tex: items and octets are DERIVED values that must be recalculated
     // items = 2 * len(requests) + len(storage)
     // octets = sum((81 + z) for (h, z) in keys(requests)) + sum((34 + len(y) + len(x)) for (x, y) in storage)
-    // Count unique request keys (hash, length pairs)
+    // Use the extracted functions from @pbnjam/core
+    const computedOctets = calculateServiceAccountOctets(account)
+    const computedItems = calculateServiceAccountItems(account)
+
+    // #region agent log
+    // Calculate breakdown for debugging (keep logs for now)
     let requestKeyCount = 0
-    let computedOctets = 0n
+    let requestsOctets = 0n
     for (const [_hash, lengthMap] of account.requests) {
       for (const [length, _status] of lengthMap) {
         requestKeyCount++
-        computedOctets += 81n + length
+        requestsOctets += 81n + length
       }
     }
-    // Add storage octets: 34 + len(key) + len(value) for each storage entry
+    let storageOctets = 0n
     for (const [storageKey, storageValue] of account.storage) {
-      const keyBytes = hexToBytes(storageKey)
-      computedOctets += 34n + BigInt(keyBytes.length) + BigInt(storageValue.length)
+      const keyBytes = hexToBytes(storageKey).length
+      storageOctets += 34n + BigInt(keyBytes) + BigInt(storageValue.length)
     }
-    const computedItems = BigInt(2 * requestKeyCount + account.storage.size)
+    if (
+      account.codehash ===
+      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+    ) {
+      fetch(
+        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'state-serialization.ts:652',
+            message: 'final octets calculation',
+            data: {
+              serviceId: serviceId.toString(),
+              storedOctets: account.octets.toString(),
+              computedOctets: computedOctets.toString(),
+              requestsOctets: requestsOctets.toString(),
+              storageOctets: storageOctets.toString(),
+              storageSize: account.storage.size,
+              requestKeyCount,
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'D',
+          }),
+        },
+      ).catch(() => {})
+    }
+    // #endregion
 
     // Update account with computed values before encoding
     const accountWithComputed = {
@@ -562,6 +689,33 @@ export function createStateTrie(
       octets: computedOctets,
     }
 
+    // #region agent log
+    if (
+      account.codehash ===
+      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+    ) {
+      fetch(
+        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'state-serialization.ts:673',
+            message: 'encoding account with computed octets',
+            data: {
+              serviceId: serviceId.toString(),
+              accountWithComputedOctets: accountWithComputed.octets.toString(),
+              accountWithComputedItems: accountWithComputed.items.toString(),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'D',
+          }),
+        },
+      ).catch(() => {})
+    }
+    // #endregion
     const [error17, accountData] = encodeServiceAccount(
       accountWithComputed,
       jamVersion,
@@ -570,6 +724,49 @@ export function createStateTrie(
       return safeError(error17)
     }
     if (accountData) {
+      // #region agent log
+      if (
+        account.codehash ===
+        '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+      ) {
+        // Decode the octets value from the encoded data to verify
+        const version = jamVersion ?? { major: 0, minor: 7, patch: 2 }
+        const includeDiscriminator =
+          version.major > 0 ||
+          (version.major === 0 && version.minor > 7) ||
+          (version.major === 0 && version.minor === 7 && version.patch > 0)
+        const discriminatorSize = includeDiscriminator ? 1 : 0
+        const octetsOffset = discriminatorSize + 32 + 24 // discriminator (optional) + codehash + offset to octets field
+        const view = new DataView(
+          accountData.buffer,
+          accountData.byteOffset,
+          accountData.byteLength,
+        )
+        const encodedOctets = view.getBigUint64(octetsOffset, true)
+        fetch(
+          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-serialization.ts:690',
+              message: 'encoded account data verification',
+              data: {
+                serviceId: serviceId.toString(),
+                encodedOctets: encodedOctets.toString(),
+                accountWithComputedOctets:
+                  accountWithComputed.octets.toString(),
+                accountDataLength: accountData.length,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'D',
+            }),
+          },
+        ).catch(() => {})
+      }
+      // #endregion
       stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
     }
 
@@ -580,7 +777,38 @@ export function createStateTrie(
     // Gray Paper merklization.tex (lines 103-104)
     for (const [storageKey, storageValue] of account.storage) {
       const storageStateKey = createServiceStorageKey(serviceId, storageKey)
-      stateTrie[bytesToHex(storageStateKey)] = bytesToHex(storageValue)
+      const storageStateKeyHex = bytesToHex(storageStateKey) as Hex
+      // #region agent log
+      const TARGET_STATE_KEY_GEN_STORAGE =
+        '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+      if (
+        storageStateKeyHex.toLowerCase() ===
+        TARGET_STATE_KEY_GEN_STORAGE.toLowerCase()
+      ) {
+        fetch(
+          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-serialization.ts:668',
+              message: 'createStateTrie: Generating target storage key',
+              data: {
+                serviceId: serviceId.toString(),
+                storageKey,
+                storageStateKeyHex,
+                storageValueLength: storageValue.length.toString(),
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'U',
+            }),
+          },
+        ).catch(() => {})
+      }
+      // #endregion
+      stateTrie[storageStateKeyHex] = bytesToHex(storageValue)
     }
 
     // Service preimage mappings: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash) ↦ preimage_data
@@ -601,6 +829,38 @@ export function createStateTrie(
           requestHash,
           length,
         )
+        const requestStateKeyHex = bytesToHex(requestStateKey) as Hex
+        // #region agent log
+        const TARGET_STATE_KEY_GEN =
+          '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+        if (
+          requestStateKeyHex.toLowerCase() ===
+          TARGET_STATE_KEY_GEN.toLowerCase()
+        ) {
+          fetch(
+            'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                location: 'state-serialization.ts:685',
+                message: 'createStateTrie: Generating target request key',
+                data: {
+                  serviceId: serviceId.toString(),
+                  requestHash,
+                  length: length.toString(),
+                  requestStateKeyHex,
+                  requestStatusLength: requestStatus.length.toString(),
+                },
+                timestamp: Date.now(),
+                sessionId: 'debug-session',
+                runId: 'run1',
+                hypothesisId: 'R',
+              }),
+            },
+          ).catch(() => {})
+        }
+        // #endregion
         // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
         // var{...} = length prefix (natural number)
         // sequence{encode[4]{x}} = sequence of 4-byte timeslots
@@ -611,7 +871,7 @@ export function createStateTrie(
         if (error18) {
           return safeError(error18)
         }
-        stateTrie[bytesToHex(requestStateKey)] = bytesToHex(requestStatusData)
+        stateTrie[requestStateKeyHex] = bytesToHex(requestStatusData)
       }
     }
   }

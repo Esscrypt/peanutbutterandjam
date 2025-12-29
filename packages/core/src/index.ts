@@ -13,6 +13,8 @@ export * from './logger'
 // Export merklization implementation
 export * from './merklization'
 export * from './schemas'
+// Export service account utilities
+export * from './service-account'
 // Export shuffle functions
 export * from './shuffle'
 // Export all utilities

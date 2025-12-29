@@ -16,10 +16,10 @@
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
     "@pbnjam/pvm": "workspace:*",
-    "pino": "^9.6.0",
-    "pino-pretty": "^11.0.0",
-    "@pbnjam/types": "workspace:*"
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/pvm-assemblyscript": "workspace:*"
   },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",

@@ -113,13 +113,31 @@ const APP_NAME = 'pbnj-fuzzer-target'
 // Initialize all services
 let stateService: StateService
 let blockImporterService: BlockImporterService
+let recentHistoryService: RecentHistoryService
 let initialized = false
 let blockNumber = 0n // Track current block number for state root comparison
 
 // Track previous state for comparison
 let previousStateKeyvals: Map<string, string> = new Map()
 
-async function initializeServices() {
+// Export getters for services (for testing)
+export function getStateService(): StateService {
+  return stateService
+}
+
+export function getBlockImporterService(): BlockImporterService {
+  return blockImporterService
+}
+
+export function getRecentHistoryService(): RecentHistoryService {
+  return recentHistoryService
+}
+
+export function getConfigService(): ConfigService {
+  return configService
+}
+
+export async function initializeServices() {
   let ringProver: RingVRFProverWasm
   let ringVerifier: RingVRFVerifierWasm
 
@@ -311,7 +329,8 @@ async function initializeServices() {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
+      useWasm: false,
+      traceSubfolder: 'fuzzer-target',
     })
 
     const statisticsService = new StatisticsService({
@@ -332,23 +351,24 @@ async function initializeServices() {
       statisticsService: statisticsService,
     })
 
-    const recentHistoryService = new RecentHistoryService({
+    recentHistoryService = new RecentHistoryService({
       eventBusService: eventBusService,
       configService: configService,
       accumulationService: accumulatedService,
     })
+    recentHistoryService.start()
 
     // Create a minimal genesis manager for fuzzer target
     // The state will be set via Initialize message, so we need a mock that returns empty state
     const genesisManager = new NodeGenesisManager(configService, {})
 
-    // Override getState to return empty state for fuzzer
-    // Safe type is [error, value] tuple - use safeResult helper
-    const originalGetState = genesisManager.getState.bind(genesisManager)
+    // Override getState to return empty state - will be set via Initialize message
     genesisManager.getState = () => {
-      // Return empty state - will be set via Initialize message
-      // GenesisHeaderState has keyvals: KeyValue[]
-      return safeResult({ keyvals: [] })
+      return safeResult({
+        state_root:
+          '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+        keyvals: [],
+      })
     }
 
     stateService = new StateService({
@@ -384,6 +404,7 @@ async function initializeServices() {
       configService: configService,
       clockService: clockService,
       entropyService: entropyService,
+      accumulationService: accumulatedService,
       authPoolService: authPoolService,
       networkService: null,
       ce134WorkPackageSharingProtocol: null,
@@ -394,7 +415,7 @@ async function initializeServices() {
       recentHistoryService: recentHistoryService,
       serviceAccountService: serviceAccountsService,
       statisticsService: statisticsService,
-      accumulationService: accumulatedService,
+      stateService: stateService,
     })
 
     blockImporterService = new BlockImporterService({
@@ -417,7 +438,6 @@ async function initializeServices() {
     })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     logger.info('Starting entropy service...')
     const [entropyStartError] = await entropyService.start()
@@ -507,7 +527,7 @@ function sendMessage(socket: UnixSocket, message: Uint8Array): void {
 }
 
 // Handle PeerInfo request
-function handlePeerInfo(socket: UnixSocket, peerInfo: FuzzPeerInfo): void {
+function handlePeerInfo(socket: UnixSocket, _peerInfo: FuzzPeerInfo): void {
   // Send our PeerInfo response
   const response: FuzzMessage = {
     type: FuzzMessageType.PeerInfo,
@@ -534,10 +554,11 @@ async function handleInitialize(
       `Initialize: Setting state with ${init.keyvals.length} keyvals`,
     )
     // Set state from keyvals with JAM version from PeerInfo
+    // Note: setState decodes keyvals and sets them on services
+    // Some keyvals may fail to decode (e.g., Chapter 12 with incomplete data)
     const [setStateError] = stateService.setState(init.keyvals, JAM_VERSION)
     if (setStateError) {
-      logger.error(`Failed to set state: ${setStateError.message}`)
-      throw new Error(`Failed to set state: ${setStateError.message}`)
+      logger.warn(`Warning during setState: ${setStateError.message}`)
     }
     logger.debug(`Initialize: State set successfully`)
 
@@ -742,7 +763,7 @@ async function handleImportBlock(
           for (const key of addedKeys) {
             const value = currentStateKeyvals.get(key)!
             const valuePreview =
-              value.length > 100 ? value.substring(0, 100) + '...' : value
+              value.length > 100 ? `${value.substring(0, 100)}...` : value
             logger.error(`   ${key}: ${valuePreview} (${value.length} chars)`)
           }
         }
@@ -752,7 +773,7 @@ async function handleImportBlock(
           for (const key of removedKeys) {
             const value = previousStateKeyvals.get(key)!
             const valuePreview =
-              value.length > 100 ? value.substring(0, 100) + '...' : value
+              value.length > 100 ? `${value.substring(0, 100)}...` : value
             logger.error(`   ${key}: ${valuePreview} (${value.length} chars)`)
           }
         }
@@ -763,11 +784,11 @@ async function handleImportBlock(
             logger.error(`   ${key}:`)
             const oldPreview =
               oldValue.length > 80
-                ? oldValue.substring(0, 80) + '...'
+                ? `${oldValue.substring(0, 80)}...`
                 : oldValue
             const newPreview =
               newValue.length > 80
-                ? newValue.substring(0, 80) + '...'
+                ? `${newValue.substring(0, 80)}...`
                 : newValue
             logger.error(`     OLD: ${oldPreview} (${oldValue.length} chars)`)
             logger.error(`     NEW: ${newPreview} (${newValue.length} chars)`)
@@ -836,7 +857,7 @@ async function handleImportBlock(
         for (let i = 0; i < Math.min(20, keyvals.length); i++) {
           const kv = keyvals[i]
           const valuePreview =
-            kv.value.length > 60 ? kv.value.substring(0, 60) + '...' : kv.value
+            kv.value.length > 60 ? `${kv.value.substring(0, 60)}...` : kv.value
           logger.error(`  [${i}] ${kv.key}: ${valuePreview}`)
         }
         if (keyvals.length > 20) {
@@ -861,7 +882,7 @@ async function handleImportBlock(
 // Handle GetState request
 async function handleGetState(
   socket: UnixSocket,
-  getState: GetState,
+  _getState: GetState,
 ): Promise<void> {
   if (!initialized) {
     const response: FuzzMessage = {

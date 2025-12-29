@@ -245,7 +245,6 @@ describe('Fuzzer Initialize Test', () => {
 
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     // Start services
     const [entropyStartError] = await entropyService.start()

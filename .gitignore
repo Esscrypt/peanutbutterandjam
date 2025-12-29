@@ -103,6 +103,10 @@ polkajam
 
 dist
 
+# JS build artifacts in packages
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+
 # Rust
 target/
 **/target/
@@ -125,3 +129,5 @@ pvm-traces/
 pvm-expected/
 
 .state-cache/
+
+mismatch-logs/

@@ -84,6 +84,9 @@ export class AccumulationService extends BaseService {
   // Gray Paper: accumulationstatistics[s] = tuple{N, gas}
   // This tracks the count and total gas used for accumulations per service
   private accumulationStatistics: Map<bigint, [number, number]> = new Map()
+  // Track onTransfers statistics per service: tuple{count, gas}
+  // This tracks the count of deferred transfers received and gas used processing them
+  private onTransfersStatistics: Map<bigint, [number, number]> = new Map()
   // Track immediate items for current transition to ensure their packages are added to accumulated
   private currentImmediateItems: ReadyItem[] = []
   // Track package hashes of new queued items for slot m (justbecameavailable^Q)
@@ -438,23 +441,7 @@ export class AccumulationService extends BaseService {
         results,
         pendingDefxfers,
       )
-      logger.debug(
-        '[AccumulationService] Collected defxfers from results for next iteration',
-        {
-          iteration: iterationCount,
-          previousPendingCount: pendingDefxfers.length,
-          collectedCount: collectedDefxfers.length,
-          resultsCount: results.length,
-          resultsOkCount: results.filter((r) => r.ok).length,
-          defxfersFromResults: results
-            .filter((r) => r.ok)
-            .map((r) => ({
-              defxfersCount: (
-                r as { ok: true; value: { defxfers: DeferredTransfer[] } }
-              ).value.defxfers.length,
-            })),
-        },
-      )
+
       pendingDefxfers = collectedDefxfers
 
       // Step 6: Update global state with results
@@ -724,7 +711,7 @@ export class AccumulationService extends BaseService {
       allItems,
       [], // Start with empty defxfers - they'll be added dynamically
     )
-    
+
     // Gray Paper accpar: Gas calculation uses the SAME t (deferred transfers) for ALL services
     // in the batch - specifically, the defxfers passed to accpar at the start.
     // We store these separately from iterationDefxfers which grows as services run.
@@ -769,9 +756,9 @@ export class AccumulationService extends BaseService {
     // This ensures defxfers from earlier services (lower IDs) are available to later ones (higher IDs)
     const sortedServices = Array.from(extendedServiceToItems.entries()).sort(
       (a, b) => {
-      if (a[0] < b[0]) return -1
-      if (a[0] > b[0]) return 1
-      return 0
+        if (a[0] < b[0]) return -1
+        if (a[0] > b[0]) return 1
+        return 0
       },
     )
 
@@ -879,16 +866,6 @@ export class AccumulationService extends BaseService {
     // Gray Paper: g = freeGas + defxferGas + workDigestGas
     const totalGasLimit = freeGas + defxferGas + workDigestGas
 
-    logger.debug('[AccumulationService] calculateServiceGasLimit', {
-      serviceId: serviceId.toString(),
-      freeGas: freeGas.toString(),
-      defxferGas: defxferGas.toString(),
-      workDigestGas: workDigestGas.toString(),
-      totalGasLimit: totalGasLimit.toString(),
-      numWorkItems: serviceItems.length,
-      numDefxfers: pendingDefxfers.filter((d) => d.dest === serviceId).length,
-    })
-
     return totalGasLimit
   }
 
@@ -978,6 +955,19 @@ export class AccumulationService extends BaseService {
     const workItemCount = operandTuples.filter(
       (input) => input.type === 0,
     ).length
+
+    // Track onTransfers statistics if service received deferred transfers
+    // Track even if result failed, since transfers were still received
+    // onTransfersCount and onTransfersGasUsed are only tracked for versions < 0.7.1
+    if (defxfersForService.length > 0) {
+      const gasUsed = result.ok ? result.value.gasused : 0n
+      this.trackOnTransfersStatistics(
+        serviceId,
+        defxfersForService.length,
+        gasUsed,
+      )
+    }
+
     if (result.ok) {
       this.trackAccumulationOutput(serviceId, result.value, currentSlot)
 
@@ -1002,12 +992,12 @@ export class AccumulationService extends BaseService {
       // (e.g., transfer destinations without code that just receive balance)
       const gasUsed = result.value.gasused
       if (workItemCount > 0 || gasUsed > 0n) {
-      this.trackAccumulationStatistics(
-        serviceId,
-        result.value,
-        currentSlot,
-        workItemCount,
-      )
+        this.trackAccumulationStatistics(
+          serviceId,
+          result.value,
+          currentSlot,
+          workItemCount,
+        )
       }
 
       // NOTE: Privileges are NOT applied immediately after each invocation.
@@ -1105,63 +1095,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Create a partial state snapshot using initial storage instead of current global state storage.
-   * Gray Paper: storage changes within accpar do NOT propagate between accseq iterations.
-   * Balances DO propagate (for transfer handling), but storage/preimages/requests are preserved.
-   */
-  private createPartialStateSnapshotWithInitialStorage(
-    initialStorageSnapshot?: Map<bigint, {
-      storage: Map<Hex, Uint8Array>
-      preimages: Map<Hex, Uint8Array>
-      requests: Map<Hex, Map<bigint, PreimageRequestStatus>>
-    }>,
-  ): PartialState {
-    if (!initialStorageSnapshot) {
-      return this.createPartialStateSnapshot()
-    }
-
-    // Start with current partial state (includes current balances from transfers)
-    const currentState = this.createPartialState()
-
-    // Replace storage/preimages/requests with initial snapshot
-    const accountsWithInitialStorage = new Map<bigint, ServiceAccount>()
-    for (const [serviceId, account] of currentState.accounts) {
-      const initialData = initialStorageSnapshot.get(serviceId)
-      if (initialData) {
-        // Use current account but with INITIAL storage
-        accountsWithInitialStorage.set(serviceId, {
-          ...account,
-          storage: new Map(Array.from(initialData.storage.entries()).map(([k, v]) => [k, new Uint8Array(v)])),
-          preimages: new Map(Array.from(initialData.preimages.entries()).map(([k, v]) => [k, new Uint8Array(v)])),
-          requests: new Map(Array.from(initialData.requests.entries()).map(([hash, byLen]) => [
-            hash,
-            new Map(Array.from(byLen.entries()).map(([len, status]) => [len, [...status]])),
-          ])),
-        })
-      } else {
-        // New service created during accumulation - use empty storage
-        accountsWithInitialStorage.set(serviceId, {
-          ...account,
-          storage: new Map(),
-          preimages: new Map(),
-          requests: new Map(),
-        })
-      }
-    }
-
-    console.log('[createPartialStateSnapshotWithInitialStorage] Created snapshot', {
-      service0CurrentBalance: currentState.accounts.get(0n)?.balance.toString(),
-      service0InitialStorageSize: initialStorageSnapshot.get(0n)?.storage.size ?? 0,
-      service0SnapshotStorageSize: accountsWithInitialStorage.get(0n)?.storage.size ?? 0,
-    })
-
-    return {
-      ...currentState,
-      accounts: accountsWithInitialStorage,
-    }
-  }
-
-  /**
    * Deep clone a partial state to prevent modifications from affecting the original.
    * Used to give each invocation in a batch its own copy of the state.
    */
@@ -1212,70 +1145,19 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Deep clone accounts map to preserve storage state
-   */
-  private deepCloneAccounts(
-    accounts: Map<bigint, ServiceAccount>,
-  ): Map<bigint, ServiceAccount> {
-    const clonedAccounts = new Map<bigint, ServiceAccount>()
-    for (const [serviceId, account] of accounts) {
-      // Clone storage map
-      const clonedStorage = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.storage) {
-        clonedStorage.set(key, new Uint8Array(value))
-      }
-
-      // Clone preimages map
-      const clonedPreimages = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.preimages) {
-        clonedPreimages.set(key, new Uint8Array(value))
-      }
-
-      // Clone requests map (nested structure)
-      const clonedRequests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-      for (const [hash, byLen] of account.requests) {
-        const clonedByLen = new Map<bigint, PreimageRequestStatus>()
-        for (const [len, status] of byLen) {
-          clonedByLen.set(len, [...status])
-        }
-        clonedRequests.set(hash, clonedByLen)
-      }
-
-      clonedAccounts.set(serviceId, {
-        ...account,
-        storage: clonedStorage,
-        preimages: clonedPreimages,
-        requests: clonedRequests,
-      })
-    }
-    return clonedAccounts
-  }
-
-  /**
    * Track accumulation output for local_fnservouts
    * Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
    */
   private trackAccumulationOutput(
     serviceId: bigint,
     output: AccumulateOutput,
-    currentSlot: bigint,
+    _currentSlot: bigint,
   ): void {
     const { yield: yieldHash } = output
 
-    // Gray Paper: Only include in local_fnservouts if yield ≠ none
-    // CRITICAL: This is a SEQUENCE - same service can appear multiple times
     if (yieldHash && yieldHash.length > 0) {
       const yieldHex = bytesToHex(yieldHash)
-      logger.info('[AccumulationService] Recording yield for lastaccout', {
-        serviceId: serviceId.toString(),
-        yieldHash: yieldHex,
-        totalOutputsSoFar: this.accumulationOutputs.length + 1,
-      })
       this.accumulationOutputs.push([serviceId, yieldHex])
-    } else {
-      logger.debug(
-        '[AccumulationService] Yield is None, not adding to local_fnservouts',
-      )
     }
   }
 
@@ -1312,6 +1194,35 @@ export class AccumulationService extends BaseService {
     // Update serviceStats.accumulation in activity state
     if (this.statisticsService) {
       this.statisticsService.updateServiceAccumulationStats(serviceId, newStats)
+    }
+  }
+
+  /**
+   * Track onTransfers statistics for a service
+   * Tracks the count of deferred transfers received and gas used processing them
+   * Only tracked for JAM versions < 0.7.1
+   *
+   * @param serviceId - Service ID that received the transfers
+   * @param transferCount - Number of deferred transfers received
+   * @param gasUsed - Gas used processing the transfers
+   */
+  private trackOnTransfersStatistics(
+    serviceId: bigint,
+    transferCount: number,
+    gasUsed: bigint,
+  ): void {
+    const currentStats = this.onTransfersStatistics.get(serviceId) || [0, 0]
+
+    const newStats: [number, number] = [
+      currentStats[0] + transferCount, // Count of deferred transfers received
+      currentStats[1] + Number(gasUsed), // Total gas used processing transfers
+    ]
+    this.onTransfersStatistics.set(serviceId, newStats)
+
+    // Update serviceStats.onTransfersCount and onTransfersGasUsed in activity state
+    // Only for versions < 0.7.1 (checked inside updateServiceOnTransfersStats)
+    if (this.statisticsService) {
+      this.statisticsService.updateServiceOnTransfersStats(serviceId, newStats)
     }
   }
 
@@ -1659,38 +1570,8 @@ export class AccumulationService extends BaseService {
           type: 0, // OperandTuple type
           value: operandTuple,
         })
-        
-        // Debug: Log each input being created
-        logger.debug('[AccumulationService] Created operand tuple input', {
-          serviceId: serviceId.toString(),
-          workReportHash: workReport.package_spec.hash,
-          payloadHash: workResult.payload_hash,
-          totalInputsForService: inputsByService.get(serviceId)!.length,
-        })
       }
     }
-
-    // Gray Paper: i = i^T concat i^U (defxfers first, then operand tuples)
-    // This is already the order since we added defxfers first, then operand tuples
-    logger.debug('[AccumulationService] Created accumulate inputs by service', {
-      servicesCount: inputsByService.size,
-      inputsPerService: Array.from(inputsByService.entries()).map(
-        ([serviceId, inputs]) => ({
-          serviceId: serviceId.toString(),
-          totalInputs: inputs.length,
-          defxferCount: inputs.filter((i) => i.type === 1).length,
-          operandTupleCount: inputs.filter((i) => i.type === 0).length,
-        }),
-      ),
-      pendingDefxfersCount: pendingDefxfers.length,
-      readyItemsCount: readyItems.length,
-      readyItemsDetails: readyItems.map((item) => ({
-        workReportHash: item.workReport.package_spec.hash,
-        resultsCount: item.workReport.results?.length ?? 0,
-        serviceIds:
-          item.workReport.results?.map((r) => r.service_id.toString()) ?? [],
-      })),
-    })
 
     return inputsByService
   }
@@ -1756,6 +1637,8 @@ export class AccumulationService extends BaseService {
     // are accumulated before processAccumulation and their statistics must be preserved
     this.accumulationOutputs = []
     this.accumulationStatistics.clear()
+    // Clear onTransfers statistics at start of each block (per-block, not cumulative)
+    this.onTransfersStatistics.clear()
     // Clear accumulated services for lastacc tracking (Gray Paper eq 410-412)
     this.accumulatedServicesForLastacc.clear()
 
@@ -1852,7 +1735,7 @@ export class AccumulationService extends BaseService {
 
     // Update last processed slot to reflect that state now represents this slot
     this.lastProcessedSlot = slot
-    
+
     // Clear immediate items after processing
     this.currentImmediateItems = []
 
@@ -1943,12 +1826,12 @@ export class AccumulationService extends BaseService {
           } as ReadyItem & { _originallyImmediate: boolean })
         } else {
           // Queue items that still have unsatisfied dependencies
-        queuedItems.push({
-          workReport: report,
-          dependencies: filteredDependencies,
-        })
+          queuedItems.push({
+            workReport: report,
+            dependencies: filteredDependencies,
+          })
+        }
       }
-    }
     }
 
     // Sort immediate items: true immediate (no original prerequisites) first,
@@ -2181,7 +2064,7 @@ export class AccumulationService extends BaseService {
     const epochLength = this.configService.epochDuration
 
     const newPackages = new Set<Hex>()
-    
+
     // First, add packages from immediate items (justbecameavailable^!)
     // Gray Paper equation 417: accumulated'_{E-1} = P(justbecameavailable^*[:n])
     // Immediate items should be accumulated immediately, so their packages must be added
@@ -2191,7 +2074,7 @@ export class AccumulationService extends BaseService {
         newPackages.add(item.workReport.package_spec.hash)
       }
     }
-    
+
     // Extract packages from processed work reports
     // Use workReportsByService to map results to their work reports
     // Gray Paper: Only accumulate work reports whose dependencies are satisfied (empty dependency set)
@@ -2201,7 +2084,7 @@ export class AccumulationService extends BaseService {
       // Gray Paper equation 417: accumulated'_{E-1} = P(justbecameavailable^*[:n])
       // P extracts package hashes from ALL processed work reports (justbecameavailable^*[:n])
       // regardless of success/failure. The packages were processed (attempted), so they're recorded.
-      // Note: result.ok being false means an internal error, not a PVM panic. 
+      // Note: result.ok being false means an internal error, not a PVM panic.
       // PVM panics still have result.ok = true with resultCode != HALT
       for (const workReport of serviceWorkReports) {
         newPackages.add(workReport.package_spec.hash)
@@ -2236,27 +2119,25 @@ export class AccumulationService extends BaseService {
       // The work report's results[0].service_id may not match the actual accumulated service
       // (e.g., when a work report has multiple results for different services)
       if (!accumulatedServiceIds || accumulatedServiceIds[i] === undefined) {
-        logger.debug('[AccumulationService] No service ID for invocation - skipping', {
-          invocationIndex: i,
-        })
+        logger.debug(
+          '[AccumulationService] No service ID for invocation - skipping',
+          {
+            invocationIndex: i,
+          },
+        )
         continue
       }
 
       const accumulatedServiceId = accumulatedServiceIds[i]
-      logger.debug('[updateGlobalState] Processing invocation', {
-        invocationIndex: i,
-        accumulatedServiceId: accumulatedServiceId.toString(),
-      })
 
       if (result.ok) {
         const { poststate } = result.value
-        
+
         // Only update the accumulated service account directly
         // Other accounts in poststate are from partial state and shouldn't be updated
         // (except newly created services, which are handled below)
         const accumulatedAccount = poststate.accounts.get(accumulatedServiceId)
         if (accumulatedAccount) {
-
           // Gray Paper equation 410-412: lastacc is updated AFTER all accumulation iterations complete
           // ONLY if service is in accumulationStatistics (i.e., had work items or used gas)
           // Services that only receive transfers without executing code should NOT have lastacc updated
@@ -2398,7 +2279,7 @@ export class AccumulationService extends BaseService {
           accumulatedServiceId: accumulatedServiceId.toString(),
           resultCode: result.err,
         })
-        
+
         // Track for deferred lastacc update even on failure (Gray Paper eq 410-412)
         // sa_lastacc = s when s ∈ keys(accumulationstatistics), regardless of success/failure
         // ONLY if service is in accumulationStatistics
@@ -2447,12 +2328,12 @@ export class AccumulationService extends BaseService {
       logger.debug(
         '[AccumulationService] Deferred transfers will be processed in next iteration',
         {
-        defxferCount: allDefxfers.length,
-        defxfers: allDefxfers.map((t) => ({
-          source: t.source.toString(),
-          dest: t.dest.toString(),
-          amount: t.amount.toString(),
-        })),
+          defxferCount: allDefxfers.length,
+          defxfers: allDefxfers.map((t) => ({
+            source: t.source.toString(),
+            dest: t.dest.toString(),
+            amount: t.amount.toString(),
+          })),
         },
       )
     }
@@ -2646,34 +2527,5 @@ export class AccumulationService extends BaseService {
       newAssigners.push(newAssigner)
     }
     this.privilegesService.setAssigners(newAssigners)
-
-    logger.debug('[AccumulationService] Applied privileges using R function', {
-      managerAccumulated: !!managerPoststate,
-      delegator: newDelegator.toString(),
-      registrar: newRegistrar.toString(),
-      assigners: newAssigners.map((a) => a.toString()),
-    })
-  }
-
-  /**
-   * Helper method to compare two bigint arrays for equality
-   */
-  private arraysEqual(a: bigint[], b: bigint[]): boolean {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
-  }
-
-  /**
-   * Helper method to compare two Maps for equality
-   */
-  private mapsEqual(a: Map<bigint, bigint>, b: Map<bigint, bigint>): boolean {
-    if (a.size !== b.size) return false
-    for (const [key, value] of a) {
-      if (!b.has(key) || b.get(key) !== value) return false
-    }
-    return true
   }
 }

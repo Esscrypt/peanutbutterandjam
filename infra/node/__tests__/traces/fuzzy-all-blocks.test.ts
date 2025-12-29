@@ -4,6 +4,9 @@
  * Tests parsing of genesis.json files from test vectors using NodeGenesisManager
  */
 
+import { config } from 'dotenv'
+config() // Load environment variables from .env file
+
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
@@ -223,6 +226,111 @@ function getStopBlock(): number | undefined {
     }
   }
   return undefined // No stop block by default
+}
+
+// Helper function to convert JSON work report to WorkReport type
+function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
+  return {
+    ...jsonReport,
+    core_index: BigInt(jsonReport.core_index || 0),
+    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
+    context: {
+      ...jsonReport.context,
+      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
+    },
+    results: jsonReport.results.map((r: any) => ({
+      ...r,
+      service_id: BigInt(r.service_id || 0),
+      accumulate_gas: BigInt(r.accumulate_gas || 0),
+      refine_load: {
+        ...r.refine_load,
+        gas_used: BigInt(r.refine_load.gas_used || 0),
+        imports: BigInt(r.refine_load.imports || 0),
+        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
+        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
+        exports: BigInt(r.refine_load.exports || 0),
+      },
+    })),
+  }
+}
+
+// Helper function to convert JSON block to Block type
+export function convertJsonBlockToBlock(jsonBlock: any): Block {
+  const jsonHeader = jsonBlock.header
+  const jsonExtrinsic = jsonBlock.extrinsic
+
+  const blockHeader: BlockHeader = {
+    parent: jsonHeader.parent,
+    priorStateRoot: jsonHeader.parent_state_root,
+    extrinsicHash: jsonHeader.extrinsic_hash,
+    timeslot: BigInt(jsonHeader.slot),
+    epochMark: jsonHeader.epoch_mark
+      ? {
+          entropyAccumulator: jsonHeader.epoch_mark.entropy,
+          entropy1: jsonHeader.epoch_mark.tickets_entropy,
+          validators: jsonHeader.epoch_mark.validators.map((validator: any) => ({
+            bandersnatch: validator.bandersnatch,
+            ed25519: validator.ed25519,
+          })),
+        }
+      : null,
+    winnersMark: jsonHeader.tickets_mark
+      ? jsonHeader.tickets_mark.map((ticket: any) => ({
+          id: ticket.id,
+          entryIndex: BigInt(ticket.attempt),
+        }))
+      : null,
+    offendersMark: jsonHeader.offenders_mark || [],
+    authorIndex: BigInt(jsonHeader.author_index),
+    vrfSig: jsonHeader.entropy_source,
+    sealSig: jsonHeader.seal,
+  }
+
+  const blockBody: BlockBody = {
+    tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
+      entryIndex: BigInt(ticket.attempt),
+      proof: ticket.signature as Hex,
+      id: getTicketIdFromProof(hexToBytes(ticket.signature as Hex)),
+    })),
+    preimages: (jsonExtrinsic.preimages || []).map((preimage: any) => ({
+      requester: BigInt(preimage.requester),
+      blob: preimage.blob,
+    })),
+    guarantees: (jsonExtrinsic.guarantees || []).map((guarantee: any) => ({
+      report: convertJsonReportToWorkReport(guarantee.report),
+      slot: BigInt(guarantee.slot),
+      signatures: guarantee.signatures,
+    })),
+    assurances: jsonExtrinsic.assurances || [],
+    disputes: jsonExtrinsic.disputes
+      ? [
+          {
+            verdicts: jsonExtrinsic.disputes.verdicts.map((verdict: any) => ({
+              target: verdict.target,
+              age: BigInt(verdict.age),
+              votes: verdict.votes.map((vote: any) => ({
+                vote: vote.vote,
+                index: BigInt(vote.index),
+                signature: vote.signature,
+              })),
+            })),
+            culprits: jsonExtrinsic.disputes.culprits,
+            faults: jsonExtrinsic.disputes.faults,
+          },
+        ]
+      : [
+          {
+            verdicts: [],
+            culprits: [],
+            faults: [],
+          },
+        ],
+  }
+
+  return {
+    header: blockHeader,
+    body: blockBody,
+  }
 }
 
 describe('Genesis Parse Tests', () => {
@@ -453,10 +561,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
@@ -469,32 +576,6 @@ describe('Genesis Parse Tests', () => {
       
       const [startError] = await blockImporterService.start()
       expect(startError).toBeUndefined()
-
-      // Helper function to convert JSON work report to WorkReport type
-      const convertJsonReportToWorkReport = (jsonReport: any): WorkReport => {
-        return {
-          ...jsonReport,
-          core_index: BigInt(jsonReport.core_index || 0),
-          auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-          context: {
-            ...jsonReport.context,
-            lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-          },
-          results: jsonReport.results.map((r: any) => ({
-            ...r,
-            service_id: BigInt(r.service_id || 0),
-            accumulate_gas: BigInt(r.accumulate_gas || 0),
-            refine_load: {
-              ...r.refine_load,
-              gas_used: BigInt(r.refine_load.gas_used || 0),
-              imports: BigInt(r.refine_load.imports || 0),
-              extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-              extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-              exports: BigInt(r.refine_load.exports || 0),
-            },
-          })),
-        }
-      }
 
       // Helper function to convert JSON block to Block type
       const convertJsonBlockToBlock = (jsonBlock: any): Block => {
@@ -689,6 +770,12 @@ describe('Genesis Parse Tests', () => {
           if (keyval.value !== expectedValue) {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
+            // #region agent log
+            if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 255 && 'serviceId' in keyInfo && keyInfo.serviceId === 0n) {
+              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:770',message:'state trie comparison mismatch',data:{blockNumber,expectedHex:keyval.value,actualHex:expectedValue,key:keyval.key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+            }
+            // #endregion
             let decodedExpected: any = null
             let decodedActual: any = null
 

@@ -15,6 +15,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@pbnjam/codec": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@pbnjam/core": "workspace:*"
   },

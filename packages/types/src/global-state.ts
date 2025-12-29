@@ -10,7 +10,7 @@
  * Each component is precisely typed according to Gray Paper specifications
  */
 
-import type { Hex } from '@pbnjam/core'
+import type { Hex } from 'viem'
 import type { BlockBody } from './block-authoring'
 import type {
   SafroleState,
@@ -369,6 +369,10 @@ export interface ServiceStats {
    * Gray Paper: accumulation = ifnone{accumulationstatistics[s], tuple{0, 0}}
    */
   accumulation?: [number, number]
+  /** OnTransfers count: N - number of onTransfers operations (only for versions < 0.7.1) */
+  onTransfersCount?: number
+  /** OnTransfers gas used: N - total gas used in onTransfers operations (only for versions < 0.7.1) */
+  onTransfersGasUsed?: number
 }
 
 /**

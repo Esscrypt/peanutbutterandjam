@@ -13,6 +13,7 @@ import {
   type Hex,
   hexToBytes,
   logger,
+  type RevertEpochTransitionEvent,
   type ValidatorSetChangeEvent,
   zeroHash,
 } from '@pbnjam/core'
@@ -57,11 +58,18 @@ export class ValidatorSetManager
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
 
   // Initialize to 144-byte zero epoch root (Gray Paper: ringroot ⊂ blob[144])
-  private epochRoot: Hex = ('0x' + '00'.repeat(144)) as Hex
+  private epochRoot: Hex = `0x${'00'.repeat(144)}` as Hex
   // Store bound callback for removal
   private readonly boundHandleEpochTransition: (
     event: EpochTransitionEvent,
   ) => SafePromise<void>
+  // Store state before epoch transition for revert
+  private preTransitionState: {
+    activeSet: Map<number, ValidatorPublicKeys>
+    pendingSet: Map<number, ValidatorPublicKeys>
+    previousSet: Map<number, ValidatorPublicKeys>
+    epochRoot: Hex
+  } | null = null
 
   constructor(options: {
     eventBusService: EventBusService
@@ -116,6 +124,43 @@ export class ValidatorSetManager
     this.eventBusService.addEpochTransitionCallback(
       this.boundHandleEpochTransition,
     )
+    this.eventBusService.addRevertEpochTransitionCallback(
+      this.handleRevertEpochTransition.bind(this),
+    )
+  }
+
+  /**
+   * Handle revert epoch transition event
+   * Restores validator sets to their state before the epoch transition
+   */
+  private handleRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Safe<void> {
+    if (!this.preTransitionState) {
+      logger.warn(
+        '[ValidatorSetManager] No pre-transition state to revert to',
+        { slot: event.slot.toString() },
+      )
+      return safeResult(undefined)
+    }
+
+    logger.info('[ValidatorSetManager] Reverting epoch transition', {
+      slot: event.slot.toString(),
+    })
+
+    // Restore previous state
+    this.activeSet = new Map(this.preTransitionState.activeSet)
+    this.pendingSet = new Map(this.preTransitionState.pendingSet)
+    this.previousSet = new Map(this.preTransitionState.previousSet)
+    this.epochRoot = this.preTransitionState.epochRoot
+
+    // Update publicKeysToValidatorIndex map
+    this.updatePublicKeysToValidatorIndex(this.activeSet)
+
+    // Clear saved state
+    this.preTransitionState = null
+
+    return safeResult(undefined)
   }
 
   setTicketService(ticketService: TicketService): void {
@@ -154,6 +199,16 @@ export class ValidatorSetManager
     const oldActiveSet = new Map(this.activeSet)
     const oldPendingSet = new Map(this.pendingSet)
     const oldStagingSet = new Map(this.stagingSet) // Save staging set to preserve BLS and metadata
+    const oldPreviousSet = new Map(this.previousSet)
+    const oldEpochRoot = this.epochRoot
+
+    // Save state for potential revert
+    this.preTransitionState = {
+      activeSet: oldActiveSet,
+      pendingSet: oldPendingSet,
+      previousSet: oldPreviousSet,
+      epochRoot: oldEpochRoot,
+    }
 
     logger.info(
       '[ValidatorSetManager] Epoch transition - rotating validator sets',
@@ -204,8 +259,8 @@ export class ValidatorSetManager
       return {
         bandersnatch: v.bandersnatch,
         ed25519: v.ed25519,
-        bls: ('0x' + '00'.repeat(144)) as Hex,
-        metadata: ('0x' + '00'.repeat(128)) as Hex,
+        bls: `0x${'00'.repeat(144)}` as Hex,
+        metadata: `0x${'00'.repeat(128)}` as Hex,
       }
     })
 
@@ -235,7 +290,7 @@ export class ValidatorSetManager
           .slice(0, 6)
           .map((v, idx) => ({
             index: idx,
-            bandersnatch: v.bandersnatch.substring(0, 20) + '...',
+            bandersnatch: `${v.bandersnatch.substring(0, 20)}...`,
           })),
       },
     )
@@ -610,6 +665,48 @@ export class ValidatorSetManager
   }
 
   /**
+   * Compute epoch root from a given set of validators (without mutating state)
+   * Implements Gray Paper equation (118): z = getRingRoot({k_bs | k ∈ pendingSet'})
+   *
+   * This is used for validation before state mutations (e.g., epoch transition validation)
+   *
+   * @param validators - Array of validator public keys to compute epoch root from
+   * @returns The epoch root as a 144-byte hex string
+   */
+  computeEpochRootFromValidators(validators: ValidatorPublicKeys[]): Safe<Hex> {
+    // Extract Bandersnatch keys from validators
+    const bandersnatchKeys = validators.map((validator) =>
+      hexToBytes(validator.bandersnatch),
+    )
+
+    // If no validators, return zero-padded 144-byte epoch root
+    if (bandersnatchKeys.length === 0) {
+      return safeResult(`0x${'00'.repeat(144)}` as Hex)
+    }
+
+    const [epochRootError, epochRoot] = getRingRoot(
+      bandersnatchKeys,
+      this.ringProver,
+    )
+    if (epochRootError) {
+      return safeError(epochRootError)
+    }
+
+    const epochRootHex = bytesToHex(epochRoot)
+
+    // Verify epoch root is 144 bytes (safety check)
+    if (hexToBytes(epochRootHex).length !== 144) {
+      return safeError(
+        new Error(
+          `Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`,
+        ),
+      )
+    }
+
+    return safeResult(epochRootHex)
+  }
+
+  /**
    * Get the epoch root for the current pending validator set
    * Implements Gray Paper equation (118): z = getRingRoot({k_bs | k ∈ pendingSet'})
    *
@@ -637,7 +734,7 @@ export class ValidatorSetManager
         'Pending set is empty, returning zero-padded 144-byte epoch root',
       )
       // Return 144 bytes of zeros (288 hex chars)
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     const [epochRootError, epochRoot] = getRingRoot(
@@ -648,7 +745,7 @@ export class ValidatorSetManager
       logger.error('Failed to get epoch root', { error: epochRootError })
       // Return zero-padded 144-byte epoch root instead of 32-byte zeroHash
       // Gray Paper: epochRoot must be 144 bytes
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     const epochRootHex = bytesToHex(epochRoot)
@@ -658,7 +755,7 @@ export class ValidatorSetManager
       logger.error(
         `Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`,
       )
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     return epochRootHex
@@ -733,8 +830,8 @@ export class ValidatorSetManager
     return {
       bandersnatch: zeroHash, // 32 bytes
       ed25519: zeroHash, // 32 bytes
-      bls: ('0x' + '00'.repeat(144)) as Hex, // 144 bytes (not 32!)
-      metadata: ('0x' + '00'.repeat(128)) as Hex, // 128 bytes
+      bls: `0x${'00'.repeat(144)}` as Hex, // 144 bytes (not 32!)
+      metadata: `0x${'00'.repeat(128)}` as Hex, // 128 bytes
     }
   }
 

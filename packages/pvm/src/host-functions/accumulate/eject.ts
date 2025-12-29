@@ -1,5 +1,5 @@
-import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import { encodeFixedLength } from '@pbnjam/codec'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -134,7 +134,9 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
       logger.warning('[EjectHostFunction] Request not found for length', {
         hashHex,
         calculatedLength: l,
-        availableLengths: Array.from(requestMap.keys()).map((len) => len.toString()),
+        availableLengths: Array.from(requestMap.keys()).map((len) =>
+          len.toString(),
+        ),
       })
       this.setAccumulateError(registers, 'HUH')
       return {
@@ -169,10 +171,15 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     const currentService = imX.state.accounts.get(imX.id)
 
     if (!currentService) {
-      logger.error('[EjectHostFunction] Current service account not found in state', {
-        currentServiceId: imX.id.toString(),
-        availableAccountIds: Array.from(imX.state.accounts.keys()).map((id) => id.toString()),
-      })
+      logger.error(
+        '[EjectHostFunction] Current service account not found in state',
+        {
+          currentServiceId: imX.id.toString(),
+          availableAccountIds: Array.from(imX.state.accounts.keys()).map((id) =>
+            id.toString(),
+          ),
+        },
+      )
       this.setAccumulateError(registers, 'WHO')
       return {
         resultCode: null, // continue execution

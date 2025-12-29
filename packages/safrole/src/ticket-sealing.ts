@@ -9,6 +9,7 @@ import type {
   IConfigService,
   Safe,
   SafroleTicket,
+  SafroleTicketWithoutProof,
   UnsignedBlockHeader,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
@@ -124,7 +125,7 @@ export function verifyTicketBasedSealSignature(
   signature: Uint8Array,
   entropy3: Uint8Array,
   unsignedHeader: UnsignedBlockHeader,
-  ticket: SafroleTicket,
+  ticket: SafroleTicketWithoutProof,
   config: IConfigService,
 ): Safe<boolean> {
   // Validate inputs
@@ -181,7 +182,7 @@ export function verifyTicketBasedSealSignature(
   )
 
   if (!isValid) {
-    logger.debug('Ticket-based seal signature verification failed', {
+    logger.error('Ticket-based seal signature verification failed', {
       ticketId: ticket.id,
       entryIndex: ticket.entryIndex.toString(),
       entropy3Length: entropy3.length,
@@ -196,22 +197,13 @@ export function verifyTicketBasedSealSignature(
   const expectedTicketId = bytesToHex(vrfOutput)
 
   if (ticket.id !== expectedTicketId) {
-    logger.debug('Ticket ID mismatch in seal signature verification', {
+    logger.error('Ticket ID mismatch in seal signature verification', {
       expectedTicketId,
       actualTicketId: ticket.id,
       entryIndex: ticket.entryIndex.toString(),
     })
     return safeResult(false)
   }
-
-  logger.debug('Ticket-based seal signature verification successful', {
-    ticketId: ticket.id,
-    entryIndex: ticket.entryIndex.toString(),
-    entropy3Length: entropy3.length,
-    signatureLength: signature.length,
-    vrfOutputLength: vrfOutput.length,
-    sealingType: 'ticket-based', // Gray Paper: isticketed = 1
-  })
 
   return safeResult(true)
 }

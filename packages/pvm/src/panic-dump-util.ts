@@ -134,6 +134,13 @@ export function writeTraceDump(
   accumulateOutput?: Uint8Array,
   errorCode?: number,
 ): string | undefined {
+  // Check if trace dumping is enabled via environment variable
+  const enableTraceDump = process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+  if (!enableTraceDump) {
+    // Trace dumping is disabled, return early
+    return undefined
+  }
+
   if (executionLogs.length === 0) {
     // No logs to write
     return undefined
@@ -226,7 +233,7 @@ export function writeTraceDump(
     const filepath = join(targetDir, traceFilename)
 
     // Write to file
-    writeFileSync(filepath, traceLines.join('\n') + '\n', 'utf-8')
+    writeFileSync(filepath, `${traceLines.join('\n')}\n`, 'utf-8')
 
     // Write accumulate_input file if provided
     // This matches the jamduna format where accumulate_input is a binary file

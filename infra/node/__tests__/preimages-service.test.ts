@@ -79,12 +79,12 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
               }
 
               const preimages = new Map<Hex, Uint8Array>()
-              for (const p of acct.data.preimages) {
+              for (const p of acct.data.preimage_blobs) {
                 preimages.set(p.hash as Hex, hexToBytes(p.blob as Hex))
               }
 
               const requests = new Map<Hex, Map<bigint, bigint[]>>()
-              for (const entry of acct.data.lookup_meta) {
+              for (const entry of acct.data.preimage_requests) {
                 const hash = entry.key.hash as Hex
                 const len = BigInt(entry.key.length)
                 const seq = entry.value.map(BigInt)
@@ -101,15 +101,37 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
               })
             }
 
-            // 2) Apply input via service (which enforces sorted/unique and needed checks)
+            // 2) Validate preimages first, then apply
             const slot = BigInt(vector.input.slot)
             const batch = vector.input.preimages.map((pi) => ({
               requester: BigInt(pi.requester),
               blob: pi.blob as Hex,
             }))
-            const [applyErr] = service.applyPreimages(batch, slot)
+            
+            // PRE-VALIDATE preimages BEFORE applying them
+            // This checks for errors that should cause the entire batch to be skipped
+            const [validateError, validatedPreimages] = service.validatePreimages(batch)
+            if (validateError) {
+              // Check if this validation error is expected in the test vector
+              if (vector.output && 'err' in vector.output && vector.output.err) {
+                // Expected error case - verify error message matches
+                expect(validateError.message).toBe(vector.output.err)
+                // When validation fails, skip applyPreimages and post_state validation
+                return
+              } else {
+                // Unexpected validation error - throw it
+                throw validateError
+              }
+            }
+            
+            if (!validatedPreimages) {
+              throw new Error('validatePreimages returned null')
+            }
+            
+            // Apply validated preimages
+            const [applyErr] = service.applyPreimages(validatedPreimages, slot)
             if (vector.output && 'err' in vector.output && vector.output.err) {
-              // expect an error
+              // expect an error from apply (shouldn't happen if validation passed)
               expect(applyErr?.message).toBe(vector.output.err)
             } else {
               expect(applyErr).toBeUndefined()
@@ -123,7 +145,7 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
 
               // Compare preimages
               const expectedPre = new Map<Hex, Hex>()
-              for (const p of acct.data.preimages) {
+              for (const p of acct.data.preimage_blobs) {
                 expectedPre.set(p.hash as Hex, p.blob as Hex)
               }
               expect(actual.preimages.size).toBe(expectedPre.size)
@@ -133,9 +155,9 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
                 expect(bytes).toEqual(hexToBytes(expBlob as Hex))
               }
 
-              // Compare requests (lookup_meta)
+              // Compare requests (preimage_requests)
               const expectedReq = new Map<Hex, Map<bigint, bigint[]>>()
-              for (const entry of acct.data.lookup_meta) {
+              for (const entry of acct.data.preimage_requests) {
                 const hash = entry.key.hash as Hex
                 const len = BigInt(entry.key.length)
                 const seq = entry.value.map(BigInt)

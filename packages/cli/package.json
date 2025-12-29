@@ -38,7 +38,8 @@
     "@pbnjam/node": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@pbnjam/codec": "workspace:*",
-    "dotenv": "^17.2.1"
+    "dotenv": "catalog:",
+    "commander": "catalog:"
   },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",

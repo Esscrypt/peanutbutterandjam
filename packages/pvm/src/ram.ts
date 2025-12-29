@@ -643,7 +643,9 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return trackLoadAndReturn(this.argumentData.slice(offset, offset + length))
+      return trackLoadAndReturn(
+        this.argumentData.slice(offset, offset + length),
+      )
     }
 
     // Stack section

@@ -209,7 +209,8 @@ describe('Fuzzer State Trie Comparison', async () => {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
+      useWasm: false,
+      traceSubfolder: 'fuzzer-state-trie-comparison',
     })
 
     const statisticsService = new StatisticsService({
@@ -268,7 +269,6 @@ describe('Fuzzer State Trie Comparison', async () => {
 
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     // Start services
     const [entropyStartError] = await entropyService.start()
@@ -641,7 +641,6 @@ describe('Fuzzer State Trie Comparison', async () => {
     })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     // Start services
     await entropyService.start()
@@ -701,6 +700,7 @@ describe('Fuzzer State Trie Comparison', async () => {
       validatorSetManager,
       recentHistoryService,
       serviceAccountService: serviceAccountsService,
+      statisticsService: statisticsService,
     })
 
     const blockImporterService = new BlockImporterService({
@@ -926,9 +926,78 @@ describe('Fuzzer State Trie Comparison', async () => {
 
     // Get state root (after block 1)
     const { merklizeState } = await import('@pbnjam/core')
+    // #region agent log
+    const [trieBeforeRootErr2, trieBeforeRoot2] = stateService.generateStateTrie()
+    const fs2 = await import('node:fs/promises')
+    const logPath2 = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    // Capture JAM version and Chapter 13 details
+    const chapter13Key2 = '0x0d000000000000000000000000000000000000000000000000000000000000'
+    const chapter13Value2 = trieBeforeRoot2?.[chapter13Key2] || ''
+    const { decodeActivity: decodeActivity2 } = await import('@pbnjam/codec')
+    let chapter13Decoded2 = null
+    if (chapter13Value2) {
+      const chapter13Bytes2 = (await import('@pbnjam/core')).hexToBytes(chapter13Value2)
+      const [decodeErr2, decoded2] = decodeActivity2(chapter13Bytes2, configService)
+      if (!decodeErr2 && decoded2) {
+        chapter13Decoded2 = {
+          valStatsAccumulatorCount: decoded2.value.valStatsAccumulator?.length || 0,
+          valStatsPreviousCount: decoded2.value.valStatsPrevious?.length || 0,
+          coreStatsCount: decoded2.value.coreStats?.length || 0,
+          coreStatsValues: decoded2.value.coreStats?.map((cs, idx) => ({
+            core: idx,
+            daLoad: cs.daLoad,
+            popularity: cs.popularity,
+            importCount: cs.importCount,
+            extrinsicCount: cs.extrinsicCount,
+            extrinsicSize: cs.extrinsicSize,
+            exportCount: cs.exportCount,
+            bundleLength: cs.bundleLength,
+            gasUsed: cs.gasUsed
+          })) || [],
+          serviceStatsCount: decoded2.value.serviceStats?.size || 0,
+          serviceStatsKeys: Array.from(decoded2.value.serviceStats?.keys() || []).map(k => k.toString()).sort()
+        }
+      }
+    }
+    const logEntry4 = JSON.stringify({location:'fuzzer-state-trie-comparison.test.ts:929',message:'State trie with Chapter 13 details',data:{test:'fuzzer-state-trie-comparison',jamVersion,chapter13Value:chapter13Value2.substring(0,200),chapter13Length:chapter13Value2.length,chapter13Decoded:chapter13Decoded2},timestamp:Date.now(),sessionId:'debug-session',runId:'full-trie',hypothesisId:'B'})+'\n'
+    await fs2.appendFile(logPath2, logEntry4).catch(()=>{})
+    // Compare Chapter 13 with first test if available
+    try {
+      const logContent = await fs2.readFile(logPath2, 'utf-8')
+      const lines = logContent.split('\n').filter(l => l.trim())
+      let test1Chapter13: any = null
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line)
+          if (entry.data?.test === 'fuzzer-target-block-import' && entry.data?.chapter13Decoded) {
+            test1Chapter13 = entry.data
+            break
+          }
+        } catch {}
+      }
+      if (test1Chapter13) {
+        const chapter13Mismatch = {
+          test1Value: test1Chapter13.chapter13Value,
+          test2Value: chapter13Value2.substring(0,200),
+          test1Decoded: test1Chapter13.chapter13Decoded,
+          test2Decoded: chapter13Decoded2,
+          jamVersionMatch: test1Chapter13.jamVersion?.major === jamVersion.major && test1Chapter13.jamVersion?.minor === jamVersion.minor && test1Chapter13.jamVersion?.patch === jamVersion.patch
+        }
+        const logEntry5 = JSON.stringify({location:'fuzzer-state-trie-comparison.test.ts:960',message:'Chapter 13 comparison',data:{chapter13Mismatch},timestamp:Date.now(),sessionId:'debug-session',runId:'comparison',hypothesisId:'B'})+'\n'
+        await fs2.appendFile(logPath2, logEntry5).catch(()=>{})
+      }
+    } catch {}
+    // #endregion
     const [stateRootErr, stateRoot] = stateService.getStateRoot()
+    // #region agent log
+    const logEntry5 = JSON.stringify({location:'fuzzer-state-trie-comparison.test.ts:932',message:'State root calculated',data:{test:'fuzzer-state-trie-comparison',stateRoot,stateRootError:stateRootErr?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'post-root',hypothesisId:'B'})+'\n'
+    await fs2.appendFile(logPath2, logEntry5).catch(()=>{})
+    // #endregion
     const expectedStateRoot = '0xd8b5b7d115536e7ec5e44da56583ada043e0d4b0332340736e9482986d8f229b' // Expected after block 1
-
+    // #region agent log
+    const logEntry6 = JSON.stringify({location:'fuzzer-state-trie-comparison.test.ts:935',message:'State root comparison',data:{test:'fuzzer-state-trie-comparison',calculated:stateRoot,expected:expectedStateRoot,matches:stateRoot?.toLowerCase() === expectedStateRoot.toLowerCase()},timestamp:Date.now(),sessionId:'debug-session',runId:'comparison',hypothesisId:'B'})+'\n'
+    await fs2.appendFile(logPath2, logEntry6).catch(()=>{})
+    // #endregion
     console.log(`\n🌳 STATE ROOT AFTER BLOCK 1:`)
     console.log(`  Our state root:      ${stateRoot}`)
     console.log(`  Expected state root: ${expectedStateRoot}`)

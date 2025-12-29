@@ -110,7 +110,9 @@ function encodeWorkResult(result: WorkExecutionResult): Safe<Uint8Array> {
       return safeError(error)
     }
     // Discriminator 0 + length + data
-    return safeResult(concatBytes([new Uint8Array([0]), lengthEncoded, resultBytes]))
+    return safeResult(
+      concatBytes([new Uint8Array([0]), lengthEncoded, resultBytes]),
+    )
   }
 }
 

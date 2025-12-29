@@ -15,13 +15,13 @@
   },
   "dependencies": {
     "@noble/curves": "catalog:",
-    "@noble/ed25519": "3.0.0",
+    "@noble/ed25519": "catalog:",
     "@noble/hashes": "catalog:",
+    "@pbnjam/bandersnatch-vrf": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@types/hapi": "18.0.14",
-    "radash": "12.1.1",
-    "viem": "catalog:",
-    "zod": "catalog:"
+    "pino": "catalog:",
+    "viem": "catalog:"
   },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",

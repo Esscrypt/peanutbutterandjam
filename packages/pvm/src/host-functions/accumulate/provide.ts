@@ -114,14 +114,14 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: (s, i) ∈ imX.provisions
     // With Set<[bigint, Uint8Array]>, we need to iterate to find duplicates
     for (const [existingServiceId, existingBlob] of imX.provisions) {
-    if (
+      if (
         existingServiceId === serviceId &&
         this.arraysEqual(existingBlob, preimageData)
-    ) {
-      // Gray Paper line 942: HUH when a = error (preimage already provided)
-      this.setAccumulateError(registers, 'HUH')
-      return {
-        resultCode: null, // continue execution
+      ) {
+        // Gray Paper line 942: HUH when a = error (preimage already provided)
+        this.setAccumulateError(registers, 'HUH')
+        return {
+          resultCode: null, // continue execution
         }
       }
     }

@@ -576,7 +576,7 @@ function decodeAncestryItem(data: Uint8Array): {
 
 // Keep for potential future use (e.g., tests)
 // @ts-expect-error - intentionally unused, kept for API consistency
-function decodeAncestry(data: Uint8Array): AncestryItem[] {
+function _decodeAncestry(data: Uint8Array): AncestryItem[] {
   // Decode sequence length
   const [lenErr, lenRes] = decodeNatural(data)
   if (lenErr) throw lenErr

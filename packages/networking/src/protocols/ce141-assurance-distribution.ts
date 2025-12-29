@@ -120,7 +120,7 @@ export class AssuranceDistributionProtocol extends NetworkingProtocol<
   /**
    * Serialize response (void)
    */
-  serializeResponse(_response: void): Safe<Uint8Array> {
+  serializeResponse(_response: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -135,7 +135,7 @@ export class AssuranceDistributionProtocol extends NetworkingProtocol<
    * Process response (void)
    */
   async processResponse(
-    _response: void,
+    _response: undefined,
     _peerPublicKey: Hex,
   ): SafePromise<void> {
     return safeResult(undefined)

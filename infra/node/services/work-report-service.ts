@@ -303,22 +303,8 @@ export class WorkReportService extends BaseService {
   }
 
   setPendingReports(reports: Reports): void {
-    logger.debug('[WorkReportService] setPendingReports called', {
-      coreReportsCount: reports.coreReports.length,
-      coreIndices: Array.from(reports.coreReports.keys()),
-    })
-
     for (const [coreIndex, report] of reports.coreReports.entries()) {
       if (report) {
-        logger.debug(
-          '[WorkReportService] Adding pending report from setState',
-          {
-            coreIndex,
-            timeslot: report.timeslot,
-            packageHash: report.workReport.package_spec.hash.slice(0, 40),
-          },
-        )
-
         this.addPendingWorkReport(
           BigInt(coreIndex),
           report.workReport,

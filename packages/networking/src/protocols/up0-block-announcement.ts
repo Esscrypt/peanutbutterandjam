@@ -104,7 +104,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   /**
    * Serialize response (void)
    */
-  serializeResponse(_data: void): Safe<Uint8Array> {
+  serializeResponse(_data: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -141,7 +141,10 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   /**
    * Process response (void)
    */
-  async processResponse(_data: void, _peerPublicKey: Hex): SafePromise<void> {
+  async processResponse(
+    _data: undefined,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     return safeResult(undefined)
   }
 
@@ -268,7 +271,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
       //   await this.addKnownLeaf(blockHash, slot)
 
       logger.info('Processed block header', {
-        parentHash: header.parent.slice(0, 20) + '...',
+        parentHash: `${header.parent.slice(0, 20)}...`,
         slot: slot.toString(),
       })
     } catch (error) {

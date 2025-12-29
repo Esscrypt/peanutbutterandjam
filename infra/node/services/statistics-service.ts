@@ -26,6 +26,7 @@ import {
   type Hex,
   hexToBytes,
   logger,
+  type RevertEpochTransitionEvent,
 } from '@pbnjam/core'
 import type {
   Activity,
@@ -57,7 +58,8 @@ export class StatisticsService extends BaseService {
   private activity: Activity
   private readonly eventBusService: EventBusService
   private readonly configService: ConfigService
-  private readonly clockService: ClockService
+  // Store state before epoch transition for revert
+  private preTransitionActivity: Activity | null = null
 
   constructor(options: {
     eventBusService: EventBusService
@@ -66,7 +68,7 @@ export class StatisticsService extends BaseService {
   }) {
     super('statistics-service')
     this.eventBusService = options.eventBusService
-    this.clockService = options.clockService
+    // this.clockService = options.clockService
     this.configService = options.configService
 
     this.activity = {
@@ -81,6 +83,9 @@ export class StatisticsService extends BaseService {
     // The epoch transition event is emitted early in block processing, before guarantees
     this.eventBusService.addEpochTransitionCallback(
       this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.addRevertEpochTransitionCallback(
+      this.handleRevertEpochTransition.bind(this),
     )
   }
 
@@ -135,12 +140,6 @@ export class StatisticsService extends BaseService {
    */
   setActivity(activity: Activity): void {
     this.activity = activity
-    logger.debug('setActivity called', {
-      serviceStatsCount: activity.serviceStats.size,
-      serviceIds: Array.from(activity.serviceStats.keys()).map((id) =>
-        id.toString(),
-      ),
-    })
   }
 
   /**
@@ -230,6 +229,41 @@ export class StatisticsService extends BaseService {
 
     // Gray Paper: accumulation = accumulationstatistics[s]
     serviceStats.accumulation = accumulationStats
+  }
+
+  /**
+   * Update onTransfers statistics for a service (only for versions < 0.7.1)
+   * These fields are preserved if they exist from decoded state, but only updated
+   * if the JAM version supports them.
+   *
+   * @param serviceId - Service ID to update
+   * @param onTransfersStats - OnTransfers statistics tuple{count, gas}
+   */
+  updateServiceOnTransfersStats(
+    serviceId: bigint,
+    onTransfersStats: [number, number],
+  ): void {
+    if (!this.activity.serviceStats.has(serviceId)) {
+      logger.warn(
+        'updateServiceOnTransfersStats called for non-existent service',
+        { serviceId },
+      )
+      return
+    }
+
+    const serviceStats = this.activity.serviceStats.get(serviceId)
+    if (!serviceStats) {
+      logger.warn(
+        'updateServiceOnTransfersStats called for service with no stats',
+        { serviceId },
+      )
+      return
+    }
+
+    // Only set onTransfers fields if they don't already exist (preserve from decoded state)
+    // or if we're explicitly updating them
+    serviceStats.onTransfersCount = onTransfersStats[0]
+    serviceStats.onTransfersGasUsed = onTransfersStats[1]
   }
 
   /**
@@ -389,15 +423,14 @@ export class StatisticsService extends BaseService {
 
     // Increment guarantees count by 1 for each validator who is a reporter
     for (const validatorIdx of reporters) {
-          let validatorStats =
-            this.activity.validatorStatsAccumulator[validatorIdx]
-          if (!validatorStats) {
-            validatorStats = this.createEmptyValidatorStat()
-          }
-          validatorStats.guarantees += 1
-          this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
-        }
+      let validatorStats = this.activity.validatorStatsAccumulator[validatorIdx]
+      if (!validatorStats) {
+        validatorStats = this.createEmptyValidatorStat()
       }
+      validatorStats.guarantees += 1
+      this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
+    }
+  }
 
   /**
    * Reset per-block statistics (coreStats and serviceStats)
@@ -423,11 +456,54 @@ export class StatisticsService extends BaseService {
    * to ensure stats go into the correct epoch's accumulator
    */
   public handleEpochTransition(): void {
+    // Save state before transition for potential revert
+    this.preTransitionActivity = {
+      validatorStatsAccumulator: [...this.activity.validatorStatsAccumulator],
+      validatorStatsPrevious: [...this.activity.validatorStatsPrevious],
+      coreStats: this.activity.coreStats.map((stats) => ({ ...stats })),
+      serviceStats: new Map(this.activity.serviceStats),
+    }
+
     this.activity = {
       ...this.activity,
       validatorStatsPrevious: [...this.activity.validatorStatsAccumulator],
       validatorStatsAccumulator: this.createEmptyValidatorStats(),
     }
+  }
+
+  /**
+   * Handle revert epoch transition event
+   * Restores activity to its state before the epoch transition
+   */
+  private handleRevertEpochTransition(event: RevertEpochTransitionEvent): void {
+    if (!this.preTransitionActivity) {
+      logger.warn(
+        '[StatisticsService] No pre-transition activity to revert to',
+        { slot: event.slot.toString() },
+      )
+      return
+    }
+
+    logger.info('[StatisticsService] Reverting epoch transition', {
+      slot: event.slot.toString(),
+    })
+
+    // Restore previous activity state
+    this.activity = {
+      validatorStatsAccumulator: [
+        ...this.preTransitionActivity.validatorStatsAccumulator,
+      ],
+      validatorStatsPrevious: [
+        ...this.preTransitionActivity.validatorStatsPrevious,
+      ],
+      coreStats: this.preTransitionActivity.coreStats.map((stats) => ({
+        ...stats,
+      })),
+      serviceStats: new Map(this.preTransitionActivity.serviceStats),
+    }
+
+    // Clear saved state
+    this.preTransitionActivity = null
   }
   /**
    * Update validator statistics based on block processing
@@ -689,9 +765,6 @@ export class StatisticsService extends BaseService {
     }
 
     // Gray Paper equation (106-114): Calculate R(c) and L(c) from incomingReports
-    logger.debug('Processing incoming reports for core statistics', {
-      incomingReportsCount: incomingReports.length,
-    })
     for (const report of incomingReports) {
       const coreIdx = Number(report.core_index)
       if (coreIdx < 0 || coreIdx >= this.activity.coreStats.length) {
@@ -841,11 +914,6 @@ export class StatisticsService extends BaseService {
       serviceStats.provision[0] += provision.count // count
       serviceStats.provision[1] += provision.totalSize // size
     }
-
-    logger.debug('Service statistics updated from preimages', {
-      preimageCount: preimages.length,
-      servicesUpdated: serviceProvisionMap.size,
-    })
   }
 
   /**

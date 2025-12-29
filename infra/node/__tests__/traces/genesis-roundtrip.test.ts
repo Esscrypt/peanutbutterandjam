@@ -229,7 +229,6 @@ describe('Genesis Round-Trip Encoding/Decoding', () => {
     })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     // Start services
     await entropyService.start()

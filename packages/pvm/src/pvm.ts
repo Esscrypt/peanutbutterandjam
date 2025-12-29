@@ -469,7 +469,8 @@ export class PVM implements IPVM {
       // Gray Paper pvm.tex line 251-255: immed_X with l_X=0 bytes defaults to 0
       // If fskip=0, there are no operand bytes, so host call ID is 0
       // This is valid per the Gray Paper - host call ID 0 (READ) will be handled by contextMutator
-      const hostCallId = operand0 !== undefined && operand0 !== null ? BigInt(operand0) : 0n
+      const hostCallId =
+        operand0 !== undefined && operand0 !== null ? BigInt(operand0) : 0n
       this.state.hostCallId = hostCallId
       if (this.state.gasCounter <= 0n) {
         this.state.resultCode = RESULT_CODES.OOG
@@ -707,8 +708,8 @@ export class PVM implements IPVM {
           instructionName,
           opcode: `0x${instruction.opcode.toString(16)}`,
           gas: this.state.gasCounter,
-          registers: Array.from(this.state.registerState.slice(0, 13)).map((r) =>
-            r.toString(),
+          registers: Array.from(this.state.registerState.slice(0, 13)).map(
+            (r) => r.toString(),
           ),
           // JIP-6 trace support: capture load/store from RAM
           loadAddress: this.state.ram.lastLoadAddress,

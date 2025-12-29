@@ -129,7 +129,7 @@ export class LogHostFunction extends BaseHostFunction {
         default:
           logger.info(consoleMessage)
       }
-    } catch (error) {
+    } catch (_error) {
       // Logger error should not stop execution - silently continue
       // This ensures LOG host function never causes a panic
     }
@@ -146,7 +146,7 @@ export class LogHostFunction extends BaseHostFunction {
         core: coreIndex === null ? null : coreIndex.toString(),
       }
       context.log('PVM Log', jsonLog)
-    } catch (error) {
+    } catch (_error) {
       // Context log error should not stop execution - silently continue
     }
 

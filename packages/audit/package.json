@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@pbnjam/types": "workspace:*",
-    "@pbnjam/core": "workspace:*"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.8.2",
