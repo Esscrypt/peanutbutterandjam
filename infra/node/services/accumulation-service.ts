@@ -711,7 +711,7 @@ export class AccumulationService extends BaseService {
       allItems,
       [], // Start with empty defxfers - they'll be added dynamically
     )
-    
+
     // Gray Paper accpar: Gas calculation uses the SAME t (deferred transfers) for ALL services
     // in the batch - specifically, the defxfers passed to accpar at the start.
     // We store these separately from iterationDefxfers which grows as services run.
@@ -756,9 +756,9 @@ export class AccumulationService extends BaseService {
     // This ensures defxfers from earlier services (lower IDs) are available to later ones (higher IDs)
     const sortedServices = Array.from(extendedServiceToItems.entries()).sort(
       (a, b) => {
-      if (a[0] < b[0]) return -1
-      if (a[0] > b[0]) return 1
-      return 0
+        if (a[0] < b[0]) return -1
+        if (a[0] > b[0]) return 1
+        return 0
       },
     )
 
@@ -992,12 +992,12 @@ export class AccumulationService extends BaseService {
       // (e.g., transfer destinations without code that just receive balance)
       const gasUsed = result.value.gasused
       if (workItemCount > 0 || gasUsed > 0n) {
-      this.trackAccumulationStatistics(
-        serviceId,
-        result.value,
-        currentSlot,
-        workItemCount,
-      )
+        this.trackAccumulationStatistics(
+          serviceId,
+          result.value,
+          currentSlot,
+          workItemCount,
+        )
       }
 
       // NOTE: Privileges are NOT applied immediately after each invocation.
@@ -1093,7 +1093,6 @@ export class AccumulationService extends BaseService {
   private createPartialStateSnapshot(): PartialState {
     return this.clonePartialState(this.createPartialState())
   }
-
 
   /**
    * Deep clone a partial state to prevent modifications from affecting the original.
@@ -1571,7 +1570,6 @@ export class AccumulationService extends BaseService {
           type: 0, // OperandTuple type
           value: operandTuple,
         })
-        
       }
     }
 
@@ -1737,7 +1735,7 @@ export class AccumulationService extends BaseService {
 
     // Update last processed slot to reflect that state now represents this slot
     this.lastProcessedSlot = slot
-    
+
     // Clear immediate items after processing
     this.currentImmediateItems = []
 
@@ -1828,12 +1826,12 @@ export class AccumulationService extends BaseService {
           } as ReadyItem & { _originallyImmediate: boolean })
         } else {
           // Queue items that still have unsatisfied dependencies
-        queuedItems.push({
-          workReport: report,
-          dependencies: filteredDependencies,
-        })
+          queuedItems.push({
+            workReport: report,
+            dependencies: filteredDependencies,
+          })
+        }
       }
-    }
     }
 
     // Sort immediate items: true immediate (no original prerequisites) first,
@@ -2066,7 +2064,7 @@ export class AccumulationService extends BaseService {
     const epochLength = this.configService.epochDuration
 
     const newPackages = new Set<Hex>()
-    
+
     // First, add packages from immediate items (justbecameavailable^!)
     // Gray Paper equation 417: accumulated'_{E-1} = P(justbecameavailable^*[:n])
     // Immediate items should be accumulated immediately, so their packages must be added
@@ -2076,7 +2074,7 @@ export class AccumulationService extends BaseService {
         newPackages.add(item.workReport.package_spec.hash)
       }
     }
-    
+
     // Extract packages from processed work reports
     // Use workReportsByService to map results to their work reports
     // Gray Paper: Only accumulate work reports whose dependencies are satisfied (empty dependency set)
@@ -2086,7 +2084,7 @@ export class AccumulationService extends BaseService {
       // Gray Paper equation 417: accumulated'_{E-1} = P(justbecameavailable^*[:n])
       // P extracts package hashes from ALL processed work reports (justbecameavailable^*[:n])
       // regardless of success/failure. The packages were processed (attempted), so they're recorded.
-      // Note: result.ok being false means an internal error, not a PVM panic. 
+      // Note: result.ok being false means an internal error, not a PVM panic.
       // PVM panics still have result.ok = true with resultCode != HALT
       for (const workReport of serviceWorkReports) {
         newPackages.add(workReport.package_spec.hash)
@@ -2121,9 +2119,12 @@ export class AccumulationService extends BaseService {
       // The work report's results[0].service_id may not match the actual accumulated service
       // (e.g., when a work report has multiple results for different services)
       if (!accumulatedServiceIds || accumulatedServiceIds[i] === undefined) {
-        logger.debug('[AccumulationService] No service ID for invocation - skipping', {
-          invocationIndex: i,
-        })
+        logger.debug(
+          '[AccumulationService] No service ID for invocation - skipping',
+          {
+            invocationIndex: i,
+          },
+        )
         continue
       }
 
@@ -2131,13 +2132,12 @@ export class AccumulationService extends BaseService {
 
       if (result.ok) {
         const { poststate } = result.value
-        
+
         // Only update the accumulated service account directly
         // Other accounts in poststate are from partial state and shouldn't be updated
         // (except newly created services, which are handled below)
         const accumulatedAccount = poststate.accounts.get(accumulatedServiceId)
         if (accumulatedAccount) {
-
           // Gray Paper equation 410-412: lastacc is updated AFTER all accumulation iterations complete
           // ONLY if service is in accumulationStatistics (i.e., had work items or used gas)
           // Services that only receive transfers without executing code should NOT have lastacc updated
@@ -2279,7 +2279,7 @@ export class AccumulationService extends BaseService {
           accumulatedServiceId: accumulatedServiceId.toString(),
           resultCode: result.err,
         })
-        
+
         // Track for deferred lastacc update even on failure (Gray Paper eq 410-412)
         // sa_lastacc = s when s ∈ keys(accumulationstatistics), regardless of success/failure
         // ONLY if service is in accumulationStatistics
@@ -2328,12 +2328,12 @@ export class AccumulationService extends BaseService {
       logger.debug(
         '[AccumulationService] Deferred transfers will be processed in next iteration',
         {
-        defxferCount: allDefxfers.length,
-        defxfers: allDefxfers.map((t) => ({
-          source: t.source.toString(),
-          dest: t.dest.toString(),
-          amount: t.amount.toString(),
-        })),
+          defxferCount: allDefxfers.length,
+          defxfers: allDefxfers.map((t) => ({
+            source: t.source.toString(),
+            dest: t.dest.toString(),
+            amount: t.amount.toString(),
+          })),
         },
       )
     }

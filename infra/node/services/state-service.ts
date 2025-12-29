@@ -79,7 +79,13 @@ import type {
   StateTrie,
   ValidatorPublicKeys,
 } from '@pbnjam/types'
-import { BaseService, DEFAULT_JAM_VERSION, type IStateService, safeError, safeResult } from '@pbnjam/types'
+import {
+  BaseService,
+  DEFAULT_JAM_VERSION,
+  type IStateService,
+  safeError,
+  safeResult,
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { AccumulationService } from './accumulation-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -113,11 +119,11 @@ export class StateService extends BaseService implements IStateService {
   // Cache for raw keyvals from test vectors
   // Used to bypass decode/encode roundtrip issues when verifying state roots
   private readonly rawStateKeyvals = new Map<Hex, Hex>()
-  
+
   // Flag to indicate whether to use raw keyvals for state trie generation
   // When true, generateStateTrie will use rawStateKeyvals directly
   private useRawKeyvals = false
-  
+
   /**
    * Clear the raw keyvals mode after pre-state verification
    * This switches back to normal state trie generation from services
@@ -245,7 +251,7 @@ export class StateService extends BaseService implements IStateService {
       // The state will be set from trace pre_state or other sources
       this.setState([])
     } else {
-    this.setState(genesisHeader.keyvals)
+      this.setState(genesisHeader.keyvals)
     }
   }
 
@@ -593,7 +599,7 @@ export class StateService extends BaseService implements IStateService {
     if (jamVersion) {
       this.setJamVersion(jamVersion)
     }
-    
+
     // Store raw keyvals if requested (for testing to bypass roundtrip issues)
     if (useRawKeyvals) {
       this.rawStateKeyvals.clear()
@@ -650,7 +656,6 @@ export class StateService extends BaseService implements IStateService {
               chapterIndex,
               (processingStats.processed.chapters.get(chapterIndex) ?? 0) + 1,
             )
-
           } else {
             // Parsed value is null/undefined
             processingStats.skipped.push({
@@ -662,7 +667,8 @@ export class StateService extends BaseService implements IStateService {
           // Log error but continue processing other keyvals
           // This allows tests to compare state even when some keyvals fail to decode
           // (e.g., when fuzzer test vectors use different core counts than the test config)
-          const errorMessage = error instanceof Error ? error.message : String(error)
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
           processingStats.skipped.push({
             key: keyval.key,
             reason: `Failed to parse state value: ${errorMessage}`,
@@ -758,18 +764,64 @@ export class StateService extends BaseService implements IStateService {
         const response = this.determineKeyType(valueBytes, blakeHashFromKey)
 
         // #region agent log
-        const TARGET_STATE_KEY_CLASSIFY = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-        if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_CLASSIFY.toLowerCase()) {
-          fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:758',message:'setState: determineKeyType result for target key',data:{keyvalKey,serviceId:serviceId.toString(),keyType:response.keyType,valueLength:valueBytes.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+        const TARGET_STATE_KEY_CLASSIFY =
+          '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+        if (
+          keyvalKey.toLowerCase() === TARGET_STATE_KEY_CLASSIFY.toLowerCase()
+        ) {
+          fetch(
+            'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                location: 'state-service.ts:758',
+                message: 'setState: determineKeyType result for target key',
+                data: {
+                  keyvalKey,
+                  serviceId: serviceId.toString(),
+                  keyType: response.keyType,
+                  valueLength: valueBytes.length,
+                },
+                timestamp: Date.now(),
+                sessionId: 'debug-session',
+                runId: 'run1',
+                hypothesisId: 'U',
+              }),
+            },
+          ).catch(() => {})
         }
         // #endregion
 
         switch (response.keyType) {
           case 'storage': {
             // #region agent log
-            const TARGET_STATE_KEY_STORAGE = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-            if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()) {
-              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:761',message:'setState: Setting storage for target key',data:{keyvalKey,serviceId:serviceId.toString(),storageKey:response.key,valueLength:response.value.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+            const TARGET_STATE_KEY_STORAGE =
+              '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+            if (
+              keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()
+            ) {
+              fetch(
+                'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    location: 'state-service.ts:761',
+                    message: 'setState: Setting storage for target key',
+                    data: {
+                      keyvalKey,
+                      serviceId: serviceId.toString(),
+                      storageKey: response.key,
+                      valueLength: response.value.length,
+                    },
+                    timestamp: Date.now(),
+                    sessionId: 'debug-session',
+                    runId: 'run1',
+                    hypothesisId: 'U',
+                  }),
+                },
+              ).catch(() => {})
             }
             // #endregion
             // Service account must already exist when parsing state
@@ -786,8 +838,30 @@ export class StateService extends BaseService implements IStateService {
               response.value,
             )
             // #region agent log
-            if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()) {
-              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:777',message:'setState: After setting storage for target key',data:{keyvalKey,serviceId:serviceId.toString(),storageError:storageError?.message||'null',storageKey:response.key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+            if (
+              keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()
+            ) {
+              fetch(
+                'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    location: 'state-service.ts:777',
+                    message: 'setState: After setting storage for target key',
+                    data: {
+                      keyvalKey,
+                      serviceId: serviceId.toString(),
+                      storageError: storageError?.message || 'null',
+                      storageKey: response.key,
+                    },
+                    timestamp: Date.now(),
+                    sessionId: 'debug-session',
+                    runId: 'run1',
+                    hypothesisId: 'U',
+                  }),
+                },
+              ).catch(() => {})
             }
             // #endregion
             if (storageError) {
@@ -840,7 +914,6 @@ export class StateService extends BaseService implements IStateService {
             break
           }
           case 'request': {
-
             // Try to verify by matching against known preimages for this service
             // Gray Paper: C(s, encode[4]{l} ∥ h) where l=blob_length, h=preimage_hash
             const servicePreimages = this.preimageInfo.get(serviceId)
@@ -893,9 +966,36 @@ export class StateService extends BaseService implements IStateService {
 
             if (!matchedPreimageHash) {
               // #region agent log
-              const TARGET_STATE_KEY_RECLASSIFY = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-              if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_RECLASSIFY.toLowerCase()) {
-                fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:876',message:'setState: Reclassifying unmatched request as storage',data:{keyvalKey,serviceId:serviceId.toString(),stateKeyHash:blakeHashFromKey,checkedPreimages:servicePreimages?.size??0,timeslots:response.timeslots.map(t=>t.toString()),valueLength:valueBytes.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'S'})}).catch(()=>{})
+              const TARGET_STATE_KEY_RECLASSIFY =
+                '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+              if (
+                keyvalKey.toLowerCase() ===
+                TARGET_STATE_KEY_RECLASSIFY.toLowerCase()
+              ) {
+                fetch(
+                  'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      location: 'state-service.ts:876',
+                      message:
+                        'setState: Reclassifying unmatched request as storage',
+                      data: {
+                        keyvalKey,
+                        serviceId: serviceId.toString(),
+                        stateKeyHash: blakeHashFromKey,
+                        checkedPreimages: servicePreimages?.size ?? 0,
+                        timeslots: response.timeslots.map((t) => t.toString()),
+                        valueLength: valueBytes.length,
+                      },
+                      timestamp: Date.now(),
+                      sessionId: 'debug-session',
+                      runId: 'run1',
+                      hypothesisId: 'S',
+                    }),
+                  },
+                ).catch(() => {})
               }
               // #endregion
               // No matching preimage found - reclassify as storage instead of request
@@ -911,7 +1011,7 @@ export class StateService extends BaseService implements IStateService {
                   note: 'Value format matched request pattern but no preimage match found - treating as storage',
                 },
               )
-              
+
               // Reclassify as storage
               // Use blakeHashFromKey as the storage key (we can't recover the original storage key k from the state key)
               // Service account must already exist when parsing state
@@ -928,8 +1028,31 @@ export class StateService extends BaseService implements IStateService {
                 valueBytes,
               )
               // #region agent log
-              if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_RECLASSIFY.toLowerCase()) {
-                fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:901',message:'setState: After reclassifying as storage',data:{keyvalKey,serviceId:serviceId.toString(),storageError:storageError?.message||'null',storageKey:blakeHashFromKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'S'})}).catch(()=>{})
+              if (
+                keyvalKey.toLowerCase() ===
+                TARGET_STATE_KEY_RECLASSIFY.toLowerCase()
+              ) {
+                fetch(
+                  'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      location: 'state-service.ts:901',
+                      message: 'setState: After reclassifying as storage',
+                      data: {
+                        keyvalKey,
+                        serviceId: serviceId.toString(),
+                        storageError: storageError?.message || 'null',
+                        storageKey: blakeHashFromKey,
+                      },
+                      timestamp: Date.now(),
+                      sessionId: 'debug-session',
+                      runId: 'run1',
+                      hypothesisId: 'S',
+                    }),
+                  },
+                ).catch(() => {})
               }
               // #endregion
               if (storageError) {
@@ -937,10 +1060,13 @@ export class StateService extends BaseService implements IStateService {
                   key: keyvalKey,
                   reason: `Failed to set storage (reclassified from request): ${storageError.message}`,
                 })
-                logger.warn('Failed to set storage (reclassified from request)', {
-                  serviceId: serviceId.toString(),
-                  error: storageError.message,
-                })
+                logger.warn(
+                  'Failed to set storage (reclassified from request)',
+                  {
+                    serviceId: serviceId.toString(),
+                    error: storageError.message,
+                  },
+                )
               } else {
                 processingStats.processed.csh.storage++
               }
@@ -980,7 +1106,8 @@ export class StateService extends BaseService implements IStateService {
       } catch (error) {
         // Log as warning and skip - invalid C(s, h) keys are allowed
         // They may represent corrupted test data or edge cases
-        const errorMessage = error instanceof Error ? error.message : String(error)
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
         processingStats.skipped.push({
           key: keyvalKey,
           reason: `Failed to determine C(s, h) key type: ${errorMessage}`,
@@ -1020,7 +1147,7 @@ export class StateService extends BaseService implements IStateService {
       ...(processingStats.skipped.length > 10
         ? { note: `${processingStats.skipped.length - 10} more keys skipped` }
         : {}),
-        })
+    })
 
     if (processingStats.skipped.length > 0) {
       logger.warn('[StateService] Some keys were not processed', {
@@ -1053,7 +1180,7 @@ export class StateService extends BaseService implements IStateService {
       }
       return safeResult(stateTrie)
     }
-    
+
     const globalState: GlobalState = {
       authpool: this.authPoolService.getAuthPool(),
       recent: this.recentHistoryService.getRecent(),
@@ -1392,7 +1519,29 @@ export class StateService extends BaseService implements IStateService {
       // #region agent log
       // Log for debugging request classification
       if (valueBytes.length === 140 && valueBytes[0] === 0x00) {
-        fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:1372',message:'determineKeyType: Request length check',data:{valueLength:valueBytes.length,timeslotCount,lengthPrefixBytes,remainingBytes,expectedBytes,matches:remainingBytes===expectedBytes},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'T'})}).catch(()=>{})
+        fetch(
+          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-service.ts:1372',
+              message: 'determineKeyType: Request length check',
+              data: {
+                valueLength: valueBytes.length,
+                timeslotCount,
+                lengthPrefixBytes,
+                remainingBytes,
+                expectedBytes,
+                matches: remainingBytes === expectedBytes,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'T',
+            }),
+          },
+        ).catch(() => {})
       }
       // #endregion
 

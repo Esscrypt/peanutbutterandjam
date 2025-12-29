@@ -73,7 +73,12 @@ export class WriteHostFunction extends BaseHostFunction {
       // Gray Paper: Calculate new account state with deletion, then check balance
       // Calculate what the new storage footprint would be after deletion
       const newItems = this.calculateItems(serviceAccount, key, true)
-      const newOctets = this.calculateOctets(serviceAccount, key, new Uint8Array(0), true)
+      const newOctets = this.calculateOctets(
+        serviceAccount,
+        key,
+        new Uint8Array(0),
+        true,
+      )
       const newMinBalance = this.calculateMinBalance(
         newItems,
         newOctets,
@@ -84,12 +89,15 @@ export class WriteHostFunction extends BaseHostFunction {
       // If so, return FULL and keep old state
       if (newMinBalance > serviceAccount.balance) {
         context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
-        context.log('Write host function: Insufficient balance for delete operation', {
-          balance: serviceAccount.balance.toString(),
-          requiredBalance: newMinBalance.toString(),
-          newItems: newItems.toString(),
-          newOctets: newOctets.toString(),
-        })
+        context.log(
+          'Write host function: Insufficient balance for delete operation',
+          {
+            balance: serviceAccount.balance.toString(),
+            requiredBalance: newMinBalance.toString(),
+            newItems: newItems.toString(),
+            newOctets: newOctets.toString(),
+          },
+        )
         return {
           resultCode: null, // continue execution
         }

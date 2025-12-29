@@ -67,7 +67,8 @@ export function calculateServiceAccountOctets(
         // Adding/updating: use new value
         // Gray Paper: len(x) is the byte length of the original storage key blob
         const keyBytes = options.writeKey.length
-        totalOctets += 34n + BigInt(keyBytes) + BigInt(options.writeValue.length)
+        totalOctets +=
+          34n + BigInt(keyBytes) + BigInt(options.writeValue.length)
       }
       // If deleting, skip this entry
     } else {
@@ -147,4 +148,3 @@ export function calculateServiceAccountItems(
   // Gray Paper: items = 2 * len(requests) + len(storage)
   return BigInt(2 * requestKeyCount + storageCount)
 }
-

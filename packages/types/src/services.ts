@@ -45,7 +45,12 @@ export interface ISealKeyService extends BaseService {
     activeValidatorsOverride?: Map<number, ValidatorPublicKeys> | null
     storeInState?: boolean
     phase?: number
-  }): Safe<SafroleTicketWithoutProof | Uint8Array | (SafroleTicketWithoutProof | Uint8Array)[] | void>
+  }): Safe<
+    | SafroleTicketWithoutProof
+    | Uint8Array
+    | (SafroleTicketWithoutProof | Uint8Array)[]
+    | void
+  >
 }
 
 export interface IRecentHistoryService extends BaseService {
@@ -55,7 +60,7 @@ export interface IRecentHistoryService extends BaseService {
 
 export interface IStateService extends BaseService {
   getStateRoot(): Safe<Hex>
-  getGenesisManager(): IGenesisManagerService 
+  getGenesisManager(): IGenesisManagerService
 }
 
 export interface IGenesisManagerService extends BaseService {

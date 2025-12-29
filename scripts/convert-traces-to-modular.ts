@@ -350,14 +350,14 @@ function discoverTraceFiles(
               ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
               : `typescript-${timeslot}-${serviceId}-accumulate_input.bin`
           const accumulateInputPath = join(dir, accumulateInputFilename)
-          
+
           // Check for output file (yield hash)
           const outputFilename =
             invocationIndex !== undefined
               ? `typescript-${timeslot}-${invocationIndex}-${serviceId}-output.bin`
               : `typescript-${timeslot}-${serviceId}-output.bin`
           const outputPath = join(dir, outputFilename)
-          
+
           // Check for err file (error code)
           const errFilename =
             invocationIndex !== undefined
@@ -396,14 +396,14 @@ function discoverTraceFiles(
               ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
               : `wasm-${timeslot}-${serviceId}-accumulate_input.bin`
           const accumulateInputPath = join(dir, accumulateInputFilename)
-          
+
           // Check for output file (yield hash)
           const outputFilename =
             invocationIndex !== undefined
               ? `wasm-${timeslot}-${invocationIndex}-${serviceId}-output.bin`
               : `wasm-${timeslot}-${serviceId}-output.bin`
           const outputPath = join(dir, outputFilename)
-          
+
           // Check for err file (error code)
           const errFilename =
             invocationIndex !== undefined
@@ -507,7 +507,7 @@ async function main() {
   const isJamConformance = args.includes('--jam-conformance')
   // Get JAM conformance version from environment variable, default to 0.7.2
   const jamConformanceVersion = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
-  
+
   if (isJamConformance) {
     targetFolder = `jam-conformance/${jamConformanceVersion}`
   }

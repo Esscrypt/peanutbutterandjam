@@ -29,7 +29,7 @@ function decodeServiceAccountFromHex(hex: string): ServiceAccountCore | null {
     const hexWithPrefix = hex.startsWith('0x') ? hex : `0x${hex}`
     const bytes = hexToBytes(hexWithPrefix as `0x${string}`)
     const [error, result] = decodeServiceAccount(bytes)
-    
+
     if (error) {
       console.error(`Error decoding service account: ${error.message}`)
       if (error.stack) {
@@ -37,12 +37,12 @@ function decodeServiceAccountFromHex(hex: string): ServiceAccountCore | null {
       }
       return null
     }
-    
+
     if (!result) {
       console.error('Error: decodeServiceAccount returned null result')
       return null
     }
-    
+
     return result.value
   } catch (error) {
     console.error(`Error decoding service account: ${error}`)
@@ -53,7 +53,11 @@ function decodeServiceAccountFromHex(hex: string): ServiceAccountCore | null {
   }
 }
 
-function formatFieldBigInt(name: string, expected: bigint, actual: bigint): string {
+function formatFieldBigInt(
+  name: string,
+  expected: bigint,
+  actual: bigint,
+): string {
   const match = expected === actual ? '✅' : '❌'
   const diff = ` (diff: ${actual - expected})`
   return `${match} ${name.padEnd(15)} Expected: ${expected.toString().padStart(15)} | Actual: ${actual.toString().padStart(15)}${diff}`
@@ -63,11 +67,11 @@ function main() {
   const args = process.argv.slice(2)
 
   if (args.length < 2) {
-    console.error('Usage: bun scripts/decode-service-account.ts <expected_hex> <actual_hex>')
-    console.error('Example:')
     console.error(
-      '  bun scripts/decode-service-account.ts "0x00..." "0x00..."',
+      'Usage: bun scripts/decode-service-account.ts <expected_hex> <actual_hex>',
     )
+    console.error('Example:')
+    console.error('  bun scripts/decode-service-account.ts "0x00..." "0x00..."')
     process.exit(1)
   }
 
@@ -102,8 +106,12 @@ function main() {
   // 8-byte fields
   console.log('8-byte Fields (encode[8]):')
   console.log(formatFieldBigInt('balance', expected.balance, actual.balance))
-  console.log(formatFieldBigInt('minaccgas', expected.minaccgas, actual.minaccgas))
-  console.log(formatFieldBigInt('minmemogas', expected.minmemogas, actual.minmemogas))
+  console.log(
+    formatFieldBigInt('minaccgas', expected.minaccgas, actual.minaccgas),
+  )
+  console.log(
+    formatFieldBigInt('minmemogas', expected.minmemogas, actual.minmemogas),
+  )
   console.log(formatFieldBigInt('octets', expected.octets, actual.octets))
   console.log(formatFieldBigInt('gratis', expected.gratis, actual.gratis))
   console.log()
@@ -133,7 +141,9 @@ function main() {
   if (differences.length === 0) {
     console.log('✅ All fields match!')
   } else {
-    console.log(`❌ Found ${differences.length} difference(s): ${differences.join(', ')}`)
+    console.log(
+      `❌ Found ${differences.length} difference(s): ${differences.join(', ')}`,
+    )
     if (differences.includes('octets')) {
       const octetsDiff = actual.octets - expected.octets
       console.log()
@@ -146,4 +156,3 @@ function main() {
 }
 
 main()
-

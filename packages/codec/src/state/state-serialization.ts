@@ -179,7 +179,7 @@ export function createServiceStorageKey(
   storageKey: Hex,
 ): Uint8Array {
   const storageKeyBytes = hexToBytes(storageKey)
-  
+
   // Check if storageKey is already a 27-byte Blake hash (from state loading)
   // When loading from state, we store h (27-byte Blake hash) directly
   // When creating new storage (from PVM), we have k (original storage key)
@@ -204,10 +204,10 @@ export function createServiceStorageKey(
     key[7] = storageKeyBytes[3] // a₃
     // Remaining bytes: a₄, a₅, ..., a₂₆ (23 bytes)
     key.set(storageKeyBytes.slice(4), 8) // a₄...a₂₆
-    
+
     return key
   }
-  
+
   // Storage key is the original key `k` - compute blake(encode[4]{0xFFFFFFFF} || k)
   // Create the prefix: encode[4]{2³²-1} = encode[4]{0xFFFFFFFF}
   const prefix = new Uint8Array(4)
@@ -249,7 +249,7 @@ export function createServicePreimageKey(
   preimageHash: Hex,
 ): Uint8Array {
   const preimageHashBytes = hexToBytes(preimageHash)
-  
+
   // Check if preimageHash is already a 27-byte Blake hash (from state loading)
   if (preimageHashBytes.length === 27) {
     // Preimage hash is already a Blake hash - use it directly to construct state key
@@ -269,10 +269,10 @@ export function createServicePreimageKey(
     key[6] = serviceUint8Array[3] // n₃
     key[7] = preimageHashBytes[3] // a₃
     key.set(preimageHashBytes.slice(4), 8) // a₄...a₂₆
-    
+
     return key
   }
-  
+
   // Preimage hash is the full 32-byte hash - compute blake(encode[4]{0xFFFFFFFE} || h)
   // Create the prefix: encode[4]{2³²-2} = encode[4]{0xFFFFFFFE}
   const prefix = new Uint8Array(4)
@@ -316,7 +316,7 @@ export function createServiceRequestKey(
   length: bigint,
 ): Uint8Array {
   const requestHashBytes = hexToBytes(requestHash)
-  
+
   // Check if requestHash is already a 27-byte Blake hash (from state loading)
   if (requestHashBytes.length === 27) {
     // Request hash is already a Blake hash - use it directly to construct state key
@@ -336,10 +336,10 @@ export function createServiceRequestKey(
     key[6] = serviceUint8Array[3] // n₃
     key[7] = requestHashBytes[3] // a₃
     key.set(requestHashBytes.slice(4), 8) // a₄...a₂₆
-    
+
     return key
   }
-  
+
   // Request hash is the full 32-byte hash - compute blake(encode[4]{l} || h)
   // Create the prefix: encode[4]{length}
   const prefix = new Uint8Array(4)
@@ -635,7 +635,7 @@ export function createStateTrie(
     // Use the extracted functions from @pbnjam/core
     const computedOctets = calculateServiceAccountOctets(account)
     const computedItems = calculateServiceAccountItems(account)
-    
+
     // #region agent log
     // Calculate breakdown for debugging (keep logs for now)
     let requestKeyCount = 0
@@ -651,8 +651,34 @@ export function createStateTrie(
       const keyBytes = hexToBytes(storageKey).length
       storageOctets += 34n + BigInt(keyBytes) + BigInt(storageValue.length)
     }
-    if (account.codehash === '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327') {
-      fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-serialization.ts:652',message:'final octets calculation',data:{serviceId:serviceId.toString(),storedOctets:account.octets.toString(),computedOctets:computedOctets.toString(),requestsOctets:requestsOctets.toString(),storageOctets:storageOctets.toString(),storageSize:account.storage.size,requestKeyCount},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    if (
+      account.codehash ===
+      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+    ) {
+      fetch(
+        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'state-serialization.ts:652',
+            message: 'final octets calculation',
+            data: {
+              serviceId: serviceId.toString(),
+              storedOctets: account.octets.toString(),
+              computedOctets: computedOctets.toString(),
+              requestsOctets: requestsOctets.toString(),
+              storageOctets: storageOctets.toString(),
+              storageSize: account.storage.size,
+              requestKeyCount,
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'D',
+          }),
+        },
+      ).catch(() => {})
     }
     // #endregion
 
@@ -664,8 +690,30 @@ export function createStateTrie(
     }
 
     // #region agent log
-    if (account.codehash === '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327') {
-      fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-serialization.ts:673',message:'encoding account with computed octets',data:{serviceId:serviceId.toString(),accountWithComputedOctets:accountWithComputed.octets.toString(),accountWithComputedItems:accountWithComputed.items.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    if (
+      account.codehash ===
+      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+    ) {
+      fetch(
+        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'state-serialization.ts:673',
+            message: 'encoding account with computed octets',
+            data: {
+              serviceId: serviceId.toString(),
+              accountWithComputedOctets: accountWithComputed.octets.toString(),
+              accountWithComputedItems: accountWithComputed.items.toString(),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'D',
+          }),
+        },
+      ).catch(() => {})
     }
     // #endregion
     const [error17, accountData] = encodeServiceAccount(
@@ -677,15 +725,46 @@ export function createStateTrie(
     }
     if (accountData) {
       // #region agent log
-      if (account.codehash === '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327') {
+      if (
+        account.codehash ===
+        '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
+      ) {
         // Decode the octets value from the encoded data to verify
         const version = jamVersion ?? { major: 0, minor: 7, patch: 2 }
-        const includeDiscriminator = version.major > 0 || (version.major === 0 && version.minor > 7) || (version.major === 0 && version.minor === 7 && version.patch > 0)
+        const includeDiscriminator =
+          version.major > 0 ||
+          (version.major === 0 && version.minor > 7) ||
+          (version.major === 0 && version.minor === 7 && version.patch > 0)
         const discriminatorSize = includeDiscriminator ? 1 : 0
         const octetsOffset = discriminatorSize + 32 + 24 // discriminator (optional) + codehash + offset to octets field
-        const view = new DataView(accountData.buffer, accountData.byteOffset, accountData.byteLength)
+        const view = new DataView(
+          accountData.buffer,
+          accountData.byteOffset,
+          accountData.byteLength,
+        )
         const encodedOctets = view.getBigUint64(octetsOffset, true)
-        fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-serialization.ts:690',message:'encoded account data verification',data:{serviceId:serviceId.toString(),encodedOctets:encodedOctets.toString(),accountWithComputedOctets:accountWithComputed.octets.toString(),accountDataLength:accountData.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        fetch(
+          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-serialization.ts:690',
+              message: 'encoded account data verification',
+              data: {
+                serviceId: serviceId.toString(),
+                encodedOctets: encodedOctets.toString(),
+                accountWithComputedOctets:
+                  accountWithComputed.octets.toString(),
+                accountDataLength: accountData.length,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'D',
+            }),
+          },
+        ).catch(() => {})
       }
       // #endregion
       stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
@@ -700,9 +779,33 @@ export function createStateTrie(
       const storageStateKey = createServiceStorageKey(serviceId, storageKey)
       const storageStateKeyHex = bytesToHex(storageStateKey) as Hex
       // #region agent log
-      const TARGET_STATE_KEY_GEN_STORAGE = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-      if (storageStateKeyHex.toLowerCase() === TARGET_STATE_KEY_GEN_STORAGE.toLowerCase()) {
-        fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-serialization.ts:668',message:'createStateTrie: Generating target storage key',data:{serviceId:serviceId.toString(),storageKey,storageStateKeyHex,storageValueLength:storageValue.length.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+      const TARGET_STATE_KEY_GEN_STORAGE =
+        '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+      if (
+        storageStateKeyHex.toLowerCase() ===
+        TARGET_STATE_KEY_GEN_STORAGE.toLowerCase()
+      ) {
+        fetch(
+          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-serialization.ts:668',
+              message: 'createStateTrie: Generating target storage key',
+              data: {
+                serviceId: serviceId.toString(),
+                storageKey,
+                storageStateKeyHex,
+                storageValueLength: storageValue.length.toString(),
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'U',
+            }),
+          },
+        ).catch(() => {})
       }
       // #endregion
       stateTrie[storageStateKeyHex] = bytesToHex(storageValue)
@@ -728,9 +831,34 @@ export function createStateTrie(
         )
         const requestStateKeyHex = bytesToHex(requestStateKey) as Hex
         // #region agent log
-        const TARGET_STATE_KEY_GEN = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-        if (requestStateKeyHex.toLowerCase() === TARGET_STATE_KEY_GEN.toLowerCase()) {
-          fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-serialization.ts:685',message:'createStateTrie: Generating target request key',data:{serviceId:serviceId.toString(),requestHash,length:length.toString(),requestStateKeyHex,requestStatusLength:requestStatus.length.toString()},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'R'})}).catch(()=>{})
+        const TARGET_STATE_KEY_GEN =
+          '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+        if (
+          requestStateKeyHex.toLowerCase() ===
+          TARGET_STATE_KEY_GEN.toLowerCase()
+        ) {
+          fetch(
+            'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                location: 'state-serialization.ts:685',
+                message: 'createStateTrie: Generating target request key',
+                data: {
+                  serviceId: serviceId.toString(),
+                  requestHash,
+                  length: length.toString(),
+                  requestStateKeyHex,
+                  requestStatusLength: requestStatus.length.toString(),
+                },
+                timestamp: Date.now(),
+                sessionId: 'debug-session',
+                runId: 'run1',
+                hypothesisId: 'R',
+              }),
+            },
+          ).catch(() => {})
         }
         // #endregion
         // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}

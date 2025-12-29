@@ -108,7 +108,8 @@ export async function validateBlockHeader(
   }
 
   // validate that winners mark is present only at phase > contest duration and has correct number of tickets
-  const currentPhase = (latestStateTimeslot + 1n) % BigInt(configService.epochDuration)
+  const currentPhase =
+    (latestStateTimeslot + 1n) % BigInt(configService.epochDuration)
   if (header.winnersMark) {
     if (currentPhase < configService.contestDuration) {
       return safeError(
@@ -129,7 +130,11 @@ export async function validateBlockHeader(
   // validate that epoch mark is present only at first slot of an epoch
   if (header.epochMark) {
     if (currentPhase !== BigInt(0)) {
-      return safeError(new Error(`epoch mark is present at non-first slot, current phase: ${currentPhase}, header timeslot: ${header.timeslot}, latest state timeslot: ${latestStateTimeslot}`))
+      return safeError(
+        new Error(
+          `epoch mark is present at non-first slot, current phase: ${currentPhase}, header timeslot: ${header.timeslot}, latest state timeslot: ${latestStateTimeslot}`,
+        ),
+      )
     }
     // if the validators are not as many as in config, return an error
     if (header.epochMark.validators.length !== configService.numValidators) {
@@ -168,7 +173,7 @@ export async function validateBlockHeader(
   //validate the vrf signature
   const [vrfValidationError, isValid] = validateVRFSignature(
     header,
-    validatorSetManagerService
+    validatorSetManagerService,
   )
   if (vrfValidationError) {
     return safeError(vrfValidationError)
@@ -224,7 +229,8 @@ export function validateSealSignature(
   const blockTimeslot = latestStateTimeslot + 1n
 
   // Get seal key for the computed timeslot (must match the unsigned header timeslot)
-  const [sealKeyError, sealKey] = sealKeyService.getSealKeyForSlot(blockTimeslot)
+  const [sealKeyError, sealKey] =
+    sealKeyService.getSealKeyForSlot(blockTimeslot)
   if (sealKeyError) {
     return safeError(sealKeyError)
   }
@@ -381,26 +387,24 @@ export function validateVRFSignature(
   return safeResult(isValid)
 }
 
-
 export function validatePreStateRoot(
   header: BlockHeader,
   stateService: IStateService,
 ): Safe<void> {
+  const [preStateRootError, preStateRoot] = stateService.getStateRoot()
+  if (preStateRootError) {
+    return safeError(
+      new Error(`Failed to get pre-state root: ${preStateRootError.message}`),
+    )
+  }
+  if (header.priorStateRoot !== preStateRoot) {
+    return safeError(
+      new Error(
+        `Prior state root mismatch: computed ${preStateRoot}, expected ${header.priorStateRoot}. ` +
+          `This may indicate decode/encode round-trip issues or state components not being set correctly from test vectors.`,
+      ),
+    )
+  }
 
-    const [preStateRootError, preStateRoot] = stateService.getStateRoot()
-    if (preStateRootError) {
-      return safeError(
-        new Error(`Failed to get pre-state root: ${preStateRootError.message}`),
-      )
-    }
-    if (header.priorStateRoot !== preStateRoot) {
-      return safeError(
-        new Error(
-          `Prior state root mismatch: computed ${preStateRoot}, expected ${header.priorStateRoot}. ` +
-            `This may indicate decode/encode round-trip issues or state components not being set correctly from test vectors.`,
-        ),
-      )
-    }
-
-    return safeResult(undefined)
+  return safeResult(undefined)
 }

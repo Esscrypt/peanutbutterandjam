@@ -285,13 +285,11 @@ export class RecentHistoryService extends BaseServiceClass {
       // totalCount is the number of items appended to the MMR (block number)
       // Use the provided totalCount, falling back to 0 if not provided
       this.accoutBelt.totalCount = recent.accoutBelt.totalCount ?? 0n
-      
     } else {
       // If no peaks provided, clear the belt
       this.mmrPeaks = []
       this.accoutBelt.peaks = []
       this.accoutBelt.totalCount = 0n
-    
     }
   }
 
@@ -489,12 +487,11 @@ export class RecentHistoryService extends BaseServiceClass {
    * @param lastaccout - Accumulation output pairings from AccumulationService
    */
   public updateAccoutBelt(lastaccout: [bigint, Hex][]): Safe<void> {
-
     // Step 1: lastaccout' is provided directly from AccumulationService
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
     // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
     // This comes from local_fnservouts tracked during accumulation
-    
+
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     // This is called for EVERY block, even when s is empty.
     // When s is empty, merklizewb([]) = H([]) = keccak(empty bytes)

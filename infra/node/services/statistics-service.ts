@@ -244,15 +244,20 @@ export class StatisticsService extends BaseService {
     onTransfersStats: [number, number],
   ): void {
     if (!this.activity.serviceStats.has(serviceId)) {
-      logger.warn('updateServiceOnTransfersStats called for non-existent service', { serviceId })
-      return;
+      logger.warn(
+        'updateServiceOnTransfersStats called for non-existent service',
+        { serviceId },
+      )
+      return
     }
 
-    
     const serviceStats = this.activity.serviceStats.get(serviceId)
-    if(!serviceStats) {
-      logger.warn('updateServiceOnTransfersStats called for service with no stats', { serviceId })
-      return;
+    if (!serviceStats) {
+      logger.warn(
+        'updateServiceOnTransfersStats called for service with no stats',
+        { serviceId },
+      )
+      return
     }
 
     // Only set onTransfers fields if they don't already exist (preserve from decoded state)
@@ -418,15 +423,14 @@ export class StatisticsService extends BaseService {
 
     // Increment guarantees count by 1 for each validator who is a reporter
     for (const validatorIdx of reporters) {
-          let validatorStats =
-            this.activity.validatorStatsAccumulator[validatorIdx]
-          if (!validatorStats) {
-            validatorStats = this.createEmptyValidatorStat()
-          }
-          validatorStats.guarantees += 1
-          this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
-        }
+      let validatorStats = this.activity.validatorStatsAccumulator[validatorIdx]
+      if (!validatorStats) {
+        validatorStats = this.createEmptyValidatorStat()
       }
+      validatorStats.guarantees += 1
+      this.activity.validatorStatsAccumulator[validatorIdx] = validatorStats
+    }
+  }
 
   /**
    * Reset per-block statistics (coreStats and serviceStats)
@@ -471,9 +475,7 @@ export class StatisticsService extends BaseService {
    * Handle revert epoch transition event
    * Restores activity to its state before the epoch transition
    */
-  private handleRevertEpochTransition(
-    event: RevertEpochTransitionEvent,
-  ): void {
+  private handleRevertEpochTransition(event: RevertEpochTransitionEvent): void {
     if (!this.preTransitionActivity) {
       logger.warn(
         '[StatisticsService] No pre-transition activity to revert to',
@@ -488,9 +490,15 @@ export class StatisticsService extends BaseService {
 
     // Restore previous activity state
     this.activity = {
-      validatorStatsAccumulator: [...this.preTransitionActivity.validatorStatsAccumulator],
-      validatorStatsPrevious: [...this.preTransitionActivity.validatorStatsPrevious],
-      coreStats: this.preTransitionActivity.coreStats.map((stats) => ({ ...stats })),
+      validatorStatsAccumulator: [
+        ...this.preTransitionActivity.validatorStatsAccumulator,
+      ],
+      validatorStatsPrevious: [
+        ...this.preTransitionActivity.validatorStatsPrevious,
+      ],
+      coreStats: this.preTransitionActivity.coreStats.map((stats) => ({
+        ...stats,
+      })),
       serviceStats: new Map(this.preTransitionActivity.serviceStats),
     }
 
@@ -906,7 +914,6 @@ export class StatisticsService extends BaseService {
       serviceStats.provision[0] += provision.count // count
       serviceStats.provision[1] += provision.totalSize // size
     }
-
   }
 
   /**

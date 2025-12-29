@@ -514,7 +514,7 @@ function getModularTraceDir(
   serviceId?: number,
 ): string {
   let traceDir = baseDir
-  
+
   if (timeslot !== undefined) {
     traceDir = join(traceDir, timeslot.padStart(8, '0'))
     if (orderedIndex !== undefined) {
@@ -524,7 +524,7 @@ function getModularTraceDir(
       }
     }
   }
-  
+
   return traceDir
 }
 
@@ -538,24 +538,24 @@ function compareOutputFiles(
   // Try to read output files (yield hash - 32 bytes)
   const expectedOutputPath = join(expectedDir, 'output')
   const actualOutputPath = join(actualDir, 'output')
-  
+
   let expectedOutput: Uint8Array | null = null
   let actualOutput: Uint8Array | null = null
-  
+
   if (existsSync(expectedOutputPath)) {
     expectedOutput = new Uint8Array(readFileSync(expectedOutputPath))
   }
   if (existsSync(actualOutputPath)) {
     actualOutput = new Uint8Array(readFileSync(actualOutputPath))
   }
-  
+
   // Try to read err files (error code - 1 byte)
   const expectedErrPath = join(expectedDir, 'err')
   const actualErrPath = join(actualDir, 'err')
-  
+
   let expectedErr: number | null = null
   let actualErr: number | null = null
-  
+
   if (existsSync(expectedErrPath)) {
     const errData = readFileSync(expectedErrPath)
     expectedErr = errData.length > 0 ? errData[0] : null
@@ -564,19 +564,20 @@ function compareOutputFiles(
     const errData = readFileSync(actualErrPath)
     actualErr = errData.length > 0 ? errData[0] : null
   }
-  
+
   // Compare outputs
   let outputMatch = false
   if (expectedOutput === null && actualOutput === null) {
     outputMatch = true // Both missing is a match
   } else if (expectedOutput !== null && actualOutput !== null) {
-    outputMatch = expectedOutput.length === actualOutput.length &&
+    outputMatch =
+      expectedOutput.length === actualOutput.length &&
       expectedOutput.every((byte, i) => byte === actualOutput[i])
   }
-  
+
   // Compare errors
   const errMatch = expectedErr === actualErr
-  
+
   return {
     expectedOutput,
     actualOutput,
@@ -591,7 +592,12 @@ function compareOutputFiles(
  * Format bytes as hex string
  */
 function bytesToHex(bytes: Uint8Array): string {
-  return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+  return (
+    '0x' +
+    Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  )
 }
 
 function compareTwoTraces(
@@ -944,51 +950,72 @@ function printTwoWayComparison(
   )
   console.log(`   Matching:                ${result.stats.matching}`)
   console.log(`   Differences:              ${result.differences.length}`)
-  
+
   // Show output/err comparison if available
   if (outputComparison) {
     console.log()
-    console.log(`${colors.bold}📦 Accumulation Output Comparison${colors.reset}`)
-    
+    console.log(
+      `${colors.bold}📦 Accumulation Output Comparison${colors.reset}`,
+    )
+
     // Output (yield hash) comparison
     if (outputComparison.expectedOutput || outputComparison.actualOutput) {
-      const outputStatus = outputComparison.outputMatch 
-        ? `${colors.green}✓ Match${colors.reset}` 
+      const outputStatus = outputComparison.outputMatch
+        ? `${colors.green}✓ Match${colors.reset}`
         : `${colors.red}✗ Mismatch${colors.reset}`
       console.log(`   Output (yield): ${outputStatus}`)
-      
+
       if (!outputComparison.outputMatch) {
         if (outputComparison.expectedOutput) {
-          console.log(`      ${colors.green}Expected:${colors.reset} ${bytesToHex(outputComparison.expectedOutput)}`)
+          console.log(
+            `      ${colors.green}Expected:${colors.reset} ${bytesToHex(outputComparison.expectedOutput)}`,
+          )
         } else {
-          console.log(`      ${colors.green}Expected:${colors.reset} (not present)`)
+          console.log(
+            `      ${colors.green}Expected:${colors.reset} (not present)`,
+          )
         }
         if (outputComparison.actualOutput) {
-          console.log(`      ${colors.blue}Actual:${colors.reset}   ${bytesToHex(outputComparison.actualOutput)}`)
+          console.log(
+            `      ${colors.blue}Actual:${colors.reset}   ${bytesToHex(outputComparison.actualOutput)}`,
+          )
         } else {
-          console.log(`      ${colors.blue}Actual:${colors.reset}   (not present)`)
+          console.log(
+            `      ${colors.blue}Actual:${colors.reset}   (not present)`,
+          )
         }
       }
     } else {
-      console.log(`   Output (yield): ${colors.dim}(neither present)${colors.reset}`)
+      console.log(
+        `   Output (yield): ${colors.dim}(neither present)${colors.reset}`,
+      )
     }
-    
+
     // Error comparison
-    if (outputComparison.expectedErr !== null || outputComparison.actualErr !== null) {
-      const errStatus = outputComparison.errMatch 
-        ? `${colors.green}✓ Match${colors.reset}` 
+    if (
+      outputComparison.expectedErr !== null ||
+      outputComparison.actualErr !== null
+    ) {
+      const errStatus = outputComparison.errMatch
+        ? `${colors.green}✓ Match${colors.reset}`
         : `${colors.red}✗ Mismatch${colors.reset}`
       console.log(`   Error code:     ${errStatus}`)
-      
+
       if (!outputComparison.errMatch) {
-        console.log(`      ${colors.green}Expected:${colors.reset} ${outputComparison.expectedErr ?? '(not present)'}`)
-        console.log(`      ${colors.blue}Actual:${colors.reset}   ${outputComparison.actualErr ?? '(not present)'}`)
+        console.log(
+          `      ${colors.green}Expected:${colors.reset} ${outputComparison.expectedErr ?? '(not present)'}`,
+        )
+        console.log(
+          `      ${colors.blue}Actual:${colors.reset}   ${outputComparison.actualErr ?? '(not present)'}`,
+        )
       }
     } else {
-      console.log(`   Error code:     ${colors.dim}(neither present)${colors.reset}`)
+      console.log(
+        `   Error code:     ${colors.dim}(neither present)${colors.reset}`,
+      )
     }
   }
-  
+
   console.log()
 
   // Match percentage
@@ -1541,7 +1568,9 @@ async function main() {
     console.log('  bun scripts/compare-3way-traces.ts --storage-all 2 0 0')
     console.log('  bun scripts/compare-3way-traces.ts --fuzzy 2 0 0')
     console.log('  bun scripts/compare-3way-traces.ts --fuzzy-light 2 0 0')
-    console.log('  bun scripts/compare-3way-traces.ts --jam-conformance 1766243315_8065 00000035 11 0 0')
+    console.log(
+      '  bun scripts/compare-3way-traces.ts --jam-conformance 1766243315_8065 00000035 11 0 0',
+    )
     return
   }
 
@@ -1553,7 +1582,7 @@ async function main() {
   let typescriptPath: string
   let wasmPath: string
   let comparisonLabel: string
-  
+
   // Track modular trace directories for output/err comparison
   let modularExpectedDir: string | undefined
   let modularActualDir: string | undefined
@@ -2785,9 +2814,14 @@ async function main() {
       orderedIndex,
       serviceId,
     )
-    
+
     // Set expected directory for output/err comparison
-    modularExpectedDir = getModularTraceDir(expectedPath, timeslot, orderedIndex, serviceId)
+    modularExpectedDir = getModularTraceDir(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
 
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
@@ -3040,9 +3074,14 @@ async function main() {
       orderedIndex,
       serviceId,
     )
-    
+
     // Set expected directory for output/err comparison
-    modularExpectedDir = getModularTraceDir(expectedPath, timeslot, orderedIndex, serviceId)
+    modularExpectedDir = getModularTraceDir(
+      expectedPath,
+      timeslot,
+      orderedIndex,
+      serviceId,
+    )
 
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
@@ -3251,7 +3290,7 @@ async function main() {
     // Expected: submodules/jamduna/jam-conformance/{version}/{trace_id}/{block_number}.log (or modular format)
     // Get version from environment variable, default to 0.7.2
     const jamConformanceVersion = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
-    
+
     const traceId = isTwoWay ? formatArgs[1] : args[1]
     const blockNumber = isTwoWay ? formatArgs[2] : args[2]
     const timeslot = isTwoWay
@@ -3296,7 +3335,12 @@ async function main() {
       'jam-conformance',
       jamConformanceVersion,
     )
-    const ourBaseDir = join(workspaceRoot, 'pvm-traces', 'jam-conformance', jamConformanceVersion)
+    const ourBaseDir = join(
+      workspaceRoot,
+      'pvm-traces',
+      'jam-conformance',
+      jamConformanceVersion,
+    )
 
     // Try to find expected trace (could be modular or text format)
     const expectedModularDir = timeslot
@@ -3310,7 +3354,11 @@ async function main() {
           String(serviceId ?? 0),
         )
       : undefined
-    const expectedTextPath = join(expectedBaseDir, traceId, `${blockNumber}.log`)
+    const expectedTextPath = join(
+      expectedBaseDir,
+      traceId,
+      `${blockNumber}.log`,
+    )
 
     // Our traces path
     const ourTraceDir = join(ourBaseDir, traceId, blockNumber)
@@ -3399,7 +3447,11 @@ async function main() {
           )
         : undefined
 
-      if (executorType === 'typescript' && ourModularDir && existsSync(ourModularDir)) {
+      if (
+        executorType === 'typescript' &&
+        ourModularDir &&
+        existsSync(ourModularDir)
+      ) {
         try {
           const actualLines = await readModularTraceDirectory(
             join(ourBaseDir, traceId, blockNumber, 'modular'),
@@ -3426,7 +3478,11 @@ async function main() {
             typescriptLines = []
           }
         }
-      } else if (executorType === 'wasm' && wasmModularPath && existsSync(wasmModularPath)) {
+      } else if (
+        executorType === 'wasm' &&
+        wasmModularPath &&
+        existsSync(wasmModularPath)
+      ) {
         try {
           const actualLines = await readModularTraceDirectory(
             join(ourBaseDir, traceId, blockNumber, 'modular-wasm'),
@@ -3453,14 +3509,22 @@ async function main() {
             wasmLines = []
           }
         }
-      } else if (executorType === 'typescript' && ourTextPath && existsSync(ourTextPath)) {
+      } else if (
+        executorType === 'typescript' &&
+        ourTextPath &&
+        existsSync(ourTextPath)
+      ) {
         console.log(
           `${colors.yellow}TypeScript modular directory not found, using text format: ${ourTextPath}${colors.reset}`,
         )
         const actualLines = parseTraceFile(ourTextPath, false)
         typescriptLines = actualLines
         typescriptPath = ourTextPath
-      } else if (executorType === 'wasm' && wasmTextPath && existsSync(wasmTextPath)) {
+      } else if (
+        executorType === 'wasm' &&
+        wasmTextPath &&
+        existsSync(wasmTextPath)
+      ) {
         console.log(
           `${colors.yellow}WASM modular directory not found, using text format: ${wasmTextPath}${colors.reset}`,
         )
@@ -3840,20 +3904,28 @@ async function main() {
       executorType === 'typescript' ? typescriptLines : wasmLines
     const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
     const result = compareTwoTraces(expectedLines, actualLines)
-    
+
     // Extract directories for output/err comparison
     // For modular format, we use the tracked directories or check if paths are directories
     let expectedDir: string | undefined = modularExpectedDir
     let actualDir: string | undefined = modularActualDir
-    
+
     // If not set, check if paths themselves are directories (fallback)
-    if (!expectedDir && existsSync(expectedPath) && statSync(expectedPath).isDirectory()) {
+    if (
+      !expectedDir &&
+      existsSync(expectedPath) &&
+      statSync(expectedPath).isDirectory()
+    ) {
       expectedDir = expectedPath
     }
-    if (!actualDir && existsSync(actualPath) && statSync(actualPath).isDirectory()) {
+    if (
+      !actualDir &&
+      existsSync(actualPath) &&
+      statSync(actualPath).isDirectory()
+    ) {
       actualDir = actualPath
     }
-    
+
     printTwoWayComparison(
       comparisonLabel,
       expectedPath,

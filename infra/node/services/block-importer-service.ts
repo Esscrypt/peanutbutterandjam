@@ -160,7 +160,10 @@ export class BlockImporterService extends BaseService {
             epochMark: block.header.epochMark,
           })
         }
-        if (this.previousStateRootForAnchorValidation !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+        if (
+          this.previousStateRootForAnchorValidation !== null &&
+          this.recentHistoryService.getRecentHistory().length > 0
+        ) {
           const previousEntry =
             this.recentHistoryService.getRecentHistory()[
               this.recentHistoryService.getRecentHistory().length - 1
@@ -186,7 +189,10 @@ export class BlockImporterService extends BaseService {
           epochMark: block.header.epochMark,
         })
       }
-      if (this.previousStateRootForAnchorValidation !== null && this.recentHistoryService.getRecentHistory().length > 0) {
+      if (
+        this.previousStateRootForAnchorValidation !== null &&
+        this.recentHistoryService.getRecentHistory().length > 0
+      ) {
         const previousEntry =
           this.recentHistoryService.getRecentHistory()[
             this.recentHistoryService.getRecentHistory().length - 1
@@ -220,7 +226,6 @@ export class BlockImporterService extends BaseService {
       return safeError(blockHeaderValidationError)
     }
 
-
     // Temporarily update previous block's state root for anchor validation
     // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
     // This is needed for validateGuarantees because anchor validation checks state_root
@@ -232,7 +237,6 @@ export class BlockImporterService extends BaseService {
       this.previousStateRootForAnchorValidation = previousEntry.stateRoot
       previousEntry.stateRoot = block.header.priorStateRoot
     }
-
 
     // PRE-VALIDATE guarantees BEFORE other state mutations (assurances, accumulation, etc.)
     // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),

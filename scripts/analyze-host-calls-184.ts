@@ -3,7 +3,7 @@
  * Analyze host function calls and find divergence points for timeslot 184
  */
 
-import { readFileSync, existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 
 const workspaceRoot = join(__dirname, '..')
@@ -16,18 +16,23 @@ const services = [
   { index: 1, serviceId: 3953987649 },
 ]
 
-function findHostCallsInTrace(tracePath: string, maxStep: number): Array<{ step: number; name: string; id: number }> {
+function findHostCallsInTrace(
+  tracePath: string,
+  maxStep: number,
+): Array<{ step: number; name: string; id: number }> {
   if (!existsSync(tracePath)) {
     return []
   }
-  
+
   const content = readFileSync(tracePath, 'utf-8')
   const lines = content.split('\n')
   const hostCalls: Array<{ step: number; name: string; id: number }> = []
-  
+
   for (const line of lines) {
     // Match: "Calling host function: NAME ID [gas used: X, gas remaining: Y] [service: Z]"
-    const match = line.match(/Calling host function: (\w+) (\d+) \[gas used: (\d+), gas remaining: (\d+)\] \[service: (\d+)\]/)
+    const match = line.match(
+      /Calling host function: (\w+) (\d+) \[gas used: (\d+), gas remaining: (\d+)\] \[service: (\d+)\]/,
+    )
     if (match) {
       // Find the step number from previous lines
       let step = 0
@@ -35,7 +40,7 @@ function findHostCallsInTrace(tracePath: string, maxStep: number): Array<{ step:
       for (let i = lineIndex - 1; i >= 0 && i >= lineIndex - 10; i--) {
         const stepMatch = lines[i].match(/(\w+) (\d+) (\d+) Gas:/)
         if (stepMatch) {
-          step = parseInt(stepMatch[2])
+          step = Number.parseInt(stepMatch[2])
           break
         }
       }
@@ -43,12 +48,12 @@ function findHostCallsInTrace(tracePath: string, maxStep: number): Array<{ step:
         hostCalls.push({
           step,
           name: match[1],
-          id: parseInt(match[2])
+          id: Number.parseInt(match[2]),
         })
       }
     }
   }
-  
+
   return hostCalls
 }
 
@@ -58,7 +63,7 @@ for (const { index, serviceId } of services) {
   console.log(`\n${'='.repeat(80)}`)
   console.log(`Service ${serviceId} (Index ${index})`)
   console.log('='.repeat(80))
-  
+
   // Try to find TypeScript trace
   const typescriptTracePath = join(
     workspaceRoot,
@@ -68,13 +73,15 @@ for (const { index, serviceId } of services) {
     `00000184`,
     `${index}`,
     `${serviceId}`,
-    'opcode'
+    'opcode',
   )
-  
+
   if (existsSync(typescriptTracePath)) {
     // Read the opcode file to find ECALLI instructions (host function calls)
-    const opcodes = readFileSync(typescriptTracePath, 'utf-8').trim().split('\n')
-    
+    const opcodes = readFileSync(typescriptTracePath, 'utf-8')
+      .trim()
+      .split('\n')
+
     // Find ECALLI instructions and their step numbers
     const hostCalls: Array<{ step: number; pc: number }> = []
     for (let i = 0; i < opcodes.length; i++) {
@@ -90,33 +97,41 @@ for (const { index, serviceId } of services) {
           `00000184`,
           `${index}`,
           `${serviceId}`,
-          'pc'
+          'pc',
         )
         if (existsSync(pcPath)) {
           const pcs = readFileSync(pcPath, 'utf-8').trim().split('\n')
           if (pcs[i]) {
-            const pc = parseInt(pcs[i].trim())
+            const pc = Number.parseInt(pcs[i].trim())
             hostCalls.push({ step, pc })
           }
         }
       }
     }
-    
-    console.log(`Found ${hostCalls.length} host function calls (ECALLI instructions)`)
+
+    console.log(
+      `Found ${hostCalls.length} host function calls (ECALLI instructions)`,
+    )
     if (hostCalls.length > 0) {
       console.log('Last 5 host calls:')
       for (const call of hostCalls.slice(-5)) {
         console.log(`  Step ${call.step}, PC ${call.pc}`)
       }
     }
-    
+
     // Based on user's output, divergence starts around step 29240
     // Find the last host call before that
     const divergenceStep = 29240
-    const lastHostCallBeforeDivergence = hostCalls.filter(c => c.step < divergenceStep).slice(-1)[0]
+    const lastHostCallBeforeDivergence = hostCalls
+      .filter((c) => c.step < divergenceStep)
+      .slice(-1)[0]
     if (lastHostCallBeforeDivergence) {
-      console.log(`\nLast host call before divergence (step ${divergenceStep}):`)
-      console.log(`  Step ${lastHostCallBeforeDivergence.step}, PC ${lastHostCallBeforeDivergence.pc}`)
+      console.log(
+        `\nLast host call before divergence (step ${divergenceStep}):`,
+      )
+      console.log(
+        `  Step ${lastHostCallBeforeDivergence.step}, PC ${lastHostCallBeforeDivergence.pc}`,
+      )
     }
   } else {
     console.log(`Trace not found: ${typescriptTracePath}`)
@@ -126,4 +141,3 @@ for (const { index, serviceId } of services) {
 console.log('\n' + '='.repeat(80))
 console.log('Analysis complete')
 console.log('='.repeat(80))
-
