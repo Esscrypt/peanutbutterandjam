@@ -45,7 +45,8 @@
     "@opentelemetry/auto-instrumentations-node": "^0.40.0",
     "pino": "catalog:",
     "@noble/ed25519": "catalog:",
-    "@infisical/quic": "catalog:"
+    "@infisical/quic": "catalog:",
+    "radash": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

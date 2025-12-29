@@ -17,8 +17,9 @@
     "@noble/curves": "catalog:",
     "@noble/ed25519": "catalog:",
     "@noble/hashes": "catalog:",
-    "@pbnjam/bandersnatch-vrf": "workspace:*",
-    "@pbnjam/types": "workspace:*",
+    "@pbnjam/bandersnatch": "catalog:",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
+    "@pbnjam/types": "catalog:",
     "@types/hapi": "18.0.14",
     "pino": "catalog:",
     "viem": "catalog:"
