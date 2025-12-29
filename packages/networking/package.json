@@ -13,19 +13,20 @@
     "clean": "rm -rf .turbo && rm -rf node_modules"
   },
   "dependencies": {
-    "@infisical/quic": "^1.0.0",
+    "@infisical/quic": "catalog:",
     "@pbnjam/core": "workspace:*",
     "@pbnjam/codec": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@pbnjam/audit": "workspace:*",
-    "@peculiar/webcrypto": "1.5.0",
-    "@peculiar/x509": "1.14.0",
-    "asn1js": "3.0.6",
-    "blakejs": "1.2.1",
-    "eckey-util": "1.0.4",
-    "node-forge": "1.3.1",
-    "pkijs": "3.2.5",
-    "u8a-utils": "1.0.12"
+    "@noble/ed25519": "catalog:",
+    "@peculiar/webcrypto": "catalog:",
+    "@peculiar/x509": "catalog:",
+    "asn1js": "catalog:",
+    "blakejs": "catalog:",
+    "eckey-util": "catalog:",
+    "node-forge": "catalog:",
+    "pkijs": "catalog:",
+    "u8a-utils": "catalog:"
   },
   "devDependencies": {
     "vitest": "^2.1.9",

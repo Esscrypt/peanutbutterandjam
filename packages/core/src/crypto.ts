@@ -10,9 +10,9 @@ import {
   FpIsSquare,
   FpSqrt,
   type IField,
-} from '@noble/curves/abstract/modular'
+} from '@noble/curves/abstract/modular.js'
 import * as ed from '@noble/ed25519'
-import { sha512 } from '@noble/hashes/sha2'
+import { sha512 } from '@noble/hashes/sha2.js'
 import { BANDERSNATCH_PARAMS } from '@pbnjam/bandersnatch'
 import type { AlternativeName, FixedLengthSize, KeyPair } from '@pbnjam/types'
 import { type Safe, safeError, safeResult } from '@pbnjam/types'

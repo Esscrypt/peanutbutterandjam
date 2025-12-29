@@ -232,8 +232,7 @@ export class DisputesService extends BaseService {
         // A verdict is "good" if positiveVotes >= requiredPositiveVotes (floor(2/3*Cvalcount) + 1)
         // Check if this verdict would be added to goodSet (current or pending)
         const wouldBeGood =
-          pendingGoodSet.has(verdict.target) ||
-          this.goodSet.has(verdict.target)
+          pendingGoodSet.has(verdict.target) || this.goodSet.has(verdict.target)
         if (positiveVotes >= requiredPositiveVotes && totalVotes > 0) {
           const faultsForTarget = dispute.faults.filter(
             (f) => f.target === verdict.target,

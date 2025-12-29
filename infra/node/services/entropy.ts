@@ -94,10 +94,9 @@ export class EntropyService extends BaseService {
     event: RevertEpochTransitionEvent,
   ): Safe<void> {
     if (!this.preTransitionEntropy) {
-      logger.warn(
-        '[EntropyService] No pre-transition entropy to revert to',
-        { slot: event.slot.toString() },
-      )
+      logger.warn('[EntropyService] No pre-transition entropy to revert to', {
+        slot: event.slot.toString(),
+      })
       return safeResult(undefined)
     }
 

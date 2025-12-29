@@ -24,7 +24,6 @@ export interface ProtocolEventHandler<TRequest, TResponse> {
 
 export abstract class NetworkingProtocol<TRequest, TResponse> {
   private eventHandler?: ProtocolEventHandler<TRequest, TResponse>
-  private messageIdCounter = 0
   protected protocolName: string
 
   constructor() {
@@ -64,7 +63,7 @@ export abstract class NetworkingProtocol<TRequest, TResponse> {
       onRequestReceived: (event: ProtocolMessageEvent<TRequest, TResponse>) => {
         logger.info(`📨 ${this.protocolName} request received`, {
           messageId: event.messageId,
-          peerPublicKey: event.peerPublicKey.slice(0, 20) + '...',
+          peerPublicKey: `${event.peerPublicKey.slice(0, 20)}...`,
           protocolName: this.protocolName,
         })
 
@@ -101,7 +100,7 @@ export abstract class NetworkingProtocol<TRequest, TResponse> {
       ) => {
         logger.info(`📨 ${this.protocolName} response received`, {
           messageId: event.messageId,
-          peerPublicKey: event.peerPublicKey.slice(0, 20) + '...',
+          peerPublicKey: `${event.peerPublicKey.slice(0, 20)}...`,
           protocolName: this.protocolName,
         })
 

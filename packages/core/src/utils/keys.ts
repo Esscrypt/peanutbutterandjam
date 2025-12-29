@@ -5,9 +5,9 @@
  * Implements Gray Paper validator key structure (336 bytes total)
  */
 
-import { bls12_381 } from '@noble/curves/bls12-381'
+import { bls12_381 } from '@noble/curves/bls12-381.js'
 import * as ed from '@noble/ed25519'
-import { sha512 } from '@noble/hashes/sha2'
+import { sha512 } from '@noble/hashes/sha2.js'
 import { BandersnatchCurve } from '@pbnjam/bandersnatch'
 import type {
   ConnectionEndpoint,

@@ -8,14 +8,12 @@ COPY package.json bun.lock ./
 COPY turbo.json ./
 
 # Copy all package.json files for workspace dependencies
-COPY config ./config
-COPY packages ./packages
-COPY infra ./infra
-# COPY apis ./apis
-
-RUN bun install --frozen-lockfile --ignore-scripts
-# Copy remaining source code
+# COPY config ./config
+# COPY packages ./packages
+# COPY infra ./infra
 COPY . .
+
+RUN bun install --ignore-scripts
 
 # Build the application
 # Note: Some packages may not have build scripts, so we continue on failure

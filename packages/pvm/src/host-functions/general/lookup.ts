@@ -111,10 +111,13 @@ export class LookupHostFunction extends BaseHostFunction {
 
     // Gray Paper: v = none when a = none ∨ memory[h:32] ∉ keys{a.preimages}
     if (!serviceAccount) {
-      context.log('Lookup host function: Service account not found (a = none)', {
-        queryServiceId: queryServiceId.toString(),
-        selfServiceId: lookupParams.serviceId.toString(),
-      })
+      context.log(
+        'Lookup host function: Service account not found (a = none)',
+        {
+          queryServiceId: queryServiceId.toString(),
+          selfServiceId: lookupParams.serviceId.toString(),
+        },
+      )
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
         resultCode: null, // continue execution
@@ -144,14 +147,15 @@ export class LookupHostFunction extends BaseHostFunction {
     const preimageLength = BigInt(preimage.length)
     const f = fromOffset < preimageLength ? Number(fromOffset) : preimage.length
     const remainingAfterF = preimage.length - f
-    const l = length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF
+    const l =
+      length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF
 
     // Only write if there's data to write
     if (l > 0) {
-    // Extract data slice
+      // Extract data slice
       const dataToWrite = preimage.subarray(f, f + l)
 
-    // Write preimage slice to memory
+      // Write preimage slice to memory
       // Gray Paper: PANIC if N[o,l] ⊄ writable{memory}
       const writeFaultAddress = context.ram.writeOctets(
         outputOffset,
@@ -163,13 +167,13 @@ export class LookupHostFunction extends BaseHostFunction {
           length: l.toString(),
           faultAddress: writeFaultAddress.toString(),
         })
-      return {
-        resultCode: RESULT_CODES.PANIC,
-        faultInfo: {
-          type: 'memory_write',
+        return {
+          resultCode: RESULT_CODES.PANIC,
+          faultInfo: {
+            type: 'memory_write',
             address: writeFaultAddress,
             details: 'Output memory not writable',
-        },
+          },
         }
       }
     }

@@ -10,7 +10,7 @@
  * Each component is precisely typed according to Gray Paper specifications
  */
 
-import type { Hex } from '@pbnjam/core'
+import type { Hex } from 'viem'
 import type { BlockBody } from './block-authoring'
 import type {
   SafroleState,

@@ -46,7 +46,10 @@ export class SealKeyService extends BaseService implements ISealKeyService {
   // Gray Paper Eq. 202-207: sealtickets' = Z(ticketaccumulator) when e' = e + 1 ∧ m ≥ Cepochtailstart ∧ |ticketaccumulator| = Cepochlen
   private pendingWinnersMark: SafroleTicketWithoutProof[] | null = null
   // Store state before epoch transition for revert
-  private preTransitionSealTickets: Map<bigint, SafroleTicketWithoutProof> | null = null
+  private preTransitionSealTickets: Map<
+    bigint,
+    SafroleTicketWithoutProof
+  > | null = null
   private preTransitionFallbackKeys: Map<bigint, Uint8Array> | null = null
 
   // Dependencies
@@ -154,10 +157,9 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     event: RevertEpochTransitionEvent,
   ): Safe<void> => {
     if (!this.preTransitionSealTickets || !this.preTransitionFallbackKeys) {
-      logger.warn(
-        '[SealKeyService] No pre-transition seal keys to revert to',
-        { slot: event.slot.toString() },
-      )
+      logger.warn('[SealKeyService] No pre-transition seal keys to revert to', {
+        slot: event.slot.toString(),
+      })
       return safeResult(undefined)
     }
 
@@ -241,7 +243,12 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     activeValidatorsOverride?: Map<number, ValidatorPublicKeys> | null
     storeInState?: boolean
     phase?: number // If specified, only compute and return the seal key for this phase
-  }): Safe<SafroleTicketWithoutProof | Uint8Array | (SafroleTicketWithoutProof | Uint8Array)[] | void> {
+  }): Safe<
+    | SafroleTicketWithoutProof
+    | Uint8Array
+    | (SafroleTicketWithoutProof | Uint8Array)[]
+    | undefined
+  > {
     const storeInState = options?.storeInState !== false // Default to true
     const targetPhase = options?.phase
 
@@ -317,10 +324,12 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         ? this.ticketService.getTicketAccumulator()
         : null)
 
-    if (ticketAccumulator && ticketAccumulator.length >= this.configService.epochDuration) {
-      const [error, reorderedTickets] = this.applyOutsideInSequencer(
-        ticketAccumulator,
-      )
+    if (
+      ticketAccumulator &&
+      ticketAccumulator.length >= this.configService.epochDuration
+    ) {
+      const [error, reorderedTickets] =
+        this.applyOutsideInSequencer(ticketAccumulator)
       if (error) {
         return safeError(error)
       }
@@ -375,8 +384,7 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     // Try using old entropy2 (before rotation) first, as test vectors may expect this
     // If oldEntropy2BeforeRotation is null, fall back to entropy'_2 (after rotation)
     const entropy2 =
-      options?.entropy2Override ??
-      this.entropyService.getEntropy2()
+      options?.entropy2Override ?? this.entropyService.getEntropy2()
 
     // Gray Paper Eq. 202-207: F(entropy'_2, activeset')
     // The epoch mark contains pendingSet' (validators for NEXT epoch), NOT activeSet'
@@ -404,11 +412,8 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       // But we need to generate all phases, not just one
       const fallbackKeys: Uint8Array[] = []
       for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-        const [fallbackError, fallbackKey] = this.computeFallbackSealKeyForPhase(
-          entropy2,
-          activeValidators,
-          phase,
-        )
+        const [fallbackError, fallbackKey] =
+          this.computeFallbackSealKeyForPhase(entropy2, activeValidators, phase)
         if (fallbackError) {
           return safeError(fallbackError)
         }
@@ -427,7 +432,9 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         for (let phase = 0; phase < this.configService.epochDuration; phase++) {
           const ticket = fallbackKeys[phase]
           if (!ticket) {
-            return safeError(new Error(`Missing fallback key at phase ${phase}`))
+            return safeError(
+              new Error(`Missing fallback key at phase ${phase}`),
+            )
           }
           this.fallbackKeyForPhase.set(BigInt(phase), ticket)
 
@@ -479,7 +486,9 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         for (let phase = 0; phase < this.configService.epochDuration; phase++) {
           const ticket = fallbackKeys[phase]
           if (!ticket) {
-            return safeError(new Error(`Missing fallback key at phase ${phase}`))
+            return safeError(
+              new Error(`Missing fallback key at phase ${phase}`),
+            )
           }
           this.fallbackKeyForPhase.set(BigInt(phase), ticket)
         }
@@ -507,7 +516,6 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     activeValidators: Map<number, ValidatorPublicKeys>,
     phase: number,
   ): Safe<Uint8Array> {
-
     // Gray Paper: encode[4]{i} - Encode phase as 4 bytes (little-endian)
     const indexBytes = new Uint8Array(4)
     new DataView(indexBytes.buffer).setUint32(0, phase, true) // true = little-endian

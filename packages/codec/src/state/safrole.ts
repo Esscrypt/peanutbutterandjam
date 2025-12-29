@@ -33,7 +33,6 @@
  */
 
 import { bytesToHex, concatBytes, hexToBytes, logger } from '@pbnjam/core'
-import { isSafroleTicket } from '@pbnjam/safrole'
 import type {
   DecodingResult,
   IConfigService,
@@ -42,7 +41,7 @@ import type {
   SafroleTicketWithoutProof,
   ValidatorPublicKeys,
 } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import { isSafroleTicket, safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
   decodeVariableSequence,

@@ -109,14 +109,16 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
         serviceAccount.requests.delete(hashHex)
       }
       serviceAccount.preimages.delete(hashHex)
-      
+
       // Gray Paper: Update items and octets when removing a request
       // items -= 2 for each removed request (h, z)
       // octets -= (81 + z) for each removed request
-      serviceAccount.items = serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
-      serviceAccount.octets = serviceAccount.octets >= 81n + preimageLength 
-        ? serviceAccount.octets - (81n + preimageLength) 
-        : 0n
+      serviceAccount.items =
+        serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
+      serviceAccount.octets =
+        serviceAccount.octets >= 81n + preimageLength
+          ? serviceAccount.octets - (81n + preimageLength)
+          : 0n
     } else if (request.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
       const [, y] = request
@@ -127,12 +129,14 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
           serviceAccount.requests.delete(hashHex)
         }
         serviceAccount.preimages.delete(hashHex)
-        
+
         // Gray Paper: Update items and octets when removing a request
-        serviceAccount.items = serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
-        serviceAccount.octets = serviceAccount.octets >= 81n + preimageLength 
-          ? serviceAccount.octets - (81n + preimageLength) 
-          : 0n
+        serviceAccount.items =
+          serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
+        serviceAccount.octets =
+          serviceAccount.octets >= 81n + preimageLength
+            ? serviceAccount.octets - (81n + preimageLength)
+            : 0n
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, 'HUH')

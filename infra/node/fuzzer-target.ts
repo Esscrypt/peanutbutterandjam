@@ -365,7 +365,8 @@ export async function initializeServices() {
     // Override getState to return empty state - will be set via Initialize message
     genesisManager.getState = () => {
       return safeResult({
-        state_root: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+        state_root:
+          '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
         keyvals: [],
       })
     }
@@ -526,7 +527,7 @@ function sendMessage(socket: UnixSocket, message: Uint8Array): void {
 }
 
 // Handle PeerInfo request
-function handlePeerInfo(socket: UnixSocket, peerInfo: FuzzPeerInfo): void {
+function handlePeerInfo(socket: UnixSocket, _peerInfo: FuzzPeerInfo): void {
   // Send our PeerInfo response
   const response: FuzzMessage = {
     type: FuzzMessageType.PeerInfo,
@@ -762,7 +763,7 @@ async function handleImportBlock(
           for (const key of addedKeys) {
             const value = currentStateKeyvals.get(key)!
             const valuePreview =
-              value.length > 100 ? value.substring(0, 100) + '...' : value
+              value.length > 100 ? `${value.substring(0, 100)}...` : value
             logger.error(`   ${key}: ${valuePreview} (${value.length} chars)`)
           }
         }
@@ -772,7 +773,7 @@ async function handleImportBlock(
           for (const key of removedKeys) {
             const value = previousStateKeyvals.get(key)!
             const valuePreview =
-              value.length > 100 ? value.substring(0, 100) + '...' : value
+              value.length > 100 ? `${value.substring(0, 100)}...` : value
             logger.error(`   ${key}: ${valuePreview} (${value.length} chars)`)
           }
         }
@@ -783,11 +784,11 @@ async function handleImportBlock(
             logger.error(`   ${key}:`)
             const oldPreview =
               oldValue.length > 80
-                ? oldValue.substring(0, 80) + '...'
+                ? `${oldValue.substring(0, 80)}...`
                 : oldValue
             const newPreview =
               newValue.length > 80
-                ? newValue.substring(0, 80) + '...'
+                ? `${newValue.substring(0, 80)}...`
                 : newValue
             logger.error(`     OLD: ${oldPreview} (${oldValue.length} chars)`)
             logger.error(`     NEW: ${newPreview} (${newValue.length} chars)`)
@@ -856,7 +857,7 @@ async function handleImportBlock(
         for (let i = 0; i < Math.min(20, keyvals.length); i++) {
           const kv = keyvals[i]
           const valuePreview =
-            kv.value.length > 60 ? kv.value.substring(0, 60) + '...' : kv.value
+            kv.value.length > 60 ? `${kv.value.substring(0, 60)}...` : kv.value
           logger.error(`  [${i}] ${kv.key}: ${valuePreview}`)
         }
         if (keyvals.length > 20) {
@@ -881,7 +882,7 @@ async function handleImportBlock(
 // Handle GetState request
 async function handleGetState(
   socket: UnixSocket,
-  getState: GetState,
+  _getState: GetState,
 ): Promise<void> {
   if (!initialized) {
     const response: FuzzMessage = {

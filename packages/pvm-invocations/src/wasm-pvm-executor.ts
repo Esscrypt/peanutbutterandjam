@@ -19,6 +19,7 @@ import {
   encodeImplicationsPair,
   encodeVariableSequence,
 } from '@pbnjam/codec'
+import { logger } from '@pbnjam/core'
 import { writeTraceDump } from '@pbnjam/pvm'
 import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import type {
@@ -35,7 +36,6 @@ import type {
 import { safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
 import { InstructionRegistry } from '../../pvm/src/instructions/registry'
-import { logger } from '@pbnjam/core'
 
 /**
  * WASM module exports type from instantiate function

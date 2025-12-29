@@ -275,6 +275,38 @@ export interface SafroleTicket {
 export type SafroleTicketWithoutProof = Omit<SafroleTicket, 'proof'>
 
 export type SealKey = SafroleTicket | SafroleTicketWithoutProof | Uint8Array
+
+/**
+ * Type guard to check if a SealKey is a SafroleTicket
+ *
+ * SealKey can be:
+ * - SafroleTicket (with id, entryIndex, proof)
+ * - SafroleTicketWithoutProof (with id, entryIndex, no proof)
+ * - Uint8Array (32-byte Bandersnatch key in fallback mode)
+ *
+ * Returns true if key is a ticket object (has id and entryIndex properties),
+ * false if it's a Uint8Array (fallback key) or null/undefined
+ */
+export function isSafroleTicket(key: SealKey): key is SafroleTicket {
+  // Check for null/undefined first (typeof null === 'object' in JavaScript)
+  if (key === null || key === undefined) {
+    return false
+  }
+  // Uint8Array is an object but won't have 'id' or 'entryIndex' properties
+  // Check if it's a Uint8Array instance
+  if (key instanceof Uint8Array) {
+    return false
+  }
+  // Check if it's an object with ticket properties
+  return (
+    typeof key === 'object' &&
+    'id' in key &&
+    'entryIndex' in key &&
+    typeof key.id === 'string' &&
+    typeof key.entryIndex === 'bigint'
+  )
+}
+
 export interface DecodingResult<T> {
   value: T
   remaining: Uint8Array

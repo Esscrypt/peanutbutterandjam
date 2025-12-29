@@ -24,9 +24,9 @@ export class LoggerProvider {
     },
     pino.multistream(
       [
-      { level: 'error', stream: process.stderr },
-      { level: 'fatal', stream: process.stderr },
-      { level: 'debug', stream: process.stdout },
+        { level: 'error', stream: process.stderr },
+        { level: 'fatal', stream: process.stderr },
+        { level: 'debug', stream: process.stdout },
       ],
       { dedupe: true },
     ),

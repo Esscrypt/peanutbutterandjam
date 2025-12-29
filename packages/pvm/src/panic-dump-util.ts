@@ -233,7 +233,7 @@ export function writeTraceDump(
     const filepath = join(targetDir, traceFilename)
 
     // Write to file
-    writeFileSync(filepath, traceLines.join('\n') + '\n', 'utf-8')
+    writeFileSync(filepath, `${traceLines.join('\n')}\n`, 'utf-8')
 
     // Write accumulate_input file if provided
     // This matches the jamduna format where accumulate_input is a binary file

@@ -4,7 +4,7 @@
  * Defines slot-based events that services can subscribe to
  */
 
-  /**
+/**
  * Base slot event interface
  */
 export interface SlotEvent {

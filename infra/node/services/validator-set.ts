@@ -58,7 +58,7 @@ export class ValidatorSetManager
   private readonly publicKeysToValidatorIndex: Map<Hex, number> = new Map()
 
   // Initialize to 144-byte zero epoch root (Gray Paper: ringroot ⊂ blob[144])
-  private epochRoot: Hex = ('0x' + '00'.repeat(144)) as Hex
+  private epochRoot: Hex = `0x${'00'.repeat(144)}` as Hex
   // Store bound callback for removal
   private readonly boundHandleEpochTransition: (
     event: EpochTransitionEvent,
@@ -144,10 +144,9 @@ export class ValidatorSetManager
       return safeResult(undefined)
     }
 
-    logger.info(
-      '[ValidatorSetManager] Reverting epoch transition',
-      { slot: event.slot.toString() },
-    )
+    logger.info('[ValidatorSetManager] Reverting epoch transition', {
+      slot: event.slot.toString(),
+    })
 
     // Restore previous state
     this.activeSet = new Map(this.preTransitionState.activeSet)
@@ -260,8 +259,8 @@ export class ValidatorSetManager
       return {
         bandersnatch: v.bandersnatch,
         ed25519: v.ed25519,
-        bls: ('0x' + '00'.repeat(144)) as Hex,
-        metadata: ('0x' + '00'.repeat(128)) as Hex,
+        bls: `0x${'00'.repeat(144)}` as Hex,
+        metadata: `0x${'00'.repeat(128)}` as Hex,
       }
     })
 
@@ -291,7 +290,7 @@ export class ValidatorSetManager
           .slice(0, 6)
           .map((v, idx) => ({
             index: idx,
-            bandersnatch: v.bandersnatch.substring(0, 20) + '...',
+            bandersnatch: `${v.bandersnatch.substring(0, 20)}...`,
           })),
       },
     )
@@ -674,9 +673,7 @@ export class ValidatorSetManager
    * @param validators - Array of validator public keys to compute epoch root from
    * @returns The epoch root as a 144-byte hex string
    */
-  computeEpochRootFromValidators(
-    validators: ValidatorPublicKeys[],
-  ): Safe<Hex> {
+  computeEpochRootFromValidators(validators: ValidatorPublicKeys[]): Safe<Hex> {
     // Extract Bandersnatch keys from validators
     const bandersnatchKeys = validators.map((validator) =>
       hexToBytes(validator.bandersnatch),
@@ -684,7 +681,7 @@ export class ValidatorSetManager
 
     // If no validators, return zero-padded 144-byte epoch root
     if (bandersnatchKeys.length === 0) {
-      return safeResult(('0x' + '00'.repeat(144)) as Hex)
+      return safeResult(`0x${'00'.repeat(144)}` as Hex)
     }
 
     const [epochRootError, epochRoot] = getRingRoot(
@@ -737,7 +734,7 @@ export class ValidatorSetManager
         'Pending set is empty, returning zero-padded 144-byte epoch root',
       )
       // Return 144 bytes of zeros (288 hex chars)
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     const [epochRootError, epochRoot] = getRingRoot(
@@ -748,7 +745,7 @@ export class ValidatorSetManager
       logger.error('Failed to get epoch root', { error: epochRootError })
       // Return zero-padded 144-byte epoch root instead of 32-byte zeroHash
       // Gray Paper: epochRoot must be 144 bytes
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     const epochRootHex = bytesToHex(epochRoot)
@@ -758,7 +755,7 @@ export class ValidatorSetManager
       logger.error(
         `Epoch root is not 144 bytes: got ${hexToBytes(epochRootHex).length} bytes`,
       )
-      return ('0x' + '00'.repeat(144)) as Hex
+      return `0x${'00'.repeat(144)}` as Hex
     }
 
     return epochRootHex
@@ -833,8 +830,8 @@ export class ValidatorSetManager
     return {
       bandersnatch: zeroHash, // 32 bytes
       ed25519: zeroHash, // 32 bytes
-      bls: ('0x' + '00'.repeat(144)) as Hex, // 144 bytes (not 32!)
-      metadata: ('0x' + '00'.repeat(128)) as Hex, // 128 bytes
+      bls: `0x${'00'.repeat(144)}` as Hex, // 144 bytes (not 32!)
+      metadata: `0x${'00'.repeat(128)}` as Hex, // 128 bytes
     }
   }
 

@@ -12,11 +12,12 @@
     "@pbnjam/core": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@pbnjam/codec": "workspace:*",
-    "@noble/ed25519": "^2.1.0",
-    "viem": "^2.21.54"
+    "@noble/ed25519": "catalog:",
+    "viem": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.2"
+    "typescript": "catalog:",
+    "@pbnjam/typescript-config": "workspace:*"
   }
 }

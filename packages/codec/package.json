@@ -18,9 +18,9 @@
     "@pbnjam/types": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "5.8.2",
-    "vitest": "3.2.4",
-    "@biomejs/biome": "2.1.3"
+    "typescript": "5.9.2",
+    "@biomejs/biome": "2.1.3",
+    "@pbnjam/typescript-config": "workspace:*"
   },
   "keywords": [
     "jam",

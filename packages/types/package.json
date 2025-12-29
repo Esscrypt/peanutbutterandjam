@@ -1,7 +1,8 @@
 {
   "name": "@pbnjam/types",
-  "version": "0.1.0",
+  "version": "0.7.2",
   "description": "Centralized type definitions for the JAM protocol",
+  "type": "module",
   "main": "src/index.ts",
   "module": "src/index.ts",
   "types": "src/index.ts",
@@ -16,8 +17,19 @@
     "types",
     "typescript"
   ],
-  "author": "JAM Protocol Team",
-  "license": "MIT",
+  "author": "Esscrypt",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Esscrypt/peanutbutterandjam.git"
+  },
+  "homepage": "https://github.com/Esscrypt/peanutbutterandjam",
+  "bugs": {
+    "url": "https://github.com/Esscrypt/peanutbutterandjam/issues"
+  },
+  "dependencies": {
+    "viem": "catalog:"
+  },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",
     "typescript": "catalog:",
@@ -25,5 +37,8 @@
   },
   "exports": {
     ".": "./src/index.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

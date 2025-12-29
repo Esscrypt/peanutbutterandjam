@@ -1353,10 +1353,11 @@ export class EventBusService extends BaseService {
     await this.emit('epochTransition', event)
   }
 
-  async emitRevertEpochTransition(event: RevertEpochTransitionEvent): Promise<void> {
+  async emitRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Promise<void> {
     await this.emit('revertEpochTransition', event)
   }
-
 
   async emitValidatorSetChange(event: ValidatorSetChangeEvent): Promise<void> {
     await this.emit('validatorSetChange', event)

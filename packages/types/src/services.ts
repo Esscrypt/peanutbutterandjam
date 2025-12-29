@@ -49,7 +49,7 @@ export interface ISealKeyService extends BaseService {
     | SafroleTicketWithoutProof
     | Uint8Array
     | (SafroleTicketWithoutProof | Uint8Array)[]
-    | void
+    | undefined
   >
 }
 

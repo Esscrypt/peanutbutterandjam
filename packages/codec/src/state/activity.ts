@@ -423,10 +423,14 @@ function encodeServiceStats(
   if (includeOnTransfers) {
     const onTransfersCount = serviceStat.onTransfersCount ?? 0
     const onTransfersGasUsed = serviceStat.onTransfersGasUsed ?? 0
-    const [error11, onTransfersCountData] = encodeNatural(BigInt(onTransfersCount))
+    const [error11, onTransfersCountData] = encodeNatural(
+      BigInt(onTransfersCount),
+    )
     if (error11) return safeError(error11)
     parts.push(onTransfersCountData)
-    const [error12, onTransfersGasUsedData] = encodeNatural(BigInt(onTransfersGasUsed))
+    const [error12, onTransfersGasUsedData] = encodeNatural(
+      BigInt(onTransfersGasUsed),
+    )
     if (error12) return safeError(error12)
     parts.push(onTransfersGasUsedData)
   }
@@ -569,7 +573,9 @@ function decodeServiceStats(
       Number(accumulationResult1.value),
       Number(accumulationResult2.value),
     ], // tuple{N, gas} - [count, gas]
-    ...(includeOnTransfers && onTransfersCount !== undefined && onTransfersGasUsed !== undefined
+    ...(includeOnTransfers &&
+    onTransfersCount !== undefined &&
+    onTransfersGasUsed !== undefined
       ? { onTransfersCount, onTransfersGasUsed }
       : {}),
   }
@@ -594,7 +600,7 @@ function decodeServiceStats(
 export function encodeActivity(
   activity: Activity,
   configService: IConfigService,
-  jamVersion?: JamVersion
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
@@ -605,26 +611,38 @@ export function encodeActivity(
     const fs = require('node:fs')
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
     const activityInput = {
-      valStatsAccumulatorLength: activity.validatorStatsAccumulator?.length || 0,
+      valStatsAccumulatorLength:
+        activity.validatorStatsAccumulator?.length || 0,
       valStatsPreviousLength: activity.validatorStatsPrevious?.length || 0,
       coreStatsLength: activity.coreStats?.length || 0,
-      coreStatsValues: activity.coreStats?.map((cs, idx) => ({
-        core: idx,
-        daLoad: cs.daLoad,
-        popularity: cs.popularity,
-        importCount: cs.importCount,
-        extrinsicCount: cs.extrinsicCount,
-        extrinsicSize: cs.extrinsicSize,
-        exportCount: cs.exportCount,
-        bundleLength: cs.bundleLength,
-        gasUsed: cs.gasUsed
-      })) || [],
+      coreStatsValues:
+        activity.coreStats?.map((cs, idx) => ({
+          core: idx,
+          daLoad: cs.daLoad,
+          popularity: cs.popularity,
+          importCount: cs.importCount,
+          extrinsicCount: cs.extrinsicCount,
+          extrinsicSize: cs.extrinsicSize,
+          exportCount: cs.exportCount,
+          bundleLength: cs.bundleLength,
+          gasUsed: cs.gasUsed,
+        })) || [],
       serviceStatsSize: activity.serviceStats?.size || 0,
-      serviceStatsKeys: Array.from(activity.serviceStats?.keys() || []).map(k => k.toString()).sort(),
+      serviceStatsKeys: Array.from(activity.serviceStats?.keys() || [])
+        .map((k) => k.toString())
+        .sort(),
       numValidators: configService.numValidators,
-      numCores: configService.numCores
+      numCores: configService.numCores,
     }
-    const logEntry = JSON.stringify({location:'activity.ts:545',message:'encodeActivity input',data:activityInput,timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-input',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:545',
+      message: 'encodeActivity input',
+      data: activityInput,
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-input',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -663,9 +681,21 @@ export function encodeActivity(
       preimageCount: vs.preimageCount,
       preimageSize: vs.preimageSize,
       guarantees: vs.guarantees,
-      assurances: vs.assurances
+      assurances: vs.assurances,
     }))
-    const logEntry = JSON.stringify({location:'activity.ts:573',message:'encodeActivity validator stats accumulator values',data:{validatorStatsValues,validatorCount,accumulatorToEncodeLength:accumulatorToEncode.length},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-val-accumulator-values',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:573',
+      message: 'encodeActivity validator stats accumulator values',
+      data: {
+        validatorStatsValues,
+        validatorCount,
+        accumulatorToEncodeLength: accumulatorToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-val-accumulator-values',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -702,9 +732,21 @@ export function encodeActivity(
       preimageCount: vs.preimageCount,
       preimageSize: vs.preimageSize,
       guarantees: vs.guarantees,
-      assurances: vs.assurances
+      assurances: vs.assurances,
     }))
-    const logEntry = JSON.stringify({location:'activity.ts:595',message:'encodeActivity validator stats previous values',data:{validatorStatsPreviousValues,validatorCount,previousToEncodeLength:previousToEncode.length},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-val-previous-values',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:595',
+      message: 'encodeActivity validator stats previous values',
+      data: {
+        validatorStatsPreviousValues,
+        validatorCount,
+        previousToEncodeLength: previousToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-val-previous-values',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -729,7 +771,23 @@ export function encodeActivity(
     const { bytesToHex } = require('@pbnjam/core')
     const valAccumulatorHex = bytesToHex(validatorStatsAccumulatorData)
     const valPreviousHex = bytesToHex(validatorStatsPreviousData)
-    const logEntry = JSON.stringify({location:'activity.ts:610',message:'encodeActivity validator stats encoded',data:{valAccumulatorHex:valAccumulatorHex.substring(0,100),valAccumulatorLength:validatorStatsAccumulatorData.length,valPreviousHex:valPreviousHex.substring(0,100),valPreviousLength:validatorStatsPreviousData.length,validatorCount,accumulatorToEncodeLength:accumulatorToEncode.length,previousToEncodeLength:previousToEncode.length},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-validator',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:610',
+      message: 'encodeActivity validator stats encoded',
+      data: {
+        valAccumulatorHex: valAccumulatorHex.substring(0, 100),
+        valAccumulatorLength: validatorStatsAccumulatorData.length,
+        valPreviousHex: valPreviousHex.substring(0, 100),
+        valPreviousLength: validatorStatsPreviousData.length,
+        validatorCount,
+        accumulatorToEncodeLength: accumulatorToEncode.length,
+        previousToEncodeLength: previousToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-validator',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -766,7 +824,20 @@ export function encodeActivity(
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
     const { bytesToHex } = require('@pbnjam/core')
     const coreStatsHex = bytesToHex(coreStatsData)
-    const logEntry = JSON.stringify({location:'activity.ts:637',message:'encodeActivity coreStats encoded',data:{coreStatsHex:coreStatsHex.substring(0,200),coreStatsLength:coreStatsData.length,coreCount:configService.numCores,coreStatsToEncodeLength:coreStatsToEncode.length},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-corestats',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:637',
+      message: 'encodeActivity coreStats encoded',
+      data: {
+        coreStatsHex: coreStatsHex.substring(0, 200),
+        coreStatsLength: coreStatsData.length,
+        coreCount: configService.numCores,
+        coreStatsToEncodeLength: coreStatsToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-corestats',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -804,7 +875,10 @@ export function encodeActivity(
       tupleParts.push(serviceIdData)
 
       // Encode service stats
-      const [error7, serviceStatsData] = encodeServiceStats(tuple.stats, version)
+      const [error7, serviceStatsData] = encodeServiceStats(
+        tuple.stats,
+        version,
+      )
       if (error7) return safeError(error7)
       tupleParts.push(serviceStatsData)
 
@@ -818,7 +892,19 @@ export function encodeActivity(
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
     const { bytesToHex } = require('@pbnjam/core')
     const serviceStatsHex = bytesToHex(serviceStatsData)
-    const logEntry = JSON.stringify({location:'activity.ts:679',message:'encodeActivity serviceStats encoded',data:{serviceStatsHex:serviceStatsHex.substring(0,200),serviceStatsLength:serviceStatsData.length,serviceStatsTuplesLength:serviceStatsTuples.length},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-servicestats',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:679',
+      message: 'encodeActivity serviceStats encoded',
+      data: {
+        serviceStatsHex: serviceStatsHex.substring(0, 200),
+        serviceStatsLength: serviceStatsData.length,
+        serviceStatsTuplesLength: serviceStatsTuples.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-servicestats',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -831,7 +917,19 @@ export function encodeActivity(
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
     const { bytesToHex } = require('@pbnjam/core')
     const finalHex = bytesToHex(finalResult)
-    const logEntry = JSON.stringify({location:'activity.ts:682',message:'encodeActivity final result',data:{finalHex:finalHex.substring(0,200),finalLength:finalResult.length,partsLengths:parts.map(p => p.length)},timestamp:Date.now(),sessionId:'debug-session',runId:'encode-activity-final',hypothesisId:'D'})+'\n'
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:682',
+      message: 'encodeActivity final result',
+      data: {
+        finalHex: finalHex.substring(0, 200),
+        finalLength: finalResult.length,
+        partsLengths: parts.map((p) => p.length),
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-final',
+      hypothesisId: 'D',
+    })}\n`
     fs.appendFileSync(logPath, logEntry)
   } catch {}
   // #endregion
@@ -909,7 +1007,10 @@ export function decodeActivity(
       tupleData = serviceIdResult.remaining
 
       // Decode service stats
-      const [error6, serviceStatsResult] = decodeServiceStats(tupleData, version)
+      const [error6, serviceStatsResult] = decodeServiceStats(
+        tupleData,
+        version,
+      )
       if (error6) return safeError(error6)
       tupleData = serviceStatsResult.remaining
 

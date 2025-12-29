@@ -5,7 +5,7 @@
  * Separates chain configuration from the canonical consensus state.
  */
 
-import type { Hex } from '@pbnjam/core'
+import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
 import type { GenesisResult, GenesisState } from './genesis'
 
