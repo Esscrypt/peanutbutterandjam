@@ -130,3 +130,9 @@ bun run install:binary  # Install globally
 - **Testnet scripts**: `*-testnet.sh`, `start-nodes.sh`, `test-single-node.sh` - Testnet management
 - **Utility scripts**: `release.sh`, `calculate-genesis-hash.ts` - Other utilities
 - **Wrapper scripts**: `run-cli.sh` - Development helpers 
+
+
+# Debugging 
+```
+DUMP_TRACES=true START_BLOCK=191 bun test '/Users/tanyageorgieva/Repos/peanutbutterandjam/infra/node/__tests__/traces/fuzzy-all-blocks.test.ts' ; bun scripts/convert-traces-to-modular.ts --folder fuzzy ; bun scripts/find-first-mismatch.ts --block 191
+```

@@ -67,6 +67,7 @@ export class BlockImporterService extends BaseService {
   private readonly accumulationService: AccumulationService
 
   private previousStateRootForAnchorValidation: Hex | null = null
+  private stateSnapshot: { key: Hex; value: Hex }[] | null = null
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -114,6 +115,24 @@ export class BlockImporterService extends BaseService {
     )
     let epochTransitionEmitted = false
 
+    // Create state snapshot before processing block
+    const [stateTrieError, stateTrie] = this.stateService.generateStateTrie()
+    if (stateTrieError) {
+      logger.error('[BlockImporter] Failed to create state snapshot', {
+        error: stateTrieError,
+      })
+      return safeResult(false)
+    }
+    // Convert state trie to keyvals format for restoration
+    this.stateSnapshot = Object.entries(stateTrie).map(([key, value]) => ({
+      key: key as Hex,
+      value: value as Hex,
+    }))
+    logger.debug('[BlockImporter] Created state snapshot', {
+      snapshotSize: this.stateSnapshot.length,
+      slot: block.header.timeslot.toString(),
+    })
+
     try {
       validatePreStateRoot(block.header, this.stateService)
       // Emit epoch transition before processing if needed
@@ -128,6 +147,12 @@ export class BlockImporterService extends BaseService {
 
       const [importError] = await this.importBlockInternal(block)
       if (importError) {
+        logger.error(importError.message, {
+          error: importError,
+          stack: new Error().stack,
+        })
+        // Revert state to snapshot
+        await this.revertStateSnapshot()
         // Revert epoch transition if it happened
         if (epochTransitionEmitted) {
           await this.eventBusService.emitRevertEpochTransition({
@@ -144,8 +169,16 @@ export class BlockImporterService extends BaseService {
         }
         return safeResult(false)
       }
+      // Clear snapshot on success
+      this.stateSnapshot = null
       return safeResult(true)
     } catch (error) {
+      // Revert state to snapshot
+      logger.error('[BlockImporter] Failed to import block', {
+        error: error,
+        stack: new Error().stack,
+      })
+      await this.revertStateSnapshot()
       // Revert epoch transition if it happened
       if (epochTransitionEmitted) {
         await this.eventBusService.emitRevertEpochTransition({
@@ -160,10 +193,7 @@ export class BlockImporterService extends BaseService {
           ]
         previousEntry.stateRoot = this.previousStateRootForAnchorValidation
       }
-      logger.error('[BlockImporter] Failed to import block', {
-        error: error,
-        stack: new Error().stack,
-      })
+
       return safeResult(false)
     }
   }
@@ -367,11 +397,6 @@ export class BlockImporterService extends BaseService {
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
 
-    logger.debug('[BlockImporter] Accumulation result', {
-      slot: block.header.timeslot.toString(),
-      accumulationOutputsSize: lastAccumulationOutputs.length,
-    })
-
     // Update accout belt before adding to recent history
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     const [beltError] = this.recentHistoryService.updateAccoutBelt(
@@ -416,5 +441,31 @@ export class BlockImporterService extends BaseService {
     )
 
     return safeResult(undefined)
+  }
+
+  /**
+   * Revert state to the snapshot taken before block import
+   */
+  private async revertStateSnapshot(): Promise<void> {
+    if (!this.stateSnapshot) {
+      logger.warn('[BlockImporter] No state snapshot to revert to')
+      return
+    }
+
+    logger.info('[BlockImporter] Reverting state to snapshot', {
+      snapshotSize: this.stateSnapshot.length,
+    })
+
+    const [revertError] = this.stateService.setState(this.stateSnapshot)
+    if (revertError) {
+      logger.error('[BlockImporter] Failed to revert state snapshot', {
+        error: revertError,
+      })
+    } else {
+      logger.debug('[BlockImporter] State reverted successfully')
+    }
+
+    // Clear snapshot after revert
+    this.stateSnapshot = null
   }
 }

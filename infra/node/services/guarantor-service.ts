@@ -1432,7 +1432,7 @@ export class GuarantorService extends BaseService {
       // lookup_anchor_slot (when refinement occurred), not necessarily current state.
       // If the service was modified (lastacc > lookup_anchor_slot), we skip the check
       // since the codehash may have changed via UPGRADE since refinement.
-      // const lookupAnchorSlot = BigInt(guarantee.report.context.lookup_anchor_slot)
+      const lookupAnchorSlot = BigInt(guarantee.report.context.lookup_anchor_slot)
       if (this.serviceAccountService) {
         for (const result of guarantee.report.results) {
           const [serviceAccountError, serviceAccount] =
@@ -1461,11 +1461,11 @@ export class GuarantorService extends BaseService {
             // }
             // // Only fail if service hasn't been modified since lookup anchor
             // // If lastacc > lookup_anchor_slot, service may have been upgraded (but not ejected)
-            // if (serviceAccount.lastacc <= lookupAnchorSlot) {
-            //   return safeError(new Error('bad_code_hash'))
-            // }
+            if (serviceAccount.lastacc <= lookupAnchorSlot) {
+              return safeError(new Error('bad_code_hash'))
+            }
             // TODO: double check this
-            return safeError(new Error('bad_code_hash'))
+            // return safeError(new Error('bad_code_hash'))
             // Otherwise, codehash mismatch is expected (service was upgraded since refinement)
           }
 

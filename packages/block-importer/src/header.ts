@@ -40,10 +40,24 @@ export async function validateBlockHeader(
 ): SafePromise<void> {
   // pre-state root already validated in validatePreStateRoot (before emitting and processing the epoch transition event)
   // so we don't need to validate it again here
-  
-  const wallClockSlot = clockService.getSlotFromWallClock()
 
-  // according to the gray paper, the block header timeslot should be in the past
+  // Gray Paper: Use thetime (C(11)) from state - the most recent block's timeslot index
+  // Gray Paper safrole.tex: thetime defines the most recent block's slot index
+  // The new block's timeslot should be greater than the previous block's timeslot
+  const latestStateTimeslot = clockService.getLatestReportedBlockTimeslot()
+
+  // Validate that the new block's timeslot is greater than the previous block's timeslot
+  // Gray Paper: thetime' ≡ H_timeslot, and thetime' should be > thetime
+  if (header.timeslot <= latestStateTimeslot) {
+    return safeError(
+      new Error(
+        `Block slot (${header.timeslot}) must be greater than previous block's slot (${latestStateTimeslot})`,
+      ),
+    )
+  }
+
+  // Also validate against wall clock to prevent blocks from the far future
+  const wallClockSlot = clockService.getSlotFromWallClock()
   if (header.timeslot > wallClockSlot) {
     return safeError(new Error('Block slot is in the future'))
   }
@@ -94,7 +108,7 @@ export async function validateBlockHeader(
   }
 
   // validate that winners mark is present only at phase > contest duration and has correct number of tickets
-  const currentPhase = header.timeslot % BigInt(configService.epochDuration)
+  const currentPhase = (latestStateTimeslot + 1n) % BigInt(configService.epochDuration)
   if (header.winnersMark) {
     if (currentPhase < configService.contestDuration) {
       return safeError(
@@ -115,7 +129,7 @@ export async function validateBlockHeader(
   // validate that epoch mark is present only at first slot of an epoch
   if (header.epochMark) {
     if (currentPhase !== BigInt(0)) {
-      return safeError(new Error('epoch mark is present at non-first slot'))
+      return safeError(new Error(`epoch mark is present at non-first slot, current phase: ${currentPhase}, header timeslot: ${header.timeslot}, latest state timeslot: ${latestStateTimeslot}`))
     }
     // if the validators are not as many as in config, return an error
     if (header.epochMark.validators.length !== configService.numValidators) {
@@ -170,6 +184,7 @@ export async function validateBlockHeader(
     validatorSetManagerService,
     entropyService,
     configService,
+    clockService,
   )
   if (sealValidationError) {
     return safeError(sealValidationError)
@@ -201,9 +216,15 @@ export function validateSealSignature(
   validatorSetManagerService: IValidatorSetManager,
   entropyService: IEntropyService,
   configService: IConfigService,
+  clockService: IClockService,
 ): Safe<void> {
+  // Use thetime from state (C(11)) to determine the block's timeslot
+  // Gray Paper: thetime' ≡ H_timeslot, so the new block's timeslot = thetime + 1
+  const latestStateTimeslot = clockService.getLatestReportedBlockTimeslot()
+  const blockTimeslot = latestStateTimeslot + 1n
 
-  const [sealKeyError, sealKey] = sealKeyService.getSealKeyForSlot(header.timeslot)
+  // Get seal key for the computed timeslot (must match the unsigned header timeslot)
+  const [sealKeyError, sealKey] = sealKeyService.getSealKeyForSlot(blockTimeslot)
   if (sealKeyError) {
     return safeError(sealKeyError)
   }

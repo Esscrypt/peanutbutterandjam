@@ -274,12 +274,6 @@ export class RecentHistoryService extends BaseServiceClass {
       // For decoded pre-state, peaks might be Hex[] (non-null only) or (Hex | null)[]
       // We need to handle both cases
       const peaksArray = recent.accoutBelt.peaks
-      logger.debug('[RecentHistoryService] setRecent: loading MMR peaks', {
-        peaksArrayLength: peaksArray.length,
-        peaksNonNull: peaksArray.filter((p: Hex | null) => p !== null).length,
-        firstPeak: peaksArray[0]?.slice(0, 18) ?? 'null',
-        lastPeak: peaksArray[peaksArray.length - 1]?.slice(0, 18) ?? 'null',
-      })
       this.mmrPeaks = peaksArray.map((p: Hex | null) =>
         p !== null ? hexToBytes(p) : null,
       )

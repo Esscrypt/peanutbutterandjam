@@ -17,5 +17,7 @@ export * from './schemas'
 export * from './shuffle'
 // Export all utilities
 export * from './utils'
+// Export service account utilities
+export * from './service-account'
 // Export Zod schemas
 export * from './zod'

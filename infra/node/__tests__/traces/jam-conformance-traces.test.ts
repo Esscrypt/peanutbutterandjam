@@ -58,8 +58,11 @@ import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
+// Get JAM conformance version from environment variable, default to 0.7.2
+const JAM_CONFORMANCE_VERSION = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
+
 // Traces directory from jam-conformance
-const TRACES_DIR = path.join(WORKSPACE_ROOT, 'submodules/jam-conformance/fuzz-reports/0.7.2/traces')
+const TRACES_DIR = path.join(WORKSPACE_ROOT, 'submodules/jam-conformance/fuzz-reports', JAM_CONFORMANCE_VERSION, 'traces')
 
 // Cache directory for storing unhashed state after each block
 const STATE_CACHE_DIR = path.join(WORKSPACE_ROOT, '.state-cache/jam-conformance')
@@ -241,6 +244,10 @@ const convertJsonBlockToBlock = (jsonBlock: any): Block => {
 describe('JAM Conformance Traces', () => {
   const configService = new ConfigService('tiny')
 
+  // Log the version being used
+  console.log(`\n📦 JAM Conformance Version: ${JAM_CONFORMANCE_VERSION}`)
+  console.log(`📁 Traces directory: ${TRACES_DIR}`)
+
   // Get all trace files
   const traceFiles = getTraceFiles()
 
@@ -262,10 +269,12 @@ describe('JAM Conformance Traces', () => {
       console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
 
       // Create accumulation logs directory preserving the subdirectory structure
+      // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
       const accumulationLogsDir = path.join(
         WORKSPACE_ROOT,
         'pvm-traces',
         'jam-conformance',
+        JAM_CONFORMANCE_VERSION,
         relativePathWithoutExt
       )
       if (!existsSync(accumulationLogsDir)) {
@@ -393,6 +402,7 @@ describe('JAM Conformance Traces', () => {
       const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
       
       // Always dump traces to the trace-specific directory, preserving subdirectory structure
+      // Include version in the path: jam-conformance/{version}/{relative_path}
       const accumulatePVM = new AccumulatePVM({
         hostFunctionRegistry,
         accumulateHostFunctionRegistry,
@@ -400,7 +410,7 @@ describe('JAM Conformance Traces', () => {
         entropyService: entropyService,
         pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
         useWasm: false,
-        traceSubfolder: `jam-conformance/${relativePathWithoutExt}`,
+        traceSubfolder: `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`,
       })
 
       const statisticsService = new StatisticsService({

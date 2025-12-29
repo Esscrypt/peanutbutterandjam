@@ -137,6 +137,7 @@ export interface IConfigService extends BaseService {
 }
 
 export interface IClockService extends BaseService {
+  getLatestReportedBlockTimeslot(): bigint
   getSlotFromWallClock(): bigint
   getCurrentSlot(): bigint
   getCurrentEpoch(): bigint

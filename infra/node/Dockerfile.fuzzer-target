@@ -3,21 +3,6 @@ FROM oven/bun:1.3.5 as build
 # Set working directory
 WORKDIR /app
 
-# Install runtime dependencies (Debian-based image uses apt, not apk)
-# Python and build tools are needed for c-kzg native bindings
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        dumb-init \
-        python3 \
-        make \
-        g++ \
-        && \
-    rm -rf /var/lib/apt/lists/*
-
-# Create app user (Debian uses groupadd/useradd, not addgroup/adduser)
-RUN groupadd -r -g 1001 nodejs && \
-    useradd -r -u 1001 -g nodejs nodejs
-
 # Copy package files first for better caching
 COPY package.json bun.lock ./
 COPY turbo.json ./
@@ -26,41 +11,23 @@ COPY turbo.json ./
 COPY config ./config
 COPY packages ./packages
 COPY infra ./infra
-COPY apis ./apis
+# COPY apis ./apis
 
-# Install dependencies (including devDependencies for build)
-# c-kzg requires Python and build tools, but we can skip it if it fails
-# since the codebase uses manual KZG implementation instead
-RUN bun install --frozen-lockfile || \
-    (echo "Warning: Some packages failed to install, continuing..." && \
-     bun install --frozen-lockfile --ignore-scripts c-kzg 2>/dev/null || true)
-
+RUN bun install --frozen-lockfile --ignore-scripts
 # Copy remaining source code
 COPY . .
 
 # Build the application
 # Note: Some packages may not have build scripts, so we continue on failure
 # but we verify that workspace packages are properly linked
-RUN bun run build 2>&1 | tee /tmp/build.log || \
-    (echo "Build completed with warnings/errors (checking package resolution)..." && \
-     echo "Verifying workspace packages are linked..." && \
-     bun pm ls | grep "@pbnjam" || true)
+RUN bun run build:fuzzer
 
-# Verify that @pbnjam/bandersnatch-vrf is available
-RUN bun pm ls | grep "@pbnjam/bandersnatch-vrf" || \
-    (echo "ERROR: @pbnjam/bandersnatch-vrf not found in workspace!" && \
-     echo "Installed packages:" && \
-     bun pm ls && \
-     exit 1)
+FROM gcr.io/distroless/base-debian11
+WORKDIR /app
 
-# Create socket directory
-RUN mkdir -p /tmp && chmod 1777 /tmp
-
-# Switch to non-root user
-USER nodejs
-
+COPY --from=build /app/bin/fuzzer-target /app/bin/fuzzer-target
 # ENTRYPOINT sets the base command, CMD provides default arguments
 # target.py will override CMD with --socket {TARGET_SOCK}
-ENTRYPOINT ["dumb-init", "--", "bun", "run", "infra/node/fuzzer-target.ts", "--spec", "tiny"]
-CMD ["--socket", "/tmp/jam_target.sock"]
+ENTRYPOINT ["/app/bin/fuzzer-target"]
+CMD ["--socket", "/tmp/jam_target.sock", "--spec", "tiny"]
 

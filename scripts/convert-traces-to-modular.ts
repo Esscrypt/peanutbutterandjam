@@ -6,13 +6,15 @@
  * in the pvm-traces folder to the binary modular format used by jamduna for JIP-6 traces.
  *
  * Usage:
- *   bun scripts/convert-traces-to-modular.ts [--compress] [--folder <subfolder>]
+ *   bun scripts/convert-traces-to-modular.ts [--compress] [--folder <subfolder>] [--jam-conformance]
  *
  * Options:
  *   --compress         Compress output files with gzip
  *   --folder <name>    Only convert traces in the specified subfolder (e.g., fuzzy_light)
+ *   --jam-conformance  Convert traces from jam-conformance folder (equivalent to --folder jam-conformance)
  *
  * The script automatically discovers and converts all trace files in pvm-traces/
+ * For jam-conformance traces, structure is: {trace_id}/{block_number}/typescript-{timeslot}-{ordered_index}-{service_id}.log
  */
 
 import {
@@ -501,6 +503,15 @@ async function main() {
   const workspaceRoot = join(__dirname, '..')
   const tracesDir = join(workspaceRoot, 'pvm-traces')
 
+  // Check for --jam-conformance flag
+  const isJamConformance = args.includes('--jam-conformance')
+  // Get JAM conformance version from environment variable, default to 0.7.2
+  const jamConformanceVersion = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
+  
+  if (isJamConformance) {
+    targetFolder = `jam-conformance/${jamConformanceVersion}`
+  }
+
   console.log('='.repeat(60))
   console.log('PVM Trace Converter - Text to JIP-6 Modular Binary Format')
   console.log('='.repeat(60))
@@ -509,6 +520,10 @@ async function main() {
   console.log(`Compression: ${compress ? 'enabled' : 'disabled'}`)
   if (targetFolder) {
     console.log(`Target folder: ${targetFolder}`)
+  }
+  if (isJamConformance) {
+    console.log(`Format: jam-conformance`)
+    console.log(`Version: ${jamConformanceVersion}`)
   }
   console.log()
 

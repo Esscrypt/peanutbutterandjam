@@ -1,18 +1,20 @@
 #!/usr/bin/env bun
 
 /**
- * Find First Trace Mismatch
+ * Find Trace Mismatches
  *
- * Runs trace comparison for blocks and stops at the first mismatch
+ * Runs trace comparison for blocks and reports mismatches.
+ * By default, stops at the first mismatch. Use --block to check all traces for a specific block.
  *
  * Usage:
- *   bun scripts/find-first-mismatch.ts [--preimages-light|--preimages-all|--storage-light|--storage-all|--fuzzy|--fuzzy-light] [--wasm] [--start N] [--end N]
+ *   bun scripts/find-first-mismatch.ts [--preimages-light|--preimages-all|--storage-light|--storage-all|--fuzzy|--fuzzy-light] [--wasm] [--start N] [--end N] [--block N]
  *
  * Examples:
  *   bun scripts/find-first-mismatch.ts --preimages-light
  *   bun scripts/find-first-mismatch.ts --fuzzy-light
  *   bun scripts/find-first-mismatch.ts --fuzzy-light --start 50 --end 150
  *   bun scripts/find-first-mismatch.ts --storage-all --wasm
+ *   bun scripts/find-first-mismatch.ts --fuzzy --block 184  # Check all traces for block 184
  */
 
 import { spawn } from 'node:child_process'
@@ -183,6 +185,13 @@ async function runComparison(
   })
 }
 
+interface Mismatch {
+  block: number
+  invocationIndex?: string
+  serviceId?: string
+  output: string
+}
+
 async function main() {
   const args = process.argv.slice(2)
 
@@ -191,6 +200,7 @@ async function main() {
   let executorType: 'typescript' | 'wasm' = 'typescript'
   let startBlock = 1
   let endBlock = 200
+  let singleBlock: number | null = null
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
@@ -202,9 +212,18 @@ async function main() {
     } else if (arg === '--end' && args[i + 1]) {
       endBlock = Number.parseInt(args[i + 1]!)
       i++
+    } else if (arg === '--block' && args[i + 1]) {
+      singleBlock = Number.parseInt(args[i + 1]!)
+      i++
     } else if (arg?.startsWith('--') && FLAG_TO_SUBPATH[arg]) {
       formatFlag = arg
     }
+  }
+
+  // If --block is specified, set start and end to that block
+  if (singleBlock !== null) {
+    startBlock = singleBlock
+    endBlock = singleBlock
   }
 
   // Default to --fuzzy-light if no flag specified
@@ -221,9 +240,12 @@ async function main() {
   }
 
   const isFuzzy = isFuzzyFormat(subpath)
+  const checkAllTraces = singleBlock !== null // If single block specified, check all traces
 
   console.log(
-    `🔍 Searching for first trace mismatch in blocks ${startBlock}-${endBlock}...`,
+    checkAllTraces
+      ? `🔍 Checking all traces for block ${singleBlock}...`
+      : `🔍 Searching for first trace mismatch in blocks ${startBlock}-${endBlock}...`,
   )
   console.log(`   Format: ${formatFlag}`)
   console.log(`   Executor: ${executorType}`)
@@ -235,6 +257,7 @@ async function main() {
   let checkedCount = 0
   let skippedCount = 0
   let traceCount = 0
+  const mismatches: Mismatch[] = []
 
   for (let block = startBlock; block <= endBlock; block++) {
     // Check if trace exists before running comparison
@@ -258,8 +281,7 @@ async function main() {
       checkedCount++
 
       let blockSuccess = true
-      let failedLocation: TraceLocation | null = null
-      let failedOutput = ''
+      const blockMismatches: Mismatch[] = []
 
       for (const loc of locations) {
         traceCount++
@@ -277,28 +299,49 @@ async function main() {
 
         if (!success) {
           blockSuccess = false
-          failedLocation = loc
-          failedOutput = output
-          break
+          blockMismatches.push({
+            block,
+            invocationIndex: loc.invocationIndex,
+            serviceId: loc.serviceId,
+            output,
+          })
+          mismatches.push({
+            block,
+            invocationIndex: loc.invocationIndex,
+            serviceId: loc.serviceId,
+            output,
+          })
+
+          // If not checking all traces, stop at first mismatch
+          if (!checkAllTraces) {
+            break
+          }
         }
       }
 
       if (blockSuccess) {
         console.log('✅ Match')
-      } else if (failedLocation) {
-        console.log(
-          `❌ MISMATCH at invocation ${failedLocation.invocationIndex}, service ${failedLocation.serviceId}\n`,
-        )
-        console.log('='.repeat(80))
-        console.log(`First mismatch at Block ${block}`)
-        console.log(
-          `Invocation: ${failedLocation.invocationIndex}, Service: ${failedLocation.serviceId}`,
-        )
-        console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
-        console.log('='.repeat(80))
-        console.log('\nComparison output:')
-        console.log(failedOutput)
-        process.exit(1)
+      } else {
+        if (checkAllTraces) {
+          console.log(
+            `❌ ${blockMismatches.length} mismatch(es) found in ${locations.length} traces`,
+          )
+        } else {
+          const firstMismatch = blockMismatches[0]!
+          console.log(
+            `❌ MISMATCH at invocation ${firstMismatch.invocationIndex}, service ${firstMismatch.serviceId}\n`,
+          )
+          console.log('='.repeat(80))
+          console.log(`First mismatch at Block ${block}`)
+          console.log(
+            `Invocation: ${firstMismatch.invocationIndex}, Service: ${firstMismatch.serviceId}`,
+          )
+          console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
+          console.log('='.repeat(80))
+          console.log('\nComparison output:')
+          console.log(firstMismatch.output)
+          process.exit(1)
+        }
       }
     } else {
       // Standard format comparison
@@ -318,14 +361,23 @@ async function main() {
       } else if (success) {
         console.log('✅ Match')
       } else {
-        console.log('❌ MISMATCH FOUND!\n')
-        console.log('='.repeat(80))
-        console.log(`First mismatch at Block ${block}`)
-        console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
-        console.log('='.repeat(80))
-        console.log('\nComparison output:')
-        console.log(output)
-        process.exit(1)
+        mismatches.push({
+          block,
+          output,
+        })
+
+        if (checkAllTraces) {
+          console.log('❌ MISMATCH FOUND')
+        } else {
+          console.log('❌ MISMATCH FOUND!\n')
+          console.log('='.repeat(80))
+          console.log(`First mismatch at Block ${block}`)
+          console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
+          console.log('='.repeat(80))
+          console.log('\nComparison output:')
+          console.log(output)
+          process.exit(1)
+        }
       }
     }
   }
@@ -334,9 +386,41 @@ async function main() {
   console.log(
     `✅ Checked ${checkedCount} blocks, ${traceCount} traces, skipped ${skippedCount} blocks (no traces)`,
   )
-  console.log('✅ All checked blocks match!')
-  console.log('='.repeat(80))
-  process.exit(0)
+
+  if (mismatches.length === 0) {
+    console.log('✅ All checked blocks match!')
+    console.log('='.repeat(80))
+    process.exit(0)
+  } else {
+    console.log(`❌ Found ${mismatches.length} mismatch(es)`)
+    console.log('='.repeat(80))
+
+    if (checkAllTraces) {
+      // Report all mismatches for the single block
+      console.log(`\n📊 All mismatches for block ${singleBlock}:`)
+      console.log('='.repeat(80))
+      for (let i = 0; i < mismatches.length; i++) {
+        const mismatch = mismatches[i]!
+        console.log(`\n${i + 1}. Mismatch:`)
+        if (mismatch.invocationIndex !== undefined) {
+          console.log(
+            `   Block: ${mismatch.block}, Invocation: ${mismatch.invocationIndex}, Service: ${mismatch.serviceId}`,
+          )
+        } else {
+          console.log(`   Block: ${mismatch.block}`)
+        }
+        console.log(`   Format: ${formatFlag}, Executor: ${executorType}`)
+        console.log('\n   Comparison output:')
+        console.log('   ' + mismatch.output.split('\n').join('\n   '))
+        if (i < mismatches.length - 1) {
+          console.log('\n' + '-'.repeat(80))
+        }
+      }
+      console.log('\n' + '='.repeat(80))
+    }
+
+    process.exit(1)
+  }
 }
 
 main().catch((error) => {

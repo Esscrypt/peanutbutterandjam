@@ -140,12 +140,6 @@ export class StatisticsService extends BaseService {
    */
   setActivity(activity: Activity): void {
     this.activity = activity
-    logger.debug('setActivity called', {
-      serviceStatsCount: activity.serviceStats.size,
-      serviceIds: Array.from(activity.serviceStats.keys()).map((id) =>
-        id.toString(),
-      ),
-    })
   }
 
   /**
@@ -763,9 +757,6 @@ export class StatisticsService extends BaseService {
     }
 
     // Gray Paper equation (106-114): Calculate R(c) and L(c) from incomingReports
-    logger.debug('Processing incoming reports for core statistics', {
-      incomingReportsCount: incomingReports.length,
-    })
     for (const report of incomingReports) {
       const coreIdx = Number(report.core_index)
       if (coreIdx < 0 || coreIdx >= this.activity.coreStats.length) {
@@ -916,10 +907,6 @@ export class StatisticsService extends BaseService {
       serviceStats.provision[1] += provision.totalSize // size
     }
 
-    logger.debug('Service statistics updated from preimages', {
-      preimageCount: preimages.length,
-      servicesUpdated: serviceProvisionMap.size,
-    })
   }
 
   /**

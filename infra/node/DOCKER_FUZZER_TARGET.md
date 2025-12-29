@@ -110,17 +110,6 @@ After publishing, update `submodules/jam-conformance/scripts/targets.json`:
 }
 ```
 
-**For GitHub Container Registry:**
-```json
-{
-  "pbnjam": {
-    "image": "ghcr.io/shimonchick/pbnjam-fuzzer-target:latest",
-    "cmd": " -- socket {TARGET_SOCK}",
-    "gp_version": "0.7.2"
-  }
-}
-```
-
 **Docker Hub personal accounts work perfectly - no organization needed!**
 
 ## Using with Fuzzer Workflow

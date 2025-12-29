@@ -245,7 +245,7 @@ export class StateService extends BaseService implements IStateService {
       // The state will be set from trace pre_state or other sources
       this.setState([])
     } else {
-      this.setState(genesisHeader.keyvals)
+    this.setState(genesisHeader.keyvals)
     }
   }
 
@@ -603,6 +603,16 @@ export class StateService extends BaseService implements IStateService {
       this.useRawKeyvals = true
     }
 
+    // Track key processing for debugging
+    const processingStats = {
+      total: keyvals.length,
+      processed: {
+        chapters: new Map<number, number>(), // chapterIndex -> count
+        csh: { storage: 0, preimage: 0, request: 0 },
+      },
+      skipped: [] as Array<{ key: Hex; reason: string }>,
+    }
+
     // First pass: Process all simple chapters (C(1) through C(16) and C(255, s))
     // This ensures service accounts exist before processing C(s, h) keys
     // Store C(s, h) keys in the order they appear to preserve insertion order
@@ -634,20 +644,33 @@ export class StateService extends BaseService implements IStateService {
               serviceId,
             )
 
-            logger.debug('Parsed state', {
-              parsedStateKey,
+            // Track successful processing
+            const chapterIndex = parsedStateKey.chapterIndex
+            processingStats.processed.chapters.set(
+              chapterIndex,
+              (processingStats.processed.chapters.get(chapterIndex) ?? 0) + 1,
+            )
+
+          } else {
+            // Parsed value is null/undefined
+            processingStats.skipped.push({
               key: keyval.key,
-              value: parsedValue,
+              reason: 'parsedValue is null/undefined',
             })
           }
         } catch (error) {
           // Log error but continue processing other keyvals
           // This allows tests to compare state even when some keyvals fail to decode
           // (e.g., when fuzzer test vectors use different core counts than the test config)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          processingStats.skipped.push({
+            key: keyval.key,
+            reason: `Failed to parse state value: ${errorMessage}`,
+          })
           logger.warn('Failed to parse state value, skipping keyval', {
             chapterIndex: parsedStateKey.chapterIndex,
             key: keyval.key,
-            error: error instanceof Error ? error.message : String(error),
+            error: errorMessage,
           })
         }
       } else if ('serviceId' in parsedStateKey && 'hash' in parsedStateKey) {
@@ -717,16 +740,13 @@ export class StateService extends BaseService implements IStateService {
       const serviceId = parsedStateKey.serviceId
       const blakeHashFromKey = parsedStateKey.hash
 
-      logger.debug('Parsed C(s, h) key', {
-        key: keyvalKey,
-        serviceId: serviceId.toString(),
-        hash: blakeHashFromKey,
-        valueLength: valueBytes.length,
-      })
-
       try {
         // Skip empty C(s, h) keys - they represent deleted/empty storage
         if (valueBytes.length === 0) {
+          processingStats.skipped.push({
+            key: keyvalKey,
+            reason: 'Empty C(s, h) key (deleted/empty storage)',
+          })
           logger.debug('Skipping empty C(s, h) key', {
             key: keyvalKey,
             serviceId: serviceId.toString(),
@@ -737,14 +757,21 @@ export class StateService extends BaseService implements IStateService {
 
         const response = this.determineKeyType(valueBytes, blakeHashFromKey)
 
+        // #region agent log
+        const TARGET_STATE_KEY_CLASSIFY = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+        if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_CLASSIFY.toLowerCase()) {
+          fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:758',message:'setState: determineKeyType result for target key',data:{keyvalKey,serviceId:serviceId.toString(),keyType:response.keyType,valueLength:valueBytes.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+        }
+        // #endregion
+
         switch (response.keyType) {
           case 'storage': {
-            logger.debug('Determined C(s, h) key type: STORAGE', {
-              key: keyvalKey,
-              serviceId: serviceId.toString(),
-              storageKeyHash: response.key,
-              valueLength: response.value.length,
-            })
+            // #region agent log
+            const TARGET_STATE_KEY_STORAGE = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+            if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()) {
+              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:761',message:'setState: Setting storage for target key',data:{keyvalKey,serviceId:serviceId.toString(),storageKey:response.key,valueLength:response.value.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+            }
+            // #endregion
             // Service account must already exist when parsing state
             const [storageAccountError, storageAccount] =
               this.serviceAccountsService.getServiceAccount(serviceId)
@@ -758,21 +785,26 @@ export class StateService extends BaseService implements IStateService {
               response.key,
               response.value,
             )
+            // #region agent log
+            if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()) {
+              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:777',message:'setState: After setting storage for target key',data:{keyvalKey,serviceId:serviceId.toString(),storageError:storageError?.message||'null',storageKey:response.key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{})
+            }
+            // #endregion
             if (storageError) {
+              processingStats.skipped.push({
+                key: keyvalKey,
+                reason: `Failed to set storage: ${storageError.message}`,
+              })
               logger.warn('Failed to set storage', {
                 serviceId: serviceId.toString(),
                 error: storageError.message,
               })
+            } else {
+              processingStats.processed.csh.storage++
             }
             break
           }
           case 'preimage': {
-            logger.debug('Determined C(s, h) key type: PREIMAGE', {
-              key: keyvalKey,
-              serviceId: serviceId.toString(),
-              preimageHash: response.preimageHash,
-              blobLength: response.blob.length,
-            })
             // Store preimage info for request key verification
             if (!this.preimageInfo.has(serviceId)) {
               this.preimageInfo.set(serviceId, new Map())
@@ -794,19 +826,20 @@ export class StateService extends BaseService implements IStateService {
               valueBytes,
             )
             if (preimageError) {
+              processingStats.skipped.push({
+                key: keyvalKey,
+                reason: `Failed to set preimage: ${preimageError.message}`,
+              })
               logger.warn('Failed to set preimage', {
                 serviceId: serviceId.toString(),
                 error: preimageError.message,
               })
+            } else {
+              processingStats.processed.csh.preimage++
             }
             break
           }
           case 'request': {
-            logger.debug('Determined C(s, h) key type: REQUEST', {
-              key: keyvalKey,
-              serviceId: serviceId.toString(),
-              timeslots: response.timeslots.map((t) => t.toString()),
-            })
 
             // Try to verify by matching against known preimages for this service
             // Gray Paper: C(s, encode[4]{l} ∥ h) where l=blob_length, h=preimage_hash
@@ -859,21 +892,62 @@ export class StateService extends BaseService implements IStateService {
             }
 
             if (!matchedPreimageHash) {
-              logger.warn(
-                'Request key could not be matched to any known preimage',
+              // #region agent log
+              const TARGET_STATE_KEY_RECLASSIFY = '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
+              if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_RECLASSIFY.toLowerCase()) {
+                fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:876',message:'setState: Reclassifying unmatched request as storage',data:{keyvalKey,serviceId:serviceId.toString(),stateKeyHash:blakeHashFromKey,checkedPreimages:servicePreimages?.size??0,timeslots:response.timeslots.map(t=>t.toString()),valueLength:valueBytes.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'S'})}).catch(()=>{})
+              }
+              // #endregion
+              // No matching preimage found - reclassify as storage instead of request
+              // A request must have a corresponding preimage (the hash in the request key should match a preimage)
+              // If there's no matching preimage, it's likely storage that happens to have a value format that looks like a request
+              logger.debug(
+                'Request-like key could not be matched to any known preimage, reclassifying as storage',
                 {
                   key: keyvalKey,
                   serviceId: serviceId.toString(),
                   stateKeyHash: blakeHashFromKey,
                   checkedPreimages: servicePreimages?.size ?? 0,
-                  note: 'This may be a request for a preimage that has not been provided yet',
+                  note: 'Value format matched request pattern but no preimage match found - treating as storage',
                 },
               )
-              // Skip this request - we can't determine the preimage hash
-              // Without the correct preimage hash, we can't generate the correct state key
-              continue
+              
+              // Reclassify as storage
+              // Use blakeHashFromKey as the storage key (we can't recover the original storage key k from the state key)
+              // Service account must already exist when parsing state
+              const [storageAccountError, storageAccount] =
+                this.serviceAccountsService.getServiceAccount(serviceId)
+              if (storageAccountError || !storageAccount) {
+                throw new Error(
+                  `Service account ${serviceId} does not exist when setting storage`,
+                )
+              }
+              const [storageError] = this.serviceAccountsService.setStorage(
+                serviceId,
+                blakeHashFromKey,
+                valueBytes,
+              )
+              // #region agent log
+              if (keyvalKey.toLowerCase() === TARGET_STATE_KEY_RECLASSIFY.toLowerCase()) {
+                fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:901',message:'setState: After reclassifying as storage',data:{keyvalKey,serviceId:serviceId.toString(),storageError:storageError?.message||'null',storageKey:blakeHashFromKey},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'S'})}).catch(()=>{})
+              }
+              // #endregion
+              if (storageError) {
+                processingStats.skipped.push({
+                  key: keyvalKey,
+                  reason: `Failed to set storage (reclassified from request): ${storageError.message}`,
+                })
+                logger.warn('Failed to set storage (reclassified from request)', {
+                  serviceId: serviceId.toString(),
+                  error: storageError.message,
+                })
+              } else {
+                processingStats.processed.csh.storage++
+              }
+              break
             }
 
+            // Found matching preimage - store as request
             // Service account must already exist when parsing state
             const [requestAccountError, requestAccount] =
               this.serviceAccountsService.getServiceAccount(serviceId)
@@ -885,14 +959,20 @@ export class StateService extends BaseService implements IStateService {
             const [requestError] =
               this.serviceAccountsService.setPreimageRequest(
                 serviceId,
-                matchedPreimageHash, // Use matched preimage hash, not blakeHashFromKey
+                matchedPreimageHash,
                 response.timeslots,
               )
             if (requestError) {
+              processingStats.skipped.push({
+                key: keyvalKey,
+                reason: `Failed to set preimage request: ${requestError.message}`,
+              })
               logger.warn('Failed to set preimage request', {
                 serviceId: serviceId.toString(),
                 error: requestError.message,
               })
+            } else {
+              processingStats.processed.csh.request++
             }
             break
           }
@@ -900,14 +980,54 @@ export class StateService extends BaseService implements IStateService {
       } catch (error) {
         // Log as warning and skip - invalid C(s, h) keys are allowed
         // They may represent corrupted test data or edge cases
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        processingStats.skipped.push({
+          key: keyvalKey,
+          reason: `Failed to determine C(s, h) key type: ${errorMessage}`,
+        })
         logger.warn('Failed to determine C(s, h) key type, skipping', {
           key: keyvalKey,
           serviceId: serviceId.toString(),
           hash: blakeHashFromKey,
           valueLength: valueBytes.length,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         })
       }
+    }
+
+    // Log processing summary
+    const totalProcessed =
+      Array.from(processingStats.processed.chapters.values()).reduce(
+        (sum, count) => sum + count,
+        0,
+      ) +
+      processingStats.processed.csh.storage +
+      processingStats.processed.csh.preimage +
+      processingStats.processed.csh.request
+
+    logger.info('[StateService] setState processing summary', {
+      total: processingStats.total,
+      processed: totalProcessed,
+      skipped: processingStats.skipped.length,
+      breakdown: {
+        chapters: Object.fromEntries(processingStats.processed.chapters),
+        csh: processingStats.processed.csh,
+      },
+      skippedKeys: processingStats.skipped.slice(0, 10).map((s) => ({
+        key: s.key,
+        reason: s.reason,
+      })), // Show first 10 skipped keys
+      ...(processingStats.skipped.length > 10
+        ? { note: `${processingStats.skipped.length - 10} more keys skipped` }
+        : {}),
+        })
+
+    if (processingStats.skipped.length > 0) {
+      logger.warn('[StateService] Some keys were not processed', {
+        skippedCount: processingStats.skipped.length,
+        totalKeys: processingStats.total,
+        processedKeys: totalProcessed,
+      })
     }
 
     return safeResult(undefined)
@@ -1269,8 +1389,17 @@ export class StateService extends BaseService implements IStateService {
       const remainingBytes = valueBytes.length - lengthPrefixBytes
       const expectedBytes = timeslotCount * 4
 
-      // Check if we have enough bytes for the timeslots and length is <= 3
-      if (timeslotCount <= 3 && remainingBytes >= expectedBytes) {
+      // #region agent log
+      // Log for debugging request classification
+      if (valueBytes.length === 140 && valueBytes[0] === 0x00) {
+        fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:1372',message:'determineKeyType: Request length check',data:{valueLength:valueBytes.length,timeslotCount,lengthPrefixBytes,remainingBytes,expectedBytes,matches:remainingBytes===expectedBytes},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'T'})}).catch(()=>{})
+      }
+      // #endregion
+
+      // Check if we have EXACTLY the right number of bytes for the timeslots and length is <= 3
+      // A request must be: var{} length prefix + exactly n * 4 bytes (no extra bytes)
+      // If there are extra bytes, it's likely storage, not a request
+      if (timeslotCount <= 3 && remainingBytes === expectedBytes) {
         const timeslots: bigint[] = []
         for (let i = 0; i < timeslotCount; i++) {
           const offset = lengthPrefixBytes + i * 4

@@ -441,23 +441,7 @@ export class AccumulationService extends BaseService {
         results,
         pendingDefxfers,
       )
-      logger.debug(
-        '[AccumulationService] Collected defxfers from results for next iteration',
-        {
-          iteration: iterationCount,
-          previousPendingCount: pendingDefxfers.length,
-          collectedCount: collectedDefxfers.length,
-          resultsCount: results.length,
-          resultsOkCount: results.filter((r) => r.ok).length,
-          defxfersFromResults: results
-            .filter((r) => r.ok)
-            .map((r) => ({
-              defxfersCount: (
-                r as { ok: true; value: { defxfers: DeferredTransfer[] } }
-              ).value.defxfers.length,
-            })),
-        },
-      )
+
       pendingDefxfers = collectedDefxfers
 
       // Step 6: Update global state with results
@@ -882,16 +866,6 @@ export class AccumulationService extends BaseService {
     // Gray Paper: g = freeGas + defxferGas + workDigestGas
     const totalGasLimit = freeGas + defxferGas + workDigestGas
 
-    logger.debug('[AccumulationService] calculateServiceGasLimit', {
-      serviceId: serviceId.toString(),
-      freeGas: freeGas.toString(),
-      defxferGas: defxferGas.toString(),
-      workDigestGas: workDigestGas.toString(),
-      totalGasLimit: totalGasLimit.toString(),
-      numWorkItems: serviceItems.length,
-      numDefxfers: pendingDefxfers.filter((d) => d.dest === serviceId).length,
-    })
-
     return totalGasLimit
   }
 
@@ -1182,20 +1156,9 @@ export class AccumulationService extends BaseService {
   ): void {
     const { yield: yieldHash } = output
 
-    // Gray Paper: Only include in local_fnservouts if yield ≠ none
-    // CRITICAL: This is a SEQUENCE - same service can appear multiple times
     if (yieldHash && yieldHash.length > 0) {
       const yieldHex = bytesToHex(yieldHash)
-      logger.info('[AccumulationService] Recording yield for lastaccout', {
-        serviceId: serviceId.toString(),
-        yieldHash: yieldHex,
-        totalOutputsSoFar: this.accumulationOutputs.length + 1,
-      })
       this.accumulationOutputs.push([serviceId, yieldHex])
-    } else {
-      logger.debug(
-        '[AccumulationService] Yield is None, not adding to local_fnservouts',
-      )
     }
   }
 
@@ -1609,37 +1572,8 @@ export class AccumulationService extends BaseService {
           value: operandTuple,
         })
         
-        // Debug: Log each input being created
-        logger.debug('[AccumulationService] Created operand tuple input', {
-          serviceId: serviceId.toString(),
-          workReportHash: workReport.package_spec.hash,
-          payloadHash: workResult.payload_hash,
-          totalInputsForService: inputsByService.get(serviceId)!.length,
-        })
       }
     }
-
-    // Gray Paper: i = i^T concat i^U (defxfers first, then operand tuples)
-    // This is already the order since we added defxfers first, then operand tuples
-    logger.debug('[AccumulationService] Created accumulate inputs by service', {
-      servicesCount: inputsByService.size,
-      inputsPerService: Array.from(inputsByService.entries()).map(
-        ([serviceId, inputs]) => ({
-          serviceId: serviceId.toString(),
-          totalInputs: inputs.length,
-          defxferCount: inputs.filter((i) => i.type === 1).length,
-          operandTupleCount: inputs.filter((i) => i.type === 0).length,
-        }),
-      ),
-      pendingDefxfersCount: pendingDefxfers.length,
-      readyItemsCount: readyItems.length,
-      readyItemsDetails: readyItems.map((item) => ({
-        workReportHash: item.workReport.package_spec.hash,
-        resultsCount: item.workReport.results?.length ?? 0,
-        serviceIds:
-          item.workReport.results?.map((r) => r.service_id.toString()) ?? [],
-      })),
-    })
 
     return inputsByService
   }
@@ -2194,10 +2128,6 @@ export class AccumulationService extends BaseService {
       }
 
       const accumulatedServiceId = accumulatedServiceIds[i]
-      logger.debug('[updateGlobalState] Processing invocation', {
-        invocationIndex: i,
-        accumulatedServiceId: accumulatedServiceId.toString(),
-      })
 
       if (result.ok) {
         const { poststate } = result.value
@@ -2597,12 +2527,5 @@ export class AccumulationService extends BaseService {
       newAssigners.push(newAssigner)
     }
     this.privilegesService.setAssigners(newAssigners)
-
-    logger.debug('[AccumulationService] Applied privileges using R function', {
-      managerAccumulated: !!managerPoststate,
-      delegator: newDelegator.toString(),
-      registrar: newRegistrar.toString(),
-      assigners: newAssigners.map((a) => a.toString()),
-    })
   }
 }
