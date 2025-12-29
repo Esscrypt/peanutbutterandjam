@@ -24,6 +24,7 @@ export interface ProtocolEventHandler<TRequest, TResponse> {
 
 export abstract class NetworkingProtocol<TRequest, TResponse> {
   private eventHandler?: ProtocolEventHandler<TRequest, TResponse>
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: This is used for message ID generation
   private messageIdCounter = 0
   protected protocolName: string
 
