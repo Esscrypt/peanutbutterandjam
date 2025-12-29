@@ -24,6 +24,7 @@ export interface ProtocolEventHandler<TRequest, TResponse> {
 
 export abstract class NetworkingProtocol<TRequest, TResponse> {
   private eventHandler?: ProtocolEventHandler<TRequest, TResponse>
+  private messageIdCounter = 0
   protected protocolName: string
 
   constructor() {
