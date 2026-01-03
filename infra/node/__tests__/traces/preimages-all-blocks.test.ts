@@ -53,8 +53,19 @@ import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
-// Helper function to parse CLI arguments for starting block
+// Helper function to parse CLI arguments or environment variable for starting block
+// Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
 function getStartBlock(): number {
+  // Check environment variable first (most reliable with bun test)
+  const envStartBlock = process.env.START_BLOCK
+  if (envStartBlock) {
+    const startBlock = Number.parseInt(envStartBlock, 10)
+    if (!Number.isNaN(startBlock) && startBlock >= 1) {
+      return startBlock
+    }
+  }
+  
+  // Fallback to CLI argument (requires -- separator with bun test)
   const args = process.argv.slice(2)
   const startBlockIndex = args.indexOf('--start-block')
   if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
@@ -583,17 +594,15 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('error' in keyInfo) {
+              console.error(`Key Info Error: ${keyInfo.error}`)
+            } else if ('chapterIndex' in keyInfo) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
-              console.error(`Key Type: ${keyInfo.type}`)
+              if ('type' in keyInfo) {
+                console.error(`Key Type: ${keyInfo.type}`)
+              }
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
-              }
-            } else if ('serviceId' in keyInfo) {
-              console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
@@ -633,10 +642,10 @@ describe('Genesis Parse Tests', () => {
       }
 
       // Process blocks sequentially
-      // Support --start-block CLI argument to start from a specific block
+      // Support --start-block CLI argument or START_BLOCK env var to start from a specific block
       const startBlock = getStartBlock()
       if (startBlock > 1) {
-        console.log(`\n🚀 Starting from block ${startBlock} (--start-block ${startBlock})`)
+        console.log(`\n🚀 Starting from block ${startBlock} (START_BLOCK=${startBlock})`)
       }
 
       let blockNumber = startBlock

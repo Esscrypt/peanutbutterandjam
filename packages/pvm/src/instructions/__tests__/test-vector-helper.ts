@@ -191,7 +191,6 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     configService: configService,
   })
   const serviceAccountService = new ServiceAccountService({
-    configService: new ConfigService('tiny'),
     eventBusService: eventBusService,
     clockService: clockService,
     networkingService: null,

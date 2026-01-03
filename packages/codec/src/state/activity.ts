@@ -605,48 +605,7 @@ export function encodeActivity(
   const parts: Uint8Array[] = []
 
   const version = jamVersion ?? DEFAULT_JAM_VERSION
-
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const activityInput = {
-      valStatsAccumulatorLength:
-        activity.validatorStatsAccumulator?.length || 0,
-      valStatsPreviousLength: activity.validatorStatsPrevious?.length || 0,
-      coreStatsLength: activity.coreStats?.length || 0,
-      coreStatsValues:
-        activity.coreStats?.map((cs, idx) => ({
-          core: idx,
-          daLoad: cs.daLoad,
-          popularity: cs.popularity,
-          importCount: cs.importCount,
-          extrinsicCount: cs.extrinsicCount,
-          extrinsicSize: cs.extrinsicSize,
-          exportCount: cs.exportCount,
-          bundleLength: cs.bundleLength,
-          gasUsed: cs.gasUsed,
-        })) || [],
-      serviceStatsSize: activity.serviceStats?.size || 0,
-      serviceStatsKeys: Array.from(activity.serviceStats?.keys() || [])
-        .map((k) => k.toString())
-        .sort(),
-      numValidators: configService.numValidators,
-      numCores: configService.numCores,
-    }
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:545',
-      message: 'encodeActivity input',
-      data: activityInput,
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-input',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
-
+  
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
   // According to Gray Paper statistics.tex line 12:
   // tuple{valstatsaccumulator, valstatsprevious} ∈ sequence[Cvalcount]{tuple{...}}^2
@@ -670,35 +629,6 @@ export function encodeActivity(
   }
   // Truncate to Cvalcount if needed
   const accumulatorToEncode = paddedAccumulator.slice(0, validatorCount)
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const validatorStatsValues = accumulatorToEncode.map((vs, idx) => ({
-      validator: idx,
-      blocks: vs.blocks,
-      tickets: vs.tickets,
-      preimageCount: vs.preimageCount,
-      preimageSize: vs.preimageSize,
-      guarantees: vs.guarantees,
-      assurances: vs.assurances,
-    }))
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:573',
-      message: 'encodeActivity validator stats accumulator values',
-      data: {
-        validatorStatsValues,
-        validatorCount,
-        accumulatorToEncodeLength: accumulatorToEncode.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-val-accumulator-values',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   const [error1, validatorStatsAccumulatorData] = encodeSequenceGeneric(
     accumulatorToEncode,
     encodeValidatorStats,
@@ -721,35 +651,6 @@ export function encodeActivity(
   }
   // Truncate to Cvalcount if needed
   const previousToEncode = paddedPrevious.slice(0, validatorCount)
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const validatorStatsPreviousValues = previousToEncode.map((vs, idx) => ({
-      validator: idx,
-      blocks: vs.blocks,
-      tickets: vs.tickets,
-      preimageCount: vs.preimageCount,
-      preimageSize: vs.preimageSize,
-      guarantees: vs.guarantees,
-      assurances: vs.assurances,
-    }))
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:595',
-      message: 'encodeActivity validator stats previous values',
-      data: {
-        validatorStatsPreviousValues,
-        validatorCount,
-        previousToEncodeLength: previousToEncode.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-val-previous-values',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   const [error2, validatorStatsPreviousData] = encodeSequenceGeneric(
     previousToEncode,
     encodeValidatorStats,
@@ -764,33 +665,6 @@ export function encodeActivity(
   // This means encode[4]{valstatsaccumulator, valstatsprevious} means each field
   // in the validator stats tuples should be encoded as encode[4] (4-byte fixed-length)
   // The sequences are fixed-length (Cvalcount elements each), encoded directly without a length prefix
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const { bytesToHex } = require('@pbnjam/core')
-    const valAccumulatorHex = bytesToHex(validatorStatsAccumulatorData)
-    const valPreviousHex = bytesToHex(validatorStatsPreviousData)
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:610',
-      message: 'encodeActivity validator stats encoded',
-      data: {
-        valAccumulatorHex: valAccumulatorHex.substring(0, 100),
-        valAccumulatorLength: validatorStatsAccumulatorData.length,
-        valPreviousHex: valPreviousHex.substring(0, 100),
-        valPreviousLength: validatorStatsPreviousData.length,
-        validatorCount,
-        accumulatorToEncodeLength: accumulatorToEncode.length,
-        previousToEncodeLength: previousToEncode.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-validator',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   parts.push(validatorStatsAccumulatorData)
   parts.push(validatorStatsPreviousData)
 
@@ -818,29 +692,6 @@ export function encodeActivity(
     encodeCoreStats,
   )
   if (error4) return safeError(error4)
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const { bytesToHex } = require('@pbnjam/core')
-    const coreStatsHex = bytesToHex(coreStatsData)
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:637',
-      message: 'encodeActivity coreStats encoded',
-      data: {
-        coreStatsHex: coreStatsHex.substring(0, 200),
-        coreStatsLength: coreStatsData.length,
-        coreCount: configService.numCores,
-        coreStatsToEncodeLength: coreStatsToEncode.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-corestats',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   parts.push(coreStatsData)
 
   // servicestats: variable-length sequence of (serviceId, serviceStats) tuples
@@ -886,53 +737,9 @@ export function encodeActivity(
     },
   )
   if (error5) return safeError(error5)
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const { bytesToHex } = require('@pbnjam/core')
-    const serviceStatsHex = bytesToHex(serviceStatsData)
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:679',
-      message: 'encodeActivity serviceStats encoded',
-      data: {
-        serviceStatsHex: serviceStatsHex.substring(0, 200),
-        serviceStatsLength: serviceStatsData.length,
-        serviceStatsTuplesLength: serviceStatsTuples.length,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-servicestats',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   parts.push(serviceStatsData)
 
   const finalResult = concatBytes(parts)
-  // #region agent log
-  try {
-    const fs = require('node:fs')
-    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
-    const { bytesToHex } = require('@pbnjam/core')
-    const finalHex = bytesToHex(finalResult)
-    const logEntry = `${JSON.stringify({
-      location: 'activity.ts:682',
-      message: 'encodeActivity final result',
-      data: {
-        finalHex: finalHex.substring(0, 200),
-        finalLength: finalResult.length,
-        partsLengths: parts.map((p) => p.length),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'encode-activity-final',
-      hypothesisId: 'D',
-    })}\n`
-    fs.appendFileSync(logPath, logEntry)
-  } catch {}
-  // #endregion
   return safeResult(finalResult)
 }
 

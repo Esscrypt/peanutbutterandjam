@@ -181,7 +181,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        configService,
         eventBusService,
         clockService,
         networkingService: null,
@@ -463,9 +462,10 @@ describe('Genesis Parse Tests', () => {
           if (parsedKey.chapterIndex === 255 && 'serviceId' in parsedKey) {
             return { ...parsedKey, type: 'C(255, s)' }
           }
+          if (parsedKey.chapterIndex === 0 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(s, h)' }
+          }
           return { ...parsedKey, type: 'C(i)' }
-        } else if ('serviceId' in parsedKey && 'hash' in parsedKey) {
-          return { ...parsedKey, type: 'C(s, h)' }
         }
         return parsedKey
       }
@@ -543,13 +543,13 @@ describe('Genesis Parse Tests', () => {
               console.error(`Key Parse Error: ${keyInfo.error}`)
             } else {
               console.error(`Key Type: ${keyInfo.type || 'unknown'}`)
-              if ('chapterIndex' in keyInfo) {
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex !== undefined) {
                 console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
               }
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-              if ('hash' in keyInfo) {
+              if ('hash' in keyInfo && typeof keyInfo.hash === 'string') {
                 console.error(`Blake Hash: ${keyInfo.hash}`)
               }
             }
@@ -622,7 +622,7 @@ describe('Genesis Parse Tests', () => {
             } else if ('serviceId' in keyInfo) {
               console.error(`Service ID: ${keyInfo.serviceId}`)
               console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
+              if ('hash' in keyInfo && typeof keyInfo.hash === 'string') {
                 console.error(`Hash: ${keyInfo.hash}`)
               }
             } else {

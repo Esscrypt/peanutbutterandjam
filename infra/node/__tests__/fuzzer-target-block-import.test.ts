@@ -101,7 +101,7 @@ describe('Fuzzer Target Block Import', () => {
     console.log(`\n📋 Initialize message loaded: ${init.keyvals.length} keyvals`)
 
     // Set initial state from Initialize message
-    const [setStateError] = stateService.setState(init.keyvals, jamVersion)
+    const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       console.log(`⚠️  Warning during setState: ${setStateError.message}`)
     }
@@ -219,7 +219,7 @@ describe('Fuzzer Target Block Import', () => {
     console.log(`\n📦 ImportBlock 2 message loaded: timeslot ${importBlock.block.header.timeslot}`)
 
     // Capture state trie before block 2 import
-    // #region agent log
+    
     const [trieBeforeBlock2Error, trieBeforeBlock2] = stateService.generateStateTrie()
     const fs = await import('node:fs/promises')
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
@@ -240,7 +240,7 @@ describe('Fuzzer Target Block Import', () => {
     console.log(`✅ Block 2 imported successfully`)
 
     // Capture state trie after block 2 import and compare with before
-    // #region agent log
+    
     const [trieAfterBlock2Error, trieAfterBlock2] = stateService.generateStateTrie()
     
     // Compare state tries to find modified keys
@@ -296,7 +296,7 @@ describe('Fuzzer Target Block Import', () => {
     // #endregion
 
     // Get state root after block import
-    // #region agent log  
+    
     const [trieBeforeRootError, trieBeforeRoot] = stateService.generateStateTrie()
     // Capture all chapter values for comparison
     const chapterKeys = [
@@ -359,14 +359,14 @@ describe('Fuzzer Target Block Import', () => {
     await fs.appendFile(logPath, logEntry1).catch(()=>{})
     // #endregion
     const [stateRootError, stateRoot] = stateService.getStateRoot()
-    // #region agent log
+    
     const logEntry2 = JSON.stringify({location:'fuzzer-target-block-import.test.ts:175',message:'State root calculated',data:{test:'fuzzer-target-block-import',stateRoot,stateRootError:stateRootError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'post-root',hypothesisId:'A'})+'\n'
     await fs.appendFile(logPath, logEntry2).catch(()=>{})
     // #endregion
     expect(stateRootError).toBeUndefined()
 
     const expectedStateRoot = '0x9bceb7d7c864bbbcaa4b0c71f1c257ceef3f610ee627f432e47345fd0d66d5df'
-    // #region agent log
+    
     const logEntry3 = JSON.stringify({location:'fuzzer-target-block-import.test.ts:180',message:'State root comparison',data:{test:'fuzzer-target-block-import',calculated:stateRoot,expected:expectedStateRoot,matches:stateRoot?.toLowerCase() === expectedStateRoot.toLowerCase()},timestamp:Date.now(),sessionId:'debug-session',runId:'comparison',hypothesisId:'A'})+'\n'
     await fs.appendFile(logPath, logEntry3).catch(()=>{})
     // #endregion

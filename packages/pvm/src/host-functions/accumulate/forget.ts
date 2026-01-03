@@ -1,4 +1,5 @@
-import { bytesToHex } from '@pbnjam/core'
+import { deleteServicePreimageValue, deleteServiceRequestValue, getServiceRequestValue, setServiceRequestValue } from '@pbnjam/codec'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -6,6 +7,7 @@ import {
   BaseAccumulateHostFunction,
 } from './base'
 
+//TODO: make a unit test for different request value lengths
 /**
  * FORGET accumulation host function (Ω_F)
  *
@@ -42,14 +44,7 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const [hashOffset, preimageLength] = registers.slice(7, 9)
 
-    // Log all input parameters
-    context.log('FORGET host function invoked', {
-      hashOffset: hashOffset.toString(),
-      preimageLength: preimageLength.toString(),
-      timeslot: timeslot.toString(),
-      currentServiceId: implications[0].id.toString(),
-      expungePeriod: context.expungePeriod.toString(),
-    })
+    const serviceId = implications[0].id
 
     // Read hash from memory (32 bytes)
     // Gray Paper line 924-927: h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
@@ -77,18 +72,14 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
 
     // Convert hash to hex and get request
     const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
-    if (!requestMap) {
+    const requestValue = getServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
+    if (!requestValue) {
+      logger.error('Forget host function: Request does not exist', {
+        serviceId: serviceId.toString(),
+        hashHex: hashHex.substring(0, 40) + '...',
+        preimageLength: preimageLength.toString(),
+      })
       // Gray Paper line 942: HUH when a = error (request doesn't exist)
-      this.setAccumulateError(registers, 'HUH')
-      return {
-        resultCode: null, // continue execution
-      }
-    }
-
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -100,16 +91,13 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     const expungePeriod = context.expungePeriod
 
     // Apply Gray Paper logic for different request states (line 935-938)
-    if (request.length === 0) {
+    if (requestValue.length === 0) {
       // Case 1 (line 935): [] (empty) - Remove request and preimage completely
       // keys(a.sa_requests) = keys(imX.self.sa_requests) \ {(h, z)}
       // keys(a.sa_preimages) = keys(imX.self.sa_preimages) \ {h}
-      requestMap.delete(preimageLength)
-      if (requestMap.size === 0) {
-        serviceAccount.requests.delete(hashHex)
-      }
-      serviceAccount.preimages.delete(hashHex)
 
+      deleteServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
+      deleteServicePreimageValue(serviceAccount, serviceId, hashHex);
       // Gray Paper: Update items and octets when removing a request
       // items -= 2 for each removed request (h, z)
       // octets -= (81 + z) for each removed request
@@ -119,17 +107,14 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
         serviceAccount.octets >= 81n + preimageLength
           ? serviceAccount.octets - (81n + preimageLength)
           : 0n
-    } else if (request.length === 2) {
+    } else if (requestValue.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
-      const [, y] = request
+      const [, y] = requestValue
       if (y < timeslot - expungePeriod) {
         // Remove request and preimage completely
-        requestMap.delete(preimageLength)
-        if (requestMap.size === 0) {
-          serviceAccount.requests.delete(hashHex)
-        }
-        serviceAccount.preimages.delete(hashHex)
 
+        deleteServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
+        deleteServicePreimageValue(serviceAccount, serviceId, hashHex);
         // Gray Paper: Update items and octets when removing a request
         serviceAccount.items =
           serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
@@ -144,16 +129,16 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
           resultCode: null, // continue execution
         }
       }
-    } else if (request.length === 1) {
+    } else if (requestValue.length === 1) {
       // Case 3 (line 936): [x] - Update to [x, t] (mark as unavailable)
-      const [x] = request
-      requestMap.set(preimageLength, [x, timeslot])
-    } else if (request.length === 3) {
+      const [x] = requestValue
+      setServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength, [x, timeslot]);
+    } else if (requestValue.length === 3) {
       // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
-      const [, y, w] = request
+      const [, y, w] = requestValue
       if (y < timeslot - expungePeriod) {
         // Update to [w, t] (mark as unavailable again)
-        requestMap.set(preimageLength, [w, timeslot])
+        setServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength, [w, timeslot]);
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, 'HUH')

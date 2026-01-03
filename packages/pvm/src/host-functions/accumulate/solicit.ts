@@ -1,5 +1,9 @@
-import { bytesToHex } from '@pbnjam/core'
-import { DEPOSIT_CONSTANTS, type HostFunctionResult } from '@pbnjam/types'
+import {
+  getServiceRequestValue,
+  setServiceRequestValue,
+} from '@pbnjam/codec'
+import { bytesToHex, calculateMinBalance } from '@pbnjam/core'
+import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -38,14 +42,6 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       // Extract parameters from registers
       const [hashOffset, preimageLength] = registers.slice(7, 9)
 
-      // Log all input parameters
-      context.log('SOLICIT host function invoked', {
-        hashOffset: hashOffset.toString(),
-        preimageLength: preimageLength.toString(),
-        timeslot: timeslot.toString(),
-        currentServiceId: implications[0].id.toString(),
-        expungePeriod: context.expungePeriod.toString(),
-      })
 
       // Read hash from memory (32 bytes)
       // Gray Paper: If memory read fails (h = error), return PANIC without changing registers
@@ -72,8 +68,12 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
 
       // Convert hash to hex and look up existing request
       const hashHex = bytesToHex(hashData)
-      const requestMap = serviceAccount.requests.get(hashHex)
-      const existingRequest = requestMap?.get(preimageLength)
+      const existingRequest = getServiceRequestValue(
+        serviceAccount,
+        imX.id,
+        hashHex,
+        preimageLength,
+      )
 
       // Determine new request state based on Gray Paper logic
       let newRequest: bigint[]
@@ -108,7 +108,7 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
 
       // Calculate new minimum balance
       // Gray Paper: a_minbalance = max(0, Cbasedeposit + Citemdeposit * a_items + Cbytedeposit * a_octets - a_gratis)
-      const newMinBalance = this.calculateMinBalance(
+      const newMinBalance = calculateMinBalance(
         newItems,
         newOctets,
         serviceAccount.gratis,
@@ -117,13 +117,6 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       // Check if service has sufficient balance for the new request
       // Gray Paper: If newMinBalance > balance, return FULL error
       if (newMinBalance > serviceAccount.balance) {
-        context.log('SOLICIT: Insufficient balance', {
-          balance: serviceAccount.balance.toString(),
-          newMinBalance: newMinBalance.toString(),
-          newItems: newItems.toString(),
-          newOctets: newOctets.toString(),
-          gratis: serviceAccount.gratis.toString(),
-        })
         this.setAccumulateError(registers, 'FULL')
         return {
           resultCode: null, // continue execution
@@ -131,16 +124,13 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
       }
 
       // Update the service account with the new request
-      if (requestMap) {
-        // Update existing request map
-        requestMap.set(preimageLength, newRequest)
-      } else {
-        // Create new request map for this hash
-        serviceAccount.requests.set(
-          hashHex,
-          new Map([[preimageLength, newRequest]]),
-        )
-      }
+      setServiceRequestValue(
+        serviceAccount,
+        imX.id,
+        hashHex,
+        preimageLength,
+        newRequest,
+      )
 
       // Update items and octets if this is a new request
       if (isNewRequest) {
@@ -165,18 +155,4 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
    * Calculate minimum balance based on items and octets
    * Gray Paper: a_minbalance = max(0, Cbasedeposit + Citemdeposit * a_items + Cbytedeposit * a_octets - a_gratis)
    */
-  private calculateMinBalance(
-    items: bigint,
-    octets: bigint,
-    gratis: bigint,
-  ): bigint {
-    const baseDeposit = BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT)
-    const itemDeposit = BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * items
-    const byteDeposit = BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT) * octets
-
-    const totalDeposit = baseDeposit + itemDeposit + byteDeposit
-    const minBalance = totalDeposit - gratis
-
-    return minBalance > 0n ? minBalance : 0n
-  }
 }

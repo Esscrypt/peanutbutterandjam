@@ -5,6 +5,7 @@ import {
   type AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
 } from './base'
+import { getServiceRequestValue } from '@pbnjam/codec'
 
 /**
  * PROVIDE accumulation host function (Ω_♈)
@@ -93,22 +94,14 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
 
     // Check if there's a matching request for this hash and size
     // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
-    const requestMap = serviceAccount.requests.get(preimageHash)
-    if (!requestMap) {
+    const requestValue = getServiceRequestValue(serviceAccount, serviceId, preimageHash, preimageLength);
+    if (!requestValue) {
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
       }
     }
 
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Gray Paper line 942: HUH when a = error (request doesn't exist for this size)
-      this.setAccumulateError(registers, 'HUH')
-      return {
-        resultCode: null, // continue execution
-      }
-    }
 
     // Check if the preimage hasn't already been provided
     // Gray Paper: (s, i) ∈ imX.provisions

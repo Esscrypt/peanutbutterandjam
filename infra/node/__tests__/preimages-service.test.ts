@@ -13,6 +13,12 @@ import type { PreimagesTestVector } from '@pbnjam/types'
 import { ServiceAccountService } from '../services/service-account-service'
 import { ConfigService } from '../services/config-service'
 import { ClockService } from '../services/clock-service'
+import {
+  setServicePreimageValue,
+  setServiceRequestValue,
+  getAllServicePreimages,
+  getServiceRequestValue,
+} from '@pbnjam/codec'
 
 // Root to workspace
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -53,7 +59,6 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
             const eventBusService = new EventBusService()
             const clockService = new ClockService({ eventBusService, configService })
             const service = new ServiceAccountService({
-              configService,
               eventBusService,
               clockService,
               networkingService: null,
@@ -64,7 +69,7 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
               const serviceId = BigInt(acct.id)
 
               // Minimal core fields for test setup
-              const core = {
+              const serviceAccount = {
                 codehash:
                   '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
                 balance: 0n,
@@ -76,29 +81,25 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
                 created: 0n,
                 lastacc: 0n,
                 parent: 0n,
+                rawCshKeyvals: {},
               }
 
-              const preimages = new Map<Hex, Uint8Array>()
+              // Set preimages using setServicePreimageValue
               for (const p of acct.data.preimage_blobs) {
-                preimages.set(p.hash as Hex, hexToBytes(p.blob as Hex))
+                const preimageHash = p.hash as Hex
+                const preimageValue = hexToBytes(p.blob as Hex)
+                setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageValue)
               }
 
-              const requests = new Map<Hex, Map<bigint, bigint[]>>()
+              // Set requests using setServiceRequestValue
               for (const entry of acct.data.preimage_requests) {
                 const hash = entry.key.hash as Hex
                 const len = BigInt(entry.key.length)
                 const seq = entry.value.map(BigInt)
-                const byLen = requests.get(hash) ?? new Map<bigint, bigint[]>()
-                byLen.set(len, seq)
-                requests.set(hash, byLen)
+                setServiceRequestValue(serviceAccount, serviceId, hash, len, seq)
               }
 
-              service.setServiceAccount(serviceId, {
-                ...core,
-                storage: new Map<Hex, Uint8Array>(),
-                preimages,
-                requests,
-              })
+              service.setServiceAccount(serviceId, serviceAccount)
             }
 
             // 2) Validate preimages first, then apply
@@ -143,19 +144,27 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
               const [err, actual] = service.getServiceAccount(serviceId)
               if (err) throw err
 
-              // Compare preimages
+              // Compare preimages using getAllServicePreimages
               const expectedPre = new Map<Hex, Hex>()
               for (const p of acct.data.preimage_blobs) {
                 expectedPre.set(p.hash as Hex, p.blob as Hex)
               }
-              expect(actual.preimages.size).toBe(expectedPre.size)
-              for (const [h, bytes] of actual.preimages.entries()) {
-                const expBlob = expectedPre.get(h)
-                expect(expBlob).toBeDefined()
-                expect(bytes).toEqual(hexToBytes(expBlob as Hex))
+              
+              const actualPreimages = getAllServicePreimages(actual)
+              // Build a map of hash to blob for comparison
+              const actualPreMap = new Map<Hex, Uint8Array>()
+              for (const [, preimageData] of actualPreimages) {
+                actualPreMap.set(preimageData.preimageHash, preimageData.blob)
+              }
+              
+              expect(actualPreMap.size).toBe(expectedPre.size)
+              for (const [h, expBlobHex] of expectedPre.entries()) {
+                const actualBlob = actualPreMap.get(h)
+                expect(actualBlob).toBeDefined()
+                expect(actualBlob).toEqual(hexToBytes(expBlobHex))
               }
 
-              // Compare requests (preimage_requests)
+              // Compare requests (preimage_requests) using getServiceRequestValue
               const expectedReq = new Map<Hex, Map<bigint, bigint[]>>()
               for (const entry of acct.data.preimage_requests) {
                 const hash = entry.key.hash as Hex
@@ -166,15 +175,30 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
                 expectedReq.set(hash, byLen)
               }
 
-              expect(actual.requests.size).toBe(expectedReq.size)
-              for (const [hash, byLen] of actual.requests.entries()) {
-                const expByLen = expectedReq.get(hash)
-                expect(expByLen).toBeDefined()
-                expect(byLen.size).toBe(expByLen!.size)
-                for (const [len, seq] of byLen.entries()) {
-                  const expSeq = expByLen!.get(len)
-                  expect(expSeq).toBeDefined()
-                  expect(seq).toEqual(expSeq as bigint[])
+              // Build actual requests map by querying each expected request
+              const actualReq = new Map<Hex, Map<bigint, bigint[]>>()
+              for (const [hash, expectedByLen] of expectedReq.entries()) {
+                const actualByLen = new Map<bigint, bigint[]>()
+                for (const [len, expectedSeq] of expectedByLen.entries()) {
+                  const actualSeq = getServiceRequestValue(actual, serviceId, hash, len)
+                  if (actualSeq) {
+                    actualByLen.set(len, actualSeq)
+                  }
+                }
+                if (actualByLen.size > 0) {
+                  actualReq.set(hash, actualByLen)
+                }
+              }
+
+              expect(actualReq.size).toBe(expectedReq.size)
+              for (const [hash, expectedByLen] of expectedReq.entries()) {
+                const actualByLen = actualReq.get(hash)
+                expect(actualByLen).toBeDefined()
+                expect(actualByLen!.size).toBe(expectedByLen.size)
+                for (const [len, expectedSeq] of expectedByLen.entries()) {
+                  const actualSeq = actualByLen!.get(len)
+                  expect(actualSeq).toBeDefined()
+                  expect(actualSeq).toEqual(expectedSeq)
                 }
               }
             }

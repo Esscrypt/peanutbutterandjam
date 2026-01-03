@@ -8,8 +8,10 @@
 
 import {
   BaseService,
+  DEFAULT_JAM_VERSION,
   FULL_SAFROLE_CONSTANTS,
   type IConfigService,
+  type JamVersion,
   SEGMENT_CONSTANTS,
   SMALL_SAFROLE_CONSTANTS,
   TIME_CONSTANTS,
@@ -25,6 +27,8 @@ import {
  * - Runtime overrides
  */
 export class ConfigService extends BaseService implements IConfigService {
+  private _jamVersion: JamVersion = DEFAULT_JAM_VERSION
+
   constructor(
     private readonly mode:
       | 'tiny'
@@ -37,6 +41,22 @@ export class ConfigService extends BaseService implements IConfigService {
       | 'full',
   ) {
     super('safrole-config')
+  }
+
+  /**
+   * Get JAM version
+   * Defaults to DEFAULT_JAM_VERSION if not set
+   */
+  get jamVersion(): JamVersion {
+    return this._jamVersion
+  }
+
+  /**
+   * Set JAM version
+   * Used to configure version-aware behavior (e.g., codec encoding, nextfreeid calculation)
+   */
+  set jamVersion(version: JamVersion) {
+    this._jamVersion = version
   }
 
   /**

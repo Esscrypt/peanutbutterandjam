@@ -1,4 +1,4 @@
-import { encodeFixedLength } from '@pbnjam/codec'
+import { encodeFixedLength, getServiceRequestValue } from '@pbnjam/codec'
 import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
@@ -117,11 +117,13 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Get request using nested map structure: requests[hash][length]
     const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
-    if (!requestMap) {
+    const requestValue = getServiceRequestValue(serviceAccount, serviceIdToEject, hashHex, BigInt(l));
+
+    // const requestMap = serviceAccount.requests.get(hashHex)
+    if (!requestValue) {
       logger.warning('[EjectHostFunction] Request map not found for hash', {
         hashHex,
-        availableHashes: Array.from(serviceAccount.requests.keys()),
+        availableHashes: Object.keys(serviceAccount.rawCshKeyvals),
       })
       this.setAccumulateError(registers, 'HUH')
       return {
@@ -129,20 +131,6 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    const request = requestMap.get(BigInt(l))
-    if (!request) {
-      logger.warning('[EjectHostFunction] Request not found for length', {
-        hashHex,
-        calculatedLength: l,
-        availableLengths: Array.from(requestMap.keys()).map((len) =>
-          len.toString(),
-        ),
-      })
-      this.setAccumulateError(registers, 'HUH')
-      return {
-        resultCode: null, // continue execution
-      }
-    }
 
     // Check if the ejection period has expired
     // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
@@ -151,10 +139,10 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     const expungePeriod = context.expungePeriod
     const threshold = timeslot - expungePeriod
 
-    if (request.length < 2 || request[1] >= timeslot - expungePeriod) {
+    if (requestValue.length < 2 || requestValue[1] >= timeslot - expungePeriod) {
       logger.warning('[EjectHostFunction] Expunge period check failed', {
-        requestLength: request.length,
-        y: request[1]?.toString(),
+        requestLength: requestValue.length,
+        y: requestValue[1]?.toString(),
         timeslot: timeslot.toString(),
         expungePeriod: expungePeriod.toString(),
         threshold: threshold.toString(),

@@ -1,9 +1,11 @@
+import {logger} from '@pbnjam/core'
 import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
 } from './base'
+
 
 /**
  * BLESS accumulation host function (Ω_B)
@@ -52,7 +54,7 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     ] = registers.slice(7, 13)
 
     // Log all input parameters
-    context.log('BLESS host function invoked', {
+    logger.info('BLESS host function invoked', {
       managerServiceId: managerServiceId.toString(),
       assignersOffset: assignersOffset.toString(),
       delegatorServiceId: delegatorServiceId.toString(),

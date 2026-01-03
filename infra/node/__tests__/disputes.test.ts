@@ -197,7 +197,7 @@ describe('Disputes Service - JAM Test Vectors', () => {
               // Check if this was expected to fail
               if (vector.output.err !== undefined) {
                 expect(validationError.message).toBe(vector.output.err)
-                continue
+                return
               }
               throw validationError
             }

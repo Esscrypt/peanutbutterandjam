@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionResult,
   Implications,
@@ -23,7 +24,7 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     const [imX] = implications
 
     // Log checkpoint invocation
-    context.log('CHECKPOINT host function invoked', {
+    logger.debug('CHECKPOINT host function invoked', {
       currentServiceId: imX.id.toString(),
       gasCounter: gasCounter.toString(),
       accountsCount: imX.state.accounts.size,
@@ -90,42 +91,12 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
 
   /**
    * Deep copy ServiceAccount including nested Maps (storage, preimages, requests)
+   * Also recalculates items from actual state to ensure checkpoint has correct value
    */
   private deepCopyServiceAccount(account: ServiceAccount): ServiceAccount {
-    // Deep copy requests map (Map<Hex, Map<bigint, PreimageRequestStatus>>)
-    const requestsCopy = new Map(
-      Array.from(account.requests.entries()).map(([hash, requestMap]) => [
-        hash,
-        new Map(
-          Array.from(requestMap.entries()).map(([length, request]) => [
-            length,
-            [...request], // Copy array
-          ]),
-        ),
-      ]),
-    )
-
-    // Deep copy preimages map (Map<Hex, Uint8Array>)
-    const preimagesCopy = new Map(
-      Array.from(account.preimages.entries()).map(([hash, preimage]) => [
-        hash,
-        new Uint8Array(preimage), // Copy Uint8Array
-      ]),
-    )
-
-    // Deep copy storage map (Map<Hex, Uint8Array>)
-    const storageCopy = new Map(
-      Array.from(account.storage.entries()).map(([key, value]) => [
-        key,
-        new Uint8Array(value), // Copy Uint8Array
-      ]),
-    )
-
     return {
       ...account,
-      requests: requestsCopy,
-      preimages: preimagesCopy,
-      storage: storageCopy,
+      rawCshKeyvals: JSON.parse(JSON.stringify(account.rawCshKeyvals)),
     }
   }
 }

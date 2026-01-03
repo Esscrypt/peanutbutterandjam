@@ -25,14 +25,11 @@ type ParsedStateKey =
       serviceId: bigint
     }
   | {
+      chapterIndex: 0 // Special indicator for C(s, h) keys
       serviceId: bigint
-      hash: Hex // storage key
     }
 
 import {
-  // createServicePreimageKey,
-  // createServiceRequestKey,
-  createServiceStorageKey,
   createStateTrie,
   decodeAccumulated,
   decodeActivity,
@@ -41,7 +38,6 @@ import {
   decodeDisputeState,
   decodeEntropy,
   decodeLastAccumulationOutputs,
-  decodeNatural,
   decodePrivileges,
   decodeReady,
   decodeRecent,
@@ -52,7 +48,6 @@ import {
   decodeValidatorSet,
 } from '@pbnjam/codec'
 import {
-  blake2bHash,
   bytesToHex,
   hexToBytes,
   logger,
@@ -67,21 +62,19 @@ import type {
   Disputes,
   EntropyState,
   GlobalState,
-  JamVersion,
   Privileges,
   Ready,
   Recent,
   Reports,
   Safe,
   SafroleState,
-  ServiceAccountCore,
+  ServiceAccount,
   StateComponent,
   StateTrie,
   ValidatorPublicKeys,
 } from '@pbnjam/types'
 import {
   BaseService,
-  DEFAULT_JAM_VERSION,
   type IStateService,
   safeError,
   safeResult,
@@ -116,27 +109,6 @@ export class StateService extends BaseService implements IStateService {
     number,
     (data: Uint8Array) => Safe<DecodingResult<unknown>>
   >()
-  // Cache for raw keyvals from test vectors
-  // Used to bypass decode/encode roundtrip issues when verifying state roots
-  private readonly rawStateKeyvals = new Map<Hex, Hex>()
-
-  // Flag to indicate whether to use raw keyvals for state trie generation
-  // When true, generateStateTrie will use rawStateKeyvals directly
-  private useRawKeyvals = false
-
-  /**
-   * Clear the raw keyvals mode after pre-state verification
-   * This switches back to normal state trie generation from services
-   */
-  clearRawKeyvals(): void {
-    this.useRawKeyvals = false
-    this.rawStateKeyvals.clear()
-  }
-
-  // Store parsed preimage information for request key verification
-  // Map: serviceId -> Map: preimageHash -> blobLength
-  private readonly preimageInfo = new Map<bigint, Map<Hex, number>>()
-
   // Service delegates for state components
 
   private readonly configService: ConfigService
@@ -157,7 +129,6 @@ export class StateService extends BaseService implements IStateService {
   private genesisManagerService: NodeGenesisManager
   private sealKeyService: SealKeyService
   private clockService: ClockService
-  private jamVersion: JamVersion = DEFAULT_JAM_VERSION
 
   constructor(options: {
     validatorSetManager: ValidatorSetManager
@@ -180,6 +151,7 @@ export class StateService extends BaseService implements IStateService {
   }) {
     super('state-service')
     this.configService = options.configService
+    // C(s,h) keys are handled separately in setStateComponent
     // Map chapter indices to decoders (hardcoded according to Gray Paper)
     this.stateTypeRegistry.set(1, (data) =>
       decodeAuthpool(data, this.configService),
@@ -207,10 +179,10 @@ export class StateService extends BaseService implements IStateService {
     ) // Chapter 10 - Reports (C(10))
     this.stateTypeRegistry.set(11, (data) => decodeTheTime(data)) // Chapter 11 - TheTime (C(11))
     this.stateTypeRegistry.set(12, (data) =>
-      decodePrivileges(data, this.configService, this.jamVersion),
+      decodePrivileges(data, this.configService, this.configService.jamVersion),
     ) // Chapter 12 - Privileges (C(12))
     this.stateTypeRegistry.set(13, (data) =>
-      decodeActivity(data, this.configService, this.jamVersion),
+      decodeActivity(data, this.configService, this.configService.jamVersion),
     ) // Chapter 13 - Activity (C(13))
     this.stateTypeRegistry.set(14, (data) =>
       decodeReady(data, this.configService),
@@ -222,7 +194,7 @@ export class StateService extends BaseService implements IStateService {
       decodeLastAccumulationOutputs(data),
     ) // Chapter 16 - LastAccout (C(16))
     this.stateTypeRegistry.set(255, (data) =>
-      decodeServiceAccount(data, this.jamVersion),
+      decodeServiceAccount(data, this.configService.jamVersion),
     ) // Chapter 255 - Service Accounts (C(255, s))
 
     this.validatorSetManager = options.validatorSetManager
@@ -244,31 +216,19 @@ export class StateService extends BaseService implements IStateService {
 
     // Initialize state from genesis if available, otherwise start with empty state
     // This allows StateService to work without genesis (e.g., when using trace pre_state)
-    const [genesisHeaderError, genesisHeader] =
-      this.genesisManagerService.getState()
-    if (genesisHeaderError) {
-      // Genesis not available - start with empty state
-      // The state will be set from trace pre_state or other sources
-      this.setState([])
-    } else {
-      this.setState(genesisHeader.keyvals)
+    if(this.genesisManagerService) {
+      const [genesisHeaderError, genesisHeader] =
+        this.genesisManagerService.getState()
+      if (genesisHeaderError) {
+        // Genesis not available - start with empty state
+        // The state will be set from trace pre_state or other sources
+        this.setState([])
+      } else {
+        this.setState(genesisHeader.keyvals)
+      }
     }
   }
 
-  /**
-   * Update the JAM version (e.g., from PeerInfo message)
-   */
-  setJamVersion(jamVersion: JamVersion): void {
-    this.jamVersion = jamVersion
-    // Update the decoder for Chapter 12 (Privileges) to use the new version
-    this.stateTypeRegistry.set(12, (data) =>
-      decodePrivileges(data, this.configService, this.jamVersion),
-    )
-    // Update the decoder for Chapter 255 (Service Accounts) to use the new version
-    this.stateTypeRegistry.set(255, (data) =>
-      decodeServiceAccount(data, this.jamVersion),
-    )
-  }
 
   /**
    * Get genesis manager service
@@ -325,6 +285,8 @@ export class StateService extends BaseService implements IStateService {
    */
   getStateComponent(chapterIndex: number, serviceId?: bigint): StateComponent {
     switch (chapterIndex) {
+      case 0:
+        return this.serviceAccountsService.getServiceAccountKeyvals(serviceId!)
       // C(1) = authpool (α) - Core authorization requirements
       case 1:
         return this.authPoolService.getAuthPool()
@@ -467,9 +429,33 @@ export class StateService extends BaseService implements IStateService {
   setStateComponent(
     chapterIndex: number,
     value: StateComponent,
+    keyval: Record<Hex, Hex>,
     serviceId: bigint | undefined,
   ): void {
     switch (chapterIndex) {
+      case 0: {
+        if (serviceId === undefined) {
+          throw new Error('Service ID is required for C(s,h) keys')
+        }
+        const problematicKey: Hex = '0x84d7c84556b776fec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
+        const problematicServiceId = 1985398916n
+        if (serviceId === problematicServiceId && keyval[problematicKey]) {
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:440',message:'Setting problematic key in setStateComponent',data:{serviceId:serviceId.toString(),problematicKey,keyValue:keyval[problematicKey],allKeys:Object.keys(keyval)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        }
+        // #endregion
+        this.serviceAccountsService.setServiceAccountKeyvals(
+          serviceId!,
+          keyval,
+        )
+        if (serviceId === problematicServiceId && keyval[problematicKey]) {
+          const [getError, account] = this.serviceAccountsService.getServiceAccount(problematicServiceId)
+          const accountKeyvalsCount = !getError && account ? Object.keys(account.rawCshKeyvals).length : 0
+          const accountProblematicValue = !getError && account ? account.rawCshKeyvals[problematicKey] : undefined
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:450',message:'After setServiceAccountKeyvals',data:{serviceId:serviceId.toString(),problematicKey,accountKeyvalsCount,accountProblematicValue,getError:getError?.message||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+        }
+        // #endregion
+        break
+      }
       // C1) = authpool (α) - Core authorization requirements
       case 1:
         this.authPoolService.setAuthPool(value as AuthPool)
@@ -572,8 +558,8 @@ export class StateService extends BaseService implements IStateService {
           throw new Error('Service ID is required for chapter 255')
         }
         this.serviceAccountsService.setServiceAccountCore(
-          serviceId,
-          value as ServiceAccountCore,
+          BigInt(serviceId),
+          value as ServiceAccount,
         )
         break
       }
@@ -587,574 +573,92 @@ export class StateService extends BaseService implements IStateService {
   /**
    * Set state from keyvals
    * @param keyvals - Array of key-value pairs
-   * @param jamVersion - Optional JAM version (defaults to 0.7.2)
-   * @param useRawKeyvals - If true, store raw keyvals for state trie generation (bypasses roundtrip)
    */
   setState(
     keyvals: { key: Hex; value: Hex }[],
-    jamVersion?: JamVersion,
-    useRawKeyvals = false,
   ): Safe<void> {
-    // Update JAM version if provided
-    if (jamVersion) {
-      this.setJamVersion(jamVersion)
-    }
+    // Track all input keyvals and which ones are processed
+    const totalKeyvals = keyvals.length
+    const processedKeys = new Set<Hex>()
+    const unprocessedKeyvals: Array<{ key: Hex; value: Hex; reason: string }> = []
 
-    // Store raw keyvals if requested (for testing to bypass roundtrip issues)
-    if (useRawKeyvals) {
-      this.rawStateKeyvals.clear()
-      for (const keyval of keyvals) {
-        this.rawStateKeyvals.set(keyval.key, keyval.value)
-      }
-      this.useRawKeyvals = true
-    }
-
-    // Track key processing for debugging
-    const processingStats = {
-      total: keyvals.length,
-      processed: {
-        chapters: new Map<number, number>(), // chapterIndex -> count
-        csh: { storage: 0, preimage: 0, request: 0 },
-      },
-      skipped: [] as Array<{ key: Hex; reason: string }>,
-    }
-
-    // First pass: Process all simple chapters (C(1) through C(16) and C(255, s))
-    // This ensures service accounts exist before processing C(s, h) keys
-    // Store C(s, h) keys in the order they appear to preserve insertion order
-    const cshKeys: Array<{
-      key: Hex
-      value: Hex
-      parsedStateKey: { serviceId: bigint; hash: Hex }
-    }> = []
-
+    // Process keyvals in the order they appear (no sorting)
+    // This preserves the original order and avoids overwriting values incorrectly
+    // Note: We still need to ensure service accounts (C(255, s)) exist before setting C(s, h) keyvals
+    // But since setServiceAccountKeyvals merges, this should be safe
     for (const keyval of keyvals) {
       const [stateKeyError, parsedStateKey] = this.parseStateKey(keyval.key)
+
       if (stateKeyError) {
-        return safeError(stateKeyError)
-      }
-
-      if ('chapterIndex' in parsedStateKey) {
-        try {
-          const parsedValue = this.parseStateValue(keyval.value, parsedStateKey)
-          if (parsedValue) {
-            // For C(255, s) keys, serviceId is required and should be present
-            const serviceId =
-              parsedStateKey.chapterIndex === 255 &&
-              'serviceId' in parsedStateKey
-                ? parsedStateKey.serviceId
-                : undefined
-            this.setStateComponent(
-              parsedStateKey.chapterIndex,
-              parsedValue,
-              serviceId,
-            )
-
-            // Track successful processing
-            const chapterIndex = parsedStateKey.chapterIndex
-            processingStats.processed.chapters.set(
-              chapterIndex,
-              (processingStats.processed.chapters.get(chapterIndex) ?? 0) + 1,
-            )
-          } else {
-            // Parsed value is null/undefined
-            processingStats.skipped.push({
-              key: keyval.key,
-              reason: 'parsedValue is null/undefined',
-            })
-          }
-        } catch (error) {
-          // Log error but continue processing other keyvals
-          // This allows tests to compare state even when some keyvals fail to decode
-          // (e.g., when fuzzer test vectors use different core counts than the test config)
-          const errorMessage =
-            error instanceof Error ? error.message : String(error)
-          processingStats.skipped.push({
-            key: keyval.key,
-            reason: `Failed to parse state value: ${errorMessage}`,
-          })
-          logger.warn('Failed to parse state value, skipping keyval', {
-            chapterIndex: parsedStateKey.chapterIndex,
-            key: keyval.key,
-            error: errorMessage,
-          })
-        }
-      } else if ('serviceId' in parsedStateKey && 'hash' in parsedStateKey) {
-        // C(s, h) key - defer processing until after all service accounts are set up
-        // COMMENTED OUT: rawCshKeys - we now generate C(s, h) keys from service accounts
-        // Store in cshKeys for second pass parsing into service accounts
-        cshKeys.push({
+        unprocessedKeyvals.push({
           key: keyval.key,
           value: keyval.value,
-          parsedStateKey,
+          reason: `parseStateKey error: ${stateKeyError.message}`,
         })
+        continue
       }
-    }
 
-    // Second pass: Process all C(s, h) keys (storage, preimage, request)
-    // Service accounts should now exist
-    // COMMENTED OUT: rawCshKeys was previously populated in first pass
-    // We now parse C(s, h) keys directly into service accounts
-    // Sort C(s, h) keys to process preimages before requests
-    // This ensures preimages are in preimageInfo when we try to match requests
-    const sortedCshKeys = [...cshKeys].sort((a, b) => {
-      const aValueBytes = hexToBytes(a.value)
-      const bValueBytes = hexToBytes(b.value)
-      const aBlakeHash = a.parsedStateKey.hash
-      const bBlakeHash = b.parsedStateKey.hash
+      if (!parsedStateKey) {
+        unprocessedKeyvals.push({
+          key: keyval.key,
+          value: keyval.value,
+          reason: 'parseStateKey returned null/undefined',
+        })
+        continue
+      }
 
-      // Determine types by trying determineKeyType (may throw, so catch)
-      let aType: 'preimage' | 'request' | 'storage' | 'unknown'
-      let bType: 'preimage' | 'request' | 'storage' | 'unknown'
+      const keyvalRecord: Record<Hex, Hex> = {
+        [keyval.key]: keyval.value
+      }
 
+      const [parsedValueError, parsedValue] = this.parseStateValue(keyval.value, parsedStateKey)
+      if(parsedValueError) {
+        unprocessedKeyvals.push({
+          key: keyval.key,
+          value: keyval.value,
+          reason: `parseStateValue error: ${parsedValueError.message}`,
+        })
+        // Continue processing other keyvals instead of returning early
+        continue
+      }
+      const serviceId = 'serviceId' in parsedStateKey ? parsedStateKey.serviceId : undefined
+      
+      // For C(255, s) keys, serviceId is required and should be present
       try {
-        const aResponse = this.determineKeyType(aValueBytes, aBlakeHash)
-        aType = aResponse.keyType
-      } catch {
-        // If we can't determine, assume storage (processed last)
-        aType = 'storage'
-      }
-
-      try {
-        const bResponse = this.determineKeyType(bValueBytes, bBlakeHash)
-        bType = bResponse.keyType
-      } catch {
-        // If we can't determine, assume storage (processed last)
-        bType = 'storage'
-      }
-
-      // Order: preimage (0), request (1), storage (2)
-      const typeOrder = { preimage: 0, request: 1, storage: 2, unknown: 2 }
-      const aOrder = typeOrder[aType]
-      const bOrder = typeOrder[bType]
-
-      if (aOrder !== bOrder) {
-        return aOrder - bOrder
-      }
-
-      // Within same type, maintain original order
-      return 0
-    })
-
-    for (const {
-      key: keyvalKey,
-      value: keyvalValue,
-      parsedStateKey,
-    } of sortedCshKeys) {
-      // Determine the type from the value format
-      const valueBytes = hexToBytes(keyvalValue)
-      const serviceId = parsedStateKey.serviceId
-      const blakeHashFromKey = parsedStateKey.hash
-
-      try {
-        // Skip empty C(s, h) keys - they represent deleted/empty storage
-        if (valueBytes.length === 0) {
-          processingStats.skipped.push({
-            key: keyvalKey,
-            reason: 'Empty C(s, h) key (deleted/empty storage)',
-          })
-          logger.debug('Skipping empty C(s, h) key', {
-            key: keyvalKey,
-            serviceId: serviceId.toString(),
-            hash: blakeHashFromKey,
-          })
-          continue
-        }
-
-        const response = this.determineKeyType(valueBytes, blakeHashFromKey)
-
-        // #region agent log
-        const TARGET_STATE_KEY_CLASSIFY =
-          '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-        if (
-          keyvalKey.toLowerCase() === TARGET_STATE_KEY_CLASSIFY.toLowerCase()
-        ) {
-          fetch(
-            'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'state-service.ts:758',
-                message: 'setState: determineKeyType result for target key',
-                data: {
-                  keyvalKey,
-                  serviceId: serviceId.toString(),
-                  keyType: response.keyType,
-                  valueLength: valueBytes.length,
-                },
-                timestamp: Date.now(),
-                sessionId: 'debug-session',
-                runId: 'run1',
-                hypothesisId: 'U',
-              }),
-            },
-          ).catch(() => {})
-        }
-        // #endregion
-
-        switch (response.keyType) {
-          case 'storage': {
-            // #region agent log
-            const TARGET_STATE_KEY_STORAGE =
-              '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-            if (
-              keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()
-            ) {
-              fetch(
-                'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    location: 'state-service.ts:761',
-                    message: 'setState: Setting storage for target key',
-                    data: {
-                      keyvalKey,
-                      serviceId: serviceId.toString(),
-                      storageKey: response.key,
-                      valueLength: response.value.length,
-                    },
-                    timestamp: Date.now(),
-                    sessionId: 'debug-session',
-                    runId: 'run1',
-                    hypothesisId: 'U',
-                  }),
-                },
-              ).catch(() => {})
-            }
-            // #endregion
-            // Service account must already exist when parsing state
-            const [storageAccountError, storageAccount] =
-              this.serviceAccountsService.getServiceAccount(serviceId)
-            if (storageAccountError || !storageAccount) {
-              throw new Error(
-                `Service account ${serviceId} does not exist when setting storage`,
-              )
-            }
-            const [storageError] = this.serviceAccountsService.setStorage(
-              serviceId,
-              response.key,
-              response.value,
-            )
-            // #region agent log
-            if (
-              keyvalKey.toLowerCase() === TARGET_STATE_KEY_STORAGE.toLowerCase()
-            ) {
-              fetch(
-                'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    location: 'state-service.ts:777',
-                    message: 'setState: After setting storage for target key',
-                    data: {
-                      keyvalKey,
-                      serviceId: serviceId.toString(),
-                      storageError: storageError?.message || 'null',
-                      storageKey: response.key,
-                    },
-                    timestamp: Date.now(),
-                    sessionId: 'debug-session',
-                    runId: 'run1',
-                    hypothesisId: 'U',
-                  }),
-                },
-              ).catch(() => {})
-            }
-            // #endregion
-            if (storageError) {
-              processingStats.skipped.push({
-                key: keyvalKey,
-                reason: `Failed to set storage: ${storageError.message}`,
-              })
-              logger.warn('Failed to set storage', {
-                serviceId: serviceId.toString(),
-                error: storageError.message,
-              })
-            } else {
-              processingStats.processed.csh.storage++
-            }
-            break
-          }
-          case 'preimage': {
-            // Store preimage info for request key verification
-            if (!this.preimageInfo.has(serviceId)) {
-              this.preimageInfo.set(serviceId, new Map())
-            }
-            const servicePreimages = this.preimageInfo.get(serviceId)!
-            servicePreimages.set(response.preimageHash, response.blob.length)
-
-            // Service account must already exist when parsing state
-            const [preimageAccountError, preimageAccount] =
-              this.serviceAccountsService.getServiceAccount(serviceId)
-            if (preimageAccountError || !preimageAccount) {
-              throw new Error(
-                `Service account ${serviceId} does not exist when setting preimage`,
-              )
-            }
-            const [preimageError] = this.serviceAccountsService.setPreimage(
-              serviceId,
-              response.preimageHash, // Use actual preimage hash, not blakeHashFromKey
-              valueBytes,
-            )
-            if (preimageError) {
-              processingStats.skipped.push({
-                key: keyvalKey,
-                reason: `Failed to set preimage: ${preimageError.message}`,
-              })
-              logger.warn('Failed to set preimage', {
-                serviceId: serviceId.toString(),
-                error: preimageError.message,
-              })
-            } else {
-              processingStats.processed.csh.preimage++
-            }
-            break
-          }
-          case 'request': {
-            // Try to verify by matching against known preimages for this service
-            // Gray Paper: C(s, encode[4]{l} ∥ h) where l=blob_length, h=preimage_hash
-            const servicePreimages = this.preimageInfo.get(serviceId)
-            let matchedPreimageHash: Hex | undefined
-
-            if (servicePreimages && servicePreimages.size > 0) {
-              // Try each known preimage for this service
-              for (const [
-                preimageHash,
-                blobLength,
-              ] of servicePreimages.entries()) {
-                // Compute blake(encode[4]{l} ∥ h) where l=blobLength, h=preimageHash
-                const lengthPrefix = new Uint8Array(4)
-                const lengthView = new DataView(lengthPrefix.buffer)
-                lengthView.setUint32(0, blobLength, true) // little-endian
-
-                const preimageHashBytes = hexToBytes(preimageHash)
-                const combinedRequestKey = new Uint8Array(
-                  lengthPrefix.length + preimageHashBytes.length,
-                )
-                combinedRequestKey.set(lengthPrefix, 0)
-                combinedRequestKey.set(preimageHashBytes, lengthPrefix.length)
-
-                const [combinedRequestHashError, combinedRequestHash] =
-                  blake2bHash(combinedRequestKey)
-                if (!combinedRequestHashError && combinedRequestHash) {
-                  const combinedRequestHashBytes =
-                    hexToBytes(combinedRequestHash)
-                  const combinedRequestHashHex = bytesToHex(
-                    combinedRequestHashBytes.slice(0, 27),
-                  ) // First 27 bytes
-
-                  if (
-                    combinedRequestHashHex.toLowerCase() ===
-                    blakeHashFromKey.toLowerCase()
-                  ) {
-                    // Found matching preimage!
-                    matchedPreimageHash = preimageHash
-                    logger.debug('Request key verified against preimage', {
-                      key: keyvalKey,
-                      serviceId: serviceId.toString(),
-                      preimageHash: preimageHash,
-                      blobLength: blobLength,
-                    })
-                    break
-                  }
-                }
-              }
-            }
-
-            if (!matchedPreimageHash) {
-              // #region agent log
-              const TARGET_STATE_KEY_RECLASSIFY =
-                '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-              if (
-                keyvalKey.toLowerCase() ===
-                TARGET_STATE_KEY_RECLASSIFY.toLowerCase()
-              ) {
-                fetch(
-                  'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      location: 'state-service.ts:876',
-                      message:
-                        'setState: Reclassifying unmatched request as storage',
-                      data: {
-                        keyvalKey,
-                        serviceId: serviceId.toString(),
-                        stateKeyHash: blakeHashFromKey,
-                        checkedPreimages: servicePreimages?.size ?? 0,
-                        timeslots: response.timeslots.map((t) => t.toString()),
-                        valueLength: valueBytes.length,
-                      },
-                      timestamp: Date.now(),
-                      sessionId: 'debug-session',
-                      runId: 'run1',
-                      hypothesisId: 'S',
-                    }),
-                  },
-                ).catch(() => {})
-              }
-              // #endregion
-              // No matching preimage found - reclassify as storage instead of request
-              // A request must have a corresponding preimage (the hash in the request key should match a preimage)
-              // If there's no matching preimage, it's likely storage that happens to have a value format that looks like a request
-              logger.debug(
-                'Request-like key could not be matched to any known preimage, reclassifying as storage',
-                {
-                  key: keyvalKey,
-                  serviceId: serviceId.toString(),
-                  stateKeyHash: blakeHashFromKey,
-                  checkedPreimages: servicePreimages?.size ?? 0,
-                  note: 'Value format matched request pattern but no preimage match found - treating as storage',
-                },
-              )
-
-              // Reclassify as storage
-              // Use blakeHashFromKey as the storage key (we can't recover the original storage key k from the state key)
-              // Service account must already exist when parsing state
-              const [storageAccountError, storageAccount] =
-                this.serviceAccountsService.getServiceAccount(serviceId)
-              if (storageAccountError || !storageAccount) {
-                throw new Error(
-                  `Service account ${serviceId} does not exist when setting storage`,
-                )
-              }
-              const [storageError] = this.serviceAccountsService.setStorage(
-                serviceId,
-                blakeHashFromKey,
-                valueBytes,
-              )
-              // #region agent log
-              if (
-                keyvalKey.toLowerCase() ===
-                TARGET_STATE_KEY_RECLASSIFY.toLowerCase()
-              ) {
-                fetch(
-                  'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-                  {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      location: 'state-service.ts:901',
-                      message: 'setState: After reclassifying as storage',
-                      data: {
-                        keyvalKey,
-                        serviceId: serviceId.toString(),
-                        storageError: storageError?.message || 'null',
-                        storageKey: blakeHashFromKey,
-                      },
-                      timestamp: Date.now(),
-                      sessionId: 'debug-session',
-                      runId: 'run1',
-                      hypothesisId: 'S',
-                    }),
-                  },
-                ).catch(() => {})
-              }
-              // #endregion
-              if (storageError) {
-                processingStats.skipped.push({
-                  key: keyvalKey,
-                  reason: `Failed to set storage (reclassified from request): ${storageError.message}`,
-                })
-                logger.warn(
-                  'Failed to set storage (reclassified from request)',
-                  {
-                    serviceId: serviceId.toString(),
-                    error: storageError.message,
-                  },
-                )
-              } else {
-                processingStats.processed.csh.storage++
-              }
-              break
-            }
-
-            // Found matching preimage - store as request
-            // Service account must already exist when parsing state
-            const [requestAccountError, requestAccount] =
-              this.serviceAccountsService.getServiceAccount(serviceId)
-            if (requestAccountError || !requestAccount) {
-              throw new Error(
-                `Service account ${serviceId} does not exist when setting preimage request`,
-              )
-            }
-            const [requestError] =
-              this.serviceAccountsService.setPreimageRequest(
-                serviceId,
-                matchedPreimageHash,
-                response.timeslots,
-              )
-            if (requestError) {
-              processingStats.skipped.push({
-                key: keyvalKey,
-                reason: `Failed to set preimage request: ${requestError.message}`,
-              })
-              logger.warn('Failed to set preimage request', {
-                serviceId: serviceId.toString(),
-                error: requestError.message,
-              })
-            } else {
-              processingStats.processed.csh.request++
-            }
-            break
-          }
-        }
+        this.setStateComponent(
+          parsedStateKey.chapterIndex,
+          parsedValue,
+          keyvalRecord,
+          serviceId,
+        )
+        processedKeys.add(keyval.key)
       } catch (error) {
-        // Log as warning and skip - invalid C(s, h) keys are allowed
-        // They may represent corrupted test data or edge cases
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        processingStats.skipped.push({
-          key: keyvalKey,
-          reason: `Failed to determine C(s, h) key type: ${errorMessage}`,
-        })
-        logger.warn('Failed to determine C(s, h) key type, skipping', {
-          key: keyvalKey,
-          serviceId: serviceId.toString(),
-          hash: blakeHashFromKey,
-          valueLength: valueBytes.length,
-          error: errorMessage,
+        unprocessedKeyvals.push({
+          key: keyval.key,
+          value: keyval.value,
+          reason: `setStateComponent error: ${error instanceof Error ? error.message : String(error)}`,
         })
       }
     }
 
-    // Log processing summary
-    const totalProcessed =
-      Array.from(processingStats.processed.chapters.values()).reduce(
-        (sum, count) => sum + count,
-        0,
-      ) +
-      processingStats.processed.csh.storage +
-      processingStats.processed.csh.preimage +
-      processingStats.processed.csh.request
-
-    logger.info('[StateService] setState processing summary', {
-      total: processingStats.total,
-      processed: totalProcessed,
-      skipped: processingStats.skipped.length,
-      breakdown: {
-        chapters: Object.fromEntries(processingStats.processed.chapters),
-        csh: processingStats.processed.csh,
-      },
-      skippedKeys: processingStats.skipped.slice(0, 10).map((s) => ({
-        key: s.key,
-        reason: s.reason,
-      })), // Show first 10 skipped keys
-      ...(processingStats.skipped.length > 10
-        ? { note: `${processingStats.skipped.length - 10} more keys skipped` }
-        : {}),
-    })
-
-    if (processingStats.skipped.length > 0) {
-      logger.warn('[StateService] Some keys were not processed', {
-        skippedCount: processingStats.skipped.length,
-        totalKeys: processingStats.total,
-        processedKeys: totalProcessed,
-      })
+    // Log unprocessed keyvals if any
+    if (unprocessedKeyvals.length > 0) {
+      logger.warn(
+        `[StateService] setState: ${unprocessedKeyvals.length} of ${totalKeyvals} keyvals were not processed`,
+        {
+          totalKeyvals,
+          processedCount: processedKeys.size,
+          unprocessedCount: unprocessedKeyvals.length,
+          unprocessedKeyvals: unprocessedKeyvals.slice(0, 10), // Log first 10
+        },
+      )
+      
+      // Log details for each unprocessed keyval
+      for (const unprocessed of unprocessedKeyvals) {
+        logger.warn(
+          `[StateService] Unprocessed keyval: ${unprocessed.key.substring(0, 20)}... (reason: ${unprocessed.reason})`,
+        )
+      }
     }
 
     return safeResult(undefined)
@@ -1171,16 +675,6 @@ export class StateService extends BaseService implements IStateService {
    * - Block header commitment
    */
   generateStateTrie(): Safe<StateTrie> {
-    // If using raw keyvals (for testing), return them directly as the state trie
-    // This bypasses decode/encode roundtrip issues
-    if (this.useRawKeyvals && this.rawStateKeyvals.size > 0) {
-      const stateTrie: StateTrie = {}
-      for (const [key, value] of this.rawStateKeyvals.entries()) {
-        stateTrie[key] = value
-      }
-      return safeResult(stateTrie)
-    }
-
     const globalState: GlobalState = {
       authpool: this.authPoolService.getAuthPool(),
       recent: this.recentHistoryService.getRecent(),
@@ -1219,10 +713,13 @@ export class StateService extends BaseService implements IStateService {
       accumulated: this.accumulationService.getAccumulated(),
     }
 
-    // Generate C(s, h) keys from service accounts (storage/preimages/requests)
-    // Gray Paper merklization.tex line 118: "Implementations are free to use this fact in order
-    // to avoid storing the keys themselves"
-    return createStateTrie(globalState, this.configService, this.jamVersion)
+    const [trieError, stateTrie] = createStateTrie(globalState, this.configService, this.configService.jamVersion)
+    
+    if (trieError) {
+      return safeError(trieError)
+    }
+    
+    return safeResult(stateTrie)
   }
 
   /**
@@ -1267,110 +764,6 @@ export class StateService extends BaseService implements IStateService {
   }
 
   /**
-   * Query service account storage value
-   *
-   * Gray Paper merklization.tex (lines 103-104):
-   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
-   * C(s, encode[4]{2³²-1} ∥ k) ↦ v
-   *
-   * @param serviceId - Service account ID
-   * @param storageKey - Storage key (blob)
-   * @returns Storage value if found, undefined if not found
-   */
-  getServiceStorageValue(
-    serviceId: bigint,
-    storageKey: Hex,
-  ): Safe<Uint8Array | undefined> {
-    const storageStateKey = createServiceStorageKey(serviceId, storageKey)
-    const stateKeyHex = bytesToHex(storageStateKey)
-
-    const [error, value] = this.getStateTrieValue(stateKeyHex)
-    if (error) {
-      return safeError(error)
-    }
-
-    if (!value) {
-      return safeResult(undefined)
-    }
-
-    // Convert hex value back to Uint8Array
-    const valueBytes = hexToBytes(value)
-    return safeResult(valueBytes)
-  }
-
-  /**
-   * Get state range with boundary nodes for CE129 protocol
-   *
-   * CE129: State request - Returns contiguous range of key/value pairs from state trie
-   * along with boundary nodes needed for verification.
-   *
-   * @param headerHash - Block header hash
-   * @param startKey - 31-byte start key (inclusive)
-   * @param endKey - 31-byte end key (inclusive)
-   * @param maxSize - Maximum response size in bytes
-   * @returns State range with boundary nodes
-   */
-  // getStateRangeWithBoundaries(
-  //   _headerHash: Hex,
-  //   startKey: Uint8Array,
-  //   endKey: Uint8Array,
-  //   maxSize: number,
-  // ): Safe<
-  //   boundaryNodes: Uint8Array[]
-  //   keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>> {
-  //     // Generate current state trie
-  //     const [trieError, stateTrie] = this.generateStateTrie()
-  //     if (trieError) {
-  //       return safeError(trieError)
-  //     }
-
-  //     // Convert to sorted key-value pairs
-  //     const keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }> = []
-  //     const sortedKeys = Object.keys(stateTrie).sort()
-
-  //     // Find range within sorted keys
-  //     for (const keyHex of sortedKeys) {
-  //       const key = hexToBytes(
-  //         keyHex.startsWith('0x') ? (keyHex as `0x${string}`) : `0x${keyHex}`,
-  //       )
-  //       const key31 = key.slice(0, 31) // Only first 31 bytes matter
-
-  //       // Check if key is in range
-  //       if (
-  //         this.compareKeys(key31, startKey) >= 0 &&
-  //         this.compareKeys(key31, endKey) <= 0
-  //       ) {
-  //         const value = hexToBytes(stateTrie[keyHex as `0x${string}`])
-  //         keyValuePairs.push({ key: key31, value })
-  //       }
-  //     }
-
-  //     // Build boundary nodes for the range
-  //     const boundaryNodes = this.buildBoundaryNodes(stateTrie, startKey, endKey)
-
-  //     // Check size limit (unless only one key/value pair)
-  //     // const responseSize = this.estimateResponseSize(
-  //     //   boundaryNodes,
-  //     //   keyValuePairs,
-  //     // )
-  //     // TEMPORARY HACK
-  //     const responseSize = maxSize - 1
-  //     if (responseSize > maxSize && keyValuePairs.length > 1) {
-  //       // Truncate to fit maxSize
-  //       const truncatedPairs = this.truncateToSize(
-  //         keyValuePairs,
-  //         maxSize,
-  //         boundaryNodes.length,
-  //       )
-  //       return safeResult({
-  //         boundaryNodes,
-  //         keyValuePairs: truncatedPairs,
-  //       })
-  //     }
-
-  //     return safeResult({ boundaryNodes, keyValuePairs })
-  // }
-  /**
    * Parse a state key to determine which state component it represents
    *
    * Gray Paper Reference: merklization.tex equation (10-16)
@@ -1379,7 +772,7 @@ export class StateService extends BaseService implements IStateService {
    * C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, ...⟩ where n = encode[4](s), a = blake(h)
    *
    * For C(s, h) keys, the key type cannot be determined from the key alone.
-   * Use determineKeyTypeFromValue() or determineKeyTypeWithCandidate() to determine the type.
+   * Use determineKeyType() to determine the type.
    *
    * @param keyHex - Hex string representing the state key
    * @returns Parsed state key with type-safe discriminated union
@@ -1423,193 +816,20 @@ export class StateService extends BaseService implements IStateService {
       return safeResult({ chapterIndex: 255, serviceId })
     }
 
-    // Otherwise, this is a C(s, h) key (service storage/preimage/request)
-    // Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
-    // where n = encode[4](s), a = blake(h)
-    // Bytes are INTERLEAVED: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, then a₄...a₂₆
-    //
-    // Gray Paper formulas:
-    // - Storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v where k is storage key
-    // - Preimage: C(s, encode[4]{2³²-2} ∥ h) ↦ p where h is preimage hash
-    // - Request: C(s, encode[4]{l} ∥ h) ↦ encode{...} where l is length, h is request hash
-    //
-    // Extract service ID from interleaved bytes: n₀, n₁, n₂, n₃ at positions 0, 2, 4, 6
-    const serviceIdBytes = new Uint8Array(4)
-    serviceIdBytes[0] = keyBytes[0] // n₀
-    serviceIdBytes[1] = keyBytes[2] // n₁
-    serviceIdBytes[2] = keyBytes[4] // n₂
-    serviceIdBytes[3] = keyBytes[6] // n₃
-    const view = new DataView(serviceIdBytes.buffer)
-    const serviceId = BigInt(view.getUint32(0, true)) // little-endian
-
-    // Extract Blake hash from interleaved bytes: a₀, a₁, a₂, a₃ at positions 1, 3, 5, 7, then a₄...a₂₆ at positions 8-30
-    const blakeHashBytes = new Uint8Array(27)
-    blakeHashBytes[0] = keyBytes[1] // a₀
-    blakeHashBytes[1] = keyBytes[3] // a₁
-    blakeHashBytes[2] = keyBytes[5] // a₂
-    blakeHashBytes[3] = keyBytes[7] // a₃
-    blakeHashBytes.set(keyBytes.slice(8, 31), 4) // a₄...a₂₆
-
-    // The Blake hash is of the combined key: prefix (4 bytes) + key/hash (variable length)
-    // - Storage: encode[4]{0xFFFFFFFF} ∥ storage_key
-    // - Preimage: encode[4]{0xFFFFFFFE} ∥ preimage_hash
-    // - Request: encode[4]{length} ∥ request_hash
-    //
-    // We cannot directly extract the prefix from the Blake hash, but we can reconstruct
-    // the combined key by trying different prefixes when we know the key type.
-    // However, for parsing purposes, we store the Blake hash bytes.
-
-    // Store the Blake hash bytes (this is what we can extract from the state key)
-    const blakeHash = bytesToHex(blakeHashBytes)
-
-    return safeResult({ serviceId, hash: blakeHash })
+    // This could be a C(s, h) key - extract service ID from bytes 0, 2, 4, 6
+    // Note: Service ID 0 is valid, so firstByte === 0 is a valid C(s, h) key
+    const serviceId = this.parseServiceIdFromCshKey(keyBytes)
+    
+    // Always return the service ID (even if it's 0) - it's a valid C(s, h) key
+    return safeResult({ chapterIndex: 0, serviceId }) // Use 0 as indicator for C(s, h)
+    
   }
 
   /**
-   * Determine the type of a C(s, h) key from its value
+   * Parse service ID from service account key (C(255, s))
    *
-   * Gray Paper formulas:
-   * - Storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v (raw blob)
-   * - Preimage: C(s, encode[4]{2³²-2} ∥ h) ↦ p (raw blob, where h = blake(p))
-   * - Request: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}} (variable-length sequence of up to 3 timeslots)
-   *
-   * Strategy:
-   * 1. Check if it's a request by reading available bytes, splitting into 4-byte
-   *    little-endian chunks, and verifying length <= 3
-   * 2. If that fails, try to determine if it's a preimage by:
-   *    - Computing h = blake(value)
-   *    - Computing blake(encode[4]{0xFFFFFFFE} ∥ h)
-   *    - Comparing first 27 bytes with the Blake hash from the key
-   * 3. Otherwise, it's storage (storage keys k are arbitrary and cannot be verified)
-   *
-   * @param valueBytes - The value bytes from the state
-   * @param blakeHashFromKey - The Blake hash extracted from the state key (first 27 bytes)
-   * @returns The determined key type: 'storage', 'preimage', or 'request'
-   */
-  public determineKeyType(
-    valueBytes: Uint8Array,
-    blakeHashFromKey: Hex,
-  ):
-    | { keyType: 'storage'; key: Hex; value: Uint8Array }
-    | { keyType: 'preimage'; preimageHash: Hex; blob: Uint8Array }
-    | { keyType: 'request'; timeslots: bigint[] } {
-    // Not a request or preimage - verify it's storage
-    // For storage: C(s, encode[4]{2³²-1} ∥ k) ↦ v (raw blob)
-    // State key contains: blake(encode[4]{0xFFFFFFFF} ∥ k)
-    // We need to verify that blake(encode[4]{0xFFFFFFFF} ∥ h) matches the state key
-    // Try using blake(value) as h (similar to preimage check)
-    if (valueBytes.length === 0) {
-      throw new Error(
-        'C(s, h) key value is empty - cannot be storage (storage values must be non-empty raw blobs)',
-      )
-    }
-
-    // Try to check if it's a request
-    // Gray Paper: C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
-    // Request values are sequences of up to 3 timeslots (4-byte each)
-    // Format: var{length} || timeslot0 || timeslot1 || ...
-    // We decode the var{} length prefix, then read that many 4-byte timeslots
-    const [lengthError, lengthResult] = decodeNatural(valueBytes)
-    if (!lengthError && lengthResult) {
-      const timeslotCount = Number(lengthResult.value)
-      const lengthPrefixBytes = lengthResult.consumed
-      const remainingBytes = valueBytes.length - lengthPrefixBytes
-      const expectedBytes = timeslotCount * 4
-
-      // #region agent log
-      // Log for debugging request classification
-      if (valueBytes.length === 140 && valueBytes[0] === 0x00) {
-        fetch(
-          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'state-service.ts:1372',
-              message: 'determineKeyType: Request length check',
-              data: {
-                valueLength: valueBytes.length,
-                timeslotCount,
-                lengthPrefixBytes,
-                remainingBytes,
-                expectedBytes,
-                matches: remainingBytes === expectedBytes,
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'T',
-            }),
-          },
-        ).catch(() => {})
-      }
-      // #endregion
-
-      // Check if we have EXACTLY the right number of bytes for the timeslots and length is <= 3
-      // A request must be: var{} length prefix + exactly n * 4 bytes (no extra bytes)
-      // If there are extra bytes, it's likely storage, not a request
-      if (timeslotCount <= 3 && remainingBytes === expectedBytes) {
-        const timeslots: bigint[] = []
-        for (let i = 0; i < timeslotCount; i++) {
-          const offset = lengthPrefixBytes + i * 4
-          if (offset + 4 <= valueBytes.length) {
-            const view = new DataView(
-              valueBytes.buffer,
-              valueBytes.byteOffset + offset,
-              4,
-            )
-            const timeslot = BigInt(view.getUint32(0, true)) // little-endian
-            timeslots.push(timeslot)
-          }
-        }
-        if (timeslots.length === timeslotCount) {
-          return { keyType: 'request', timeslots }
-        }
-      }
-    }
-
-    // Not a request - try to determine if it's a preimage
-    // For preimage: value is p, and h = blake(p)
-    // State key contains: blake(encode[4]{0xFFFFFFFE} ∥ h)
-    const [preimageHashError, preimageHash] = blake2bHash(valueBytes)
-    if (!preimageHashError && preimageHash) {
-      // Try to match against preimage prefix
-      const prefix = new Uint8Array(4)
-      const prefixView = new DataView(prefix.buffer)
-      prefixView.setUint32(0, 0xfffffffe, true) // little-endian
-      // preimageHash is already Hex type from blake2bHash
-      const preimageHashBytes = hexToBytes(preimageHash)
-      const combinedKey = new Uint8Array(
-        prefix.length + preimageHashBytes.length,
-      )
-      combinedKey.set(prefix, 0)
-      combinedKey.set(preimageHashBytes, prefix.length)
-      const [combinedHashError, combinedHash] = blake2bHash(combinedKey)
-      if (!combinedHashError && combinedHash) {
-        // combinedHash is Hex (string), extract first 27 bytes
-        const combinedHashBytes = hexToBytes(combinedHash)
-        const combinedHashHex = bytesToHex(combinedHashBytes.slice(0, 27)) // First 27 bytes
-        if (combinedHashHex === blakeHashFromKey) {
-          // It's a preimage!
-          return {
-            keyType: 'preimage',
-            preimageHash: preimageHash,
-            blob: valueBytes,
-          }
-        }
-      }
-    }
-
-    // Not a request or preimage - default to storage
-    // Gray Paper: C(s, encode[4]{0xFFFFFFFF} ∥ k) ↦ v
-    // Storage keys k are arbitrary blobs chosen by the service, not related to blake(value)
-    // We cannot verify storage keys from the state key alone (k is hashed and unrecoverable)
-    // Therefore, if it's not a request or preimage, we assume it's storage
-    return { keyType: 'storage', key: blakeHashFromKey, value: valueBytes }
-  }
-
-  /**
-   * Parse service ID from service account key
+   * Gray Paper: C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
+   * Service ID is in bytes 1, 3, 5, 7 (interleaved with zeros)
    *
    * @param keyBytes - 31-byte state key
    * @returns Service ID as bigint
@@ -1630,6 +850,30 @@ export class StateService extends BaseService implements IStateService {
   }
 
   /**
+   * Parse service ID from C(s, h) key (storage/preimage/request)
+   *
+   * Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+   * Service ID is in bytes 0, 2, 4, 6 (interleaved with Blake hash)
+   *
+   * @param keyBytes - 31-byte state key
+   * @returns Service ID as bigint, or null if not a valid C(s, h) key
+   */
+  private parseServiceIdFromCshKey(keyBytes: Uint8Array): bigint | null {
+    // Service ID is encoded in bytes 0, 2, 4, 6 (every other byte starting from 0)
+    // Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+    // where n = encode[4](s) in little-endian format
+    const serviceIdBytes = new Uint8Array(4)
+    serviceIdBytes[0] = keyBytes[0] // n₀
+    serviceIdBytes[1] = keyBytes[2] // n₁
+    serviceIdBytes[2] = keyBytes[4] // n₂
+    serviceIdBytes[3] = keyBytes[6] // n₃
+
+    // Convert to bigint (little-endian, matching createStateKey encoding)
+    const view = new DataView(serviceIdBytes.buffer)
+    return BigInt(view.getUint32(0, true))
+  }
+
+  /**
    * Parse state value based on component type
    *
    * @param component - State component name
@@ -1639,138 +883,24 @@ export class StateService extends BaseService implements IStateService {
   private parseStateValue(
     valueHex: Hex,
     parsedStateKey: Extract<ParsedStateKey, { chapterIndex: number }>,
-  ): StateComponent {
+  ): Safe<StateComponent> {
+    if (parsedStateKey.chapterIndex === 0) {
+      return safeResult(valueHex)
+    }
     const decoder = this.stateTypeRegistry.get(parsedStateKey.chapterIndex)
 
     if (!decoder) {
-      logger.warn('No decoder found for chapter index', {
-        chapterIndex: parsedStateKey.chapterIndex,
-        availableIndices: Array.from(this.stateTypeRegistry.keys()),
-      })
-      throw new Error('No decoder found for chapter index')
+      return safeError(new Error('No decoder found for chapter index'))
     }
 
     const data = hexToBytes(valueHex)
     const [error, result] = decoder(data)
 
     if (error) {
-      logger.error('Failed to decode state value', {
-        chapterIndex: parsedStateKey.chapterIndex,
-        valueHexLength: valueHex.length,
-        dataLength: data.length,
-        error: error.message,
-        firstBytes: bytesToHex(data.slice(0, Math.min(128, data.length))),
-      })
-      throw new Error('Failed to decode state value')
+      return safeError(new Error('Failed to decode state value'))
     }
 
-    return result.value as StateComponent
-  }
-
-  /**
-   * Build b*/
-  // private buildBoundaryNodes(
-  //   stateTrie: StateTrie,
-  //   startKey: Uint8Array,
-  //   endKey: Uint8Array,
-  // ): Uint8Array[] {
-  //   // Simplified implementation - in practice, this would traverse the trie
-  //   // and collect nodes on paths from root to start/end keys
-  //   const boundaryNodes: Uint8Array[] = []
-
-  //   // For now, return empty array as full trie traversal implementation
-  //   // would be quite complex and require the actual trie structure
-  //   logger.debug('Building boundary nodes for state range', {
-  //     startKey: bytesToHex(startKey),
-  //     endKey: bytesToHex(endKey),
-  //     trieSize: Object.keys(stateTrie).length,
-  //   })
-
-  //   return boundaryNodes
-  // }
-
-  /**
-   * Estimate response size in bytes
-   */
-  // TODO: implement properly
-  // private estimateResponseSize(
-  //   boundaryNodes: Uint8Array[],
-  //   keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>,
-  // ): number {
-  //   let size = 0
-
-  //   // Boundary nodes: 64 bytes each
-  //   size += boundaryNodes.length * 64
-
-  //   // Key-value pairs: 31 bytes key + 4 bytes length + value length
-  //   for (const { key, value } of keyValuePairs) {
-  //     size += 31 + 4 + value.length
-  //   }
-
-  //   return size
-  // }
-
-  /**
-   * Truncate key-value pairs to fit within size limit
-   */
-  // private truncateToSize(
-  //   keyValuePairs: Array<{ key: Uint8Array; value: Uint8Array }>,
-  //   maxSize: number,
-  //   boundaryNodeCount: number,
-  // ): Array<{ key: Uint8Array; value: Uint8Array }> {
-  //   const boundaryNodeSize = boundaryNodeCount * 64
-  //   const availableSize = maxSize - boundaryNodeSize
-
-  //   const truncated: Array<{ key: Uint8Array; value: Uint8Array }> = []
-  //   let currentSize = 0
-
-  //   for (const { key, value } of keyValuePairs) {
-  //     const itemSize = 31 + 4 + value.length
-  //     if (currentSize + itemSize > availableSize) {
-  //       break
-  //     }
-  //     truncated.push({ key, value })
-  //     currentSize += itemSize
-  //   }
-
-  //   return truncated
-  // }
-
-  /**
-   * Calculate Merkle root from raw keyvals (for test vectors)
-   *
-   * This bypasses decode/encode and uses the raw values directly from test vectors.
-   * Useful when the test vector state root should match exactly.
-   */
-  public calculateStateRootFromKeyvals(
-    keyvals: { key: Hex; value: Hex }[],
-  ): Safe<Hex> {
-    const hexKeyValues: Record<string, string> = {}
-
-    for (const keyval of keyvals) {
-      const normalizedKey = keyval.key.startsWith('0x')
-        ? keyval.key
-        : `0x${keyval.key}`
-      const normalizedValue = keyval.value.startsWith('0x')
-        ? keyval.value
-        : `0x${keyval.value}`
-      hexKeyValues[normalizedKey] = normalizedValue
-    }
-
-    // Use Gray Paper merklization implementation
-    const [error, merkleRoot] = merklizeState(hexKeyValues)
-    if (error) {
-      return safeError(
-        new Error(
-          `Failed to calculate Merkle root from keyvals: ${error.message}`,
-        ),
-      )
-    }
-
-    // Convert Uint8Array to Hex
-    const rootHex = bytesToHex(merkleRoot)
-
-    return safeResult(rootHex)
+    return safeResult(result.value as StateComponent)
   }
 
   /**

@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { encodeServiceAccount, decodeServiceAccount } from '../state/service-account'
-import type { ServiceAccountCore } from '@pbnjam/types'
+import {
+  encodeServiceAccount,
+  decodeServiceAccount,
+  setServiceStorageValue,
+  getServiceStorageValue,
+} from '../state/service-account'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { determineSingleKeyType } from '../state/state-key'
+import { createServiceStorageKey } from '../state/state-serialization'
+import type { ServiceAccount } from '@pbnjam/types'
+import type { Hex } from '@pbnjam/core'
 
 describe('Service Account Serialization', () => {
-  const mockServiceAccount: ServiceAccountCore = {
+  const mockServiceAccount: ServiceAccount = {
     codehash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
     balance: 1000000n,
     minaccgas: 1000n,
@@ -14,9 +23,10 @@ describe('Service Account Serialization', () => {
     created: 1000n,
     lastacc: 2000n,
     parent: 0n,
+    rawCshKeyvals: {},
   }
 
-  const mockServiceAccountEmpty: ServiceAccountCore = {
+  const mockServiceAccountEmpty: ServiceAccount = {
     codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
     balance: 0n,
     minaccgas: 0n,
@@ -27,6 +37,7 @@ describe('Service Account Serialization', () => {
     created: 0n,
     lastacc: 0n,
     parent: 0n,
+    rawCshKeyvals: {},
   }
 
   it('should encode and decode service account with all fields', () => {
@@ -70,7 +81,7 @@ describe('Service Account Serialization', () => {
   })
 
   it('should handle round-trip with realistic service account values', () => {
-    const realisticAccount: ServiceAccountCore = {
+    const realisticAccount: ServiceAccount = {
       codehash: '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       balance: 5000000000000000000n, // 5 ETH equivalent
       minaccgas: 21000n, // Standard gas limit
@@ -81,6 +92,7 @@ describe('Service Account Serialization', () => {
       created: 1234567890n,
       lastacc: 1234567891n,
       parent: 42n,
+      rawCshKeyvals: {},
     }
 
     const [encodeError, encodedData] = encodeServiceAccount(realisticAccount)
@@ -164,7 +176,7 @@ describe('Service Account Serialization', () => {
   })
 
   it('should handle large values correctly', () => {
-    const largeAccount: ServiceAccountCore = {
+    const largeAccount: ServiceAccount = {
       codehash: '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
       balance: 18446744073709551615n, // Max 64-bit value
       minaccgas: 18446744073709551615n,
@@ -175,6 +187,7 @@ describe('Service Account Serialization', () => {
       created: 4294967295n,
       lastacc: 4294967295n,
       parent: 4294967295n,
+      rawCshKeyvals: {},
     }
 
     const [encodeError, encodedData] = encodeServiceAccount(largeAccount)
@@ -205,9 +218,10 @@ describe('Service Account Serialization', () => {
     ]
 
     for (const codehash of patterns) {
-      const account: ServiceAccountCore = {
+      const account: ServiceAccount = {
         ...mockServiceAccountEmpty,
         codehash: codehash as `0x${string}`,
+        rawCshKeyvals: {},
       }
 
       const [encodeError, encodedData] = encodeServiceAccount(account)
@@ -219,5 +233,118 @@ describe('Service Account Serialization', () => {
       expect(decoded).toBeDefined()
       expect(decoded!.value.codehash).toBe(codehash)
     }
+  })
+
+  describe('Storage values that could be misclassified as requests', () => {
+    it('should NOT classify storage values starting with natural number prefixes as requests', () => {
+      const serviceId = 0n
+      const account: ServiceAccount = {
+        ...mockServiceAccountEmpty,
+        rawCshKeyvals: {},
+      }
+
+      // Test cases from the actual mismatch: values that start with bytes that could be decoded as natural numbers
+      // These are storage values, NOT requests
+      const testCases = [
+        {
+          name: 'Value starting with 0x68 (104)',
+          storageKey: '0x05' as Hex,
+          storageValue: hexToBytes('0x68b1c031' as Hex),
+          expectedHex: '0x68b1c031',
+        },
+        {
+          name: 'Value starting with 0x05 (5)',
+          storageKey: '0x06' as Hex,
+          storageValue: hexToBytes('0x05000000' as Hex),
+          expectedHex: '0x05000000',
+        },
+        {
+          name: 'Value starting with 0x00 (0)',
+          storageKey: '0x07' as Hex,
+          storageValue: hexToBytes('0x00000000dc30000000000000726566696c6c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' as Hex),
+          expectedHex: '0x00000000dc30000000000000726566696c6c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+        },
+        {
+          name: 'Value starting with 0x18 (24)',
+          storageKey: '0x08' as Hex,
+          storageValue: hexToBytes('0x18000f4e554c4c20417574686f72697a65720131034343300000000000000000000000000a00000000000633073308320015' as Hex),
+          expectedHex: '0x18000f4e554c4c20417574686f72697a65720131034343300000000000000000000000000a00000000000633073308320015',
+        },
+      ]
+
+      for (const testCase of testCases) {
+        // Set the storage value
+        setServiceStorageValue(account, serviceId, testCase.storageKey, testCase.storageValue)
+
+        // Get the state key that was created
+        const stateKey = createServiceStorageKey(serviceId, testCase.storageKey)
+        const stateKeyHex = bytesToHex(stateKey)
+
+        // Verify the value is stored correctly in rawCshKeyvals
+        expect(stateKeyHex in account.rawCshKeyvals).toBe(true)
+        const storedValue = account.rawCshKeyvals[stateKeyHex]
+        expect(storedValue).toBe(testCase.expectedHex)
+        expect(storedValue.length).toBe(testCase.expectedHex.length)
+
+        // Verify we can retrieve it correctly
+        const retrievedValue = getServiceStorageValue(account, serviceId, testCase.storageKey)
+        expect(retrievedValue).toBeDefined()
+        expect(bytesToHex(retrievedValue!)).toBe(testCase.expectedHex)
+
+        // Extract the Blake hash from the state key using the helper function
+        // Verify determineSingleKeyType correctly identifies it as storage, NOT request
+        const valueBytes = hexToBytes(storedValue as Hex)
+        const keyType = determineSingleKeyType(stateKeyHex as Hex, valueBytes)
+        
+        expect(keyType.keyType).toBe('storage')
+        expect(keyType.keyType).not.toBe('request')
+        expect(keyType.keyType).not.toBe('preimage')
+        
+        // Verify the value is not truncated (only storage type has 'value' property)
+        if (keyType.keyType === 'storage') {
+          expect(bytesToHex(keyType.value)).toBe(testCase.expectedHex)
+          expect(keyType.value.length).toBe(testCase.storageValue.length)
+        }
+      }
+    })
+
+    it('should preserve storage values exactly as stored without truncation', () => {
+      const serviceId = 0n
+      const account: ServiceAccount = {
+        ...mockServiceAccountEmpty,
+        rawCshKeyvals: {},
+      }
+
+      // Test the exact values from the mismatch
+      const problematicValues = [
+        '0x68b1c031',
+        '0x05000000',
+        '0x00000000dc30000000000000726566696c6c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000',
+        '0x18000f4e554c4c20417574686f72697a65720131034343300000000000000000000000000a00000000000633073308320015',
+      ]
+
+      for (let i = 0; i < problematicValues.length; i++) {
+        const valueHex = problematicValues[i] as Hex
+        const storageKey = `0x${i.toString(16).padStart(2, '0')}` as Hex
+        const storageValue = hexToBytes(valueHex)
+
+        // Set via setServiceStorageValue
+        setServiceStorageValue(account, serviceId, storageKey, storageValue)
+
+        // Get the state key
+        const stateKey = createServiceStorageKey(serviceId, storageKey)
+        const stateKeyHex = bytesToHex(stateKey)
+
+        // Verify exact match in rawCshKeyvals
+        expect(account.rawCshKeyvals[stateKeyHex]).toBe(valueHex)
+        expect(account.rawCshKeyvals[stateKeyHex]?.length).toBe(valueHex.length)
+
+        // Verify retrieval
+        const retrieved = getServiceStorageValue(account, serviceId, storageKey)
+        expect(retrieved).toBeDefined()
+        expect(bytesToHex(retrieved!)).toBe(valueHex)
+        expect(retrieved!.length).toBe(storageValue.length)
+      }
+    })
   })
 })

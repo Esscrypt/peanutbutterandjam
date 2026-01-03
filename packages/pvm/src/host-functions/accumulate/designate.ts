@@ -2,6 +2,7 @@ import {
   decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
 } from '@pbnjam/codec'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   HostFunctionResult,
   IConfigService,
@@ -54,7 +55,7 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     const totalSize = VALIDATOR_SIZE * C_VALCOUNT
 
     // Log all input parameters
-    context.log('DESIGNATE host function invoked', {
+    logger.info('DESIGNATE host function invoked', {
       validatorsOffset: validatorsOffset.toString(),
       validatorCount: C_VALCOUNT.toString(),
       validatorSize: VALIDATOR_SIZE.toString(),
@@ -73,6 +74,12 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (faultAddress || !validatorsData) {
       // DO NOT modify registers[7] - it must remain unchanged on panic
+      logger.error('DESIGNATE host function invoked but validators data read failed', {
+        totalSize: totalSize.toString(),
+        validatorsOffset: validatorsOffset.toString(),
+        C_VALCOUNT: C_VALCOUNT.toString(),
+        VALIDATOR_SIZE: VALIDATOR_SIZE.toString(),
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -92,6 +99,10 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
       if (error) {
         // DO NOT modify registers[7] - it must remain unchanged on panic
+        logger.error('DESIGNATE host function invoked but validator decoding failed', {
+          error: error.message,
+          validatorData: bytesToHex(validatorData),
+        })
         return {
           resultCode: RESULT_CODES.PANIC,
         }
@@ -106,6 +117,10 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: imX.id !== imX.state.ps_delegator
     if (imX.id !== imX.state.delegator) {
       this.setAccumulateError(registers, 'HUH')
+      logger.warn('DESIGNATE host function invoked but not the delegator', {
+        currentServiceId: imX.id.toString(),
+        delegator: imX.state.delegator.toString(),
+      })
       return {
         resultCode: null, // continue execution
       }

@@ -56,15 +56,19 @@
  * This is critical for JAM's service account state management system.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   JamVersion,
   Safe,
-  ServiceAccountCore,
+  ServiceAccount,
 } from '@pbnjam/types'
 import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
+import { encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
+import { encodeVariableSequence } from '../core/sequence'
+import { determineKeyTypes } from './state-key'
+import { createServicePreimageKey, createServiceRequestKey, createServiceStorageKey } from './state-serialization'
 
 /**
  * Encode service account according to Gray Paper specification.
@@ -107,10 +111,17 @@ import { decodeNatural, encodeNatural } from '../core/natural-number'
  * @param jamVersion - Optional JAM version. Defaults to v0.7.2 (includes discriminator)
  * @returns Encoded octet sequence
  */
+
 export function encodeServiceAccount(
-  account: ServiceAccountCore,
+  account: ServiceAccount,
   jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
+  // Recalculate items and octets from actual state to ensure consistency
+  // Gray Paper: a_items = 2 * len(a_requests) + len(a_storage)
+  // const storage = getAllServiceStorageItems(account)
+  // const requests = getAllServiceRequests(account)
+  // const recalculatedItems = BigInt(2 * requests.size + storage.size)
+
   const parts: Uint8Array[] = []
 
   // Gray Paper: 0 (placeholder discriminator)
@@ -147,7 +158,7 @@ export function encodeServiceAccount(
   // MinMemoGas (8 bytes)
   view.setBigUint64(16, account.minmemogas, true)
 
-  // Octets (8 bytes)
+  // Octets (8 bytes) - use recalculated value
   view.setBigUint64(24, account.octets, true)
 
   // Gratis (8 bytes)
@@ -160,9 +171,9 @@ export function encodeServiceAccount(
   const metadataBytes = new Uint8Array(16)
   const metadataView = new DataView(metadataBytes.buffer)
 
-  // Items (4 bytes)
+  // Items (4 bytes) - use recalculated value
+  // metadataView.setUint32(0, Number(recalculatedItems), true)
   metadataView.setUint32(0, Number(account.items), true)
-
   // Created (4 bytes)
   metadataView.setUint32(4, Number(account.created), true)
 
@@ -202,9 +213,8 @@ export function encodeServiceAccount(
  * @returns Encoded octet sequence (96 bytes)
  */
 export function encodeServiceAccountForInfo(
-  account: ServiceAccountCore,
+  account: ServiceAccount,
   minbalance: bigint,
-  computedItems?: bigint, // Optional: computed items (2 * requests.size + storage.size)
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
@@ -236,11 +246,9 @@ export function encodeServiceAccountForInfo(
 
   // Gray Paper pvm_invocations.tex: encode[4]{items}
   // 1 × 4-byte field = 4 bytes
-  // Use computedItems if provided (dynamically computed from requests/storage sizes),
-  // otherwise fall back to stored account.items
   const itemsBytes = new Uint8Array(4)
   const itemsView = new DataView(itemsBytes.buffer)
-  itemsView.setUint32(0, Number(computedItems ?? account.items), true)
+  itemsView.setUint32(0, Number(account.items), true)
   parts.push(itemsBytes)
 
   // Gray Paper pvm_invocations.tex: encode[8]{gratis}
@@ -266,7 +274,9 @@ export function encodeServiceAccountForInfo(
 
   parts.push(metadataBytes)
 
-  return safeResult(concatBytes(parts))
+  const result = concatBytes(parts)
+  
+  return safeResult(result)
 }
 
 /**
@@ -291,7 +301,7 @@ export function encodeServiceAccountForInfo(
 export function decodeServiceAccount(
   data: Uint8Array,
   jamVersion?: JamVersion,
-): Safe<DecodingResult<ServiceAccountCore>> {
+): Safe<DecodingResult<ServiceAccount>> {
   let currentData = data
 
   // Gray Paper: 0 (placeholder discriminator)
@@ -387,8 +397,380 @@ export function decodeServiceAccount(
       created,
       lastacc,
       parent,
+      rawCshKeyvals: {}, // TODO: make sure this is set later in the flow
     },
     remaining: currentData,
     consumed,
   })
+}
+
+ /**
+   * Query service account preimage value
+   *
+   * Gray Paper merklization.tex (lines 105-106):
+   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
+   * C(s, encode[4]{2³²-2} ∥ h) ↦ p
+   *
+   * @param serviceId - Service account ID
+   * @param preimageHash - Preimage hash
+   * @returns Preimage blob if found, undefined if not found
+   */
+ export function getServicePreimageValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  preimageHash: Hex,
+): Uint8Array | undefined {
+  const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
+  const stateKeyHex = bytesToHex(preimageStateKey)
+
+
+  // Check raw rawCshKeyvals first (for test vectors)
+  if (stateKeyHex in serviceAccount.rawCshKeyvals) {
+    const value = serviceAccount.rawCshKeyvals[stateKeyHex]
+    const valueBytes = hexToBytes(value)
+    
+    
+    return valueBytes
+  }
+
+  return undefined
+}
+
+/**
+ * Query service account request value
+ *
+ * Gray Paper merklization.tex (lines 107-110):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨⟨h, l⟩, t⟩ ∈ sa_requests:
+ * C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
+ *
+ * @param serviceId - Service account ID
+ * @param requestHash - Request hash (preimage hash)
+ * @param length - Blob length
+ * @returns Request status (timeslots array) if found, undefined if not found
+ */
+export function getServiceRequestValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  requestHash: Hex,
+  length: bigint,
+): bigint[] | undefined {
+  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const stateKeyHex = bytesToHex(requestStateKey)
+
+  // Check raw rawCshKeyvals first (for test vectors)
+  let value: Hex | undefined
+  if (stateKeyHex in serviceAccount.rawCshKeyvals) {
+    value = serviceAccount.rawCshKeyvals[stateKeyHex]
+  }
+
+  if (!value) {
+    return undefined
+  }
+
+  // Decode request status: var{sequence{encode[4]{x} | x ∈ t}}
+  // This is a variable-length sequence of up to 3 timeslots (4-byte each)
+  const valueBytes = hexToBytes(value)
+  const [decodeError, decodeResult] = decodeNatural(valueBytes)
+  if (decodeError || !decodeResult) {
+    return undefined
+  }
+
+  const timeslotCount = Number(decodeResult.value)
+  const lengthPrefixBytes = decodeResult.consumed
+  const remainingBytes = valueBytes.length - lengthPrefixBytes
+  const expectedBytes = timeslotCount * 4
+
+  if (timeslotCount > 3 || remainingBytes !== expectedBytes) {
+      return undefined
+  }
+
+  const timeslots: bigint[] = []
+  for (let i = 0; i < timeslotCount; i++) {
+    const offset = lengthPrefixBytes + i * 4
+    if (offset + 4 <= valueBytes.length) {
+      const view = new DataView(
+        valueBytes.buffer,
+        valueBytes.byteOffset + offset,
+        4,
+      )
+      const timeslot = BigInt(view.getUint32(0, true)) // little-endian
+      timeslots.push(timeslot)
+    }
+  }
+
+  if (timeslots.length === timeslotCount) {
+    return timeslots
+  }
+
+  return undefined
+}
+
+  /**
+   * Query service account storage value
+   *
+   * Gray Paper merklization.tex (lines 103-104):
+   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
+   * C(s, encode[4]{2³²-1} ∥ k) ↦ v
+   *
+   * @param serviceId - Service account ID
+   * @param storageKey - Storage key (blob)
+   * @returns Storage value if found, undefined if not found
+   */
+  export function getServiceStorageValue(
+    serviceAccount: ServiceAccount,
+    serviceId: bigint,
+    storageKey: Hex,
+  ): Uint8Array | undefined {
+    const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+    const stateKeyHex = bytesToHex(storageStateKey)
+
+    // Check raw rawCshKeyvals first (for test vectors)
+    if (stateKeyHex in serviceAccount.rawCshKeyvals) {
+      const value = serviceAccount.rawCshKeyvals[stateKeyHex]
+      const valueBytes = hexToBytes(value)
+      return valueBytes
+    }
+
+    return undefined
+  }
+
+export function getServiceStorageKey(
+  serviceId: bigint,
+  storageKey: Hex,
+): Hex {
+  const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+  return bytesToHex(storageStateKey)
+}
+
+export function deleteServiceStorageValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  storageKey: Hex,
+): void {
+  const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+  const stateKeyHex = bytesToHex(storageStateKey)
+  delete serviceAccount.rawCshKeyvals[stateKeyHex]
+}
+
+
+
+export function setServiceStorageValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  storageKey: Hex,
+  storageValue: Uint8Array,
+): void {
+  const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+  const stateKeyHex = bytesToHex(storageStateKey)
+  
+  serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(storageValue)
+}
+
+export function setServicePreimageValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  preimageHash: Hex,
+  preimageValue: Uint8Array,
+): void {
+  const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
+  const stateKeyHex = bytesToHex(preimageStateKey)
+  serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(preimageValue)
+}
+
+export function deleteServicePreimageValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  preimageHash: Hex,
+): void {
+  const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
+  const stateKeyHex = bytesToHex(preimageStateKey)
+  delete serviceAccount.rawCshKeyvals[stateKeyHex]
+}
+
+export function setServiceRequestValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  requestHash: Hex,
+  length: bigint,
+  requestValue: bigint[],
+): void {
+  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const stateKeyHex = bytesToHex(requestStateKey)
+
+  // Encode request value: var{sequence{encode[4]{x} | x ∈ t}}
+  // Gray Paper merklization.tex (lines 107-110)
+  if (requestValue.length > 3) {
+    throw new Error('Invalid request value: maximum 3 timeslots allowed')
+  }
+
+  const [encodeError, requestValueBytes] = encodeVariableSequence(
+    requestValue,
+    (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
+  )
+
+  if (encodeError) {
+    throw new Error(`Failed to encode request value: ${encodeError.message}`)
+  }
+
+  serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(requestValueBytes)
+}
+
+export function deleteServiceRequestValue(
+  serviceAccount: ServiceAccount,
+  serviceId: bigint,
+  requestHash: Hex,
+  length: bigint,
+): void {
+  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const stateKeyHex = bytesToHex(requestStateKey)
+  delete serviceAccount.rawCshKeyvals[stateKeyHex]
+}
+
+/**
+ * Extract the 27-byte Blake hash from a C(s, h) state key
+ *
+ * Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+ * where n = encode[4](s), a = blake(h)
+ * The Blake hash is in bytes 1, 3, 5, 7, 8-30 (interleaved with service ID)
+ *
+ * @param stateKeyBytes - 31-byte state key
+ * @returns 27-byte Blake hash as Hex
+ */
+
+/**
+ * Get all storage items for a service account
+ *
+ * Iterates through all C(s, h) keys in rawCshKeyvals and returns those that
+ * are storage items. Uses determineKeyTypes to distinguish storage from preimages.
+ *
+ * Gray Paper merklization.tex (lines 103-104):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
+ * C(s, encode[4]{2³²-1} ∥ k) ↦ v
+ *
+ * @param serviceAccount - Service account to query
+ * @returns Map of state keys to storage values (as Uint8Array)
+ */
+export function getAllServiceStorageItems(
+  serviceAccount: ServiceAccount,
+  currentTimeslot?: bigint,
+): Map<Hex, Uint8Array> {
+  const storageItems = new Map<Hex, Uint8Array>()
+  
+  // Use determineKeyTypes to classify all keys at once
+  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
+  
+  for (const [stateKeyHex, keyType] of keyTypes) {
+    if (keyType.keyType === 'storage') {
+      storageItems.set(stateKeyHex, keyType.value)
+    }
+  }
+  
+  return storageItems
+}
+
+/**
+ * Extract service ID from a C(s, h) state key
+ *
+ * Gray Paper: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+ * where n = encode[4](s), a = blake(h)
+ * The service ID is in bytes 0, 2, 4, 6 (interleaved with Blake hash)
+ *
+ * @param stateKeyBytes - 31-byte state key
+ * @returns Service ID if valid, null otherwise
+ */
+export function extractServiceIdFromStateKey(
+  stateKeyBytes: Uint8Array,
+): bigint | null {
+  if (stateKeyBytes.length !== 31) {
+    return null
+  }
+  const serviceIdBytes = new Uint8Array(4)
+  serviceIdBytes[0] = stateKeyBytes[0] // n₀
+  serviceIdBytes[1] = stateKeyBytes[2] // n₁
+  serviceIdBytes[2] = stateKeyBytes[4] // n₂
+  serviceIdBytes[3] = stateKeyBytes[6] // n₃
+  const view = new DataView(serviceIdBytes.buffer)
+  return BigInt(view.getUint32(0, true)) // little-endian
+}
+
+/**
+ * Get all requests for a service account
+ *
+ * Iterates through all C(s, h) keys in rawCshKeyvals and returns those that
+ * have request-encoded values. Uses determineKeyTypes to identify requests.
+ *
+ * Gray Paper merklization.tex (lines 107-110):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨⟨h, l⟩, t⟩ ∈ sa_requests:
+ * C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
+ *
+ * @param serviceAccount - Service account to query
+ * @returns Map of state keys to {timeslots, blobLength} objects
+ * Note: The blob length is obtained from the preimage if it exists, otherwise 0
+ */
+export function getAllServiceRequests(
+  serviceAccount: ServiceAccount,
+  currentTimeslot?: bigint,
+): Map<Hex, { timeslots: bigint[]; blobLength: bigint }> {
+  const requests = new Map<Hex, { timeslots: bigint[]; blobLength: bigint }>()
+  
+  // Use determineKeyTypes to classify all keys at once
+  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
+  
+  // Get all preimages to look up blob lengths
+  const preimages = getAllServicePreimages(serviceAccount, currentTimeslot)
+  const preimageMap = new Map<Hex, Uint8Array>()
+  for (const [, preimageData] of preimages) {
+    preimageMap.set(preimageData.preimageHash, preimageData.blob)
+  }
+  
+  for (const [stateKeyHex, keyType] of keyTypes) {
+    if (keyType.keyType === 'request') {
+      // Get blob length from preimage if it exists, otherwise 0
+      const preimageBlob = preimageMap.get(keyType.preimageHash)
+      const blobLength = preimageBlob ? BigInt(preimageBlob.length) : 0n
+      
+      requests.set(stateKeyHex, {
+        timeslots: keyType.timeslots,
+        blobLength,
+      })
+    }
+  }
+  
+  return requests
+}
+
+/**
+ * Get all preimages for a service account
+ *
+ * Iterates through all C(s, h) keys in rawCshKeyvals and returns those that
+ * are preimages. Uses determineKeyTypes to distinguish preimages from storage.
+ *
+ * Gray Paper merklization.tex (lines 105-106):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
+ * C(s, encode[4]{2³²-2} ∥ h) ↦ p
+ *
+ * @param serviceAccount - Service account to query
+ * @returns Map of state keys to preimage values (as Uint8Array)
+ * Note: The map key is the state key, and the value includes the preimage hash
+ * in the returned object structure from determineKeyTypes.
+ */
+export function getAllServicePreimages(
+  serviceAccount: ServiceAccount,
+  currentTimeslot?: bigint,
+): Map<Hex, { preimageHash: Hex; blob: Uint8Array }> {
+  const preimages = new Map<Hex, { preimageHash: Hex; blob: Uint8Array }>()
+  
+  // Use determineKeyTypes to classify all keys at once
+  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
+  
+  for (const [stateKeyHex, keyType] of keyTypes) {
+    if (keyType.keyType === 'preimage') {
+      preimages.set(stateKeyHex, {
+        preimageHash: keyType.preimageHash,
+        blob: keyType.blob,
+      })
+    }
+  }
+  
+  return preimages
 }

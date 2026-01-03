@@ -239,6 +239,13 @@ function decodeWorkResult(
  * ✅ CORRECT: Uses proper result encoding with success/error discrimination
  * ✅ CORRECT: Uses variable-length encoding for auth trace
  *
+ * Version differences:
+ * - **v0.7.0**: encode{operandtuple} - raw tuple encoding (no discriminator notation)
+ * - **v0.7.2+**: encode[U]{operandtuple} - same encoding, but with discriminator notation
+ *
+ * Note: The actual binary encoding is the same in both versions (just the tuple).
+ * The [U] discriminator is used when operandtuple appears in accinput encoding (v0.7.2+).
+ *
  * @param operandTuple - Operand tuple to encode
  * @returns Encoded octet sequence
  */
@@ -318,6 +325,13 @@ export function encodeOperandTuple(
  * ✅ CORRECT: Uses proper result decoding with success/error reconstruction
  * ✅ CORRECT: Uses variable-length decoding for auth trace
  * ✅ CORRECT: Uses proper decode functions instead of manual bit manipulation
+ *
+ * Version differences:
+ * - **v0.7.0**: decode{operandtuple} - raw tuple decoding (no discriminator)
+ * - **v0.7.2+**: decode[U]{operandtuple} - same decoding, but with discriminator notation
+ *
+ * Note: The actual binary decoding is the same in both versions (just the tuple).
+ * The [U] discriminator is used when operandtuple appears in accinput decoding (v0.7.2+).
  *
  * @param data - Octet sequence to decode
  * @returns Decoded operand tuple and remaining data

@@ -31,16 +31,24 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { decodeRecent } from '@pbnjam/codec'
+import {
+  decodeRecent,
+  setServiceStorageValue,
+  setServicePreimageValue,
+  setServiceRequestValue,
+} from '@pbnjam/codec'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
 import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
+  DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
+  type JamVersion,
+  type ServiceAccount,
   type WorkReport,
 } from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
@@ -56,138 +64,6 @@ import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
-
-// Cache directory for storing unhashed state after each block
-// This allows starting from any block without losing original storage keys
-const STATE_CACHE_DIR = path.join(WORKSPACE_ROOT, '.state-cache/fuzzy')
-
-// Ensure cache directory exists
-function ensureCacheDir(): void {
-  if (!existsSync(STATE_CACHE_DIR)) {
-    mkdirSync(STATE_CACHE_DIR, { recursive: true })
-  }
-}
-
-// Save full service account state after a block (with original storage keys)
-function saveStateCache(
-  blockNumber: number,
-  serviceAccountsService: InstanceType<typeof import('../../services/service-account-service').ServiceAccountService>,
-): void {
-  ensureCacheDir()
-  const cacheFile = path.join(STATE_CACHE_DIR, `block-${blockNumber.toString().padStart(8, '0')}.json`)
-  
-  // Get all service accounts with their full storage/preimages/requests
-  const serviceAccounts = serviceAccountsService.getServiceAccounts()
-  
-  // Serialize to JSON with BigInt support
-  const serializedAccounts: Record<string, any> = {}
-  for (const [serviceId, account] of serviceAccounts.accounts.entries()) {
-    const storageObj: Record<string, string> = {}
-    for (const [key, value] of account.storage.entries()) {
-      storageObj[key] = Buffer.from(value).toString('hex')
-    }
-    
-    const preimagesObj: Record<string, string> = {}
-    for (const [key, value] of account.preimages.entries()) {
-      preimagesObj[key] = Buffer.from(value).toString('hex')
-    }
-    
-    const requestsObj: Record<string, Record<string, string[]>> = {}
-    for (const [hash, byLen] of account.requests.entries()) {
-      requestsObj[hash] = {}
-      for (const [len, status] of byLen.entries()) {
-        // PreimageRequestStatus is bigint[] - serialize each timeslot
-        requestsObj[hash][len.toString()] = status.map((t: bigint) => t.toString())
-      }
-    }
-    
-    serializedAccounts[serviceId.toString()] = {
-      codehash: account.codehash,
-      balance: account.balance.toString(),
-      minaccgas: account.minaccgas.toString(),
-      minmemogas: account.minmemogas.toString(),
-      octets: account.octets.toString(),
-      gratis: account.gratis.toString(),
-      items: account.items.toString(),
-      created: account.created.toString(),
-      lastacc: account.lastacc.toString(),
-      parent: account.parent.toString(),
-      storage: storageObj,
-      preimages: preimagesObj,
-      requests: requestsObj,
-    }
-  }
-  
-  writeFileSync(cacheFile, JSON.stringify(serializedAccounts, null, 2))
-  console.log(`💾 Saved state cache for block ${blockNumber} (${Object.keys(serializedAccounts).length} services)`)
-}
-
-// Load cached state for a specific block
-function loadStateCache(
-  blockNumber: number,
-  serviceAccountsService: InstanceType<typeof import('../../services/service-account-service').ServiceAccountService>,
-): boolean {
-  const cacheFile = path.join(STATE_CACHE_DIR, `block-${blockNumber.toString().padStart(8, '0')}.json`)
-  
-  if (!existsSync(cacheFile)) {
-    console.log(`⚠️  No state cache found for block ${blockNumber}`)
-    return false
-  }
-  
-  try {
-    const data = JSON.parse(readFileSync(cacheFile, 'utf-8'))
-    
-    for (const [serviceIdStr, account] of Object.entries(data) as [string, any][]) {
-      const serviceId = BigInt(serviceIdStr)
-      
-      // Reconstruct storage map with original keys (cast to Hex)
-      const storage = new Map<Hex, Uint8Array>()
-      for (const [key, valueHex] of Object.entries(account.storage) as [string, string][]) {
-        storage.set(key as Hex, Buffer.from(valueHex, 'hex'))
-      }
-      
-      // Reconstruct preimages map (cast to Hex)
-      const preimages = new Map<Hex, Uint8Array>()
-      for (const [key, valueHex] of Object.entries(account.preimages) as [string, string][]) {
-        preimages.set(key as Hex, Buffer.from(valueHex, 'hex'))
-      }
-      
-      // Reconstruct requests map - PreimageRequestStatus is bigint[]
-      const requests = new Map<Hex, Map<bigint, bigint[]>>()
-      for (const [hash, byLen] of Object.entries(account.requests) as [string, any][]) {
-        const byLenMap = new Map<bigint, bigint[]>()
-        for (const [lenStr, statusArr] of Object.entries(byLen) as [string, string[]][]) {
-          // statusArr is array of timeslot strings - convert to bigint[]
-          byLenMap.set(BigInt(lenStr), statusArr.map((t: string) => BigInt(t)))
-        }
-        requests.set(hash as Hex, byLenMap)
-      }
-      
-      // Set the full service account with original storage keys
-      serviceAccountsService.setServiceAccount(serviceId, {
-        codehash: account.codehash as Hex,
-        balance: BigInt(account.balance),
-        minaccgas: BigInt(account.minaccgas),
-        minmemogas: BigInt(account.minmemogas),
-        octets: BigInt(account.octets),
-        gratis: BigInt(account.gratis),
-        items: BigInt(account.items),
-        created: BigInt(account.created),
-        lastacc: BigInt(account.lastacc),
-        parent: BigInt(account.parent),
-        storage,
-        preimages,
-        requests,
-      })
-    }
-    
-    console.log(`📂 Loaded state cache for block ${blockNumber} (${Object.keys(data).length} services)`)
-    return true
-  } catch (error) {
-    console.error(`❌ Failed to load state cache for block ${blockNumber}:`, error)
-    return false
-  }
-}
 
 // Helper function to parse CLI arguments or environment variable for starting block
 // Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
@@ -333,14 +209,48 @@ export function convertJsonBlockToBlock(jsonBlock: any): Block {
   }
 }
 
+// Helper function to parse JAM version from environment variable or string
+// Format: "0.7.0", "0.7.2", etc.
+function parseJamVersion(versionStr?: string): JamVersion {
+  if (!versionStr) {
+    return DEFAULT_JAM_VERSION
+  }
+  
+  const parts = versionStr.split('.').map(s => Number.parseInt(s, 10))
+  if (parts.length !== 3 || parts.some(isNaN)) {
+    console.warn(`⚠️  Invalid JAM version format: "${versionStr}", using default ${DEFAULT_JAM_VERSION.major}.${DEFAULT_JAM_VERSION.minor}.${DEFAULT_JAM_VERSION.patch}`)
+    return DEFAULT_JAM_VERSION
+  }
+  
+  return {
+    major: parts[0]!,
+    minor: parts[1]!,
+    patch: parts[2]!,
+  }
+}
+
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
+  
+  // Set JAM version from environment variable (GP_VERSION) or default to 0.7.2
+  const gpVersion = process.env.GP_VERSION || process.env.JAM_VERSION
+  const jamVersion = parseJamVersion(gpVersion)
+  configService.jamVersion = jamVersion
+  console.log(`📋 Using JAM version: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}${gpVersion ? ` (from ${process.env.GP_VERSION ? 'GP_VERSION' : 'JAM_VERSION'})` : ' (default)'}`)
+
+  // Construct traces subfolder path with version
+  // v0.7.1 has only 'fuzzy' directory and does NOT use 'traces/' subdirectory
+  // v0.7.2+ has both 'fuzzy' and 'fuzzy_light' directories and uses 'traces/' subdirectory
+  // This test uses 'fuzzy_light' for v0.7.2+ and 'fuzzy' for 0.7.1
+  const versionString = `v${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`
 
   describe('Safrole Genesis', () => {
+    // Disable timeout for this long-running test (processes multiple blocks)
+    // Set to 0 to disable timeout entirely (no timeout limit)
     it('should parse genesis.json from traces/fuzzy', async () => {
       const genesisJsonPath = path.join(
         WORKSPACE_ROOT,
-        'submodules/jam-test-vectors/traces/fuzzy/genesis.json',
+        `submodules/jam-test-vectors/traces/fuzzy/genesis.json`,
       )
 
       const genesisManager = new NodeGenesisManager(configService, {
@@ -445,9 +355,13 @@ describe('Genesis Parse Tests', () => {
         configService,
       })
 
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
+        configService: configService,
+        clockService: clockService,
+      })
 
       const serviceAccountsService = new ServiceAccountService({
-        configService,
         eventBusService,
         clockService,
         networkingService: null,
@@ -465,13 +379,7 @@ describe('Genesis Parse Tests', () => {
         entropyService: entropyService,
         pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
         useWasm: false,
-        traceSubfolder: shouldDumpTraces ? 'fuzzy' : undefined,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
+        traceSubfolder: shouldDumpTraces ? `fuzzy/${versionString}` : undefined,
       })
 
       const accumulatedService = new AccumulationService({
@@ -664,12 +572,13 @@ describe('Genesis Parse Tests', () => {
         }
         // Add type information for better debugging
         if ('chapterIndex' in parsedKey) {
+          if (parsedKey.chapterIndex === 0 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(s, h)' }
+          }
           if (parsedKey.chapterIndex === 255 && 'serviceId' in parsedKey) {
             return { ...parsedKey, type: 'C(255, s)' }
           }
           return { ...parsedKey, type: 'C(i)' }
-        } else if ('serviceId' in parsedKey && 'hash' in parsedKey) {
-          return { ...parsedKey, type: 'C(s, h)' }
         }
         return parsedKey
       }
@@ -677,6 +586,7 @@ describe('Genesis Parse Tests', () => {
       // Helper function to get chapter name
       const getChapterName = (chapterIndex: number): string => {
         const chapterNames: Record<number, string> = {
+          0: 'C(s, h) keyvals',
           1: 'authpool (α)',
           2: 'authqueue (φ)',
           3: 'recent (β)',
@@ -696,6 +606,24 @@ describe('Genesis Parse Tests', () => {
           255: 'service accounts',
         }
         return chapterNames[chapterIndex] || `unknown (${chapterIndex})`
+      }
+
+      // Helper function to truncate long hex strings for logging
+      const truncateHex = (hex: string, maxLength: number = 100) => {
+        if (hex.length <= maxLength) return hex
+        return `${hex.slice(0, maxLength)}... (${hex.length} chars total)`
+      }
+
+      // Helper function to create a JSON stringify replacer that truncates long hex strings
+      const createTruncatingReplacer = (maxHexLength: number = 200) => {
+        return (key: string, value: any) => {
+          if (typeof value === 'string' && value.startsWith('0x') && value.length > maxHexLength) {
+            return truncateHex(value, maxHexLength)
+          }
+          if (typeof value === 'bigint') return value.toString()
+          if (value === undefined) return null
+          return value
+        }
       }
 
       // Helper function to verify post-state
@@ -741,22 +669,29 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('error' in keyInfo) {
+              console.error(`Key Info Error: ${keyInfo.error}`)
+            } else if ('chapterIndex' in keyInfo) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
+              if ('type' in keyInfo) {
               console.error(`Key Type: ${keyInfo.type}`)
+              }
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
-              console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
+            } else if ('serviceId' in keyInfo && !('error' in keyInfo) && !('chapterIndex' in keyInfo)) {
+              const serviceKeyInfo = keyInfo as { serviceId: bigint; type?: string; hash?: Hex }
+              console.error(`Service ID: ${serviceKeyInfo.serviceId}`)
+              if (serviceKeyInfo.type) {
+                console.error(`Key Type: ${serviceKeyInfo.type}`)
+              }
+              if (serviceKeyInfo.hash) {
+                console.error(`Hash: ${serviceKeyInfo.hash}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
-            console.error(`Expected Value: ${keyval.value}`)
+            console.error(`Expected Value: ${truncateHex(keyval.value)}`)
             console.error(`Actual Value: undefined (key not found in state trie)`)
             console.error('=====================================\n')
             
@@ -771,11 +706,6 @@ describe('Genesis Parse Tests', () => {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
             
-            // #region agent log
-            if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 255 && 'serviceId' in keyInfo && keyInfo.serviceId === 0n) {
-              fetch('http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:770',message:'state trie comparison mismatch',data:{blockNumber,expectedHex:keyval.value,actualHex:expectedValue,key:keyval.key},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-            }
-            // #endregion
             let decodedExpected: any = null
             let decodedActual: any = null
 
@@ -783,7 +713,24 @@ describe('Genesis Parse Tests', () => {
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
               const chapterIndex = keyInfo.chapterIndex
               try {
-                // Decode expected value from test vector using the same decoder as StateService
+                // Handle C(s, h) keys (chapterIndex: 0) - these are raw keyvals, not decoded
+                if (chapterIndex === 0 && 'serviceId' in keyInfo) {
+                  // For C(s, h) keys, get the keyvals object and look up the specific key
+                  const keyvals = stateService.getStateComponent(
+                    chapterIndex,
+                    keyInfo.serviceId,
+                  ) as Record<Hex, Hex>
+                  decodedActual = {
+                    keyvals: keyvals,
+                    specificKey: keyval.key,
+                    value: keyvals?.[keyval.key] || undefined,
+                  }
+                  decodedExpected = {
+                    key: keyval.key,
+                    value: keyval.value,
+                  }
+                } else {
+                  // For regular chapter keys, decode the value
                 const expectedBytes = hexToBytes(keyval.value as Hex)
                 // Access private stateTypeRegistry to get the decoder
                 const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
@@ -806,6 +753,7 @@ describe('Genesis Parse Tests', () => {
                   chapterIndex,
                   'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
                 )
+                }
               } catch (error) {
                 decodedExpected = decodedExpected || { 
                   error: error instanceof Error ? error.message : String(error),
@@ -822,37 +770,59 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('error' in keyInfo) {
+              console.error(`Key Info Error: ${keyInfo.error}`)
+            } else if ('chapterIndex' in keyInfo) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
+              if ('type' in keyInfo) {
               console.error(`Key Type: ${keyInfo.type}`)
+              }
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
-              console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
+            } else if ('serviceId' in keyInfo && !('error' in keyInfo) && !('chapterIndex' in keyInfo)) {
+              const serviceKeyInfo = keyInfo as { serviceId: bigint; type?: string; hash?: Hex }
+              console.error(`Service ID: ${serviceKeyInfo.serviceId}`)
+              if (serviceKeyInfo.type) {
+                console.error(`Key Type: ${serviceKeyInfo.type}`)
+              }
+              if (serviceKeyInfo.hash) {
+                console.error(`Hash: ${serviceKeyInfo.hash}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
-            console.error(`Expected Value (hex): ${keyval.value}`)
-            console.error(`Actual Value (hex): ${expectedValue}`)
+            console.error(`Expected Value (hex): ${truncateHex(keyval.value)}`)
+            console.error(`Actual Value (hex): ${truncateHex(expectedValue || '')}`)
             if (decodedExpected) {
-              console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedExpected) {
+                console.error(`\nDecoded Expected Value:`, {
+                  key: decodedExpected.key || keyval.key,
+                  value: decodedExpected.value || keyval.value,
+                  keyvalsCount: Object.keys(decodedExpected.keyvals || {}).length,
+                })
+              } else {
+                console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, createTruncatingReplacer(), 2))
+              }
             }
             if (decodedActual) {
-              console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedActual) {
+                console.error(`\nDecoded Actual Value:`, {
+                  specificKey: decodedActual.specificKey || keyval.key,
+                  value: decodedActual.value || expectedValue,
+                  keyvalsCount: Object.keys(decodedActual.keyvals || {}).length,
+                  hasExpectedKey: decodedActual.keyvals ? keyval.key in decodedActual.keyvals : false,
+                })
+              } else {
+                console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, createTruncatingReplacer(), 2))
+              }
             }
             console.error('=====================================\n')
             
             // Dump expected and actual values to files for easier comparison
-            const mismatchDir = path.join(STATE_CACHE_DIR, 'mismatches')
+            const mismatchDir = path.join(WORKSPACE_ROOT, '.state-mismatches')
             if (!existsSync(mismatchDir)) {
               mkdirSync(mismatchDir, { recursive: true })
             }
@@ -942,14 +912,15 @@ describe('Genesis Parse Tests', () => {
           if (blockNumber === startBlock) {
             // Set pre_state from test vector FIRST
             // This ensures entropy3 and other state components match what was used to create the seal signature
-            // Use raw keyvals mode (3rd param = true) to bypass decode/encode roundtrip issues
-            // for the initial state root verification
+            // Set pre-state from test vector
+
             if (blockJsonData.pre_state?.keyvals) {
               const [setStateError] = stateService.setState(
                 blockJsonData.pre_state.keyvals,
-                undefined, // jamVersion
-                true, // useRawKeyvals - store raw keyvals for pre-state root calculation
               )
+              
+              fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:1029',message:'After setState',data:{blockNumber:blockNumber,setStateError:setStateError?.message||'none',preStateKeyvalsCount:blockJsonData.pre_state.keyvals.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+              // #endregion
               if (setStateError) {
                 throw new Error(`Failed to set pre-state: ${setStateError.message}`)
               }
@@ -957,23 +928,9 @@ describe('Genesis Parse Tests', () => {
               // Fallback to genesis state if pre_state is not available
               const [setStateError] = stateService.setState(
                 genesisJson?.state?.keyvals ?? [],
-                undefined,
-                true, // useRawKeyvals
               )
               if (setStateError) {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
-              }
-            }
-            
-            // For non-genesis starts, load from state cache AFTER setState
-            // This overwrites the service accounts with versions that have original (unhashed) storage keys
-            // The C(s, h) keys from test vectors only contain blake hashes, not original keys
-            if (startBlock > 1) {
-              const previousBlock = startBlock - 1
-              const cacheLoaded = loadStateCache(previousBlock, serviceAccountsService)
-              if (!cacheLoaded) {
-                console.warn(`⚠️  No state cache for block ${previousBlock}. Run from block 1 first to build cache.`)
-                console.warn(`   Storage keys will use blake hashes instead of original keys.`)
               }
             }
             
@@ -1012,16 +969,124 @@ describe('Genesis Parse Tests', () => {
             })
             console.log(`📂 Seal keys after setState: ${sealKeyService.getSealKeys().length} keys`)
 
-            // Verify pre-state root matches block header's priorStateRoot
+            // Deep compare generated state trie with pre-state keyvals
+
+            
+              const preStateKeyvals = blockJsonData.pre_state?.keyvals || []
+              const [trieError, stateTrie] = stateService.generateStateTrie()
+            
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:1098',message:'After generateStateTrie',data:{blockNumber:blockNumber,trieError:trieError?.message||'none',stateTrieKeysCount:stateTrie?Object.keys(stateTrie).length:0,preStateKeyvalsCount:preStateKeyvals.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+            
+            expect(trieError).toBeUndefined()
+            expect(stateTrie).toBeDefined()
+            
+            if (!stateTrie) {
+              throw new Error('Failed to generate state trie')
+            }
+
+            // Build maps for comparison
+              const preStateKeyvalsMap = new Map<string, string>()
+              for (const kv of preStateKeyvals) {
+                preStateKeyvalsMap.set(kv.key, kv.value)
+              }
+              const stateTrieMap = new Map<string, string>()
+                for (const [key, value] of Object.entries(stateTrie)) {
+                  stateTrieMap.set(key, value)
+                }
+
+              // Find keys in pre-state but not in state trie
+              const missingInTrie: string[] = []
+            const differentValues: Array<{key: string, expected: string, actual: string, chapterIndex?: number}> = []
+            
+              for (const [key, expectedValue] of preStateKeyvalsMap.entries()) {
+                const actualValue = stateTrieMap.get(key)
+                if (actualValue === undefined) {
+                  missingInTrie.push(key)
+                const keyBytes = hexToBytes(key as Hex)
+                const firstByte = keyBytes[0]
+                const isChapterKey = firstByte >= 1 && firstByte <= 16 && keyBytes.slice(1).every(b => b === 0)
+                const chapterIndex = isChapterKey ? firstByte : (firstByte === 0xff ? 255 : 0)
+                fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:1120',message:'Missing key in state trie',data:{blockNumber:blockNumber,key:key,keyShort:key.substring(0,30)+'...',chapterIndex:chapterIndex,expectedValue:expectedValue.substring(0,40)+'...',expectedValueLength:expectedValue.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                // #endregion
+                } else if (actualValue !== expectedValue) {
+                    const keyBytes = hexToBytes(key as Hex)
+                    const firstByte = keyBytes[0]
+                    const isChapterKey = firstByte >= 1 && firstByte <= 16 && keyBytes.slice(1).every(b => b === 0)
+                    const chapterIndex = isChapterKey ? firstByte : (firstByte === 0xff ? 255 : 0)
+                differentValues.push({key, expected: expectedValue, actual: actualValue, chapterIndex})
+                fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:1130',message:'Value mismatch',data:{blockNumber:blockNumber,key:key,keyShort:key.substring(0,30)+'...',chapterIndex:chapterIndex,expectedValue:expectedValue,actualValue:actualValue,expectedLength:expectedValue.length,actualLength:actualValue.length,expectedFirstBytes:expectedValue.substring(0,40),actualFirstBytes:actualValue.substring(0,40)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+                  // #endregion
+                }
+              }
+
+              // Find keys in state trie but not in pre-state
+              const extraInTrie: string[] = []
+              for (const key of stateTrieMap.keys()) {
+                if (!preStateKeyvalsMap.has(key)) {
+                  extraInTrie.push(key)
+                const keyBytes = hexToBytes(key as Hex)
+                const firstByte = keyBytes[0]
+                const isChapterKey = firstByte >= 1 && firstByte <= 16 && keyBytes.slice(1).every(b => b === 0)
+                const chapterIndex = isChapterKey ? firstByte : (firstByte === 0xff ? 255 : 0)
+                fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-all-blocks.test.ts:1145',message:'Extra key in state trie',data:{blockNumber:blockNumber,key:key,keyShort:key.substring(0,30)+'...',chapterIndex:chapterIndex,actualValue:stateTrieMap.get(key)?.substring(0,40)+'...',actualValueLength:stateTrieMap.get(key)?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+              }
+            }
+
+            // Calculate state root for comparison
             const [preStateRootError, preStateRoot] = stateService.getStateRoot()
             expect(preStateRootError).toBeUndefined()
             expect(preStateRoot).toBeDefined()
 
+            // Log detailed summary
+            if (missingInTrie.length > 0 || differentValues.length > 0 || extraInTrie.length > 0 || preStateRoot !== blockJsonData.block.header.parent_state_root) {
+              console.error(`\n❌ [Block ${blockNumber}] State trie mismatch detected:`)
+              console.error(`  Pre-state keyvals: ${preStateKeyvals.length}`)
+              console.error(`  Generated trie keys: ${stateTrieMap.size}`)
+              console.error(`  Missing keys: ${missingInTrie.length}`)
+              console.error(`  Different values: ${differentValues.length}`)
+              console.error(`  Extra keys: ${extraInTrie.length}`)
+              console.error(`  State root: computed ${preStateRoot}, expected ${blockJsonData.block.header.parent_state_root}`)
+              
+              if (missingInTrie.length > 0) {
+                console.error(`\n  Missing keys (first 10):`)
+                for (const key of missingInTrie.slice(0, 10)) {
+                  const keyInfo = parseStateKeyForDebug(key as Hex)
+                  console.error(`    ${key} - ${'chapterIndex' in keyInfo ? `Chapter ${keyInfo.chapterIndex}` : JSON.stringify(keyInfo)}`)
+                }
+              }
+              
+              if (differentValues.length > 0) {
+                console.error(`\n  Different values (first 10):`)
+                for (const diff of differentValues.slice(0, 10)) {
+                  const keyInfo = parseStateKeyForDebug(diff.key as Hex)
+                  console.error(`    ${diff.key} - ${'chapterIndex' in keyInfo ? `Chapter ${keyInfo.chapterIndex}` : JSON.stringify(keyInfo)}`)
+                  console.error(`      Expected: ${diff.expected.substring(0, 40)}... (${diff.expected.length} bytes)`)
+                  console.error(`      Actual:   ${diff.actual.substring(0, 40)}... (${diff.actual.length} bytes)`)
+                }
+              }
+              
+              if (extraInTrie.length > 0) {
+                console.error(`\n  Extra keys (first 10):`)
+                for (const key of extraInTrie.slice(0, 10)) {
+                  const keyInfo = parseStateKeyForDebug(key as Hex)
+                  console.error(`    ${key} - ${'chapterIndex' in keyInfo ? `Chapter ${keyInfo.chapterIndex}` : JSON.stringify(keyInfo)}`)
+                }
+              }
+            }
+
+            // Verify state root matches
             if (preStateRoot !== blockJsonData.block.header.parent_state_root) {
               console.warn(
                 `⚠️  [Block ${blockNumber}] Pre-state root doesn't match block header: computed ${preStateRoot}, expected ${blockJsonData.block.header.parent_state_root}`,
               )
             }
+            
+            // Fail test if there are mismatches
+            expect(missingInTrie.length).toBe(0)
+            expect(differentValues.length).toBe(0)
+            expect(preStateRoot).toBe(blockJsonData.block.header.parent_state_root)
             // Note: Don't clear raw keyvals here - the block importer also needs them for prior state root validation
           } else {
             // For subsequent blocks, verify that the current state root matches the block's parent_state_root
@@ -1046,18 +1111,11 @@ describe('Genesis Parse Tests', () => {
           }
           expect(importError).toBeUndefined()
 
-          // Clear raw keyvals mode after block import
-          // This switches back to normal state trie generation for post-state verification
-          // The post-state should be verified against what our services actually produce,
-          // not the raw keyvals from pre_state
-          stateService.clearRawKeyvals()
+          // Note: State trie generation uses the actual service state,
+          // not raw keyvals from pre_state, so no clearing is needed
 
           // Verify post-state matches expected post_state from test vector
           verifyPostState(blockNumber, blockJsonData)
-
-          // Save state cache after successful block processing
-          // This preserves original storage keys for future --start-block runs
-          saveStateCache(blockNumber, serviceAccountsService)
 
           console.log(`✅ Block ${blockNumber} imported and verified successfully`)
 
@@ -1079,7 +1137,7 @@ describe('Genesis Parse Tests', () => {
           }
         }
       }
-    })
+    }, { timeout: Number.MAX_SAFE_INTEGER }) // Effectively disable timeout - test processes multiple blocks and may take a very long time
   })
 })
 

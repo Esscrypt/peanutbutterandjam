@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach } from 'vitest'
+import { describe, test, expect, beforeEach } from 'bun:test'
 import { LookupHostFunction, PVMRAM, ACCUMULATE_ERROR_CODES } from '@pbnjam/pvm'
-import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, type Hex } from '@pbnjam/core'
 import type { HostFunctionContext, LookupParams, ServiceAccount } from '@pbnjam/types'
+import { setServicePreimageValue, setServiceStorageValue, getServicePreimageValue } from '@pbnjam/codec'
 
 /**
  * Test for LOOKUP host function
@@ -34,11 +35,11 @@ describe('LOOKUP Host Function', () => {
   test('should return preimage data when preimage exists', () => {
     // Setup: Create a service account with a preimage
     const serviceId = 0n
-    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' as Hex
     const preimageData = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08])
 
     const serviceAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -48,10 +49,11 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map([[preimageHash, preimageData]]),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
+
+    // Add preimage using helper
+    setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageData)
 
     const accounts = new Map<bigint, ServiceAccount>([[serviceId, serviceAccount]])
 
@@ -111,10 +113,10 @@ describe('LOOKUP Host Function', () => {
 
   test('should return NONE when preimage does not exist', () => {
     const serviceId = 0n
-    const nonExistentHash = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef'
+    const nonExistentHash = '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef' as Hex
 
     const serviceAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -124,9 +126,7 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(), // No preimages
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {}, // No preimages
     }
 
     const accounts = new Map<bigint, ServiceAccount>([[serviceId, serviceAccount]])
@@ -174,10 +174,10 @@ describe('LOOKUP Host Function', () => {
   test('should return NONE when service account does not exist', () => {
     const serviceId = 0n
     const queryServiceId = 999n // Non-existent service
-    const someHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const someHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' as Hex
 
     const serviceAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -187,9 +187,7 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
 
     // Only service 0 exists
@@ -241,12 +239,12 @@ describe('LOOKUP Host Function', () => {
   test.skip('should lookup from different service when registers[7] != self', () => {
     const selfServiceId = 0n
     const otherServiceId = 1n
-    const preimageHash = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890'
+    const preimageHash = '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890' as Hex
     const preimageData = new Uint8Array([0xAA, 0xBB, 0xCC, 0xDD])
 
     // Self service has no preimages
     const selfAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -256,14 +254,12 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
 
     // Other service has the preimage
     const otherAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -273,10 +269,11 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map([[preimageHash, preimageData]]),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
+
+    // Add preimage to other service
+    setServicePreimageValue(otherAccount, otherServiceId, preimageHash, preimageData)
 
     const accounts = new Map<bigint, ServiceAccount>([
       [selfServiceId, selfAccount],
@@ -330,11 +327,13 @@ describe('LOOKUP Host Function', () => {
 
   test('should NOT modify service account (LOOKUP is read-only)', () => {
     const serviceId = 0n
-    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' as Hex
     const preimageData = new Uint8Array([0x01, 0x02, 0x03, 0x04])
+    const storageKey = '0xaabbccdd' as Hex
+    const storageValue = new Uint8Array([1, 2, 3])
 
     const serviceAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -344,17 +343,18 @@ describe('LOOKUP Host Function', () => {
       created: 1n,
       lastacc: 10n,
       parent: 0n,
-      preimages: new Map([[preimageHash, preimageData]]),
-      requests: new Map(),
-      storage: new Map([['0xaabbccdd', new Uint8Array([1, 2, 3])]]),
+      rawCshKeyvals: {},
     }
+
+    // Add preimage and storage using helpers
+    setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageData)
+    setServiceStorageValue(serviceAccount, serviceId, storageKey, storageValue)
 
     // Clone the account state for comparison
     const originalBalance = serviceAccount.balance
     const originalOctets = serviceAccount.octets
     const originalItems = serviceAccount.items
-    const originalStorageSize = serviceAccount.storage.size
-    const originalPreimagesSize = serviceAccount.preimages.size
+    const originalRawCshKeyvalsSize = Object.keys(serviceAccount.rawCshKeyvals).length
 
     const accounts = new Map<bigint, ServiceAccount>([[serviceId, serviceAccount]])
 
@@ -401,21 +401,22 @@ describe('LOOKUP Host Function', () => {
     expect(accountAfter.balance).toBe(originalBalance)
     expect(accountAfter.octets).toBe(originalOctets)
     expect(accountAfter.items).toBe(originalItems)
-    expect(accountAfter.storage.size).toBe(originalStorageSize)
-    expect(accountAfter.preimages.size).toBe(originalPreimagesSize)
+    expect(Object.keys(accountAfter.rawCshKeyvals).length).toBe(originalRawCshKeyvalsSize)
     
     // Verify preimage still exists and wasn't consumed/deleted
-    expect(accountAfter.preimages.get(preimageHash)).toEqual(preimageData)
+    const fetchedPreimage = getServicePreimageValue(accountAfter, serviceId, preimageHash)
+    expect(fetchedPreimage).not.toBeUndefined()
+    expect(fetchedPreimage).toEqual(preimageData)
   })
 
   test('should handle partial preimage reads (from offset and length)', () => {
     const serviceId = 0n
-    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef'
+    const preimageHash = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' as Hex
     // 10-byte preimage: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     const preimageData = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
 
     const serviceAccount: ServiceAccount = {
-      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+      codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000000n,
       minaccgas: 0n,
       minmemogas: 0n,
@@ -425,10 +426,11 @@ describe('LOOKUP Host Function', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map([[preimageHash, preimageData]]),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
+
+    // Add preimage using helper
+    setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageData)
 
     const accounts = new Map<bigint, ServiceAccount>([[serviceId, serviceAccount]])
 

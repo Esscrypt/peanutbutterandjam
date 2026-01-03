@@ -1,3 +1,4 @@
+import { getServiceStorageValue } from '@pbnjam/codec'
 import { bytesToHex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
@@ -87,7 +88,7 @@ export class ReadHostFunction extends BaseHostFunction {
 
     // Gray Paper equation 414-418: Read storage value by key
     // v = a_storage[k] if a != none and k in keys(a_storage), otherwise none
-    const value = serviceAccount.storage.get(bytesToHex(key)) || null
+    const value = getServiceStorageValue(serviceAccount, requestedServiceId, bytesToHex(key))
     if (!value) {
       // Gray Paper equation 423: Return NONE if storage key not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE

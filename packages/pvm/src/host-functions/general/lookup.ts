@@ -1,4 +1,5 @@
-import { bytesToHex } from '@pbnjam/core'
+import { getServicePreimageValue } from '@pbnjam/codec'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -95,7 +96,7 @@ export class LookupHostFunction extends BaseHostFunction {
     const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
     if (!hashData) {
       // v = error - memory not readable
-      context.log('Lookup host function: Hash memory not readable', {
+      logger.error('Lookup host function: Hash memory not readable', {
         hashOffset: hashOffset.toString(),
         faultAddress: readFaultAddress?.toString() ?? 'null',
       })
@@ -111,7 +112,7 @@ export class LookupHostFunction extends BaseHostFunction {
 
     // Gray Paper: v = none when a = none ∨ memory[h:32] ∉ keys{a.preimages}
     if (!serviceAccount) {
-      context.log(
+      logger.error(
         'Lookup host function: Service account not found (a = none)',
         {
           queryServiceId: queryServiceId.toString(),
@@ -125,35 +126,39 @@ export class LookupHostFunction extends BaseHostFunction {
     }
 
     // Look up preimage by hash
+    // Gray Paper: v = a.preimages[memory[h:32]]
+    // Use getServicePreimageValue which looks up by preimage hash (not state key)
     const hashHex = bytesToHex(hashData)
-    const preimage = serviceAccount.preimages.get(hashHex)
+    const actualServiceId = queryServiceId === MAX_U64 ? lookupParams.serviceId : queryServiceId
 
-    if (!preimage) {
+    const foundPreimage = getServicePreimageValue(
+      serviceAccount,
+      actualServiceId,
+      hashHex,
+    )
+
+    if (!foundPreimage) {
       // v = none - preimage not found
-      context.log('Lookup host function: Preimage not found', {
-        hashHex,
-        queryServiceId: queryServiceId.toString(),
-        preimagesKeys: Array.from(serviceAccount.preimages.keys()).slice(0, 5),
-      })
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
         resultCode: null, // continue execution
       }
     }
 
+
     // v found - calculate slice parameters
     // Gray Paper: f = min(registers[10], len{v})
     //             l = min(registers[11], len{v} - f)
-    const preimageLength = BigInt(preimage.length)
-    const f = fromOffset < preimageLength ? Number(fromOffset) : preimage.length
-    const remainingAfterF = preimage.length - f
+    const preimageLength = BigInt(foundPreimage.length)
+    const f = fromOffset < preimageLength ? Number(fromOffset) : foundPreimage.length
+    const remainingAfterF = foundPreimage.length - f
     const l =
       length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF
 
     // Only write if there's data to write
     if (l > 0) {
       // Extract data slice
-      const dataToWrite = preimage.subarray(f, f + l)
+      const dataToWrite = foundPreimage.subarray(f, f + l)
 
       // Write preimage slice to memory
       // Gray Paper: PANIC if N[o,l] ⊄ writable{memory}
@@ -162,7 +167,7 @@ export class LookupHostFunction extends BaseHostFunction {
         dataToWrite,
       )
       if (writeFaultAddress) {
-        context.log('Lookup host function: Output memory not writable', {
+        logger.error('Lookup host function: Output memory not writable', {
           outputOffset: outputOffset.toString(),
           length: l.toString(),
           faultAddress: writeFaultAddress.toString(),
@@ -181,7 +186,7 @@ export class LookupHostFunction extends BaseHostFunction {
     // Gray Paper: Return len{v} (full preimage length, not slice length)
     context.registers[7] = preimageLength
 
-    context.log('Lookup host function: Success', {
+    logger.info('Lookup host function: Success', {
       queryServiceId: queryServiceId.toString(),
       hashHex,
       preimageLength: preimageLength.toString(),

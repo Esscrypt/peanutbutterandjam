@@ -6,7 +6,8 @@
     "config/*",
     "packages/*",
     "apis/*",
-    "infra/*"
+    "infra/*",
+    "scripts"
   ],
   "scripts": {
     "build": "turbo run build --output-logs=full --log-order=stream",

@@ -73,6 +73,7 @@ export interface HistoricalLookupParams {
 export interface InfoParams {
   serviceId: bigint
   accounts: Map<bigint, ServiceAccount>
+  currentTimeslot: bigint
 }
 
 /**
@@ -107,6 +108,7 @@ export interface LookupParams {
 export interface WriteParams {
   serviceAccount: ServiceAccount
   serviceId: bigint
+
 }
 
 export interface ReadParams {

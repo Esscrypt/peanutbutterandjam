@@ -181,7 +181,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        configService,
         eventBusService,
         clockService,
         networkingService: null,
@@ -415,19 +414,23 @@ describe('Genesis Parse Tests', () => {
       }
 
       // Helper function to parse state key using state service
-      const parseStateKeyForDebug = (keyHex: Hex) => {
+      const parseStateKeyForDebug = (keyHex: Hex): { error?: string; type?: string; chapterIndex?: number; serviceId?: bigint } => {
         const [error, parsedKey] = stateService.parseStateKey(keyHex)
         if (error) {
           return { error: error.message }
+        }
+        if (!parsedKey) {
+          return { error: 'Parsed key is null' }
         }
         // Add type information for better debugging
         if ('chapterIndex' in parsedKey) {
           if (parsedKey.chapterIndex === 255 && 'serviceId' in parsedKey) {
             return { ...parsedKey, type: 'C(255, s)' }
           }
+          if (parsedKey.chapterIndex === 0 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(s, h)' }
+          }
           return { ...parsedKey, type: 'C(i)' }
-        } else if ('serviceId' in parsedKey && 'hash' in parsedKey) {
-          return { ...parsedKey, type: 'C(s, h)' }
         }
         return parsedKey
       }
@@ -499,18 +502,15 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('chapterIndex' in keyInfo && !keyInfo.error && keyInfo.chapterIndex !== undefined) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
               console.error(`Key Type: ${keyInfo.type}`)
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
+            } else if ('serviceId' in keyInfo && !keyInfo.error) {
               console.error(`Service ID: ${keyInfo.serviceId}`)
               console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
-              }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
@@ -538,26 +538,28 @@ describe('Genesis Parse Tests', () => {
                 // Decode expected value from test vector using the same decoder as StateService
                 const expectedBytes = hexToBytes(keyval.value as Hex)
                 // Access private stateTypeRegistry to get the decoder
-                const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
-                if (decoder) {
-                  const [decodeError, decoded] = decoder(expectedBytes)
-                  if (!decodeError && decoded) {
-                    decodedExpected = decoded.value
-                  } else {
-                    decodedExpected = { 
-                      error: decodeError?.message || 'Decode failed',
-                      decodeError: decodeError ? String(decodeError) : undefined
+                if (chapterIndex !== undefined) {
+                  const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
+                  if (decoder) {
+                    const [decodeError, decoded] = decoder(expectedBytes)
+                    if (!decodeError && decoded) {
+                      decodedExpected = decoded.value
+                    } else {
+                      decodedExpected = { 
+                        error: decodeError?.message || 'Decode failed',
+                        decodeError: decodeError ? String(decodeError) : undefined
+                      }
                     }
+                  } else {
+                    decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
                   }
-                } else {
-                  decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
-                }
 
-                // Get decoded actual state component
-                decodedActual = stateService.getStateComponent(
-                  chapterIndex,
-                  'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
-                )
+                  // Get decoded actual state component
+                  decodedActual = stateService.getStateComponent(
+                    chapterIndex,
+                    'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
+                  )
+                }
               } catch (error) {
                 decodedExpected = decodedExpected || { 
                   error: error instanceof Error ? error.message : String(error),
@@ -574,18 +576,15 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('chapterIndex' in keyInfo && !keyInfo.error && keyInfo.chapterIndex !== undefined) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
               console.error(`Key Type: ${keyInfo.type}`)
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
+            } else if ('serviceId' in keyInfo && !keyInfo.error) {
               console.error(`Service ID: ${keyInfo.serviceId}`)
               console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
-              }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }

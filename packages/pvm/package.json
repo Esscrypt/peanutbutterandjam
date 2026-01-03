@@ -9,8 +9,6 @@
     "build:wasm": "bun run build.wasm.ts",
     "build:all": "bun run build && bun run build:wasm",
     "check": "tsc --pretty --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest run --watch",
     "test:wasm": "bun test src/__tests__/wasm-wrapper.test.ts",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },

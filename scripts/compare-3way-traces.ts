@@ -2799,8 +2799,10 @@ async function main() {
     )
 
     expectedPath = testVectorsDir
-    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', 'modular')
-    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', 'modular-wasm')
+    // Include version directory (v0.7.2) in trace paths to match actual trace location
+    const traceVersion = 'v0.7.2'
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', traceVersion, 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', traceVersion, 'modular-wasm')
 
     comparisonLabel = `Fuzzy Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -2860,6 +2862,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy',
+            traceVersion,
             `${executorType}-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -2891,6 +2894,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy',
+          traceVersion,
           `${executorType}-${timeslot}.log`,
         )
         if (existsSync(textPath)) {
@@ -2936,6 +2940,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy',
+            traceVersion,
             `typescript-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -2957,6 +2962,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy',
+          traceVersion,
           `typescript-${timeslot}.log`,
         )
         if (existsSync(textPath)) {
@@ -2990,6 +2996,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy',
+            traceVersion,
             `wasm-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -3011,6 +3018,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy',
+          traceVersion,
           `wasm-${timeslot}.log`,
         )
         if (existsSync(textPath)) {
@@ -3059,8 +3067,10 @@ async function main() {
     )
 
     expectedPath = testVectorsDir
-    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', 'modular')
-    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', 'modular-wasm')
+    // Include version directory (v0.7.2) in trace paths to match actual trace location
+    const traceVersion = 'v0.7.2'
+    typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', traceVersion, 'modular')
+    wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', traceVersion, 'modular-wasm')
 
     comparisonLabel = `Fuzzy Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -3120,6 +3130,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy_light',
+            traceVersion,
             `${executorType}-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -3151,6 +3162,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy_light',
+          traceVersion,
           `${executorType}-${timeslot}.log`,
         )
         if (existsSync(textPath)) {
@@ -3196,6 +3208,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy_light',
+            traceVersion,
             `typescript-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -3217,6 +3230,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy_light',
+          traceVersion,
           `typescript-${timeslot}.log`,
         )
         if (existsSync(textPath)) {
@@ -3250,6 +3264,7 @@ async function main() {
             workspaceRoot,
             'pvm-traces',
             'fuzzy_light',
+            traceVersion,
             `wasm-${timeslot}.log`,
           )
           if (existsSync(textPath)) {
@@ -3271,6 +3286,7 @@ async function main() {
           workspaceRoot,
           'pvm-traces',
           'fuzzy_light',
+          traceVersion,
           `wasm-${timeslot}.log`,
         )
         if (existsSync(textPath)) {

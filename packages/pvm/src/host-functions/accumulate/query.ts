@@ -5,6 +5,7 @@ import {
   type AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
 } from './base'
+import { getServiceRequestValue } from '@pbnjam/codec'
 
 /**
  * QUERY accumulation host function (Ω_Q)
@@ -73,9 +74,9 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
 
     // Convert hash to hex and look up request
     const hashHex = bytesToHex(hashData)
-    const requestMap = serviceAccount.requests.get(hashHex)
+    const requestValue = getServiceRequestValue(serviceAccount, imX.id, hashHex, preimageLength);
 
-    if (!requestMap) {
+    if (!requestValue) {
       // Request doesn't exist
       this.setAccumulateError(registers, 'NONE')
       registers[8] = 0n
@@ -84,34 +85,25 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    const request = requestMap.get(preimageLength)
-    if (!request) {
-      // Request doesn't exist for this size
-      this.setAccumulateError(registers, 'NONE')
-      registers[8] = 0n
-      return {
-        resultCode: null, // continue execution
-      }
-    }
 
     // Return encoded status based on request length
-    if (request.length === 0) {
+    if (requestValue.length === 0) {
       // Empty request []
       registers[7] = 0n
       registers[8] = 0n
-    } else if (request.length === 1) {
+    } else if (requestValue.length === 1) {
       // Single entry [x]
-      const [x] = request
+      const [x] = requestValue
       registers[7] = 1n + 2n ** 32n * x
       registers[8] = 0n
-    } else if (request.length === 2) {
+    } else if (requestValue.length === 2) {
       // Two entries [x, y]
-      const [x, y] = request
+      const [x, y] = requestValue
       registers[7] = 2n + 2n ** 32n * x
       registers[8] = y
-    } else if (request.length === 3) {
+    } else if (requestValue.length === 3) {
       // Three entries [x, y, z]
-      const [x, y, z] = request
+      const [x, y, z] = requestValue
       registers[7] = 3n + 2n ** 32n * x
       registers[8] = y + 2n ** 32n * z
     } else {

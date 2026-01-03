@@ -20,6 +20,8 @@
 import {
   calculateWorkReportHash,
   encodeValidatorPublicKeys,
+  setServicePreimageValue,
+  setServiceRequestValue,
 } from '@pbnjam/codec'
 import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type { AccumulatePVM } from '@pbnjam/pvm-invocations'
@@ -31,7 +33,6 @@ import {
   BaseService,
   type DeferredTransfer,
   type PartialState,
-  type PreimageRequestStatus,
   type Ready,
   type ReadyItem,
   type ServiceAccount,
@@ -1068,8 +1069,11 @@ export class AccumulationService extends BaseService {
       stagingset = stagingset.slice(0, requiredCount)
     }
 
+    const accounts = this.serviceAccountsService.getServiceAccounts().accounts
+    
+    
     return {
-      accounts: this.serviceAccountsService.getServiceAccounts().accounts,
+      accounts,
       stagingset,
       authqueue: this.authQueueService
         ? this.authQueueService
@@ -1102,36 +1106,11 @@ export class AccumulationService extends BaseService {
     // Deep clone accounts to prevent modifications from affecting other services
     const clonedAccounts = new Map<bigint, ServiceAccount>()
     for (const [serviceId, account] of originalState.accounts) {
-      // Clone storage map
-      const clonedStorage = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.storage) {
-        clonedStorage.set(key, new Uint8Array(value))
-      }
-
-      // Clone preimages map
-      const clonedPreimages = new Map<Hex, Uint8Array>()
-      for (const [key, value] of account.preimages) {
-        clonedPreimages.set(key, new Uint8Array(value))
-      }
-
-      // Clone requests map (nested structure)
-      const clonedRequests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-      for (const [hash, byLen] of account.requests) {
-        const clonedByLen = new Map<bigint, PreimageRequestStatus>()
-        for (const [len, status] of byLen) {
-          // PreimageRequestStatus is bigint[], so we need to clone the array
-          clonedByLen.set(len, [...status])
-        }
-        clonedRequests.set(hash, clonedByLen)
-      }
-
-      // Create cloned account
-      clonedAccounts.set(serviceId, {
+      const clonedAccount: ServiceAccount = {
         ...account,
-        storage: clonedStorage,
-        preimages: clonedPreimages,
-        requests: clonedRequests,
-      })
+        rawCshKeyvals: JSON.parse(JSON.stringify(account.rawCshKeyvals)),
+      }
+      clonedAccounts.set(serviceId, clonedAccount)
     }
 
     // Clone alwaysaccers map
@@ -2201,8 +2180,9 @@ export class AccumulationService extends BaseService {
 
           // Check if provision is still providable (request exists and is not already provided)
           const preimageLength = BigInt(preimageData.length)
-          const requestMap = account.requests.get(preimageHash)
-          if (!requestMap || !requestMap.has(preimageLength)) {
+          const request = this.serviceAccountsService.getServiceAccountRequest(provisionServiceId, preimageHash, preimageLength)
+          // const requestMap = account.requests.get(preimageHash)
+          if (!request) {
             logger.debug(
               '[AccumulationService] Provision not providable - request not found',
               {
@@ -2216,8 +2196,10 @@ export class AccumulationService extends BaseService {
 
           // Apply the provision
           // Gray Paper line 275-276: set preimages[blake(i)] = i, requests[(blake(i), len(i))] = [thetime']
-          account.preimages.set(preimageHash, preimageData)
-          requestMap.set(preimageLength, [currentSlot])
+          // Use helper functions to set preimage and request values in rawCshKeyvals
+          setServicePreimageValue(account, provisionServiceId, preimageHash, preimageData)
+          setServiceRequestValue(account, provisionServiceId, preimageHash, preimageLength, [currentSlot])
+          
 
           logger.info('[AccumulationService] Applied provision', {
             serviceId: provisionServiceId.toString(),

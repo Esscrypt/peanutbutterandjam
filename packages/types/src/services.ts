@@ -9,15 +9,15 @@ import type {
   Guarantee,
   GuaranteeSignature,
   Judgment,
-  Preimage,
+  ServiceAccount,
   SafroleTicket,
   SafroleTicketWithoutProof,
-  ServiceAccount,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
 } from './serialization'
 import type { BaseService } from './service'
+import type { JamVersion } from './fuzz'
 
 export interface IValidatorSetManager extends BaseService {
   getEpochRoot(): Hex
@@ -61,6 +61,7 @@ export interface IRecentHistoryService extends BaseService {
 export interface IStateService extends BaseService {
   getStateRoot(): Safe<Hex>
   getGenesisManager(): IGenesisManagerService
+
 }
 
 export interface IGenesisManagerService extends BaseService {
@@ -74,24 +75,15 @@ export interface IServiceAccountService extends BaseService {
     serviceAccount: ServiceAccount,
   ): Safe<void>
   deleteServiceAccount(serviceId: bigint): Safe<void>
-  updateServiceAccount(
-    serviceId: bigint,
-    serviceAccount: ServiceAccount,
-  ): Safe<void>
-  getServiceAccountStorage(serviceId: bigint): Safe<Map<Hex, Uint8Array>>
+
+  getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined
   histLookupServiceAccount(
+    serviceId: bigint,
     serviceAccount: ServiceAccount,
     hash: Hex,
     timeslot: bigint,
   ): Safe<Uint8Array | null>
   /** Lookup using service id and internal state */
-  histLookupForService(
-    serviceId: bigint,
-    hash: Hex,
-    timeslot: bigint,
-  ): Safe<Uint8Array | null>
-  // histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null>
-  getPreimage(hash: Hex): Safe<Preimage | null>
 }
 
 export interface IKeyPairService extends BaseService {
@@ -139,6 +131,8 @@ export interface IConfigService extends BaseService {
   get slotDuration(): number
   get maxLookupAnchorage(): number
   get ecPieceSize(): number
+  get jamVersion(): JamVersion
+  set jamVersion(version: JamVersion)
 }
 
 export interface IClockService extends BaseService {

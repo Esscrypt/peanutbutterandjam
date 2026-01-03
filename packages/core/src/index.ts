@@ -13,10 +13,12 @@ export * from './logger'
 // Export merklization implementation
 export * from './merklization'
 export * from './schemas'
-// Export service account utilities
-export * from './service-account'
+// Export service ID generation utilities
+export * from './service-id'
 // Export shuffle functions
 export * from './shuffle'
+// Export state utilities
+export * from './state-key'
 // Export all utilities
 export * from './utils'
 // Export Zod schemas

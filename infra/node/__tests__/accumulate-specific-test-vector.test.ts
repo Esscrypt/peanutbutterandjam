@@ -28,6 +28,12 @@ import { AuthQueueService } from '../services/auth-queue-service'
 import { ValidatorSetManager } from '../services/validator-set'
 import { PrivilegesService } from '../services/privileges-service'
 import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
+import {
+  setServiceStorageValue,
+  setServicePreimageValue,
+  setServiceRequestValue,
+} from '@pbnjam/codec'
+import { convertJsonReportToWorkReport } from './traces/fuzzy-all-blocks.test'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -88,32 +94,6 @@ function loadTestVectors(
   return allVectors
 }
 
-// Helper function to convert JSON numbers to bigints for WorkReport
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-    },
-    results: jsonReport.results.map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load.gas_used || 0),
-        imports: BigInt(r.refine_load.imports || 0),
-        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-        exports: BigInt(r.refine_load.exports || 0),
-      },
-    })),
-  }
-}
-
 describe('Accumulate Test Vector Execution', () => {
   // Test both tiny and full configurations
   for (const configType of ['tiny', 'full'] as const) {
@@ -143,7 +123,6 @@ describe('Accumulate Test Vector Execution', () => {
             // const { PreimageRequestProtocol } = await import('@pbnjam/networking')
             // const preimageRequestProtocol = new PreimageRequestProtocol(eventBusService)
             const serviceAccountService = new ServiceAccountService({
-              configService: configService,
               eventBusService: eventBusService,
               clockService: clockService,
               networkingService: null,
@@ -404,63 +383,44 @@ function convertToAccounts(accounts: AccumulateTestVector['pre_state']['accounts
       created: BigInt(serviceInfo.creation_slot),
       lastacc: BigInt(serviceInfo.last_accumulation_slot),
       parent: BigInt(serviceInfo.parent_service),
-      storage: new Map(),
-      preimages: new Map(),
-      requests: new Map(),
+      rawCshKeyvals: {},
     }
 
-    // Convert storage
-    for (const storageEntry of accountData.data.storage) {
-      serviceAccount.storage.set(storageEntry.key as Hex, hexToBytes(storageEntry.value as Hex))
-    }
-
-    // Convert preimages (if present)
-    // Note: Test vectors use "preimage_blobs" (not "preimages_blob")
-    // Use type assertion to handle both field names
-    const accountDataAny = accountData.data as any
-    if (accountDataAny.preimage_blobs) {
-      for (const preimageEntry of accountDataAny.preimage_blobs) {
-        serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
+    // Set storage values from test vector
+    if (accountData.data.storage) {
+      for (const storageEntry of accountData.data.storage) {
+        const storageKey = storageEntry.key as Hex
+        const storageValue = hexToBytes(storageEntry.value as Hex)
+        setServiceStorageValue(serviceAccount, serviceId, storageKey, storageValue)
       }
     }
-    // Also check for "preimages_blob" for backwards compatibility
+
+    // Set preimage values from test vector
     if (accountData.data.preimages_blob) {
       for (const preimageEntry of accountData.data.preimages_blob) {
-        serviceAccount.preimages.set(preimageEntry.hash as Hex, hexToBytes(preimageEntry.blob as Hex))
+        const preimageHash = preimageEntry.hash as Hex
+        const preimageValue = hexToBytes(preimageEntry.blob as Hex)
+        setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageValue)
       }
     }
 
-    // Convert preimage requests (if present)
-    // requests is Map<Hex, Map<bigint, PreimageRequestStatus>>
-    // where PreimageRequestStatus = bigint[]
+    // Set preimage requests from test vector
     // Test vector has preimage_requests with key.hash, key.length, and value array
-    if (accountDataAny.preimage_requests) {
-      for (const requestEntry of accountDataAny.preimage_requests) {
+    if ((accountData as any).preimage_requests) {
+      for (const requestEntry of (accountData as any).preimage_requests) {
         const hash = requestEntry.key.hash as Hex
         const length = BigInt(requestEntry.key.length)
         const status: PreimageRequestStatus = requestEntry.value.map(BigInt)
-        
-        // Get or create the request map for this hash
-        let requestMap = serviceAccount.requests.get(hash)
-        if (!requestMap) {
-          requestMap = new Map<bigint, PreimageRequestStatus>()
-          serviceAccount.requests.set(hash, requestMap)
-        }
-        
-        // Set the status for this length
-        requestMap.set(length, status)
+        setServiceRequestValue(serviceAccount, serviceId, hash, length, status)
       }
     }
     // Also check for "preimages_status" for backwards compatibility
     if (accountData.data.preimages_status) {
       for (const statusEntry of accountData.data.preimages_status) {
         const hash = statusEntry.hash as Hex
-        const statusMap = new Map<bigint, PreimageRequestStatus>()
-        // Convert status array to PreimageRequestStatus (bigint[])
         const status: PreimageRequestStatus = statusEntry.status.map(BigInt)
         // Use 0 as default length (test vectors don't provide length)
-        statusMap.set(0n, status)
-        serviceAccount.requests.set(hash, statusMap)
+        setServiceRequestValue(serviceAccount, serviceId, hash, 0n, status)
       }
     }
 

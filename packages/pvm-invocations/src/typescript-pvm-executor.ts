@@ -29,7 +29,6 @@ import type {
   ResultCode,
   SafePromise,
   ServiceAccount,
-  WriteParams,
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import types that aren't exported from main index - use relative path to source
@@ -59,7 +58,6 @@ export class TypeScriptPVMExecutor extends PVM {
     gasAfter: bigint
     serviceId?: bigint
   }> = []
-
   constructor(
     hostFunctionRegistry: HostFunctionRegistry,
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry,
@@ -72,7 +70,6 @@ export class TypeScriptPVMExecutor extends PVM {
     this.accumulateHostFunctionRegistry = accumulateHostFunctionRegistry
     this.configService = configService
     this.entropyService = entropyService
-
     // Calculate workspace root (same logic as WasmPVMExecutor)
     const currentDir =
       typeof __dirname !== 'undefined'
@@ -141,13 +138,15 @@ export class TypeScriptPVMExecutor extends PVM {
 
       // Determine error code based on result
       // result is Uint8Array (success), 'PANIC', or 'OOG'
+      // Error codes match Gray Paper pvm_invocations.tex section 6.1:
+      // HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
       let errorCode: number | undefined
       if (error) {
-        errorCode = 1 // General error
+        errorCode = RESULT_CODES.PANIC // General error maps to PANIC
       } else if (marshallingResult?.result === 'PANIC') {
-        errorCode = 1 // PANIC = error code 1
+        errorCode = RESULT_CODES.PANIC // PANIC = error code 1
       } else if (marshallingResult?.result === 'OOG') {
-        errorCode = 2 // OOG = error code 2
+        errorCode = RESULT_CODES.OOG // OOG = error code 4 (not 2!)
       }
       // If result is Uint8Array, it's a success - no error code
 
@@ -189,9 +188,17 @@ export class TypeScriptPVMExecutor extends PVM {
       const gasBefore = this.state.gasCounter
       const serviceId = implicationsPair[0].id
 
-      // Gray Paper: Apply gas cost (10 gas for all host functions)
-      const gasCost = 10n
-      const isOOG = this.state.gasCounter < gasCost
+      // JIP-1: LOG host function (100) costs 0 gas for JAM version 0.7.1
+      // For other host functions or versions, use standard 10 gas cost
+      const jamVersion = this.configService.jamVersion
+      const isLogFunction = hostCallId === GENERAL_FUNCTIONS.LOG
+      const isJamVersion071 =
+        jamVersion.major === 0 &&
+        jamVersion.minor === 7 &&
+        jamVersion.patch === 1
+      const gasCost =
+        isLogFunction && isJamVersion071 ? 0n : 10n
+      const isOOG = gasCost > 0n && this.state.gasCounter < gasCost
 
       // Log host function call BEFORE execution (even if OOG) so it appears in trace dump
       // This ensures we see which host function was attempted even if it fails
@@ -201,10 +208,13 @@ export class TypeScriptPVMExecutor extends PVM {
         gasBefore,
         gasAfter: isOOG
           ? this.state.gasCounter
-          : this.state.gasCounter - gasCost, // Will be updated after execution if not OOG
+          : gasCost > 0n
+            ? this.state.gasCounter - gasCost // Will be updated after execution if not OOG
+            : this.state.gasCounter, // LOG costs 0 gas for JAM 0.7.1
         serviceId,
       }
       this.traceHostFunctionLogs.push(hostLogEntry)
+      
 
       if (isOOG) {
         // Gray Paper: On OOG, all remaining gas is consumed
@@ -212,8 +222,11 @@ export class TypeScriptPVMExecutor extends PVM {
         return RESULT_CODES.OOG
       }
 
-      this.state.gasCounter -= gasCost
-      // Update gasAfter now that we've deducted the base cost
+      // Only deduct gas if gasCost > 0 (LOG costs 0 gas for JAM 0.7.1)
+      if (gasCost > 0n) {
+        this.state.gasCounter -= gasCost
+      }
+      // Update gasAfter now that we've deducted the base cost (or not, if gasCost was 0)
       hostLogEntry.gasAfter = this.state.gasCounter
 
       // Try accumulate host functions first (14-26)
@@ -260,6 +273,7 @@ export class TypeScriptPVMExecutor extends PVM {
         const result = this.handleGeneralHostFunction(
           hostCallId,
           implicationsPair,
+          timeslot,
         )
 
         // Update gasAfter after host function execution (even if it panicked or OOG)
@@ -373,6 +387,7 @@ export class TypeScriptPVMExecutor extends PVM {
   private handleGeneralHostFunction(
     hostCallId: bigint,
     implicationsPair: ImplicationsPair,
+    timeslot: bigint,
   ): ResultCode | null {
     const hostFunction = this.hostFunctionRegistry.get(hostCallId)
     if (!hostFunction) {
@@ -427,7 +442,7 @@ export class TypeScriptPVMExecutor extends PVM {
       }
       case 5n: {
         // info
-        const infoParams = this.buildInfoParams(implicationsPair)
+        const infoParams = this.buildInfoParams(implicationsPair, timeslot)
         result = hostFunction.execute(hostFunctionContext, infoParams)
         break
       }
@@ -533,7 +548,10 @@ export class TypeScriptPVMExecutor extends PVM {
     }
   }
 
-  private buildWriteParams(implicationsPair: ImplicationsPair): WriteParams {
+  private buildWriteParams(implicationsPair: ImplicationsPair): {
+    serviceAccount: ServiceAccount,
+    serviceId: bigint
+  } {
     const imX = implicationsPair[0]
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
@@ -562,11 +580,12 @@ export class TypeScriptPVMExecutor extends PVM {
     }
   }
 
-  private buildInfoParams(implicationsPair: ImplicationsPair): InfoParams {
+  private buildInfoParams(implicationsPair: ImplicationsPair, timeslot: bigint): InfoParams {
     const imX = implicationsPair[0]
     return {
       serviceId: imX.id,
       accounts: imX.state.accounts,
+      currentTimeslot: timeslot,
     }
   }
 

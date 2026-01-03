@@ -1,4 +1,10 @@
-import { bytesToHex, logger } from '@pbnjam/core'
+import { setServiceRequestValue } from '@pbnjam/codec'
+import {
+  bytesToHex,
+  calculateMinBalance,
+  calculateNextFreeId,
+  logger,
+} from '@pbnjam/core'
 import type { HostFunctionResult, ServiceAccount } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -58,7 +64,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 763: l ∈ N_bits32, otherwise codehash = error → PANIC
     // On PANIC, registers_7 remains unchanged
     if (expectedCodeLength > 0xffffffffn) {
-      logger.debug('[NEW] PANIC: expectedCodeLength exceeds 32-bit', {
+      logger.error('[NEW] PANIC: expectedCodeLength exceeds 32-bit', {
         expectedCodeLength: expectedCodeLength.toString(),
       })
       return {
@@ -66,28 +72,27 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Log all input parameters
-    context.log('NEW host function invoked', {
-      codeHashOffset: codeHashOffset.toString(),
-      expectedCodeLength: expectedCodeLength.toString(),
-      minAccGas: minAccGas.toString(),
-      minMemoGas: minMemoGas.toString(),
-      gratis: gratis.toString(),
-      desiredId: desiredId.toString(),
-      timeslot: timeslot.toString(),
-      currentServiceId: implications[0].id.toString(),
-      registrar: implications[0].state.registrar.toString(),
-      nextFreeId: implications[0].nextfreeid.toString(),
-    })
-
     // Gray Paper: codehash = memory[o:32] - ALWAYS read 32 bytes for the hash
     // The hash is a blake2b hash which is always 32 bytes
+    // Check if offset is in initial zone (0-65536) - this is not readable
+    // Regular memory instructions PANIC for addresses < ZONE_SIZE
+    if (codeHashOffset < 65536n) {
+      logger.error('[NEW] PANIC: codeHashOffset in initial zone (not readable)', {
+        codeHashOffset: codeHashOffset.toString(),
+        zoneSize: '65536',
+      })
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+    
     const [codeHashData, faultAddress] = ram.readOctets(
       codeHashOffset,
       32n, // Always read 32 bytes for the code hash
     )
+    
     if (faultAddress) {
-      logger.debug('[NEW] PANIC: memory read fault for codehash', {
+      logger.error('[NEW] PANIC: memory read fault for codehash', {
         codeHashOffset: codeHashOffset.toString(),
         faultAddress: faultAddress.toString(),
       })
@@ -98,7 +103,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       }
     }
     if (!codeHashData) {
-      logger.debug('[NEW] PANIC: no codehash data', {
+      logger.error('[NEW] PANIC: no codehash data', {
         codeHashOffset: codeHashOffset.toString(),
       })
       // Gray Paper: PANIC but registers_7 should remain UNCHANGED
@@ -134,20 +139,15 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // For a new service with one request entry (codehash, expectedCodeLength):
     //   items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
     //   octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
-    const C_BASE_DEPOSIT = 100n
-    const C_ITEM_DEPOSIT = 10n
-    const C_BYTE_DEPOSIT = 1n
-
     const newServiceItems = 2n // 2 * 1 request + 0 storage
     const newServiceOctets = 81n + expectedCodeLength // 81 + expected code length
 
     // Gray Paper: minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
-    const minBalanceBeforeGratis =
-      C_BASE_DEPOSIT +
-      C_ITEM_DEPOSIT * newServiceItems +
-      C_BYTE_DEPOSIT * newServiceOctets
-    const minBalance =
-      minBalanceBeforeGratis > gratis ? minBalanceBeforeGratis - gratis : 0n
+    const minBalance = calculateMinBalance(
+      newServiceItems,
+      newServiceOctets,
+      gratis,
+    )
 
     // Check if current service has sufficient balance
     // Gray Paper line 786: CASH when s.balance < self.minbalance
@@ -223,12 +223,27 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       created: timeslot,
       lastacc: 0n,
       parent: imX.id,
-      storage: new Map(),
-      preimages: new Map(),
-      // Gray Paper line 770: requests = {(codehash, expectedCodeLength): []}
-      requests: new Map([[codeHashHex, new Map([[expectedCodeLength, []]])]]),
+      rawCshKeyvals: {},
     }
 
+    // Gray Paper line 770: sa_requests = {(c, l): []}
+    // where c = codehash and l = expectedCodeLength
+    // Create the initial request entry with empty timeslots array
+    // Request key: C(s, encode[4]{l} || codehash)
+    // Request value: encode{var{sequence{encode[4]{x} | x ∈ t}}} where t = [] (empty)
+    setServiceRequestValue(
+      newServiceAccount,
+      newServiceId,
+      codeHashHex, // requestHash = codehash (32-byte hash)
+      expectedCodeLength, // length = expectedCodeLength
+      [], // requestValue = empty timeslots array
+    )
+
+    // Note: octets and items are already correctly set above:
+    // - octets = 81 + expectedCodeLength (Gray Paper: sum((81 + z) for (h, z) in keys(requests)))
+    // - items = 2 (Gray Paper: 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2)
+    // These values don't need to be recalculated because we know the blob length z = expectedCodeLength
+    
     logger.info('[NEW Host Function] Creating new service account', {
       newServiceId: newServiceId.toString(),
       parentServiceId: imX.id.toString(),
@@ -251,7 +266,10 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Update next free ID only for non-registrar cases
     // Gray Paper line 791: i* = check(Cminpublicindex + (imX.nextfreeid - Cminpublicindex + 42) mod ...)
     if (updateNextFreeId) {
-      imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+      imX.nextfreeid = calculateNextFreeId(
+        imX.nextfreeid,
+        imX.state.accounts,
+      )
     }
 
     logger.info(
@@ -271,56 +289,5 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     }
   }
 
-  /**
-   * Get next free ID according to Gray Paper specification
-   *
-   * Gray Paper line 791: i* = check(Cminpublicindex + (im_nextfreeid - Cminpublicindex + 42) mod (2^32 - Cminpublicindex - 2^8))
-   *
-   * The check function (Gray Paper line 252-255) ensures the ID is not already in use:
-   * - If ID is available, return it
-   * - Otherwise, recursively check the next candidate (increment by 1, wrapped)
-   */
-  private getNextFreeId(
-    currentId: bigint,
-    accounts: Map<bigint, ServiceAccount>,
-  ): bigint {
-    const C_MIN_PUBLIC_INDEX = 65536n // 2^16 = Cminpublicindex
-    const MODULUS = 2n ** 32n - C_MIN_PUBLIC_INDEX - 2n ** 8n // 2^32 - Cminpublicindex - 2^8
 
-    // Gray Paper line 791: Calculate candidate ID
-    // i* = Cminpublicindex + (im_nextfreeid - Cminpublicindex + 42) mod (2^32 - Cminpublicindex - 2^8)
-    const candidateId =
-      C_MIN_PUBLIC_INDEX + ((currentId - C_MIN_PUBLIC_INDEX + 42n) % MODULUS)
-
-    // Gray Paper line 252-255: Apply check function to ensure ID is available
-    return this.checkServiceId(candidateId, accounts)
-  }
-
-  /**
-   * Check function from Gray Paper line 252-255
-   *
-   * check(i ∈ serviceid) = {
-   *   i                          if i ∉ keys(accounts)
-   *   check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)  otherwise
-   * }
-   */
-  private checkServiceId(
-    id: bigint,
-    accounts: Map<bigint, ServiceAccount>,
-  ): bigint {
-    const C_MIN_PUBLIC_INDEX = 65536n // 2^16 = Cminpublicindex
-    const MODULUS = 2n ** 32n - 2n ** 8n - C_MIN_PUBLIC_INDEX // 2^32 - 2^8 - Cminpublicindex
-
-    // If ID is not in accounts, return it
-    if (!accounts.has(id)) {
-      return id
-    }
-
-    // Otherwise, recursively check the next candidate
-    // (i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex
-    const nextCandidate =
-      C_MIN_PUBLIC_INDEX + ((id - C_MIN_PUBLIC_INDEX + 1n) % MODULUS)
-
-    return this.checkServiceId(nextCandidate, accounts)
-  }
 }

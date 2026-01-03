@@ -69,32 +69,6 @@ export class ServiceAccount {
   }
 }
 
-export class ServiceAccountCore {
-  codehash: string
-  balance: u64
-  minaccgas: u64
-  minmemogas: u64
-  octets: u64
-  gratis: u64
-  items: u64
-  created: u64
-  lastacc: u64
-  parent: u64
-
-  constructor() {
-    this.codehash = ''
-    this.balance = 0
-    this.minaccgas = 0
-    this.minmemogas = 0
-    this.octets = 0
-    this.gratis = 0
-    this.items = 0
-    this.created = 0
-    this.lastacc = 0
-    this.parent = 0
-  }
-}
-
 // ============================================================================
 // Service Interfaces (Stub implementations)
 // ============================================================================
