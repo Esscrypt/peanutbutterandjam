@@ -94,9 +94,10 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
    * Also recalculates items from actual state to ensure checkpoint has correct value
    */
   private deepCopyServiceAccount(account: ServiceAccount): ServiceAccount {
-    return {
+    const copy = {
       ...account,
       rawCshKeyvals: JSON.parse(JSON.stringify(account.rawCshKeyvals)),
     }
+    return copy
   }
 }

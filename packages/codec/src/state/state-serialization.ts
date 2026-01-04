@@ -59,12 +59,7 @@
  * - Compact state commitments (32-byte hash)
  */
 
-import {
-  blake2bHash,
-  bytesToHex,
-  type Hex,
-  hexToBytes,
-} from '@pbnjam/core'
+import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   GlobalState,
   IConfigService,
@@ -628,17 +623,13 @@ export function createStateTrie(
   for (const [serviceId, account] of globalState.accounts.accounts) {
     const accountKey = createStateKey(255, serviceId)
 
-    const [error17, accountData] = encodeServiceAccount(
-      account,
-      jamVersion,
-    )
+    const [error17, accountData] = encodeServiceAccount(account, jamVersion)
     if (error17) {
       return safeError(error17)
     }
     if (accountData) {
       stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
     }
-
   }
 
   // Add all raw C(s, h) keys to the state trie

@@ -74,23 +74,12 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
 
     // Gray Paper: codehash = memory[o:32] - ALWAYS read 32 bytes for the hash
     // The hash is a blake2b hash which is always 32 bytes
-    // Check if offset is in initial zone (0-65536) - this is not readable
-    // Regular memory instructions PANIC for addresses < ZONE_SIZE
-    if (codeHashOffset < 65536n) {
-      logger.error('[NEW] PANIC: codeHashOffset in initial zone (not readable)', {
-        codeHashOffset: codeHashOffset.toString(),
-        zoneSize: '65536',
-      })
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    
+
     const [codeHashData, faultAddress] = ram.readOctets(
       codeHashOffset,
       32n, // Always read 32 bytes for the code hash
     )
-    
+
     if (faultAddress) {
       logger.error('[NEW] PANIC: memory read fault for codehash', {
         codeHashOffset: codeHashOffset.toString(),
@@ -118,6 +107,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Get current service account
     const currentService = imX.state.accounts.get(imX.id)
     if (!currentService) {
+      logger.error('[NEW] PANIC: current service account not found', {
+        serviceId: imX.id.toString(),
+      })
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -127,6 +119,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 787: HUH when gratis != 0 AND service is not the manager
     // Only the manager can create services with gratis (free deposit allowance)
     if (gratis !== 0n && imX.id !== imX.state.manager) {
+      logger.error('[NEW] HUH: gratis != 0 and service is not the manager', {
+        serviceId: imX.id.toString(),
+        managerId: imX.state.manager.toString(),
+        gratis: gratis.toString(),
+      })
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -184,6 +181,10 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       // Registrar creating reserved service with specific ID
       // Gray Paper line 788: check if desired ID is already taken
       if (imX.state.accounts.has(desiredId)) {
+        logger.error('[NEW] FULL: desired ID is already taken', {
+          desiredId: desiredId.toString(),
+          serviceId: imX.id.toString(),
+        })
         this.setAccumulateError(registers, 'FULL')
         return {
           resultCode: null, // continue execution
@@ -243,7 +244,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // - octets = 81 + expectedCodeLength (Gray Paper: sum((81 + z) for (h, z) in keys(requests)))
     // - items = 2 (Gray Paper: 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2)
     // These values don't need to be recalculated because we know the blob length z = expectedCodeLength
-    
+
     logger.info('[NEW Host Function] Creating new service account', {
       newServiceId: newServiceId.toString(),
       parentServiceId: imX.id.toString(),
@@ -266,10 +267,7 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Update next free ID only for non-registrar cases
     // Gray Paper line 791: i* = check(Cminpublicindex + (imX.nextfreeid - Cminpublicindex + 42) mod ...)
     if (updateNextFreeId) {
-      imX.nextfreeid = calculateNextFreeId(
-        imX.nextfreeid,
-        imX.state.accounts,
-      )
+      imX.nextfreeid = calculateNextFreeId(imX.nextfreeid, imX.state.accounts)
     }
 
     logger.info(
@@ -288,6 +286,4 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       resultCode: null, // continue execution
     }
   }
-
-
 }

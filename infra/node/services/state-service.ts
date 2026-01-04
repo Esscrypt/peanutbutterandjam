@@ -47,12 +47,7 @@ import {
   decodeTheTime,
   decodeValidatorSet,
 } from '@pbnjam/codec'
-import {
-  bytesToHex,
-  hexToBytes,
-  logger,
-  merklizeState,
-} from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger, merklizeState } from '@pbnjam/core'
 import type {
   Accumulated,
   Activity,
@@ -216,7 +211,7 @@ export class StateService extends BaseService implements IStateService {
 
     // Initialize state from genesis if available, otherwise start with empty state
     // This allows StateService to work without genesis (e.g., when using trace pre_state)
-    if(this.genesisManagerService) {
+    if (this.genesisManagerService) {
       const [genesisHeaderError, genesisHeader] =
         this.genesisManagerService.getState()
       if (genesisHeaderError) {
@@ -228,7 +223,6 @@ export class StateService extends BaseService implements IStateService {
       }
     }
   }
-
 
   /**
    * Get genesis manager service
@@ -437,23 +431,9 @@ export class StateService extends BaseService implements IStateService {
         if (serviceId === undefined) {
           throw new Error('Service ID is required for C(s,h) keys')
         }
-        const problematicKey: Hex = '0x84d7c84556b776fec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
-        const problematicServiceId = 1985398916n
-        if (serviceId === problematicServiceId && keyval[problematicKey]) {
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:440',message:'Setting problematic key in setStateComponent',data:{serviceId:serviceId.toString(),problematicKey,keyValue:keyval[problematicKey],allKeys:Object.keys(keyval)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        }
-        // #endregion
-        this.serviceAccountsService.setServiceAccountKeyvals(
-          serviceId!,
-          keyval,
-        )
-        if (serviceId === problematicServiceId && keyval[problematicKey]) {
-          const [getError, account] = this.serviceAccountsService.getServiceAccount(problematicServiceId)
-          const accountKeyvalsCount = !getError && account ? Object.keys(account.rawCshKeyvals).length : 0
-          const accountProblematicValue = !getError && account ? account.rawCshKeyvals[problematicKey] : undefined
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'state-service.ts:450',message:'After setServiceAccountKeyvals',data:{serviceId:serviceId.toString(),problematicKey,accountKeyvalsCount,accountProblematicValue,getError:getError?.message||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        }
-        // #endregion
+
+        this.serviceAccountsService.setServiceAccountKeyvals(serviceId!, keyval)
+
         break
       }
       // C1) = authpool (α) - Core authorization requirements
@@ -574,13 +554,12 @@ export class StateService extends BaseService implements IStateService {
    * Set state from keyvals
    * @param keyvals - Array of key-value pairs
    */
-  setState(
-    keyvals: { key: Hex; value: Hex }[],
-  ): Safe<void> {
+  setState(keyvals: { key: Hex; value: Hex }[]): Safe<void> {
     // Track all input keyvals and which ones are processed
     const totalKeyvals = keyvals.length
     const processedKeys = new Set<Hex>()
-    const unprocessedKeyvals: Array<{ key: Hex; value: Hex; reason: string }> = []
+    const unprocessedKeyvals: Array<{ key: Hex; value: Hex; reason: string }> =
+      []
 
     // Process keyvals in the order they appear (no sorting)
     // This preserves the original order and avoids overwriting values incorrectly
@@ -608,11 +587,14 @@ export class StateService extends BaseService implements IStateService {
       }
 
       const keyvalRecord: Record<Hex, Hex> = {
-        [keyval.key]: keyval.value
+        [keyval.key]: keyval.value,
       }
 
-      const [parsedValueError, parsedValue] = this.parseStateValue(keyval.value, parsedStateKey)
-      if(parsedValueError) {
+      const [parsedValueError, parsedValue] = this.parseStateValue(
+        keyval.value,
+        parsedStateKey,
+      )
+      if (parsedValueError) {
         unprocessedKeyvals.push({
           key: keyval.key,
           value: keyval.value,
@@ -621,8 +603,9 @@ export class StateService extends BaseService implements IStateService {
         // Continue processing other keyvals instead of returning early
         continue
       }
-      const serviceId = 'serviceId' in parsedStateKey ? parsedStateKey.serviceId : undefined
-      
+      const serviceId =
+        'serviceId' in parsedStateKey ? parsedStateKey.serviceId : undefined
+
       // For C(255, s) keys, serviceId is required and should be present
       try {
         this.setStateComponent(
@@ -652,7 +635,7 @@ export class StateService extends BaseService implements IStateService {
           unprocessedKeyvals: unprocessedKeyvals.slice(0, 10), // Log first 10
         },
       )
-      
+
       // Log details for each unprocessed keyval
       for (const unprocessed of unprocessedKeyvals) {
         logger.warn(
@@ -713,12 +696,16 @@ export class StateService extends BaseService implements IStateService {
       accumulated: this.accumulationService.getAccumulated(),
     }
 
-    const [trieError, stateTrie] = createStateTrie(globalState, this.configService, this.configService.jamVersion)
-    
+    const [trieError, stateTrie] = createStateTrie(
+      globalState,
+      this.configService,
+      this.configService.jamVersion,
+    )
+
     if (trieError) {
       return safeError(trieError)
     }
-    
+
     return safeResult(stateTrie)
   }
 
@@ -819,10 +806,9 @@ export class StateService extends BaseService implements IStateService {
     // This could be a C(s, h) key - extract service ID from bytes 0, 2, 4, 6
     // Note: Service ID 0 is valid, so firstByte === 0 is a valid C(s, h) key
     const serviceId = this.parseServiceIdFromCshKey(keyBytes)
-    
+
     // Always return the service ID (even if it's 0) - it's a valid C(s, h) key
     return safeResult({ chapterIndex: 0, serviceId }) // Use 0 as indicator for C(s, h)
-    
   }
 
   /**

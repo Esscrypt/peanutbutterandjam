@@ -129,7 +129,8 @@ export class LookupHostFunction extends BaseHostFunction {
     // Gray Paper: v = a.preimages[memory[h:32]]
     // Use getServicePreimageValue which looks up by preimage hash (not state key)
     const hashHex = bytesToHex(hashData)
-    const actualServiceId = queryServiceId === MAX_U64 ? lookupParams.serviceId : queryServiceId
+    const actualServiceId =
+      queryServiceId === MAX_U64 ? lookupParams.serviceId : queryServiceId
 
     const foundPreimage = getServicePreimageValue(
       serviceAccount,
@@ -138,6 +139,11 @@ export class LookupHostFunction extends BaseHostFunction {
     )
 
     if (!foundPreimage) {
+      logger.error('Lookup host function: Preimage not found', {
+        hashHex,
+        queryServiceId: queryServiceId.toString(),
+        preimagesKeys: Object.keys(serviceAccount.rawCshKeyvals).slice(0, 5),
+      })
       // v = none - preimage not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return {
@@ -145,12 +151,12 @@ export class LookupHostFunction extends BaseHostFunction {
       }
     }
 
-
     // v found - calculate slice parameters
     // Gray Paper: f = min(registers[10], len{v})
     //             l = min(registers[11], len{v} - f)
     const preimageLength = BigInt(foundPreimage.length)
-    const f = fromOffset < preimageLength ? Number(fromOffset) : foundPreimage.length
+    const f =
+      fromOffset < preimageLength ? Number(fromOffset) : foundPreimage.length
     const remainingAfterF = foundPreimage.length - f
     const l =
       length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF

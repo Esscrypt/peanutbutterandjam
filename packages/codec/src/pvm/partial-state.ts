@@ -49,13 +49,16 @@ import type {
   ValidatorPublicKeys,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
-import { decodeVariableLength, encodeVariableLength } from '../core/discriminator'
+import {
+  decodeVariableLength,
+  encodeVariableLength,
+} from '../core/discriminator'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
-import {
-  encodeSequenceGeneric,
-} from '../core/sequence'
+import { encodeSequenceGeneric } from '../core/sequence'
 import { decodeAuthqueue, encodeAuthqueue } from '../state/authqueue'
+import { extractServiceIdFromStateKey } from '../state/service-account'
+import { determineKeyTypes } from '../state/state-key'
 import { decodeValidatorSet, encodeValidatorSet } from '../state/validator-set'
 
 /**
@@ -202,7 +205,7 @@ export function encodeCompleteServiceAccount(
     if (keyLengthError) {
       return safeError(keyLengthError)
     }
-    
+
     // Value: encode{var{blob}} = encode{len(value)} || value
     const valueBytes = hexToBytes(value)
     const [valueLengthError, encodedValue] = encodeVariableLength(valueBytes)
@@ -468,7 +471,8 @@ export function decodeCompleteServiceAccount(
   // sa_storage (rawCshKeyvals): decode{dictionary{blob}{blob}}
   // This is encoded as var{sequence{sorted(key, value)}} where both keys and values are hex strings (blobs)
   // Manually decode dictionary with variable-length keys and values
-  const [rawCshKeyvalsVarError, rawCshKeyvalsVarResult] = decodeVariableLength(currentData)
+  const [rawCshKeyvalsVarError, rawCshKeyvalsVarResult] =
+    decodeVariableLength(currentData)
   if (rawCshKeyvalsVarError) {
     return safeError(rawCshKeyvalsVarError)
   }
@@ -573,19 +577,101 @@ export function decodeCompleteServiceAccount(
   const parent = parentResult.value
   currentData = parentResult.remaining
 
-  // Compute octets and items from rawCshKeyvals
-  // Note: This is a simplified calculation. In practice, octets and items should be
-  // computed from the actual storage/preimages/requests, but for round-trip testing
-  // we'll use placeholder values. The actual values should be computed when needed.
+  // Compute octets and items from rawCshKeyvals according to Gray Paper
+  // Gray Paper: a_octets = sum over requests (81 + z) + sum over storage (34 + len(y) + len(x))
+  // Gray Paper: a_items = 2 * len(requests) + len(storage)
+  // where z is request value length, x is storage key, y is storage value
+  // NOTE: We cannot get the original storage key length (len(x)) from the state key alone,
+  // as state keys only contain the blake hash of the original key. We use 34 + len(value) as
+  // an approximation, which will be slightly lower than the true value but closer than
+  // the previous implementation that only summed value lengths.
+  const keyTypes = determineKeyTypes(rawCshKeyvals)
   let totalOctets = 0n
-  for (const value of Object.values(rawCshKeyvals)) {
-    const valueBytes = hexToBytes(value)
-    totalOctets += BigInt(valueBytes.length)
+  let requestsCount = 0n
+  let storageCount = 0n
+
+  for (const [stateKeyHex, keyType] of keyTypes) {
+    if (keyType.keyType === 'storage') {
+      // Storage: 34 + len(value) + len(key)
+      // We don't have the original key length, so we approximate with 34 + len(value)
+      // This is slightly lower than the true value but much closer than the previous implementation
+      const valueLength = BigInt(keyType.value.length)
+      totalOctets += 34n + valueLength
+      storageCount += 1n
+    } else if (keyType.keyType === 'request') {
+      // Request: 81 + len(value)
+      const valueHex = rawCshKeyvals[stateKeyHex]
+      const valueBytes = hexToBytes(valueHex)
+      totalOctets += 81n + BigInt(valueBytes.length)
+      requestsCount += 1n
+    }
+    // Preimages are not counted in octets
   }
+
   const octets = totalOctets
-  // Items = 2 * requests + storage (but we can't distinguish without determineKeyTypes)
-  // For now, use a placeholder - in practice this should be computed properly
-  const items = BigInt(Object.keys(rawCshKeyvals).length)
+  // Items = 2 * requests + storage
+  const items = 2n * requestsCount + storageCount
+
+  // #region agent log
+  // Extract service ID from first key to check if this is service 0 or 3953987649
+  let foundServiceId: bigint | null = null
+  for (const stateKeyHex of Object.keys(rawCshKeyvals)) {
+    const stateKeyBytes = hexToBytes(stateKeyHex as Hex)
+    if (stateKeyBytes.length === 31) {
+      foundServiceId = extractServiceIdFromStateKey(stateKeyBytes)
+      if (foundServiceId === 0n || foundServiceId === 3953987649n) break
+    }
+  }
+  if (foundServiceId === 0n) {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'partial-state.ts:decodeCompleteServiceAccount',
+          message: 'Service 0 octets calculation in decode',
+          data: {
+            serviceId: foundServiceId.toString(),
+            storageCount: storageCount.toString(),
+            requestsCount: requestsCount.toString(),
+            calculatedOctets: octets.toString(),
+            calculatedItems: items.toString(),
+            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run2',
+          hypothesisId: 'J',
+        }),
+      },
+    ).catch(() => {})
+  }
+  if (foundServiceId === 3953987649n) {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'partial-state.ts:decodeCompleteServiceAccount',
+          message: 'Service 3953987649 items calculation in decode',
+          data: {
+            serviceId: foundServiceId.toString(),
+            storageCount: storageCount.toString(),
+            requestsCount: requestsCount.toString(),
+            calculatedItems: items.toString(),
+            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'G',
+        }),
+      },
+    ).catch(() => {})
+  }
+  // #endregion
 
   const account: ServiceAccount = {
     codehash,
