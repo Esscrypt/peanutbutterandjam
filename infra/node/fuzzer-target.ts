@@ -309,7 +309,6 @@ export async function initializeServices() {
     })
 
     const serviceAccountsService = new ServiceAccountService({
-      configService,
       eventBusService,
       clockService,
       networkingService: null,
@@ -527,7 +526,14 @@ function sendMessage(socket: UnixSocket, message: Uint8Array): void {
 }
 
 // Handle PeerInfo request
-function handlePeerInfo(socket: UnixSocket, _peerInfo: FuzzPeerInfo): void {
+function handlePeerInfo(socket: UnixSocket, peerInfo: FuzzPeerInfo): void {
+  // Update JAM version in config service from fuzzer's PeerInfo
+  // This ensures version-aware behavior (e.g., codec encoding, nextfreeid calculation)
+  configService.jamVersion = peerInfo.jam_version
+  logger.info(
+    `Set JAM version in config service: ${peerInfo.jam_version.major}.${peerInfo.jam_version.minor}.${peerInfo.jam_version.patch}`,
+  )
+
   // Send our PeerInfo response
   const response: FuzzMessage = {
     type: FuzzMessageType.PeerInfo,
@@ -556,7 +562,7 @@ async function handleInitialize(
     // Set state from keyvals with JAM version from PeerInfo
     // Note: setState decodes keyvals and sets them on services
     // Some keyvals may fail to decode (e.g., Chapter 12 with incomplete data)
-    const [setStateError] = stateService.setState(init.keyvals, JAM_VERSION)
+    const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       logger.warn(`Warning during setState: ${setStateError.message}`)
     }

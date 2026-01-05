@@ -7,11 +7,15 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
-import { logger } from '@pbnjam/core'
+import { logger, bytesToHex, hexToBytes, type Hex } from '@pbnjam/core'
 import type { ServiceAccount } from '@pbnjam/types'
 import {
   encodeCompleteServiceAccount,
   decodeCompleteServiceAccount,
+} from '@pbnjam/codec'
+import {
+  createServiceStorageKey,
+  createServicePreimageKey,
 } from '@pbnjam/codec'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
@@ -26,23 +30,43 @@ beforeAll(async () => {
 })
 
 /**
- * Create a test ServiceAccount object
+ * Create a test ServiceAccount object with rawCshKeyvals
  */
 function createTestServiceAccount(): ServiceAccount {
+  const serviceId = 0n
+  
+  // Create storage key-value pair
+  const storageKey = '0x0102' as Hex
+  const storageValue = new Uint8Array([1, 2, 3])
+  const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+  const storageStateKeyHex = bytesToHex(storageStateKey) as Hex
+  const storageValueHex = bytesToHex(storageValue) as Hex
+  
+  // Create preimage key-value pair
+  const preimageHash = ('0x' + '01'.repeat(32)) as Hex
+  const preimageBlob = new Uint8Array([4, 5, 6])
+  const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
+  const preimageStateKeyHex = bytesToHex(preimageStateKey) as Hex
+  const preimageValueHex = bytesToHex(preimageBlob) as Hex
+  
+  // Create rawCshKeyvals object
+  const rawCshKeyvals: Record<Hex, Hex> = {
+    [storageStateKeyHex]: storageValueHex,
+    [preimageStateKeyHex]: preimageValueHex,
+  }
+  
   return {
-    codehash: ('0x' + '00'.repeat(32)) as any,
+    codehash: ('0x' + '00'.repeat(32)) as Hex,
     balance: 1000n,
     minaccgas: 100n,
     minmemogas: 50n,
-    octets: 3n,
+    octets: BigInt(storageValue.length + preimageBlob.length),
     gratis: 0n,
-    items: 1n,
+    items: 2n, // 1 storage + 1 preimage (requests would be 2 * requests.size)
     created: 1n,
     lastacc: 1n,
     parent: 0n,
-    storage: new Map([['0x0102' as any, new Uint8Array([1, 2, 3])]]),
-    preimages: new Map([['0x' + '01'.repeat(32) as any, new Uint8Array([4, 5, 6])]]),
-    requests: new Map(),
+    rawCshKeyvals,
   }
 }
 
@@ -91,56 +115,44 @@ function compareServiceAccount(a: ServiceAccount, b: ServiceAccount): boolean {
     return false
   }
   
-  // Compare storage
-  if (a.storage.size !== b.storage.size) {
-    logger.error(`storage size mismatch: ${a.storage.size} !== ${b.storage.size}`)
+  // Compare rawCshKeyvals
+  const aKeys = Object.keys(a.rawCshKeyvals)
+  const bKeys = Object.keys(b.rawCshKeyvals)
+  if (aKeys.length !== bKeys.length) {
+    logger.error(`rawCshKeyvals size mismatch: ${aKeys.length} !== ${bKeys.length}`)
     return false
-  }
-  for (const [key, valueA] of a.storage.entries()) {
-    const valueB = b.storage.get(key)
-    if (valueB === undefined) {
-      logger.error(`storage key ${key} missing in decoded (b.storage has keys: ${Array.from(b.storage.keys()).join(', ')})`)
-      return false
-    }
-    if (valueA.length !== valueB.length) {
-      logger.error(`storage[${key}] length mismatch: ${valueA.length} !== ${valueB.length}`)
-      return false
-    }
-    for (let i = 0; i < valueA.length; i++) {
-      if (valueA[i] !== valueB[i]) {
-        logger.error(`storage[${key}][${i}] mismatch: ${valueA[i]} !== ${valueB[i]}`)
-        return false
-      }
-    }
   }
   
-  // Compare preimages
-  if (a.preimages.size !== b.preimages.size) {
-    logger.error(`preimages size mismatch: ${a.preimages.size} !== ${b.preimages.size}`)
-    return false
-  }
-  for (const [hash, blobA] of a.preimages.entries()) {
-    const blobB = b.preimages.get(hash)
-    if (!blobB) {
-      logger.error(`preimages hash ${hash} missing in decoded`)
-      return false
-    }
-    if (blobA.length !== blobB.length) {
-      logger.error(`preimages[${hash}] length mismatch: ${blobA.length} !== ${blobB.length}`)
-      return false
-    }
-    for (let i = 0; i < blobA.length; i++) {
-      if (blobA[i] !== blobB[i]) {
-        logger.error(`preimages[${hash}][${i}] mismatch: ${blobA[i]} !== ${blobB[i]}`)
-        return false
-      }
-    }
-  }
+  // Sort keys for deterministic comparison
+  aKeys.sort()
+  bKeys.sort()
   
-  // Compare requests
-  if (a.requests.size !== b.requests.size) {
-    logger.error(`requests size mismatch: ${a.requests.size} !== ${b.requests.size}`)
-    return false
+  for (let i = 0; i < aKeys.length; i++) {
+    const keyA = aKeys[i] as Hex
+    const keyB = bKeys[i] as Hex
+    if (keyA !== keyB) {
+      logger.error(`rawCshKeyvals key mismatch at index ${i}: ${keyA} !== ${keyB}`)
+      return false
+    }
+    
+    const valueA = a.rawCshKeyvals[keyA]
+    const valueB = b.rawCshKeyvals[keyB]
+    if (valueA !== valueB) {
+      logger.error(`rawCshKeyvals[${keyA}] value mismatch: ${valueA} !== ${valueB}`)
+      const valueABytes = hexToBytes(valueA)
+      const valueBBytes = hexToBytes(valueB)
+      if (valueABytes.length !== valueBBytes.length) {
+        logger.error(`rawCshKeyvals[${keyA}] length mismatch: ${valueABytes.length} !== ${valueBBytes.length}`)
+      } else {
+        for (let j = 0; j < valueABytes.length; j++) {
+          if (valueABytes[j] !== valueBBytes[j]) {
+            logger.error(`rawCshKeyvals[${keyA}][${j}] byte mismatch: ${valueABytes[j]} !== ${valueBBytes[j]}`)
+            break
+          }
+        }
+      }
+      return false
+    }
   }
   
   logger.info('✅ ServiceAccount comparison passed')
@@ -217,8 +229,8 @@ describe('ServiceAccount Round-Trip Tests', () => {
       const [asDecodeError, asDecoded] = decodeCompleteServiceAccount(asEncoded)
       
       if (!tsDecodeError && !asDecodeError) {
-        logger.info(`TypeScript decoded: storage=${tsDecoded!.value.storage.size}, preimages=${tsDecoded!.value.preimages.size}`)
-        logger.info(`AssemblyScript decoded: storage=${asDecoded!.value.storage.size}, preimages=${asDecoded!.value.preimages.size}`)
+        logger.info(`TypeScript decoded: rawCshKeyvals=${Object.keys(tsDecoded!.value.rawCshKeyvals).length}`)
+        logger.info(`AssemblyScript decoded: rawCshKeyvals=${Object.keys(asDecoded!.value.rawCshKeyvals).length}`)
       }
     } else {
       logger.info('✅ Size match!')

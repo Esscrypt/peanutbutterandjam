@@ -20,7 +20,6 @@ import type {
 import type {
   SafroleTicketWithoutProof,
   ServiceAccount,
-  ServiceAccountCore,
   WorkReport,
 } from './serialization'
 
@@ -123,7 +122,7 @@ export interface AccoutBelt {
  * }
  *
  * Implementation Notes:
- * - The accounts map stores complete ServiceAccount objects (not just ServiceAccountCore)
+ * - The accounts map stores complete ServiceAccount objects (not just ServiceAccount)
  * - Storage, preimages, and requests are included as per Gray Paper specification
  * - Each service account contains all fields required by the Gray Paper
  * - The map key is serviceid (32-bit integer) and value is the complete serviceaccount tuple
@@ -466,7 +465,7 @@ export type StateComponent =
   /** Safrole state (γ) - Consensus protocol internal state */
   | SafroleState
   /** Service accounts (δ) - All service (smart contract) state */
-  | ServiceAccountCore // ServiceAccountCore is a single service account core, not a map of service account cores, since we handle the state in separate key/val pairs
+  | ServiceAccount // ServiceAccount is a single service account core, not a map of service account cores, since we handle the state in separate key/val pairs
   /** Entropy (ε) - On-chain randomness accumulator */
   | EntropyState
   /** Staging validator set (ι) - Validators queued for next epoch */
@@ -489,7 +488,10 @@ export type StateComponent =
   | Ready
   /** Accumulated packages (ξ) - Recently accumulated work-packages */
   | Accumulated
-
+  /** Service account keyvals (δ) - All service (smart contract) state */
+  | Record<Hex, Hex>
+  /** Service account keyvals (δ) - All service (smart contract) state */
+  | Hex
 export interface GlobalState {
   /** 1. Authorization pool (α) - Core authorization requirements */
   authpool: AuthPool

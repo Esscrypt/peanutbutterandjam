@@ -292,7 +292,6 @@ export class MainService extends BaseService {
     )
 
     this.serviceAccountService = new ServiceAccountService({
-      configService: this.configService,
       eventBusService: this.eventBusService,
       clockService: this.clockService,
       networkingService: this.networkingService,

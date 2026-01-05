@@ -5,12 +5,10 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { encodeNatural } from '@pbnjam/codec'
+import { encodeNatural, getServicePreimageValue } from '@pbnjam/codec'
 import {
-  blake2bHash,
   concatBytes,
-  type Hex,
-  hexToBytes,
+  generateNextServiceId,
   logger,
 } from '@pbnjam/core'
 import type {
@@ -26,14 +24,14 @@ import type {
   IEntropyService,
   Implications,
   ImplicationsPair,
+  JamVersion,
   PartialState,
-  PreimageRequestStatus,
   PVMOptions,
   ResultCode,
   Safe,
   ServiceAccount,
 } from '@pbnjam/types'
-import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 import {
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
@@ -46,6 +44,7 @@ import {
  */
 export class AccumulatePVM {
   private readonly entropyService: IEntropyService
+  private readonly configService: IConfigService
   private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
   private readonly useWasm: boolean
   constructor(options: {
@@ -58,7 +57,6 @@ export class AccumulatePVM {
     traceSubfolder?: string
   }) {
     this.useWasm = options.useWasm
-
     // Create PVM executor based on useWasm flag
     if (options.useWasm) {
       // Create WASM executor - module will be loaded from pvm-assemblyscript/build/pvm.wasm
@@ -84,6 +82,7 @@ export class AccumulatePVM {
       )
     }
     this.entropyService = options.entropyService
+    this.configService = options.configService
   }
 
   /**
@@ -135,8 +134,8 @@ export class AccumulatePVM {
 
     // Gray Paper: Get service code from preimages using codehash
     // Gray Paper accounts.tex equation 42-43: c = none when codehash not in preimages
-    const serviceCode = serviceAccount.preimages.get(serviceAccount.codehash)
-
+    const serviceCode = getServicePreimageValue(serviceAccount, serviceId, serviceAccount.codehash)
+    
     // Gray Paper pvm_invocations.tex line 162: Process deferred transfers FIRST,
     // even when c = none or len(c) > Cmaxservicecodesize
     // postxferstate = basestate except balance += sum of deferred transfer amounts
@@ -219,11 +218,14 @@ export class AccumulatePVM {
     }
 
     // Initialize Implications context
+    // Get JAM version from config service for version-aware behavior
+    const jamVersion = this.configService.jamVersion
 
     const [initError, implicationsPair] = this.initializeImplicationsContext(
       postTransferState,
       serviceId,
       timeslot,
+      jamVersion,
     )
     if (initError) {
       logger.error(
@@ -317,17 +319,7 @@ export class AccumulatePVM {
       context: updatedImplicationsPair,
     } = marshallingResult
 
-    // DEBUG: Check transfers in updated implications before collapsing
-    const updatedImX = (updatedImplicationsPair as ImplicationsPair)[0]
-    logger.debug('[AccumulatePVM] Before collapse - checking transfers', {
-      serviceId: serviceId.toString(),
-      xfersCount: updatedImX.xfers.length,
-      xfers: updatedImX.xfers.map((t) => ({
-        source: t.source.toString(),
-        dest: t.dest.toString(),
-        amount: t.amount.toString(),
-      })),
-    })
+
 
     // Panic dump and host function logs are now handled inside executeMarshallingInvocation in the PVM class
 
@@ -462,6 +454,41 @@ export class AccumulatePVM {
   }
 
   /**
+   * Generate next service ID according to Gray Paper specification
+   *
+   * Gray Paper: pvm_invocations.tex, equation 185
+   * im_nextfreeid = check((decode[4]{blake{encode{im_id, entropyaccumulator', H_timeslot}}}
+   *                        mod (2^32 - Cminpublicindex - 2^8))
+   *                        + Cminpublicindex)
+   *
+   * Version differences:
+   * - v0.7.0: (decode[4]{blake{...}} mod (2^32 - 2^9)) + 2^8
+   * - v0.7.1+: (decode[4]{blake{...}} mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex
+   *
+   * @param serviceId - Current service ID (im_id)
+   * @param entropyAccumulator - Entropy accumulator (32 bytes)
+   * @param timeslot - Current timeslot (H_timeslot)
+   * @param accounts - Map of existing service accounts (for check function)
+   * @param jamVersion - Optional JAM version. Defaults to DEFAULT_JAM_VERSION
+   * @returns Next free service ID
+   */
+  public generateNextServiceId(
+    serviceId: bigint,
+    entropyAccumulator: Uint8Array,
+    timeslot: bigint,
+    accounts: Map<bigint, ServiceAccount>,
+    jamVersion?: JamVersion,
+  ): Safe<bigint> {
+    return generateNextServiceId(
+      serviceId,
+      entropyAccumulator,
+      timeslot,
+      accounts,
+      jamVersion,
+    )
+  }
+
+  /**
    * Initialize Implications context
    *
    * *** GRAY PAPER FORMULA ***
@@ -488,7 +515,9 @@ export class AccumulatePVM {
     partialState: PartialState,
     serviceId: bigint,
     timeslot: bigint,
+    jamVersion?: JamVersion,
   ): Safe<ImplicationsPair> {
+    const version = jamVersion ?? DEFAULT_JAM_VERSION
     // Step 1: Get entropy accumulator from entropy service
     if (!this.entropyService) {
       return safeError(
@@ -506,67 +535,17 @@ export class AccumulatePVM {
       )
     }
 
-    // Step 2: Encode serviceid (natural encoding) - Gray Paper: encode{im_id, ...}
-    // The Gray Paper uses encode{...} NOT encode[4]{...}, so we use natural encoding
-    const [serviceIdError, encodedServiceId] = encodeNatural(serviceId)
-    if (serviceIdError) {
-      return safeError(
-        new Error(`Failed to encode service ID: ${serviceIdError.message}`),
-      )
-    }
-
-    // Step 3: Encode timeslot (natural encoding) - Gray Paper: encode{..., H_timeslot}
-    // The Gray Paper uses encode{...} NOT encode[4]{...}, so we use natural encoding
-    const [timeslotError, encodedTimeslot] = encodeNatural(timeslot)
-    if (timeslotError) {
-      return safeError(
-        new Error(`Failed to encode timeslot: ${timeslotError.message}`),
-      )
-    }
-
-    // Step 4: Concatenate: encode{im_id, entropyaccumulator', H_timeslot}
-    const inputToHash = new Uint8Array(
-      encodedServiceId.length +
-        entropyAccumulator.length +
-        encodedTimeslot.length,
+    // Step 2: Generate nextfreeid using extracted method
+    const [nextfreeidError, nextfreeid] = this.generateNextServiceId(
+      serviceId,
+      entropyAccumulator,
+      timeslot,
+      partialState.accounts,
+      version,
     )
-    let offset = 0
-    inputToHash.set(encodedServiceId, offset)
-    offset += encodedServiceId.length
-    inputToHash.set(entropyAccumulator, offset)
-    offset += entropyAccumulator.length
-    inputToHash.set(encodedTimeslot, offset)
-
-    // Step 5: Blake2b hash - Gray Paper: blake{encode{im_id, entropyaccumulator', H_timeslot}}
-    const [hashError, hashHex] = blake2bHash(inputToHash)
-    if (hashError) {
-      return safeError(
-        new Error(`Failed to compute Blake2b hash: ${hashError.message}`),
-      )
+    if (nextfreeidError) {
+      return safeError(nextfreeidError)
     }
-
-    // Step 6: Decode first 4 bytes as uint32 (LITTLE-ENDIAN) - Gray Paper: decode[4]{...}
-    // Gray Paper serialization.tex line 100: "Values are encoded in a regular little-endian fashion"
-    const hash = hexToBytes(hashHex)
-    if (hash.length < 4) {
-      return safeError(
-        new Error(
-          `Hash too short: expected at least 4 bytes, got ${hash.length}`,
-        ),
-      )
-    }
-    const hashView = new DataView(hash.buffer, hash.byteOffset, hash.byteLength)
-    const decodedHash = BigInt(hashView.getUint32(0, true)) // true = little-endian (FIXED!)
-
-    // Step 7: Calculate nextfreeid candidate - Gray Paper formula
-    // im_nextfreeid = check((decode[4]{blake{...}} mod (2^32 - Cminpublicindex - 2^8)) + Cminpublicindex)
-    const MIN_PUBLIC_INDEX = ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX // 2^16 = 65,536
-    const MODULUS_BASE = 2n ** 32n // 2^32
-    const MODULUS = MODULUS_BASE - MIN_PUBLIC_INDEX - 2n ** 8n // 2^32 - 65536 - 256
-    const candidateId = (decodedHash % MODULUS) + MIN_PUBLIC_INDEX
-
-    // Step 7b: Apply check function to find available ID - Gray Paper equation 251-255
-    const nextfreeid = this.checkServiceId(candidateId, partialState.accounts)
 
     // Step 8: Create implications structure - Gray Paper equation 177-184
     // CRITICAL: Deep clone the partial state to prevent mutations from affecting other invocations
@@ -584,11 +563,14 @@ export class AccumulatePVM {
     // First element: regular dimension (imX)
     // Second element: exceptional dimension (imY) - initialized identically
     // CRITICAL: Each dimension needs its OWN deep-cloned state to prevent cross-contamination
+    const imYState = this.deepClonePartialState(partialState) // Separate clone for imY
+    
+    
     return safeResult([
       implications, // Regular dimension (imX)
       {
         id: serviceId,
-        state: this.deepClonePartialState(partialState), // Separate clone for imY
+        state: imYState,
         nextfreeid,
         xfers: [],
         yield: null,
@@ -597,36 +579,6 @@ export class AccumulatePVM {
     ])
   }
 
-  /**
-   * Check function from Gray Paper equation 251-255
-   *
-   * Gray Paper pvm_invocations.tex:
-   * check(i ∈ serviceid) = {
-   *   i                          if i ∉ keys(accounts)
-   *   check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)  otherwise
-   * }
-   *
-   * Recursively finds the first available service ID starting from the given candidate.
-   */
-  private checkServiceId(
-    id: bigint,
-    accounts: Map<bigint, ServiceAccount>,
-  ): bigint {
-    const C_MIN_PUBLIC_INDEX = ACCUMULATE_INVOCATION_CONFIG.MIN_PUBLIC_INDEX // 2^16
-    const MODULUS = 2n ** 32n - 2n ** 8n - C_MIN_PUBLIC_INDEX // 2^32 - 2^8 - Cminpublicindex
-
-    // If ID is not in accounts, return it
-    if (!accounts.has(id)) {
-      return id
-    }
-
-    // Otherwise, recursively check the next candidate
-    // (i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex
-    const nextCandidate =
-      C_MIN_PUBLIC_INDEX + ((id - C_MIN_PUBLIC_INDEX + 1n) % MODULUS)
-
-    return this.checkServiceId(nextCandidate, accounts)
-  }
 
   /**
    * Encode accumulate arguments according to Gray Paper specification
@@ -707,6 +659,8 @@ export class AccumulatePVM {
       //   yield = imY.yield
       //   provisions = imY.provisions
       // Transfers executed in imX are NOT applied on panic/OOG - they are discarded
+      
+      
       return {
         ok: true,
         value: {
@@ -794,34 +748,10 @@ export class AccumulatePVM {
    * @returns Deep cloned service account with new Map instances
    */
   private deepCloneServiceAccount(account: ServiceAccount): ServiceAccount {
-    // Deep clone storage Map
-    const clonedStorage = new Map<Hex, Uint8Array>()
-    for (const [key, value] of account.storage) {
-      clonedStorage.set(key, new Uint8Array(value))
-    }
-
-    // Deep clone preimages Map
-    const clonedPreimages = new Map<Hex, Uint8Array>()
-    for (const [key, value] of account.preimages) {
-      clonedPreimages.set(key, new Uint8Array(value))
-    }
-
-    // Deep clone requests Map (Map<Hex, Map<bigint, PreimageRequestStatus>>)
-    const clonedRequests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-    for (const [hash, lengthMap] of account.requests) {
-      const clonedLengthMap = new Map<bigint, PreimageRequestStatus>()
-      for (const [length, status] of lengthMap) {
-        // Clone the status array
-        clonedLengthMap.set(length, [...status])
-      }
-      clonedRequests.set(hash, clonedLengthMap)
-    }
-
-    return {
+    const cloned = {
       ...account,
-      storage: clonedStorage,
-      preimages: clonedPreimages,
-      requests: clonedRequests,
+      rawCshKeyvals: { ...account.rawCshKeyvals }, // Deep clone rawCshKeyvals object
     }
+    return cloned
   }
 }

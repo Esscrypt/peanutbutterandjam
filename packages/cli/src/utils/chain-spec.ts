@@ -161,6 +161,7 @@ export function generateChainSpec(
             lastacc: 0n,
             parent: 0n,
             minbalance: 0n,
+            rawCshKeyvals: {},
           },
         ]),
       ),
@@ -233,9 +234,6 @@ export function generateChainSpec(
     const validator = validators[i]
     const serviceAccount: ServiceAccount = {
       balance: validator.stake,
-      storage: new Map(),
-      preimages: new Map(),
-      requests: new Map(),
       gratis: 0n,
       codehash: zeroHash,
       minaccgas: 1000n,
@@ -245,6 +243,7 @@ export function generateChainSpec(
       created: 0n,
       lastacc: 0n,
       parent: 0n,
+      rawCshKeyvals: {},
     }
 
     // Create service account key (Chapter 255 with service ID) according to Gray Paper
@@ -258,6 +257,7 @@ export function generateChainSpec(
   const [genesisError, genesisStateTrie] = createStateTrie(
     genesisState,
     configService,
+    configService.jamVersion,
   )
 
   if (genesisError) {

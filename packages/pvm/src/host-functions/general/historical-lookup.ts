@@ -1,4 +1,4 @@
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   HistoricalLookupParams,
   HostFunctionContext,
@@ -97,6 +97,10 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     // Gray Paper: Read hash from memory (32 bytes at hashOffset)
     const [hashData, readFaultAddress] = context.ram.readOctets(hashOffset, 32n)
     if (hashData === null) {
+      logger.error('HistoricalLookupHostFunction: Memory range not readable', {
+        hashOffset: hashOffset.toString(),
+        readFaultAddress: readFaultAddress?.toString() ?? 'null',
+      })
       // Gray Paper: Return panic if memory range not readable
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -113,6 +117,7 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     // We use the service account we determined from the lookup logic
     const [lookupError, preimage] =
       this.serviceAccountService.histLookupServiceAccount(
+        params.serviceId,
         serviceAccount,
         bytesToHex(hashData),
         params.timeslot,

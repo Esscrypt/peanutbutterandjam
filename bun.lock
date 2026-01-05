@@ -167,6 +167,7 @@
       "name": "@pbnjam/block-importer",
       "version": "0.0.1",
       "dependencies": {
+        "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/core": "workspace:*",
         "@pbnjam/safrole": "workspace:*",
         "@pbnjam/types": "workspace:*",
@@ -222,6 +223,7 @@
         "@noble/curves": "catalog:",
         "@noble/ed25519": "catalog:",
         "@noble/hashes": "catalog:",
+        "@pbnjam/bandersnatch": "catalog:",
         "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/types": "catalog:",
         "@types/hapi": "18.0.14",
@@ -418,6 +420,15 @@
         "@pbnjam/typescript-config": "workspace:*",
         "bun-types": "catalog:",
         "typescript": "catalog:",
+      },
+    },
+    "scripts": {
+      "name": "scripts",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pbnjam/codec": "workspace:*",
+        "@pbnjam/pvm": "workspace:*",
+        "@pbnjam/types": "workspace:*",
       },
     },
   },
@@ -1745,6 +1756,8 @@
     "safe-stable-stringify": ["safe-stable-stringify@2.5.0", "", {}, "sha512-b3rppTKm9T+PsVCBEOUR46GWI7fdOs00VKZ1+9c1EWDaDMvjQc6tUwuFyIprgGgTcWoVHSKrU8H31ZHA2e0RHA=="],
 
     "safer-buffer": ["safer-buffer@2.1.2", "", {}, "sha512-YZo3K82SD7Riyi0E1EQPojLz7kpepnSQI9IyPbHHg1XXXevb5dJI7tpyN2ADxGcQbHG7vcyRHk0cbwqcQriUtg=="],
+
+    "scripts": ["scripts@workspace:scripts"],
 
     "secure-json-parse": ["secure-json-parse@2.7.0", "", {}, "sha512-6aU+Rwsezw7VR8/nyvKTx8QpWH9FrcYiXXlqC4z5d5XQBDRqtbfsRjnwGyqbi3gddNtWHuEk9OANUotL26qKUw=="],
 

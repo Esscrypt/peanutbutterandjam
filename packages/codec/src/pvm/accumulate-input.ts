@@ -42,10 +42,11 @@ import type {
   AccumulateInput,
   DecodingResult,
   DeferredTransfer,
+  JamVersion,
   OperandTuple,
   Safe,
 } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
@@ -80,14 +81,39 @@ import { decodeOperandTuple, encodeOperandTuple } from './operand-tuple'
  * ✅ CORRECT: Maintains Gray Paper discriminator semantics
  * ✅ CORRECT: Supports both operand tuples and deferred transfers
  *
+ * Version differences:
+ * - **v0.7.0**: accinput encoding did not exist (only raw defxfer/operandtuple)
+ * - **v0.7.2+**: accinput encoding with discriminator-based union (0=operandtuple, 1=defxfer)
+ *
  * @param accumulateInput - Accumulate input to encode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Encoded octet sequence
  */
 export function encodeAccumulateInput(
   accumulateInput: AccumulateInput,
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  
+  // Check if version is <= 0.7.0 (accinput encoding didn't exist)
+  const isV070OrEarlier =
+    version.major < 0 ||
+    (version.major === 0 && version.minor < 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch <= 0)
+  
+  if (isV070OrEarlier) {
+    // In v0.7.0, accinput didn't exist - encode as raw type
+    if (accumulateInput.type === 0) {
+      // Operand tuple: just encode the tuple directly
+      return encodeOperandTuple(accumulateInput.value as OperandTuple)
+    } else {
+      // Deferred transfer: just encode the tuple directly
+      return encodeDeferredTransfer(accumulateInput.value as DeferredTransfer, version)
+    }
+  }
   const parts: Uint8Array[] = []
 
+  // v0.7.2+ encoding with discriminator
   if (accumulateInput.type === 0) {
     // encode{0, encode[U]{o}} for operand tuple
     parts.push(new Uint8Array([0])) // Discriminator
@@ -105,6 +131,7 @@ export function encodeAccumulateInput(
 
     const [error, transferEncoded] = encodeDeferredTransfer(
       accumulateInput.value as DeferredTransfer,
+      version,
     )
     if (error) {
       return safeError(error)
@@ -144,12 +171,50 @@ export function encodeAccumulateInput(
  * ✅ CORRECT: Uses safeError instead of throw for error handling
  * ✅ CORRECT: Maintains round-trip compatibility
  *
+ * Version differences:
+ * - **v0.7.0**: accinput decoding did not exist (only raw defxfer/operandtuple)
+ * - **v0.7.2+**: accinput decoding with discriminator-based union (0=operandtuple, 1=defxfer)
+ *
  * @param data - Octet sequence to decode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Decoded accumulate input and remaining data
  */
 export function decodeAccumulateInput(
   data: Uint8Array,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<AccumulateInput>> {
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  
+  // Check if version is <= 0.7.0 (accinput encoding didn't exist)
+  const isV070OrEarlier =
+    version.major < 0 ||
+    (version.major === 0 && version.minor < 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch <= 0)
+  
+  if (isV070OrEarlier) {
+    // In v0.7.0, accinput didn't exist - try to decode as raw operand tuple first
+    // (operand tuples are more common, so try that first)
+    const [error1, operandResult] = decodeOperandTuple(data)
+    if (!error1) {
+      return safeResult({
+        value: { type: 0, value: operandResult.value },
+        remaining: operandResult.remaining,
+        consumed: operandResult.consumed,
+      })
+    }
+    
+    // If operand tuple fails, try deferred transfer
+    const [error2, transferResult] = decodeDeferredTransfer(data, version)
+    if (!error2) {
+      return safeResult({
+        value: { type: 1, value: transferResult.value },
+        remaining: transferResult.remaining,
+        consumed: transferResult.consumed,
+      })
+    }
+    
+    return safeError(new Error('Could not decode as v0.7.0 format (neither operand tuple nor deferred transfer)'))
+  }
   if (data.length === 0) {
     return safeError(
       new Error('Insufficient data for accumulate input decoding'),
@@ -159,6 +224,7 @@ export function decodeAccumulateInput(
   const discriminator = data[0]
   const remainingData = data.slice(1)
 
+  // v0.7.2+ decoding with discriminator
   if (discriminator === 0) {
     // Operand tuple: decode{0, decode[U]{o}}
     const [error, operandTupleResult] = decodeOperandTuple(remainingData)
@@ -176,7 +242,7 @@ export function decodeAccumulateInput(
   } else if (discriminator === 1) {
     // Deferred transfer: decode{1, decode[X]{o}}
     const [error, deferredTransferResult] =
-      decodeDeferredTransfer(remainingData)
+      decodeDeferredTransfer(remainingData, version)
     if (error) {
       return safeError(error)
     }

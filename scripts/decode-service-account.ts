@@ -11,7 +11,7 @@
  */
 
 import { decodeServiceAccount } from '@pbnjam/codec'
-import type { ServiceAccountCore } from '@pbnjam/types'
+import type { ServiceAccount } from '@pbnjam/types'
 import { hexToBytes } from 'viem'
 
 /**
@@ -23,7 +23,7 @@ import { hexToBytes } from 'viem'
  * Total: 1 + 32 + 40 + 16 = 89 bytes
  */
 
-function decodeServiceAccountFromHex(hex: string): ServiceAccountCore | null {
+function decodeServiceAccountFromHex(hex: string): ServiceAccount | null {
   try {
     // Ensure hex string has 0x prefix for hexToBytes
     const hexWithPrefix = hex.startsWith('0x') ? hex : `0x${hex}`
@@ -116,7 +116,7 @@ function main() {
   console.log(formatFieldBigInt('gratis', expected.gratis, actual.gratis))
   console.log()
 
-  // 4-byte fields (stored as bigint in ServiceAccountCore)
+  // 4-byte fields (stored as bigint in ServiceAccount)
   console.log('4-byte Fields (encode[4]):')
   console.log(formatFieldBigInt('items', expected.items, actual.items))
   console.log(formatFieldBigInt('created', expected.created, actual.created))

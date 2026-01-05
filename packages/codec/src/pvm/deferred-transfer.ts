@@ -45,8 +45,13 @@
  */
 
 import { concatBytes } from '@pbnjam/core'
-import type { DecodingResult, DeferredTransfer, Safe } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import type {
+  DecodingResult,
+  DeferredTransfer,
+  JamVersion,
+  Safe,
+} from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 
 /**
@@ -89,12 +94,24 @@ const MEMO_SIZE = 128
  * ✅ CORRECT: Uses encode[8] for amount and gas (8-byte fixed-length)
  * ✅ CORRECT: Uses fixed 128-byte encoding for memo (Cmemosize = 128)
  *
+ * Version differences:
+ * - **v0.7.0**: encode{defxfer} - raw tuple encoding (no discriminator notation)
+ * - **v0.7.2+**: encode[X]{defxfer} - same encoding, but with discriminator notation
+ *
+ * Note: The actual binary encoding is the same in both versions (just the tuple).
+ * The [X] discriminator is used when defxfer appears in accinput encoding (v0.7.2+).
+ *
  * @param deferredTransfer - Deferred transfer to encode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Encoded octet sequence
  */
 export function encodeDeferredTransfer(
   deferredTransfer: DeferredTransfer,
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
+  // Version parameter is accepted for consistency with other encoders,
+  // but the encoding format is the same across versions (just the tuple)
+  void (jamVersion ?? DEFAULT_JAM_VERSION)
   const parts: Uint8Array[] = []
 
   // Source: encode[4](dxX_source) (4-byte fixed-length)
@@ -167,12 +184,24 @@ export function encodeDeferredTransfer(
  * ✅ CORRECT: Uses fixed 128-byte decoding for memo (Cmemosize = 128)
  * ✅ CORRECT: Uses safeError instead of throw for error handling
  *
+ * Version differences:
+ * - **v0.7.0**: decode{defxfer} - raw tuple decoding (no discriminator)
+ * - **v0.7.2+**: decode[X]{defxfer} - same decoding, but with discriminator notation
+ *
+ * Note: The actual binary decoding is the same in both versions (just the tuple).
+ * The [X] discriminator is used when defxfer appears in accinput decoding (v0.7.2+).
+ *
  * @param data - Octet sequence to decode
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Decoded deferred transfer and remaining data
  */
 export function decodeDeferredTransfer(
   data: Uint8Array,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<DeferredTransfer>> {
+  // Version parameter is accepted for consistency with other decoders,
+  // but the decoding format is the same across versions (just the tuple)
+  void (jamVersion ?? DEFAULT_JAM_VERSION)
   let currentData = data
 
   // Source: encode[4](dxX_source) (4-byte fixed-length)

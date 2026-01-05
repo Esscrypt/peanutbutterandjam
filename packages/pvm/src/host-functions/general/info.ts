@@ -1,12 +1,11 @@
 import { encodeServiceAccountForInfo } from '@pbnjam/codec'
+import { calculateMinBalance, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   InfoParams,
   ServiceAccount,
-  ServiceAccountCore,
 } from '@pbnjam/types'
-import { DEPOSIT_CONSTANTS } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -80,32 +79,28 @@ export class InfoHostFunction extends BaseHostFunction {
     //         encode[4]{items} + encode[8]{gratis} + encode[4]{created, lastacc, parent}
     // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
 
-    // Gray Paper: items = 2 * len(requests) + len(storage)
-    // This MUST be computed dynamically, not read from the stored field,
-    // to reflect the current state of requests and storage Maps
-    const requestsSize = serviceAccount.requests?.size ?? 0
-    const storageSize = serviceAccount.storage?.size ?? 0
-    const computedItems = BigInt(2 * requestsSize + storageSize)
-
-    // Calculate minbalance: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
-    const baseDeposit = BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT)
-    const itemDeposit = BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * computedItems
-    const byteDeposit =
-      BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT) * serviceAccount.octets
-    const totalDeposit = baseDeposit + itemDeposit + byteDeposit
-    const minbalance =
-      totalDeposit > serviceAccount.gratis
-        ? totalDeposit - serviceAccount.gratis
-        : 0n
-
-    // Encode using INFO-specific format (96 bytes, includes minbalance)
-    // Pass computedItems to ensure the encoded data reflects the current state
-    const [encodeError, info] = encodeServiceAccountForInfo(
-      serviceAccount as ServiceAccountCore,
-      minbalance,
-      computedItems,
+    // Calculate minbalance using computed items (not stored items field)
+    // Gray Paper: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    const minbalance = calculateMinBalance(
+      serviceAccount.items,
+      serviceAccount.octets,
+      serviceAccount.gratis,
     )
+
+    const [encodeError, info] = encodeServiceAccountForInfo(
+      serviceAccount as ServiceAccount,
+      minbalance,
+    )
+
     if (encodeError || !info) {
+      logger.error('Error encoding service account for INFO host function', {
+        error: encodeError,
+        serviceAccount: serviceAccount,
+        minbalance: minbalance,
+        computedItems: serviceAccount.items,
+        octets: serviceAccount.octets,
+        gratis: serviceAccount.gratis,
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -145,6 +140,14 @@ export class InfoHostFunction extends BaseHostFunction {
 
     const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress) {
+      logger.error('Error writing service account info to memory', {
+        faultAddress: faultAddress.toString(),
+        dataToWriteLength: dataToWrite.length,
+        outputOffset: outputOffset.toString(),
+        infoLength: info.length,
+        dataSliceLength: dataSlice.length,
+        requestedWriteLength: requestedWriteLength,
+      })
       // Gray Paper: Return panic if memory not writable
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -156,8 +159,6 @@ export class InfoHostFunction extends BaseHostFunction {
       }
     }
 
-    // Gray Paper equation 480: Return total length of encoded data (len(v))
-    // NOT the length of the slice that was written - the Gray Paper specifies registers'_7 = len(v)
     context.registers[7] = BigInt(info.length)
 
     return {

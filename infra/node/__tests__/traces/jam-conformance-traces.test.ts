@@ -391,7 +391,6 @@ describe('JAM Conformance Traces', () => {
       })
 
       const serviceAccountsService = new ServiceAccountService({
-        configService,
         eventBusService,
         clockService,
         networkingService: null,
@@ -520,18 +519,13 @@ describe('JAM Conformance Traces', () => {
       if (traceData.pre_state?.keyvals) {
         const [setStateError] = stateService.setState(
           traceData.pre_state.keyvals,
-          undefined,
-          true, // useRawKeyvals
         )
         if (setStateError) {
           throw new Error(`Failed to set pre-state: ${setStateError.message}`)
         }
       } else if (genesisJson?.state?.keyvals) {
         const [setStateError] = stateService.setState(
-          genesisJson.state.keyvals,
-          undefined,
-          true,
-        )
+          genesisJson.state.keyvals, )
         if (setStateError) {
           throw new Error(`Failed to set genesis state: ${setStateError.message}`)
         }
@@ -558,9 +552,6 @@ describe('JAM Conformance Traces', () => {
         throw new Error(`Failed to import block: ${importError.message}, stack: ${importError.stack}`)
       }
       expect(importError).toBeUndefined()
-
-      // Clear raw keyvals mode after block import
-      stateService.clearRawKeyvals()
 
       // Verify post-state matches expected post_state from trace
       const [stateTrieError, stateTrie] = stateService.generateStateTrie()

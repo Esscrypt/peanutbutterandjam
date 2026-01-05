@@ -5,6 +5,7 @@
  * Handles mapping from hash to preimage data and announcement tracking
  */
 
+import { getServicePreimageValue, getServiceRequestValue, getServiceStorageKey, getServiceStorageValue, setServicePreimageValue, setServiceRequestValue, setServiceStorageValue } from '@pbnjam/codec'
 import {
   blake2bHash,
   bytesToHex,
@@ -12,7 +13,6 @@ import {
   type Hex,
   hexToBytes,
   logger,
-  type SlotChangeEvent,
 } from '@pbnjam/core'
 import type { PreimageRequestProtocol } from '@pbnjam/networking'
 import {
@@ -25,13 +25,11 @@ import {
   type Safe,
   type SafePromise,
   type ServiceAccount,
-  type ServiceAccountCore,
   type ServiceAccounts,
   safeError,
   safeResult,
 } from '@pbnjam/types'
 import type { ClockService } from './clock-service'
-import type { ConfigService } from './config-service'
 import type { NetworkingService } from './networking-service'
 
 /**
@@ -48,29 +46,14 @@ export class ServiceAccountService
   implements IServiceAccountService
 {
   /** Map from preimage hash to preimage data */
-  private readonly preimageCache: Map<Hex, Preimage> = new Map()
+  private readonly coreServiceAccounts: Map<bigint, ServiceAccount>
 
-  private readonly serviceStorage: Map<bigint, Map<Hex, Uint8Array>>
-  private readonly coreServiceAccounts: Map<bigint, ServiceAccountCore>
-  // per-service preimages mapping to avoid cross-service overwrite
-  private readonly servicePreimages: Map<bigint, Map<Hex, Uint8Array>> =
-    new Map()
-
-  // used to determine if a preimage is available as of a timeslot or not
-  // serviceId -> preimage hash -> blob length -> request status
-  private readonly serviceRequests: Map<
-    bigint,
-    Map<Hex, Map<bigint, PreimageRequestStatus>>
-  > = new Map()
-
-  private readonly configService: ConfigService
   private readonly eventBusService: EventBusService
   private readonly clockService: ClockService
   private readonly networkingService: NetworkingService | null
   private readonly preimageRequestProtocol: PreimageRequestProtocol | null
 
   constructor(options: {
-    configService: ConfigService
     eventBusService: EventBusService
     clockService: ClockService
     networkingService: NetworkingService | null
@@ -78,13 +61,11 @@ export class ServiceAccountService
   }) {
     super('preimage-holder-service')
     this.networkingService = options.networkingService
-    this.configService = options.configService
     this.eventBusService = options.eventBusService
     this.clockService = options.clockService
     this.preimageRequestProtocol = options.preimageRequestProtocol
 
-    this.serviceStorage = new Map<bigint, Map<Hex, Uint8Array>>()
-    this.coreServiceAccounts = new Map<bigint, ServiceAccountCore>()
+    this.coreServiceAccounts = new Map<bigint, ServiceAccount>()
 
     this.eventBusService.addPreimageAnnouncementCallback(
       this.handlePreimageAnnouncement.bind(this),
@@ -95,9 +76,9 @@ export class ServiceAccountService
     this.eventBusService.addPreimageReceivedCallback(
       this.handlePreimageReceived.bind(this),
     )
-    this.eventBusService.addSlotChangeCallback(
-      this.handleSlotChanged.bind(this),
-    )
+    // this.eventBusService.addSlotChangeCallback(
+    //   this.handleSlotChanged.bind(this),
+    // )
   }
 
   async start(): SafePromise<boolean> {
@@ -114,42 +95,18 @@ export class ServiceAccountService
     this.eventBusService.removePreimageReceivedCallback(
       this.handlePreimageReceived.bind(this),
     )
-    this.eventBusService.removeSlotChangeCallback(
-      this.handleSlotChanged.bind(this),
-    )
+    // this.eventBusService.removeSlotChangeCallback(
+    //   this.handleSlotChanged.bind(this),
+    // )
 
     return safeResult(true)
   }
 
-  getPreimageCreationSlot(
-    serviceId: bigint,
-    hash: Hex,
-    blobLength: bigint,
-  ): Safe<bigint | null> {
-    const requestStatus = this.serviceRequests
-      .get(serviceId)
-      ?.get(hash)
-      ?.get(blobLength)
-    if (!requestStatus) {
-      return safeResult(null)
-    }
-    if (requestStatus.length === 3) {
-      return safeResult(requestStatus[2])
-    }
-    return safeResult(requestStatus[0])
-  }
 
   async handlePreimageRequested(
     request: PreimageRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    const [error2, preimage] = this.getPreimage(request.hash)
-    if (error2) {
-      return safeError(error2)
-    }
-    if (!preimage) {
-      return safeError(new Error('Preimage not found'))
-    }
 
     if (!this.preimageRequestProtocol) {
       return safeError(new Error('Preimage request protocol not found'))
@@ -159,8 +116,24 @@ export class ServiceAccountService
       return safeError(new Error('Networking service not found'))
     }
 
+    let foundPreimage: Hex | undefined 
+    let foundServiceId: bigint | undefined 
+    // try to find the preimage from known service accounts
+    for (const [serviceId, serviceAccount] of this.coreServiceAccounts.entries()) {
+      const preimage = getServicePreimageValue(serviceAccount, serviceId, request.hash)
+      if (preimage) {
+        foundPreimage = bytesToHex(preimage)
+        foundServiceId = serviceId
+        break
+      }
+    }
+
+    if (!foundPreimage || !foundServiceId) {
+      return safeError(new Error('Preimage not found'))
+    }
+
     const [serializeError, serializedPreimageMessage] =
-      this.preimageRequestProtocol.serializeResponse(preimage)
+      this.preimageRequestProtocol.serializeResponse({ requester: foundServiceId, blob: foundPreimage })
     if (serializeError) {
       return safeError(serializeError)
     }
@@ -226,24 +199,16 @@ export class ServiceAccountService
     }
 
     const blobLength = BigInt(blobBytes.length)
-    const serviceBucket = this.serviceRequests.get(preimage.requester)!
 
-    // Store the preimage
-    this.preimageCache.set(hash, preimage)
-    const perServiceBucket =
-      this.servicePreimages.get(preimage.requester) ??
-      new Map<Hex, Uint8Array>()
-    perServiceBucket.set(hash, blobBytes)
-    this.servicePreimages.set(preimage.requester, perServiceBucket)
-
-    // fill/update the preimage request status for this service
-    const hashToBlobLength = serviceBucket!.get(hash)!
-    const requestStatus = hashToBlobLength.get(blobLength)
-    if (requestStatus) {
-      requestStatus.push(creationSlot)
-    } else {
-      hashToBlobLength.set(blobLength, [creationSlot])
+    const serviceAccount = this.coreServiceAccounts.get(preimage.requester)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
     }
+    const serviceId = preimage.requester
+    // Store the preimage
+    setServicePreimageValue(serviceAccount, serviceId, hash, blobBytes)
+
+    setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, [creationSlot])
 
     return safeResult(hash)
   }
@@ -252,26 +217,32 @@ export class ServiceAccountService
    * Validate a preimage against current state without mutating it
    */
   private validatePreimageRequest(preimage: Preimage): Safe<void> {
+
     // Compute hash over blob only
     const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
     if (hashError) {
       return safeError(hashError)
     }
 
+    const serviceAccount = this.coreServiceAccounts.get(preimage.requester)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
+    }
     // Already present for this service -> unneeded
-    const existing = this.preimageCache.get(hash)
-    if (existing && existing.requester === preimage.requester) {
+    const existing = getServicePreimageValue(serviceAccount, preimage.requester, hash)
+    if (existing) {
       return safeError(new Error('preimage_unneeded'))
     }
 
     // Must be requested for this service and exact byte length
     const blobLength = BigInt(hexToBytes(preimage.blob).length)
-    const serviceBucket = this.serviceRequests.get(preimage.requester)
-    const lengthMap = serviceBucket?.get(hash)
-    if (!lengthMap || !lengthMap.has(blobLength)) {
+    
+    const requestStatus = getServiceRequestValue(serviceAccount, preimage.requester, hash, blobLength)
+    
+    if (!requestStatus) {
+      // Return preimage_unneeded when blob is not requested (per test vector expectations)
       return safeError(new Error('preimage_unneeded'))
     }
-
     return safeResult(undefined)
   }
 
@@ -327,36 +298,6 @@ export class ServiceAccountService
     return safeResult(undefined)
   }
 
-  /**
-   * Get preimage data by hash
-   *
-   * @param hash - The preimage hash to retrieve
-   * @returns Preimage entry or null if not found
-   */
-  getPreimage(hash: Hex): Safe<Preimage | null> {
-    const entry = this.preimageCache.get(hash)
-    if (entry) {
-      return safeResult(entry)
-    }
-    return safeResult(null)
-  }
-
-  getPreimageByServiceId(serviceId: bigint) {
-    return Array.from(this.preimageCache.values()).filter(
-      (preimage) => preimage.requester === serviceId,
-    )
-  }
-
-  /**
-   * Remove preimage (mark as unavailable)
-   *
-   * @param hash - The preimage hash to remove
-   * @returns True if preimage was removed
-   */
-  async removePreimage(hash: Hex): SafePromise<boolean> {
-    this.preimageCache.delete(hash)
-    return safeResult(true)
-  }
 
   /**
    * Clean up expired preimages
@@ -364,24 +305,24 @@ export class ServiceAccountService
    * @param currentTimeslot - Current timeslot for expiration calculation
    * @returns Number of preimages cleaned up
    */
-  async handleSlotChanged(slotChangeEvent: SlotChangeEvent): SafePromise<void> {
-    const CEXPUNGE_PERIOD = BigInt(this.configService.preimageExpungePeriod) // Gray Paper constant
+  // async handleSlotChanged(slotChangeEvent: SlotChangeEvent): SafePromise<void> {
+  //   const CEXPUNGE_PERIOD = BigInt(this.configService.preimageExpungePeriod) // Gray Paper constant
 
-    // update all requests (per service)
-    for (const [_, hashMap] of this.serviceRequests.entries()) {
-      for (const [hash, lengthMap] of hashMap.entries()) {
-        for (const [_blobLength, requestStatus] of lengthMap.entries()) {
-          const lastChangeSlot = requestStatus[requestStatus.length - 1]
-          if (slotChangeEvent.slot > lastChangeSlot - CEXPUNGE_PERIOD) {
-            requestStatus.push(slotChangeEvent.slot) // just became unavailable
-            this.preimageCache.delete(hash)
-          }
-        }
-      }
-    }
+  //   // update all requests (per service)
+  //   for (const [_, hashMap] of this.stateService.getServiceRequests().entries()) {
+  //     for (const [hash, lengthMap] of hashMap.entries()) {
+  //       for (const [_blobLength, requestStatus] of lengthMap.entries()) {
+  //         const lastChangeSlot = requestStatus[requestStatus.length - 1]
+  //         if (slotChangeEvent.slot > lastChangeSlot - CEXPUNGE_PERIOD) {
+  //           requestStatus.push(slotChangeEvent.slot) // just became unavailable
+  //           this.preimageCache.delete(hash)
+  //         }
+  //       }
+  //     }
+  //   }
 
-    return safeResult(undefined)
-  }
+  //   return safeResult(undefined)
+  // }
 
   /**
    * Gray Paper histlookup function
@@ -395,6 +336,7 @@ export class ServiceAccountService
    * @returns Preimage blob or null if not found/not available
    */
   histLookupServiceAccount(
+    serviceId: bigint,
     serviceAccount: ServiceAccount,
     hash: Hex,
     timeslot: bigint,
@@ -403,22 +345,15 @@ export class ServiceAccountService
     // first check validity based on the timeslot:
 
     // Get the request map for this hash
-    const preimage = serviceAccount.preimages.get(hash)
+    const preimage = getServicePreimageValue(serviceAccount, serviceId, hash)
     if (!preimage) {
       logger.debug('Hash does not belong to a preimage', { hash })
       return safeResult(null)
     }
 
-    const length = preimage.length
-
-    const lengthMap = serviceAccount.requests.get(hash)
-    if (!lengthMap) {
-      logger.debug('No request map found for hash', { hash })
-      return safeResult(null)
-    }
-    const requestStatus = lengthMap.get(BigInt(length))
+    const requestStatus = getServiceRequestValue(serviceAccount, serviceId, hash, BigInt(preimage.length))
     if (!requestStatus) {
-      logger.debug('No request status found for length', { length })
+      logger.debug('No request map found for hash', { hash })
       return safeResult(null)
     }
 
@@ -435,87 +370,6 @@ export class ServiceAccountService
     }
 
     return safeResult(preimage)
-  }
-
-  /**
-   * Gray Paper histlookup by service id
-   * Looks up availability using internal per-service requests map
-   */
-  histLookupForService(
-    serviceId: bigint,
-    hash: Hex,
-    timeslot: bigint,
-  ): Safe<Uint8Array | null> {
-    // resolve preimage bytes for this service
-    const preimage = this.preimageCache.get(hash)
-    if (!preimage || preimage.requester !== serviceId) {
-      logger.debug('Hash does not belong to a preimage for service', {
-        hash,
-        serviceId: serviceId.toString(),
-      })
-      return safeResult(null)
-    }
-
-    const length = BigInt(hexToBytes(preimage.blob).length)
-    const lengthMap = this.serviceRequests.get(serviceId)?.get(hash)
-    if (!lengthMap) {
-      logger.debug('No request map found for hash', { hash })
-      return safeResult(null)
-    }
-    const requestStatus = lengthMap.get(length)
-    if (!requestStatus) {
-      logger.debug('No request status found for length', {
-        length: length.toString(),
-      })
-      return safeResult(null)
-    }
-
-    const isValid = this.checkRequestValidity(requestStatus, timeslot)
-    if (!isValid) {
-      logger.debug('Preimage not available at requested timeslot', {
-        hash,
-        timeslot: timeslot.toString(),
-        requestStatus: requestStatus.map((t) => t.toString()),
-      })
-      return safeResult(null)
-    }
-
-    return safeResult(hexToBytes(preimage.blob))
-  }
-
-  histLookup(hash: Hex, timeslot: bigint): Safe<Uint8Array | null> {
-    // Get the request map for this hash
-    const preimage = this.preimageCache.get(hash)
-    if (!preimage) {
-      logger.debug('Hash does not belong to a preimage', { hash })
-      return safeResult(null)
-    }
-
-    const length = hexToBytes(preimage.blob).length
-
-    const lengthMap = this.serviceRequests.get(preimage.requester)?.get(hash)
-    if (!lengthMap) {
-      logger.debug('No request map found for hash', { hash })
-      return safeResult(null)
-    }
-    const requestStatus = lengthMap.get(BigInt(length))
-    if (!requestStatus) {
-      logger.debug('No request status found for length', { length })
-      return safeResult(null)
-    }
-    // Apply the Gray Paper histlookup logic using I(l, t) function
-    const isValid = this.checkRequestValidity(requestStatus, timeslot)
-
-    if (!isValid) {
-      logger.debug('Preimage not available at requested timeslot', {
-        hash,
-        timeslot: timeslot.toString(),
-        requestStatus: requestStatus.map((t) => t.toString()),
-      })
-      return safeResult(null)
-    }
-
-    return safeResult(hexToBytes(preimage.blob))
   }
 
   /**
@@ -574,34 +428,18 @@ export class ServiceAccountService
   getServiceAccounts(): ServiceAccounts {
     const accounts = new Map<bigint, ServiceAccount>()
 
-    // Iterate through all core service accounts
-    for (const [serviceId, accountCore] of this.coreServiceAccounts.entries()) {
-      const storage =
-        this.serviceStorage.get(serviceId) ?? new Map<Hex, Uint8Array>()
-
-      // Get preimages for this service (empty map for now - needs database queries)
-      const preimages =
-        this.servicePreimages.get(serviceId) ?? new Map<Hex, Uint8Array>()
-
-      // Get requests for this service directly from per-service map
-      const requests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-      const bucket = this.serviceRequests.get(serviceId)
-      if (bucket) {
-        for (const [hash, byLen] of bucket.entries()) {
-          requests.set(hash, byLen)
-        }
+    for (const [serviceId, serviceAccount] of this.coreServiceAccounts.entries()) {
+      // Deep copy rawCshKeyvals to prevent mutations
+      const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals));
+      
+      const serviceAccountCopy: ServiceAccount = {
+        ...serviceAccount,
+        rawCshKeyvals: rawCshKeyvalsCopy,
       }
-
-      const serviceAccount: ServiceAccount = {
-        ...accountCore,
-        storage,
-        preimages,
-        requests,
-      }
-
-      accounts.set(serviceId, serviceAccount)
+      
+      accounts.set(serviceId, serviceAccountCopy)
     }
-
+    
     return { accounts }
   }
 
@@ -614,7 +452,10 @@ export class ServiceAccountService
   ): Safe<void> {
     // Clone the core properties to prevent external mutations from affecting stored state
     // This is critical because JavaScript objects are passed by reference
-    const clonedCore: ServiceAccountCore = {
+    // Deep copy rawCshKeyvals to prevent mutations
+    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals))
+    
+    const clonedCore: ServiceAccount = {
       codehash: serviceAccount.codehash,
       balance: serviceAccount.balance,
       minaccgas: serviceAccount.minaccgas,
@@ -625,57 +466,83 @@ export class ServiceAccountService
       created: serviceAccount.created,
       lastacc: serviceAccount.lastacc,
       parent: serviceAccount.parent,
+      rawCshKeyvals: rawCshKeyvalsCopy, // DEEP COPY - prevents mutations
     }
+    
     this.coreServiceAccounts.set(serviceId, clonedCore)
-    this.serviceStorage.set(serviceId, serviceAccount.storage)
 
-    // REPLACE preimages bucket with the complete state from PVM
-    // Note: The PVM returns the complete service account for modified accounts.
-    // Preimages not in the partial state were not in the accumulation context,
-    // but the poststate.accounts should include all preimages for the service.
-    const preimageBucket = new Map<Hex, Uint8Array>()
-    for (const [hash, preimage] of serviceAccount.preimages.entries()) {
-      preimageBucket.set(hash, preimage)
-      this.preimageCache.set(hash, {
-        requester: serviceId,
-        blob: bytesToHex(preimage),
-      })
+    return safeResult(undefined)
+  }
+
+  setServiceAccountKeyvals(
+    serviceId: bigint,
+    keyvals: Record<Hex, Hex>,
+  ): Safe<void> {
+    let serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      const newServiceAccount: ServiceAccount = {
+        codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        balance: 0n,
+        minaccgas: 0n,
+        minmemogas: 0n,
+        octets: 0n,
+        gratis: 0n,
+        items: 0n,
+        created: 0n,
+        lastacc: 0n,
+        parent: 0n,
+        rawCshKeyvals: {},
+      }
+      // Store the newly created service account in the map
+      this.coreServiceAccounts.set(serviceId, newServiceAccount)
+      serviceAccount = newServiceAccount
     }
-    this.servicePreimages.set(serviceId, preimageBucket)
-
-    // REPLACE requests bucket with the complete state from PVM
-    const bucket = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-    for (const [
-      hash,
-      requestStatusByLen,
-    ] of serviceAccount.requests.entries()) {
-      bucket.set(hash, requestStatusByLen)
+    
+    // Merge new keyvals with existing rawCshKeyvals
+    // Deep copy existing values to prevent mutations from affecting stored state
+    // Then merge in new keyvals (new values overwrite existing ones for the same key)
+    const newRawCshKeyvals: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals))
+    // Merge: add new keyvals, overwriting existing ones if the same key appears
+    for (const key in keyvals) {
+      newRawCshKeyvals[key as Hex] = keyvals[key as Hex]
     }
-    this.serviceRequests.set(serviceId, bucket)
-
+    
+    serviceAccount.rawCshKeyvals = newRawCshKeyvals
+    
     return safeResult(undefined)
   }
 
   setServiceAccountCore(
     serviceId: bigint,
-    serviceAccountCore: ServiceAccountCore,
+    serviceAccountCore: ServiceAccount,
   ): Safe<void> {
+    // CRITICAL: Merge rawCshKeyvals instead of overwriting
+    // If an existing account has rawCshKeyvals, preserve them and merge with new ones
+    const existingAccount = this.coreServiceAccounts.get(serviceId);
+    const existingRawCshKeyvalsCount = existingAccount ? Object.keys(existingAccount.rawCshKeyvals).length : 0;
+    
+    if (existingAccount && existingRawCshKeyvalsCount > 0) {
+      // Merge existing rawCshKeyvals with new ones (new values overwrite existing ones)
+      const mergedRawCshKeyvals: Record<Hex, Hex> = JSON.parse(JSON.stringify(existingAccount.rawCshKeyvals))
+      for (const key in serviceAccountCore.rawCshKeyvals) {
+        mergedRawCshKeyvals[key as Hex] = serviceAccountCore.rawCshKeyvals[key as Hex]
+      }
+      serviceAccountCore.rawCshKeyvals = mergedRawCshKeyvals
+    }
+    
     this.coreServiceAccounts.set(serviceId, serviceAccountCore)
-    this.serviceStorage.set(serviceId, new Map<Hex, Uint8Array>())
-    this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
-    this.serviceRequests.set(
-      serviceId,
-      new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
-    )
+
     return safeResult(undefined)
   }
 
   setStorage(serviceId: bigint, key: Hex, value: Uint8Array): Safe<void> {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
-      return safeError(new Error('Storage not found'))
+
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
     }
-    storage.set(key, value)
+    setServiceStorageValue(serviceAccount, serviceId, key, value)
+
     return safeResult(undefined)
   }
 
@@ -684,74 +551,32 @@ export class ServiceAccountService
     preimageHash: Hex,
     blob: Uint8Array,
   ): Safe<void> {
-    const preimage = this.servicePreimages.get(serviceId)
-    if (!preimage) {
-      return safeError(new Error('Preimage not found'))
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
     }
-    preimage.set(preimageHash, blob)
+    setServicePreimageValue(serviceAccount, serviceId, preimageHash, blob)
     return safeResult(undefined)
-  }
-
-  setPreimageRequest(
-    serviceId: bigint,
-    preimageHash: Hex,
-    timeslots: bigint[],
-  ): Safe<void> {
-    // Ensure preimages map exists
-    if (!this.servicePreimages.has(serviceId)) {
-      this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
-    }
-    // Ensure requests map exists
-    if (!this.serviceRequests.has(serviceId)) {
-      this.serviceRequests.set(
-        serviceId,
-        new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
-      )
-    }
-
-    // get blob length from preimage hash
-    const preimage = this.servicePreimages.get(serviceId)?.get(preimageHash)
-    if (!preimage) {
-      // If preimage doesn't exist, we can't determine the blob length
-      // This is a limitation when decoding from test vectors
-      // For now, use 0 as a placeholder length
-      const blobLength = 0n
-      const requestMap = this.serviceRequests.get(serviceId)!
-      if (!requestMap.has(preimageHash)) {
-        requestMap.set(preimageHash, new Map<bigint, PreimageRequestStatus>())
-      }
-      const request = requestMap.get(preimageHash)!
-      request.set(blobLength, timeslots)
-      return safeResult(undefined)
-    }
-    const blobLength = BigInt(preimage.length)
-    const requestMap = this.serviceRequests.get(serviceId)!
-    if (!requestMap.has(preimageHash)) {
-      requestMap.set(preimageHash, new Map<bigint, PreimageRequestStatus>())
-    }
-    const request = requestMap.get(preimageHash)!
-    request.set(blobLength, timeslots)
-    return safeResult(undefined)
-  }
-  /**
-   * Update service account
-   */
-  updateServiceAccount(
-    serviceId: bigint,
-    serviceAccount: ServiceAccount,
-  ): Safe<void> {
-    return this.setServiceAccount(serviceId, serviceAccount)
   }
 
   /**
    * Get service account storage
    */
-  getServiceAccountStorage(serviceId: bigint): Safe<Map<Hex, Uint8Array>> {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
-      return safeError(new Error('Storage not found'))
+  getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return undefined
     }
-    return safeResult(storage)
+    return  getServiceStorageValue(serviceAccount, serviceId, key)
+  }
+
+  setServiceAccountStorage(serviceId: bigint, key: Hex, value: Uint8Array): Safe<void> {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
+    }
+    setServiceStorageValue(serviceAccount, serviceId, key, value)
+    return safeResult(undefined)
   }
 
   /**
@@ -764,21 +589,10 @@ export class ServiceAccountService
     if (!accountCore) {
       return safeError(new Error('Service account not found'))
     }
-    const storage =
-      this.serviceStorage.get(serviceId) ?? new Map<Hex, Uint8Array>()
-    const preimages =
-      this.servicePreimages.get(serviceId) ?? new Map<Hex, Uint8Array>()
-    const requests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-    const bucket = this.serviceRequests.get(serviceId)
-    if (bucket) {
-      for (const [hash, byLen] of bucket.entries()) {
-        requests.set(hash, byLen)
-      }
-    }
-    return safeResult({ ...accountCore, storage, preimages, requests })
+    return safeResult(accountCore)
   }
 
-  getServiceAccountCore(serviceId: bigint): Safe<ServiceAccountCore> {
+  getServiceAccountCore(serviceId: bigint): Safe<ServiceAccount> {
     const accountCore = this.coreServiceAccounts.get(serviceId)
     if (!accountCore) {
       return safeError(new Error('Service account not found'))
@@ -786,27 +600,31 @@ export class ServiceAccountService
     return safeResult(accountCore)
   }
 
-  /**
-   * Create new service account
-   *
-   * Gray Paper: accounts ∈ dictionary{serviceid}{serviceaccount}
-   */
-  createServiceAccount(
-    serviceId: bigint,
-    accountCore: ServiceAccountCore,
-  ): void {
-    this.coreServiceAccounts.set(serviceId, accountCore)
-    this.serviceStorage.set(serviceId, new Map<Hex, Uint8Array>())
-    // Initialize preimages and requests maps if they don't exist
-    if (!this.servicePreimages.has(serviceId)) {
-      this.servicePreimages.set(serviceId, new Map<Hex, Uint8Array>())
+  getServiceAccountKeyvals(serviceId: bigint): Record<Hex, Hex> {
+    const accountCore = this.coreServiceAccounts.get(serviceId)
+    if (!accountCore) {
+      return {}
     }
-    if (!this.serviceRequests.has(serviceId)) {
-      this.serviceRequests.set(
-        serviceId,
-        new Map<Hex, Map<bigint, PreimageRequestStatus>>(),
-      )
+    // Deep clone rawCshKeyvals to prevent mutations from affecting stored state
+    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(accountCore.rawCshKeyvals))
+    return rawCshKeyvalsCopy
+  }
+
+  getServiceAccountRequest(serviceId: bigint, hash: Hex, blobLength: bigint): PreimageRequestStatus | undefined {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return undefined
     }
+    return getServiceRequestValue(serviceAccount, serviceId, hash, blobLength)
+  }
+
+  setServiceAccountRequest(serviceId: bigint, hash: Hex, blobLength: bigint, timeslots: bigint[]): Safe<void> {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return safeError(new Error('Service account not found'))
+    }
+    setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, timeslots)
+    return safeResult(undefined)
   }
 
   /**
@@ -814,24 +632,9 @@ export class ServiceAccountService
    */
   deleteServiceAccount(serviceId: bigint): Safe<void> {
     this.coreServiceAccounts.delete(serviceId)
-    this.serviceStorage.delete(serviceId)
     return safeResult(undefined)
   }
 
-  /**
-   * Update service account core fields
-   *
-   * Gray Paper: accounts ∈ dictionary{serviceid}{serviceaccount}
-   */
-  updateServiceAccountCore(
-    serviceId: bigint,
-    accountCore: ServiceAccountCore,
-  ): void {
-    const existingAccount = this.coreServiceAccounts.get(serviceId)
-    if (existingAccount) {
-      this.coreServiceAccounts.set(serviceId, accountCore)
-    }
-  }
 
   /**
    * Get storage value for service
@@ -839,92 +642,26 @@ export class ServiceAccountService
    * Gray Paper: sa_storage ∈ dictionary{blob}{blob}
    */
   getStorageValue(serviceId: bigint, key: Hex): Uint8Array | undefined {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
       return undefined
     }
-    return storage.get(key)
+    const storage = getServiceStorageValue(serviceAccount, serviceId, key)
+    return storage
   }
 
-  /**
-   * Set storage value for service
-   *
-   * Gray Paper: sa_storage ∈ dictionary{blob}{blob}
-   */
-  setStorageValue(serviceId: bigint, key: Hex, value: Uint8Array): void {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
-      return
-    }
-    storage.set(key, value)
-  }
 
   /**
    * Delete storage value for service
    */
   deleteStorageValue(serviceId: bigint, key: Hex): void {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
       return
     }
-    storage.delete(key)
+    const storageKey = getServiceStorageKey(serviceId, key)
+
+    delete serviceAccount.rawCshKeyvals[storageKey]
   }
 
-  /**
-   * Get all storage keys for service
-   */
-  getStorageKeys(serviceId: bigint): Hex[] {
-    const storage = this.serviceStorage.get(serviceId)
-    if (!storage) {
-      return []
-    }
-    return storage.keys().toArray()
-  }
-
-  /**
-   * Get balance for service
-   *
-   * Gray Paper: sa_balance ∈ balance
-   */
-  getBalance(serviceId: bigint): bigint | undefined {
-    const accountCore = this.coreServiceAccounts.get(serviceId)
-    return accountCore?.balance
-  }
-
-  /**
-   * Set balance for service
-   *
-   * Gray Paper: sa_balance ∈ balance
-   */
-  setBalance(serviceId: bigint, balance: bigint): void {
-    const accountCore = this.coreServiceAccounts.get(serviceId)
-    if (accountCore) {
-      accountCore.balance = balance
-    }
-  }
-
-  /**
-   * Transfer balance between services
-   */
-  transferBalance(
-    fromServiceId: bigint,
-    toServiceId: bigint,
-    amount: bigint,
-  ): boolean {
-    const fromAccount = this.coreServiceAccounts.get(fromServiceId)
-    const toAccount = this.coreServiceAccounts.get(toServiceId)
-
-    if (!fromAccount || !toAccount) {
-      return false
-    }
-
-    if (fromAccount.balance < amount) {
-      return false
-    }
-
-    fromAccount.balance -= amount
-    toAccount.balance += amount
-
-    return true
-  }
 }

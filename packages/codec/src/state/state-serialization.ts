@@ -59,14 +59,7 @@
  * - Compact state commitments (32-byte hash)
  */
 
-import {
-  blake2bHash,
-  bytesToHex,
-  calculateServiceAccountItems,
-  calculateServiceAccountOctets,
-  type Hex,
-  hexToBytes,
-} from '@pbnjam/core'
+import { blake2bHash, bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   GlobalState,
   IConfigService,
@@ -75,8 +68,6 @@ import type {
   StateTrie,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
-import { encodeFixedLength } from '../core/fixed-length'
-import { encodeVariableSequence } from '../core/sequence'
 import { encodeAccumulated } from './accumulated'
 import { encodeActivity } from './activity'
 import { encodeAuthpool } from './authpool'
@@ -419,18 +410,19 @@ export function createServiceRequestKey(
  * ✅ FIXED: Chapter 10 - now uses proper reports encoding (maybe{(workreport, timestamp)} per core)
  * ✅ FIXED: Chapter 11 - now uses proper encode[4]{thetime}
  * ✅ FIXED: Chapter 12 - now uses proper privileges encoding format
- * ✅ FIXED: Service accounts - now uses proper ServiceAccountCore encoding
+ * ✅ FIXED: Service accounts - now uses proper ServiceAccount encoding
  * ✅ FIXED: Service storage, preimages, requests mappings - now included with Gray Paper key patterns
  */
 export function createStateTrie(
   globalState: GlobalState,
   configService: IConfigService,
-  jamVersion?: JamVersion,
+  jamVersion: JamVersion,
 ): Safe<StateTrie> {
   const stateTrie: StateTrie = {}
 
   // Chapter 1: authpool
   const authpoolKey = createStateKey(1)
+  const authpoolKeyHex = bytesToHex(authpoolKey)
   const [error, authpoolData] = encodeAuthpool(
     globalState.authpool,
     configService,
@@ -439,7 +431,9 @@ export function createStateTrie(
     return safeError(error)
   }
   if (authpoolData) {
-    stateTrie[bytesToHex(authpoolKey)] = bytesToHex(authpoolData)
+    const encodedValue = bytesToHex(authpoolData)
+
+    stateTrie[authpoolKeyHex] = encodedValue
   }
 
   // Chapter 2: authqueue
@@ -629,250 +623,21 @@ export function createStateTrie(
   for (const [serviceId, account] of globalState.accounts.accounts) {
     const accountKey = createStateKey(255, serviceId)
 
-    // Gray Paper accounts.tex: items and octets are DERIVED values that must be recalculated
-    // items = 2 * len(requests) + len(storage)
-    // octets = sum((81 + z) for (h, z) in keys(requests)) + sum((34 + len(y) + len(x)) for (x, y) in storage)
-    // Use the extracted functions from @pbnjam/core
-    const computedOctets = calculateServiceAccountOctets(account)
-    const computedItems = calculateServiceAccountItems(account)
-
-    // #region agent log
-    // Calculate breakdown for debugging (keep logs for now)
-    let requestKeyCount = 0
-    let requestsOctets = 0n
-    for (const [_hash, lengthMap] of account.requests) {
-      for (const [length, _status] of lengthMap) {
-        requestKeyCount++
-        requestsOctets += 81n + length
-      }
-    }
-    let storageOctets = 0n
-    for (const [storageKey, storageValue] of account.storage) {
-      const keyBytes = hexToBytes(storageKey).length
-      storageOctets += 34n + BigInt(keyBytes) + BigInt(storageValue.length)
-    }
-    if (
-      account.codehash ===
-      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
-    ) {
-      fetch(
-        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'state-serialization.ts:652',
-            message: 'final octets calculation',
-            data: {
-              serviceId: serviceId.toString(),
-              storedOctets: account.octets.toString(),
-              computedOctets: computedOctets.toString(),
-              requestsOctets: requestsOctets.toString(),
-              storageOctets: storageOctets.toString(),
-              storageSize: account.storage.size,
-              requestKeyCount,
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            runId: 'run1',
-            hypothesisId: 'D',
-          }),
-        },
-      ).catch(() => {})
-    }
-    // #endregion
-
-    // Update account with computed values before encoding
-    const accountWithComputed = {
-      ...account,
-      items: computedItems,
-      octets: computedOctets,
-    }
-
-    // #region agent log
-    if (
-      account.codehash ===
-      '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
-    ) {
-      fetch(
-        'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'state-serialization.ts:673',
-            message: 'encoding account with computed octets',
-            data: {
-              serviceId: serviceId.toString(),
-              accountWithComputedOctets: accountWithComputed.octets.toString(),
-              accountWithComputedItems: accountWithComputed.items.toString(),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            runId: 'run1',
-            hypothesisId: 'D',
-          }),
-        },
-      ).catch(() => {})
-    }
-    // #endregion
-    const [error17, accountData] = encodeServiceAccount(
-      accountWithComputed,
-      jamVersion,
-    )
+    const [error17, accountData] = encodeServiceAccount(account, jamVersion)
     if (error17) {
       return safeError(error17)
     }
     if (accountData) {
-      // #region agent log
-      if (
-        account.codehash ===
-        '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327'
-      ) {
-        // Decode the octets value from the encoded data to verify
-        const version = jamVersion ?? { major: 0, minor: 7, patch: 2 }
-        const includeDiscriminator =
-          version.major > 0 ||
-          (version.major === 0 && version.minor > 7) ||
-          (version.major === 0 && version.minor === 7 && version.patch > 0)
-        const discriminatorSize = includeDiscriminator ? 1 : 0
-        const octetsOffset = discriminatorSize + 32 + 24 // discriminator (optional) + codehash + offset to octets field
-        const view = new DataView(
-          accountData.buffer,
-          accountData.byteOffset,
-          accountData.byteLength,
-        )
-        const encodedOctets = view.getBigUint64(octetsOffset, true)
-        fetch(
-          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'state-serialization.ts:690',
-              message: 'encoded account data verification',
-              data: {
-                serviceId: serviceId.toString(),
-                encodedOctets: encodedOctets.toString(),
-                accountWithComputedOctets:
-                  accountWithComputed.octets.toString(),
-                accountDataLength: accountData.length,
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'D',
-            }),
-          },
-        ).catch(() => {})
-      }
-      // #endregion
       stateTrie[bytesToHex(accountKey)] = bytesToHex(accountData)
     }
+  }
 
-    // Generate C(s, h) keys from service account Maps
-    // Gray Paper merklization.tex line 118: "Implementations are free to use this fact in order
-    // to avoid storing the keys themselves" - we generate keys from service account storage/preimages/requests
-    // Service storage mappings: C(s, encode[4]{0xFFFFFFFF} ∥ storage_key) ↦ storage_value
-    // Gray Paper merklization.tex (lines 103-104)
-    for (const [storageKey, storageValue] of account.storage) {
-      const storageStateKey = createServiceStorageKey(serviceId, storageKey)
-      const storageStateKeyHex = bytesToHex(storageStateKey) as Hex
-      // #region agent log
-      const TARGET_STATE_KEY_GEN_STORAGE =
-        '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-      if (
-        storageStateKeyHex.toLowerCase() ===
-        TARGET_STATE_KEY_GEN_STORAGE.toLowerCase()
-      ) {
-        fetch(
-          'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'state-serialization.ts:668',
-              message: 'createStateTrie: Generating target storage key',
-              data: {
-                serviceId: serviceId.toString(),
-                storageKey,
-                storageStateKeyHex,
-                storageValueLength: storageValue.length.toString(),
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'U',
-            }),
-          },
-        ).catch(() => {})
-      }
-      // #endregion
-      stateTrie[storageStateKeyHex] = bytesToHex(storageValue)
-    }
+  // Add all raw C(s, h) keys to the state trie
+  for (const [_serviceId, account] of globalState.accounts.accounts) {
+    for (const key in account.rawCshKeyvals) {
+      const hexKey = key as Hex
 
-    // Service preimage mappings: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash) ↦ preimage_data
-    // Gray Paper merklization.tex (lines 105-106)
-    for (const [preimageHash, preimageData] of account.preimages) {
-      const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
-      stateTrie[bytesToHex(preimageStateKey)] = bytesToHex(preimageData)
-    }
-
-    // Service request mappings: C(s, encode[4]{length} ∥ request_hash) ↦ request_status
-    // Gray Paper merklization.tex (lines 107-110)
-    // encode{var{sequence{encode[4]{x} | x ∈ t}}}
-    // where t is the sequence of timeslots (up to 3)
-    for (const [requestHash, lengthMap] of account.requests) {
-      for (const [length, requestStatus] of lengthMap) {
-        const requestStateKey = createServiceRequestKey(
-          serviceId,
-          requestHash,
-          length,
-        )
-        const requestStateKeyHex = bytesToHex(requestStateKey) as Hex
-        // #region agent log
-        const TARGET_STATE_KEY_GEN =
-          '0x005e00ec001400cc4efb2b66558ec2cdfbc435247929d71ff139cc9cbc2e56' as Hex
-        if (
-          requestStateKeyHex.toLowerCase() ===
-          TARGET_STATE_KEY_GEN.toLowerCase()
-        ) {
-          fetch(
-            'http://127.0.0.1:7242/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                location: 'state-serialization.ts:685',
-                message: 'createStateTrie: Generating target request key',
-                data: {
-                  serviceId: serviceId.toString(),
-                  requestHash,
-                  length: length.toString(),
-                  requestStateKeyHex,
-                  requestStatusLength: requestStatus.length.toString(),
-                },
-                timestamp: Date.now(),
-                sessionId: 'debug-session',
-                runId: 'run1',
-                hypothesisId: 'R',
-              }),
-            },
-          ).catch(() => {})
-        }
-        // #endregion
-        // Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
-        // var{...} = length prefix (natural number)
-        // sequence{encode[4]{x}} = sequence of 4-byte timeslots
-        const [error18, requestStatusData] = encodeVariableSequence(
-          requestStatus,
-          (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
-        )
-        if (error18) {
-          return safeError(error18)
-        }
-        stateTrie[requestStateKeyHex] = bytesToHex(requestStatusData)
-      }
+      stateTrie[hexKey] = account.rawCshKeyvals[hexKey]
     }
   }
 

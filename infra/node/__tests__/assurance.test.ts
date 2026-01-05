@@ -199,7 +199,7 @@ describe('Assurance Service - JAM Test Vectors', () => {
                 vector.input.slot,
                 configService,
               )
-              transitionError = applyError
+              transitionError = applyError || null
             } else {
               transitionError = validationError
             }

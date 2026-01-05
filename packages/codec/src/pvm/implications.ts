@@ -46,9 +46,10 @@ import type {
   IConfigService,
   Implications,
   ImplicationsPair,
+  JamVersion,
   Safe,
 } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import { decodeOptional, encodeOptional } from '../core/discriminator'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
@@ -77,12 +78,15 @@ import { decodePartialState, encodePartialState } from './partial-state'
  *
  * @param implications - Implications to encode
  * @param configService - Configuration service for core/validator counts
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Encoded octet sequence
  */
 export function encodeImplications(
   implications: Implications,
   configService: IConfigService,
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
   const parts: Uint8Array[] = []
 
   // im_id: encode[4]{serviceid} (4-byte fixed-length)
@@ -116,7 +120,7 @@ export function encodeImplications(
   // var{x} = ⟨len(x), x⟩, so we encode length then sequence
   const [error4, encodedXfers] = encodeVariableSequence(
     implications.xfers,
-    encodeDeferredTransfer,
+    (transfer) => encodeDeferredTransfer(transfer, version),
   )
   if (error4) {
     return safeError(error4)
@@ -209,12 +213,15 @@ export function encodeImplications(
  *
  * @param data - Octet sequence to decode
  * @param configService - Configuration service for core/validator counts
+ * @param jamVersion - Optional JAM version. Defaults to v0.7.2
  * @returns Decoded implications and remaining data
  */
 export function decodeImplications(
   data: Uint8Array,
   configService: IConfigService,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<Implications>> {
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
   let currentData = data
 
   // im_id: decode[4]{serviceid} (4-byte fixed-length)
@@ -244,7 +251,7 @@ export function decodeImplications(
   // im_xfers: decode{var{sequence{defxfer}}}
   const [error4, xfersResult] = decodeVariableSequence(
     currentData,
-    decodeDeferredTransfer,
+    (data) => decodeDeferredTransfer(data, version),
   )
   if (error4) {
     return safeError(error4)
@@ -396,9 +403,10 @@ export function encodeImplicationsPair(
 export function decodeImplicationsPair(
   data: Uint8Array,
   configService: IConfigService,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<ImplicationsPair>> {
   // Decode regular dimension (first element)
-  const [error1, regularResult] = decodeImplications(data, configService)
+  const [error1, regularResult] = decodeImplications(data, configService, jamVersion)
   if (error1) {
     return safeError(error1)
   }
@@ -409,6 +417,7 @@ export function decodeImplicationsPair(
   const [error2, exceptionalResult] = decodeImplications(
     regularRemaining,
     configService,
+    jamVersion,
   )
   if (error2) {
     return safeError(error2)

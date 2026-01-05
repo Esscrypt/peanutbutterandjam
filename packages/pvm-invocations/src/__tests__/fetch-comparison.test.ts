@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from 'vitest'
+import { describe, test, expect, beforeEach } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,7 +6,7 @@ import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import { FetchHostFunction, PVMRAM } from '@pbnjam/pvm'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 import { EntropyService } from '../../../../infra/node/services/entropy'
-import { EventBusService, bytesToHex, hexToBytes, concatBytes } from '@pbnjam/core'
+import { EventBusService, bytesToHex, concatBytes, hexToBytes, type Hex } from '@pbnjam/core'
 import type { HostFunctionContext, FetchParams, PartialState, Implications, ImplicationsPair, ServiceAccount, WorkItem, ImportSegment, ExtrinsicReference } from '@pbnjam/types'
 import { encodeImplicationsPair, encodeFixedLength, encodeNatural, encodeProgram, encodeServiceCodeToPreimage, encodeBlob, encodeVariableSequence, decodeVariableSequence, encodeWorkItem, decodeWorkItem } from '@pbnjam/codec'
 
@@ -27,7 +27,6 @@ describe('FETCH Host Function Comparison', () => {
     configService = new ConfigService('tiny')
     const eventBusService = new EventBusService()
     entropyService = new EntropyService(eventBusService)
-
     // Initialize TypeScript FETCH host function
     tsFetchFunction = new FetchHostFunction(configService)
 
@@ -166,7 +165,7 @@ describe('FETCH Host Function Comparison', () => {
         [
           serviceId,
           {
-            codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+            codehash: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
             balance: 0n,
             minaccgas: 0n,
             minmemogas: 0n,
@@ -176,9 +175,7 @@ describe('FETCH Host Function Comparison', () => {
             created: 0n,
             lastacc: 0n,
             parent: 0n,
-            preimages: new Map(),
-            requests: new Map(),
-            storage: new Map(),
+            rawCshKeyvals: {},
           } as ServiceAccount,
         ],
       ]),

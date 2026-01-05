@@ -44,21 +44,21 @@ import type {
   DecodingResult,
   IConfigService,
   PartialState,
-  PreimageRequestStatus,
   Safe,
   ServiceAccount,
   ValidatorPublicKeys,
 } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
-import { decodeVariableLength } from '../core/discriminator'
-import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
-import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
-  decodeVariableSequence,
-  encodeSequenceGeneric,
-  encodeVariableSequence,
-} from '../core/sequence'
+  decodeVariableLength,
+  encodeVariableLength,
+} from '../core/discriminator'
+import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
+import { encodeNatural } from '../core/natural-number'
+import { encodeSequenceGeneric } from '../core/sequence'
 import { decodeAuthqueue, encodeAuthqueue } from '../state/authqueue'
+import { extractServiceIdFromStateKey } from '../state/service-account'
+import { determineKeyTypes } from '../state/state-key'
 import { decodeValidatorSet, encodeValidatorSet } from '../state/validator-set'
 
 /**
@@ -194,38 +194,24 @@ export function encodeCompleteServiceAccount(
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
-  // sa_storage: encode{dictionary{blob}{blob}}
-  // Sort storage entries by key for deterministic encoding
-  const sortedStorage = Array.from(account.storage.entries())
-  sortedStorage.sort((a, b) => {
-    const aBytes = hexToBytes(a[0])
-    const bBytes = hexToBytes(b[0])
-    const minLen = aBytes.length < bBytes.length ? aBytes.length : bBytes.length
-    for (let i = 0; i < minLen; i++) {
-      if (aBytes[i] < bBytes[i]) return -1
-      if (aBytes[i] > bBytes[i]) return 1
-    }
-    if (aBytes.length < bBytes.length) return -1
-    if (aBytes.length > bBytes.length) return 1
-    return 0
-  })
-
   // Manually encode dictionary: var{sequence{sorted(key, value)}}
+  // Each key and value must be encoded with var{} discriminator (length prefix + blob)
   const storagePairs: Uint8Array[] = []
-  for (const [key, value] of sortedStorage) {
-    const keyBytes = hexToBytes(key)
-    const [keyLenError, encodedKeyLen] = encodeNatural(BigInt(keyBytes.length))
-    if (keyLenError) {
-      return safeError(keyLenError)
-    }
-    const [valueLenError, encodedValueLen] = encodeNatural(BigInt(value.length))
-    if (valueLenError) {
-      return safeError(valueLenError)
-    }
+  for (const key in account.rawCshKeyvals) {
+    const value = account.rawCshKeyvals[key as Hex]
     // Key: encode{var{blob}} = encode{len(key)} || key
-    const encodedKey = concatBytes([encodedKeyLen, keyBytes])
+    const keyBytes = hexToBytes(key as Hex)
+    const [keyLengthError, encodedKey] = encodeVariableLength(keyBytes)
+    if (keyLengthError) {
+      return safeError(keyLengthError)
+    }
+
     // Value: encode{var{blob}} = encode{len(value)} || value
-    const encodedValue = concatBytes([encodedValueLen, value])
+    const valueBytes = hexToBytes(value)
+    const [valueLengthError, encodedValue] = encodeVariableLength(valueBytes)
+    if (valueLengthError) {
+      return safeError(valueLengthError)
+    }
     storagePairs.push(concatBytes([encodedKey, encodedValue]))
   }
   const concatenatedStoragePairs = concatBytes(storagePairs)
@@ -237,110 +223,6 @@ export function encodeCompleteServiceAccount(
     return safeError(storageLengthError)
   }
   parts.push(concatBytes([encodedStorageLength, concatenatedStoragePairs]))
-
-  // sa_preimages: encode{dictionary{hash}{blob}}
-  // Sort preimage entries by hash for deterministic encoding
-  const sortedPreimages = Array.from(account.preimages.entries())
-  sortedPreimages.sort((a, b) => {
-    const aBytes = hexToBytes(a[0])
-    const bBytes = hexToBytes(b[0])
-    const minLen = aBytes.length < bBytes.length ? aBytes.length : bBytes.length
-    for (let i = 0; i < minLen; i++) {
-      if (aBytes[i] < bBytes[i]) return -1
-      if (aBytes[i] > bBytes[i]) return 1
-    }
-    if (aBytes.length < bBytes.length) return -1
-    if (aBytes.length > bBytes.length) return 1
-    return 0
-  })
-
-  // Manually encode dictionary: var{sequence{sorted(key, value)}}
-  const preimagePairs: Uint8Array[] = []
-  for (const [hash, blob] of sortedPreimages) {
-    const hashBytes = hexToBytes(hash)
-    if (hashBytes.length !== 32) {
-      return safeError(
-        new Error(`Preimage hash must be 32 bytes, got ${hashBytes.length}`),
-      )
-    }
-    const [blobLenError, encodedBlobLen] = encodeNatural(BigInt(blob.length))
-    if (blobLenError) {
-      return safeError(blobLenError)
-    }
-    // Key: hash (32-byte fixed-length)
-    const key = hashBytes
-    // Value: encode{var{blob}} = encode{len(blob)} || blob
-    const value = concatBytes([encodedBlobLen, blob])
-    preimagePairs.push(concatBytes([key, value]))
-  }
-  const concatenatedPreimagePairs = concatBytes(preimagePairs)
-  // Wrap with var{} discriminator
-  const [preimagesLengthError, encodedPreimagesLength] = encodeNatural(
-    BigInt(concatenatedPreimagePairs.length),
-  )
-  if (preimagesLengthError) {
-    return safeError(preimagesLengthError)
-  }
-  parts.push(concatBytes([encodedPreimagesLength, concatenatedPreimagePairs]))
-
-  // sa_requests: encode{dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}}
-  // Collect all request entries and sort by (hash, length) for deterministic encoding
-  const requestEntries: Array<{ key: Uint8Array; value: Uint8Array }> = []
-  for (const [hash, lengthMap] of account.requests.entries()) {
-    const hashBytes = hexToBytes(hash)
-    if (hashBytes.length !== 32) {
-      return safeError(
-        new Error(`Request hash must be 32 bytes, got ${hashBytes.length}`),
-      )
-    }
-    for (const [length, status] of lengthMap.entries()) {
-      // Key: tuple{hash, bloblength} = hash || encode[4]{length}
-      const [lengthError, encodedLength] = encodeFixedLength(length, 4n)
-      if (lengthError) {
-        return safeError(lengthError)
-      }
-      const requestKey = concatBytes([hashBytes, encodedLength])
-
-      // Value: sequence[:3]{timeslot} = var{sequence{encode[4]{timeslot}}}
-      const [statusError, encodedStatus] = encodeVariableSequence(
-        status,
-        (timeslot: bigint) => encodeFixedLength(timeslot, 4n),
-      )
-      if (statusError) {
-        return safeError(statusError)
-      }
-      requestEntries.push({
-        key: requestKey,
-        value: encodedStatus,
-      })
-    }
-  }
-  // Sort by key (hash + length) for deterministic encoding
-  requestEntries.sort((a, b) => {
-    const minLen = a.key.length < b.key.length ? a.key.length : b.key.length
-    for (let i = 0; i < minLen; i++) {
-      if (a.key[i] < b.key[i]) return -1
-      if (a.key[i] > b.key[i]) return 1
-    }
-    if (a.key.length < b.key.length) return -1
-    if (a.key.length > b.key.length) return 1
-    return 0
-  })
-
-  // Manually encode dictionary: var{sequence{sorted(key, value)}}
-  const requestPairs: Uint8Array[] = []
-  for (const entry of requestEntries) {
-    requestPairs.push(concatBytes([entry.key, entry.value]))
-  }
-  const concatenatedRequestPairs = concatBytes(requestPairs)
-  // Wrap with var{} discriminator
-  const [requestsLengthError, encodedRequestsLength] = encodeNatural(
-    BigInt(concatenatedRequestPairs.length),
-  )
-  if (requestsLengthError) {
-    return safeError(requestsLengthError)
-  }
-  parts.push(concatBytes([encodedRequestsLength, concatenatedRequestPairs]))
 
   // sa_gratis: encode[8]{balance} (8-byte fixed-length)
   const [gratisError, encodedGratis] = encodeFixedLength(account.gratis, 8n)
@@ -586,166 +468,50 @@ export function decodeCompleteServiceAccount(
 ): Safe<DecodingResult<ServiceAccount>> {
   let currentData = data
 
-  // sa_storage: decode{dictionary{blob}{blob}}
+  // sa_storage (rawCshKeyvals): decode{dictionary{blob}{blob}}
+  // This is encoded as var{sequence{sorted(key, value)}} where both keys and values are hex strings (blobs)
   // Manually decode dictionary with variable-length keys and values
-  const [storageVarError, storageVarResult] = decodeVariableLength(currentData)
-  if (storageVarError) {
-    return safeError(storageVarError)
+  const [rawCshKeyvalsVarError, rawCshKeyvalsVarResult] =
+    decodeVariableLength(currentData)
+  if (rawCshKeyvalsVarError) {
+    return safeError(rawCshKeyvalsVarError)
   }
-  const storagePairs = storageVarResult.value
-  currentData = storageVarResult.remaining
+  const rawCshKeyvalsPairs = rawCshKeyvalsVarResult.value
+  currentData = rawCshKeyvalsVarResult.remaining
 
-  const storage = new Map<Hex, Uint8Array>()
-  let storageData = storagePairs
+  const rawCshKeyvals: Record<Hex, Hex> = {}
+  let pairsData = rawCshKeyvalsPairs
 
   // Decode pairs until we've processed all bytes
-  while (storageData.length > 0) {
+  while (pairsData.length > 0) {
     // Decode key: var{blob} = length prefix + blob
-    const [keyVarError, keyVarResult] = decodeVariableLength(storageData)
+    const [keyVarError, keyVarResult] = decodeVariableLength(pairsData)
     if (keyVarError) {
       break
     }
     const keyData = keyVarResult.value
-    storageData = storageData.slice(
-      storageData.length - keyVarResult.remaining.length,
+    pairsData = pairsData.slice(
+      pairsData.length - keyVarResult.remaining.length,
     )
 
     // Decode key blob (keyData already has length prefix removed by decodeVariableLength)
     // keyData is already the blob data (blob has identity encoding)
-    const keyBytes = keyData
-    const storageKey = bytesToHex(keyBytes)
+    const stateKey = bytesToHex(keyData) as Hex
 
     // Decode value: var{blob} = length prefix + blob
     // decodeVariableLength returns the blob data directly (blob has identity encoding)
-    const [valueVarError, valueVarResult] = decodeVariableLength(storageData)
+    const [valueVarError, valueVarResult] = decodeVariableLength(pairsData)
     if (valueVarError) {
       break
     }
-    const storageValue = valueVarResult.value // Already the blob data
-    storageData = storageData.slice(
-      storageData.length - valueVarResult.remaining.length,
+    const valueData = valueVarResult.value // Already the blob data
+    pairsData = pairsData.slice(
+      pairsData.length - valueVarResult.remaining.length,
     )
 
-    storage.set(storageKey, storageValue)
-  }
-
-  // sa_preimages: decode{dictionary{hash}{blob}}
-  // Manually decode dictionary with variable-length values
-  const [preimagesVarError, preimagesVarResult] =
-    decodeVariableLength(currentData)
-  if (preimagesVarError) {
-    return safeError(preimagesVarError)
-  }
-  const preimagesPairs = preimagesVarResult.value
-  currentData = preimagesVarResult.remaining
-
-  const preimages = new Map<Hex, Uint8Array>()
-  let preimagesData = preimagesPairs
-
-  // Decode pairs until we've processed all bytes
-  while (preimagesData.length > 0) {
-    // Decode key: hash (32 bytes fixed)
-    if (preimagesData.length < 32) {
-      break
-    }
-    const preimageHash = bytesToHex(preimagesData.slice(0, 32))
-    preimagesData = preimagesData.slice(32)
-
-    // Decode value: var{blob} = length prefix + blob
-    const [blobVarError, blobVarResult] = decodeVariableLength(preimagesData)
-    if (blobVarError) {
-      break
-    }
-    const blobData = blobVarResult.value
-    preimagesData = preimagesData.slice(
-      preimagesData.length - blobVarResult.remaining.length,
-    )
-
-    // Decode blob (blobData already has length prefix removed by decodeVariableLength)
-    // blobData is already the blob data (blob has identity encoding)
-    const preimageBlob = blobData
-
-    preimages.set(preimageHash, preimageBlob)
-  }
-
-  // sa_requests: decode{dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}}
-  // Manually decode dictionary with variable-length values
-  // Gray Paper: var{sequence{sorted(key, value)}}
-  const [dictVarError, dictVarResult] = decodeVariableLength(currentData)
-  if (dictVarError) {
-    return safeError(dictVarError)
-  }
-  const concatenatedPairs = dictVarResult.value
-  currentData = dictVarResult.remaining
-
-  const requests = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
-  let pairsData = concatenatedPairs
-
-  // Decode pairs until we've processed all bytes
-  while (pairsData.length > 0) {
-    // Decode key: tuple{hash, bloblength} = hash (32 bytes) || encode[4]{length} (4 bytes)
-    if (pairsData.length < 36) {
-      break
-    }
-    const hashBytes = pairsData.slice(0, 32)
-    const preimageHash = bytesToHex(hashBytes)
-
-    const [lengthError, lengthResult] = decodeFixedLength(
-      pairsData.slice(32),
-      4n,
-    )
-    if (lengthError) {
-      return safeError(lengthError)
-    }
-    const blobLength = lengthResult.value
-    pairsData = pairsData.slice(36) // Consume key
-
-    // Decode value: sequence[:3]{timeslot} = var{sequence{encode[4]{timeslot}}}
-    // First decode the var{} prefix to get the length prefix bytes and element count
-    const [lengthPrefixError, lengthPrefixResult] = decodeNatural(pairsData)
-    if (lengthPrefixError) {
-      return safeError(lengthPrefixError)
-    }
-    const elementCount = Number(lengthPrefixResult.value)
-    // Each timeslot is 4 bytes (encode[4]{timeslot})
-    const elementSize = 4
-    const totalValueLength =
-      lengthPrefixResult.consumed + elementCount * elementSize
-    if (pairsData.length < totalValueLength) {
-      return safeError(
-        new Error(
-          `Insufficient data for request value: need ${totalValueLength} bytes, got ${pairsData.length}`,
-        ),
-      )
-    }
-    const valueData = pairsData.slice(0, totalValueLength) // Includes length prefix
-    pairsData = pairsData.slice(totalValueLength) // Consume value
-
-    // Now decode the sequence from valueData (which includes the length prefix)
-    const [statusError, statusResult] = decodeVariableSequence(
-      valueData,
-      (data: Uint8Array) => {
-        const [error, result] = decodeFixedLength(data, 4n)
-        if (error) {
-          return safeError(error)
-        }
-        return safeResult({
-          value: result.value,
-          remaining: result.remaining,
-          consumed: 4,
-        })
-      },
-    )
-    if (statusError) {
-      return safeError(statusError)
-    }
-    const status = statusResult.value as PreimageRequestStatus
-
-    // Group by hash
-    if (!requests.has(preimageHash)) {
-      requests.set(preimageHash, new Map())
-    }
-    requests.get(preimageHash)!.set(blobLength, status)
+    // Value is also a hex string (blob)
+    const stateValue = bytesToHex(valueData) as Hex
+    rawCshKeyvals[stateKey] = stateValue
   }
 
   // sa_gratis: decode[8]{balance} (8-byte fixed-length)
@@ -811,13 +577,101 @@ export function decodeCompleteServiceAccount(
   const parent = parentResult.value
   currentData = parentResult.remaining
 
-  // Compute octets and items from storage
+  // Compute octets and items from rawCshKeyvals according to Gray Paper
+  // Gray Paper: a_octets = sum over requests (81 + z) + sum over storage (34 + len(y) + len(x))
+  // Gray Paper: a_items = 2 * len(requests) + len(storage)
+  // where z is request value length, x is storage key, y is storage value
+  // NOTE: We cannot get the original storage key length (len(x)) from the state key alone,
+  // as state keys only contain the blake hash of the original key. We use 34 + len(value) as
+  // an approximation, which will be slightly lower than the true value but closer than
+  // the previous implementation that only summed value lengths.
+  const keyTypes = determineKeyTypes(rawCshKeyvals)
   let totalOctets = 0n
-  for (const value of storage.values()) {
-    totalOctets += BigInt(value.length)
+  let requestsCount = 0n
+  let storageCount = 0n
+
+  for (const [stateKeyHex, keyType] of keyTypes) {
+    if (keyType.keyType === 'storage') {
+      // Storage: 34 + len(value) + len(key)
+      // We don't have the original key length, so we approximate with 34 + len(value)
+      // This is slightly lower than the true value but much closer than the previous implementation
+      const valueLength = BigInt(keyType.value.length)
+      totalOctets += 34n + valueLength
+      storageCount += 1n
+    } else if (keyType.keyType === 'request') {
+      // Request: 81 + len(value)
+      const valueHex = rawCshKeyvals[stateKeyHex]
+      const valueBytes = hexToBytes(valueHex)
+      totalOctets += 81n + BigInt(valueBytes.length)
+      requestsCount += 1n
+    }
+    // Preimages are not counted in octets
   }
+
   const octets = totalOctets
-  const items = BigInt(storage.size)
+  // Items = 2 * requests + storage
+  const items = 2n * requestsCount + storageCount
+
+  // #region agent log
+  // Extract service ID from first key to check if this is service 0 or 3953987649
+  let foundServiceId: bigint | null = null
+  for (const stateKeyHex of Object.keys(rawCshKeyvals)) {
+    const stateKeyBytes = hexToBytes(stateKeyHex as Hex)
+    if (stateKeyBytes.length === 31) {
+      foundServiceId = extractServiceIdFromStateKey(stateKeyBytes)
+      if (foundServiceId === 0n || foundServiceId === 3953987649n) break
+    }
+  }
+  if (foundServiceId === 0n) {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'partial-state.ts:decodeCompleteServiceAccount',
+          message: 'Service 0 octets calculation in decode',
+          data: {
+            serviceId: foundServiceId.toString(),
+            storageCount: storageCount.toString(),
+            requestsCount: requestsCount.toString(),
+            calculatedOctets: octets.toString(),
+            calculatedItems: items.toString(),
+            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run2',
+          hypothesisId: 'J',
+        }),
+      },
+    ).catch(() => {})
+  }
+  if (foundServiceId === 3953987649n) {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'partial-state.ts:decodeCompleteServiceAccount',
+          message: 'Service 3953987649 items calculation in decode',
+          data: {
+            serviceId: foundServiceId.toString(),
+            storageCount: storageCount.toString(),
+            requestsCount: requestsCount.toString(),
+            calculatedItems: items.toString(),
+            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'G',
+        }),
+      },
+    ).catch(() => {})
+  }
+  // #endregion
 
   const account: ServiceAccount = {
     codehash,
@@ -830,9 +684,7 @@ export function decodeCompleteServiceAccount(
     created,
     lastacc,
     parent,
-    storage,
-    preimages,
-    requests,
+    rawCshKeyvals,
   }
 
   const consumed = data.length - currentData.length

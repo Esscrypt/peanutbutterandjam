@@ -5,7 +5,7 @@ import {
   encodeWorkItemSummary,
   encodeWorkPackage,
 } from '@pbnjam/codec'
-import { hexToBytes } from '@pbnjam/core'
+import { hexToBytes, logger } from '@pbnjam/core'
 import type {
   FetchParams,
   HostFunctionContext,
@@ -121,7 +121,7 @@ export class FetchHostFunction extends BaseHostFunction {
 
       // Return length of fetched data
       context.registers[7] = BigInt(fetchedData.length)
-      context.log('Fetch host function: Data fetched successfully', {
+      logger.debug('Fetch host function: Data fetched successfully', {
         selector: selector.toString(),
         dataLength: fetchedData.length.toString(),
         actualLength: actualLength.toString(),
@@ -322,9 +322,11 @@ export class FetchHostFunction extends BaseHostFunction {
           return null
         }
 
+        // Get JAM version from config service for version-specific encoding
+        const jamVersion = this.configService.jamVersion
         const [error, encoded] = encodeVariableSequence(
           params.accumulateInputs,
-          encodeAccumulateInput,
+          (input) => encodeAccumulateInput(input, jamVersion),
         )
         if (error || !encoded) {
           return null
@@ -561,7 +563,11 @@ export class FetchHostFunction extends BaseHostFunction {
     }
 
     const input = inputs[idx]
-    const [error, encoded] = encodeAccumulateInput(input)
+    // Get JAM version from config service for version-specific encoding
+    // Version differences: v0.7.0 and below use different encoding (no discriminator)
+    // See: https://graypaper.fluffylabs.dev/#/9a08063/32fb0132fb01?v=0.6.6
+    const jamVersion = this.configService.jamVersion
+    const [error, encoded] = encodeAccumulateInput(input, jamVersion)
     if (error || !encoded) {
       return null
     }

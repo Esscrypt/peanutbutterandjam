@@ -5,6 +5,8 @@
  * Gray Paper Reference: pvm.tex, serialization.tex
  */
 
+import { blake2b256 } from './crypto'
+
 /**
  * Decoding result structure
  */
@@ -3336,4 +3338,248 @@ export function encodeImplicationsPair(
   
   // Concatenate: encode{regular} || encode{exceptional}
   return concatBytes([encodedRegular, encodedExceptional])
+}
+
+/**
+ * Create service storage key according to Gray Paper specification.
+ *
+ * Gray Paper merklization.tex (lines 103-104):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
+ * C(s, encode[4]{2³²-1} ∥ k) ↦ v
+ *
+ * Storage keys use the pattern: C(s, encode[4]{0xFFFFFFFF} ∥ storage_key)
+ * where s is the service ID and k is the storage key.
+ *
+ * This function handles two cases:
+ * 1. Original storage key `k`: Computes blake(encode[4]{0xFFFFFFFF} || k) and uses first 27 bytes
+ * 2. Already-hashed storage key (27 bytes): Uses the hash directly to construct the state key
+ *
+ * @param serviceId - Service account ID
+ * @param storageKey - Storage key (either original blob `k` or 27-byte Blake hash `h`)
+ * @returns 31-byte state key for service storage
+ */
+export function createServiceStorageKey(
+  serviceId: u64,
+  storageKey: Uint8Array,
+): Uint8Array {
+  // Check if storageKey is already a 27-byte Blake hash (from state loading)
+  if (storageKey.length === 27) {
+    // Storage key is already a Blake hash - use it directly to construct state key
+    // C(s, h) where h is already blake(encode[4]{0xFFFFFFFF} || k)
+    const key = new Uint8Array(31)
+    const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = storageKey[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = storageKey[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = storageKey[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = storageKey[3] // a₃
+    // Remaining bytes: a₄, a₅, ..., a₂₆ (23 bytes)
+    for (let i = 0; i < 23; i++) {
+      key[8 + i] = storageKey[4 + i]
+    }
+
+    return key
+  }
+
+  // Storage key is the original key `k` - compute blake(encode[4]{0xFFFFFFFF} || k)
+  // Create the prefix: encode[4]{2³²-1} = encode[4]{0xFFFFFFFF}
+  const prefix = encodeFixedLength(0xffffffff, 4)
+
+  // Concatenate prefix with storage key
+  const combinedKey = new Uint8Array(prefix.length + storageKey.length)
+  for (let i = 0; i < prefix.length; i++) {
+    combinedKey[i] = prefix[i]
+  }
+  for (let i = 0; i < storageKey.length; i++) {
+    combinedKey[prefix.length + i] = storageKey[i]
+  }
+
+  // Compute Blake hash and take first 27 bytes
+  const blakeHashFull = blake2b256(combinedKey)
+  const blakeHash = blakeHashFull.slice(0, 27)
+
+  // Construct the state key by interleaving service ID with Blake hash
+  const key = new Uint8Array(31)
+  const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+  key[0] = serviceUint8Array[0] // n₀
+  key[1] = blakeHash[0] // a₀
+  key[2] = serviceUint8Array[1] // n₁
+  key[3] = blakeHash[1] // a₁
+  key[4] = serviceUint8Array[2] // n₂
+  key[5] = blakeHash[2] // a₂
+  key[6] = serviceUint8Array[3] // n₃
+  key[7] = blakeHash[3] // a₃
+  for (let i = 0; i < 23; i++) {
+    key[8 + i] = blakeHash[4 + i] // a₄...a₂₆
+  }
+
+  return key
+}
+
+/**
+ * Create service preimage key according to Gray Paper specification.
+ *
+ * Gray Paper merklization.tex (lines 105-106):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
+ * C(s, encode[4]{2³²-2} ∥ h) ↦ p
+ *
+ * Preimage keys use the pattern: C(s, encode[4]{0xFFFFFFFE} ∥ preimage_hash)
+ * where s is the service ID and h is the preimage hash.
+ *
+ * This function handles two cases:
+ * 1. Full preimage hash `h` (32 bytes): Computes blake(encode[4]{0xFFFFFFFE} || h) and uses first 27 bytes
+ * 2. Already-hashed key (27 bytes): Uses the hash directly to construct the state key
+ *
+ * @param serviceId - Service account ID
+ * @param preimageHash - Preimage hash (either full 32-byte hash or 27-byte Blake hash)
+ * @returns 31-byte state key for service preimage
+ */
+export function createServicePreimageKey(
+  serviceId: u64,
+  preimageHash: Uint8Array,
+): Uint8Array {
+  // Check if preimageHash is already a 27-byte Blake hash (from state loading)
+  if (preimageHash.length === 27) {
+    // Preimage hash is already a Blake hash - use it directly to construct state key
+    const key = new Uint8Array(31)
+    const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = preimageHash[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = preimageHash[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = preimageHash[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = preimageHash[3] // a₃
+    for (let i = 0; i < 23; i++) {
+      key[8 + i] = preimageHash[4 + i] // a₄...a₂₆
+    }
+
+    return key
+  }
+
+  // Preimage hash is the full 32-byte hash - compute blake(encode[4]{0xFFFFFFFE} || h)
+  // Create the prefix: encode[4]{2³²-2} = encode[4]{0xFFFFFFFE}
+  const prefix = encodeFixedLength(0xfffffffe, 4)
+
+  // Concatenate prefix with preimage hash
+  const combinedKey = new Uint8Array(prefix.length + preimageHash.length)
+  for (let i = 0; i < prefix.length; i++) {
+    combinedKey[i] = prefix[i]
+  }
+  for (let i = 0; i < preimageHash.length; i++) {
+    combinedKey[prefix.length + i] = preimageHash[i]
+  }
+
+  // Compute Blake hash and take first 27 bytes
+  const blakeHashFull = blake2b256(combinedKey)
+  const blakeHash = blakeHashFull.slice(0, 27)
+
+  // Construct the state key by interleaving service ID with Blake hash
+  const key = new Uint8Array(31)
+  const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+  key[0] = serviceUint8Array[0] // n₀
+  key[1] = blakeHash[0] // a₀
+  key[2] = serviceUint8Array[1] // n₁
+  key[3] = blakeHash[1] // a₁
+  key[4] = serviceUint8Array[2] // n₂
+  key[5] = blakeHash[2] // a₂
+  key[6] = serviceUint8Array[3] // n₃
+  key[7] = blakeHash[3] // a₃
+  for (let i = 0; i < 23; i++) {
+    key[8 + i] = blakeHash[4 + i] // a₄...a₂₆
+  }
+
+  return key
+}
+
+/**
+ * Create service request key according to Gray Paper specification.
+ *
+ * Gray Paper merklization.tex (lines 107-110):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨⟨h, l⟩, t⟩ ∈ sa_requests:
+ * C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
+ *
+ * Request keys use the pattern: C(s, encode[4]{length} ∥ request_hash)
+ * where s is the service ID, l is the blob length, and h is the request hash.
+ *
+ * This function handles two cases:
+ * 1. Full request hash `h` (32 bytes): Computes blake(encode[4]{l} || h) and uses first 27 bytes
+ * 2. Already-hashed key (27 bytes): Uses the hash directly to construct the state key
+ *
+ * @param serviceId - Service account ID
+ * @param requestHash - Request hash (either full 32-byte hash or 27-byte Blake hash)
+ * @param length - Blob length
+ * @returns 31-byte state key for service request
+ */
+export function createServiceRequestKey(
+  serviceId: u64,
+  requestHash: Uint8Array,
+  length: u64,
+): Uint8Array {
+  // Check if requestHash is already a 27-byte Blake hash (from state loading)
+  if (requestHash.length === 27) {
+    // Request hash is already a Blake hash - use it directly to construct state key
+    const key = new Uint8Array(31)
+    const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceUint8Array[0] // n₀
+    key[1] = requestHash[0] // a₀
+    key[2] = serviceUint8Array[1] // n₁
+    key[3] = requestHash[1] // a₁
+    key[4] = serviceUint8Array[2] // n₂
+    key[5] = requestHash[2] // a₂
+    key[6] = serviceUint8Array[3] // n₃
+    key[7] = requestHash[3] // a₃
+    for (let i = 0; i < 23; i++) {
+      key[8 + i] = requestHash[4 + i] // a₄...a₂₆
+    }
+
+    return key
+  }
+
+  // Request hash is the full 32-byte hash - compute blake(encode[4]{l} || h)
+  // Create the prefix: encode[4]{length}
+  const prefix = encodeFixedLength(length, 4)
+
+  // Concatenate prefix with request hash
+  const combinedKey = new Uint8Array(prefix.length + requestHash.length)
+  for (let i = 0; i < prefix.length; i++) {
+    combinedKey[i] = prefix[i]
+  }
+  for (let i = 0; i < requestHash.length; i++) {
+    combinedKey[prefix.length + i] = requestHash[i]
+  }
+
+  // Compute Blake hash and take first 27 bytes
+  const blakeHashFull = blake2b256(combinedKey)
+  const blakeHash = blakeHashFull.slice(0, 27)
+
+  // Construct the state key by interleaving service ID with Blake hash
+  const key = new Uint8Array(31)
+  const serviceUint8Array = encodeFixedLength(serviceId, 4)
+
+  key[0] = serviceUint8Array[0] // n₀
+  key[1] = blakeHash[0] // a₀
+  key[2] = serviceUint8Array[1] // n₁
+  key[3] = blakeHash[1] // a₁
+  key[4] = serviceUint8Array[2] // n₂
+  key[5] = blakeHash[2] // a₂
+  key[6] = serviceUint8Array[3] // n₃
+  key[7] = blakeHash[3] // a₃
+  for (let i = 0; i < 23; i++) {
+    key[8 + i] = blakeHash[4 + i] // a₄...a₂₆
+  }
+
+  return key
 }

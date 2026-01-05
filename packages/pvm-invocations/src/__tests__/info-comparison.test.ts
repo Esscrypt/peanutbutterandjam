@@ -1,10 +1,10 @@
-import { describe, test, expect, beforeEach } from 'vitest'
+import { describe, test, expect, beforeEach } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { instantiate } from '@pbnjam/pvm-assemblyscript/wasmAsInit'
 import { InfoHostFunction, PVMRAM, ACCUMULATE_ERROR_CODES } from '@pbnjam/pvm'
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, type Hex } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   InfoParams,
@@ -83,7 +83,7 @@ describe('INFO Host Function Comparison', () => {
     const serviceId = 0n
     const serviceAccount: ServiceAccount = {
       codehash:
-        '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327',
+        '0xd1b097b4410b3a63446d7c57d093972a9744fcd2d74f4a5e2ec163610e6d6327' as Hex,
       balance: 0xffffffffffffffffn, // max uint64
       minaccgas: 10n,
       minmemogas: 10n,
@@ -93,9 +93,7 @@ describe('INFO Host Function Comparison', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
 
     // Create RAM for TypeScript execution
@@ -128,6 +126,7 @@ describe('INFO Host Function Comparison', () => {
     const tsInfoParams: InfoParams = {
       serviceId,
       accounts: new Map([[serviceId, serviceAccount]]),
+      currentTimeslot: 0n,
     }
 
     // Execute TypeScript INFO
@@ -181,7 +180,7 @@ describe('INFO Host Function Comparison', () => {
     const serviceId = 0n
     const serviceAccount: ServiceAccount = {
       codehash:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000n,
       minaccgas: 5n,
       minmemogas: 5n,
@@ -191,9 +190,7 @@ describe('INFO Host Function Comparison', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
 
     // Create RAM for TypeScript execution
@@ -225,6 +222,7 @@ describe('INFO Host Function Comparison', () => {
     const tsInfoParams: InfoParams = {
       serviceId,
       accounts: new Map([[serviceId, serviceAccount]]),
+      currentTimeslot: 0n,
     }
 
     // Execute TypeScript INFO
@@ -250,7 +248,7 @@ describe('INFO Host Function Comparison', () => {
     const serviceId = 0n
     const serviceAccount: ServiceAccount = {
       codehash:
-        '0x0000000000000000000000000000000000000000000000000000000000000000',
+        '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
       balance: 1000n,
       minaccgas: 5n,
       minmemogas: 5n,
@@ -260,9 +258,7 @@ describe('INFO Host Function Comparison', () => {
       created: 0n,
       lastacc: 0n,
       parent: 0n,
-      preimages: new Map(),
-      requests: new Map(),
-      storage: new Map(),
+      rawCshKeyvals: {},
     }
 
     // Create RAM for TypeScript execution
@@ -294,6 +290,7 @@ describe('INFO Host Function Comparison', () => {
     const tsInfoParams: InfoParams = {
       serviceId,
       accounts: new Map([[serviceId, serviceAccount]]),
+      currentTimeslot: 0n,
     }
 
     // Execute TypeScript INFO

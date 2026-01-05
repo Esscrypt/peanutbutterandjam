@@ -27,6 +27,7 @@ import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
 import { AccumulateHostFunctionRegistry, HostFunctionRegistry } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import { PrivilegesService } from '../services/privileges-service'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
@@ -184,8 +185,7 @@ describe('Reports - JAM Test Vectors', () => {
           recentHistoryService.start()
 
           // Step 4: Initialize ServiceAccountService and set accounts from pre_state
-          const serviceAccountService = new ServiceAccountService({
-            configService,
+          const serviceAccountService = new ServiceAccountService({ 
             eventBusService,
             clockService,
             networkingService: null,
@@ -209,9 +209,7 @@ describe('Reports - JAM Test Vectors', () => {
               created: BigInt(serviceData.creation_slot),
               lastacc: BigInt(serviceData.last_accumulation_slot),
               parent: BigInt(serviceData.parent_service),
-              storage: new Map<Hex, Uint8Array>(),
-              preimages: new Map<Hex, Uint8Array>(),
-              requests: new Map<Hex, Map<bigint, bigint[]>>(),
+              rawCshKeyvals: {},
             }
 
             serviceAccountService.setServiceAccount(serviceId, serviceAccount)
@@ -307,13 +305,14 @@ describe('Reports - JAM Test Vectors', () => {
             configService: configService,
             clockService: clockService,
             serviceAccountsService: serviceAccountService,
-            privilegesService: null,
+            privilegesService: new PrivilegesService({
+              configService: configService,
+            }),
             validatorSetManager: validatorSetManager,
             authQueueService: authQueueService,
             accumulatePVM: accumulatePVM,
             readyService: readyService,
             statisticsService: statisticsService,
-            // entropyService: entropyService,
           })
 
           // Step 7: Initialize GuarantorService and process guarantees

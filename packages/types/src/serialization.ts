@@ -935,48 +935,6 @@ export interface LastAccumulationOutput {
 }
 
 /**
- * Service account structure
- */
-// export interface ServiceAccount {
-//   /** Account balance */
-//   balance: bigint
-//   /** Account nonce */
-//   nonce: bigint
-//   /** Is validator account */
-//   isValidator: boolean
-//   /** Validator public key */
-//   validatorKey?: Hex
-//   /** Validator stake */
-//   stake?: bigint
-//   /** Account storage */
-//   storage: Map<Hex, Uint8Array>
-//   /** Account preimages */
-//   preimages: Map<Hex, Uint8Array>
-//   /** Account requests */
-//   requests: Map<Hex, Uint8Array>
-//   /** Account gratis */
-//   gratis: bigint
-//   /** Account code hash */
-//   codehash: Hex
-//   /** Minimum accumulate gas */
-//   minaccgas: bigint
-//   /** Minimum memory gas */
-//   minmemogas: bigint
-//   /** Account octets */
-//   octets: bigint
-//   /** Account items */
-//   items: bigint
-//   /** Account created timestamp */
-//   created: bigint
-//   /** Last account timestamp */
-//   lastacc: bigint
-//   /** Parent service ID */
-//   parent: bigint
-//   /** Minimum balance requirement */
-//   minbalance: bigint
-// }
-
-/**
  * Service Account Core structure according to Gray Paper specification.
  *
  * Gray Paper service account encoding (Chapter 255):
@@ -994,7 +952,7 @@ export interface LastAccumulationOutput {
  * - lastacc: 4-byte timestamp of last accumulation
  * - parent: 4-byte parent service identifier
  */
-export interface ServiceAccountCore {
+export interface ServiceAccount {
   codehash: Hex // sa_codehash
   balance: bigint // sa_balance
   minaccgas: bigint // sa_minaccgas
@@ -1005,6 +963,8 @@ export interface ServiceAccountCore {
   created: bigint // sa_created
   lastacc: bigint // sa_lastacc
   parent: bigint // sa_parent
+
+  rawCshKeyvals: Record<Hex, Hex> // serialized separately, tracking preimages, requests, and storage
 }
 
 /**
@@ -1175,60 +1135,6 @@ export const PreimageRequestUtils = {
   },
 } as const
 
-/**
- * Complete Service Account structure according to Gray Paper specification.
- *
- * Gray Paper accounts.tex equation (12-27) defines service account as:
- *
- * serviceaccount ≡ tuple{
- *   sa_storage ∈ dictionary{blob}{blob},
- *   sa_preimages ∈ dictionary{hash}{blob},
- *   sa_requests ∈ dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}},
- *   sa_gratis ∈ balance,
- *   sa_codehash ∈ hash,
- *   sa_balance ∈ balance,
- *   sa_minaccgas ∈ gas,
- *   sa_minmemogas ∈ gas,
- *   sa_created ∈ timeslot,
- *   sa_lastacc ∈ timeslot,
- *   sa_parent ∈ serviceid
- * }
- *
- * State storage locations per Gray Paper:
- * - Core fields: Directly encoded in state trie at C(255, s)
- * - Storage: Key-value pairs at C(s, storage_key)
- * - Preimages: Hash-to-data mappings at C(s, preimage_hash)
- * - Requests: Preimage request metadata at C(s, request_hash, length)
- *
- * sa_requests semantics (accounts.tex lines 104-110):
- * - Maps (hash, length) → sequence of up to 3 timeslots
- * - [] = requested but not supplied
- * - [t0] = available since t0
- * - [t0, t1] = was available from t0 until t1 (now unavailable)
- * - [t0, t1, t2] = was available t0-t1, now available again since t2
- *
- * ✅ CORRECT: Nested map structure matches Gray Paper exactly
- * requests: Map<Hex, Map<bigint, PreimageRequestStatus>>
- *
- * This corresponds to:
- * dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}
- *
- * where:
- * - Outer Map<Hex, ...> groups by hash
- * - Inner Map<bigint, PreimageRequestStatus> maps length to status sequence
- * - PreimageRequestStatus = sequence[:3]{timeslot} (up to 3 time slots)
- *
- * Benefits of nested map structure:
- * - Natural grouping by hash (common access pattern)
- * - Easier iteration over all lengths for a given hash
- * - More efficient lookups when hash is known
- * - Better alignment with state trie storage patterns
- */
-export interface ServiceAccount extends ServiceAccountCore {
-  storage: Map<Hex, Uint8Array> // sa_storage - stored at C(s, storage_key)
-  preimages: Map<Hex, Uint8Array> // sa_preimages - stored at C(s, preimage_hash)
-  requests: Map<Hex, Map<bigint, PreimageRequestStatus>> // sa_requests - ✅ GRAY PAPER COMPLIANT (nested map)
-}
 
 // Note: GenesisState moved to @pbnjam/types/genesis for Gray Paper compliance
 

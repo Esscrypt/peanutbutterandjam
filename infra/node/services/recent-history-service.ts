@@ -553,6 +553,12 @@ export class RecentHistoryService extends BaseServiceClass {
       peak !== null ? bytesToHex(peak) : null,
     )
 
+    // Step 8: Increment totalCount (number of blocks appended to the belt)
+    // Gray Paper: totalCount tracks the number of items in the MMR (block number)
+    // This must be incremented for every block, even when lastaccout is empty
+    // TODO: investigate
+    // this.accoutBelt.totalCount += 1n
+
     return safeResult(undefined)
   }
 

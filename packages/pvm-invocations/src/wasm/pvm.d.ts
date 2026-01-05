@@ -555,6 +555,28 @@ export declare function encodeImplications(implications: __Internref26, numCores
  * @returns `~lib/typedarray/Uint8Array`
  */
 export declare function encodeImplicationsPair(pair: __Internref25, numCores: number, numValidators: number, authQueueSize: number): Uint8Array;
+/**
+ * assembly/codec/createServiceStorageKey
+ * @param serviceId `u64`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createServiceStorageKey(serviceId: bigint, storageKey: Uint8Array): Uint8Array;
+/**
+ * assembly/codec/createServicePreimageKey
+ * @param serviceId `u64`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createServicePreimageKey(serviceId: bigint, preimageHash: Uint8Array): Uint8Array;
+/**
+ * assembly/codec/createServiceRequestKey
+ * @param serviceId `u64`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createServiceRequestKey(serviceId: bigint, requestHash: Uint8Array, length: bigint): Uint8Array;
 /** assembly/config/DEFAULT_GAS_LIMIT */
 export declare const DEFAULT_GAS_LIMIT: {
   /** @type `u32` */
