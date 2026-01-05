@@ -12,7 +12,7 @@
  *   bun run fuzzer-target.ts --socket /tmp/jam_target.sock --spec tiny
  */
 
-import { unlinkSync } from 'node:fs'
+import { mkdirSync, unlinkSync } from 'node:fs'
 import { Server as UnixServer, type Socket as UnixSocket } from 'node:net'
 import * as path from 'node:path'
 import {
@@ -107,7 +107,7 @@ const SUPPORTED_FEATURES = FEATURE_ANCESTRY | FEATURE_FORKS
 let JAM_VERSION: JamVersion = DEFAULT_JAM_VERSION
 
 // App version
-const APP_VERSION = { major: 0, minor: 1, patch: 0 }
+const APP_VERSION = { major: 0, minor: 7, patch: 2 }
 const APP_NAME = 'pbnj-fuzzer-target'
 
 // Initialize all services
@@ -1124,6 +1124,18 @@ async function main() {
     await initializeServices()
     logger.info('Services initialized successfully')
 
+    // Ensure the directory for the socket exists
+    const socketDir = path.dirname(socketPath)
+    try {
+      mkdirSync(socketDir, { recursive: true })
+      logger.info(`Ensured socket directory exists: ${socketDir}`)
+    } catch (error) {
+      logger.error(`Failed to create socket directory ${socketDir}:`, error)
+      throw new Error(
+        `Cannot create socket directory: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
     // Remove existing socket if it exists
     try {
       unlinkSync(socketPath)
@@ -1151,12 +1163,31 @@ async function main() {
 
     server.on('error', (error) => {
       logger.error('Server error:', error)
-      // Don't exit on error - try to continue listening
-      // Only exit on fatal errors
-      if ((error as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+      const err = error as NodeJS.ErrnoException
+      // Handle specific error codes
+      if (err.code === 'EADDRINUSE') {
         logger.error(`Socket ${socketPath} is already in use`)
         process.exit(1)
+      } else if (err.code === 'ENOTSUP') {
+        logger.error(
+          `Unix domain sockets not supported at ${socketPath}. This may occur if:`,
+        )
+        logger.error(`  1. The filesystem doesn't support Unix sockets`)
+        logger.error(`  2. The directory is not writable`)
+        logger.error(`  3. Running in an environment without socket support`)
+        logger.error(
+          `  Try using a different path or ensure the directory is writable`,
+        )
+        process.exit(1)
+      } else if (err.code === 'EACCES') {
+        logger.error(`Permission denied creating socket at ${socketPath}`)
+        logger.error(`  Ensure the directory is writable`)
+        process.exit(1)
+      } else if (err.code === 'ENOENT') {
+        logger.error(`Directory does not exist for socket at ${socketPath}`)
+        process.exit(1)
       }
+      // For other errors, don't exit - try to continue listening
     })
 
     server.listen(socketPath, () => {
