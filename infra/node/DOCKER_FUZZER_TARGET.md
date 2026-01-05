@@ -18,7 +18,7 @@ Build the image locally for your current architecture:
 
 ```bash
 # Build the image
-docker build -f infra/node/Dockerfile.fuzzer-target -t pbnjam-fuzzer-target:latest .
+docker buildx build --platform linux/amd64,linux/arm64 -f infra/node/Dockerfile.fuzzer-target -t shimonchick/pbnjam-fuzzer-target:latest --push .
 
 # Test the image locally
 docker run --rm \
@@ -126,25 +126,37 @@ Docker Hub allows publishing under your personal username - **no organization ne
    docker push shimonchick/pbnjam-fuzzer-target:latest
    ```
 
-#### Publishing AMD64 Images to Docker Hub
+## Exposing Unix Domain Sockets in Docker
 
-To build and push an amd64-specific image to Docker Hub:
+The fuzzer target uses Unix domain sockets for communication. To expose sockets from the container to the host (or to other containers), you **must** mount the socket directory as a volume.
+
+### Required Volume Mount
+
+Always use the `-v /tmp:/tmp` flag when running the container:
 
 ```bash
-# Build and push for amd64
-docker buildx build --platform linux/amd64 \
-  -f infra/node/Dockerfile.fuzzer-target \
-  -t shimonchick/pbnjam-fuzzer-target:latest \
-  --push .
-
-# Or build multi-arch (amd64 + arm64) and push
-docker buildx build --platform linux/amd64,linux/arm64 \
-  -f infra/node/Dockerfile.fuzzer-target \
-  -t shimonchick/pbnjam-fuzzer-target:latest \
-  --push .
+docker run --rm \
+  -v /tmp:/tmp \
+  pbnjam-fuzzer-target:latest \
+  --socket /tmp/jam_target.sock --spec tiny
 ```
 
-**Note**: The `--push` flag pushes directly to the registry without loading into your local Docker daemon.
+**Why this is necessary:**
+- Unix domain sockets are filesystem-based and only accessible within the container's filesystem
+- The volume mount (`-v /tmp:/tmp`) makes the socket accessible from the host
+- Without the volume mount, the socket cannot be accessed from outside the container
+- The fuzzer workflow automatically mounts `/tmp:/tmp` when running the container
+
+### Socket Path Considerations
+
+- The socket path inside the container must match the mounted directory
+- Use `/tmp` or another directory that's mounted as a volume
+- The socket file will appear on the host at the same path (e.g., `/tmp/jam_target.sock`)
+- Ensure the socket directory exists and is writable (the Dockerfile ensures `/tmp` exists)
+
+### Base Image Note
+
+The Dockerfile uses `debian:bullseye-slim` (instead of distroless) to ensure proper Unix domain socket support. Distroless images are too minimal and may not support socket operations.
 
 ## Testing the Published Image
 
@@ -154,33 +166,12 @@ Test the published image before using it in production:
 # Pull the image (Docker Hub)
 docker pull shimonchick/pbnjam-fuzzer-target:latest
 
-# Run a test
+# Run a test (note the -v /tmp:/tmp mount is required)
 docker run --rm \
   -v /tmp:/tmp \
   pbnjam-fuzzer-target:latest \
-  --socket /tmp/jam_target.sock
+  --socket /tmp/jam_target.sock --spec tiny
 ```
 
-### Testing AMD64 Images on Non-AMD64 Systems
-
-If you're testing on a different architecture (e.g., Apple Silicon), you can explicitly run the amd64 image:
-
-```bash
-# Pull and run amd64 image explicitly
-docker pull --platform linux/amd64 shimonchick/pbnjam-fuzzer-target:latest
-
-docker run --rm --platform linux/amd64 \
-  -v /tmp:/tmp \
-  shimonchick/pbnjam-fuzzer-target:latest \
-  --socket /tmp/jam_target.sock
-```
-
-## CI/CD Integration
-
-The GitHub Actions workflow (`.github/workflows/docker-fuzzer-target.yml`) automatically builds and publishes multi-architecture images (amd64 and arm64) to GitHub Container Registry on pushes to main branches. The workflow:
-
-- Builds for both `linux/amd64` and `linux/arm64` platforms
-- Publishes to `ghcr.io/shimonchick/pbnjam-fuzzer-target`
-- Tags images with branch names, commit SHAs, and semantic versions
-- Uses GitHub Actions cache for faster builds
+The socket will be created at `/tmp/jam_target.sock` on both the host and in the container.
 
