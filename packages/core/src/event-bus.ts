@@ -44,8 +44,8 @@ import type {
   WorkReportOutline,
   WorkReportRequest,
   WorkReportResponse,
-} from '@pbnj/types'
-import { BaseService, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { logger } from './logger'
 
@@ -64,6 +64,11 @@ export interface SlotChangeEvent {
 }
 
 export interface EpochTransitionEvent {
+  slot: bigint
+  epochMark: EpochMark | null
+}
+
+export interface RevertEpochTransitionEvent {
   slot: bigint
   epochMark: EpochMark | null
 }
@@ -132,6 +137,7 @@ export interface AuditTrancheEvent {
 export interface EventMap {
   slotChange: [SlotChangeEvent]
   epochTransition: [EpochTransitionEvent]
+  revertEpochTransition: [RevertEpochTransitionEvent]
   validatorSetChange: [ValidatorSetChangeEvent]
   conectivityChange: [ConectivityChangeEvent]
   assuranceReceived: [AssuranceDistributionRequest, Hex]
@@ -364,6 +370,12 @@ export class EventBusService extends BaseService {
     callback: EventCallback<EventMap['epochTransition']>,
   ): void {
     this.on('epochTransition', callback)
+  }
+
+  addRevertEpochTransitionCallback(
+    callback: EventCallback<EventMap['revertEpochTransition']>,
+  ): void {
+    this.on('revertEpochTransition', callback)
   }
 
   // Aliases for compatibility (addXxxCallback methods)
@@ -1339,6 +1351,12 @@ export class EventBusService extends BaseService {
 
   async emitEpochTransition(event: EpochTransitionEvent): Promise<void> {
     await this.emit('epochTransition', event)
+  }
+
+  async emitRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Promise<void> {
+    await this.emit('revertEpochTransition', event)
   }
 
   async emitValidatorSetChange(event: ValidatorSetChangeEvent): Promise<void> {

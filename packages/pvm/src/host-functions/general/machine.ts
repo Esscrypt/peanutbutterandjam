@@ -4,7 +4,7 @@ import type {
   PVMGuest,
   PVMOptions,
   RefineInvocationContext,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -65,7 +65,6 @@ export class MachineHostFunction extends BaseHostFunction {
         resultCode: RESULT_CODES.FAULT,
       }
     }
-
 
     // Check if refine context is available
     if (!refineContext) {

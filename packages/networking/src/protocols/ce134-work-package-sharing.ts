@@ -11,21 +11,21 @@
  * Gray Paper Reference: guaranteeing.tex (line 31-33)
  */
 
-import type { EventBusService } from '@pbnj/core'
-import { concatBytes } from '@pbnj/core'
 import {
   decodeVariableSequence,
   decodeWorkPackage,
   encodeVariableSequence,
   encodeWorkPackage,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
+import type { EventBusService } from '@pbnjam/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
   WorkPackageSharing,
   WorkPackageSharingResponse,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { NetworkingProtocol } from './protocol'
 

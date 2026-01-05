@@ -37,15 +37,15 @@
  * data flows while maintaining type safety and execution ordering.
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   AccumulateInput,
   DecodingResult,
   DeferredTransfer,
   OperandTuple,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
@@ -111,9 +111,7 @@ export function encodeAccumulateInput(
     }
     parts.push(transferEncoded)
   } else {
-    return safeError(
-      new Error(`Invalid accumulate input type`),
-    )
+    return safeError(new Error(`Invalid accumulate input type`))
   }
 
   return safeResult(concatBytes(parts))

@@ -1,5 +1,5 @@
-import { decodeBlob } from '@pbnj/codec'
-import type { PVMInstruction } from '@pbnj/types'
+import { decodeBlob } from '@pbnjam/codec'
+import type { PVMInstruction } from '@pbnjam/types'
 /**
  * PVM Parser implementation
  * Parses PVM instruction data and program blobs according to Gray Paper specification

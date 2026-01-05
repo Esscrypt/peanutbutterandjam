@@ -6,12 +6,12 @@
  * Uses the ConfigService to get proper Gray Paper parameters
  */
 
-import { logger, EventBusService } from '@pbnj/core'
+import { logger, EventBusService } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'bun:test'
 import { ConfigService } from '../services/config-service'
-import { ErasureCodingService } from '../services/shard-service'
+import { ErasureCodingService } from '../services/erasure-coding-service'
 
 beforeAll(() => {
   logger.init()
@@ -82,8 +82,8 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
     fullConfigService = new ConfigService('full')
     
     // Initialize shard services
-    tinyShardService = new ErasureCodingService(tinyConfigService, eventBusService)
-    fullShardService = new ErasureCodingService(fullConfigService, eventBusService)
+    tinyShardService = new ErasureCodingService({ configService: tinyConfigService })
+    fullShardService = new ErasureCodingService({ configService: fullConfigService })
     
     // Start shard services
     const [tinyStartError, tinyStartResult] = await tinyShardService.start()
@@ -99,9 +99,11 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
 
   describe('Real JAM Test Vectors', () => {
     it('should test against actual JAM test vectors with exact shard content matching', async () => {
+      // Root to workspace
+      const WORKSPACE_ROOT = join(__dirname, '../../../')
       const jamTestVectorPaths = [
-        '../../../submodules/jamtestvectors/erasure/tiny',
-        '../../../submodules/jamtestvectors/erasure/full'
+        join(WORKSPACE_ROOT, 'submodules/jam-test-vectors/erasure/tiny'),
+        join(WORKSPACE_ROOT, 'submodules/jam-test-vectors/erasure/full')
       ]
       
       let totalVectorsFound = 0
@@ -125,7 +127,7 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
       
       for (const [index, vectorPath] of jamTestVectorPaths.entries()) {
         const category = index === 0 ? 'tiny' : 'full'
-        const testVectors = loadJAMTestVectors(join(__dirname, vectorPath))
+        const testVectors = loadJAMTestVectors(vectorPath)
         totalVectorsFound += testVectors.length
         
         logger.info(`Found ${testVectors.length} ${category} test vectors`)
@@ -163,12 +165,12 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
               decodeResult.every((byte, i) => byte === inputData[i])
             
             // Check shard size compliance (use shard size from filename)
-            const shardSizeMatch = encodeResult.shards.every(shard => shard.length === shardSize)
+            const shardSizeMatch = encodeResult.shards.every(shard => shard.shard.length === shardSize)
             
             // Check exact shard content match with JAM test vectors
             const shardContentMatch = encodeResult.shards.every((shard, index) => {
               if (index >= expectedShards.length) return false
-              return uint8ArrayToHex(shard) === uint8ArrayToHex(expectedShards[index])
+              return uint8ArrayToHex(shard.shard) === uint8ArrayToHex(expectedShards[index])
             })
             
             const result = {
@@ -179,14 +181,14 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
               shardContentMatch,
               inputSize: inputData.length,
               shardSize, // Include the shard size from filename
-              shardSizes: encodeResult.shards.map(s => s.length),
+              shardSizes: encodeResult.shards.map(s => s.shard.length),
               parameters: { k: shardService['coder'].k, n: shardService['coder'].n, parityShards: shardService['coder'].n - shardService['coder'].k },
               // Detailed comparison for debugging
               shardComparison: encodeResult.shards.map((shard, i) => ({
                 index: i,
-                ourShard: uint8ArrayToHex(shard),
+                ourShard: uint8ArrayToHex(shard.shard),
                 expectedShard: i < expectedShards.length ? uint8ArrayToHex(expectedShards[i]) : 'N/A',
-                match: i < expectedShards.length ? uint8ArrayToHex(shard) === uint8ArrayToHex(expectedShards[i]) : false
+                match: i < expectedShards.length ? uint8ArrayToHex(shard.shard) === uint8ArrayToHex(expectedShards[i]) : false
               }))
             }
             
@@ -213,8 +215,8 @@ describe('JAM Test Vector Analysis using ErasureCodingService', () => {
                 maxCapacity: shardService['coder'].k * 2,
                 systematicMatches: encodeResult.shards.slice(0, shardService['coder'].k).map((shard, i) => ({
                   index: i,
-                  match: i < expectedShards.length ? uint8ArrayToHex(shard) === uint8ArrayToHex(expectedShards[i]) : false,
-                  ourShard: uint8ArrayToHex(shard),
+                  match: i < expectedShards.length ? uint8ArrayToHex(shard.shard) === uint8ArrayToHex(expectedShards[i]) : false,
+                  ourShard: uint8ArrayToHex(shard.shard),
                   expectedShard: i < expectedShards.length ? uint8ArrayToHex(expectedShards[i]) : 'N/A'
                 }))
               })

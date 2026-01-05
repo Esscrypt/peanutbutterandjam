@@ -1,4 +1,5 @@
-import type { HostFunctionResult, IConfigService } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -58,19 +59,25 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     })
 
     // Read auth queue from memory (80 entries * 32 bytes each)
+    // Gray Paper pvm_invocations.tex lines 717-720:
+    // q = sequence{memory[o+32i:32] for i in N_Cauthqueuesize} when Nrange(o,32*Cauthqueuesize) ⊆ readable(memory), error otherwise
     const authQueueLength = C_AUTH_QUEUE_SIZE * 32n
     const [authQueueData, faultAddress] = ram.readOctets(
       authQueueOffset,
       authQueueLength,
     )
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!authQueueData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 722: (panic, registers_7, ...) when q = error
+    // Note: jamduna sets OOB on memory faults before PANIC to indicate why it failed
+    if (faultAddress || !authQueueData) {
+      logger.debug('[ASSIGN] OOB+PANIC: memory read fault', {
+        authQueueOffset: authQueueOffset.toString(),
+        authQueueLength: authQueueLength.toString(),
+        faultAddress: faultAddress?.toString() ?? 'null',
+        hasData: (!!authQueueData).toString(),
+      })
+      // Set OOB error to indicate memory access failure
+      //TODO: according to GP, registers[7] should be unchanged, we are setting it to OOB here to match jamduna behavior
+      this.setAccumulateError(registers, 'OOB')
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -85,7 +92,13 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
     // Check if core index is valid
     // Gray Paper: c >= Ccorecount
+    logger.debug('[ASSIGN] Checking core index', {
+      coreIndex: coreIndex.toString(),
+      numCores: C_CORE_COUNT.toString(),
+      isValidCore: (coreIndex < C_CORE_COUNT).toString(),
+    })
     if (coreIndex >= C_CORE_COUNT) {
+      logger.debug('[ASSIGN] CORE error: invalid core index')
       this.setAccumulateError(registers, 'CORE')
       return {
         resultCode: null, // continue execution

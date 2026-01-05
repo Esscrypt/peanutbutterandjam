@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { ConfigService } from '../../../../infra/node/services/config-service.js'
 import { generateChainSpec } from '../utils/chain-spec.js'
 

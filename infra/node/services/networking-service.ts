@@ -9,13 +9,13 @@ import { type events, QUICClient, QUICServer } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
 // import type { EventAll } from '@matrixai/events'
 import * as ed from '@noble/ed25519'
-import { sha512 } from '@noble/hashes/sha2'
-import { bytesToHex, type Hex, logger } from '@pbnj/core'
+import { sha512 } from '@noble/hashes/sha2.js'
+import { bytesToHex, type Hex, logger } from '@pbnjam/core'
 
 // Configure Ed25519 with SHA-512
 ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
 
-import type { NetworkingProtocol } from '@pbnj/networking'
+import type { NetworkingProtocol } from '@pbnjam/networking'
 import {
   extractPublicKeyFromDERCertificate,
   generateNetworkingCertificates,
@@ -24,9 +24,9 @@ import {
   getTlsConfig,
   shouldLocalInitiate,
   verifyPeerCertificate,
-} from '@pbnj/networking'
-import type { ConnectionEndpoint, SafePromise, StreamKind } from '@pbnj/types'
-import { BaseService, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/networking'
+import type { ConnectionEndpoint, SafePromise, StreamKind } from '@pbnjam/types'
+import { BaseService, safeError, safeResult } from '@pbnjam/types'
 import type { KeyPairService } from './keypair-service'
 import type { ValidatorSetManager } from './validator-set'
 

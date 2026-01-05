@@ -20,16 +20,16 @@
  * }}}
  */
 
-import { blake2bHash, concatBytes, hexToBytes } from '@pbnj/core'
 import {
   encodeAssurances,
   encodeDisputes,
   encodeGuarantees,
   encodePreimages,
   encodeSafroleTickets,
-} from '@pbnj/codec'
-import type { BlockBody, Guarantee, IConfigService, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/codec'
+import { blake2bHash, concatBytes, hexToBytes } from '@pbnjam/core'
+import type { BlockBody, Guarantee, IConfigService, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Encode guarantees component 'g' according to Gray Paper specification

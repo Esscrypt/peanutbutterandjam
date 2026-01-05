@@ -48,15 +48,15 @@
  * This is critical for JAM's work-package dependency resolution and accumulation tracking.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   Accumulated,
   AccumulatedItem,
   DecodingResult,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
@@ -65,19 +65,25 @@ import { decodeSequenceGeneric, encodeSequenceGeneric } from '../core/sequence'
  * Convert Accumulated to AccumulatedItem[]
  * Each Set<Hex> is converted to concatenated 32-byte hashes
  */
-function convertAccumulatedToAccumulatedItems(accumulated: Accumulated): AccumulatedItem[] {
+function convertAccumulatedToAccumulatedItems(
+  accumulated: Accumulated,
+): AccumulatedItem[] {
   return accumulated.packages.map((hashes) => {
     if (hashes.size === 0) {
       return { data: new Uint8Array(0) }
     }
-    
+
+    // Convert Set to sorted array for deterministic serialization
+    // Gray Paper: protoset is an unordered set, so we sort lexicographically for canonical encoding
+    const sortedHashes = Array.from(hashes).sort()
+
     // Concatenate all hashes into a single byte array
     const hashArrays: Uint8Array[] = []
-    for (const hash of hashes) {
+    for (const hash of sortedHashes) {
       const hashBytes = hexToBytes(hash)
       hashArrays.push(hashBytes)
     }
-    
+
     const data = concatBytes(hashArrays)
     return { data }
   })
@@ -121,14 +127,15 @@ export function encodeAccumulated(
 
     // Gray Paper: sq{build{var{i}}{i ∈ accumulated}}
     // Fixed-length sequence (no length prefix), each element encoded as var{i}
+    // Where i is a protoset{hash}, so var{i} is encoded as COUNT of hashes (not byte length!)
     const [error, encodedData] = encodeSequenceGeneric(
       accumulatedToEncode,
       (item: AccumulatedItem) => {
-        // Gray Paper: var{i} - variable-length blob with natural number length prefix
-        // var{x} ≡ tuple{len{x}, x} thus encode{var{x}} ≡ encode{len{x}} ∥ encode{x}
-        const [lengthError, lengthEncoded] = encodeNatural(
-          BigInt(item.data.length),
-        )
+        // Gray Paper: var{i} where i ∈ protoset{hash}
+        // Each hash is 32 bytes, so count = data.length / 32
+        // Encode as: count (natural) + concatenated hashes
+        const hashCount = item.data.length / 32
+        const [lengthError, lengthEncoded] = encodeNatural(BigInt(hashCount))
         if (lengthError) {
           return safeError(lengthError)
         }
@@ -148,11 +155,13 @@ export function encodeAccumulated(
  * Convert AccumulatedItem[] to Accumulated
  * Each AccumulatedItem.data contains concatenated 32-byte hashes
  */
-function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumulated {
+function convertAccumulatedItemsToAccumulated(
+  items: AccumulatedItem[],
+): Accumulated {
   const packages: Set<Hex>[] = items.map((item) => {
     const hashes = new Set<Hex>()
     const data = item.data
-    
+
     // Each hash is 32 bytes, split data into 32-byte chunks
     for (let i = 0; i < data.length; i += 32) {
       if (i + 32 <= data.length) {
@@ -161,10 +170,10 @@ function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumul
         hashes.add(hashHex)
       }
     }
-    
+
     return hashes
   })
-  
+
   return { packages }
 }
 
@@ -175,7 +184,7 @@ function convertAccumulatedItemsToAccumulated(items: AccumulatedItem[]): Accumul
  * Gray Paper: accumulated ∈ sequence[C_epochlen]{protoset{hash}}
  * This is a FIXED-LENGTH sequence of C_epochlen elements (no sequence length prefix)
  * Each element i is decoded as var{i} (variable-length with length prefix)
- * 
+ *
  * Returns Accumulated directly (not AccumulatedItem[])
  */
 export function decodeAccumulated(
@@ -188,25 +197,27 @@ export function decodeAccumulated(
 
   // Gray Paper: decode sq{build{var{i}}{i ∈ accumulated}}
   // Fixed-length sequence (no length prefix), each element decoded as var{i}
+  // Where i is a protoset{hash}, so the length prefix is hash COUNT (not byte length!)
   const [error, decodedData] = decodeSequenceGeneric<AccumulatedItem>(
     data,
     (itemData: Uint8Array) => {
-      // Gray Paper: decode var{i} - variable-length blob with natural number length prefix
-      // var{x} ≡ tuple{len{x}, x} thus decode{var{x}} ≡ decode{len{x}} ∥ decode{x}
+      // Gray Paper: decode var{i} where i ∈ protoset{hash}
+      // The length prefix is hash COUNT, then we read count * 32 bytes
       const [lengthError, lengthResult] = decodeNatural(itemData)
       if (lengthError) {
         return safeError(lengthError)
       }
 
-      const length = Number(lengthResult.value)
+      const hashCount = Number(lengthResult.value)
+      const byteLength = hashCount * 32 // Each hash is 32 bytes
       const remainingAfterLength = lengthResult.remaining
 
-      if (remainingAfterLength.length < length) {
+      if (remainingAfterLength.length < byteLength) {
         return safeError(new Error('Insufficient data for accumulated item'))
       }
 
-      const itemBytes = remainingAfterLength.slice(0, length)
-      const remaining = remainingAfterLength.slice(length)
+      const itemBytes = remainingAfterLength.slice(0, byteLength)
+      const remaining = remainingAfterLength.slice(byteLength)
 
       return safeResult({
         value: { data: itemBytes },

@@ -1,4 +1,4 @@
-import type { Hex } from '@pbnj/core'
+import type { Hex } from 'viem'
 
 /**
  * Previous tranche announcement data

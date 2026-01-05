@@ -1,4 +1,4 @@
-import type { IConfigService, IServiceAccountService } from '@pbnj/types'
+import type { IConfigService, IServiceAccountService } from '@pbnjam/types'
 import type { BaseHostFunction } from './base'
 import { ExportHostFunction } from './export'
 import { ExpungeHostFunction } from './expunge'

@@ -59,7 +59,7 @@
 //   getRingRoot,
 //   IETFVRFProver,
 //   RingVRFProver,
-// } from '@pbnj/bandersnatch-vrf'
+// } from '@pbnjam/bandersnatch-vrf'
 
 // import {
 //   blake2bHash,
@@ -73,21 +73,21 @@
 //   safeError,
 //   safeResult,
 //   zeroHash,
-// } from '@pbnj/core'
+// } from '@pbnjam/core'
 // import type {
 //   SafroleInput,
 //   SafroleOutput,
 //   SafroleState,
 //   SafroleTicket,
 //   ValidatorPublicKeys,
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 
 // import { calculateSlotPhase } from './phase'
 // import { parseEpochRootForRingCommitment } from './epoch-root'
 // import { computeEpochMarker } from './epoch-marker'
 // import { validateBandersnatchVRFProof } from './ticket-generation'
 
-// import { SAFROLE_CONSTANTS, type SafroleErrorCode } from '@pbnj/types'
+// import { SAFROLE_CONSTANTS, type SafroleErrorCode } from '@pbnjam/types'
 
 // /**
 //  * Convert little-endian byte array to 32-bit unsigned integer

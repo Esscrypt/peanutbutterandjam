@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -29,7 +29,6 @@ export class ADD_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 export class SUB_64Instruction extends BaseInstruction {
@@ -58,7 +57,6 @@ export class SUB_64Instruction extends BaseInstruction {
 
     return { resultCode: null }
   }
-
 }
 
 export class MUL_64Instruction extends BaseInstruction {
@@ -73,21 +71,23 @@ export class MUL_64Instruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA * valueB
 
-    context.log('MUL_64: Multiplication of registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'MUL_64: Multiplication of registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
 
     return { resultCode: null }
   }
-
 }
 
 export class DIV_U_64Instruction extends BaseInstruction {
@@ -104,21 +104,23 @@ export class DIV_U_64Instruction extends BaseInstruction {
     // Gray Paper: division by zero results in 2^64 - 1
     const result = valueB === 0n ? 2n ** 64n - 1n : valueA / valueB
 
-    context.log('DIV_U_64: Division of unsigned registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'DIV_U_64: Division of unsigned registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
 
     return { resultCode: null }
   }
-
 }
 
 export class DIV_S_64Instruction extends BaseInstruction {
@@ -150,14 +152,17 @@ export class DIV_S_64Instruction extends BaseInstruction {
       result = signedResult < 0n ? signedResult + 2n ** 64n : signedResult
     }
 
-    context.log('DIV_S_64: Division of signed registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      signedA,
-      signedB,
-      result,
-    })
+    context.log(
+      'DIV_S_64: Division of signed registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        signedA,
+        signedB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
@@ -187,21 +192,23 @@ export class REM_U_64Instruction extends BaseInstruction {
     // Gray Paper: when B = 0, result = A
     const result = valueB === 0n ? valueA : valueA % valueB
 
-    context.log('REM_U_64: Remainder of unsigned registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'REM_U_64: Remainder of unsigned registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
 
     return { resultCode: null }
   }
-
 }
 
 export class REM_S_64Instruction extends BaseInstruction {
@@ -236,19 +243,21 @@ export class REM_S_64Instruction extends BaseInstruction {
       result = signedResult < 0n ? signedResult + 2n ** 64n : signedResult
     }
 
-    context.log('REM_S_64: Remainder of signed registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      signedA,
-      signedB,
-      result,
-    })
+    context.log(
+      'REM_S_64: Remainder of signed registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        signedA,
+        signedB,
+        result,
+      },
+    )
 
     // Mutate context directly
     this.setRegisterValue(context.registers, registerD, result)
 
     return { resultCode: null }
   }
-
 }

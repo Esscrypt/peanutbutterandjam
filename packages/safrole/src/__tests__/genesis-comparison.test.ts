@@ -8,7 +8,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { hexToBytes, bytesToHex, blake2bHash, merklizeBytes } from '@pbnj/core'
+import { hexToBytes, bytesToHex, blake2bHash, merklizeBytes } from '@pbnjam/core'
 
 /**
  * Exact Python implementation: Blake2b-256

@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -26,7 +26,6 @@ export class SET_LT_UInstruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -65,7 +64,6 @@ export class SET_LT_SInstruction extends BaseInstruction {
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

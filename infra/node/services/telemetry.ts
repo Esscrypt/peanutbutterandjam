@@ -13,8 +13,8 @@
 //   type SafePromise,
 //   safeError,
 //   safeResult,
-// } from '@pbnj/core'
-// import type { TelemetryClient } from '@pbnj/telemetry'
+// } from '@pbnjam/core'
+// import type { TelemetryClient } from '@pbnjam/telemetry'
 // import type {
 //   AccumulateCost,
 //   BlockOutline,
@@ -25,8 +25,8 @@
 //   TelemetryEvent,
 //   WorkPackageOutline,
 //   WorkReportOutline,
-// } from '@pbnj/types'
-// import { BaseService } from '@pbnj/types'
+// } from '@pbnjam/types'
+// import { BaseService } from '@pbnjam/types'
 // export class TelemetryEventEmitterService extends BaseService {
 //   private eventIdCounter = 0n
 //   private readonly client: TelemetryClient

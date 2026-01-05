@@ -5,16 +5,16 @@
  * This is a Common Ephemeral (CE) stream for announcing audit requirements.
  */
 
+import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
 import {
   bytesToHex,
   concatBytes,
   type EventBusService,
   type Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
-import type { AuditAnnouncement, Safe, SafePromise } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/core'
+import type { AuditAnnouncement, Safe, SafePromise } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

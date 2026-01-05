@@ -1,0 +1,67 @@
+name: Build and Release Fuzzer Target
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build dependencies
+        run: bun run build
+
+      - name: Build fuzzer target binary
+        run: bun run build:fuzzer
+
+      - name: Create checksum
+        run: |
+          sha256sum bin/fuzzer-target > bin/fuzzer-target.sha256
+
+      - name: Create release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: fuzzer-target-${{ github.sha }}
+          name: Fuzzer Target ${{ github.sha }}
+          body: |
+            Fuzzer target binary built from commit ${{ github.sha }}
+            
+            ## Usage
+            ```bash
+            ./fuzzer-target --socket /tmp/jam_target.sock --spec tiny
+            ```
+          draft: false
+          prerelease: true
+          files: |
+            bin/fuzzer-target
+            bin/fuzzer-target.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

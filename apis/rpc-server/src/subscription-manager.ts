@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import type { RpcParams, RpcResult, Subscription, WebSocket } from './types'
 
 export class SubscriptionManager {

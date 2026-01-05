@@ -6,7 +6,7 @@
  */
 
 // Import local types to avoid circular dependencies
-// Types are imported directly from @pbnj/types
+// Types are imported directly from @pbnjam/types
 
 export * from './block'
 export * from './core'
@@ -19,4 +19,3 @@ export * from './state'
 export * from './utils'
 // Work package serialization
 export * from './work-package'
-

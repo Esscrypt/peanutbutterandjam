@@ -3,7 +3,7 @@ import type {
   ImplicationsPair,
   RAM,
   RegisterState,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ACCUMULATE_ERROR_CODES } from '../../config'
 
 export interface AccumulateHostFunctionContext {

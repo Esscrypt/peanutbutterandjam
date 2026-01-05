@@ -5,16 +5,16 @@
  * This is a Common Ephemeral (CE) stream for requesting ranges of state trie data.
  */
 
-import type { EventBusService, Hex } from '@pbnj/core'
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import { decodeFixedLength, encodeFixedLength } from '@pbnj/codec'
+import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
+import type { EventBusService, Hex } from '@pbnjam/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
   StateRequest,
   StateResponse,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

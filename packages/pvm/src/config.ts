@@ -51,7 +51,6 @@ export const REGISTER_INIT = {
   },
 } as const
 
-
 // Result codes as specified in Gray Paper
 /**
  * Result codes as specified in Gray Paper
@@ -269,7 +268,6 @@ export const ACCUMULATE_INVOCATION_CONFIG = {
   MIN_PUBLIC_INDEX: 65536n, // Cminpublicindex = 2^16
   ENTROPY_ACCUMULATOR: 'entropy', // Placeholder for entropy accumulator
 } as const
-
 
 // Gas costs for instructions (all cost 1 as per Gray Paper)
 export const INSTRUCTION_GAS_COSTS = Object.fromEntries(

@@ -53,15 +53,15 @@
  * deterministic gas accounting and data flow dependencies.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   ExtrinsicReference,
   Safe,
   WorkItem,
   WorkPackage,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -251,10 +251,7 @@ export function encodeWorkItemSummary(workItem: WorkItem): Safe<Uint8Array> {
 
   // 6. encode[2]{len(importsegments)} - 2-byte fixed-length import segments count
   const importSegmentsLength = workItem.importsegments?.length || 0
-  const [error5, encoded5] = encodeFixedLength(
-    BigInt(importSegmentsLength),
-    2n,
-  )
+  const [error5, encoded5] = encodeFixedLength(BigInt(importSegmentsLength), 2n)
   if (error5) {
     return safeError(error5)
   }

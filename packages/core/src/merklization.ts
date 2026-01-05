@@ -5,10 +5,9 @@
  * Reference: Gray Paper merklization.tex section D
  */
 
-import { keccak_256 } from '@noble/hashes/sha3'
-import { encodeVariableSequence } from '@pbnj/codec'
-import type { Encoder, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { keccak_256 } from '@noble/hashes/sha3.js'
+import type { Encoder, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { blake2bHash, bytesToHex, hexToBytes } from './utils/crypto'
 import { validateHexString } from './utils/validation'
 
@@ -336,23 +335,31 @@ export function defaultKeccakHash(data: Uint8Array): Safe<Uint8Array> {
  * - Small data sequences (≤32 bytes per item)
  * - Accumulation output logs
  *
- * Formula: merklizewb(v) ≡ {
+ * Formula: merklizewb(v, H) ≡ {
+ *   zerohash when |v| = 0
  *   H(v₀) when |v| = 1
- *   N(v) otherwise
+ *   N(v, H) otherwise
  * }
+ *
+ * @param values - Sequence of byte arrays to merklize
+ * @param hashFn - Hash function to use (defaults to blake2b, use keccak for accoutBelt)
  */
-export function merklizewb(values: Uint8Array[]): Safe<Uint8Array> {
+export function merklizewb(
+  values: Uint8Array[],
+  hashFn: HashFunction = defaultBlake2bHash,
+): Safe<Uint8Array> {
   if (values.length === 0) {
-    return safeResult(new Uint8Array(32)) // Zero hash
+    // Gray Paper: merklizewb([]) = zerohash (32 bytes of zeros)
+    return safeResult(new Uint8Array(32))
   }
 
   if (values.length === 1) {
     // Single value: hash it directly per Gray Paper Equation 218
-    return defaultBlake2bHash(values[0])
+    return hashFn(values[0])
   }
 
   // Multiple values: use Gray Paper node function N per Equation 219
-  return merkleNodeWB(values)
+  return merkleNodeWB(values, hashFn)
 }
 
 /**
@@ -360,13 +367,16 @@ export function merklizewb(values: Uint8Array[]): Safe<Uint8Array> {
  *
  * Gray Paper Reference: merklization.tex (Equation 174-182)
  *
- * N(v) ≡ {
+ * N(v, H) ≡ {
  *   zerohash when |v| = 0
  *   v₀ when |v| = 1
- *   H($node concat N(left) concat N(right)) otherwise
+ *   H($node concat N(left, H) concat N(right, H)) otherwise
  * }
  */
-function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
+function merkleNodeWB(
+  values: Uint8Array[],
+  hashFn: HashFunction = defaultBlake2bHash,
+): Safe<Uint8Array> {
   if (values.length === 0) {
     return safeResult(new Uint8Array(32)) // Zero hash
   }
@@ -382,12 +392,12 @@ function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
   const right = values.slice(mid)
 
   // Recursively compute left and right subtrees
-  const [leftError, leftHash] = merkleNodeWB(left)
+  const [leftError, leftHash] = merkleNodeWB(left, hashFn)
   if (leftError) {
     return safeError(leftError)
   }
 
-  const [rightError, rightHash] = merkleNodeWB(right)
+  const [rightError, rightHash] = merkleNodeWB(right, hashFn)
   if (rightError) {
     return safeError(rightError)
   }
@@ -401,7 +411,7 @@ function merkleNodeWB(values: Uint8Array[]): Safe<Uint8Array> {
   combined.set(leftHash, nodePrefix.length)
   combined.set(rightHash, nodePrefix.length + leftHash.length)
 
-  return defaultBlake2bHash(combined)
+  return hashFn(combined)
 }
 
 /**
@@ -501,7 +511,7 @@ function merkleNodeCD(values: Uint8Array[]): Safe<Uint8Array> {
     return safeError(rightError)
   }
 
-  // Hash the concatenation with "$node" prefix
+  // Hash the concatenation with "node" prefix
   const nodePrefix = new TextEncoder().encode('node')
   const combined = new Uint8Array(
     nodePrefix.length + leftHash.length + rightHash.length,
@@ -689,16 +699,34 @@ export function mmrencode(range: MMRRange): Safe<Uint8Array> {
       }
     }
 
-    // Use variable length encoding from serialization package
-    const [encodeError, encoded] = encodeVariableSequence(
-      optionalHashes,
-      optionalHashEncoder,
-    )
-    if (encodeError) {
-      return safeError(encodeError)
+    // Encode sequence with length prefix (minimal implementation to avoid codec dependency)
+    const parts: Uint8Array[] = []
+
+    // Encode length as 4-byte little-endian
+    const lengthBytes = new Uint8Array(4)
+    const lengthView = new DataView(lengthBytes.buffer)
+    lengthView.setUint32(0, optionalHashes.length, true) // little-endian
+    parts.push(lengthBytes)
+
+    // Encode each element
+    for (const hash of optionalHashes) {
+      const [error, encoded] = optionalHashEncoder(hash)
+      if (error) {
+        return safeError(error)
+      }
+      parts.push(encoded)
     }
 
-    return safeResult(encoded)
+    // Concatenate all parts
+    const totalLength = parts.reduce((sum, part) => sum + part.length, 0)
+    const result = new Uint8Array(totalLength)
+    let offset = 0
+    for (const part of parts) {
+      result.set(part, offset)
+      offset += part.length
+    }
+
+    return safeResult(result)
   } catch (error) {
     return safeError(error as Error)
   }

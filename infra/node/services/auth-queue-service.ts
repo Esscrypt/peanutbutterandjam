@@ -16,7 +16,7 @@
  * - designate: Validator designation (Ω_D) - validator assignment
  */
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import {
   AUTHORIZATION_CONSTANTS,
   type AuthQueue,
@@ -24,7 +24,7 @@ import {
   type Safe,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { ConfigService } from './config-service'
 /**

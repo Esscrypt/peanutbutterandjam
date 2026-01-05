@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -16,21 +16,22 @@ export class AND_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue & immediate
 
-    context.log('AND_IMM: Bitwise AND with immediate of registerA and immediate to registerD', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
-    })
+    context.log(
+      'AND_IMM: Bitwise AND with immediate of registerA and immediate to registerD',
+      {
+        registerD,
+        registerA,
+        immediate,
+        registerValue,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }
 
 export class XOR_IMMInstruction extends BaseInstruction {
@@ -47,21 +48,22 @@ export class XOR_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue ^ immediate
 
-    context.log('XOR_IMM: Bitwise XOR with immediate of registerA and immediate to registerD', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
-    })
+    context.log(
+      'XOR_IMM: Bitwise XOR with immediate of registerA and immediate to registerD',
+      {
+        registerD,
+        registerA,
+        immediate,
+        registerValue,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }
 
 export class OR_IMMInstruction extends BaseInstruction {
@@ -78,19 +80,20 @@ export class OR_IMMInstruction extends BaseInstruction {
     )
     const result = registerValue | immediate
 
-    context.log('OR_IMM: Bitwise OR with immediate of registerA and immediate to registerD', {
-      registerD,
-      registerA,
-      immediate,
-      registerValue,
-      result,
-    })
+    context.log(
+      'OR_IMM: Bitwise OR with immediate of registerA and immediate to registerD',
+      {
+        registerD,
+        registerA,
+        immediate,
+        registerValue,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }

@@ -1,7 +1,7 @@
 # State Transition Functions Implementation Guide
 
 ## Overview
-This guide outlines the implementation requirements for the `@pbnj/state-transition` package, which implements the core state transition logic for the JAM protocol as specified in the Gray Paper.
+This guide outlines the implementation requirements for the `@pbnjam/state-transition` package, which implements the core state transition logic for the JAM protocol as specified in the Gray Paper.
 
 ## Package Structure
 ```
@@ -33,9 +33,9 @@ interface StateTransitionFunction<TState, TInput, TOutput> {
 ```
 
 ### 2. Component Integration
-- **Safrole Integration**: Integrate with `@pbnj/safrole` for block production consensus
-- **Disputes Integration**: Integrate with `@pbnj/disputes` for dispute resolution
-- **History Integration**: Integrate with `@pbnj/history` for historical data management
+- **Safrole Integration**: Integrate with `@pbnjam/safrole` for block production consensus
+- **Disputes Integration**: Integrate with `@pbnjam/disputes` for dispute resolution
+- **History Integration**: Integrate with `@pbnjam/history` for historical data management
 
 ### 3. Validation Requirements
 - **Input Validation**: Validate all input parameters before processing

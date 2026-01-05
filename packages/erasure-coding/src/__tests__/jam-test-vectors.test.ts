@@ -5,7 +5,7 @@
  * Uses the reed-solomon-simd Rust library for high-performance erasure coding.
  */
 
-import { type Hex, logger, bytesToHex, hexToBytes } from '@pbnj/core'
+import { type Hex, logger, bytesToHex, hexToBytes } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'

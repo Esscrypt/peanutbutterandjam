@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, verifyEd25519 } from '@pbnj/core'
-import { generateAlternativeName } from '@pbnj/core'
+import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, verifyEd25519 } from '@pbnjam/core'
+import { generateAlternativeName } from '@pbnjam/core'
 import { generateALPNProtocol, parseALPNProtocol } from '../src/crypto/tls'
-import { decodeFixedLength } from '@pbnj/codec'
+import { decodeFixedLength } from '@pbnjam/codec'
 
 describe('JAMNP-S Networking Implementation', () => {
   describe('Key Management', () => {

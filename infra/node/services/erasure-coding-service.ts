@@ -5,11 +5,11 @@
  * Handles encoding, decoding, and shard recovery operations for JAM protocol
  */
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import {
   isRustModuleAvailable,
   RustReedSolomonCoder,
-} from '@pbnj/erasure-coding'
+} from '@pbnjam/erasure-coding'
 import {
   BaseService,
   type EncodedData,
@@ -17,7 +17,7 @@ import {
   type ShardWithIndex,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 
 /**

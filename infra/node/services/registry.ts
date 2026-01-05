@@ -1,6 +1,6 @@
-import { logger } from '@pbnj/core'
-import type { Safe, SafePromise, Service } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { Safe, SafePromise, Service } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 /**
  * Service registry for managing all services
  */

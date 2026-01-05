@@ -8,11 +8,11 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { EventBusService, hexToBytes, type Hex } from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+import { EventBusService, hexToBytes, type Hex } from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@pbnj/types'
+import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@pbnjam/types'
 import { ConfigService } from '../services/config-service'
 import { StatisticsService } from '../services/statistics-service'
 import { ClockService } from '../services/clock-service'
@@ -104,7 +104,7 @@ describe('Statistics Service - JAM Test Vectors', () => {
 
           // Build BlockBody from extrinsic fields where types align
           const body: BlockBody = {
-            tickets: vector.input.extrinsic.tickets.map((t) => ({
+            tickets: (vector.input.extrinsic.tickets || []).map((t) => ({
               entryIndex: BigInt(t.attempt),
               proof: t.signature as Hex,
               id: getTicketIdFromProof(hexToBytes(t.signature as Hex)),
@@ -117,18 +117,18 @@ describe('Statistics Service - JAM Test Vectors', () => {
               report: convertJsonReportToWorkReport(g.report),
               slot: BigInt(g.slot),
               signatures: g.signatures.map((s) => ({
-                validator_index: Number(s.validator_index), // TODO: fix this
+                validator_index: Number(s.validator_index),
                 signature: s.signature as Hex,
               })),
             })),
             assurances: (vector.input.extrinsic.assurances || []).map((a) => ({
               anchor: a.anchor as Hex,
               bitfield: a.bitfield as Hex,
-              validator_index: Number(a.validator_index), // TODO: fix this
+              validator_index: Number(a.validator_index),
               signature: a.signature as Hex,
             })),
-            disputes: [{
-              verdicts: vector.input.extrinsic.disputes.verdicts.map((v) => ({
+            disputes: vector.input.extrinsic.disputes ? [{
+              verdicts: (vector.input.extrinsic.disputes.verdicts || []).map((v) => ({
                 target: v.target as Hex,
                 age: BigInt(v.age),
                 votes: v.votes.map((vv) => ({
@@ -137,21 +137,38 @@ describe('Statistics Service - JAM Test Vectors', () => {
                   signature: vv.signature as Hex,
                 })),
               })),
-              culprits: vector.input.extrinsic.disputes.culprits.map((c) => ({
+              culprits: (vector.input.extrinsic.disputes.culprits || []).map((c) => ({
                 target: c.target as Hex,
                 key: c.key as Hex,
                 signature: c.signature as Hex,
               })),
-              faults: vector.input.extrinsic.disputes.faults.map((f) => ({
+              faults: (vector.input.extrinsic.disputes.faults || []).map((f) => ({
                 target: f.target as Hex,
                 vote: !!f.vote,
                 key: f.key as Hex,
                 signature: f.signature as Hex,
               })),
-            }],
+            }] : [],
           }
 
+          // Check if this is an epoch transition
+          // Epoch transition must happen BEFORE any stats updates
+          const isEpochTransition = clockService.isEpochTransition(header.timeslot)
+          if (isEpochTransition) {
+            // Emit epoch transition event to trigger handleEpochTransition
+            // This rolls over validatorStatsAccumulator to validatorStatsPrevious
+            await eventBusService.emitEpochTransition({
+              slot: header.timeslot,
+              epochMark: header.epochMark || null,
+            })
+          }
+
+          // Reset per-block statistics (coreStats and serviceStats) before processing
+          // This must be called at the START of block processing
+          statsService.resetPerBlockStats()
+
           // Emit a BlockProcessedEvent to drive StatisticsService
+          // This calls applyBlockDeltas which updates validator stats from block content
           await eventBusService.emitBlockProcessed({
             timestamp: Date.now(),
             slot: header.timeslot,
@@ -161,6 +178,8 @@ describe('Statistics Service - JAM Test Vectors', () => {
             body,
           })
 
+          // Update guarantees separately (applyBlockDeltas doesn't call this)
+          // This must happen AFTER epoch transition to ensure stats go into correct epoch
           statsService.updateGuarantees(body.guarantees)
 
           // Validate validator statistics against post_state

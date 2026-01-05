@@ -1,4 +1,4 @@
-# @pbnj/audit
+# @pbnjam/audit
 
 To install dependencies:
 

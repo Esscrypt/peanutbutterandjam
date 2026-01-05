@@ -6,15 +6,20 @@
  */
 
 import { readFileSync } from 'node:fs'
-import type { ChainSpecJson, GenesisHeader, GenesisJson, Hex } from '@pbnj/core'
+import { encodeHeader } from '@pbnjam/codec'
+import type {
+  ChainSpecJson,
+  GenesisHeader,
+  GenesisJson,
+  Hex,
+} from '@pbnjam/core'
 import {
   blake2bHash,
   parseChainSpec,
   parseGenesisHeader,
   parseGenesisJson,
   zeroHash,
-} from '@pbnj/core'
-import { encodeHeader } from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   BlockHeader,
   GenesisState,
@@ -22,13 +27,13 @@ import type {
   ParsedBootnode,
   Safe,
   ValidatorKeyTuple,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 // Helper methods merged into main class
 
 /**
- * Load and parse chain-spec.json file (returns Zod-validated input)
+ * Load and parse chain-spec.json file
  */
 export function loadChainSpec(filePath: string): Safe<ChainSpecJson> {
   const content = readFileSync(filePath, 'utf8')

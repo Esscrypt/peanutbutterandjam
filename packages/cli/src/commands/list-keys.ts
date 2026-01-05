@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 
 import { generateValidatorKeys } from '../utils/key-generation'
 

@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -11,7 +11,6 @@ export class SHLO_L_IMM_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_IMM_64
   readonly name = 'SHLO_L_IMM_64'
   execute(context: InstructionContext): InstructionResult {
-
     // Test vector format: operands[0] = (A << 4) | D, operands[1+] = immediate
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
@@ -29,19 +28,24 @@ export class SHLO_L_IMM_64Instruction extends BaseInstruction {
     const multiplied = registerValue << shiftAmount
     const mod64 = multiplied & 0xffffffffffffffffn // mod 2^64
     const shift = this.signExtend(mod64, 8) // sext{8} (no-op for 64-bit values)
-    
+
     // Log BEFORE modification to capture the before state
     const beforeValue = context.registers[registerA]
-    context.log('SHLO_L_IMM_64: Logical left shift of registerB by immediate (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      shiftAmount,
-      shift,
-      beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-    })
+    context.log(
+      'SHLO_L_IMM_64: Logical left shift of registerB by immediate (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerValue,
+        shiftAmount,
+        shift,
+        beforeValue: beforeValue.toString(),
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+      },
+    )
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, shift)
 
@@ -77,17 +81,22 @@ export class SHLO_R_IMM_64Instruction extends BaseInstruction {
 
     // Log BEFORE modification to capture the before state
     const beforeValue = context.registers[registerA]
-    context.log('SHLO_R_IMM_64: Logical right shift of registerB by immediate (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerValue,
-      shiftAmount,
-      result,
-      shift,
-      beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-    })
+    context.log(
+      'SHLO_R_IMM_64: Logical right shift of registerB by immediate (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerValue,
+        shiftAmount,
+        result,
+        shift,
+        beforeValue: beforeValue.toString(),
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+      },
+    )
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, shift)
 
@@ -123,24 +132,28 @@ export class SHAR_R_IMM_64Instruction extends BaseInstruction {
 
     // Log BEFORE modification to capture the before state
     const beforeValue = context.registers[registerA]
-    context.log('SHAR_R_IMM_64: Arithmetic right shift of registerB by immediate (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      signedValue,
-      shiftAmount,
-      shiftedValue,
-      result,
-      beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-    })
+    context.log(
+      'SHAR_R_IMM_64: Arithmetic right shift of registerB by immediate (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        signedValue,
+        shiftAmount,
+        shiftedValue,
+        result,
+        beforeValue: beforeValue.toString(),
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+      },
+    )
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }
   }
-
 }
 
 /**
@@ -177,7 +190,9 @@ export class NEG_ADD_IMM_64Instruction extends BaseInstruction {
       registerBValue,
       result,
       beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
     })
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)

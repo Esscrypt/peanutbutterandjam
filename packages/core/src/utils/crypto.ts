@@ -8,12 +8,13 @@
 import * as ed from '@noble/ed25519'
 // Import blakejs for cryptographic operations
 import { blake2b } from '@noble/hashes/blake2.js'
-import { sha512 } from '@noble/hashes/sha2'
+import { sha512 } from '@noble/hashes/sha2.js'
+import { getBanderoutFromGamma } from '@pbnjam/bandersnatch-vrf'
 
 // Configure Ed25519 with SHA-512
 ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
 
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 import {
   bytesToBigInt,
   bytesToHex,
@@ -128,4 +129,19 @@ export function validatePrivateKey(privateKey: Uint8Array): boolean {
  */
 export function validateSignature(signature: Uint8Array): boolean {
   return signature.length === 64
+}
+
+/**
+ * Get ticket ID from VRF proof
+ *
+ * Extracts the ticket ID from a Ring VRF proof by taking the first 32 bytes (gamma)
+ * and computing the banderout (VRF output hash).
+ *
+ * @param proof - Ring VRF proof (784 bytes)
+ * @returns Ticket ID as hex string
+ */
+export function getTicketIdFromProof(proof: Uint8Array): Hex {
+  // gamma is the first 32 bytes of the proof
+  const gamma = proof.slice(0, 32)
+  return bytesToHex(getBanderoutFromGamma(gamma))
 }

@@ -8,17 +8,17 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger, hexToBytes, bytesToHex } from '@pbnj/core'
+import { logger, hexToBytes, bytesToHex } from '@pbnjam/core'
 import {
   decodeWorkPackage,
   encodeWorkPackage,
-} from '@pbnj/codec'
-import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnj/types'
+} from '@pbnjam/codec'
+import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnjam/types'
 import { ConfigService } from '../config-service'
 import { ErasureCodingService } from '../erasure-coding-service'
 import { ShardService } from '../shard-service'
-import { EventBusService } from '@pbnj/core'
-import { ShardDistributionProtocol } from '@pbnj/networking'
+import { EventBusService } from '@pbnjam/core'
+import { ShardDistributionProtocol } from '@pbnjam/networking'
 
 // Mock networking service that captures sent messages
 class MockNetworkingService {

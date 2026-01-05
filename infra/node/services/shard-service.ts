@@ -1,3 +1,4 @@
+import { encodeWorkPackage } from '@pbnjam/codec'
 import {
   blake2bHash,
   bytesToHex,
@@ -10,9 +11,8 @@ import {
   merklizewb,
   reconstructRoot,
   verifyMerkleProof,
-} from '@pbnj/core'
-import type { ShardDistributionProtocol } from '@pbnj/networking'
-import { encodeWorkPackage } from '@pbnj/codec'
+} from '@pbnjam/core'
+import type { ShardDistributionProtocol } from '@pbnjam/networking'
 import type {
   Safe,
   SafePromise,
@@ -22,8 +22,8 @@ import type {
   ShardDistributionResponse,
   ShardWithIndex,
   WorkPackage,
-} from '@pbnj/types'
-import { BaseService, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, safeError, safeResult } from '@pbnjam/types'
 import type { ConfigService } from './config-service'
 import type { ErasureCodingService } from './erasure-coding-service'
 import type { NetworkingService } from './networking-service'

@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -27,7 +27,6 @@ export class ROT_L_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -60,7 +59,7 @@ export class ROT_L_64Instruction extends BaseInstruction {
  */
 export class ROT_L_32Instruction extends BaseInstruction {
   readonly opcode = OPCODES.ROT_L_32
-  readonly name = 'ROT_L_32' 
+  readonly name = 'ROT_L_32'
 
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
@@ -87,7 +86,6 @@ export class ROT_L_32Instruction extends BaseInstruction {
     // Mutate context directly
     return { resultCode: null }
   }
-
 
   private rotateLeft32(value: bigint, amount: number): bigint {
     // Handle negative rotation amounts
@@ -133,7 +131,6 @@ export class ROT_R_64Instruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
@@ -191,7 +188,6 @@ export class ROT_R_32Instruction extends BaseInstruction {
     this.setRegisterValueWith32BitResult(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

@@ -5,7 +5,7 @@
  * Reference: JAM Protocol genesis specifications
  */
 
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import { z } from 'zod'
 

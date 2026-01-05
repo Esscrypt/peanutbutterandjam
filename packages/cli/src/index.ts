@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { config } from 'dotenv'
 import { createGenKeysCommand } from './commands/gen-keys'
 import { createGenSpecCommand } from './commands/gen-spec'

@@ -7,11 +7,11 @@ import {
   encodeImplicationsPair,
   decodeImplicationsPair,
   type ImplicationsPair,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import { ConfigService } from '../../../infra/node/services/config-service'
-import type { IConfigService, Implications } from '@pbnj/types'
-import { hexToBytes, type Hex } from '@pbnj/core'
-import type { ServiceAccount, DeferredTransfer, PreimageRequestStatus } from '@pbnj/types'
+import type { IConfigService, Implications } from '@pbnjam/types'
+import { hexToBytes, type Hex } from '@pbnjam/core'
+import type { ServiceAccount, DeferredTransfer, PreimageRequestStatus } from '@pbnjam/types'
 
 // Copy createTestImplications from implications-roundtrip.test.ts
 function createTestImplications(configService: IConfigService): Implications {

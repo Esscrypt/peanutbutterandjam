@@ -21,14 +21,14 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -120,7 +120,7 @@ export class AssuranceDistributionProtocol extends NetworkingProtocol<
   /**
    * Serialize response (void)
    */
-  serializeResponse(_response: void): Safe<Uint8Array> {
+  serializeResponse(_response: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -135,7 +135,7 @@ export class AssuranceDistributionProtocol extends NetworkingProtocol<
    * Process response (void)
    */
   async processResponse(
-    _response: void,
+    _response: undefined,
     _peerPublicKey: Hex,
   ): SafePromise<void> {
     return safeResult(undefined)

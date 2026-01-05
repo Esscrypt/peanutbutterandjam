@@ -1,4 +1,4 @@
-# @pbnj/telemetry
+# @pbnjam/telemetry
 
 JIP-3 telemetry implementation for JAM nodes, enabling integration with JAM Tart (Testing, Analytics and Research Telemetry).
 
@@ -18,7 +18,7 @@ This package provides a complete implementation of the JIP-3 telemetry specifica
 ## Installation
 
 ```bash
-bun add @pbnj/telemetry
+bun add @pbnjam/telemetry
 ```
 
 ## Usage
@@ -26,7 +26,7 @@ bun add @pbnj/telemetry
 ### Basic Setup
 
 ```typescript
-import { createTelemetrySystem, TelemetryEventEmitter } from '@pbnj/telemetry'
+import { createTelemetrySystem, TelemetryEventEmitter } from '@pbnjam/telemetry'
 
 // Configure telemetry
 const telemetryConfig = {
@@ -101,7 +101,7 @@ await telemetry.events.emitConnectedOut(connectingOutEventId)
 ### Advanced Usage
 
 ```typescript
-import { TelemetryClient, TelemetryEventEmitter } from '@pbnj/telemetry'
+import { TelemetryClient, TelemetryEventEmitter } from '@pbnjam/telemetry'
 
 // Manual setup for more control
 const client = new TelemetryClient(telemetryConfig)

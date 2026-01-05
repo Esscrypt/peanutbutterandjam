@@ -28,17 +28,18 @@
  * ✅ CORRECT: Properly encodes all fields of each statistic type
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   Activity,
   CoreStats,
   DecodingResult,
   IConfigService,
+  JamVersion,
   Safe,
   ServiceStats,
   ValidatorStats,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -326,7 +327,10 @@ function decodeCoreStats(data: Uint8Array): Safe<DecodingResult<CoreStats>> {
  *       refinement: [count, gas] - tuple{N, gas}
  *       accumulation: [count, gas] - tuple{N, gas}
  */
-function encodeServiceStats(serviceStat: ServiceStats): Safe<Uint8Array> {
+function encodeServiceStats(
+  serviceStat: ServiceStats,
+  jamVersion?: JamVersion,
+): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
 
   // Gray Paper statistics.tex line 91-101: servicestats tuple order (type definition)
@@ -342,19 +346,27 @@ function encodeServiceStats(serviceStat: ServiceStats): Safe<Uint8Array> {
 
   // 1. provision: tuple{N, N}
   // encode{tuple{N, N}} ≡ encode{N} ∥ encode{N}
-  const [error1, provisionData1] = encodeNatural(BigInt(serviceStat.provision[0])) // count
+  const [error1, provisionData1] = encodeNatural(
+    BigInt(serviceStat.provision[0]),
+  ) // count
   if (error1) return safeError(error1)
   parts.push(provisionData1)
-  const [error2, provisionData2] = encodeNatural(BigInt(serviceStat.provision[1])) // size
+  const [error2, provisionData2] = encodeNatural(
+    BigInt(serviceStat.provision[1]),
+  ) // size
   if (error2) return safeError(error2)
   parts.push(provisionData2)
 
   // 2. refinement: tuple{N, gas}
   // encode{tuple{N, gas}} ≡ encode{N} ∥ encode{gas}
-  const [error3, refinementData1] = encodeNatural(BigInt(serviceStat.refinement[0])) // count
+  const [error3, refinementData1] = encodeNatural(
+    BigInt(serviceStat.refinement[0]),
+  ) // count
   if (error3) return safeError(error3)
   parts.push(refinementData1)
-  const [error4, refinementData2] = encodeNatural(BigInt(serviceStat.refinement[1])) // gas
+  const [error4, refinementData2] = encodeNatural(
+    BigInt(serviceStat.refinement[1]),
+  ) // gas
   if (error4) return safeError(error4)
   parts.push(refinementData2)
 
@@ -400,6 +412,29 @@ function encodeServiceStats(serviceStat: ServiceStats): Safe<Uint8Array> {
   if (error10) return safeError(error10)
   parts.push(accumulationData2)
 
+  // 8. onTransfersCount and onTransfersGasUsed: tuple{N, gas} (only for versions < 0.7.1)
+  // These fields are NOT included for JAM version 0.7.1 and up
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  const includeOnTransfers =
+    version.major < 0 ||
+    (version.major === 0 && version.minor < 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch < 1)
+
+  if (includeOnTransfers) {
+    const onTransfersCount = serviceStat.onTransfersCount ?? 0
+    const onTransfersGasUsed = serviceStat.onTransfersGasUsed ?? 0
+    const [error11, onTransfersCountData] = encodeNatural(
+      BigInt(onTransfersCount),
+    )
+    if (error11) return safeError(error11)
+    parts.push(onTransfersCountData)
+    const [error12, onTransfersGasUsedData] = encodeNatural(
+      BigInt(onTransfersGasUsed),
+    )
+    if (error12) return safeError(error12)
+    parts.push(onTransfersGasUsedData)
+  }
+
   return safeResult(concatBytes(parts))
 }
 
@@ -440,6 +475,7 @@ function encodeServiceStats(serviceStat: ServiceStats): Safe<Uint8Array> {
  */
 function decodeServiceStats(
   data: Uint8Array,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<ServiceStats>> {
   let currentData = data
 
@@ -501,14 +537,47 @@ function decodeServiceStats(
   if (error10) return safeError(error10)
   currentData = accumulationResult2.remaining
 
+  // 8. onTransfersCount and onTransfersGasUsed: tuple{N, gas} (only for versions < 0.7.1)
+  // These fields are NOT included for JAM version 0.7.1 and up
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+  const includeOnTransfers =
+    (version.major === 0 && version.minor < 7) ||
+    (version.major === 0 && version.minor === 7 && version.patch < 1)
+
+  let onTransfersCount: number | undefined
+  let onTransfersGasUsed: number | undefined
+
+  // if (includeOnTransfers) {
+  //   const [error11, onTransfersCountResult] = decodeNatural(currentData)
+  //   if (error11) return safeError(error11)
+  //   currentData = onTransfersCountResult.remaining
+  //   onTransfersCount = Number(onTransfersCountResult.value)
+
+  //   const [error12, onTransfersGasUsedResult] = decodeNatural(currentData)
+  //   if (error12) return safeError(error12)
+  //   currentData = onTransfersGasUsedResult.remaining
+  //   onTransfersGasUsed = Number(onTransfersGasUsedResult.value)
+  // }
+
   const serviceStat: ServiceStats = {
     provision: [Number(provisionResult1.value), Number(provisionResult2.value)], // tuple{N, N} - [count, size]
-    refinement: [Number(refinementResult1.value), Number(refinementResult2.value)], // tuple{N, gas} - [count, gas]
+    refinement: [
+      Number(refinementResult1.value),
+      Number(refinementResult2.value),
+    ], // tuple{N, gas} - [count, gas]
     importCount: Number(importCountResult.value),
     extrinsicCount: Number(extrinsicCountResult.value),
     extrinsicSize: Number(extrinsicSizeResult.value),
     exportCount: Number(exportCountResult.value),
-    accumulation: [Number(accumulationResult1.value), Number(accumulationResult2.value)], // tuple{N, gas} - [count, gas]
+    accumulation: [
+      Number(accumulationResult1.value),
+      Number(accumulationResult2.value),
+    ], // tuple{N, gas} - [count, gas]
+    ...(includeOnTransfers &&
+    onTransfersCount !== undefined &&
+    onTransfersGasUsed !== undefined
+      ? { onTransfersCount, onTransfersGasUsed }
+      : {}),
   }
 
   return safeResult({
@@ -531,8 +600,52 @@ function decodeServiceStats(
 export function encodeActivity(
   activity: Activity,
   configService: IConfigService,
+  jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
   const parts: Uint8Array[] = []
+
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
+
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const activityInput = {
+      valStatsAccumulatorLength:
+        activity.validatorStatsAccumulator?.length || 0,
+      valStatsPreviousLength: activity.validatorStatsPrevious?.length || 0,
+      coreStatsLength: activity.coreStats?.length || 0,
+      coreStatsValues:
+        activity.coreStats?.map((cs, idx) => ({
+          core: idx,
+          daLoad: cs.daLoad,
+          popularity: cs.popularity,
+          importCount: cs.importCount,
+          extrinsicCount: cs.extrinsicCount,
+          extrinsicSize: cs.extrinsicSize,
+          exportCount: cs.exportCount,
+          bundleLength: cs.bundleLength,
+          gasUsed: cs.gasUsed,
+        })) || [],
+      serviceStatsSize: activity.serviceStats?.size || 0,
+      serviceStatsKeys: Array.from(activity.serviceStats?.keys() || [])
+        .map((k) => k.toString())
+        .sort(),
+      numValidators: configService.numValidators,
+      numCores: configService.numCores,
+    }
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:545',
+      message: 'encodeActivity input',
+      data: activityInput,
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-input',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
 
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
   // According to Gray Paper statistics.tex line 12:
@@ -557,6 +670,35 @@ export function encodeActivity(
   }
   // Truncate to Cvalcount if needed
   const accumulatorToEncode = paddedAccumulator.slice(0, validatorCount)
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const validatorStatsValues = accumulatorToEncode.map((vs, idx) => ({
+      validator: idx,
+      blocks: vs.blocks,
+      tickets: vs.tickets,
+      preimageCount: vs.preimageCount,
+      preimageSize: vs.preimageSize,
+      guarantees: vs.guarantees,
+      assurances: vs.assurances,
+    }))
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:573',
+      message: 'encodeActivity validator stats accumulator values',
+      data: {
+        validatorStatsValues,
+        validatorCount,
+        accumulatorToEncodeLength: accumulatorToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-val-accumulator-values',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
   const [error1, validatorStatsAccumulatorData] = encodeSequenceGeneric(
     accumulatorToEncode,
     encodeValidatorStats,
@@ -579,6 +721,35 @@ export function encodeActivity(
   }
   // Truncate to Cvalcount if needed
   const previousToEncode = paddedPrevious.slice(0, validatorCount)
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const validatorStatsPreviousValues = previousToEncode.map((vs, idx) => ({
+      validator: idx,
+      blocks: vs.blocks,
+      tickets: vs.tickets,
+      preimageCount: vs.preimageCount,
+      preimageSize: vs.preimageSize,
+      guarantees: vs.guarantees,
+      assurances: vs.assurances,
+    }))
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:595',
+      message: 'encodeActivity validator stats previous values',
+      data: {
+        validatorStatsPreviousValues,
+        validatorCount,
+        previousToEncodeLength: previousToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-val-previous-values',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
   const [error2, validatorStatsPreviousData] = encodeSequenceGeneric(
     previousToEncode,
     encodeValidatorStats,
@@ -593,6 +764,33 @@ export function encodeActivity(
   // This means encode[4]{valstatsaccumulator, valstatsprevious} means each field
   // in the validator stats tuples should be encoded as encode[4] (4-byte fixed-length)
   // The sequences are fixed-length (Cvalcount elements each), encoded directly without a length prefix
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const { bytesToHex } = require('@pbnjam/core')
+    const valAccumulatorHex = bytesToHex(validatorStatsAccumulatorData)
+    const valPreviousHex = bytesToHex(validatorStatsPreviousData)
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:610',
+      message: 'encodeActivity validator stats encoded',
+      data: {
+        valAccumulatorHex: valAccumulatorHex.substring(0, 100),
+        valAccumulatorLength: validatorStatsAccumulatorData.length,
+        valPreviousHex: valPreviousHex.substring(0, 100),
+        valPreviousLength: validatorStatsPreviousData.length,
+        validatorCount,
+        accumulatorToEncodeLength: accumulatorToEncode.length,
+        previousToEncodeLength: previousToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-validator',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
   parts.push(validatorStatsAccumulatorData)
   parts.push(validatorStatsPreviousData)
 
@@ -620,6 +818,29 @@ export function encodeActivity(
     encodeCoreStats,
   )
   if (error4) return safeError(error4)
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const { bytesToHex } = require('@pbnjam/core')
+    const coreStatsHex = bytesToHex(coreStatsData)
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:637',
+      message: 'encodeActivity coreStats encoded',
+      data: {
+        coreStatsHex: coreStatsHex.substring(0, 200),
+        coreStatsLength: coreStatsData.length,
+        coreCount: configService.numCores,
+        coreStatsToEncodeLength: coreStatsToEncode.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-corestats',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
   parts.push(coreStatsData)
 
   // servicestats: variable-length sequence of (serviceId, serviceStats) tuples
@@ -627,7 +848,7 @@ export function encodeActivity(
   // Gray Paper serialization.tex line 79-90: dictionary encoding
   // encode{d ∈ dictionary{K}{V}} ≡ encode{var{sequence{build{tuple{encode{k}, encode{d[k]}}}{k ∈ keys{d}} ordered by k}}}
   // This means: variable-length sequence of (key, value) tuples, ordered by key
-  // Note: Gray Paper does NOT specify omitting zero values - encode all keys in the dictionary
+  // Filter out all-zero service stats entries to avoid encoding unnecessary empty records
   const serviceStatsTuples: Array<{ serviceId: bigint; stats: ServiceStats }> =
     []
   for (const [serviceId, serviceStat] of activity.serviceStats) {
@@ -654,7 +875,10 @@ export function encodeActivity(
       tupleParts.push(serviceIdData)
 
       // Encode service stats
-      const [error7, serviceStatsData] = encodeServiceStats(tuple.stats)
+      const [error7, serviceStatsData] = encodeServiceStats(
+        tuple.stats,
+        version,
+      )
       if (error7) return safeError(error7)
       tupleParts.push(serviceStatsData)
 
@@ -662,9 +886,54 @@ export function encodeActivity(
     },
   )
   if (error5) return safeError(error5)
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const { bytesToHex } = require('@pbnjam/core')
+    const serviceStatsHex = bytesToHex(serviceStatsData)
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:679',
+      message: 'encodeActivity serviceStats encoded',
+      data: {
+        serviceStatsHex: serviceStatsHex.substring(0, 200),
+        serviceStatsLength: serviceStatsData.length,
+        serviceStatsTuplesLength: serviceStatsTuples.length,
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-servicestats',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
   parts.push(serviceStatsData)
 
-  return safeResult(concatBytes(parts))
+  const finalResult = concatBytes(parts)
+  // #region agent log
+  try {
+    const fs = require('node:fs')
+    const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
+    const { bytesToHex } = require('@pbnjam/core')
+    const finalHex = bytesToHex(finalResult)
+    const logEntry = `${JSON.stringify({
+      location: 'activity.ts:682',
+      message: 'encodeActivity final result',
+      data: {
+        finalHex: finalHex.substring(0, 200),
+        finalLength: finalResult.length,
+        partsLengths: parts.map((p) => p.length),
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      runId: 'encode-activity-final',
+      hypothesisId: 'D',
+    })}\n`
+    fs.appendFileSync(logPath, logEntry)
+  } catch {}
+  // #endregion
+  return safeResult(finalResult)
 }
 
 /**
@@ -680,8 +949,11 @@ export function encodeActivity(
 export function decodeActivity(
   data: Uint8Array,
   configService: IConfigService,
+  jamVersion?: JamVersion,
 ): Safe<DecodingResult<Activity>> {
   let currentData = data
+
+  const version = jamVersion ?? DEFAULT_JAM_VERSION
 
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
   // According to serialization.tex line 114:
@@ -735,7 +1007,10 @@ export function decodeActivity(
       tupleData = serviceIdResult.remaining
 
       // Decode service stats
-      const [error6, serviceStatsResult] = decodeServiceStats(tupleData)
+      const [error6, serviceStatsResult] = decodeServiceStats(
+        tupleData,
+        version,
+      )
       if (error6) return safeError(error6)
       tupleData = serviceStatsResult.remaining
 

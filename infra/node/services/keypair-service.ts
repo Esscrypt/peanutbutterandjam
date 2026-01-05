@@ -14,14 +14,14 @@ import {
   hexToBytes,
   signEd25519,
   verifyEd25519,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   ConnectionEndpoint,
   Safe,
   ValidatorCredentials,
   ValidatorPublicKeys,
-} from '@pbnj/types'
-import { BaseService, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { BaseService, safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Validator key pair with all components

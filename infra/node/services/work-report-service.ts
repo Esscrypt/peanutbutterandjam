@@ -14,13 +14,18 @@
  * 4. Retrieval: Provide access to work reports by hash or core index
  */
 
-import { type EventBusService, type Hex, hexToBytes, logger } from '@pbnj/core'
+import { calculateWorkReportHash } from '@pbnjam/codec'
+import {
+  type EventBusService,
+  type Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
 import {
   getAssignedCore,
   verifyWorkReportDistributionSignature,
-} from '@pbnj/guarantor'
-import type { WorkReportRequestProtocol } from '@pbnj/networking'
-import { calculateWorkReportHash } from '@pbnj/codec'
+} from '@pbnjam/guarantor'
+import type { WorkReportRequestProtocol } from '@pbnjam/networking'
 import {
   BaseService,
   type GuaranteedWorkReport,
@@ -33,7 +38,7 @@ import {
   type WorkReport,
   type WorkReportRequest,
   type WorkReportResponse,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { EntropyService } from './entropy'
@@ -298,19 +303,8 @@ export class WorkReportService extends BaseService {
   }
 
   setPendingReports(reports: Reports): void {
-    logger.debug('[WorkReportService] setPendingReports called', {
-      coreReportsCount: reports.coreReports.length,
-      coreIndices: Array.from(reports.coreReports.keys()),
-    })
-    
     for (const [coreIndex, report] of reports.coreReports.entries()) {
       if (report) {
-        logger.debug('[WorkReportService] Adding pending report from setState', {
-          coreIndex,
-          timeslot: report.timeslot,
-          packageHash: report.workReport.package_spec.hash.slice(0, 40),
-        })
-        
         this.addPendingWorkReport(
           BigInt(coreIndex),
           report.workReport,
@@ -396,17 +390,17 @@ export class WorkReportService extends BaseService {
 
   /**
    * Clear work report core mapping to allow core reuse
-   * 
+   *
    * Gray Paper: When a work report is included in a guarantee, we need to allow
    * the core to be reused for future guarantees. However, the work report should
    * remain in pendingWorkReports (reports state) until it receives super-majority
    * assurance or times out.
-   * 
+   *
    * This method only clears the core mapping, not the pending reports entry.
    * The pending reports entry is cleared by applyAssurances when:
    * 1. The work report receives super-majority assurance (> 2/3 validators)
    * 2. The work report times out (exceeds C_assurancetimeoutperiod)
-   * 
+   *
    * @param coreIndex - Core index to clear from mapping
    */
   clearWorkReportCoreMapping(coreIndex: bigint): Safe<void> {
@@ -414,7 +408,7 @@ export class WorkReportService extends BaseService {
     // Note: We do NOT remove from pendingWorkReports here - that's done by applyAssurances
     // when the work report becomes available (super-majority) or times out
     this.workReportHashByCore.delete(coreIndex)
-    
+
     return safeResult(undefined)
   }
 
@@ -429,7 +423,7 @@ export class WorkReportService extends BaseService {
   /**
    * Check if a core has an available work report
    * A core is engaged if it has either a pending or available report
-   * 
+   *
    * Note: This checks the core mapping, not pendingWorkReports, because
    * we clear the core mapping after processing guarantees to allow reuse,
    * but keep the work report in pendingWorkReports until it's assured or times out.
@@ -449,47 +443,32 @@ export class WorkReportService extends BaseService {
    * @param timeout - The timeout slot when this report expires
    */
   markAsAvailable(workReport: WorkReport, timeout: bigint): Safe<void> {
-    try {
-      const [hashError, hash] = calculateWorkReportHash(workReport)
-      if (hashError) {
-        return safeError(hashError)
-      }
-
-      const coreIndex = workReport.core_index
-
-      // Store work report by hash if not already stored
-      if (!this.workReportsByHash.has(hash)) {
-        this.workReportsByHash.set(hash, workReport)
-      }
-
-      // Store work report by core index for quick lookup
-      this.workReportHashByCore.set(coreIndex, hash)
-
-      // Update state to available
-      this.workReportState.set(hash, 'available')
-
-      // Gray Paper: Work reports in guarantees should be added to reports state (chapter 10)
-      // The reports state contains work reports that are "reported" but awaiting availability assurance
-      // Add to pending reports so it appears in the state (will be removed when it becomes available to super-majority or times out)
-      this.pendingWorkReports.set(coreIndex, {
-        workReport: workReport,
-        timeslot: Number(timeout),
-      })
-
-      // Get stack trace to see who called this
-      const stack = new Error().stack
-      
-      logger.debug('Work report marked as available', {
-        hash,
-        coreIndex: coreIndex.toString(),
-        timeout: timeout.toString(),
-        packageHash: workReport.package_spec.hash.slice(0, 40),
-        callStack: stack?.split('\n').slice(1, 6).join('\n'),
-      })
-
-      return safeResult(undefined)
-    } catch (error) {
-      return safeError(error as Error)
+    const [hashError, hash] = calculateWorkReportHash(workReport)
+    if (hashError) {
+      return safeError(hashError)
     }
+
+    const coreIndex = workReport.core_index
+
+    // Store work report by hash if not already stored
+    if (!this.workReportsByHash.has(hash)) {
+      this.workReportsByHash.set(hash, workReport)
+    }
+
+    // Store work report by core index for quick lookup
+    this.workReportHashByCore.set(coreIndex, hash)
+
+    // Update state to available
+    this.workReportState.set(hash, 'available')
+
+    // Gray Paper: Work reports in guarantees should be added to reports state (chapter 10)
+    // The reports state contains work reports that are "reported" but awaiting availability assurance
+    // Add to pending reports so it appears in the state (will be removed when it becomes available to super-majority or times out)
+    this.pendingWorkReports.set(coreIndex, {
+      workReport: workReport,
+      timeslot: Number(timeout),
+    })
+
+    return safeResult(undefined)
   }
 }

@@ -39,8 +39,8 @@
  * may be missing or have variable sizes (like epoch marks in headers).
  */
 
-import type { Decoder, Encoder, Optional, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type { Decoder, Encoder, Optional, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from './natural-number'
 
 /**

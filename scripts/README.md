@@ -1,5 +1,19 @@
 # PBNJ Scripts
 
+```
+# Compare TypeScript traces
+bun scripts/compare-3way-traces.ts --2way --typescript --preimages-light 2 0 0
+
+# Compare WASM traces
+bun scripts/compare-3way-traces.ts --2way --wasm --preimages-light 2 0 0
+
+# Defaults to TypeScript if executor not specified
+bun scripts/compare-3way-traces.ts --2way --preimages-light 2 0 0
+
+# Works with legacy text format too
+bun scripts/compare-3way-traces.ts --2way --typescript 2
+```
+
 This directory contains various scripts for building, testing, and managing the PBNJ (PeanutButterAndJam) project.
 
 ## CLI Build Scripts
@@ -116,3 +130,9 @@ bun run install:binary  # Install globally
 - **Testnet scripts**: `*-testnet.sh`, `start-nodes.sh`, `test-single-node.sh` - Testnet management
 - **Utility scripts**: `release.sh`, `calculate-genesis-hash.ts` - Other utilities
 - **Wrapper scripts**: `run-cli.sh` - Development helpers 
+
+
+# Debugging 
+```
+DUMP_TRACES=true START_BLOCK=191 bun test '/Users/tanyageorgieva/Repos/peanutbutterandjam/infra/node/__tests__/traces/fuzzy-all-blocks.test.ts' ; bun scripts/convert-traces-to-modular.ts --folder fuzzy ; bun scripts/find-first-mismatch.ts --block 191
+```

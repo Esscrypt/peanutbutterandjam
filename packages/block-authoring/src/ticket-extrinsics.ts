@@ -3,8 +3,8 @@ import type {
   IConfigService,
   ITicketService,
   SafroleTicketWithoutProof,
-} from '@pbnj/types'
-import { type SafePromise, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { type SafePromise, safeResult } from '@pbnjam/types'
 
 export async function getTicketsForExtrinsic(
   clockService: IClockService,

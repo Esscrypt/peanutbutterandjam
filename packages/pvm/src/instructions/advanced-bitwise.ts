@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -14,19 +14,21 @@ export class AND_INVInstruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA & ~valueB
 
-    context.log('AND_INV: Bitwise AND with inverted operand of registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'AND_INV: Bitwise AND with inverted operand of registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
 
     return { resultCode: null }
   }
-
 }
 
 export class OR_INVInstruction extends BaseInstruction {
@@ -41,17 +43,18 @@ export class OR_INVInstruction extends BaseInstruction {
     const valueB = this.getRegisterValueAs64(context.registers, registerB)
     const result = valueA | ~valueB
 
-    context.log('OR_INV: Bitwise OR with inverted operand of registerA and registerB to registerD', {
-      registerD,
-      registerA,
-      registerB,
-      valueA,
-      valueB,
-      result,
-    })
+    context.log(
+      'OR_INV: Bitwise OR with inverted operand of registerA and registerB to registerD',
+      {
+        registerD,
+        registerA,
+        registerB,
+        valueA,
+        valueB,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerD, result)
-
-    
 
     return { resultCode: null }
   }

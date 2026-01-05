@@ -27,7 +27,9 @@ export class ECALLIInstruction extends BaseInstruction {
   name: string = 'ECALLI'
 
   execute(context: InstructionContext): InstructionResult {
-    context.registers[0] = u64(context.operands[0])
+    // Gray Paper pvm.tex §7.4.1 line 264: ε = host × immed_X
+    // The host function ID is in the immediate operand, not in r0
+    // We do NOT set r0 - the Gray Paper doesn't require it
 
     return new InstructionResult(RESULT_CODE_HOST)
   }

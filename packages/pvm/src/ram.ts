@@ -1,5 +1,5 @@
-import { logger } from '@pbnj/core'
-import type { MemoryAccessType, RAM } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { MemoryAccessType, RAM } from '@pbnjam/types'
 import { alignToPage, alignToZone } from './alignment-helpers'
 import { INIT_CONFIG, MEMORY_CONFIG, REGISTER_INIT } from './config'
 
@@ -39,6 +39,22 @@ export class PVMRAM implements RAM {
   private readonly pageAccess: Map<[bigint, bigint], MemoryAccessType> =
     new Map()
 
+  // JIP-6 trace support: Track last load/store for each instruction step
+  // These are updated by readOctets/writeOctets and should be cleared after each instruction
+  public lastLoadAddress = 0
+  public lastLoadValue = 0n
+  public lastStoreAddress = 0
+  public lastStoreValue = 0n
+
+  /**
+   * Clear last load/store tracking (call at start of each instruction)
+   */
+  public clearLastMemoryOp(): void {
+    this.lastLoadAddress = 0
+    this.lastLoadValue = 0n
+    this.lastStoreAddress = 0
+    this.lastStoreValue = 0n
+  }
 
   // Debug: Track full history of all instructions that interacted with each address
   private readonly addressInteractionHistory: Map<
@@ -124,40 +140,6 @@ export class PVMRAM implements RAM {
     const readOnlyZoneEndAddress =
       readOnlyZoneStartAddress + alignToPage(readOnlyDataLength)
 
-    console.log('\n=== initializeMemoryLayout - Input Data Summary ===');
-    console.log('Argument Data:', {
-      length: argumentDataLength,
-      firstBytes: argumentDataLength > 0 ? 
-        Array.from(argumentData.slice(0, Math.min(32, argumentDataLength)))
-          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
-    });
-    console.log('Read-Only Data:', {
-      length: readOnlyDataLength,
-      firstBytes: readOnlyDataLength > 0 ?
-        Array.from(readOnlyData.slice(0, Math.min(32, readOnlyDataLength)))
-          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
-    });
-    console.log('Heap Data:', {
-      length: heap.length,
-      firstBytes: heap.length > 0 ?
-        Array.from(heap.slice(0, Math.min(32, heap.length)))
-          .map(b => b.toString(16).padStart(2, '0')).join(' ') : 'empty',
-    });
-    console.log('Stack:', {
-      size: stackSize,
-      initialization: 'ZEROS (per Gray Paper - no data from program blob)',
-    });
-    console.log('Heap Zero Padding Size:', heapZeroPaddingSize);
-
-    console.log('\n=== initializeMemoryLayout - Address Layout ===');
-    console.log({
-      readOnlyZone: `[0x${readOnlyZoneStartAddress.toString(16)}, 0x${readOnlyZoneEndAddress.toString(16)})`,
-      heap: `[0x${heapStartAddress.toString(16)}, 0x${heapEndAddress.toString(16)})`,
-      heapWithPadding: `[0x${heapStartAddress.toString(16)}, 0x${heapZerosEndAddress.toString(16)})`,
-      stack: `[0x${stackStartAddress.toString(16)}, 0x${stackEndAddress.toString(16)})`,
-      argumentData: `[0x${argumentDataStartAddress.toString(16)}, 0x${argumentDataZeroPaddingEndAddress.toString(16)})`,
-    });
-
     // Always reinitialize structure with actual sizes from the program
     // This ensures the structure matches the program's memory layout
     // Note: heap.length is not used - Go reference uses readOnlyDataSize for initial heap region size
@@ -166,18 +148,10 @@ export class PVMRAM implements RAM {
     this.roData = new Uint8Array(readOnlyDataLength)
     this.argumentData = new Uint8Array(argumentDataLength)
 
-    console.log('\n=== initializeMemoryLayout - Setting Initial Data ===');
-    console.log('Setting argument data...', argumentDataLength > 0 ? `${argumentDataLength} bytes` : 'none');
     this.argumentData.set(argumentData, 0)
-    
-    console.log('Setting read-only data...', readOnlyDataLength > 0 ? `${readOnlyDataLength} bytes` : 'none');
+
     this.roData.set(readOnlyData, 0)
-    
-    console.log('Setting heap data...', heap.length > 0 ? `${heap.length} bytes` : 'none');
     this.heap.set(heap, 0)
-    
-    console.log('Stack initialized to ZEROS (per Gray Paper - no data from program blob)');
-    console.log('=== initializeMemoryLayout Complete ===\n')
 
     // Update variable addresses (fixed addresses are already set in constructor)
     // currentHeapPointer extends to heapZerosEnd (includes heap length + jump table)
@@ -319,7 +293,8 @@ export class PVMRAM implements RAM {
           newData.set(this.argumentData, 0)
         }
         this.argumentData = newData
-        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
+        this.argumentDataEnd =
+          this.argumentDataAddress + this.argumentData.length
       }
       return
     }
@@ -347,19 +322,26 @@ export class PVMRAM implements RAM {
       // Initialize heapStartAddress if not set (heap starts after roData)
       if (this.heapStartAddress === 0) {
         // Heap starts after roData zone (zone-aligned)
-        this.heapStartAddress = this.roDataAddressEnd > 0 
-          ? this.roDataAddressEnd 
-          : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        this.heapStartAddress =
+          this.roDataAddressEnd > 0
+            ? this.roDataAddressEnd
+            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
       }
       // Check if address is in heap (beyond roData region)
-      const isInHeap = addr >= this.heapStartAddress || 
-                       (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
+      const isInHeap =
+        addr >= this.heapStartAddress ||
+        (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
       if (isInHeap) {
         // Ensure heapStartAddress is set correctly
-        if (this.heapStartAddress === 0 || (this.roDataAddressEnd > 0 && this.heapStartAddress < this.roDataAddressEnd)) {
-          this.heapStartAddress = this.roDataAddressEnd > 0 
-            ? this.roDataAddressEnd 
-            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        if (
+          this.heapStartAddress === 0 ||
+          (this.roDataAddressEnd > 0 &&
+            this.heapStartAddress < this.roDataAddressEnd)
+        ) {
+          this.heapStartAddress =
+            this.roDataAddressEnd > 0
+              ? this.roDataAddressEnd
+              : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
         }
         const offset = addr - this.heapStartAddress
         const requiredSize = offset + length
@@ -626,6 +608,11 @@ export class PVMRAM implements RAM {
     address: bigint,
     count: bigint,
   ): [Uint8Array | null, bigint | null] {
+    // Gray Paper: Empty range is trivially readable - return empty array
+    if (count === 0n) {
+      return [new Uint8Array(0), null]
+    }
+
     // Check if entire range is readable first
     const [readable, faultAddress] = this.isReadableWithFault(address, count)
     if (!readable) {
@@ -638,6 +625,17 @@ export class PVMRAM implements RAM {
     const end = addr + length
 
     // Gray Paper pvm.tex line 145: fault address is page start: Cpvmpagesize × ⌊min(x) ÷ Cpvmpagesize⌋
+    // Helper to track load and return result
+    const trackLoadAndReturn = (data: Uint8Array): [Uint8Array, null] => {
+      this.lastLoadAddress = addr
+      // Convert bytes to u64 value (little-endian, pad to 8 bytes)
+      const padded = new Uint8Array(8)
+      padded.set(data.slice(0, Math.min(8, data.length)))
+      const view = new DataView(padded.buffer)
+      this.lastLoadValue = view.getBigUint64(0, true)
+      return [data, null]
+    }
+
     // Output section
     if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
       const offset = addr - this.argumentDataAddress
@@ -645,7 +643,9 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.argumentData.slice(offset, offset + length), null]
+      return trackLoadAndReturn(
+        this.argumentData.slice(offset, offset + length),
+      )
     }
 
     // Stack section
@@ -655,7 +655,7 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.stack.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.stack.slice(offset, offset + length))
     }
 
     // heap region: from heapStartAddress to currentHeapPointer (includes padding)
@@ -665,21 +665,21 @@ export class PVMRAM implements RAM {
         const faultPage = this.getPageIndex(address)
         return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
       }
-      return [this.heap.slice(offset, offset + length), null]
+      return trackLoadAndReturn(this.heap.slice(offset, offset + length))
     }
 
     // Read-only data section: roDataAddress ≤ i < roDataAddressEnd (data)
     // Read-only padding: roDataAddressEnd ≤ i < roDataAddressEnd + padding (padding, value = 0)
     // Since max read is 32 bytes, a read can span at most one page boundary
     if (addr >= this.roDataAddress && end <= this.roDataAddressEnd) {
-        // Read starts in data region
-        const offset = addr - this.roDataAddress
+      // Read starts in data region
+      const offset = addr - this.roDataAddress
 
-        if (offset + length > this.roData.length) {
-          const faultPage = this.getPageIndex(address)
-          return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
-        }
-        return [this.roData.slice(offset, offset + length), null]
+      if (offset + length > this.roData.length) {
+        const faultPage = this.getPageIndex(address)
+        return [null, faultPage * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
+      }
+      return trackLoadAndReturn(this.roData.slice(offset, offset + length))
     }
 
     return [null, this.getPageIndex(address) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
@@ -702,6 +702,16 @@ export class PVMRAM implements RAM {
     const length = values.length
     const end = addr + length
 
+    // Helper to track store after successful write
+    const trackStore = (): void => {
+      this.lastStoreAddress = addr
+      // Convert bytes to u64 value (little-endian, pad to 8 bytes)
+      const padded = new Uint8Array(8)
+      padded.set(values.slice(0, Math.min(8, values.length)))
+      const view = new DataView(padded.buffer)
+      this.lastStoreValue = view.getBigUint64(0, true)
+    }
+
     // Match Go WriteRAMBytes structure exactly
     // Go implementation: checks bounds, then directly copies (no array growth)
     if (addr >= this.argumentDataAddress && end <= this.argumentDataEnd) {
@@ -713,6 +723,7 @@ export class PVMRAM implements RAM {
       // Go doesn't check array size - assumes it's correct if bounds check passes
       // If array is too small, this will throw (matching Go's behavior)
       this.argumentData.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -724,6 +735,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (no array growth)
       this.stack.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -737,6 +749,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (arrays are grown via allocatePages or here)
       this.heap.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -748,6 +761,7 @@ export class PVMRAM implements RAM {
       }
       // Go implementation: directly copies (no array growth)
       this.roData.set(values, offset)
+      trackStore()
       return null
     }
 
@@ -781,7 +795,8 @@ export class PVMRAM implements RAM {
           newData.set(this.argumentData, 0)
         }
         this.argumentData = newData
-        this.argumentDataEnd = this.argumentDataAddress + this.argumentData.length
+        this.argumentDataEnd =
+          this.argumentDataAddress + this.argumentData.length
       }
       this.argumentData.set(values, offset)
       return
@@ -813,19 +828,26 @@ export class PVMRAM implements RAM {
       // Initialize heapStartAddress if not set (heap starts after roData)
       if (this.heapStartAddress === 0) {
         // Heap starts after roData zone (zone-aligned)
-        this.heapStartAddress = this.roDataAddressEnd > 0 
-          ? this.roDataAddressEnd 
-          : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        this.heapStartAddress =
+          this.roDataAddressEnd > 0
+            ? this.roDataAddressEnd
+            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
       }
       // Check if address is in heap (beyond roData region)
-      const isInHeap = addr >= this.heapStartAddress || 
-                       (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
+      const isInHeap =
+        addr >= this.heapStartAddress ||
+        (this.roDataAddressEnd > 0 && addr >= this.roDataAddressEnd)
       if (isInHeap) {
         // Ensure heapStartAddress is set correctly
-        if (this.heapStartAddress === 0 || (this.roDataAddressEnd > 0 && this.heapStartAddress < this.roDataAddressEnd)) {
-          this.heapStartAddress = this.roDataAddressEnd > 0 
-            ? this.roDataAddressEnd 
-            : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
+        if (
+          this.heapStartAddress === 0 ||
+          (this.roDataAddressEnd > 0 &&
+            this.heapStartAddress < this.roDataAddressEnd)
+        ) {
+          this.heapStartAddress =
+            this.roDataAddressEnd > 0
+              ? this.roDataAddressEnd
+              : alignToZone(this.roDataAddress) + INIT_CONFIG.ZONE_SIZE
         }
         const offset = addr - this.heapStartAddress
         const requiredSize = offset + length
@@ -870,6 +892,12 @@ export class PVMRAM implements RAM {
   }
 
   isReadableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
+    // Gray Paper: Empty range is trivially readable
+    // Nrange{a}{0} ⊆ readable(mem) is always true for any address a
+    if (size === 0n) {
+      return [true, null]
+    }
+
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
       return [false, address]
@@ -877,25 +905,56 @@ export class PVMRAM implements RAM {
 
     // Gray Paper: readable(memory) ≡ {i | memory_ram_access[⌊i/Cpvmpagesize⌋] ≠ none}
     // This means both 'read' and 'write' pages are readable (anything ≠ none)
-    // Check all pages that the address range spans
-    // Note: endAddress in stored ranges is exclusive, so we check if [address, address + size) is contained
+    // Check that EVERY address in the range is covered by SOME page access entry with non-'none' access
+    // This handles cases where the heap was grown via multiple SBRK calls creating separate entries
     const endRequestedAddress = address + size
+
+    // First, try to find a single entry that covers the entire range (fast path)
     for (const [
       [startAddress, endAddress],
       pageAccess,
     ] of this.pageAccess.entries()) {
-      // Range [startAddress, endAddress) contains [address, address + size) if:
-      // startAddress <= address AND endAddress >= address + size
       if (startAddress <= address && endAddress >= endRequestedAddress) {
         if (pageAccess !== 'none') {
           return [true, null]
         }
       }
     }
-    return [false, this.getPageIndex(address) * BigInt(MEMORY_CONFIG.PAGE_SIZE)]
+
+    // Slow path: check each address individually to handle fragmented ranges
+    for (let addr = address; addr < endRequestedAddress; addr++) {
+      let isReadable = false
+      for (const [
+        [startAddress, endAddress],
+        pageAccess,
+      ] of this.pageAccess.entries()) {
+        if (
+          addr >= startAddress &&
+          addr < endAddress &&
+          pageAccess !== 'none'
+        ) {
+          isReadable = true
+          break
+        }
+      }
+      if (!isReadable) {
+        // Found an address that's not readable - return fault at page boundary
+        return [
+          false,
+          this.getPageIndex(addr) * BigInt(MEMORY_CONFIG.PAGE_SIZE),
+        ]
+      }
+    }
+    return [true, null]
   }
 
   isWritableWithFault(address: bigint, size = 1n): [boolean, bigint | null] {
+    // Gray Paper: Empty range is trivially writable
+    // Nrange{a}{0} ⊆ writable(mem) is always true for any address a
+    if (size === 0n) {
+      return [true, null]
+    }
+
     // Check bounds
     if (address < 0n || address + size > this.MAX_ADDRESS) {
       const faultAddress =
@@ -1033,7 +1092,12 @@ export class PVMRAM implements RAM {
       const offset = addr - this.roDataAddress
       return Array.from(this.roData.slice(offset, offset + length))
     }
-    throw new Error('getMemoryContents: Invalid address range: ' + address.toString() + ' to ' + (address + BigInt(length)).toString())
+    throw new Error(
+      'getMemoryContents: Invalid address range: ' +
+        address.toString() +
+        ' to ' +
+        (address + BigInt(length)).toString(),
+    )
   }
 
   /**

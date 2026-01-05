@@ -1,5 +1,10 @@
 import { HostFunctionResult } from '../accumulate/base'
-import { HostFunctionContext, HostFunctionParams, LookupParams } from './base'
+import {
+  HostFunctionContext,
+  HostFunctionParams,
+  LookupParams,
+} from './base'
+import { CompleteServiceAccount } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -12,25 +17,41 @@ import { BaseHostFunction } from './base'
  *
  * Looks up preimages from service account storage
  *
- * Gray Paper Specification:
+ * Gray Paper Specification (pvm_invocations.tex lines 374-396):
  * - Function ID: 2 (lookup)
  * - Gas Cost: 10
- * - Uses registers[7] to specify which service account to query
- * - Uses registers[8:2] to specify hash and output offset in memory
- * - Uses registers[10:2] to specify from offset and length
- * - Looks up preimage by hash from service account's preimages
- * - Writes result to memory at specified offset
- * - Returns NONE if not found, length if found
+ * - Signature: Ω_L(gascounter, registers, memory, s, s, d)
+ *   - s = current service account
+ *   - s = current service ID
+ *   - d = accounts dictionary
  *
- * Gray Paper Logic:
- * a = service account (self if registers[7] = s or NONE, otherwise accounts[registers[7]])
- * h = memory[registers[8]:32] (hash)
- * o = registers[9] (output offset)
- * f = registers[10] (from offset)
- * l = registers[11] (length)
- * v = a.preimages[h] if exists, NONE otherwise
- * if v != NONE: write v[f:f+l] to memory[o:o+l], return len(v)
- * else: return NONE
+ * Service account selection (a):
+ *   a = s (current service)       when registers[7] ∈ {s, 2^64 - 1}
+ *   a = d[registers[7]]           when registers[7] ∈ keys{d}
+ *   a = none                      otherwise
+ *
+ * Register usage:
+ *   registers[7] = service ID to query (or s/2^64-1 for self)
+ *   registers[8] = hash offset (h) - 32 bytes to read from memory
+ *   registers[9] = output offset (o) - where to write result
+ *   registers[10] = from offset (f) in preimage
+ *   registers[11] = length (l) to copy
+ *
+ * Value lookup (v):
+ *   v = error  when hash memory not readable
+ *   v = none   when a = none OR memory[h:32] ∉ keys{a.preimages}
+ *   v = a.preimages[memory[h:32]] otherwise
+ *
+ * Slice parameters:
+ *   f = min(registers[10], len{v})
+ *   l = min(registers[11], len{v} - f)
+ *
+ * Result:
+ *   - PANIC if v = error OR output memory not writable
+ *   - registers[7] = NONE if v = none
+ *   - registers[7] = len{v}, memory[o:l] = v[f:l] otherwise
+ *
+ * NOTE: LOOKUP is READ-ONLY - it does NOT modify service accounts!
  */
 
 export class LookupHostFunction extends BaseHostFunction {
@@ -45,60 +66,85 @@ export class LookupHostFunction extends BaseHostFunction {
       return new HostFunctionResult(RESULT_CODES.PANIC)
     }
     const lookupParams = params as LookupParams
-    const serviceId = context.registers[7]
+    const queryServiceId = context.registers[7]
     const hashOffset = context.registers[8]
     const outputOffset = context.registers[9]
     const fromOffset = context.registers[10]
     const length = context.registers[11]
 
-    // Get service account
-    const serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
-    if (!serviceAccount) {
-      // Return NONE (2^64 - 1) for not found
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return new HostFunctionResult(255) // continue execution
+    // Gray Paper: a = service account to query
+    // a = s (self)       when registers_7 ∈ {s, 2^64 - 1}
+    // a = d[registers_7] when registers_7 ∈ keys{d}
+    // a = none           otherwise
+    const MAX_U64: u64 = u64.MAX_VALUE // 2^64 - 1
+
+    let serviceAccount: CompleteServiceAccount | null = null
+
+    if (
+      queryServiceId == lookupParams.serviceId ||
+      queryServiceId == MAX_U64
+    ) {
+      // Query self
+      if (lookupParams.accounts.has(lookupParams.serviceId)) {
+        serviceAccount = lookupParams.accounts.get(lookupParams.serviceId)
+      }
+    } else if (lookupParams.accounts.has(queryServiceId)) {
+      // Query another service from accounts dictionary
+      serviceAccount = lookupParams.accounts.get(queryServiceId)
     }
+    // else: serviceAccount remains null (a = none)
 
     // Read hash from memory (32 bytes)
+    // Gray Paper: v = error when N[h,32] ⊄ readable{memory}
     const readResult_hashData = context.ram.readOctets(u32(hashOffset), 32)
     const hashData = readResult_hashData.data
     const hashFaultAddress = readResult_hashData.faultAddress
     if (hashData === null || hashFaultAddress !== 0) {
+      // v = error - memory not readable
       return new HostFunctionResult(RESULT_CODES.PANIC)
+    }
+
+    // Gray Paper: v = none when a = none ∨ memory[h:32] ∉ keys{a.preimages}
+    if (serviceAccount === null) {
+      // a = none - service account not found
+      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
+      return new HostFunctionResult(255) // continue execution
     }
 
     // Look up preimage by hash
     const preimage = serviceAccount.preimages.get(hashData)
     if (!preimage) {
-      // Return NONE (2^64 - 1) for not found
+      // v = none - preimage not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Calculate slice parameters
-    const f = i32(fromOffset)
-    const l = i32(length)
+    // v found - calculate slice parameters
+    // Gray Paper: f = min(registers[10], len{v})
+    //             l = min(registers[11], len{v} - f)
     const preimageLength = preimage.length
+    const f: i32 = fromOffset < u64(preimageLength)
+      ? i32(fromOffset)
+      : preimageLength
+    const remainingAfterF: i32 = preimageLength - f
+    const l: i32 = length < u64(remainingAfterF)
+      ? i32(length)
+      : remainingAfterF
 
-    // Calculate actual slice length
-    const actualLength = min(l, preimageLength - f)
-
-    if (actualLength <= 0) {
-      // Return NONE if no data to copy
-      context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      return new HostFunctionResult(255) // continue execution
-    }
-
+    // Only write if there's data to write
+    if (l > 0) {
     // Extract data slice
-    const dataToWrite = preimage.slice(f, f + actualLength)
+      const dataToWrite = preimage.slice(f, f + l)
 
     // Write preimage slice to memory
+      // Gray Paper: PANIC if N[o,l] ⊄ writable{memory}
     const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
     if (writeResult.hasFault) {
       return new HostFunctionResult(RESULT_CODES.PANIC)
+      }
     }
 
-    // Return length of preimage
+    // Gray Paper: Return len{v} (full preimage length, not slice length)
     context.registers[7] = u64(preimageLength)
 
     return new HostFunctionResult(255) // continue execution

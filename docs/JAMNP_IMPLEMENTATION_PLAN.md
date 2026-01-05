@@ -22,9 +22,9 @@ This document outlines the step-by-step implementation of the JAM Simple Network
 ```json
 {
   "dependencies": {
-    "@pbnj/types": "workspace:*",
-    "@pbnj/core": "workspace:*",
-    "@pbnj/codec": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
     "@infisical/quic": "^1.0.0",
     "@stablelib/ed25519": "^2.0.1",
     "blakejs": "^1.2.1",

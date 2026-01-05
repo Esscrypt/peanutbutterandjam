@@ -24,7 +24,7 @@ interface ShuffleTestVector {
 
 function loadShuffleTestVectors(): ShuffleTestVector[] {
   try {
-    const testVectorPath = '/Users/tanyageorgieva/Repos/peanutbutterandjam/submodules/jamtestvectors/shuffle/shuffle_tests.json'
+    const testVectorPath = '/Users/tanyageorgieva/Repos/peanutbutterandjam/submodules/jam-test-vectors/shuffle/shuffle_tests.json'
     const content = readFileSync(testVectorPath, 'utf-8')
     const testVectors = JSON.parse(content) as ShuffleTestVector[]
     

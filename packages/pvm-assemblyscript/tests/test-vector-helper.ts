@@ -6,8 +6,8 @@ import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 // import { instantiate } from '@assemblyscript/loader'
 import { instantiate } from './wasmAsInit'
-import { logger } from '@pbnj/core'
-import { PVMParser, InstructionRegistry } from '@pbnj/pvm'
+import { logger } from '@pbnjam/core'
+import { PVMParser, InstructionRegistry } from '@pbnjam/pvm'
 
 // PVM page size (4KB)
 const PAGE_SIZE = 4096

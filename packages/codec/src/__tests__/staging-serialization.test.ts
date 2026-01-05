@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { encodeValidatorSet, decodeValidatorSet } from '../state/validator-set'
-import type { ValidatorPublicKeys } from '@pbnj/types'
+import type { ValidatorPublicKeys } from '@pbnjam/types'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 
 // Mock config service for testing

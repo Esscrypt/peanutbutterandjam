@@ -34,7 +34,7 @@
  * ✅ CORRECT: Handles work report and dependency set properly
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
@@ -42,8 +42,8 @@ import type {
   ReadyItem,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeSequenceGeneric,
   decodeVariableSequence,
@@ -168,13 +168,15 @@ export function decodeReady(
   // Outer sequence is fixed-length (C_epochlen), inner sequences are variable-length
   const [error, result] = decodeSequenceGeneric<ReadyItem[]>(
     data,
-    (data) => {
+    (slotData) => {
       // Decode each slot as a variable-length sequence of ready items
-      return decodeVariableSequence<ReadyItem>(data, decodeReadyItem)
+      return decodeVariableSequence<ReadyItem>(slotData, decodeReadyItem)
     },
     configService.epochDuration, // Fixed length: C_epochlen
   )
-  if (error) return safeError(error)
+  if (error) {
+    return safeError(error)
+  }
 
   const ready: Ready = {
     epochSlots: result.value,

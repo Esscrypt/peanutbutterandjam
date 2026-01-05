@@ -1,13 +1,13 @@
 {
-  "name": "@pbnj/assurance",
+  "name": "@pbnjam/assurance",
   "version": "0.0.1",
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*",
     "@noble/curves": "catalog:"
   }
 }

@@ -1,9 +1,9 @@
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   LogParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { GENERAL_FUNCTIONS } from '../../config'
 import { BaseHostFunction } from './base'
 
@@ -26,10 +26,7 @@ export class LogHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.LOG
   readonly name = 'log'
 
-  execute(
-    context: HostFunctionContext,
-    params: LogParams,
-  ): HostFunctionResult {
+  execute(context: HostFunctionContext, params: LogParams): HostFunctionResult {
     const level = context.registers[7]
     const targetOffset = context.registers[8]
     const targetLength = context.registers[9]
@@ -38,7 +35,7 @@ export class LogHostFunction extends BaseHostFunction {
 
     // Read target from memory if both offset and length are non-zero
     let target: string | null = null
-    if (targetOffset !== 0n || targetLength !== 0n) {
+    if (targetOffset !== 0n && targetLength !== 0n) {
       const [targetData, faultAddress] = context.ram.readOctets(
         targetOffset,
         targetLength,
@@ -109,38 +106,49 @@ export class LogHostFunction extends BaseHostFunction {
     const consoleMessage = `${timestamp} ${levelString}${corePart}${servicePart}${targetPart} ${message}`
 
     // Log according to level
+    // Wrap logger calls in try-catch to prevent exceptions from stopping execution
+    // JIP-1: LOG should never cause side effects that stop execution
     const levelNum = Number(level)
-    switch (levelNum) {
-      case 0: // Fatal error
-        logger.error(consoleMessage)
-        break
-      case 1: // Warning
-        logger.warn(consoleMessage)
-        break
-      case 2: // Important information
-        logger.info(consoleMessage)
-        break
-      case 3: // Helpful information
-        logger.debug(consoleMessage)
-        break
-      case 4: // Pedantic information
-        logger.debug(consoleMessage)
-        break
-      default:
-        logger.info(consoleMessage)
+    try {
+      switch (levelNum) {
+        case 0: // Fatal error
+          logger.error(consoleMessage)
+          break
+        case 1: // Warning
+          logger.warn(consoleMessage)
+          break
+        case 2: // Important information
+          logger.info(consoleMessage)
+          break
+        case 3: // Helpful information
+          logger.debug(consoleMessage)
+          break
+        case 4: // Pedantic information
+          logger.debug(consoleMessage)
+          break
+        default:
+          logger.info(consoleMessage)
+      }
+    } catch (_error) {
+      // Logger error should not stop execution - silently continue
+      // This ensures LOG host function never causes a panic
     }
 
     // Also log structured JSON format for programmatic access
-    const jsonLog = {
-      time: timestamp,
-      level: levelString,
-      message,
-      target: target ?? null,
-      service: serviceId === null ? null : serviceId.toString(),
-      core: coreIndex === null ? null : coreIndex.toString(),
+    // Wrap context.log in try-catch as well
+    try {
+      const jsonLog = {
+        time: timestamp,
+        level: levelString,
+        message,
+        target: target ?? null,
+        service: serviceId === null ? null : serviceId.toString(),
+        core: coreIndex === null ? null : coreIndex.toString(),
+      }
+      context.log('PVM Log', jsonLog)
+    } catch (_error) {
+      // Context log error should not stop execution - silently continue
     }
-    context.log('PVM Log', jsonLog)
-    logger.info(consoleMessage)
 
     return {
       resultCode: null, // continue execution

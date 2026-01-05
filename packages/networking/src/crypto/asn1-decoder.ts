@@ -5,7 +5,7 @@
  * the specification in jamtestvectors/lib/jam-types.asn
  */
 
-import type { Extrinsic } from '@pbnj/types'
+import type { Extrinsic } from '@pbnjam/types'
 
 // ASN.1 Tag Classes
 export enum Asn1TagClass {

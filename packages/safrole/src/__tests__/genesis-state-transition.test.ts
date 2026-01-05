@@ -8,8 +8,8 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { hexToBytes, bytesToHex } from '@pbnj/core'
-import { merklizeState, type Hex , type GenesisJson, type KeyValuePair } from '@pbnj/core'
+import { hexToBytes, bytesToHex } from '@pbnjam/core'
+import { merklizeState, type Hex , type GenesisJson, type KeyValuePair } from '@pbnjam/core'
   
 /**
  * Load genesis.json from fallback traces

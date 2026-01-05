@@ -5,14 +5,7 @@
  * This is a Common Ephemeral (CE) stream for distributing guaranteed work reports.
  */
 
-import {
-  bytesToHex,
-  concatBytes,
-  type EventBusService,
-  type Hex,
-  hexToBytes,
-} from '@pbnj/core'
-// import { validateGuaranteeSignatures } from '@pbnj/guarantor'
+// import { validateGuaranteeSignatures } from '@pbnjam/guarantor'
 import {
   // calculateWorkReportHash,
   decodeFixedLength,
@@ -21,15 +14,22 @@ import {
   encodeFixedLength,
   encodeNatural,
   encodeWorkReport,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
+import {
+  bytesToHex,
+  concatBytes,
+  type EventBusService,
+  type Hex,
+  hexToBytes,
+} from '@pbnjam/core'
 import type {
   GuaranteedWorkReport,
   Safe,
   SafePromise,
   // ValidatorPublicKeys,
   WorkReport,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 // IWorkReportService interface for dependency injection

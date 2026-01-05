@@ -526,13 +526,30 @@ function concatBytes(arrays: Uint8Array[]): Uint8Array {
  * }
  * 
  * @param account - Service account to encode
+ * @param major - JAM version major (default: 0)
+ * @param minor - JAM version minor (default: 7)
+ * @param patch - JAM version patch (default: 2)
  * @returns Encoded octet sequence
  */
-export function encodeServiceAccount(account: ServiceAccountData): Uint8Array {
+export function encodeServiceAccount(
+  account: ServiceAccountData,
+  major: i32 = 0,
+  minor: i32 = 7,
+  patch: i32 = 2,
+): Uint8Array {
   const parts: Uint8Array[] = []
 
   // Gray Paper: 0 (placeholder discriminator)
-  parts.push(encodeNaturalZero())
+  // Include discriminator for JAM version > 0.7.0 (v0.7.1+)
+  // Fuzzer test vectors (v0.7.0) omit this discriminator byte
+  const includeDiscriminator =
+    major > 0 ||
+    (major === 0 && minor > 7) ||
+    (major === 0 && minor === 7 && patch > 0)
+
+  if (includeDiscriminator) {
+    parts.push(encodeNaturalZero())
+  }
 
   // Gray Paper: sa_codehash (32-byte hash)
   parts.push(account.codehash)
@@ -579,6 +596,119 @@ export function encodeServiceAccount(account: ServiceAccountData): Uint8Array {
   parts.push(metadataBytes)
 
   return concatBytes(parts)
+}
+
+/**
+ * Decode service account according to Gray Paper specification
+ * 
+ * Gray Paper merklization.tex equation C(255, s):
+ * Decodes the service account structure:
+ * - 0 (discriminator, optional for JAM 0.7.0)
+ * - sa_codehash (32 bytes)
+ * - encode[8]{sa_balance, sa_minaccgas, sa_minmemogas, sa_octets, sa_gratis} (40 bytes)
+ * - encode[4]{sa_items, sa_created, sa_lastacc, sa_parent} (16 bytes)
+ * 
+ * @param data - Octet sequence to decode
+ * @param major - JAM version major (default: 0)
+ * @param minor - JAM version minor (default: 7)
+ * @param patch - JAM version patch (default: 2)
+ * @returns Decoded ServiceAccountData and remaining data, or null on error
+ */
+export function decodeServiceAccount(
+  data: Uint8Array,
+  major: i32 = 0,
+  minor: i32 = 7,
+  patch: i32 = 2,
+): DecodingResult<ServiceAccountData> | null {
+  let currentData = data
+
+  // Gray Paper: 0 (placeholder discriminator)
+  // Include discriminator for JAM version > 0.7.0 (v0.7.1+)
+  // Fuzzer test vectors (v0.7.0) omit this discriminator byte
+  const expectDiscriminator =
+    major > 0 ||
+    (major === 0 && minor > 7) ||
+    (major === 0 && minor === 7 && patch > 0)
+
+  if (expectDiscriminator) {
+    // For v0.7.1+, expect discriminator byte
+    if (currentData.length > 0 && currentData[0] === 0x00) {
+      const discriminatorResult = decodeNatural(currentData)
+      if (!discriminatorResult) {
+        return null
+      }
+      currentData = currentData.slice(discriminatorResult.consumed)
+    } else {
+      // Discriminator expected but missing - this is an error for v0.7.1+
+      return null
+    }
+  } else {
+    // For v0.7.0 and earlier, discriminator is optional (fuzzer test vectors omit it)
+    // If first byte is 0x00, decode it as natural number. Otherwise, assume discriminator is missing.
+    if (currentData.length > 0 && currentData[0] === 0x00) {
+      const discriminatorResult = decodeNatural(currentData)
+      if (!discriminatorResult) {
+        return null
+      }
+      currentData = currentData.slice(discriminatorResult.consumed)
+    }
+    // If first byte is not 0x00, assume discriminator is missing and start with codehash
+  }
+
+  // Gray Paper: sa_codehash (32-byte hash)
+  if (currentData.length < 32) {
+    return null
+  }
+  const codehash = currentData.slice(0, 32)
+  currentData = currentData.slice(32)
+
+  // Gray Paper: decode[8]{sa_balance, sa_minaccgas, sa_minmemogas, sa_octets, sa_gratis}
+  if (currentData.length < 40) {
+    return null
+  }
+  const accountBytes = currentData.slice(0, 40)
+  const accountView = new DataView(accountBytes.buffer)
+
+  // Decode 8-byte fields (little-endian)
+  const balance = accountView.getUint64(0, true)
+  const minaccgas = accountView.getUint64(8, true)
+  const minmemogas = accountView.getUint64(16, true)
+  const octets = accountView.getUint64(24, true)
+  const gratis = accountView.getUint64(32, true)
+
+  currentData = currentData.slice(40)
+
+  // Gray Paper: decode[4]{sa_items, sa_created, sa_lastacc, sa_parent}
+  if (currentData.length < 16) {
+    return null
+  }
+  const metadataBytes = currentData.slice(0, 16)
+  const metadataView = new DataView(metadataBytes.buffer)
+
+  // Decode 4-byte fields (little-endian)
+  const items = metadataView.getUint32(0, true)
+  const created = metadataView.getUint32(4, true)
+  const lastacc = metadataView.getUint32(8, true)
+  const parent = metadataView.getUint32(12, true)
+
+  currentData = currentData.slice(16)
+
+  const consumed = data.length - currentData.length
+
+  const accountData = new ServiceAccountData(
+    codehash,
+    balance,
+    minaccgas,
+    minmemogas,
+    octets,
+    gratis,
+    items,
+    created,
+    lastacc,
+    parent,
+  )
+
+  return new DecodingResult<ServiceAccountData>(accountData, consumed)
 }
 
 
@@ -978,6 +1108,188 @@ export function encodeWorkItemSummary(workItem: WorkItem): Uint8Array {
 }
 
 /**
+ * Decode import reference according to Gray Paper specification
+ * 
+ * Gray Paper Equation 305-311: encodeImportRef
+ * Structure:
+ * - h: 32-byte hash
+ * - encode[2]{index}: 2-byte index with type encoding:
+ *   - Regular hash: i (0-32767)
+ *   - Refined hash: i + 2^15 (32768-65535)
+ */
+export function decodeImportReference(data: Uint8Array): DecodingResult<ImportSegment> | null {
+  if (data.length < 34) {
+    return null
+  }
+  
+  // h: 32-byte hash
+  const treeRoot = data.slice(0, 32)
+  
+  // encode[2]{index}: 2-byte index with type encoding
+  const indexResult = decodeFixedLength(data.slice(32), 2)
+  if (!indexResult) {
+    return null
+  }
+  const encodedIndex = u32(indexResult.value)
+  const isRefined = encodedIndex >= 32768
+  const index = isRefined ? encodedIndex - 32768 : encodedIndex
+  
+  const importSegment = new ImportSegment()
+  importSegment.treeRoot = treeRoot
+  importSegment.index = index
+  importSegment.isRefined = isRefined
+  
+  return new DecodingResult<ImportSegment>(importSegment, 34)
+}
+
+/**
+ * Decode extrinsic reference according to Gray Paper specification
+ * 
+ * Gray Paper formula: (h, encode[4]{length})
+ * Structure:
+ * - h: 32-byte hash
+ * - encode[4]{length}: 4-byte fixed-length length
+ */
+export function decodeExtrinsicReference(data: Uint8Array): DecodingResult<ExtrinsicReference> | null {
+  if (data.length < 36) {
+    return null
+  }
+  
+  // h: 32-byte hash
+  const hash = data.slice(0, 32)
+  
+  // encode[4]{length}: 4-byte fixed-length length
+  const lengthResult = decodeFixedLength(data.slice(32), 4)
+  if (!lengthResult) {
+    return null
+  }
+  const length = u32(lengthResult.value)
+  
+  const extrinsicRef = new ExtrinsicReference()
+  extrinsicRef.hash = hash
+  extrinsicRef.length = length
+  
+  return new DecodingResult<ExtrinsicReference>(extrinsicRef, 36)
+}
+
+/**
+ * Decode work item according to Gray Paper specification
+ * 
+ * Gray Paper Equation 242-264: encode{WI ∈ workitem}
+ * Fields:
+ * 1. encode[4]{WI_serviceindex} - 4-byte service ID
+ * 2. WI_codehash - 32-byte hash
+ * 3. encode[8]{WI_refgaslimit} - 8-byte gas limit
+ * 4. encode[8]{WI_accgaslimit} - 8-byte gas limit
+ * 5. encode[2]{WI_exportcount} - 2-byte export count
+ * 6. var{WI_payload} - variable-length payload
+ * 7. var{WI_importsegments} - variable-length import segments
+ * 8. var{WI_extrinsics} - variable-length extrinsic references
+ */
+export function decodeWorkItem(data: Uint8Array): DecodingResult<WorkItem> | null {
+  let currentData = data
+  
+  // 1. decode[4]{serviceindex} - 4-byte service ID
+  const serviceIndexResult = decodeFixedLength(currentData, 4)
+  if (!serviceIndexResult) {
+    return null
+  }
+  const serviceIndex = u32(serviceIndexResult.value)
+  currentData = currentData.slice(serviceIndexResult.consumed)
+  
+  // 2. codehash - 32-byte hash
+  if (currentData.length < 32) {
+    return null
+  }
+  const codehash = currentData.slice(0, 32)
+  currentData = currentData.slice(32)
+  
+  // 3. decode[8]{refgaslimit} - 8-byte gas limit
+  const refGasLimitResult = decodeFixedLength(currentData, 8)
+  if (!refGasLimitResult) {
+    return null
+  }
+  const refgaslimit = refGasLimitResult.value
+  currentData = currentData.slice(refGasLimitResult.consumed)
+  
+  // 4. decode[8]{accgaslimit} - 8-byte gas limit
+  const accGasLimitResult = decodeFixedLength(currentData, 8)
+  if (!accGasLimitResult) {
+    return null
+  }
+  const accgaslimit = accGasLimitResult.value
+  currentData = currentData.slice(accGasLimitResult.consumed)
+  
+  // 5. decode[2]{exportcount} - 2-byte export count
+  const exportCountResult = decodeFixedLength(currentData, 2)
+  if (!exportCountResult) {
+    return null
+  }
+  const exportcount = u16(exportCountResult.value)
+  currentData = currentData.slice(exportCountResult.consumed)
+  
+  // 6. var{payload} - variable-length payload (length prefix + data)
+  const payloadLengthResult = decodeNatural(currentData)
+  if (!payloadLengthResult) {
+    return null
+  }
+  const payloadLength = i32(payloadLengthResult.value)
+  currentData = currentData.slice(payloadLengthResult.consumed)
+  if (currentData.length < payloadLength) {
+    return null
+  }
+  const payload = currentData.slice(0, payloadLength)
+  currentData = currentData.slice(payloadLength)
+  
+  // 7. var{importsegments} - variable-length import segments
+  const importSegmentsLengthResult = decodeNatural(currentData)
+  if (!importSegmentsLengthResult) {
+    return null
+  }
+  const importSegmentsLength = i32(importSegmentsLengthResult.value)
+  currentData = currentData.slice(importSegmentsLengthResult.consumed)
+  const importsegments = new Array<ImportSegment>()
+  for (let i = 0; i < importSegmentsLength; i++) {
+    const importSegmentResult = decodeImportReference(currentData)
+    if (!importSegmentResult) {
+      return null
+    }
+    importsegments.push(importSegmentResult.value)
+    currentData = currentData.slice(importSegmentResult.consumed)
+  }
+  
+  // 8. var{extrinsics} - variable-length extrinsic references
+  const extrinsicsLengthResult = decodeNatural(currentData)
+  if (!extrinsicsLengthResult) {
+    return null
+  }
+  const extrinsicsLength = i32(extrinsicsLengthResult.value)
+  currentData = currentData.slice(extrinsicsLengthResult.consumed)
+  const extrinsics = new Array<ExtrinsicReference>()
+  for (let i = 0; i < extrinsicsLength; i++) {
+    const extrinsicResult = decodeExtrinsicReference(currentData)
+    if (!extrinsicResult) {
+      return null
+    }
+    extrinsics.push(extrinsicResult.value)
+    currentData = currentData.slice(extrinsicResult.consumed)
+  }
+  
+  const workItem = new WorkItem()
+  workItem.serviceindex = serviceIndex
+  workItem.codehash = codehash
+  workItem.refgaslimit = refgaslimit
+  workItem.accgaslimit = accgaslimit
+  workItem.exportcount = exportcount
+  workItem.payload = payload
+  workItem.importsegments = importsegments
+  workItem.extrinsics = extrinsics
+  
+  const consumed = data.length - currentData.length
+  return new DecodingResult<WorkItem>(workItem, consumed)
+}
+
+/**
  * Encode work package according to Gray Paper specification
  * 
  * Gray Paper Equation 242-264: encode{WP ∈ workpackage}
@@ -1035,10 +1347,14 @@ export function encodeWorkPackage(workPackage: WorkPackage): Uint8Array {
 /**
  * Decode accumulate arguments according to Gray Paper specification
  *
- * Gray Paper: encode(timeslot, serviceid, len(inputs))
- * - timeslot: encode[4]{thetime} (4 bytes) - merklization.tex C(11)
- * - serviceid: encode[4]{serviceid} (4 bytes) - work package/item patterns
- * - len(inputs): encodeNatural (variable) - sequence length pattern
+ * Gray Paper pvm_invocations.tex equation 163: encode{t, s, len(i)}
+ * All values use variable-length natural number encoding (decodeNatural):
+ * - t (timeslot): decodeNatural (variable)
+ * - s (serviceId): decodeNatural (variable)
+ * - len(i) (input length): decodeNatural (variable)
+ *
+ * Note: This differs from fixed-length encodings used elsewhere (e.g. encode[4] in headers).
+ * The general encode{} notation uses variable-length encoding.
  *
  * @param args - Encoded accumulate arguments
  * @returns Decoding result with timeslot, serviceId, and inputLength, or null if decoding fails
@@ -1046,32 +1362,32 @@ export function encodeWorkPackage(workPackage: WorkPackage): Uint8Array {
 export function decodeAccumulateArgs(
   args: Uint8Array,
 ): DecodingResult<DecodedAccumulateArgs> | null {
-  if (args.length < 4) {
+  if (args.length < 1) {
     return null
   }
 
   let offset: i32 = 0
 
-  // 1. Decode timeslot (4 bytes fixed) - Gray Paper: encode[4]{thetime}
-  const timeslotResult = decodeFixedLength(args.slice(offset), 4)
+  // 1. Decode timeslot - Gray Paper: encode{t} (variable-length natural number)
+  const timeslotResult = decodeNatural(args.slice(offset))
   if (!timeslotResult) {
     return null
   }
   const timeslot = timeslotResult.value
-  offset += 4
+  offset += timeslotResult.consumed
 
-  // 2. Decode service ID (4 bytes fixed) - Gray Paper: encode[4]{serviceid}
-  if (offset + 4 > args.length) {
+  // 2. Decode service ID - Gray Paper: encode{s} (variable-length natural number)
+  if (offset >= args.length) {
     return null
   }
-  const serviceIdResult = decodeFixedLength(args.slice(offset), 4)
+  const serviceIdResult = decodeNatural(args.slice(offset))
   if (!serviceIdResult) {
     return null
   }
   const serviceId = serviceIdResult.value
-  offset += 4
+  offset += serviceIdResult.consumed
 
-  // 3. Decode input length (variable) - Gray Paper: encodeNatural pattern
+  // 3. Decode input length - Gray Paper: encode{len(i)} (variable-length natural number)
   if (offset >= args.length) {
     return null
   }
@@ -1969,18 +2285,13 @@ export function decodeDeferredTransfer(
   transfer.amount = amountResult.value
   currentData = currentData.slice(amountResult.consumed)
   
-  // Memo: DX_memo (variable-length octet sequence)
-  const memoLengthResult = decodeNatural(currentData)
-  if (!memoLengthResult) {
+  // Memo: DX_memo (fixed 128-byte blob, Cmemosize = 128)
+  // Gray Paper specifies memo is exactly 128 bytes, no length prefix
+  if (currentData.length < 128) {
     return null
   }
-  const memoLength = i32(memoLengthResult.value)
-  const memoRemaining = currentData.slice(memoLengthResult.consumed)
-  if (memoRemaining.length < memoLength) {
-    return null
-  }
-  transfer.memo = memoRemaining.slice(0, memoLength)
-  currentData = memoRemaining.slice(memoLength)
+  transfer.memo = currentData.slice(0, 128)
+  currentData = currentData.slice(128)
   
   // Gas: decode[8]{DX_gas} (8-byte fixed-length)
   const gasResult = decodeFixedLength(currentData, 8)
@@ -2277,14 +2588,347 @@ export function encodeDeferredTransfer(transfer: DeferredTransfer): Uint8Array {
   // Amount: encode[8]{DX_amount} (8-byte fixed-length)
   parts.push(encodeFixedLength(transfer.amount, 8))
   
-  // Memo: DX_memo (variable-length with length prefix)
-  parts.push(encodeNatural(u64(transfer.memo.length)))
-  parts.push(transfer.memo)
+  // Memo: DX_memo (fixed 128-byte blob, Cmemosize = 128)
+  // Gray Paper specifies memo is exactly 128 bytes, no length prefix
+  if (transfer.memo.length != 128) {
+    // Pad or truncate to exactly 128 bytes
+    const fixedMemo = new Uint8Array(128)
+    const copyLen = i32(min(u64(transfer.memo.length), u64(128)))
+    for (let i = 0; i < copyLen; i++) {
+      fixedMemo[i] = transfer.memo[i]
+    }
+    parts.push(fixedMemo)
+  } else {
+    parts.push(transfer.memo)
+  }
   
   // Gas: encode[8]{DX_gas} (8-byte fixed-length)
   parts.push(encodeFixedLength(transfer.gasLimit, 8))
   
   return concatBytes(parts)
+}
+
+// ============================================================================
+// Accumulate Input Structures and Encoding (Gray Paper compliant)
+// ============================================================================
+
+/**
+ * OperandTuple structure for work item results
+ * 
+ * Gray Paper Equation 279-287: encode[U]{OT ∈ operandtuple}
+ */
+export class OperandTuple {
+  packageHash: Uint8Array    // 32-byte hash
+  segmentRoot: Uint8Array    // 32-byte hash
+  authorizer: Uint8Array     // 32-byte public key
+  payloadHash: Uint8Array    // 32-byte hash
+  gasLimit: u64              // 8-byte gas limit
+  result: Uint8Array         // Variable-length result (success blob or empty for error)
+  resultType: u8             // 0 = success, 1-6 = error types
+  authTrace: Uint8Array      // Variable-length authorization trace
+  
+  constructor() {
+    this.packageHash = new Uint8Array(32)
+    this.segmentRoot = new Uint8Array(32)
+    this.authorizer = new Uint8Array(32)
+    this.payloadHash = new Uint8Array(32)
+    this.gasLimit = u64(0)
+    this.result = new Uint8Array(0)
+    this.resultType = 0 // Success by default
+    this.authTrace = new Uint8Array(0)
+  }
+}
+
+/**
+ * AccumulateInput structure (discriminated union)
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export class AccumulateInput {
+  inputType: u8  // 0 = OperandTuple, 1 = DeferredTransfer
+  operandTuple: OperandTuple | null
+  deferredTransfer: DeferredTransfer | null
+  
+  constructor(inputType: u8) {
+    this.inputType = inputType
+    this.operandTuple = null
+    this.deferredTransfer = null
+  }
+  
+  static fromOperandTuple(ot: OperandTuple): AccumulateInput {
+    const input = new AccumulateInput(0)
+    input.operandTuple = ot
+    return input
+  }
+  
+  static fromDeferredTransfer(dt: DeferredTransfer): AccumulateInput {
+    const input = new AccumulateInput(1)
+    input.deferredTransfer = dt
+    return input
+  }
+}
+
+/**
+ * Encode work result according to Gray Paper specification
+ * 
+ * Gray Paper pvm_invocations.tex encodeResult:
+ * 0 = success (followed by var{blob})
+ * 1 = ∞ (out of gas)
+ * 2 = panic
+ * 3 = badexports
+ * 4 = oversize
+ * 5 = BAD
+ * 6 = BIG
+ */
+export function encodeWorkResult(resultType: u8, result: Uint8Array): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // Discriminator byte
+  const discriminatorByte = new Uint8Array(1)
+  discriminatorByte[0] = resultType
+  parts.push(discriminatorByte)
+  
+  // If success (type 0), append the variable-length result blob
+  if (resultType == 0) {
+    parts.push(encodeNatural(u64(result.length)))
+    parts.push(result)
+  }
+  // For error types 1-6, no additional data
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Encode OperandTuple according to Gray Paper specification
+ * 
+ * Gray Paper Equation 279-287:
+ * encode[U]{OT ∈ operandtuple} ≡ encode{
+ *   OT_packagehash,
+ *   OT_segroot,
+ *   OT_authorizer,
+ *   OT_payloadhash,
+ *   OT_gaslimit,
+ *   encodeResult{OT_result},
+ *   var{OT_authtrace}
+ * }
+ * 
+ * Note: OT_gaslimit uses natural encoding (no encode[8]{} wrapper)
+ */
+export function encodeOperandTuple(ot: OperandTuple): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // packageHash: 32-byte hash
+  parts.push(ot.packageHash)
+  
+  // segmentRoot: 32-byte hash
+  parts.push(ot.segmentRoot)
+  
+  // authorizer: 32-byte public key
+  parts.push(ot.authorizer)
+  
+  // payloadHash: 32-byte hash
+  parts.push(ot.payloadHash)
+  
+  // gasLimit: natural encoding (Gray Paper uses encode{} not encode[8]{})
+  parts.push(encodeNatural(ot.gasLimit))
+  
+  // encodeResult{result}: discriminator + optional var{blob}
+  parts.push(encodeWorkResult(ot.resultType, ot.result))
+  
+  // var{authTrace}: variable-length with length prefix
+  parts.push(encodeNatural(u64(ot.authTrace.length)))
+  parts.push(ot.authTrace)
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Encode AccumulateInput according to Gray Paper specification
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export function encodeAccumulateInput(input: AccumulateInput): Uint8Array {
+  const parts: Uint8Array[] = []
+  
+  // Type discriminator
+  const discriminatorByte = new Uint8Array(1)
+  discriminatorByte[0] = input.inputType
+  parts.push(discriminatorByte)
+  
+  if (input.inputType == 0 && input.operandTuple != null) {
+    // OperandTuple encoding
+    parts.push(encodeOperandTuple(input.operandTuple!))
+  } else if (input.inputType == 1 && input.deferredTransfer != null) {
+    // DeferredTransfer encoding
+    parts.push(encodeDeferredTransfer(input.deferredTransfer!))
+  }
+  
+  return concatBytes(parts)
+}
+
+/**
+ * Decode work result according to Gray Paper specification
+ * 
+ * Gray Paper pvm_invocations.tex encodeResult:
+ * 0 = success (followed by var{blob})
+ * 1-6 = error types (no additional data)
+ */
+export function decodeWorkResult(data: Uint8Array): DecodingResult<OperandTuple> | null {
+  if (data.length === 0) {
+    return null
+  }
+  
+  const ot = new OperandTuple()
+  ot.resultType = data[0]
+  
+  if (ot.resultType == 0) {
+    // Success: var{result_blob}
+    const lengthResult = decodeNatural(data.slice(1))
+    if (!lengthResult) {
+      return null
+    }
+    const blobLength = i32(lengthResult.value)
+    const remaining = data.slice(1 + lengthResult.consumed)
+    if (remaining.length < blobLength) {
+      return null
+    }
+    ot.result = remaining.slice(0, blobLength)
+    return new DecodingResult<OperandTuple>(ot, 1 + lengthResult.consumed + blobLength)
+  }
+  
+  // Error types 1-6: no additional data
+  return new DecodingResult<OperandTuple>(ot, 1)
+}
+
+/**
+ * Decode OperandTuple according to Gray Paper specification
+ * 
+ * Gray Paper Equation 279-287:
+ * encode[U]{OT ∈ operandtuple} ≡ encode{
+ *   OT_packagehash,
+ *   OT_segroot,
+ *   OT_authorizer,
+ *   OT_payloadhash,
+ *   OT_gaslimit,
+ *   encodeResult{OT_result},
+ *   var{OT_authtrace}
+ * }
+ */
+export function decodeOperandTuple(data: Uint8Array): DecodingResult<OperandTuple> | null {
+  if (data.length < 128) { // Minimum: 32+32+32+32 = 128 bytes for fixed hash fields
+    return null
+  }
+  
+  const ot = new OperandTuple()
+  let offset = 0
+  
+  // packageHash: 32 bytes
+  ot.packageHash = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // segmentRoot: 32 bytes
+  ot.segmentRoot = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // authorizer: 32 bytes
+  ot.authorizer = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // payloadHash: 32 bytes
+  ot.payloadHash = data.slice(offset, offset + 32)
+  offset += 32
+  
+  // gasLimit: natural encoding (Gray Paper uses encode{} not encode[8]{})
+  const gasResult = decodeNatural(data.slice(offset))
+  if (!gasResult) {
+    return null
+  }
+  ot.gasLimit = gasResult.value
+  offset += gasResult.consumed
+  
+  // decodeResult: discriminator + optional var{blob}
+  const resultDisc = data[offset]
+  ot.resultType = resultDisc
+  offset += 1
+  
+  if (resultDisc == 0) {
+    // Success: var{result_blob}
+    const lengthResult = decodeNatural(data.slice(offset))
+    if (!lengthResult) {
+      return null
+    }
+    const blobLength = i32(lengthResult.value)
+    offset += lengthResult.consumed
+    
+    if (offset + blobLength > data.length) {
+      return null
+    }
+    ot.result = data.slice(offset, offset + blobLength)
+    offset += blobLength
+  }
+  // For error types 1-6: no additional data, result stays empty
+  
+  // var{authTrace}: variable-length with length prefix
+  const authTraceLengthResult = decodeNatural(data.slice(offset))
+  if (!authTraceLengthResult) {
+    return null
+  }
+  const authTraceLength = i32(authTraceLengthResult.value)
+  offset += authTraceLengthResult.consumed
+  
+  if (offset + authTraceLength > data.length) {
+    return null
+  }
+  ot.authTrace = data.slice(offset, offset + authTraceLength)
+  offset += authTraceLength
+  
+  return new DecodingResult<OperandTuple>(ot, offset)
+}
+
+/**
+ * Decode AccumulateInput according to Gray Paper specification
+ * 
+ * Gray Paper Equation 289-292:
+ * encode{AI ∈ accinput} ≡ {
+ *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
+ *   encode{1, encode[X]{o}}  when AI ∈ defxfer
+ * }
+ */
+export function decodeAccumulateInput(data: Uint8Array): DecodingResult<AccumulateInput> | null {
+  if (data.length === 0) {
+    return null
+  }
+  
+  const inputType = data[0]
+  const remaining = data.slice(1)
+  
+  if (inputType == 0) {
+    // OperandTuple
+    const otResult = decodeOperandTuple(remaining)
+    if (!otResult) {
+      return null
+    }
+    const input = AccumulateInput.fromOperandTuple(otResult.value)
+    return new DecodingResult<AccumulateInput>(input, 1 + otResult.consumed)
+  } else if (inputType == 1) {
+    // DeferredTransfer
+    const dtResult = decodeDeferredTransfer(remaining)
+    if (!dtResult) {
+      return null
+    }
+    const input = AccumulateInput.fromDeferredTransfer(dtResult.value)
+    return new DecodingResult<AccumulateInput>(input, 1 + dtResult.consumed)
+  }
+  
+  return null
 }
 
 /**

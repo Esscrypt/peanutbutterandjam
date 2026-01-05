@@ -5,21 +5,21 @@
 //  * Reference: Gray Paper block authoring specifications
 //  */
 
-// import type { ConectivityChangeEvent } from '@pbnj/core'
+// import type { ConectivityChangeEvent } from '@pbnjam/core'
 // import {
 //   type EventBusService,
 //   type Hex,
 //   logger,
-// } from '@pbnj/core'
-// import type { BlockAnnouncementProtocol } from '@pbnj/networking'
-// import { calculateBlockHash } from '@pbnj/codec'
+// } from '@pbnjam/core'
+// import type { BlockAnnouncementProtocol } from '@pbnjam/networking'
+// import { calculateBlockHash } from '@pbnjam/codec'
 // import type {
 //   Block,
 //   BlockAnnouncement,
 //   BlockAnnouncementHandshake,
 //   SafePromise,
-// } from '@pbnj/types'
-// import { BaseService, safeError, safeResult } from '@pbnj/types'
+// } from '@pbnjam/types'
+// import { BaseService, safeError, safeResult } from '@pbnjam/types'
 // import type { ConfigService } from './config-service'
 // import type { NetworkingService } from './networking-service'
 // import type { ValidatorSetManager } from './validator-set'

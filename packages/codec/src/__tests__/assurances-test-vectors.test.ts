@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeAssurances, encodeAssurances } from '../block/assurance'
-import type { Assurance, IConfigService } from '@pbnj/types'
+import type { Assurance, IConfigService } from '@pbnjam/types'
 
 describe('Assurances Test Vectors - Comprehensive Round Trip', () => {
   // Create configs for different test vector sizes

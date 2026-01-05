@@ -40,7 +40,7 @@
  * while maintaining efficient encoding for the common case of no disputes.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   Culprit,
   DecodingResult,
@@ -50,8 +50,8 @@ import type {
   Judgment,
   Safe,
   Verdict,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
 import {

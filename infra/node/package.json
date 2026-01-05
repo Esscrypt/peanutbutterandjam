@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/node",
+  "name": "@pbnjam/node",
   "version": "0.0.1",
   "description": "Node serving the JAM Protocol",
   "type": "module",
@@ -7,33 +7,33 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "build:bin": "bun build ./services/main-service.ts --compile --outfile ./bin --sourcemap",
+    "build:bin": "bun build ./services/main-service.ts --compile --outfile ./bin --sourcemap --minify-whitespace --minify-syntax --target bun ",
+    "build:fuzzer": "bun build ./fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --sourcemap --minify-whitespace --minify-syntax --target bun ",
     "check": "tsc --pretty --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest run --watch",
-    "test:coverage": "vitest run --coverage",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "cli": "tsx src/cli.ts",
     "cli:build": "tsc && node dist/cli.js"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/safrole": "workspace:*",
-    "@pbnj/codec": "workspace:*",
-    "@pbnj/pvm": "workspace:*",
-    "@pbnj/pvm-invocations": "workspace:*",
-    "@pbnj/bandersnatch-vrf": "workspace:*",
-    "@pbnj/erasure-coding": "workspace:*",
-    "@pbnj/networking": "workspace:*",
-    "@pbnj/telemetry": "workspace:*",
-    "@pbnj/genesis": "workspace:*",
-    "@pbnj/events": "workspace:*",
-    "@pbnj/audit": "workspace:*",
-    "@pbnj/block-authoring": "workspace:*",
-    "@pbnj/guarantor": "workspace:*",
-    "@pbnj/assurance": "workspace:*",
-    "commander": "^12.0.0",
-    "@pbnj/types": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/safrole": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
+    "@pbnjam/pvm": "workspace:*",
+    "@pbnjam/pvm-invocations": "workspace:*",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
+    "@pbnjam/erasure-coding": "workspace:*",
+    "@pbnjam/networking": "workspace:*",
+    "@pbnjam/telemetry": "workspace:*",
+    "@pbnjam/genesis": "workspace:*",
+    "@pbnjam/events": "workspace:*",
+    "@pbnjam/audit": "workspace:*",
+    "@pbnjam/block-authoring": "workspace:*",
+    "@pbnjam/guarantor": "workspace:*",
+    "@pbnjam/assurance": "workspace:*",
+    "@pbnjam/block-importer": "workspace:*",
+    "@pbnjam/disputes": "workspace:*",
+    "commander": "catalog:",
+    "@pbnjam/types": "workspace:*",
     "@opentelemetry/api": "^1.7.0",
     "@opentelemetry/resources": "^1.21.0",
     "@opentelemetry/semantic-conventions": "^1.21.0",
@@ -42,15 +42,16 @@
     "@opentelemetry/exporter-metrics-otlp-http": "^0.48.0",
     "@opentelemetry/sdk-metrics": "^1.21.0",
     "@opentelemetry/sdk-trace-base": "^1.21.0",
-    "@opentelemetry/auto-instrumentations-node": "^0.40.0"
+    "@opentelemetry/auto-instrumentations-node": "^0.40.0",
+    "pino": "catalog:",
+    "@noble/ed25519": "catalog:",
+    "@infisical/quic": "catalog:",
+    "radash": "catalog:"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.8.3",
-    "vitest": "^2.1.9",
-    "@vitest/coverage-v8": "^2.1.9",
-    "@pbnj/typescript-config": "workspace:*",
-    "tsx": "^4.19.2"
+    "typescript": "5.9.2",
+    "@pbnjam/typescript-config": "workspace:*"
   },
   "exports": {
     ".": "./index.ts"
@@ -62,6 +63,6 @@
     "consensus",
     "blockchain"
   ],
-  "author": "JAM Protocol Team",
+  "author": "Esscrypt",
   "license": "MIT"
 }

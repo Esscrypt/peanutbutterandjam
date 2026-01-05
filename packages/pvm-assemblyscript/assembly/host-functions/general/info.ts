@@ -1,7 +1,6 @@
-import { CompleteServiceAccount, ServiceAccountData } from '../../codec'
+import { CompleteServiceAccount } from '../../codec'
 import { HostFunctionResult } from '../accumulate/base'
 import { HostFunctionContext, HostFunctionParams, InfoParams } from './base'
-import { encodeServiceAccount } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -31,7 +30,6 @@ import { BaseHostFunction } from './base'
 export class InfoHostFunction extends BaseHostFunction {
   functionId: u64 = GENERAL_FUNCTIONS.INFO
   name: string = 'info'
-  gasCost: u64 = 10
 
   execute(
     context: HostFunctionContext,
@@ -71,21 +69,51 @@ export class InfoHostFunction extends BaseHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Gray Paper equation 466-473: Encode service account info
-    // Convert CompleteServiceAccount to ServiceAccountData for encoding
-    const accountData = new ServiceAccountData(
-      serviceAccount.codehash,
-      serviceAccount.balance,
-      serviceAccount.minaccgas,
-      serviceAccount.minmemogas,
-      serviceAccount.octets,
-      serviceAccount.gratis,
-      serviceAccount.items,
-      serviceAccount.created,
-      serviceAccount.lastacc,
-      serviceAccount.parent
-    )
-    const info = encodeServiceAccount(accountData)
+    // Gray Paper equation 466-473: Encode service account info for INFO host function
+    // INFO uses a different format than merklization (pvm_invocations.tex vs merklization.tex)
+    // Format: codehash + encode[8]{balance, minbalance, minaccgas, minmemogas, octets} +
+    //         encode[4]{items} + encode[8]{gratis} + encode[4]{created, lastacc, parent}
+    // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
+
+    // Calculate minbalance: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    const C_BASEDEPOSIT: u64 = u64(100)
+    const C_ITEMDEPOSIT: u64 = u64(10)
+    const C_BYTEDEPOSIT: u64 = u64(1)
+    const baseDeposit = C_BASEDEPOSIT
+    const itemDeposit = C_ITEMDEPOSIT * serviceAccount.items
+    const byteDeposit = C_BYTEDEPOSIT * serviceAccount.octets
+    const totalDeposit = baseDeposit + itemDeposit + byteDeposit
+    const minbalance =
+      totalDeposit > serviceAccount.gratis
+        ? totalDeposit - serviceAccount.gratis
+        : u64(0)
+
+    // Encode using INFO-specific format (96 bytes, includes minbalance)
+    // Gray Paper pvm_invocations.tex format (NOT merklization format)
+    const info = new Uint8Array(96) // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
+    const view = new DataView(info.buffer)
+
+    // 1. codehash (32 bytes)
+    // codehash is already a Uint8Array in CompleteServiceAccount
+    info.set(serviceAccount.codehash, 0)
+
+    // 2. encode[8]{balance, minbalance, minaccgas, minmemogas, octets} (40 bytes)
+    view.setUint64(32, serviceAccount.balance, true) // balance at offset 32
+    view.setUint64(40, minbalance, true) // minbalance at offset 40
+    view.setUint64(48, serviceAccount.minaccgas, true) // minaccgas at offset 48
+    view.setUint64(56, serviceAccount.minmemogas, true) // minmemogas at offset 56
+    view.setUint64(64, serviceAccount.octets, true) // octets at offset 64
+
+    // 3. encode[4]{items} (4 bytes)
+    view.setUint32(72, serviceAccount.items, true) // items at offset 72
+
+    // 4. encode[8]{gratis} (8 bytes)
+    view.setUint64(76, serviceAccount.gratis, true) // gratis at offset 76
+
+    // 5. encode[4]{created, lastacc, parent} (12 bytes)
+    view.setUint32(84, serviceAccount.created, true) // created at offset 84
+    view.setUint32(88, serviceAccount.lastacc, true) // lastacc at offset 88
+    view.setUint32(92, serviceAccount.parent, true) // parent at offset 92
 
     // Gray Paper equation 475-476: Calculate slice parameters
     // f = min(registers[9], len(v))
@@ -100,7 +128,24 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     // Gray Paper equation 480: Extract slice v[f:f+l]
-    const dataToWrite = info.slice(f, f + l)
+    const dataSlice = info.slice(f, f + l)
+    
+    // Pad to requested length if needed (to match jamduna behavior)
+    // Gray Paper equation 478: Write to memory[o:o+l]
+    // Note: l is the actual slice length, but if requested length > actual length,
+    // jamduna pads with zeros to the requested length
+    const requestedWriteLength = i32(length)
+    let dataToWrite: Uint8Array
+    if (requestedWriteLength > dataSlice.length) {
+      // Pad with zeros to requested length
+      dataToWrite = new Uint8Array(requestedWriteLength)
+      for (let i = 0; i < dataSlice.length; i++) {
+        dataToWrite[i] = dataSlice[i]
+      }
+      // Remaining bytes are already zero (default Uint8Array initialization)
+    } else {
+      dataToWrite = dataSlice
+    }
 
     // Gray Paper equation 478: Write to memory[o:o+l]
     const writeResult = context.ram.writeOctets(u32(outputOffset), dataToWrite)
@@ -109,8 +154,9 @@ export class InfoHostFunction extends BaseHostFunction {
       return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
-    // Gray Paper equation 480: Return length of info
-    context.registers[7] = u64(info.length)
+    // Gray Paper equation 480: Return length of written data (requested length if padded)
+    // Match jamduna behavior: return the length that was actually written
+    context.registers[7] = u64(dataToWrite.length)
 
     return new HostFunctionResult(255) // continue execution
   }

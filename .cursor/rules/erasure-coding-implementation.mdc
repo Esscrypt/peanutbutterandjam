@@ -1,7 +1,7 @@
 # Erasure Coding Implementation Guide
 
 ## Overview
-This guide outlines the implementation requirements for the `@pbnj/erasure-coding` package, which implements data availability through erasure coding for the JAM protocol as specified in the Gray Paper.
+This guide outlines the implementation requirements for the `@pbnjam/erasure-coding` package, which implements data availability through erasure coding for the JAM protocol as specified in the Gray Paper.
 
 ## Package Structure
 ```

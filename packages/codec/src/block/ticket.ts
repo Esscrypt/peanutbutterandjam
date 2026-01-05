@@ -36,10 +36,14 @@
  * BABE-style slot-based authorship and finality mechanisms.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
-import type { DecodingResult, Safe, SafroleTicket } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import {
+  bytesToHex,
+  concatBytes,
+  getTicketIdFromProof,
+  hexToBytes,
+} from '@pbnjam/core'
+import type { DecodingResult, Safe, SafroleTicket } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { decodeSequenceGeneric, encodeVariableSequence } from '../core/sequence'
 

@@ -6,8 +6,8 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
-import { GENERAL_FUNCTIONS, ACCUMULATE_FUNCTIONS } from './config'
+import { logger } from '@pbnjam/core'
+import { ACCUMULATE_FUNCTIONS, GENERAL_FUNCTIONS } from './config'
 
 /**
  * Get host function name from function ID
@@ -19,41 +19,88 @@ function getHostFunctionName(hostCallId: bigint): string {
       return name
     }
   }
-  
+
   // Check accumulate functions
   for (const [name, id] of Object.entries(ACCUMULATE_FUNCTIONS)) {
     if (id === hostCallId) {
       return name
     }
   }
-  
+
   return `UNKNOWN_${hostCallId.toString()}`
 }
 
 /**
- * Generate jamduna-style filename from block number
- * Format: 00000004.log (8-digit zero-padded block number)
+ * Generate trace filename
+ *
+ * Priority:
+ * 1. If both executorType and blockNumber are provided: {executorType}-{blockNumber}.log (e.g., wasm-4.log)
+ * 2. If only executorType is provided: {executorType}-{timestamp}.log
+ * 3. If only blockNumber is provided: jamduna format 00000004.log
+ * 4. Otherwise: trace-{timestamp}.log
  */
-export function generateTraceFilename(blockNumber?: number | bigint | string): string {
+export function generateTraceFilename(
+  blockNumber?: number | bigint | string,
+  executorType?: 'wasm' | 'typescript',
+  serviceId?: number | bigint | string,
+  invocationIndex?: number, // The accseq iteration index (0-based) - determines directory structure in jamduna format
+): string {
+  // If executor type is provided with block number, use {executorType}-{blockNumber}-{invocationIndex}-{serviceId}.log
+  // This format enables the converter to group services by invocation index (accseq iteration)
+  // jamduna structure: {timeslot}/{invocation_index}/{service_id}/
+  if (executorType !== undefined && blockNumber !== undefined) {
+    const blockNum =
+      typeof blockNumber === 'string'
+        ? Number.parseInt(blockNumber, 10)
+        : Number(blockNumber)
+    if (serviceId !== undefined) {
+      const svcId =
+        typeof serviceId === 'string'
+          ? Number.parseInt(serviceId, 10)
+          : Number(serviceId)
+      const invIdx = invocationIndex ?? 0
+      return `${executorType}-${blockNum}-${invIdx}-${svcId}.log`
+    }
+    return `${executorType}-${blockNum}.log`
+  }
+
+  // If only executor type is provided, use {executorType}-{timestamp}.log
+  if (executorType !== undefined) {
+    const timestamp = Date.now()
+    return `${executorType}-${timestamp}.log`
+  }
+
+  // If only blockNumber is provided (and executorType is not), use jamduna format
   if (blockNumber !== undefined) {
-    const blockNum = typeof blockNumber === 'string' ? Number.parseInt(blockNumber, 10) : Number(blockNumber)
+    const blockNum =
+      typeof blockNumber === 'string'
+        ? Number.parseInt(blockNumber, 10)
+        : Number(blockNumber)
     return `${String(blockNum).padStart(8, '0')}.log`
   }
+
+  // Default: timestamp-based
   return `trace-${Date.now()}.log`
 }
 
 /**
  * Write PVM execution trace in jamduna format
- * 
+ *
  * Format matches jamduna exactly:
  * - Instruction lines: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
  * - Host function calls: Calling host function: <NAME> <ID> [gas used: <GAS_USED>, gas remaining: <GAS_REMAINING>] [service: <SERVICE_ID>]
- * 
+ *
  * @param executionLogs - Array of execution log entries
  * @param hostFunctionLogs - Optional array of host function call logs
  * @param outputDir - Optional output directory (defaults to 'pvm-traces' in process.cwd())
- * @param filename - Optional filename (defaults to timestamp-based name, or use blockNumber to generate jamduna-style name)
+ * @param filename - Optional filename (overrides all other filename generation options)
  * @param blockNumber - Optional block number for jamduna-style filename (e.g., 4 -> "00000004.log")
+ * @param executorType - Optional executor type ('wasm' or 'ts') for trace-style filename
+ * @param serviceId - Optional service ID to include in trace-style filename
+ * @param accumulateInput - Optional accumulate input bytes (encoded args) to write alongside trace
+ * @param invocationIndex - Optional invocation index (accseq iteration) for jamduna directory structure
+ * @param accumulateOutput - Optional accumulate output (yield hash, 32 bytes) to write as 'output' file
+ * @param errorCode - Optional error code to write as 'err' file (1 byte)
  * @returns The filepath where the trace was written, or undefined if writing failed
  */
 export function writeTraceDump(
@@ -64,6 +111,11 @@ export function writeTraceDump(
     opcode: string
     gas: bigint
     registers: string[]
+    // JIP-6 trace support
+    loadAddress?: number
+    loadValue?: bigint
+    storeAddress?: number
+    storeValue?: bigint
   }>,
   hostFunctionLogs?: Array<{
     step: number
@@ -75,7 +127,20 @@ export function writeTraceDump(
   outputDir?: string,
   filename?: string,
   blockNumber?: number | bigint | string,
+  executorType?: 'wasm' | 'typescript',
+  serviceId?: number | bigint | string,
+  accumulateInput?: Uint8Array,
+  invocationIndex?: number,
+  accumulateOutput?: Uint8Array,
+  errorCode?: number,
 ): string | undefined {
+  // Check if trace dumping is enabled via environment variable
+  const enableTraceDump = process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+  if (!enableTraceDump) {
+    // Trace dumping is disabled, return early
+    return undefined
+  }
+
   if (executionLogs.length === 0) {
     // No logs to write
     return undefined
@@ -91,13 +156,26 @@ export function writeTraceDump(
 
     // Build combined trace lines
     const traceLines: string[] = []
-    const hostLogsByStep = new Map<number, { step: number; hostCallId: bigint; gasBefore: bigint; gasAfter: bigint; serviceId?: bigint } | undefined>()
-    
+    const hostLogsByStep = new Map<
+      number,
+      | {
+          step: number
+          hostCallId: bigint
+          gasBefore: bigint
+          gasAfter: bigint
+          serviceId?: bigint
+        }
+      | undefined
+    >()
+
     if (hostFunctionLogs && hostFunctionLogs.length > 0) {
       for (const hostLog of hostFunctionLogs) {
         hostLogsByStep.set(hostLog.step, hostLog)
       }
     }
+
+    // Track which steps have execution logs to ensure host function logs appear
+    const executionLogSteps = new Set(executionLogs.map((log) => log.step))
 
     // Format trace lines in jamduna format
     for (const log of executionLogs) {
@@ -108,27 +186,85 @@ export function writeTraceDump(
         const gasUsed = hostLog.gasBefore - hostLog.gasAfter
         const serviceId = hostLog.serviceId ?? 0n
         traceLines.push(
-          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`
+          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`,
         )
+        // Remove from map so we don't duplicate it
+        hostLogsByStep.delete(log.step)
       }
-      
+
       // Format registers as comma-separated values (jamduna format)
       const registersStr = log.registers.join(', ')
       const gasValue = log.gas.toString()
 
-      // Format: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
-      // Matches jamduna format exactly
+      // Format: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...] Load:[<ADDR>,<VALUE>] Store:[<ADDR>,<VALUE>]
+      // Extended format includes JIP-6 load/store info
+      const loadAddr = log.loadAddress ?? 0
+      const loadVal = log.loadValue ?? 0n
+      const storeAddr = log.storeAddress ?? 0
+      const storeVal = log.storeValue ?? 0n
       traceLines.push(
-        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}]`
+        `${log.instructionName} ${log.step} ${log.pc.toString()} Gas: ${gasValue} Registers:[${registersStr}] Load:[${loadAddr},${loadVal}] Store:[${storeAddr},${storeVal}]`,
       )
     }
 
-    // Create filename (use blockNumber if provided and filename not specified)
-    const traceFilename = filename ?? generateTraceFilename(blockNumber)
+    // Add any remaining host function logs that don't have corresponding instruction logs
+    // This can happen if execution stops immediately after a host function panic
+    // Iterate through remaining entries in hostLogsByStep (those not matched to instruction logs)
+    for (const hostLog of hostLogsByStep.values()) {
+      if (hostLog && !executionLogSteps.has(hostLog.step)) {
+        const hostFunctionName = getHostFunctionName(hostLog.hostCallId)
+        const gasUsed = hostLog.gasBefore - hostLog.gasAfter
+        const serviceId = hostLog.serviceId ?? 0n
+        traceLines.push(
+          `Calling host function: ${hostFunctionName} ${hostLog.hostCallId.toString()} [gas used: ${gasUsed.toString()}, gas remaining: ${hostLog.gasAfter.toString()}] [service: ${serviceId.toString()}]`,
+        )
+      }
+    }
+
+    // Create filename (use provided filename, or generate based on parameters)
+    const traceFilename =
+      filename ??
+      generateTraceFilename(
+        blockNumber,
+        executorType,
+        serviceId,
+        invocationIndex,
+      )
     const filepath = join(targetDir, traceFilename)
 
     // Write to file
-    writeFileSync(filepath, traceLines.join('\n') + '\n', 'utf-8')
+    writeFileSync(filepath, `${traceLines.join('\n')}\n`, 'utf-8')
+
+    // Write accumulate_input file if provided
+    // This matches the jamduna format where accumulate_input is a binary file
+    // alongside the trace log with the same naming pattern
+    if (accumulateInput && accumulateInput.length > 0) {
+      // Generate accumulate_input filename based on trace filename
+      // e.g., typescript-2-0.log -> typescript-2-0-accumulate_input.bin
+      const accumulateInputFilename = traceFilename.replace(
+        '.log',
+        '-accumulate_input.bin',
+      )
+      const accumulateInputPath = join(targetDir, accumulateInputFilename)
+      writeFileSync(accumulateInputPath, accumulateInput)
+      logger.debug(
+        `[TraceDump] Wrote accumulate_input to: ${accumulateInputPath}`,
+      )
+    }
+
+    // Write accumulate output or error file if provided
+    // jamduna format: 'output' (32-byte yield hash) or 'err' (1-byte error code)
+    if (accumulateOutput && accumulateOutput.length > 0) {
+      const outputFilename = traceFilename.replace('.log', '-output.bin')
+      const outputPath = join(targetDir, outputFilename)
+      writeFileSync(outputPath, accumulateOutput)
+      logger.debug(`[TraceDump] Wrote output to: ${outputPath}`)
+    } else if (errorCode !== undefined) {
+      const errFilename = traceFilename.replace('.log', '-err.bin')
+      const errPath = join(targetDir, errFilename)
+      writeFileSync(errPath, new Uint8Array([errorCode]))
+      logger.debug(`[TraceDump] Wrote err to: ${errPath}`)
+    }
 
     return filepath
   } catch (error) {

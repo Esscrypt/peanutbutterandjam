@@ -15,8 +15,8 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
 import { Resource } from '@opentelemetry/resources'
 import { NodeSDK } from '@opentelemetry/sdk-node'
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions'
-import type { BlockAuthoringMetrics, Safe } from '@pbnj/types'
-import { BaseService, safeResult } from '@pbnj/types'
+import type { BlockAuthoringMetrics, Safe } from '@pbnjam/types'
+import { BaseService, safeResult } from '@pbnjam/types'
 
 /**
  * Metrics Collector with OpenTelemetry

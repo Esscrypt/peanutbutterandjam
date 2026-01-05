@@ -21,7 +21,7 @@ import {
   type BlockProcessedEvent,
   type EventBusService,
   logger,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import {
   AUTHORIZATION_CONSTANTS,
   type AuthPool,
@@ -31,7 +31,7 @@ import {
   type Safe,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { AuthQueueService } from './auth-queue-service'
 import type { ConfigService } from './config-service'

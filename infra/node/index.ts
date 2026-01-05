@@ -5,8 +5,8 @@
  * Reference: Gray Paper specifications
  */
 
-import { logger } from '@pbnj/core'
-import type { NodeType } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { NodeType } from '@pbnjam/types'
 import type { MainServiceConfig } from './services/main-service'
 import { MainService } from './services/main-service'
 

@@ -27,6 +27,7 @@
       "!**/ponder-env.d.ts",
       "!**/submodules/**",
       "!**/packages/erasure-coding/rust-reed-solomon/**",
+      "!**/scripts/**",
       "!**/*.test.ts",
       "!**/*.test.tsx",
       "!**/*.spec.ts",
@@ -34,7 +35,9 @@
       "!**/__tests__/**",
       "!**/test/**",
       "!**/tests/**",
-      "!**/packages/pvm-assemblyscript/assembly/**"
+      "!**/packages/pvm-assemblyscript/assembly/**",
+      "!**/*.json",
+      "!**/*.log"
     ]
   },
   "formatter": {

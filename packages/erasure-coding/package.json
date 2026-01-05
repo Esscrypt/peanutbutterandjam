@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/erasure-coding",
+  "name": "@pbnjam/erasure-coding",
   "version": "0.1.0",
   "description": "Erasure coding implementation for JAM protocol data availability",
   "type": "module",
@@ -20,12 +20,14 @@
     "prepare": "bun run build:native || echo 'Native build failed, continuing without native module'"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "catalog:",
+    "@types/hapi__catbox": "catalog:"
   },
   "devDependencies": {
+    "@pbnjam/typescript-config": "workspace:*",
     "@types/node": "22.13.10",
-    "typescript": "5.8.2",
-    "vitest": "2.1.9",
+    "typescript": "catalog:",
     "biome": "0.3.3",
     "@napi-rs/cli": "^2.18.0"
   },

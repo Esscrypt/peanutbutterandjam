@@ -4,7 +4,7 @@
  * ADD_IMM and MUL_IMM variants - Add/Multiply with immediate values
  */
 
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -29,7 +29,6 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
   readonly name = 'ADD_IMM_32'
 
   execute(context: InstructionContext): InstructionResult {
-
     const { registerA, registerB, immediateX } =
       this.parseTwoRegistersAndImmediate(
         context.instruction.operands,
@@ -44,7 +43,6 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
       context.registers,
       registerB,
     )
-
 
     // Gray Paper: reg'_A = sext{4}{(\reg_B + \immed_X) \bmod 2^{32}}
     // Add 32-bit reg_B to 64-bit immed_X, then mod 2^32
@@ -62,7 +60,9 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
       registerValue: registerValue.toString(),
       addition: addition.toString(),
       result: result.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       pc: context.pc,
     })
 
@@ -75,7 +75,9 @@ export class ADD_IMM_32Instruction extends BaseInstruction {
       immediateX: immediateX.toString(),
       afterValue: context.registers[registerA].toString(),
       result: result.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
+      registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+        r.toString(),
+      ),
       pc: context.pc,
     })
 

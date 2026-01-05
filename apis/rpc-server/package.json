@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/rpc-server",
+  "name": "@pbnjam/rpc-server",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -13,7 +13,7 @@
     "start:dev": "bun run --hot ./src/index.ts 2>&1 | bunx pino-pretty"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
+    "@pbnjam/core": "workspace:*",
     "drizzle-orm": "0.41.0",
     "viem": "2.33.1",
     "express": "^4.18.0",
@@ -24,7 +24,7 @@
     "zod": "^3.0.0"
   },
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "@types/node": "^20.0.0",
     "@types/express": "^4.17.0",
     "@types/ws": "^8.5.0",

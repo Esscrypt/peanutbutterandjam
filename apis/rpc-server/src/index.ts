@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import cors from 'cors'
 import express from 'express'
 import { WebSocketServer } from 'ws'

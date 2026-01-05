@@ -6,8 +6,8 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { generateAlternativeName } from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/codec'
+import { generateAlternativeName } from '@pbnjam/core'
+import { decodeFixedLength } from '@pbnjam/codec'
 
 describe('generateAlternativeName', () => {
   it('should generate alternative names according to Gray Paper specification', () => {

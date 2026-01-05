@@ -1,4 +1,4 @@
-import { createEnvSchema, loadEnvVariables } from '@pbnj/core'
+import { createEnvSchema, loadEnvVariables } from '@pbnjam/core'
 import { z } from 'zod'
 
 // Define RPC server specific environment schema

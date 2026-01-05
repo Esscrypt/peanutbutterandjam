@@ -1,5 +1,4 @@
-
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -27,14 +26,17 @@ export class SHLO_L_IMM_ALT_64Instruction extends BaseInstruction {
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
-    context.log('SHLO_L_IMM_ALT_64: Alternative logical left shift of immediate by register (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      shiftAmount,
-      result,
-    })
+    context.log(
+      'SHLO_L_IMM_ALT_64: Alternative logical left shift of immediate by register (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        shiftAmount,
+        result,
+      },
+    )
 
     return { resultCode: null }
   }
@@ -64,16 +66,21 @@ export class SHLO_R_IMM_ALT_64Instruction extends BaseInstruction {
 
     // Log BEFORE modification to capture the before state
     const beforeValue = context.registers[registerA]
-    context.log('SHLO_R_IMM_ALT_64: Alternative logical right shift of immediate by register (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      shiftAmount,
-      result,
-      beforeValue: beforeValue.toString(),
-      registers: Array.from(context.registers.slice(0, 13)).map(r => r.toString()),
-    })
+    context.log(
+      'SHLO_R_IMM_ALT_64: Alternative logical right shift of immediate by register (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        shiftAmount,
+        result,
+        beforeValue: beforeValue.toString(),
+        registers: Array.from(context.registers.slice(0, 13)).map((r) =>
+          r.toString(),
+        ),
+      },
+    )
 
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
@@ -105,16 +112,19 @@ export class SHAR_R_IMM_ALT_64Instruction extends BaseInstruction {
     const shiftedValue = signedImmediate >> BigInt(shiftAmount)
     const result = this.toUnsigned64(shiftedValue)
 
-    context.log('SHAR_R_IMM_ALT_64: Alternative arithmetic right shift of immediate by register (64-bit) and storing in registerA', {
-      registerA,
-      registerB,
-      immediateX,
-      registerBValue,
-      signedImmediate,
-      shiftAmount,
-      shiftedValue,
-      result,
-    })
+    context.log(
+      'SHAR_R_IMM_ALT_64: Alternative arithmetic right shift of immediate by register (64-bit) and storing in registerA',
+      {
+        registerA,
+        registerB,
+        immediateX,
+        registerBValue,
+        signedImmediate,
+        shiftAmount,
+        shiftedValue,
+        result,
+      },
+    )
     this.setRegisterValueWith64BitResult(context.registers, registerA, result)
 
     return { resultCode: null }

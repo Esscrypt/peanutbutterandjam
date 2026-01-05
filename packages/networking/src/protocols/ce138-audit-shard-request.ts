@@ -10,14 +10,14 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   AuditShardRequest,
   AuditShardResponse,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

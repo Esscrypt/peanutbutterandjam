@@ -1,5 +1,5 @@
 /**
- * @pbnj/guarantor
+ * @pbnjam/guarantor
  *
  * JAM Protocol Guarantor Implementation
  *

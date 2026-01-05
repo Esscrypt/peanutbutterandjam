@@ -1,7 +1,7 @@
-import { blake2bHash, type Hex, hexToBytes } from '@pbnj/core'
+import { blake2bHash, type Hex, hexToBytes } from '@pbnjam/core'
 
-import type { Safe, ValidatorPublicKeys } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import type { Safe, ValidatorPublicKeys } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Compute epoch marker according to Gray Paper Eq. 248-257

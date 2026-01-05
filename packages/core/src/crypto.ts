@@ -10,12 +10,12 @@ import {
   FpIsSquare,
   FpSqrt,
   type IField,
-} from '@noble/curves/abstract/modular'
+} from '@noble/curves/abstract/modular.js'
 import * as ed from '@noble/ed25519'
-import { sha512 } from '@noble/hashes/sha2'
-import { BANDERSNATCH_PARAMS } from '@pbnj/bandersnatch'
-import type { AlternativeName, FixedLengthSize, KeyPair } from '@pbnj/types'
-import { type Safe, safeError, safeResult } from '@pbnj/types'
+import { sha512 } from '@noble/hashes/sha2.js'
+import { BANDERSNATCH_PARAMS } from '@pbnjam/bandersnatch'
+import type { AlternativeName, FixedLengthSize, KeyPair } from '@pbnjam/types'
+import { type Safe, safeError, safeResult } from '@pbnjam/types'
 import { blake2bHash, hexToBytes } from './utils/crypto'
 
 // Configure Ed25519 with SHA-512

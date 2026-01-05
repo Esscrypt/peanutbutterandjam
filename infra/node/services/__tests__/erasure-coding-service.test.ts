@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import {
   decodeWorkPackage,
   encodeWorkPackage,
-} from '@pbnj/codec'
-import type { ShardWithIndex } from '@pbnj/types'
+} from '@pbnjam/codec'
+import type { ShardWithIndex } from '@pbnjam/types'
 import { ConfigService } from '../config-service'
 import { ErasureCodingService } from '../erasure-coding-service'
 

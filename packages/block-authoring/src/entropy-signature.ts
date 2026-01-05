@@ -1,10 +1,13 @@
-import { banderout, generateEntropyVRFSignature } from '@pbnj/bandersnatch-vrf'
+import {
+  banderout,
+  generateEntropyVRFSignature,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   type IKeyPairService,
   type SafePromise,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 
 /**
  * Generate VRF signature (H_vrfsig) using safrole helper function

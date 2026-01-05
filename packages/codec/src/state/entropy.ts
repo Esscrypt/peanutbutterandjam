@@ -52,9 +52,9 @@
  * network security through unbiased validator selection.
  */
 
-import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, EntropyState, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
+import type { DecodingResult, EntropyState, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { encodeSequenceGeneric } from '../core/sequence'
 
 /**

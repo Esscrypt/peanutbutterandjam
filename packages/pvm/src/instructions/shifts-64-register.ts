@@ -1,5 +1,4 @@
-
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -10,7 +9,7 @@ import { BaseInstruction } from './base'
 export class SHLO_L_64Instruction extends BaseInstruction {
   readonly opcode = OPCODES.SHLO_L_64
   readonly name = 'SHLO_L_64'
-  
+
   execute(context: InstructionContext): InstructionResult {
     const registerD = this.getRegisterD(context.instruction.operands)
     const registerA = this.getRegisterA(context.instruction.operands)

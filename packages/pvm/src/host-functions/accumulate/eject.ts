@@ -1,5 +1,6 @@
-import { bytesToHex, hexToBytes, logger } from '@pbnj/core'
-import type { HostFunctionResult } from '@pbnj/types'
+import { encodeFixedLength } from '@pbnjam/codec'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
+import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -77,9 +78,25 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Verify the hash matches the service's code hash
     // Gray Paper: d.sa_codehash ≠ encode[32]{imX.id}
-    const expectedCodeHash = this.encodeServiceId(imX.id)
+    // Use encodeFixedLength for proper Gray Paper encoding
+    const [encodeError, expectedCodeHash] = encodeFixedLength(imX.id, 32n)
+    if (encodeError) {
+      logger.error('[EjectHostFunction] Failed to encode service ID', {
+        serviceId: imX.id.toString(),
+        error: encodeError.message,
+      })
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
     const serviceCodeHash = hexToBytes(serviceAccount.codehash)
     if (!this.arraysEqual(serviceCodeHash, expectedCodeHash)) {
+      logger.warning('[EjectHostFunction] Codehash mismatch', {
+        serviceIdToEject: serviceIdToEject.toString(),
+        currentServiceId: imX.id.toString(),
+        expectedCodeHash: bytesToHex(expectedCodeHash),
+        actualCodeHash: serviceAccount.codehash,
+      })
       this.setAccumulateError(registers, 'WHO')
       return {
         resultCode: null, // continue execution
@@ -102,6 +119,10 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     const hashHex = bytesToHex(hashData)
     const requestMap = serviceAccount.requests.get(hashHex)
     if (!requestMap) {
+      logger.warning('[EjectHostFunction] Request map not found for hash', {
+        hashHex,
+        availableHashes: Array.from(serviceAccount.requests.keys()),
+      })
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -110,6 +131,13 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     const request = requestMap.get(BigInt(l))
     if (!request) {
+      logger.warning('[EjectHostFunction] Request not found for length', {
+        hashHex,
+        calculatedLength: l,
+        availableLengths: Array.from(requestMap.keys()).map((len) =>
+          len.toString(),
+        ),
+      })
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -121,7 +149,16 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // For test vectors, Cexpungeperiod = 32 (as per README)
     // For production, Cexpungeperiod = 19200 (Gray Paper constant)
     const expungePeriod = context.expungePeriod
+    const threshold = timeslot - expungePeriod
+
     if (request.length < 2 || request[1] >= timeslot - expungePeriod) {
+      logger.warning('[EjectHostFunction] Expunge period check failed', {
+        requestLength: request.length,
+        y: request[1]?.toString(),
+        timeslot: timeslot.toString(),
+        expungePeriod: expungePeriod.toString(),
+        threshold: threshold.toString(),
+      })
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
@@ -132,43 +169,33 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: imX'.state.ps_accounts = imX.state.ps_accounts \ {d} ∪ {imX.id: s'}
     // where s' = imX.self except s'.sa_balance = imX.self.sa_balance + d.sa_balance
     const currentService = imX.state.accounts.get(imX.id)
-    const ejectedBalance = serviceAccount.balance
-    const currentBalanceBefore = currentService?.balance ?? 0n
 
-    if (currentService) {
-      currentService.balance += serviceAccount.balance
+    if (!currentService) {
+      logger.error(
+        '[EjectHostFunction] Current service account not found in state',
+        {
+          currentServiceId: imX.id.toString(),
+          availableAccountIds: Array.from(imX.state.accounts.keys()).map((id) =>
+            id.toString(),
+          ),
+        },
+      )
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
     }
 
-    // Remove the ejected service account
-    const deleted = imX.state.accounts.delete(serviceIdToEject)
+    currentService.balance += serviceAccount.balance
 
-    // Log ejection details for debugging
-    logger.debug('[EjectHostFunction] Service ejected successfully', {
-      ejectedServiceId: serviceIdToEject.toString(),
-      currentServiceId: imX.id.toString(),
-      ejectedBalance: ejectedBalance.toString(),
-      currentBalanceBefore: currentBalanceBefore.toString(),
-      currentBalanceAfter: currentService?.balance?.toString() ?? 'N/A',
-      deleted: deleted,
-      remainingAccountsCount: imX.state.accounts.size,
-      remainingAccountIds: Array.from(imX.state.accounts.keys()).map((id) =>
-        id.toString(),
-      ),
-    })
+    // Remove the ejected service account
+    imX.state.accounts.delete(serviceIdToEject)
 
     // Set success result
     this.setAccumulateSuccess(registers)
     return {
       resultCode: null, // continue execution
     }
-  }
-
-  private encodeServiceId(serviceId: bigint): Uint8Array {
-    // Encode service ID as 32-byte hash
-    const buffer = new ArrayBuffer(32)
-    const view = new DataView(buffer)
-    view.setBigUint64(0, serviceId, true) // little-endian
-    return new Uint8Array(buffer)
   }
 
   private arraysEqual(a: Uint8Array, b: Uint8Array): boolean {

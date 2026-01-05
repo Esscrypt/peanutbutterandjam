@@ -12,8 +12,8 @@ import {
   verifyTranche0AuditSignature,
   verifyTrancheNAuditSignature,
 } from '../src/audit-signature'
-import { logger, type Hex, generateDevAccountValidatorKeyPair } from '@pbnj/core'
-import type { WorkReport, AuditAnnouncement, IValidatorSetManager, ValidatorKeyTuple } from '@pbnj/types'
+import { logger, type Hex, generateDevAccountValidatorKeyPair } from '@pbnjam/core'
+import type { WorkReport, AuditAnnouncement, IValidatorSetManager, ValidatorKeyTuple } from '@pbnjam/types'
 import { generateAnnouncementSignature, verifyAnnouncementSignature } from '../src/announcement'
 
 beforeAll(() => {

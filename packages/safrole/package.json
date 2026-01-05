@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/safrole",
+  "name": "@pbnjam/safrole",
   "version": "0.0.1",
   "type": "module",
   "main": "dist/index.js",
@@ -13,17 +13,17 @@
   },
   "dependencies": {
     "@noble/hashes": "catalog:",
-    "@pbnj/bandersnatch-vrf": "workspace:*",
-    "@pbnj/core": "workspace:*",
-    "@pbnj/codec": "workspace:*",
-    "@pbnj/types": "workspace:*"
+    "@pbnjam/bandersnatch-vrf": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
+    "@pbnjam/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vitest": "^2.1.9",
-    "@pbnj/typescript-config": "workspace:*"
+    "@pbnjam/typescript-config": "workspace:*"
   },
   "exports": {
     ".": "./src/index.ts"

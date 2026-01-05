@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
-import { decodeFuzzMessage } from '@pbnj/codec'
+import { decodeFuzzMessage } from '@pbnjam/codec'
 import { ConfigService } from '../services/config-service'
 import { StateService } from '../services/state-service'
 import { ValidatorSetManager } from '../services/validator-set'
@@ -26,21 +26,21 @@ import { WorkReportService } from '../services/work-report-service'
 import { PrivilegesService } from '../services/privileges-service'
 import { ServiceAccountService } from '../services/service-account-service'
 import { RecentHistoryService } from '../services/recent-history-service'
-import { EventBusService } from '@pbnj/core'
+import { EventBusService } from '@pbnjam/core'
 import { SealKeyService } from '../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import { ClockService } from '../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { AssuranceService } from '../services/assurance-service'
 import { GuarantorService } from '../services/guarantor-service'
 import { StatisticsService } from '../services/statistics-service'
 import { NodeGenesisManager } from '../services/genesis-manager'
-import { FuzzMessageType, safeResult } from '@pbnj/types'
+import { FuzzMessageType, safeResult } from '@pbnjam/types'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
@@ -185,7 +185,8 @@ describe('Fuzzer Initialize Test', () => {
       accumulateHostFunctionRegistry,
       configService: configService,
       entropyService: entropyService,
-      pvmOptions: { gasCounter: 1_000_000n },
+      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+      useWasm: true,
     })
 
     const statisticsService = new StatisticsService({
@@ -242,34 +243,8 @@ describe('Fuzzer Initialize Test', () => {
       clockService: clockService,
     })
 
-    const assuranceService = new AssuranceService({
-      configService: configService,
-      workReportService: workReportService,
-      validatorSetManager: validatorSetManager,
-      eventBusService: eventBusService,
-      sealKeyService: sealKeyService,
-      recentHistoryService: recentHistoryService,
-    })
-
-    const guarantorService = new GuarantorService({
-      configService: configService,
-      clockService: clockService,
-      entropyService: entropyService,
-      authPoolService: authPoolService,
-      networkService: null,
-      ce134WorkPackageSharingProtocol: null,
-      keyPairService: null,
-      workReportService: workReportService,
-      eventBusService: eventBusService,
-      validatorSetManager: validatorSetManager,
-      recentHistoryService: recentHistoryService,
-      serviceAccountService: serviceAccountsService,
-      statisticsService: statisticsService,
-      accumulationService: accumulatedService,
-    })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
-    sealKeyService.registerEpochTransitionCallback()
 
     // Start services
     const [entropyStartError] = await entropyService.start()

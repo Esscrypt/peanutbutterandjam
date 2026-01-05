@@ -1,4 +1,4 @@
-import type { InstructionContext, InstructionResult } from '@pbnj/types'
+import type { InstructionContext, InstructionResult } from '@pbnjam/types'
 import { OPCODES } from '../config'
 import { BaseInstruction } from './base'
 
@@ -36,11 +36,9 @@ export class MUL_UPPER_S_SInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }
 
 export class MUL_UPPER_U_UInstruction extends BaseInstruction {
@@ -69,11 +67,9 @@ export class MUL_UPPER_U_UInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }
-
 }
 
 export class MUL_UPPER_S_UInstruction extends BaseInstruction {
@@ -111,7 +107,6 @@ export class MUL_UPPER_S_UInstruction extends BaseInstruction {
     this.setRegisterValue(context.registers, registerD, result)
 
     // Mutate context directly
-    
 
     return { resultCode: null }
   }

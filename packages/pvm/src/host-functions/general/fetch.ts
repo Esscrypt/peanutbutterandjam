@@ -1,17 +1,17 @@
 import {
+  encodeAccumulateInput,
   encodeRefineContext,
   encodeVariableSequence,
-  encodeWorkItem,
   encodeWorkItemSummary,
   encodeWorkPackage,
-} from '@pbnj/codec'
-import { hexToBytes } from '@pbnj/core'
+} from '@pbnjam/codec'
+import { hexToBytes } from '@pbnjam/core'
 import type {
   FetchParams,
   HostFunctionContext,
   HostFunctionResult,
   IConfigService,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   AUTHORIZATION_CONSTANTS,
   DEPOSIT_CONSTANTS,
@@ -21,7 +21,7 @@ import {
   TRANSFER_CONSTANTS,
   WORK_PACKAGE_CONSTANTS,
   WORK_REPORT_CONSTANTS,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -89,11 +89,9 @@ export class FetchHostFunction extends BaseHostFunction {
       // Then calculate available length after fromOffset
       const availableLength = fetchedData.length - clampedFromOffset
       // Finally clamp requested length to available data
-      // If length = 0, use all available data; otherwise use min(length, availableLength)
-      const actualLength =
-        length === 0n
-          ? availableLength
-          : Math.min(Number(length), availableLength)
+      // Gray Paper: l = min(registers_9, len(v) - f)
+      // When registers_9 = 0, l = 0 (write nothing, just return length in r7)
+      const actualLength = Math.min(Number(length), availableLength)
       const dataToWrite = fetchedData.slice(
         clampedFromOffset,
         clampedFromOffset + actualLength,
@@ -316,26 +314,30 @@ export class FetchHostFunction extends BaseHostFunction {
 
       case 14n: {
         // Gray Paper pvm_invocations.tex line 359: registers[10] = 14
-        // Returns: encode(i) when i ≠ none
-        // Encoded work items sequence i (the second 'i' parameter to Ω_Y)
-        if (!params.workItemsSequence) {
+        // Returns: encode{var{i}} when i ≠ none
+        // Where i is sequence{accinput} - the accumulate inputs sequence
+        // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
+        // Gray Paper equations 289-292: encode(AccumulateInput) format
+        if (!params.accumulateInputs) {
           return null
         }
+
         const [error, encoded] = encodeVariableSequence(
-          params.workItemsSequence,
-          encodeWorkItem,
+          params.accumulateInputs,
+          encodeAccumulateInput,
         )
         if (error || !encoded) {
           return null
         }
+        // encodeVariableSequence always returns a Uint8Array (even for empty sequence, it's length prefix 0x00)
         return encoded
       }
 
       case 15n: {
         // Gray Paper pvm_invocations.tex line 360: registers[10] = 15
-        // Returns: encode(i[registers[11]]) when i ≠ none ∧ registers[11] < len(i)
-        // Encoded work item at index registers[11] from work items sequence i
-        return this.getWorkItemByIndex(params, context.registers[11])
+        // Returns: encode{i[registers[11]]} when i ≠ none ∧ registers[11] < len(i)
+        // Encoded single AccumulateInput at index registers[11] from i sequence
+        return this.getAccumulateInputByIndex(params, context.registers[11])
       }
       default:
         // Unknown selector - return NONE
@@ -538,27 +540,28 @@ export class FetchHostFunction extends BaseHostFunction {
     return workItem.payload
   }
 
-  private getWorkItemByIndex(
+  private getAccumulateInputByIndex(
     params: FetchParams,
     itemIndex: bigint,
   ): Uint8Array | null {
-    // Gray Paper: encode(i[registers[11]]) when i ≠ none ∧ registers[10] = 15
-    // Returns encoded work item at index registers[11] from work items sequence i
-    // Note: i is the second 'i' parameter (workItemsSequence), not workPackage.workItems
+    // Gray Paper pvm_invocations.tex line 360: registers[10] = 15
+    // Returns: encode{i[registers[11]]} when i ≠ none ∧ registers[11] < len(i)
+    // Where i is sequence{accinput} - the accumulate inputs sequence
+    // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
 
-    if (!params.workItemsSequence) {
+    if (!params.accumulateInputs) {
       return null
     }
 
-    const workItems = params.workItemsSequence
-    const itemIdx = Number(itemIndex)
+    const inputs = params.accumulateInputs
+    const idx = Number(itemIndex)
 
-    if (itemIdx >= workItems.length) {
+    if (idx >= inputs.length) {
       return null
     }
 
-    const workItem = workItems[itemIdx]
-    const [error, encoded] = encodeWorkItem(workItem)
+    const input = inputs[idx]
+    const [error, encoded] = encodeAccumulateInput(input)
     if (error || !encoded) {
       return null
     }

@@ -1,8 +1,8 @@
 import type {
+  ExportParams,
   HostFunctionContext,
   HostFunctionResult,
-  ExportParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -33,8 +33,6 @@ export class ExportHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     params: ExportParams,
   ): HostFunctionResult {
-
-
     // Gray Paper: p = registers[7]
     const memoryOffset = context.registers[7]
     // Gray Paper: z = min(registers[8], Csegmentsize)

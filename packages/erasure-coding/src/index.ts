@@ -12,7 +12,7 @@ export type {
   ErasureCodingParams,
   FieldElement,
   Polynomial,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 // Export constants from shared types package
 export {
   BLOB_ERASURE_CODING_PARAMS,
@@ -21,7 +21,7 @@ export {
   FIELD_GENERATOR,
   IRREDUCIBLE_POLYNOMIAL,
   SEGMENT_ERASURE_CODING_PARAMS,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 // Export Rust implementation
 export {
   isRustModuleAvailable,

@@ -5,10 +5,13 @@
  * Validates conformance to the Gray Paper specification for validator statistics tracking
  */
 
-import { logger } from '@pbnj/core'
+import { logger } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
+
+// Root to workspace
+const WORKSPACE_ROOT = join(__dirname, '../../../')
 
 beforeAll(() => {
   logger.init()
@@ -186,11 +189,11 @@ function loadStatisticsTestVectors(directory: string): Array<{ file: string, tes
 }
 
 describe('JAM Statistics Test Vectors', () => {
-  const tinyVectors = loadStatisticsTestVectors(join(process.cwd(), '../../submodules/jamtestvectors/stf/statistics/tiny'))
-  const fullVectors = loadStatisticsTestVectors(join(process.cwd(), '../../submodules/jamtestvectors/stf/statistics/full'))
+  const tinyVectors = loadStatisticsTestVectors(join(WORKSPACE_ROOT, 'submodules/jam-test-vectors/stf/statistics/tiny'))
+  const fullVectors = loadStatisticsTestVectors(join(WORKSPACE_ROOT, 'submodules/jam-test-vectors/stf/statistics/full'))
 
-  logger.info(`Loaded ${tinyVectors.length} Statistics test vectors from submodules/jamtestvectors/stf/statistics/tiny`)
-  logger.info(`Loaded ${fullVectors.length} Statistics test vectors from submodules/jamtestvectors/stf/statistics/full`)
+  logger.info(`Loaded ${tinyVectors.length} Statistics test vectors from submodules/jam-test-vectors/stf/statistics/tiny`)
+  logger.info(`Loaded ${fullVectors.length} Statistics test vectors from submodules/jam-test-vectors/stf/statistics/full`)
 
   describe('Statistics tiny test vectors', () => {
     for (const { file, testVector } of tinyVectors) {

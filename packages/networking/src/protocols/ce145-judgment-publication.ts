@@ -5,20 +5,20 @@
  * This is a Common Ephemeral (CE) stream for publishing audit judgments.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
 import {
   decodeFixedLength,
   decodeNatural,
   encodeFixedLength,
   encodeNatural,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   IJudgmentHolderService,
   JudgmentPublicationRequest,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 /**
  * Judgment publication protocol handler

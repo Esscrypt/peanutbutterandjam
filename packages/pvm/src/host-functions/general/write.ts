@@ -1,11 +1,15 @@
-import { bytesToHex } from '@pbnj/core'
+import {
+  bytesToHex,
+  calculateServiceAccountItems,
+  calculateServiceAccountOctets,
+} from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
-  WriteParams,
   ServiceAccount,
-} from '@pbnj/types'
-import { DEPOSIT_CONSTANTS } from '@pbnj/types'
+  WriteParams,
+} from '@pbnjam/types'
+import { DEPOSIT_CONSTANTS } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -66,6 +70,39 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Check if this is a delete operation (value length = 0)
     if (valueLength === 0n) {
+      // Gray Paper: Calculate new account state with deletion, then check balance
+      // Calculate what the new storage footprint would be after deletion
+      const newItems = this.calculateItems(serviceAccount, key, true)
+      const newOctets = this.calculateOctets(
+        serviceAccount,
+        key,
+        new Uint8Array(0),
+        true,
+      )
+      const newMinBalance = this.calculateMinBalance(
+        newItems,
+        newOctets,
+        serviceAccount.gratis,
+      )
+
+      // Gray Paper equation 450: Check if new minbalance > balance
+      // If so, return FULL and keep old state
+      if (newMinBalance > serviceAccount.balance) {
+        context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
+        context.log(
+          'Write host function: Insufficient balance for delete operation',
+          {
+            balance: serviceAccount.balance.toString(),
+            requiredBalance: newMinBalance.toString(),
+            newItems: newItems.toString(),
+            newOctets: newOctets.toString(),
+          },
+        )
+        return {
+          resultCode: null, // continue execution
+        }
+      }
+
       // Delete the key
       const previousLength = this.deleteStorage(serviceAccount, key)
       context.registers[7] = previousLength
@@ -139,21 +176,11 @@ export class WriteHostFunction extends BaseHostFunction {
     key: Uint8Array,
     isDelete: boolean,
   ): bigint {
-    // Gray Paper: a_items = 2 * len(a_requests) + len(a_storage)
-    const requestsCount = serviceAccount.requests.size
-    const keyHex = bytesToHex(key)
-    const hasKey = serviceAccount.storage.has(keyHex)
-
-    let storageCount = serviceAccount.storage.size
-    if (isDelete) {
-      // If deleting and key exists, reduce count by 1
-      storageCount = hasKey ? storageCount - 1 : storageCount
-    } else {
-      // If writing and key doesn't exist, increase count by 1
-      storageCount = hasKey ? storageCount : storageCount + 1
-    }
-
-    return BigInt(2 * requestsCount + storageCount)
+    // Use the extracted function from @pbnjam/core
+    return calculateServiceAccountItems(serviceAccount, {
+      writeKey: key,
+      isDelete,
+    })
   }
 
   private calculateOctets(
@@ -162,39 +189,12 @@ export class WriteHostFunction extends BaseHostFunction {
     value: Uint8Array,
     isDelete: boolean,
   ): bigint {
-    // Gray Paper: a_octets = sum over requests (81 + z) + sum over storage (34 + len(y) + len(x))
-    let totalOctets = 0
-
-    // Sum over requests: 81 + z for each (h, z) in requests
-    for (const [_hashHex, requestMap] of serviceAccount.requests) {
-      for (const [length, _requestStatus] of requestMap) {
-        totalOctets += 81 + Number(length)
-      }
-    }
-
-    // Sum over storage: 34 + len(y) + len(x) for each (x, y) in storage
-    const keyHex = bytesToHex(key)
-
-    for (const [existingKeyHex, existingValue] of serviceAccount.storage) {
-      if (existingKeyHex === keyHex) {
-        // This is the key we're modifying
-        if (!isDelete) {
-          // Adding/updating: use new value
-          totalOctets += 34 + value.length + key.length
-        }
-        // If deleting, skip this entry
-      } else {
-        // Different key: use existing value
-        totalOctets += 34 + existingValue.length + existingKeyHex.length
-      }
-    }
-
-    // If adding a new key (not updating existing), add it
-    if (!isDelete && !serviceAccount.storage.has(keyHex)) {
-      totalOctets += 34 + value.length + key.length
-    }
-
-    return BigInt(totalOctets)
+    // Use the extracted function from @pbnjam/core
+    return calculateServiceAccountOctets(serviceAccount, {
+      writeKey: key,
+      writeValue: value,
+      isDelete,
+    })
   }
 
   private calculateMinBalance(
@@ -229,11 +229,7 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.storage.set(keyHex, value)
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(
-      serviceAccount,
-      key,
-      false,
-    )
+    serviceAccount.items = this.calculateItems(serviceAccount, key, false)
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,
@@ -259,11 +255,7 @@ export class WriteHostFunction extends BaseHostFunction {
     serviceAccount.storage.delete(keyHex)
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(
-      serviceAccount,
-      key,
-      true,
-    )
+    serviceAccount.items = this.calculateItems(serviceAccount, key, true)
     serviceAccount.octets = this.calculateOctets(
       serviceAccount,
       key,

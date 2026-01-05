@@ -6,7 +6,7 @@ import {
 } from './base'
 
 export class CheckpointHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(19) // CHECKPOINT function ID
+  functionId: u64 = u64(17) // CHECKPOINT function ID
   name: string = 'checkpoint'
   gasCost: u64 = u64(10)
 

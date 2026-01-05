@@ -13,8 +13,8 @@ import {
   hexToBytes,
   logger,
   type SlotChangeEvent,
-} from '@pbnj/core'
-import type { PreimageRequestProtocol } from '@pbnj/networking'
+} from '@pbnjam/core'
+import type { PreimageRequestProtocol } from '@pbnjam/networking'
 import {
   BaseService,
   type IServiceAccountService,
@@ -29,7 +29,7 @@ import {
   type ServiceAccounts,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { NetworkingService } from './networking-service'
@@ -219,12 +219,13 @@ export class ServiceAccountService
     }
 
     // Gray Paper: preimage hash is computed over the blob only
-    const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
+    const blobBytes = hexToBytes(preimage.blob)
+    const [hashError, hash] = blake2bHash(blobBytes)
     if (hashError) {
       return safeError(hashError)
     }
 
-    const blobLength = BigInt(hexToBytes(preimage.blob).length)
+    const blobLength = BigInt(blobBytes.length)
     const serviceBucket = this.serviceRequests.get(preimage.requester)!
 
     // Store the preimage
@@ -232,7 +233,7 @@ export class ServiceAccountService
     const perServiceBucket =
       this.servicePreimages.get(preimage.requester) ??
       new Map<Hex, Uint8Array>()
-    perServiceBucket.set(hash, hexToBytes(preimage.blob))
+    perServiceBucket.set(hash, blobBytes)
     this.servicePreimages.set(preimage.requester, perServiceBucket)
 
     // fill/update the preimage request status for this service
@@ -275,10 +276,14 @@ export class ServiceAccountService
   }
 
   /**
-   * Apply a batch of preimages for a given slot with ordering/uniqueness validation
-   * Returns error 'preimages_not_sorted_unique' when inputs violate sorting/uniqueness
+   * Validate preimages without modifying state
+   * This should be called BEFORE applyPreimages to check for errors
+   * that should cause the entire block to be skipped (no state changes).
+   *
+   * @param preimages - Preimages to validate
+   * @returns Safe result with error if validation fails, or validated preimages if successful
    */
-  applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
+  validatePreimages(preimages: Preimage[]): Safe<Preimage[]> {
     // Validate sorted by requester asc, then blob asc; and unique
     for (let i = 1; i < preimages.length; i++) {
       const a = preimages[i - 1]
@@ -302,6 +307,18 @@ export class ServiceAccountService
       }
     }
 
+    return safeResult(preimages)
+  }
+
+  /**
+   * Apply a batch of preimages for a given slot
+   * This should be called AFTER validatePreimages passes.
+   *
+   * @param preimages - Validated preimages from validatePreimages
+   * @param creationSlot - Slot when preimages are created
+   * @returns Safe result indicating success
+   */
+  applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
     // Apply each preimage
     for (const p of preimages) {
       const [err] = this.storePreimage(p, creationSlot)
@@ -349,7 +366,6 @@ export class ServiceAccountService
    */
   async handleSlotChanged(slotChangeEvent: SlotChangeEvent): SafePromise<void> {
     const CEXPUNGE_PERIOD = BigInt(this.configService.preimageExpungePeriod) // Gray Paper constant
-
 
     // update all requests (per service)
     for (const [_, hashMap] of this.serviceRequests.entries()) {
@@ -596,10 +612,27 @@ export class ServiceAccountService
     serviceId: bigint,
     serviceAccount: ServiceAccount,
   ): Safe<void> {
-    this.coreServiceAccounts.set(serviceId, serviceAccount)
+    // Clone the core properties to prevent external mutations from affecting stored state
+    // This is critical because JavaScript objects are passed by reference
+    const clonedCore: ServiceAccountCore = {
+      codehash: serviceAccount.codehash,
+      balance: serviceAccount.balance,
+      minaccgas: serviceAccount.minaccgas,
+      minmemogas: serviceAccount.minmemogas,
+      octets: serviceAccount.octets,
+      gratis: serviceAccount.gratis,
+      items: serviceAccount.items,
+      created: serviceAccount.created,
+      lastacc: serviceAccount.lastacc,
+      parent: serviceAccount.parent,
+    }
+    this.coreServiceAccounts.set(serviceId, clonedCore)
     this.serviceStorage.set(serviceId, serviceAccount.storage)
 
-    // set per-service preimages bucket
+    // REPLACE preimages bucket with the complete state from PVM
+    // Note: The PVM returns the complete service account for modified accounts.
+    // Preimages not in the partial state were not in the accumulation context,
+    // but the poststate.accounts should include all preimages for the service.
     const preimageBucket = new Map<Hex, Uint8Array>()
     for (const [hash, preimage] of serviceAccount.preimages.entries()) {
       preimageBucket.set(hash, preimage)
@@ -609,10 +642,9 @@ export class ServiceAccountService
       })
     }
     this.servicePreimages.set(serviceId, preimageBucket)
-    // populate per-service requests bucket
-    const bucket =
-      this.serviceRequests.get(serviceId) ??
-      new Map<Hex, Map<bigint, PreimageRequestStatus>>()
+
+    // REPLACE requests bucket with the complete state from PVM
+    const bucket = new Map<Hex, Map<bigint, PreimageRequestStatus>>()
     for (const [
       hash,
       requestStatusByLen,

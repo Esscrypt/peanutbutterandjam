@@ -1,3 +1,4 @@
+import { encodeFixedLength } from '../../codec'
 import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_HUH,
@@ -30,7 +31,7 @@ import {
  * 7. Remove the service account and transfer its balance to current service
  */
 export class EjectHostFunction extends BaseAccumulateHostFunction {
-  functionId: u64 = u64(20) // EJECT function ID
+  functionId: u64 = u64(21) // EJECT function ID
   name: string = 'eject'
   gasCost: u64 = u64(10)
 
@@ -75,7 +76,8 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Verify the hash matches the service's code hash
     // Gray Paper: d.sa_codehash ≠ encode[32]{imX.id}
-    const expectedCodeHash = this.encodeServiceId(imX.id)
+    // Use encodeFixedLength for proper Gray Paper encoding
+    const expectedCodeHash = encodeFixedLength(imX.id, 32)
     const serviceCodeHash = serviceAccount.codehash
     if (!this.arraysEqual(serviceCodeHash, expectedCodeHash)) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
@@ -114,10 +116,15 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: imX'.state.ps_accounts = imX.state.ps_accounts \ {d} ∪ {imX.id: s'}
     // where s' = imX.self except s'.sa_balance = imX.self.sa_balance + d.sa_balance
     const currentAccountEntry = this.findAccountEntry(imX.state.accounts, imX.id)
-
-    if (currentAccountEntry !== null) {
-      currentAccountEntry.account.balance += serviceAccount.balance
+    
+    if (currentAccountEntry === null) {
+      // Current service account not found - this should not happen but handle gracefully
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
+      return new HostFunctionResult(255) // continue execution
     }
+
+    // Transfer balance: s'.sa_balance = imX.self.sa_balance + d.sa_balance
+    currentAccountEntry.account.balance += serviceAccount.balance
 
     // Remove the ejected service account
     for (let i = 0; i < imX.state.accounts.length; i++) {
@@ -130,22 +137,6 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Set success result
     this.setAccumulateSuccess(registers)
     return new HostFunctionResult(255) // continue execution
-  }
-
-  encodeServiceId(serviceId: u64): Uint8Array {
-    // Encode service ID as 32-byte hash (little-endian)
-    const result = new Uint8Array(32)
-    // Write u64 in little-endian format
-    result[0] = u8(serviceId & u64(0xff))
-    result[1] = u8((serviceId >> 8) & u64(0xff))
-    result[2] = u8((serviceId >> 16) & u64(0xff))
-    result[3] = u8((serviceId >> 24) & u64(0xff))
-    result[4] = u8((serviceId >> 32) & u64(0xff))
-    result[5] = u8((serviceId >> 40) & u64(0xff))
-    result[6] = u8((serviceId >> 48) & u64(0xff))
-    result[7] = u8((serviceId >> 56) & u64(0xff))
-    // Remaining bytes are zero
-    return result
   }
 
   arraysEqual(a: Uint8Array, b: Uint8Array): bool {

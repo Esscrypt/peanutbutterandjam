@@ -38,7 +38,7 @@ export class LogHostFunction extends BaseHostFunction {
 
     // Read target from memory if both offset and length are non-zero
     let target: string | null = null
-    if (targetOffset !== u64(0) || targetLength !== u64(0)) {
+    if (targetOffset !== u64(0) && targetLength !== u64(0)) {
       const readResult_targetData = context.ram.readOctets(
         u32(targetOffset),
         u32(targetLength),
@@ -69,9 +69,46 @@ export class LogHostFunction extends BaseHostFunction {
     // Decode message as UTF-8 string (simplified)
     const message = this.bytesToString(messageData)
 
-    // Note: In AssemblyScript, logging would need to be handled externally
-    // For now, this is a no-op that continues execution
-    // The actual logging would be done by the host environment
+    // Map level to log level and format message according to JIP-1
+    // Format: <YYYY-MM-DD hh-mm-ss> <LEVEL>[@<CORE>]?[#<SERVICE_ID>]? [<TARGET>]? <MESSAGE>
+    let levelString = 'INFO'
+    if (level === 0) {
+      levelString = 'FATAL'
+    } else if (level === 1) {
+      levelString = 'WARN'
+    } else if (level === 2) {
+      levelString = 'INFO'
+    } else if (level === 3) {
+      levelString = 'DEBUG'
+    } else if (level === 4) {
+      levelString = 'TRACE'
+    }
+
+    // Build formatted message (simplified - no timestamp, serviceId, or coreIndex in AssemblyScript)
+    // Format: <LEVEL> [<TARGET>]? <MESSAGE>
+    let formattedMessage = levelString
+    if (target !== null) {
+      formattedMessage = formattedMessage + ' [' + target + ']'
+    }
+    formattedMessage = formattedMessage + ' ' + message
+
+    // Log according to level using AssemblyScript console
+    if (level === 0) {
+      // Fatal error
+      console.error(formattedMessage)
+    } else if (level === 1) {
+      // Warning
+      console.warn(formattedMessage)
+    } else if (level === 2) {
+      // Important information
+      console.info(formattedMessage)
+    } else if (level === 3 || level === 4) {
+      // Helpful or pedantic information
+      console.debug(formattedMessage)
+    } else {
+      // Default to info
+      console.info(formattedMessage)
+    }
 
     return new HostFunctionResult(255) // continue execution
   }

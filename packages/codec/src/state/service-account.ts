@@ -56,14 +56,14 @@
  * This is critical for JAM's service account state management system.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   JamVersion,
   Safe,
   ServiceAccountCore,
-} from '@pbnj/types'
-import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { DEFAULT_JAM_VERSION, safeError, safeResult } from '@pbnjam/types'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**
@@ -171,6 +171,98 @@ export function encodeServiceAccount(
 
   // Parent (4 bytes)
   metadataView.setUint32(12, Number(account.parent), true)
+
+  parts.push(metadataBytes)
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
+ * Encode service account for INFO host function according to Gray Paper pvm_invocations.tex.
+ *
+ * Gray Paper pvm_invocations.tex (lines 466-472):
+ * encode{
+ *   codehash,
+ *   encode[8]{balance, minbalance, minaccgas, minmemogas, octets},
+ *   encode[4]{items},
+ *   encode[8]{gratis},
+ *   encode[4]{created, lastacc, parent}
+ * }
+ *
+ * Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
+ *
+ * This is DIFFERENT from the merklization format (C(255, s)) which:
+ * - Includes discriminator byte (0)
+ * - Groups fields differently
+ * - Does not include minbalance
+ * - Total: 89 bytes (with discriminator) or 88 bytes (without)
+ *
+ * @param account - Service account to encode
+ * @param minbalance - Calculated minimum balance (Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+ * @returns Encoded octet sequence (96 bytes)
+ */
+export function encodeServiceAccountForInfo(
+  account: ServiceAccountCore,
+  minbalance: bigint,
+  computedItems?: bigint, // Optional: computed items (2 * requests.size + storage.size)
+): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
+  // Gray Paper pvm_invocations.tex: codehash (32 bytes)
+  // NOTE: No discriminator byte (0) - INFO format is different from merklization
+  parts.push(hexToBytes(account.codehash))
+
+  // Gray Paper pvm_invocations.tex: encode[8]{balance, minbalance, minaccgas, minmemogas, octets}
+  // 5 × 8-byte fields = 40 bytes total
+  const accountBytes = new Uint8Array(40)
+  const view = new DataView(accountBytes.buffer)
+
+  // Balance (8 bytes)
+  view.setBigUint64(0, account.balance, true)
+
+  // MinBalance (8 bytes) - calculated value, not stored
+  view.setBigUint64(8, minbalance, true)
+
+  // MinAccGas (8 bytes)
+  view.setBigUint64(16, account.minaccgas, true)
+
+  // MinMemoGas (8 bytes)
+  view.setBigUint64(24, account.minmemogas, true)
+
+  // Octets (8 bytes)
+  view.setBigUint64(32, account.octets, true)
+
+  parts.push(accountBytes)
+
+  // Gray Paper pvm_invocations.tex: encode[4]{items}
+  // 1 × 4-byte field = 4 bytes
+  // Use computedItems if provided (dynamically computed from requests/storage sizes),
+  // otherwise fall back to stored account.items
+  const itemsBytes = new Uint8Array(4)
+  const itemsView = new DataView(itemsBytes.buffer)
+  itemsView.setUint32(0, Number(computedItems ?? account.items), true)
+  parts.push(itemsBytes)
+
+  // Gray Paper pvm_invocations.tex: encode[8]{gratis}
+  // 1 × 8-byte field = 8 bytes
+  const gratisBytes = new Uint8Array(8)
+  const gratisView = new DataView(gratisBytes.buffer)
+  gratisView.setBigUint64(0, account.gratis, true)
+  parts.push(gratisBytes)
+
+  // Gray Paper pvm_invocations.tex: encode[4]{created, lastacc, parent}
+  // 3 × 4-byte fields = 12 bytes total
+  const metadataBytes = new Uint8Array(12)
+  const metadataView = new DataView(metadataBytes.buffer)
+
+  // Created (4 bytes)
+  metadataView.setUint32(0, Number(account.created), true)
+
+  // LastAcc (4 bytes)
+  metadataView.setUint32(4, Number(account.lastacc), true)
+
+  // Parent (4 bytes)
+  metadataView.setUint32(8, Number(account.parent), true)
 
   parts.push(metadataBytes)
 

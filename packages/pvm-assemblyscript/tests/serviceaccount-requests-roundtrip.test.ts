@@ -5,16 +5,16 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
-import { logger } from '@pbnj/core'
-import type { ServiceAccount, PreimageRequestStatus } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { ServiceAccount, PreimageRequestStatus } from '@pbnjam/types'
 import {
   encodeCompleteServiceAccount,
   decodeCompleteServiceAccount,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { hexToBytes, type Hex } from '@pbnj/core'
+import { hexToBytes, type Hex } from '@pbnjam/core'
 
 let wasm: any = null
 

@@ -14,6 +14,9 @@ import {
   encodeImplicationsPair,
   PartialState,
   CompleteServiceAccount,
+  decodeVariableSequence,
+  AccumulateInput,
+  decodeAccumulateInput,
 } from './codec'
 import { ImplicationsPair } from './codec'
 import {
@@ -131,6 +134,7 @@ export class PVM {
   accumulationContext: ImplicationsPair | null = null
   timeslot: u64 = u64(0) // Current timeslot for accumulation
   entropyAccumulator: Uint8Array | null = null // Entropy accumulator for FETCH host function
+  accumulateInputs: Array<AccumulateInput> | null = null // Accumulate inputs for FETCH host function (selectors 14, 15)
   
   // Config parameters (set during setupAccumulateInvocation)
   configNumCores: i32 = 341
@@ -474,8 +478,14 @@ export class PVM {
 
     // Check if it's a HOST result code
     if (resultCode === i32(RESULT_CODE_HOST)) {
-      // Extract host call ID from registers (typically r0 or r1)
-      const hostCallId = u64(this.state.registerState[0]) // Host call ID is in r0
+      // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
+      // Gray Paper pvm.tex §7.4.1: ε = host × immed_X, where immed_X is the immediate operand
+      // Gray Paper pvm.tex line 251-255: If l_X=0 (no operand bytes), immed_X defaults to 0
+      // This happens when fskip=0, meaning operands array is empty
+      let hostCallId: u64 = 0
+      if (instruction.operands.length > 0) {
+        hostCallId = u64(instruction.operands[0])
+      }
       this.state.hostCallId = u32(hostCallId)
       
       if (this.state.gasCounter === 0) {
@@ -674,8 +684,10 @@ export class PVM {
         return null
       }
       case u32(1): {
-        // fetch - FetchParams with timeslot
-        return new FetchParams(this.timeslot, u64(0))
+        // fetch - FetchParams with timeslot and accumulateInputs
+        const fetchParams = new FetchParams(this.timeslot, u64(0))
+        fetchParams.accumulateInputs = this.accumulateInputs
+        return fetchParams
       }
       case u32(2): {
         // lookup - LookupParams with service ID and accounts Map
@@ -994,6 +1006,7 @@ export class PVM {
     numValidators: i32,
     authQueueSize: i32,
     entropyAccumulator: Uint8Array,
+    encodedWorkItems: Uint8Array,
     configNumCores: i32 = 341,
     configPreimageExpungePeriod: u32 = 19200,
     configEpochDuration: u32 = 600,
@@ -1016,6 +1029,7 @@ export class PVM {
       numValidators,
       authQueueSize,
       entropyAccumulator,
+      encodedWorkItems,
       configNumCores,
       configPreimageExpungePeriod,
       configEpochDuration,
@@ -1082,6 +1096,7 @@ export class PVM {
     numValidators: i32,
     authQueueSize: i32,
     entropyAccumulator: Uint8Array,
+    encodedWorkItems: Uint8Array,
     configNumCores: i32 = 341,
     configPreimageExpungePeriod: u32 = 19200,
     configEpochDuration: u32 = 600,
@@ -1097,6 +1112,16 @@ export class PVM {
     configMaxLookupAnchorage: u32 = 14400,
     configEcPieceSize: u32 = 684,
   ): void {
+    // CRITICAL: Reset PVM state completely before each accumulation invocation
+    // This ensures no state leaks between invocations
+    this.reset()
+    
+    // Also clear accumulation-specific state
+    this.accumulationContext = null
+    this.entropyAccumulator = null
+    this.accumulateInputs = null
+    this.timeslot = u64(0)
+    
     // Store config parameters
     this.configNumCores = configNumCores
     this.configPreimageExpungePeriod = configPreimageExpungePeriod
@@ -1144,6 +1169,33 @@ export class PVM {
     // Store entropy accumulator for FETCH host function
     this.entropyAccumulator = entropyAccumulator
     
+    // Decode and store accumulate inputs for FETCH host function (selectors 14 and 15)
+    // encodedWorkItems is now actually encoded AccumulateInputs
+    // Gray Paper pvm_invocations.tex lines 359-360:
+    // - Selector 14: encode{var{i}} - sequence of AccumulateInputs
+    // - Selector 15: encode{i[registers[11]]} - single AccumulateInput
+    // Should always be present (even if empty, it's encoded as length prefix 0 = 0x00)
+    if (encodedWorkItems.length === 0) {
+      // Truly empty (no data at all) - this shouldn't happen if we always encode
+      // But handle it gracefully by setting empty array
+      this.accumulateInputs = new Array<AccumulateInput>()
+    } else {
+      const inputsResult = decodeVariableSequence<AccumulateInput>(
+        encodedWorkItems,
+        (data: Uint8Array) => decodeAccumulateInput(data),
+      )
+      if (inputsResult) {
+        this.accumulateInputs = inputsResult.value
+        // accumulateInputs is now an array (possibly empty, but never null)
+      } else {
+        // Decoding failed - this is a problem
+        abort(
+          `setupAccumulateInvocation: decodeVariableSequence failed for encodedAccumulateInputs.length=${encodedWorkItems.length}`
+        )
+        unreachable()
+      }
+    }
+    
     // Set PVM instance on FetchHostFunction so it can access config values
     const fetchHandler = this.hostFunctionRegistry.get(GENERAL_FUNCTIONS.FETCH)
     if (fetchHandler) {
@@ -1169,6 +1221,14 @@ export class PVM {
     }
     
     // Don't call run() - caller will step through manually
+  }
+
+  /**
+   * Set accumulate inputs for FETCH host function
+   * This is called from the WASM executor to provide accumulate inputs for selectors 14 and 15
+   */
+  public setAccumulateInputs(inputs: Array<AccumulateInput> | null): void {
+    this.accumulateInputs = inputs
   }
 
   /**

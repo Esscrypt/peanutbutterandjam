@@ -1,7 +1,4 @@
-import type {
-  HostFunctionContext,
-  HostFunctionResult,
-} from '@pbnj/types'
+import type { HostFunctionContext, HostFunctionResult } from '@pbnjam/types'
 
 /**
  * Base abstract class for all host functions

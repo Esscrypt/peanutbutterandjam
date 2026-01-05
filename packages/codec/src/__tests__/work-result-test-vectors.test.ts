@@ -12,7 +12,7 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeWorkResult, encodeWorkResult } from '../work-package/work-result'
-import type { WorkResult } from '@pbnj/types'
+import type { WorkResult } from '@pbnjam/types'
 import { describe, it, expect } from 'vitest'
 
 describe('Work Result Test Vectors - Round Trip Encoding/Decoding', () => {

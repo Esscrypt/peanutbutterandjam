@@ -1,5 +1,5 @@
-import { bytesToHex, type Hex, logger, z, zeroHash } from '@pbnj/core'
-import { createStateKey, createStateTrie } from '@pbnj/codec'
+import { createStateKey, createStateTrie } from '@pbnjam/codec'
+import { bytesToHex, type Hex, logger, z, zeroHash } from '@pbnjam/core'
 import type {
   Account,
   GenesisState,
@@ -7,8 +7,8 @@ import type {
   Safe,
   ServiceAccount,
   Validator,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Helper function to convert Uint8Array to hex without 0x prefix
@@ -180,7 +180,7 @@ export function generateChainSpec(
         totalCount: 0n,
       },
     },
-    lastAccumulationOutput: new Map(),
+    lastAccumulationOutput: [],
     entropy: {
       accumulator: zeroHash,
       entropy1: zeroHash,

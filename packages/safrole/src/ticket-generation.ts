@@ -1,10 +1,9 @@
 import {
-  getBanderoutFromGamma,
   RingVRFProver,
   type RingVRFProverWasm,
   type RingVRFVerifierWasm,
-} from '@pbnj/bandersnatch-vrf'
-import { bytesToHex, type Hex, hexToBytes, logger } from '@pbnj/core'
+} from '@pbnjam/bandersnatch-vrf'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   IConfigService,
   IEntropyService,
@@ -12,9 +11,8 @@ import type {
   IValidatorSetManager,
   Safe,
   SafroleTicket,
-  SealKey,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { generateTicketProof } from './generate-ring-proof'
 
 /**
@@ -214,7 +212,13 @@ export function verifyTicket(
   // Gray Paper Eq. 292: Validate proof format - must be 288 bytes per bandersnatch-vrf-spec
   const proofBytes = hexToBytes(ticket.proof)
   if (proofBytes.length !== 784) {
-    return safeError(new Error('Invalid Ring VRF proof size, expected 784 bytes, got ' + proofBytes.length + ' bytes'))
+    return safeError(
+      new Error(
+        'Invalid Ring VRF proof size, expected 784 bytes, got ' +
+          proofBytes.length +
+          ' bytes',
+      ),
+    )
   }
 
   const entropy2 = entropyService.getEntropy2()
@@ -274,7 +278,6 @@ export function verifyTicket(
     proverIndex: 0, // Not used during verification - Ring VRF is anonymous
   }
 
-
   // Step 4: Perform Ring VRF verification using RingVRFVerifier
   // The verifier now internally deserializes gamma and proofs from the serialized result
   const isValid = ringVerifier.verify(
@@ -323,40 +326,8 @@ export function determineProxyValidator(
   return finalIndex
 }
 
-export function getTicketIdFromProof(proof: Uint8Array): Hex {
-  // gamma is the first 32 bytes of the proof
-  const gamma = proof.slice(0, 32)
-  return bytesToHex(getBanderoutFromGamma(gamma))
-}
+// getTicketIdFromProof moved to @pbnjam/core to break circular dependency
+// Re-exported from safrole index.ts for backward compatibility
 
-/**
- * Type guard for SafroleTicket
- * Checks if a SealKey is a ticket or a fallback key
- *
- * SealKey can be:
- * - SafroleTicket (with id, entryIndex, proof)
- * - SafroleTicketWithoutProof (with id, entryIndex, no proof)
- * - Uint8Array (32-byte Bandersnatch key in fallback mode)
- *
- * Returns true if key is a ticket object (has id and entryIndex properties),
- * false if it's a Uint8Array (fallback key) or null/undefined
- */
-export function isSafroleTicket(key: SealKey): key is SafroleTicket {
-  // Check for null/undefined first (typeof null === 'object' in JavaScript)
-  if (key === null || key === undefined) {
-    return false
-  }
-  // Uint8Array is an object but won't have 'id' or 'entryIndex' properties
-  // Check if it's a Uint8Array instance
-  if (key instanceof Uint8Array) {
-    return false
-  }
-  // Check if it's an object with ticket properties
-  return (
-    typeof key === 'object' &&
-    'id' in key &&
-    'entryIndex' in key &&
-    typeof key.id === 'string' &&
-    typeof key.entryIndex === 'bigint'
-  )
-}
+// isSafroleTicket moved to @pbnjam/types to break circular dependency
+// Re-exported from safrole index.ts for backward compatibility

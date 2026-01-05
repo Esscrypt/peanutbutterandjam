@@ -1,0 +1,43 @@
+FROM oven/bun:1.3.5 as build
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files first for better caching
+COPY package.json bun.lock ./
+COPY turbo.json ./
+
+# Copy all package.json files for workspace dependencies
+# COPY config ./config
+# COPY packages ./packages
+# COPY infra ./infra
+COPY . .
+
+RUN bun install --ignore-scripts
+
+# Build the application
+# Note: Some packages may not have build scripts, so we continue on failure
+# but we verify that workspace packages are properly linked
+RUN bun run build:fuzzer
+
+FROM gcr.io/distroless/base-debian11
+WORKDIR /app
+
+# Set environment variables for logging
+ENV ENABLE_LOGGER=true
+ENV PINO_LEVEL=debug
+
+# Copy the compiled binary
+COPY --from=build /app/bin/fuzzer-target /app/bin/fuzzer-target
+
+# Copy WASM file (needed at runtime, not bundled in binary)
+COPY --from=build /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm
+
+# Copy SRS file (needed at runtime)
+COPY --from=build /app/packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin /app/packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin
+
+# ENTRYPOINT sets the base command, CMD provides default arguments
+# target.py will override CMD with --socket {TARGET_SOCK}
+ENTRYPOINT ["/app/bin/fuzzer-target"]
+CMD ["--spec", "tiny"]
+

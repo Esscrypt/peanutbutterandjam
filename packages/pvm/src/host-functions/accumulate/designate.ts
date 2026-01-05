@@ -1,12 +1,12 @@
 import {
   decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
-} from '@pbnj/codec'
+} from '@pbnjam/codec'
 import type {
   HostFunctionResult,
   IConfigService,
   ValidatorPublicKeys,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -63,24 +63,23 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       delegator: implications[0].state.delegator.toString(),
     })
 
+    // Gray Paper pvm_invocations.tex lines 736-739:
+    // v = sequence{memory[o+336i:336] for i in valindex} when Nrange(o,336*Cvalcount) ⊆ readable(memory), error otherwise
     const [validatorsData, faultAddress] = ram.readOctets(
       validatorsOffset,
       BigInt(totalSize),
     )
-    if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
-      return {
-        resultCode: RESULT_CODES.PANIC,
-      }
-    }
-    if (!validatorsData) {
-      this.setAccumulateError(registers, 'WHAT')
+    // Gray Paper line 741: (panic, registers_7, ...) when v = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (faultAddress || !validatorsData) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
 
     // Parse validators array (336 bytes per validator)
+    // Gray Paper: v = sequence{Cvalcount}{valkey} where valkey is 336 bytes
     const validators: ValidatorPublicKeys[] = []
     for (let i = 0; i < C_VALCOUNT; i++) {
       const validatorData = validatorsData.slice(
@@ -88,8 +87,11 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
         (i + 1) * VALIDATOR_SIZE,
       )
       const [error, validator] = decodeValidatorPublicKeys(validatorData)
+      // If decoding fails, treat as invalid data and panic
+      // Gray Paper line 741: (panic, registers_7, ...) when v = error
+      // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
       if (error) {
-        this.setAccumulateError(registers, 'WHAT')
+        // DO NOT modify registers[7] - it must remain unchanged on panic
         return {
           resultCode: RESULT_CODES.PANIC,
         }

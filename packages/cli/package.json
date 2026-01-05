@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/cli",
+  "name": "@pbnjam/cli",
   "version": "0.0.1",
   "type": "module",
   "main": "dist/index.js",
@@ -34,14 +34,15 @@
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/node": "workspace:*",
-    "@pbnj/types": "workspace:*",
-    "@pbnj/codec": "workspace:*",
-    "dotenv": "^17.2.1"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/node": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/codec": "workspace:*",
+    "dotenv": "catalog:",
+    "commander": "catalog:"
   },
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "@types/node": "^22.0.0",
     "esbuild": "^0.20.0",
     "pkg": "^5.8.1",

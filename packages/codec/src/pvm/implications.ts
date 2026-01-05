@@ -40,19 +40,16 @@
  * 6. im_provisions: encode{var{sequence{sorted(serviceid, blob)}}} (protected set as sorted sequence)
  */
 
-import { concatBytes } from '@pbnj/core'
+import { concatBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   IConfigService,
   Implications,
   ImplicationsPair,
   Safe,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
-import {
-  decodeOptional,
-  encodeOptional,
-} from '../core/discriminator'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
+import { decodeOptional, encodeOptional } from '../core/discriminator'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import {
@@ -63,10 +60,7 @@ import {
   decodeDeferredTransfer,
   encodeDeferredTransfer,
 } from './deferred-transfer'
-import {
-  decodePartialState,
-  encodePartialState,
-} from './partial-state'
+import { decodePartialState, encodePartialState } from './partial-state'
 
 /**
  * Encode Implications according to Gray Paper specification.
@@ -153,12 +147,22 @@ export function encodeImplications(
   // protoset is encoded as a sorted sequence of tuples
   // Each tuple is: encode[4]{serviceid} || encode{var{blob}}
   // The blob needs a length prefix since it's variable length
-  const provisionsArray = Array.from(implications.provisions.entries())
-  // Sort by serviceid for deterministic encoding
+  // Set iteration returns values directly (no .entries() needed)
+  const provisionsArray = Array.from(implications.provisions)
+  // Gray Paper: protoset requires canonical sorted encoding
+  // Sort by (serviceid, blob) lexicographically
   provisionsArray.sort((a, b) => {
+    // First compare by serviceId
     if (a[0] < b[0]) return -1
     if (a[0] > b[0]) return 1
-    return 0
+    // If serviceIds are equal, compare blobs lexicographically
+    const minLen = Math.min(a[1].length, b[1].length)
+    for (let i = 0; i < minLen; i++) {
+      if (a[1][i] < b[1][i]) return -1
+      if (a[1][i] > b[1][i]) return 1
+    }
+    // Shorter blob comes first if prefixes match
+    return a[1].length - b[1].length
   })
 
   const [error6, encodedProvisions] = encodeVariableSequence(
@@ -186,14 +190,6 @@ export function encodeImplications(
     return safeError(error6)
   }
   parts.push(encodedProvisions)
-
-  // console.log('TS encodeImplications sizes:')
-  // console.log('id:', encodedId.length)
-  // console.log('state:', encodedState.length)
-  // console.log('nextfreeid:', encodedNextFreeId.length)
-  // console.log('xfers:', encodedXfers.length)
-  // console.log('yield:', encodedYield.length)
-  // console.log('provisions:', encodedProvisions.length)
 
   return safeResult(concatBytes(parts))
 }
@@ -262,7 +258,9 @@ export function decodeImplications(
     (data: Uint8Array) => {
       if (data.length < 32) {
         return safeError(
-          new Error(`Insufficient data for yield hash: need 32 bytes, got ${data.length}`),
+          new Error(
+            `Insufficient data for yield hash: need 32 bytes, got ${data.length}`,
+          ),
         )
       }
       const hash = data.slice(0, 32)
@@ -326,10 +324,10 @@ export function decodeImplications(
     return safeError(error6)
   }
 
-  // Convert array of tuples to Map
-  const provisions = new Map<bigint, Uint8Array>()
-  for (const [serviceId, blob] of provisionsResult.value) {
-    provisions.set(serviceId, blob)
+  // Convert array of tuples to Set (Gray Paper: protoset<tuple{serviceid, blob}>)
+  const provisions = new Set<[bigint, Uint8Array]>()
+  for (const tuple of provisionsResult.value) {
+    provisions.add(tuple)
   }
   currentData = provisionsResult.remaining
 
@@ -426,4 +424,3 @@ export function decodeImplicationsPair(
     consumed: data.length - exceptionalRemaining.length,
   })
 }
-

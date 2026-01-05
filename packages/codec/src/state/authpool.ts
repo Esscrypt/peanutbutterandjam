@@ -26,14 +26,14 @@
  * ✅ CORRECT: Uses coreCount from config service for proper structure
  */
 
-import { bytesToHex, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   AuthPool,
   DecodingResult,
   IConfigService,
   Safe,
-} from '@pbnj/types'
-import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { AUTHORIZATION_CONSTANTS, safeError, safeResult } from '@pbnjam/types'
 import {
   decodeSequenceGeneric,
   decodeVariableSequence,

@@ -44,9 +44,9 @@
  * maintains network integrity through validator accountability.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, Disputes, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
+import type { DecodingResult, Disputes, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,

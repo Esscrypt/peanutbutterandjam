@@ -1,4 +1,4 @@
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import {
   type AncestryItem,
   type ErrorMessage,
@@ -13,14 +13,14 @@ import {
   type Initialize,
   type KeyValue,
   type StateRoot,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { decodeBlock, encodeBlock } from '../block/body'
 import { decodeHeader, encodeHeader } from '../block/header'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 
 /**
  * Encode a FuzzMessage into bytes with length prefix
- * 
+ *
  * ASN.1 discriminants:
  * - peer-info: [0] (0x00)
  * - initialize: [1] (0x01)
@@ -63,7 +63,7 @@ export function encodeFuzzMessage(
       payload = encodeState(message.payload)
       break
     case FuzzMessageType.Error:
-      discriminant = 0xFF
+      discriminant = 0xff
       payload = encodeError(message.payload)
       break
     default:
@@ -82,7 +82,7 @@ export function encodeFuzzMessage(
 /**
  * Decode a FuzzMessage from bytes.
  * Assumes the input is the MESSAGE PAYLOAD (discriminant + content), excluding the 4-byte length prefix.
- * 
+ *
  * ASN.1 discriminants:
  * - peer-info: [0] (0x00)
  * - initialize: [1] (0x01)
@@ -104,18 +104,33 @@ export function decodeFuzzMessage(
 
   switch (discriminant) {
     case 0x00:
-      return { type: FuzzMessageType.PeerInfo, payload: decodePeerInfo(payload) }
+      return {
+        type: FuzzMessageType.PeerInfo,
+        payload: decodePeerInfo(payload),
+      }
     case 0x01:
-      return { type: FuzzMessageType.Initialize, payload: decodeInitialize(payload, config) }
+      return {
+        type: FuzzMessageType.Initialize,
+        payload: decodeInitialize(payload, config),
+      }
     case 0x02:
-      return { type: FuzzMessageType.StateRoot, payload: decodeStateRoot(payload) }
+      return {
+        type: FuzzMessageType.StateRoot,
+        payload: decodeStateRoot(payload),
+      }
     case 0x03:
-      return { type: FuzzMessageType.ImportBlock, payload: decodeImportBlock(payload, config) }
+      return {
+        type: FuzzMessageType.ImportBlock,
+        payload: decodeImportBlock(payload, config),
+      }
     case 0x04:
-      return { type: FuzzMessageType.GetState, payload: decodeGetState(payload) }
+      return {
+        type: FuzzMessageType.GetState,
+        payload: decodeGetState(payload),
+      }
     case 0x05:
       return { type: FuzzMessageType.State, payload: decodeState(payload) }
-    case 0xFF:
+    case 0xff:
       return { type: FuzzMessageType.Error, payload: decodeError(payload) }
     default:
       throw new Error(`Unknown discriminant: ${discriminant}`)
@@ -129,7 +144,9 @@ function encodePeerInfo(info: FuzzPeerInfo): Uint8Array {
   const [err, nameLengthEncoded] = encodeNatural(BigInt(nameBytes.length))
   if (err) throw err
 
-  const buffer = new Uint8Array(1 + 4 + 3 + 3 + nameLengthEncoded.length + nameBytes.length)
+  const buffer = new Uint8Array(
+    1 + 4 + 3 + 3 + nameLengthEncoded.length + nameBytes.length,
+  )
   const view = new DataView(buffer.buffer)
   let offset = 0
 
@@ -152,35 +169,37 @@ function encodePeerInfo(info: FuzzPeerInfo): Uint8Array {
   return buffer
 }
 
-function encodeInitialize(init: Initialize, config: IConfigService): Uint8Array {
+function encodeInitialize(
+  init: Initialize,
+  config: IConfigService,
+): Uint8Array {
   // Encode header (directly, no length prefix - ASN.1 SEQUENCE concatenates fields)
   const [headerError, headerEncoded] = encodeHeader(init.header, config)
   if (headerError) throw headerError
-  
+
   // Encode keyvals (State = SEQUENCE OF KeyValue)
   // encodeKeyValueSequence already adds the length prefix for the sequence
   const keyvalsEncoded = encodeKeyValueSequence(init.keyvals)
-  
+
   // Encode ancestry (SEQUENCE OF AncestryItem)
   // encodeAncestry already adds the length prefix for the sequence
   const ancestryEncoded = encodeAncestry(init.ancestry)
-  
+
   // Combine: header (direct) + keyvals (already length-prefixed) + ancestry (already length-prefixed)
   // ASN.1 SEQUENCE just concatenates fields directly
-  return concatBytes([
-    headerEncoded,
-    keyvalsEncoded,
-    ancestryEncoded,
-  ])
+  return concatBytes([headerEncoded, keyvalsEncoded, ancestryEncoded])
 }
 
-function encodeImportBlock(msg: ImportBlock, config: IConfigService): Uint8Array {
+function encodeImportBlock(
+  msg: ImportBlock,
+  config: IConfigService,
+): Uint8Array {
   // Encode block using JAM codec
   // According to ASN.1 spec: ImportBlock ::= Block
   // So ImportBlock is just the block directly, NOT length-prefixed
   const [blockError, blockEncoded] = encodeBlock(msg.block, config)
   if (blockError) throw blockError
-  
+
   // Return block directly without length prefix
   return blockEncoded
 }
@@ -213,11 +232,13 @@ function encodeKeyValue(kv: KeyValue): Uint8Array {
     throw new Error(`Key must be exactly 31 bytes, got ${keyBytes.length}`)
   }
   const valueBytes = hexToBytes(kv.value)
-  
+
   // KeyValue: key (31 bytes) + value (length-prefixed)
-  const [valueLenErr, valueLenEncoded] = encodeNatural(BigInt(valueBytes.length))
+  const [valueLenErr, valueLenEncoded] = encodeNatural(
+    BigInt(valueBytes.length),
+  )
   if (valueLenErr) throw valueLenErr
-  
+
   return concatBytes([keyBytes, valueLenEncoded, valueBytes])
 }
 
@@ -225,10 +246,10 @@ function encodeKeyValueSequence(keyvals: FuzzState): Uint8Array {
   // Encode sequence length
   const [lenErr, lenEncoded] = encodeNatural(BigInt(keyvals.length))
   if (lenErr) throw lenErr
-  
+
   // Encode each KeyValue
-  const kvEncoded = keyvals.map(kv => encodeKeyValue(kv))
-  
+  const kvEncoded = keyvals.map((kv) => encodeKeyValue(kv))
+
   return concatBytes([lenEncoded, ...kvEncoded] as Uint8Array[])
 }
 
@@ -237,7 +258,7 @@ function encodeAncestryItem(item: AncestryItem): Uint8Array {
   const slotBytes = new Uint8Array(4)
   new DataView(slotBytes.buffer).setUint32(0, Number(item.slot), true)
   const headerHashBytes = hexToBytes(item.header_hash)
-  
+
   return concatBytes([slotBytes, headerHashBytes])
 }
 
@@ -248,10 +269,10 @@ function encodeAncestry(ancestry: AncestryItem[]): Uint8Array {
   }
   const [lenErr, lenEncoded] = encodeNatural(BigInt(ancestry.length))
   if (lenErr) throw lenErr
-  
+
   // Encode each AncestryItem
-  const itemsEncoded = ancestry.map(item => encodeAncestryItem(item))
-  
+  const itemsEncoded = ancestry.map((item) => encodeAncestryItem(item))
+
   return concatBytes([lenEncoded, ...itemsEncoded] as Uint8Array[])
 }
 
@@ -280,7 +301,7 @@ function decodePeerInfo(data: Uint8Array): FuzzPeerInfo {
   const [err, nameLengthRes] = decodeNatural(data.subarray(offset))
   if (err) throw err
   offset += nameLengthRes.consumed
-  
+
   const nameBytes = data.subarray(offset, offset + Number(nameLengthRes.value))
   const app_name = new TextDecoder().decode(nameBytes)
 
@@ -293,25 +314,37 @@ function decodePeerInfo(data: Uint8Array): FuzzPeerInfo {
   }
 }
 
-function decodeInitialize(data: Uint8Array, config: IConfigService): Initialize {
+function decodeInitialize(
+  data: Uint8Array,
+  config: IConfigService,
+): Initialize {
   let offset = 0
-  
+
   // Decode header (directly, no length prefix - ASN.1 SEQUENCE concatenates fields)
   // Header is a complex structure with variable size, so we need to decode it
   // and use the consumed bytes to advance the offset
-  const [headerError, headerResult] = decodeHeader(data.subarray(offset), config)
+  const [headerError, headerResult] = decodeHeader(
+    data.subarray(offset),
+    config,
+  )
   if (headerError) throw headerError
   offset += headerResult.consumed
-  
+
   // Debug: Check what's at the offset after header
   if (data.length > offset) {
     const nextBytes = data.subarray(offset, Math.min(offset + 20, data.length))
     // Only log in debug mode to avoid noise
     if (process.env['DEBUG_FUZZ_DECODE']) {
-      console.log(`[decodeInitialize] After header (offset=${offset}): first 20 bytes: ${Array.from(nextBytes).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')}`)
+      console.log(
+        `[decodeInitialize] After header (offset=${offset}): first 20 bytes: ${Array.from(
+          nextBytes,
+        )
+          .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
+          .join(' ')}`,
+      )
     }
   }
-  
+
   // Skip padding zeros after header (tool artifacts, not part of ASN.1 spec)
   // Some tools add padding between header and keyvals, which we need to skip
   const originalOffset = offset
@@ -321,34 +354,45 @@ function decodeInitialize(data: Uint8Array, config: IConfigService): Initialize 
   if (offset > originalOffset) {
     // Only log in debug mode to avoid noise
     if (process.env['DEBUG_FUZZ_DECODE']) {
-      console.log(`[decodeInitialize] Skipped ${offset - originalOffset} bytes of padding zeros after header`)
+      console.log(
+        `[decodeInitialize] Skipped ${offset - originalOffset} bytes of padding zeros after header`,
+      )
     }
   }
-  
+
   // Decode keyvals (State = SEQUENCE OF KeyValue)
   // decodeKeyValueSequence expects the data to start with the sequence length prefix
   // No outer length prefix needed - ASN.1 SEQUENCE just concatenates fields
   const remainingForKeyvals = data.subarray(offset)
   if (remainingForKeyvals.length === 0) {
-    throw new Error(`No data remaining for keyvals after header (offset=${offset}, data.length=${data.length})`)
+    throw new Error(
+      `No data remaining for keyvals after header (offset=${offset}, data.length=${data.length})`,
+    )
   }
-  
+
   if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeInitialize] Decoding keyvals: remaining data length=${remainingForKeyvals.length} bytes, offset=${offset}`)
+    console.log(
+      `[decodeInitialize] Decoding keyvals: remaining data length=${remainingForKeyvals.length} bytes, offset=${offset}`,
+    )
   }
-  
-  const { keyvals, consumed: keyvalsConsumed } = decodeKeyValueSequenceWithConsumed(remainingForKeyvals)
+
+  const { keyvals, consumed: keyvalsConsumed } =
+    decodeKeyValueSequenceWithConsumed(remainingForKeyvals)
   offset += keyvalsConsumed
-  
+
   if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeInitialize] Decoded ${keyvals.length} keyvals, consumed ${keyvalsConsumed} bytes, new offset=${offset}`)
+    console.log(
+      `[decodeInitialize] Decoded ${keyvals.length} keyvals, consumed ${keyvalsConsumed} bytes, new offset=${offset}`,
+    )
   }
-  
+
   // Decode ancestry (SEQUENCE OF AncestryItem)
   // decodeAncestry expects the data to start with the sequence length prefix
-  const { ancestry, consumed: ancestryConsumed } = decodeAncestryWithConsumed(data.subarray(offset))
+  const { ancestry, consumed: ancestryConsumed } = decodeAncestryWithConsumed(
+    data.subarray(offset),
+  )
   offset += ancestryConsumed
-  
+
   return {
     header: headerResult.value,
     keyvals,
@@ -356,34 +400,47 @@ function decodeInitialize(data: Uint8Array, config: IConfigService): Initialize 
   }
 }
 
-function decodeImportBlock(data: Uint8Array, config: IConfigService): ImportBlock {
+function decodeImportBlock(
+  data: Uint8Array,
+  config: IConfigService,
+): ImportBlock {
   // Debug logging if enabled
   if (process.env['DEBUG_FUZZ_DECODE']) {
     console.log(`[decodeImportBlock] Decoding from ${data.length} bytes`)
-    console.log(`[decodeImportBlock] First 20 bytes: ${Array.from(data.slice(0, 20)).map(b => `0x${b.toString(16).padStart(2, '0')}`).join(' ')}`)
+    console.log(
+      `[decodeImportBlock] First 20 bytes: ${Array.from(data.slice(0, 20))
+        .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
+        .join(' ')}`,
+    )
   }
-  
+
   // According to ASN.1 spec: ImportBlock ::= Block
   // So ImportBlock is just the block directly, NOT length-prefixed
   // Decode the entire data as a block
   if (data.length === 0) {
     throw new Error(`ImportBlock has zero-length block data`)
   }
-  
+
   if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeImportBlock] Decoding entire ${data.length} bytes as block (no length prefix)`)
+    console.log(
+      `[decodeImportBlock] Decoding entire ${data.length} bytes as block (no length prefix)`,
+    )
   }
-  
+
   // Decode block using JAM codec
   const [blockError, blockResult] = decodeBlock(data, config)
   if (blockError) {
     if (process.env['DEBUG_FUZZ_DECODE']) {
-      console.error(`[decodeImportBlock] Block decode error: ${blockError.message}`)
+      console.error(
+        `[decodeImportBlock] Block decode error: ${blockError.message}`,
+      )
       console.error(`[decodeImportBlock] Data length: ${data.length} bytes`)
     }
-    throw new Error(`Failed to decode block in ImportBlock: ${blockError.message}`)
+    throw new Error(
+      `Failed to decode block in ImportBlock: ${blockError.message}`,
+    )
   }
-  
+
   return { block: blockResult.value }
 }
 
@@ -403,8 +460,11 @@ function decodeState(data: Uint8Array): FuzzerState {
 function decodeError(data: Uint8Array): ErrorMessage {
   const [err, lengthRes] = decodeNatural(data)
   if (err) throw err
-  
-  const errorBytes = data.subarray(lengthRes.consumed, lengthRes.consumed + Number(lengthRes.value))
+
+  const errorBytes = data.subarray(
+    lengthRes.consumed,
+    lengthRes.consumed + Number(lengthRes.value),
+  )
   return { error: new TextDecoder().decode(errorBytes) }
 }
 
@@ -413,21 +473,23 @@ function decodeError(data: Uint8Array): ErrorMessage {
 function decodeKeyValue(data: Uint8Array): { kv: KeyValue; consumed: number } {
   // Key (31 bytes) + value (length-prefixed)
   if (data.length < 31) {
-    throw new Error(`Not enough data for KeyValue key: need 31 bytes, got ${data.length}`)
+    throw new Error(
+      `Not enough data for KeyValue key: need 31 bytes, got ${data.length}`,
+    )
   }
-  
+
   const keyBytes = data.subarray(0, 31)
   const key = bytesToHex(keyBytes)
-  
+
   let offset = 31
   const [valueLenErr, valueLenRes] = decodeNatural(data.subarray(offset))
   if (valueLenErr) throw valueLenErr
   offset += valueLenRes.consumed
-  
+
   const valueBytes = data.subarray(offset, offset + Number(valueLenRes.value))
   const value = bytesToHex(valueBytes)
   offset += Number(valueLenRes.value)
-  
+
   return {
     kv: { key, value },
     consumed: offset,
@@ -438,60 +500,74 @@ function decodeKeyValueSequence(data: Uint8Array): FuzzState {
   // Decode sequence length
   const [lenErr, lenRes] = decodeNatural(data)
   if (lenErr) throw lenErr
-  
+
   let offset = lenRes.consumed
   const keyvals: KeyValue[] = []
-  
+
   for (let i = 0; i < Number(lenRes.value); i++) {
     const { kv, consumed } = decodeKeyValue(data.subarray(offset))
     keyvals.push(kv)
     offset += consumed
   }
-  
+
   return keyvals
 }
 
-function decodeKeyValueSequenceWithConsumed(data: Uint8Array): { keyvals: FuzzState; consumed: number } {
+function decodeKeyValueSequenceWithConsumed(data: Uint8Array): {
+  keyvals: FuzzState
+  consumed: number
+} {
   // Decode sequence length
   const [lenErr, lenRes] = decodeNatural(data)
   if (lenErr) throw lenErr
-  
+
   const expectedKeyvals = Number(lenRes.value)
   if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeKeyValueSequenceWithConsumed] Expected ${expectedKeyvals} keyvals, data length: ${data.length} bytes`)
+    console.log(
+      `[decodeKeyValueSequenceWithConsumed] Expected ${expectedKeyvals} keyvals, data length: ${data.length} bytes`,
+    )
   }
-  
+
   let offset = lenRes.consumed
   const keyvals: KeyValue[] = []
-  
+
   for (let i = 0; i < expectedKeyvals; i++) {
     if (offset >= data.length) {
-      throw new Error(`Not enough data for keyval ${i + 1}/${expectedKeyvals} (offset=${offset}, data.length=${data.length})`)
+      throw new Error(
+        `Not enough data for keyval ${i + 1}/${expectedKeyvals} (offset=${offset}, data.length=${data.length})`,
+      )
     }
     const { kv, consumed } = decodeKeyValue(data.subarray(offset))
     keyvals.push(kv)
     offset += consumed
   }
-  
+
   if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeKeyValueSequenceWithConsumed] Decoded ${keyvals.length} keyvals, consumed ${offset} bytes`)
+    console.log(
+      `[decodeKeyValueSequenceWithConsumed] Decoded ${keyvals.length} keyvals, consumed ${offset} bytes`,
+    )
   }
-  
+
   return { keyvals, consumed: offset }
 }
 
-function decodeAncestryItem(data: Uint8Array): { item: AncestryItem; consumed: number } {
+function decodeAncestryItem(data: Uint8Array): {
+  item: AncestryItem
+  consumed: number
+} {
   // slot (4 bytes) + header_hash (32 bytes)
   if (data.length < 36) {
-    throw new Error(`Not enough data for AncestryItem: need 36 bytes, got ${data.length}`)
+    throw new Error(
+      `Not enough data for AncestryItem: need 36 bytes, got ${data.length}`,
+    )
   }
-  
+
   const slotBytes = data.subarray(0, 4)
   const slot = BigInt(new DataView(slotBytes.buffer).getUint32(0, true))
-  
+
   const headerHashBytes = data.subarray(4, 36)
   const header_hash = bytesToHex(headerHashBytes)
-  
+
   return {
     item: { slot, header_hash },
     consumed: 36,
@@ -500,36 +576,39 @@ function decodeAncestryItem(data: Uint8Array): { item: AncestryItem; consumed: n
 
 // Keep for potential future use (e.g., tests)
 // @ts-expect-error - intentionally unused, kept for API consistency
-function decodeAncestry(data: Uint8Array): AncestryItem[] {
+function _decodeAncestry(data: Uint8Array): AncestryItem[] {
   // Decode sequence length
   const [lenErr, lenRes] = decodeNatural(data)
   if (lenErr) throw lenErr
-  
+
   let offset = lenRes.consumed
   const ancestry: AncestryItem[] = []
-  
+
   for (let i = 0; i < Number(lenRes.value); i++) {
     const { item, consumed } = decodeAncestryItem(data.subarray(offset))
     ancestry.push(item)
     offset += consumed
   }
-  
+
   return ancestry
 }
 
-function decodeAncestryWithConsumed(data: Uint8Array): { ancestry: AncestryItem[]; consumed: number } {
+function decodeAncestryWithConsumed(data: Uint8Array): {
+  ancestry: AncestryItem[]
+  consumed: number
+} {
   // Decode sequence length
   const [lenErr, lenRes] = decodeNatural(data)
   if (lenErr) throw lenErr
-  
+
   let offset = lenRes.consumed
   const ancestry: AncestryItem[] = []
-  
+
   for (let i = 0; i < Number(lenRes.value); i++) {
     const { item, consumed } = decodeAncestryItem(data.subarray(offset))
     ancestry.push(item)
     offset += consumed
   }
-  
+
   return { ancestry, consumed: offset }
 }

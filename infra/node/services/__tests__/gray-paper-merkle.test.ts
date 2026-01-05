@@ -10,7 +10,7 @@ import {
   generateWellBalancedProof, 
   merklizewb, 
   verifyMerkleProof 
-} from '@pbnj/core'
+} from '@pbnjam/core'
 
 describe('Gray Paper Merkle Tree Implementation', () => {
   describe('merklizewb - Well-Balanced Binary Merkle Tree', () => {

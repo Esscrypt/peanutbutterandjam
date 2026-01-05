@@ -1,4 +1,4 @@
-import type { Hex } from '@pbnj/core'
+import type { Hex } from 'viem'
 
 import type { Assurance, WorkReport } from './serialization'
 
@@ -333,11 +333,11 @@ export interface PreimagesTestVector {
     accounts: Array<{
       id: number
       data: {
-        preimages: Array<{
+        preimage_blobs: Array<{
           hash: Hex
           blob: Hex
         }>
-        lookup_meta: Array<{
+        preimage_requests: Array<{
           key: {
             hash: Hex
             length: number
@@ -356,11 +356,11 @@ export interface PreimagesTestVector {
     accounts: Array<{
       id: number
       data: {
-        preimages: Array<{
+        preimage_blobs: Array<{
           hash: Hex
           blob: Hex
         }>
-        lookup_meta: Array<{
+        preimage_requests: Array<{
           key: {
             hash: Hex
             length: number

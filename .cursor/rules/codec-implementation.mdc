@@ -1,7 +1,7 @@
 # Codec Implementation Guide
 
 ## Overview
-This guide outlines the implementation requirements for the `@pbnj/codec` package, which implements data serialization and deserialization for the JAM protocol as specified in the Gray Paper.
+This guide outlines the implementation requirements for the `@pbnjam/codec` package, which implements data serialization and deserialization for the JAM protocol as specified in the Gray Paper.
 
 ## Package Structure
 ```

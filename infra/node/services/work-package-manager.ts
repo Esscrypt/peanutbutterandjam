@@ -22,14 +22,14 @@
  * - Reports track: work-report + timestamp of reporting
  */
 
-import type { EventBusService } from '@pbnj/core'
-import type { Extrinsic, Safe, WorkPackage, WorkReport } from '@pbnj/types'
+import type { EventBusService } from '@pbnjam/core'
+import type { Extrinsic, Safe, WorkPackage, WorkReport } from '@pbnjam/types'
 import {
   BaseService,
   safeError,
   safeResult,
   type WorkPackageSubmissionRequest,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 
 /**

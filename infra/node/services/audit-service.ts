@@ -19,7 +19,7 @@
 //   verifyTranche0AuditSignature,
 //   verifyTrancheNAuditSignature,
 //   verifyWorkReportSelection,
-// } from '@pbnj/audit'
+// } from '@pbnjam/audit'
 // import {
 //   type AuditTrancheEvent,
 //   type EventBusService,
@@ -29,9 +29,9 @@
 //   type SafePromise,
 //   safeError,
 //   safeResult,
-// } from '@pbnj/core'
-// import type { AuditAnnouncement, Judgment, WorkReport } from '@pbnj/types'
-// import { BaseService } from '@pbnj/types'
+// } from '@pbnjam/core'
+// import type { AuditAnnouncement, Judgment, WorkReport } from '@pbnjam/types'
+// import { BaseService } from '@pbnjam/types'
 // import type { Hex } from 'viem'
 // import type { ValidatorSetManager } from './validator-set'
 // import type { WorkReportService } from './work-report-service'

@@ -41,7 +41,7 @@
  * complete header contents while including the signature in the commitment.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
 import type {
   BlockHeader,
   DecodingResult,
@@ -52,8 +52,8 @@ import type {
   UnsignedBlockHeader,
   ValidatorKeyPair,
   ValidatorKeyTuple,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 

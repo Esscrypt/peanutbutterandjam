@@ -5,11 +5,11 @@
  * from submodules/jamtestvectors/shuffle/shuffle_tests.json
  */
 
-import { logger, jamShuffle } from '@pbnj/core'
+import { logger, jamShuffle } from '@pbnjam/core'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { beforeAll, describe, expect, it } from 'vitest'
-// import { computeGuarantorAssignments } from '@pbnj/safrole'
+// import { computeGuarantorAssignments } from '@pbnjam/safrole'
 
 beforeAll(() => {
   logger.init()
@@ -40,7 +40,7 @@ function fromLittleEndianBytes(bytes: Uint8Array): number {
 }
 
 function jamShuffle<T>(validators: T[], entropy: string): T[] {
-  // Implementation moved to @pbnj/core package
+  // Implementation moved to @pbnjam/core package
 }
 */
 

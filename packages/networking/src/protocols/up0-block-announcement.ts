@@ -8,6 +8,8 @@
  * This implementation is a placeholder and will be replaced with a more complete
  * implementation in the future.
  */
+
+import { decodeFixedLength, decodeHeader, encodeHeader } from '@pbnjam/codec'
 import {
   bytesToHex,
   concatBytes,
@@ -15,12 +17,7 @@ import {
   hexToBytes,
   logger,
   numberToBytes,
-} from '@pbnj/core'
-import {
-  decodeFixedLength,
-  decodeHeader,
-  encodeHeader,
-} from '@pbnj/codec'
+} from '@pbnjam/core'
 import type {
   BlockAnnouncement,
   BlockAnnouncementHandshake,
@@ -28,8 +25,8 @@ import type {
   IConfigService,
   Safe,
   SafePromise,
-} from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
@@ -107,7 +104,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   /**
    * Serialize response (void)
    */
-  serializeResponse(_data: void): Safe<Uint8Array> {
+  serializeResponse(_data: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
@@ -144,7 +141,10 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   /**
    * Process response (void)
    */
-  async processResponse(_data: void, _peerPublicKey: Hex): SafePromise<void> {
+  async processResponse(
+    _data: undefined,
+    _peerPublicKey: Hex,
+  ): SafePromise<void> {
     return safeResult(undefined)
   }
 
@@ -224,7 +224,10 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
    * Create block announcement message
    */
   createBlockAnnouncement(blockHeader: Uint8Array): BlockAnnouncement {
-    const [error, blockHeaderResult] = decodeHeader(blockHeader, this.configService)
+    const [error, blockHeaderResult] = decodeHeader(
+      blockHeader,
+      this.configService,
+    )
     if (error) {
       throw error
     }
@@ -268,7 +271,7 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
       //   await this.addKnownLeaf(blockHash, slot)
 
       logger.info('Processed block header', {
-        parentHash: header.parent.slice(0, 20) + '...',
+        parentHash: `${header.parent.slice(0, 20)}...`,
         slot: slot.toString(),
       })
     } catch (error) {

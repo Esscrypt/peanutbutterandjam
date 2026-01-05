@@ -1,5 +1,5 @@
-import { bytesToHex } from '@pbnj/core'
-import type { HostFunctionResult } from '@pbnj/types'
+import { blake2bHash } from '@pbnjam/core'
+import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -81,8 +81,15 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Compute hash of the preimage data
-    const preimageHash = bytesToHex(preimageData)
+    // Compute blake2b hash of the preimage data
+    // Gray Paper line 985: requests[(blake(i), z)]
+    const [preimageHashError, preimageHash] = blake2bHash(preimageData)
+    if (preimageHashError || !preimageHash) {
+      this.setAccumulateError(registers, 'WHAT')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
 
     // Check if there's a matching request for this hash and size
     // Gray Paper: a.sa_requests[(blake(i), z)] ≠ []
@@ -105,23 +112,23 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
 
     // Check if the preimage hasn't already been provided
     // Gray Paper: (s, i) ∈ imX.provisions
-    // Note: We use a simple approach here - in practice, provisions would be a set of tuples
-    // For now, we'll use the service ID as the key and check if the data matches
-    const existingProvision = imX.provisions.get(serviceId)
-    if (
-      existingProvision &&
-      this.arraysEqual(existingProvision, preimageData)
-    ) {
-      // Gray Paper line 942: HUH when a = error (preimage already provided)
-      this.setAccumulateError(registers, 'HUH')
-      return {
-        resultCode: null, // continue execution
+    // With Set<[bigint, Uint8Array]>, we need to iterate to find duplicates
+    for (const [existingServiceId, existingBlob] of imX.provisions) {
+      if (
+        existingServiceId === serviceId &&
+        this.arraysEqual(existingBlob, preimageData)
+      ) {
+        // Gray Paper line 942: HUH when a = error (preimage already provided)
+        this.setAccumulateError(registers, 'HUH')
+        return {
+          resultCode: null, // continue execution
+        }
       }
     }
 
     // Add the preimage to provisions
     // Gray Paper: imX.provisions ∪ {(s, i)}
-    imX.provisions.set(serviceId, preimageData)
+    imX.provisions.add([serviceId, preimageData])
 
     // Set success result
     this.setAccumulateSuccess(registers)

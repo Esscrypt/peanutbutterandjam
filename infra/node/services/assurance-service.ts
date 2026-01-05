@@ -20,21 +20,26 @@
  * correctness. See packages/assurance/KNOWN_ISSUES.md for full details.
  */
 
-import { verifyAssuranceSignature } from '@pbnj/assurance'
+import { verifyAssuranceSignature } from '@pbnjam/assurance'
 import {
   type AssuranceDistributionEvent,
   type EventBusService,
   hexToBytes,
   logger,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   Assurance,
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
   WorkReport,
-} from '@pbnj/types'
-import { BaseService, safeError, safeResult, TIME_CONSTANTS } from '@pbnj/types'
+} from '@pbnjam/types'
+import {
+  BaseService,
+  safeError,
+  safeResult,
+  TIME_CONSTANTS,
+} from '@pbnjam/types'
 import type { Hex } from 'viem'
 import type { RecentHistoryService } from './recent-history-service'
 import type { SealKeyService } from './seal-key'
@@ -176,33 +181,27 @@ export class AssuranceService extends BaseService {
   }
 
   /**
-   * Apply assurance state transition to reports
+   * Validate assurances without modifying state
+   * This should be called BEFORE applyAssurances to check for errors
+   * that should cause the entire block to be skipped (no state changes).
    *
-   * Gray Paper: equation eq:reportspostguaranteesdef
-   *
-   * ∀ c ∈ coreindex: reportspostguarantees[c] ≡
-   *   none when report[c].workreport ∈ justbecameavailable ∨
-   *            H_timeslot >= report[c].timestamp + C_assurancetimeoutperiod
-   *   report[c] otherwise
-   *
-   * This removes reports that either:
-   * 1. Just became available (reached 2/3 supermajority)
-   * 2. Timed out (exceeded assurance timeout period)
+   * @param assurances - Array of assurances to validate
+   * @param currentSlot - Current block timeslot
+   * @param parentHash - Parent block hash
+   * @param configService - Configuration service
+   * @returns Safe result with error if validation fails, or assurance counts map if successful
    */
-  applyAssurances(
+  validateAssurances(
     assurances: Assurance[],
-    currentSlot: number,
+    _currentSlot: number,
     parentHash: Hex,
     configService: IConfigService,
-  ): Safe<WorkReport[]> {
-    // Reset assurance counts for this transition (counts are per-transition, not cumulative)
-    this.assuranceCountByCoreIndex.clear()
-
-    // Track work reports that become available in this block
-    const availableWorkReports: WorkReport[] = []
-
-    // Get pending reports first to check for engaged cores
+  ): Safe<Map<number, number>> {
+    // Get pending reports to check for engaged cores during validation
     const pendingReports = this.workReportService.getPendingReports()
+
+    // Track assurance counts in a temporary map (not stored in state)
+    const assuranceCounts = new Map<number, number>()
 
     // Gray Paper: ∀ i ∈ {1 … len(XT_assurances)} : XT_assurances[i-1]_assurer < XT_assurances[i]_assurer
     // Check if assurances are sorted (strictly ascending) and unique in O(N) time
@@ -271,14 +270,48 @@ export class AssuranceService extends BaseService {
             if (!pendingReports.coreReports[coreIndex]) {
               return safeError(new Error('core_not_engaged'))
             }
-            this.assuranceCountByCoreIndex.set(
+            // Store in temporary map (not state)
+            assuranceCounts.set(
               coreIndex,
-              (this.assuranceCountByCoreIndex.get(coreIndex) || 0) + 1,
+              (assuranceCounts.get(coreIndex) || 0) + 1,
             )
           }
         }
       }
     }
+
+    return safeResult(assuranceCounts)
+  }
+
+  /**
+   * Apply assurance state transition to reports
+   *
+   * Gray Paper: equation eq:reportspostguaranteesdef
+   *
+   * ∀ c ∈ coreindex: reportspostguarantees[c] ≡
+   *   none when report[c].workreport ∈ justbecameavailable ∨
+   *            H_timeslot >= report[c].timestamp + C_assurancetimeoutperiod
+   *   report[c] otherwise
+   *
+   * This removes reports that either:
+   * 1. Just became available (reached 2/3 supermajority)
+   * 2. Timed out (exceeded assurance timeout period)
+   *
+   * @param assuranceCounts - Validated assurance counts from validateAssurances
+   * @param currentSlot - Current block timeslot
+   * @param configService - Configuration service
+   * @returns Array of work reports that became available
+   */
+  applyAssurances(
+    assuranceCounts: Map<number, number>,
+    currentSlot: number,
+    configService: IConfigService,
+  ): Safe<WorkReport[]> {
+    // Track work reports that become available in this block
+    const availableWorkReports: WorkReport[] = []
+
+    // Get pending reports
+    const pendingReports = this.workReportService.getPendingReports()
 
     // Check for timeouts on all pending reports (must happen regardless of assurances)
     // Gray Paper: H_timeslot >= timestamp + C_assurancetimeoutperiod
@@ -306,7 +339,7 @@ export class AssuranceService extends BaseService {
     // that should be passed to accumulation
     const threshold = Math.floor((configService.numValidators * 2) / 3) + 1
 
-    for (const [coreIndex, count] of this.assuranceCountByCoreIndex.entries()) {
+    for (const [coreIndex, count] of assuranceCounts.entries()) {
       if (count >= threshold) {
         const pendingReport = pendingReports.coreReports[coreIndex]
         if (pendingReport) {
@@ -318,9 +351,16 @@ export class AssuranceService extends BaseService {
       }
     }
 
+    // Gray Paper equation 174: justbecameavailable must be ordered by core index
+    // "c ∈ordered coreindex" means we iterate cores in ascending order
+    availableWorkReports.sort((a, b) => Number(a.core_index - b.core_index))
+
     logger.debug('[AssuranceService] Work reports became available', {
       count: availableWorkReports.length,
-      packageHashes: availableWorkReports.map(wr => wr.package_spec.hash.slice(0, 40)),
+      packageHashes: availableWorkReports.map((wr) =>
+        wr.package_spec.hash.slice(0, 40),
+      ),
+      coreIndices: availableWorkReports.map((wr) => Number(wr.core_index)),
     })
 
     return safeResult(availableWorkReports)

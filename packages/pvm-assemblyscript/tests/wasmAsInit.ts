@@ -61,7 +61,19 @@ export async function instantiate(module, imports = {}) {
       },
       'console.log'(message) {
         console.log(__liftString(message >>> 0));
-      }
+      },
+      'console.debug'(message) {
+        console.debug(__liftString(message >>> 0));
+      },
+      'console.info'(message) {
+        console.info(__liftString(message >>> 0));
+      },
+      'console.warn'(message) {
+        console.warn(__liftString(message >>> 0));
+      },
+      'console.error'(message) {
+        console.error(__liftString(message >>> 0));
+      },
     }),
   };
   const result = await WebAssembly.instantiate(module, adaptedImports);
@@ -94,6 +106,20 @@ export async function instantiate(module, imports = {}) {
       // assembly/index/roundTripPartialState(~lib/typedarray/Uint8Array, i32, i32, i32) => ~lib/typedarray/Uint8Array
       data = __lowerTypedArray(Uint8Array, 11, 0, data) || __notnull();
       return __liftTypedArray(Uint8Array, exports.roundTripPartialState(data, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    roundTripAccumulateInputs(data) {
+      // assembly/index/roundTripAccumulateInputs(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 11, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripAccumulateInputs(data) >>> 0);
+    },
+    roundTripSingleAccumulateInput(data) {
+      // assembly/index/roundTripSingleAccumulateInput(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 11, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripSingleAccumulateInput(data) >>> 0);
+    },
+    getAccumulationContext(numCores, numValidators, authQueueSize) {
+      // assembly/index/getAccumulationContext(i32, i32, i32) => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getAccumulationContext(numCores, numValidators, authQueueSize) >>> 0);
     },
     resetGeneric(program, registers, gas) {
       // assembly/index/resetGeneric(~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, u32) => void
@@ -129,13 +155,55 @@ export async function instantiate(module, imports = {}) {
     },
     runBlob(program) {
       // assembly/index/runBlob(~lib/typedarray/Uint8Array) => void
-      program = __lowerTypedArray(Uint8Array, 11, 0, program) || __notnull();
+      program = __lowerTypedArray(Uint8Array, 15, 0, program) || __notnull();
       exports.runBlob(program);
     },
     prepareBlob(program) {
       // assembly/index/prepareBlob(~lib/typedarray/Uint8Array) => void
-      program = __lowerTypedArray(Uint8Array, 11, 0, program) || __notnull();
+      program = __lowerTypedArray(Uint8Array, 15, 0, program) || __notnull();
       exports.prepareBlob(program);
+    },
+    accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators) {
+      // assembly/index/accumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u16?, u16?, u16?, u16?) => assembly/pvm/AccumulateInvocationResult
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      context = __retain(__lowerTypedArray(Uint8Array, 15, 0, context) || __notnull());
+      entropyAccumulator = __retain(__lowerTypedArray(Uint8Array, 15, 0, entropyAccumulator) || __notnull());
+      encodedWorkItems = __lowerTypedArray(Uint8Array, 15, 0, encodedWorkItems) || __notnull();
+      configMaxBlockGas = configMaxBlockGas || 0n;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        return __liftInternref(exports.accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators) >>> 0);
+      } finally {
+        __release(program);
+        __release(args);
+        __release(context);
+        __release(entropyAccumulator);
+      }
+    },
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      context = __retain(__lowerTypedArray(Uint8Array, 15, 0, context) || __notnull());
+      entropyAccumulator = __retain(__lowerTypedArray(Uint8Array, 15, 0, entropyAccumulator) || __notnull());
+      encodedWorkItems = __lowerTypedArray(Uint8Array, 15, 0, encodedWorkItems) || __notnull();
+      configMaxBlockGas = configMaxBlockGas || 0n;
+      configMaxRefineGas = configMaxRefineGas || 0n;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
+      } finally {
+        __release(program);
+        __release(args);
+        __release(context);
+        __release(entropyAccumulator);
+      }
+    },
+    setAccumulateInputs(inputs) {
+      // assembly/index/setAccumulateInputs(~lib/array/Array<assembly/codec/AccumulateInput> | null) => void
+      inputs = __lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 51, 2, inputs);
+      exports.setAccumulateInputs(inputs);
     },
     runProgram() {
       // assembly/index/runProgram() => assembly/types/RunProgramResult
@@ -162,13 +230,21 @@ export async function instantiate(module, imports = {}) {
       // assembly/index/getResultCode() => u32
       return exports.getResultCode() >>> 0;
     },
+    getCode() {
+      // assembly/index/getCode() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getCode() >>> 0);
+    },
+    getBitmask() {
+      // assembly/index/getBitmask() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getBitmask() >>> 0);
+    },
     getRegisters() {
       // assembly/index/getRegisters() => ~lib/typedarray/Uint8Array
       return __liftTypedArray(Uint8Array, exports.getRegisters() >>> 0);
     },
     setRegisters(registers) {
       // assembly/index/setRegisters(~lib/array/Array<u8>) => void
-      registers = __lowerArray(__setU8, 193, 0, registers) || __notnull();
+      registers = __lowerArray(__setU8, 5, 0, registers) || __notnull();
       exports.setRegisters(registers);
     },
     getRegister(index) {
@@ -180,65 +256,23 @@ export async function instantiate(module, imports = {}) {
       value = value || 0n;
       exports.setRegister(index, value);
     },
-    getPageDump(pageIndex) {
-      // assembly/index/getPageDump(i32) => ~lib/typedarray/Uint8Array
-      return __liftTypedArray(Uint8Array, exports.getPageDump(pageIndex) >>> 0);
-    },
     setMemory(address, data) {
       // assembly/index/setMemory(u32, ~lib/typedarray/Uint8Array) => void
-      data = __lowerTypedArray(Uint8Array, 11, 0, data) || __notnull();
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
       exports.setMemory(address, data);
+    },
+    getAccumulationContext(numCores, numValidators, authQueueSize) {
+      // assembly/index/getAccumulationContext(i32, i32, i32) => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getAccumulationContext(numCores, numValidators, authQueueSize) >>> 0);
     },
     initializeProgram(program, args) {
       // assembly/index/initializeProgram(~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array) => void
-      program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
-      args = __lowerTypedArray(Uint8Array, 11, 0, args) || __notnull();
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __lowerTypedArray(Uint8Array, 15, 0, args) || __notnull();
       try {
         exports.initializeProgram(program, args);
       } finally {
         __release(program);
-      }
-    },
-    accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize) {
-      // assembly/index/accumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32) => assembly/pvm/AccumulateInvocationResult
-      // Clear any previous error before calling
-      clearLastWasmError();
-      
-      program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
-      args = __lowerTypedArray(Uint8Array, 11, 0, args) || __notnull();
-      context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
-      try {
-        const resultPtr = exports.accumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize);
-        // Lift the AccumulateInvocationResult from WASM memory
-        return __liftInternref(resultPtr >>> 0);
-      } catch (error) {
-        // If error was thrown, check if we have WASM error details
-        const wasmError = getLastWasmError();
-        if (wasmError) {
-          // Enhance the error with WASM details
-          (error as any).wasmErrorDetails = wasmError;
-        }
-        throw error;
-      } finally {
-        __release(program);
-        __release(context);
-      }
-    },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
-      program = __retain(__lowerTypedArray(Uint8Array, 11, 0, program) || __notnull());
-      args = __retain(__lowerTypedArray(Uint8Array, 11, 0, args) || __notnull());
-      context = __retain(__lowerTypedArray(Uint8Array, 11, 0, context) || __notnull());
-      entropyAccumulator = __lowerTypedArray(Uint8Array, 11, 0, entropyAccumulator) || __notnull();
-      configMaxBlockGas = configMaxBlockGas || 0n;
-      configMaxRefineGas = configMaxRefineGas || 0n;
-      try {
-        exports.__setArgumentsLength(arguments.length);
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
-      } finally {
-        __release(program);
-        __release(args);
-        __release(context);
       }
     },
     alignToPage(size) {
@@ -251,46 +285,40 @@ export async function instantiate(module, imports = {}) {
     },
     decodeNatural(data) {
       // assembly/codec/decodeNatural(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<u64> | null
-      data = __lowerTypedArray(Uint8Array, 11, 0, data) || __notnull();
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
       return __liftInternref(exports.decodeNatural(data) >>> 0);
     },
     decodeBlob(programBlob) {
       // assembly/codec/decodeBlob(~lib/typedarray/Uint8Array) => assembly/codec/DecodedBlob | null
-      programBlob = __lowerTypedArray(Uint8Array, 11, 0, programBlob) || __notnull();
+      programBlob = __lowerTypedArray(Uint8Array, 15, 0, programBlob) || __notnull();
       return __liftInternref(exports.decodeBlob(programBlob) >>> 0);
     },
     decodeServiceCodeFromPreimage(preimageBlob) {
       // assembly/codec/decodeServiceCodeFromPreimage(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/ServiceCodeResult> | null
-      preimageBlob = __lowerTypedArray(Uint8Array, 11, 0, preimageBlob) || __notnull();
+      preimageBlob = __lowerTypedArray(Uint8Array, 15, 0, preimageBlob) || __notnull();
       return __liftInternref(exports.decodeServiceCodeFromPreimage(preimageBlob) >>> 0);
     },
     decodeProgram(programBlob) {
       // assembly/codec/decodeProgram(~lib/typedarray/Uint8Array) => assembly/codec/DecodedProgram | null
-      programBlob = __lowerTypedArray(Uint8Array, 11, 0, programBlob) || __notnull();
+      programBlob = __lowerTypedArray(Uint8Array, 15, 0, programBlob) || __notnull();
       return __liftInternref(exports.decodeProgram(programBlob) >>> 0);
     },
     decodeProgramFromPreimage(preimageBlob) {
       // assembly/codec/decodeProgramFromPreimage(~lib/typedarray/Uint8Array) => assembly/codec/DecodedProgram | null
-      preimageBlob = __lowerTypedArray(Uint8Array, 11, 0, preimageBlob) || __notnull();
+      preimageBlob = __lowerTypedArray(Uint8Array, 15, 0, preimageBlob) || __notnull();
       return __liftInternref(exports.decodeProgramFromPreimage(preimageBlob) >>> 0);
     },
-    getCode() {
-      // assembly/index/getCode() => ~lib/typedarray/Uint8Array
-      return __liftTypedArray(Uint8Array, exports.getCode() >>> 0);
-    },
-    getBitmask() {
-      // assembly/index/getBitmask() => ~lib/typedarray/Uint8Array
-      return __liftTypedArray(Uint8Array, exports.getBitmask() >>> 0);
-    },
-    encodeServiceAccount(account) {
-      // assembly/codec/encodeServiceAccount(assembly/codec/ServiceAccountData) => ~lib/typedarray/Uint8Array
+    encodeServiceAccount(account, major, minor, patch) {
+      // assembly/codec/encodeServiceAccount(assembly/codec/ServiceAccountData, i32?, i32?, i32?) => ~lib/typedarray/Uint8Array
       account = __lowerInternref(account) || __notnull();
-      return __liftTypedArray(Uint8Array, exports.encodeServiceAccount(account) >>> 0);
+      exports.__setArgumentsLength(arguments.length);
+      return __liftTypedArray(Uint8Array, exports.encodeServiceAccount(account, major, minor, patch) >>> 0);
     },
-    hexToBytes(hex) {
-      // assembly/codec/hexToBytes(~lib/string/String) => ~lib/typedarray/Uint8Array
-      hex = __lowerString(hex) || __notnull();
-      return __liftTypedArray(Uint8Array, exports.hexToBytes(hex) >>> 0);
+    decodeServiceAccount(data, major, minor, patch) {
+      // assembly/codec/decodeServiceAccount(~lib/typedarray/Uint8Array, i32?, i32?, i32?) => assembly/codec/DecodingResult<assembly/codec/ServiceAccountData> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      exports.__setArgumentsLength(arguments.length);
+      return __liftInternref(exports.decodeServiceAccount(data, major, minor, patch) >>> 0);
     },
     encodeFixedLength(value, length) {
       // assembly/codec/encodeFixedLength(u64, i32) => ~lib/typedarray/Uint8Array
@@ -319,7 +347,7 @@ export async function instantiate(module, imports = {}) {
     },
     encodeVariableSequence(sequence) {
       // assembly/codec/encodeVariableSequence(~lib/array/Array<~lib/typedarray/Uint8Array>) => ~lib/typedarray/Uint8Array
-      sequence = __lowerArray((pointer, value) => { __setU32(pointer, __lowerTypedArray(Uint8Array, 11, 0, value) || __notnull()); }, 195, 2, sequence) || __notnull();
+      sequence = __lowerArray((pointer, value) => { __setU32(pointer, __lowerTypedArray(Uint8Array, 15, 0, value) || __notnull()); }, 41, 2, sequence) || __notnull();
       return __liftTypedArray(Uint8Array, exports.encodeVariableSequence(sequence) >>> 0);
     },
     encodeWorkItem(workItem) {
@@ -332,10 +360,210 @@ export async function instantiate(module, imports = {}) {
       workItem = __lowerInternref(workItem) || __notnull();
       return __liftTypedArray(Uint8Array, exports.encodeWorkItemSummary(workItem) >>> 0);
     },
+    decodeImportReference(data) {
+      // assembly/codec/decodeImportReference(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/ImportSegment> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeImportReference(data) >>> 0);
+    },
+    decodeExtrinsicReference(data) {
+      // assembly/codec/decodeExtrinsicReference(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/ExtrinsicReference> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeExtrinsicReference(data) >>> 0);
+    },
+    decodeWorkItem(data) {
+      // assembly/codec/decodeWorkItem(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/WorkItem> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeWorkItem(data) >>> 0);
+    },
     encodeWorkPackage(workPackage) {
       // assembly/codec/encodeWorkPackage(assembly/codec/WorkPackage) => ~lib/typedarray/Uint8Array
       workPackage = __lowerInternref(workPackage) || __notnull();
       return __liftTypedArray(Uint8Array, exports.encodeWorkPackage(workPackage) >>> 0);
+    },
+    decodeAccumulateArgs(args) {
+      // assembly/codec/decodeAccumulateArgs(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/DecodedAccumulateArgs> | null
+      args = __lowerTypedArray(Uint8Array, 15, 0, args) || __notnull();
+      return __liftInternref(exports.decodeAccumulateArgs(args) >>> 0);
+    },
+    decodeFixedLength(data, length) {
+      // assembly/codec/decodeFixedLength(~lib/typedarray/Uint8Array, i32) => assembly/codec/DecodingResult<u64> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeFixedLength(data, length) >>> 0);
+    },
+    decodeVariableLength(data) {
+      // assembly/codec/decodeVariableLength(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<~lib/typedarray/Uint8Array> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeVariableLength(data) >>> 0);
+    },
+    decodeVariableSequence(data, elementDecoder) {
+      // assembly/codec/decodeVariableSequence<u32>(~lib/typedarray/Uint8Array, (~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<u32> | null) => assembly/codec/DecodingResult<~lib/array/Array<u32>> | null
+      data = __retain(__lowerTypedArray(Uint8Array, 15, 0, data) || __notnull());
+      elementDecoder = __lowerInternref(elementDecoder) || __notnull();
+      try {
+        return __liftInternref(exports.decodeVariableSequence(data, elementDecoder) >>> 0);
+      } finally {
+        __release(data);
+      }
+    },
+    decodeVariableSequence(data, elementDecoder) {
+      // assembly/codec/decodeVariableSequence<assembly/codec/DeferredTransfer>(~lib/typedarray/Uint8Array, (~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> | null) => assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/DeferredTransfer>> | null
+      data = __retain(__lowerTypedArray(Uint8Array, 15, 0, data) || __notnull());
+      elementDecoder = __lowerInternref(elementDecoder) || __notnull();
+      try {
+        return __liftInternref(exports.decodeVariableSequence(data, elementDecoder) >>> 0);
+      } finally {
+        __release(data);
+      }
+    },
+    decodeVariableSequence(data, elementDecoder) {
+      // assembly/codec/decodeVariableSequence<assembly/codec/ProvisionEntry>(~lib/typedarray/Uint8Array, (~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/ProvisionEntry> | null) => assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/ProvisionEntry>> | null
+      data = __retain(__lowerTypedArray(Uint8Array, 15, 0, data) || __notnull());
+      elementDecoder = __lowerInternref(elementDecoder) || __notnull();
+      try {
+        return __liftInternref(exports.decodeVariableSequence(data, elementDecoder) >>> 0);
+      } finally {
+        __release(data);
+      }
+    },
+    decodeVariableSequence(data, elementDecoder) {
+      // assembly/codec/decodeVariableSequence<assembly/codec/AccumulateInput>(~lib/typedarray/Uint8Array, (~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/AccumulateInput> | null) => assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/AccumulateInput>> | null
+      data = __retain(__lowerTypedArray(Uint8Array, 15, 0, data) || __notnull());
+      elementDecoder = __lowerInternref(elementDecoder) || __notnull();
+      try {
+        return __liftInternref(exports.decodeVariableSequence(data, elementDecoder) >>> 0);
+      } finally {
+        __release(data);
+      }
+    },
+    decodeCompleteServiceAccount(data) {
+      // assembly/codec/decodeCompleteServiceAccount(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/CompleteServiceAccount> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeCompleteServiceAccount(data) >>> 0);
+    },
+    decodePartialState(data, numCores, numValidators, authQueueSize) {
+      // assembly/codec/decodePartialState(~lib/typedarray/Uint8Array, i32, i32, i32) => assembly/codec/DecodingResult<assembly/codec/PartialState> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodePartialState(data, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    decodeDeferredTransfer(data) {
+      // assembly/codec/decodeDeferredTransfer(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeDeferredTransfer(data) >>> 0);
+    },
+    decodeImplications(data, numCores, numValidators, authQueueSize) {
+      // assembly/codec/decodeImplications(~lib/typedarray/Uint8Array, i32, i32, i32) => assembly/codec/DecodingResult<assembly/codec/Implications> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeImplications(data, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    decodeImplicationsPair(data, numCores, numValidators, authQueueSize) {
+      // assembly/codec/decodeImplicationsPair(~lib/typedarray/Uint8Array, i32, i32, i32) => assembly/codec/DecodingResult<assembly/codec/ImplicationsPair> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeImplicationsPair(data, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    encodeOptional(value, encoder) {
+      // assembly/codec/encodeOptional(~lib/typedarray/Uint8Array | null, (~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      value = __retain(__lowerTypedArray(Uint8Array, 15, 0, value));
+      encoder = __lowerInternref(encoder) || __notnull();
+      try {
+        return __liftTypedArray(Uint8Array, exports.encodeOptional(value, encoder) >>> 0);
+      } finally {
+        __release(value);
+      }
+    },
+    encodeDeferredTransfer(transfer) {
+      // assembly/codec/encodeDeferredTransfer(assembly/codec/DeferredTransfer) => ~lib/typedarray/Uint8Array
+      transfer = __lowerInternref(transfer) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeDeferredTransfer(transfer) >>> 0);
+    },
+    encodeWorkResult(resultType, result) {
+      // assembly/codec/encodeWorkResult(u8, ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      result = __lowerTypedArray(Uint8Array, 15, 0, result) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeWorkResult(resultType, result) >>> 0);
+    },
+    encodeOperandTuple(ot) {
+      // assembly/codec/encodeOperandTuple(assembly/codec/OperandTuple) => ~lib/typedarray/Uint8Array
+      ot = __lowerInternref(ot) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeOperandTuple(ot) >>> 0);
+    },
+    encodeAccumulateInput(input) {
+      // assembly/codec/encodeAccumulateInput(assembly/codec/AccumulateInput) => ~lib/typedarray/Uint8Array
+      input = __lowerInternref(input) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeAccumulateInput(input) >>> 0);
+    },
+    decodeWorkResult(data) {
+      // assembly/codec/decodeWorkResult(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/OperandTuple> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeWorkResult(data) >>> 0);
+    },
+    decodeOperandTuple(data) {
+      // assembly/codec/decodeOperandTuple(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/OperandTuple> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeOperandTuple(data) >>> 0);
+    },
+    decodeAccumulateInput(data) {
+      // assembly/codec/decodeAccumulateInput(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/AccumulateInput> | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftInternref(exports.decodeAccumulateInput(data) >>> 0);
+    },
+    encodeVariableSequenceGeneric(sequence, elementEncoder) {
+      // assembly/codec/encodeVariableSequenceGeneric<u32>(~lib/array/Array<u32>, (u32) => ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      sequence = __retain(__lowerArray(__setU32, 14, 2, sequence) || __notnull());
+      elementEncoder = __lowerInternref(elementEncoder) || __notnull();
+      try {
+        return __liftTypedArray(Uint8Array, exports.encodeVariableSequenceGeneric(sequence, elementEncoder) >>> 0);
+      } finally {
+        __release(sequence);
+      }
+    },
+    encodeVariableSequenceGeneric(sequence, elementEncoder) {
+      // assembly/codec/encodeVariableSequenceGeneric<assembly/codec/DeferredTransfer>(~lib/array/Array<assembly/codec/DeferredTransfer>, (assembly/codec/DeferredTransfer) => ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      sequence = __retain(__lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 46, 2, sequence) || __notnull());
+      elementEncoder = __lowerInternref(elementEncoder) || __notnull();
+      try {
+        return __liftTypedArray(Uint8Array, exports.encodeVariableSequenceGeneric(sequence, elementEncoder) >>> 0);
+      } finally {
+        __release(sequence);
+      }
+    },
+    encodeVariableSequenceGeneric(sequence, elementEncoder) {
+      // assembly/codec/encodeVariableSequenceGeneric<assembly/codec/ProvisionEntry>(~lib/array/Array<assembly/codec/ProvisionEntry>, (assembly/codec/ProvisionEntry) => ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      sequence = __retain(__lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 48, 2, sequence) || __notnull());
+      elementEncoder = __lowerInternref(elementEncoder) || __notnull();
+      try {
+        return __liftTypedArray(Uint8Array, exports.encodeVariableSequenceGeneric(sequence, elementEncoder) >>> 0);
+      } finally {
+        __release(sequence);
+      }
+    },
+    encodeVariableSequenceGeneric(sequence, elementEncoder) {
+      // assembly/codec/encodeVariableSequenceGeneric<assembly/codec/AccumulateInput>(~lib/array/Array<assembly/codec/AccumulateInput>, (assembly/codec/AccumulateInput) => ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      sequence = __retain(__lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 51, 2, sequence) || __notnull());
+      elementEncoder = __lowerInternref(elementEncoder) || __notnull();
+      try {
+        return __liftTypedArray(Uint8Array, exports.encodeVariableSequenceGeneric(sequence, elementEncoder) >>> 0);
+      } finally {
+        __release(sequence);
+      }
+    },
+    encodeCompleteServiceAccount(account) {
+      // assembly/codec/encodeCompleteServiceAccount(assembly/codec/CompleteServiceAccount) => ~lib/typedarray/Uint8Array
+      account = __lowerInternref(account) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeCompleteServiceAccount(account) >>> 0);
+    },
+    encodePartialState(state, numCores, numValidators, authQueueSize) {
+      // assembly/codec/encodePartialState(assembly/codec/PartialState, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      state = __lowerInternref(state) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodePartialState(state, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    encodeImplications(implications, numCores, numValidators, authQueueSize) {
+      // assembly/codec/encodeImplications(assembly/codec/Implications, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      implications = __lowerInternref(implications) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeImplications(implications, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    encodeImplicationsPair(pair, numCores, numValidators, authQueueSize) {
+      // assembly/codec/encodeImplicationsPair(assembly/codec/ImplicationsPair, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      pair = __lowerInternref(pair) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.encodeImplicationsPair(pair, numCores, numValidators, authQueueSize) >>> 0);
     },
     DEFAULT_GAS_LIMIT: {
       // assembly/config/DEFAULT_GAS_LIMIT: u32
@@ -498,7 +726,7 @@ export async function instantiate(module, imports = {}) {
     ))({}),
     bytesToHex(bytes) {
       // assembly/types/bytesToHex(~lib/typedarray/Uint8Array) => ~lib/string/String
-      bytes = __lowerTypedArray(Uint8Array, 11, 0, bytes) || __notnull();
+      bytes = __lowerTypedArray(Uint8Array, 15, 0, bytes) || __notnull();
       return __liftString(exports.bytesToHex(bytes) >>> 0);
     },
     Status: (values => (
@@ -513,48 +741,42 @@ export async function instantiate(module, imports = {}) {
     ))({}),
     createPvmShell() {
       // assembly/wasm-wrapper/createPvmShell() => assembly/wasm-wrapper/WasmPvmShellInterface
-      return __liftRecord5(exports.createPvmShell() >>> 0);
+      return __liftRecord9(exports.createPvmShell() >>> 0);
     },
-    // Error tracking helpers
-    getLastWasmError() {
-      return getLastWasmError();
+    roundTripSingleImplications(data, numCores, numValidators, authQueueSize) {
+      // assembly/test-exports/roundTripSingleImplications(~lib/typedarray/Uint8Array, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripSingleImplications(data, numCores, numValidators, authQueueSize) >>> 0);
     },
-    clearLastWasmError() {
-      clearLastWasmError();
+    roundTripImplications(data, numCores, numValidators, authQueueSize) {
+      // assembly/test-exports/roundTripImplications(~lib/typedarray/Uint8Array, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripImplications(data, numCores, numValidators, authQueueSize) >>> 0);
+    },
+    roundTripServiceAccount(data) {
+      // assembly/test-exports/roundTripServiceAccount(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripServiceAccount(data) >>> 0);
+    },
+    roundTripPartialState(data, numCores, numValidators, authQueueSize) {
+      // assembly/test-exports/roundTripPartialState(~lib/typedarray/Uint8Array, i32, i32, i32) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripPartialState(data, numCores, numValidators, authQueueSize) >>> 0);
     },
     getDecodedProgramFields(preimageBlob) {
-      // assembly/index/getDecodedProgramFields(~lib/typedarray/Uint8Array) => assembly/test-exports/DecodedProgramFields | null
-      preimageBlob = __lowerTypedArray(Uint8Array, 11, 0, preimageBlob) || __notnull();
-      const result = exports.getDecodedProgramFields(preimageBlob);
-      if (!result) return null;
-      // result is an internref pointer to DecodedProgramFields class in WASM memory
-      // We need to read the fields from memory using the pointer
-      const memory = exports.memory || imports.env?.memory;
-      const view = new DataView(memory.buffer);
-      // Read class fields from WASM memory (each field is 4 bytes for pointers, u32 values)
-      // Class layout: metadata (ptr), roDataLength (u32), rwDataLength (u32), heapZeroPaddingSize (u32), 
-      //               stackSize (u32), roData (ptr), rwData (ptr), codeSize (u32), code (ptr)
-      const metadataPtr = view.getUint32(result + 0, true);
-      const roDataLength = view.getUint32(result + 4, true);
-      const rwDataLength = view.getUint32(result + 8, true);
-      const heapZeroPaddingSize = view.getUint32(result + 12, true);
-      const stackSize = view.getUint32(result + 16, true);
-      const roDataPtr = view.getUint32(result + 20, true);
-      const rwDataPtr = view.getUint32(result + 24, true);
-      const codeSize = view.getUint32(result + 28, true);
-      const codePtr = view.getUint32(result + 32, true);
-      
-      return {
-        metadata: metadataPtr ? __liftTypedArray(Uint8Array, metadataPtr >>> 0) : new Uint8Array(0),
-        roDataLength: roDataLength >>> 0,
-        rwDataLength: rwDataLength >>> 0,
-        heapZeroPaddingSize: heapZeroPaddingSize >>> 0,
-        stackSize: stackSize >>> 0,
-        roData: roDataPtr ? __liftTypedArray(Uint8Array, roDataPtr >>> 0) : new Uint8Array(0),
-        rwData: rwDataPtr ? __liftTypedArray(Uint8Array, rwDataPtr >>> 0) : new Uint8Array(0),
-        codeSize: codeSize >>> 0,
-        code: codePtr ? __liftTypedArray(Uint8Array, codePtr >>> 0) : new Uint8Array(0),
-      };
+      // assembly/test-exports/getDecodedProgramFields(~lib/typedarray/Uint8Array) => assembly/test-exports/DecodedProgramFields | null
+      preimageBlob = __lowerTypedArray(Uint8Array, 15, 0, preimageBlob) || __notnull();
+      return __liftInternref(exports.getDecodedProgramFields(preimageBlob) >>> 0);
+    },
+    roundTripAccumulateInputs(data) {
+      // assembly/test-exports/roundTripAccumulateInputs(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripAccumulateInputs(data) >>> 0);
+    },
+    roundTripSingleAccumulateInput(data) {
+      // assembly/test-exports/roundTripSingleAccumulateInput(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.roundTripSingleAccumulateInput(data) >>> 0);
     },
   }, exports);
   function __liftRecord5(pointer) {

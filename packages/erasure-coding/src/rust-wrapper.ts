@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
-import { logger } from '@pbnj/core'
-import type { EncodedData, ErasureCoder, ShardWithIndex } from '@pbnj/types'
+import { logger } from '@pbnjam/core'
+import type { EncodedData, ErasureCoder, ShardWithIndex } from '@pbnjam/types'
 
 // Rust native module types
 interface RustShardWithIndex {

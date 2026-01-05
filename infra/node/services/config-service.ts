@@ -14,7 +14,7 @@ import {
   SMALL_SAFROLE_CONSTANTS,
   TIME_CONSTANTS,
   TINY_SAFROLE_CONSTANTS,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 
 /**
  * Safrole Configuration Service

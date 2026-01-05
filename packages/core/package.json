@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/core",
+  "name": "@pbnjam/core",
   "version": "0.0.1",
   "type": "module",
   "main": "index.ts",
@@ -15,16 +15,17 @@
   },
   "dependencies": {
     "@noble/curves": "catalog:",
-    "@noble/ed25519": "3.0.0",
+    "@noble/ed25519": "catalog:",
     "@noble/hashes": "catalog:",
-    "@pbnj/types": "workspace:*",
+    "@pbnjam/bandersnatch": "catalog:",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
+    "@pbnjam/types": "catalog:",
     "@types/hapi": "18.0.14",
-    "radash": "12.1.1",
-    "viem": "catalog:",
-    "zod": "catalog:"
+    "pino": "catalog:",
+    "viem": "catalog:"
   },
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "biome": "0.3.3",
     "bun-types": "^1.3.1",
     "typescript": "5.8.2",

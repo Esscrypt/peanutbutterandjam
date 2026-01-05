@@ -27,24 +27,24 @@ import {
   EventBusService,
   Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
-import { AccumulatePVM } from '@pbnj/pvm-invocations'
+} from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
@@ -52,6 +52,20 @@ import { StatisticsService } from '../../services/statistics-service'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
+// Helper function to parse CLI arguments for starting block
+function getStartBlock(): number {
+  const args = process.argv.slice(2)
+  const startBlockIndex = args.indexOf('--start-block')
+  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
+    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
+    if (Number.isNaN(startBlock) || startBlock < 1) {
+      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
+    }
+    return startBlock
+  }
+  return 1 // Default to block 1 (genesis)
+}
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
@@ -182,6 +196,8 @@ describe('Genesis Parse Tests', () => {
         configService: configService,
         entropyService: entropyService,
         pvmOptions: { gasCounter: 1_000_000n },
+        traceSubfolder: 'safrole',
+        useWasm: false,
       })
 
       const statisticsService = new StatisticsService({
@@ -276,10 +292,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
@@ -600,8 +615,13 @@ describe('Genesis Parse Tests', () => {
       }
 
       // Process blocks sequentially
-      // Start from block 1 and continue until we run out of block files
-      let blockNumber = 1
+      // Support --start-block CLI argument to start from a specific block
+      const startBlock = getStartBlock()
+      if (startBlock > 1) {
+        console.log(`\n🚀 Starting from block ${startBlock} (--start-block ${startBlock})`)
+      }
+
+      let blockNumber = startBlock
       let hasMoreBlocks = true
 
       while (hasMoreBlocks) {
@@ -619,8 +639,8 @@ describe('Genesis Parse Tests', () => {
 
           console.log(`\n📦 Processing Block ${blockNumber}...`)
 
-          // Only set pre-state for the first block
-          if (blockNumber === 1) {
+          // Only set pre-state for the starting block
+          if (blockNumber === startBlock) {
             // Set pre_state from test vector BEFORE validating the block
             // This ensures entropy3 and other state components match what was used to create the seal signature
             // Use JAM version 0.7.1+ for safrole traces (includes registrar in privileges and discriminator in service accounts)

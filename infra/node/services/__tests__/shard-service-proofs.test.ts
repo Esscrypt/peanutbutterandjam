@@ -10,15 +10,15 @@ import { ShardService } from '../shard-service'
 import type { ConfigService } from '../config-service'
 import type { ErasureCodingService } from '../erasure-coding-service'
 import type { NetworkingService } from '../networking-service'
-import { EventBusService } from '@pbnj/core'
-import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnj/types'
+import { EventBusService } from '@pbnjam/core'
+import type { WorkPackage, ShardDistributionRequest, ShardDistributionResponse } from '@pbnjam/types'
 import { 
   generateWellBalancedProof, 
 
   merklizewb, 
   verifyMerkleProof 
-} from '@pbnj/core'
-import { decodeWorkPackage } from '@pbnj/codec'
+} from '@pbnjam/core'
+import { decodeWorkPackage } from '@pbnjam/codec'
 import { join } from 'path'
 import { readFileSync } from 'fs'
 

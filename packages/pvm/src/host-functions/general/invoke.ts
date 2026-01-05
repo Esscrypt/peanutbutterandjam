@@ -1,10 +1,10 @@
 import type {
   HostFunctionContext,
   HostFunctionResult,
+  InvokeParams,
   PVMState,
   RAM,
-  InvokeParams,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -29,7 +29,6 @@ import { BaseHostFunction } from './base'
  * - Returns execution result (HALT, PANIC, FAULT, OOG, HOST)
  * - Updates machine state (RAM and PC) and writes results back to memory
  */
-
 
 export class InvokeHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.INVOKE

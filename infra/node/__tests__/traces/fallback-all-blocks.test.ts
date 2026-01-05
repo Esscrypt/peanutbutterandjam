@@ -27,30 +27,45 @@ import {
   EventBusService,
   Hex,
   hexToBytes,
-} from '@pbnj/core'
-import { getTicketIdFromProof } from '@pbnj/safrole'
+} from '@pbnjam/core'
+import type { SafroleState } from '@pbnjam/types'
+import { getTicketIdFromProof } from '@pbnjam/safrole'
 import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnj/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnj/bandersnatch-vrf'
+import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   type Block,
   type BlockBody,
   type BlockHeader,
   type BlockTraceTestVector,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import { ClockService } from '../../services/clock-service'
 import {
   AccumulateHostFunctionRegistry,
-  AccumulatePVM,
   HostFunctionRegistry,
-} from '@pbnj/pvm'
+} from '@pbnjam/pvm'
 import { BlockImporterService } from '../../services/block-importer-service'
 import { AssuranceService } from '../../services/assurance-service'
 import { GuarantorService } from '../../services/guarantor-service'
 import { StatisticsService } from '../../services/statistics-service'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
+// Helper function to parse CLI arguments for starting block
+function getStartBlock(): number {
+  const args = process.argv.slice(2)
+  const startBlockIndex = args.indexOf('--start-block')
+  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
+    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
+    if (Number.isNaN(startBlock) || startBlock < 1) {
+      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
+    }
+    return startBlock
+  }
+  return 1 // Default to block 1 (genesis)
+}
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
@@ -119,7 +134,6 @@ describe('Genesis Parse Tests', () => {
         sealKeyService,
         ringProver,
         ticketService,
-        keyPairService: null, 
         configService,
         initialValidators: initialValidators.map((validator) => ({
           bandersnatch: validator.bandersnatch,
@@ -145,7 +159,6 @@ describe('Genesis Parse Tests', () => {
       })
 
       const workReportService = new WorkReportService({
-        workStore: null,
         eventBus: eventBusService,
         networkingService: null,
         ce136WorkReportRequestProtocol: null,
@@ -168,7 +181,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        preimageStore: null,
         configService,
         eventBusService,
         clockService,
@@ -178,12 +190,11 @@ describe('Genesis Parse Tests', () => {
 
       const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
       const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-      const accumulatePVM = new AccumulatePVM({
-        hostFunctionRegistry,
-        accumulateHostFunctionRegistry,
+
+      const statisticsService = new StatisticsService({
+        eventBusService: eventBusService,
         configService: configService,
-        entropyService: entropyService,
-        pvmOptions: { gasCounter: 1_000_000n },
+        clockService: clockService,
       })
 
       const accumulatedService = new AccumulationService({
@@ -193,8 +204,17 @@ describe('Genesis Parse Tests', () => {
         privilegesService: privilegesService,
         validatorSetManager: validatorSetManager,
         authQueueService: authQueueService,
-        accumulatePVM: accumulatePVM,
         readyService: readyService,
+        statisticsService: statisticsService,
+        accumulatePVM: new AccumulatePVM({
+          hostFunctionRegistry,
+          accumulateHostFunctionRegistry,
+          configService: configService,
+          entropyService: entropyService,
+          pvmOptions: { gasCounter: 1_000_000n },
+          useWasm: false,
+          traceSubfolder: 'fallback',
+        }),
       })
             
       const recentHistoryService = new RecentHistoryService({
@@ -203,11 +223,6 @@ describe('Genesis Parse Tests', () => {
         accumulationService: accumulatedService,
       })
 
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
-      })
 
 
       const stateService = new StateService({
@@ -267,7 +282,6 @@ describe('Genesis Parse Tests', () => {
         validatorSetManagerService: validatorSetManager,
         entropyService: entropyService,
         sealKeyService: sealKeyService,
-        blockStore: null,
         assuranceService: assuranceService,
         guarantorService: guarantorService,
         ticketService: ticketService,
@@ -278,10 +292,9 @@ describe('Genesis Parse Tests', () => {
 
       // Set validatorSetManager on sealKeyService (needed for fallback key generation)
       sealKeyService.setValidatorSetManager(validatorSetManager)
-      // Register SealKeyService epoch transition callback AFTER ValidatorSetManager
-      // This ensures ValidatorSetManager.handleEpochTransition runs first, updating activeSet'
-      // before SealKeyService calculates the new seal key sequence
-      sealKeyService.registerEpochTransitionCallback()
+      // SealKeyService epoch transition callback is registered in constructor
+      // ValidatorSetManager should be constructed before SealKeyService to ensure
+      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
 
       // Start all services
       // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
@@ -444,32 +457,92 @@ describe('Genesis Parse Tests', () => {
           }
         }
         
-        // Print only pendingSet and epochRoot
-        console.log(`\n=== [Block ${blockNumber}] Safrole State (pendingSet & epochRoot) ===`)
+        // Print full safrole state comparison
+        console.log(`\n=== [Block ${blockNumber}] Safrole State (Full Comparison) ===`)
         if (expectedSafrole) {
           console.log('Expected pendingSet:', JSON.stringify(
-            expectedSafrole.pendingSet?.map((v: any) => ({
+            (expectedSafrole as any).pendingSet?.map((v: any) => ({
               bandersnatch: v.bandersnatch,
               ed25519: v.ed25519,
             })),
             null,
             2
           ))
-          console.log('Expected epochRoot:', expectedSafrole.epochRoot)
+          console.log('Expected epochRoot:', (expectedSafrole as SafroleState).epochRoot)
+          console.log('Expected discriminator:', (expectedSafrole as any).discriminator ?? 'N/A')
+          console.log('Expected sealTickets length:', (expectedSafrole as SafroleState).sealTickets?.length ?? 0)
+          console.log('Expected ticketAccumulator length:', (expectedSafrole as SafroleState).ticketAccumulator?.length ?? 0)
         } else {
           console.log('Expected safrole: Not found in post_state')
         }
         
-        if (actualSafrole && !('error' in actualSafrole)) {
+        if (actualSafrole && typeof actualSafrole === 'object' && !('error' in actualSafrole)) {
           console.log('Actual pendingSet:', JSON.stringify(
-            actualSafrole.pendingSet?.map((v: any) => ({
+            (actualSafrole as SafroleState).pendingSet?.map((v: any) => ({
               bandersnatch: v.bandersnatch,
               ed25519: v.ed25519,
             })),
             null,
             2
           ))
-          console.log('Actual epochRoot:', actualSafrole.epochRoot)
+          console.log('Actual epochRoot:', (actualSafrole as SafroleState).epochRoot)
+          // Compute discriminator from sealTickets
+          const hasTickets = (actualSafrole as SafroleState).sealTickets?.every((ticket) => 
+            typeof ticket === 'object' && 'id' in ticket
+          ) ?? false
+          console.log('Actual discriminator:', hasTickets ? 0 : 1)
+          console.log('Actual sealTickets length:', (actualSafrole as SafroleState).sealTickets?.length ?? 0)
+          console.log('Actual ticketAccumulator length:', (actualSafrole as SafroleState).ticketAccumulator?.length ?? 0)
+          
+          // Compare sealTickets if lengths match
+          if (expectedSafrole && 
+              (expectedSafrole as SafroleState).sealTickets?.length === (actualSafrole as SafroleState).sealTickets?.length) {
+            const expectedSealTickets = (expectedSafrole as SafroleState).sealTickets
+            const actualSealTickets = (actualSafrole as SafroleState).sealTickets
+            let sealTicketsMatch = true
+            for (let i = 0; i < (expectedSealTickets?.length ?? 0); i++) {
+              const expected = expectedSealTickets![i]
+              const actual = actualSealTickets![i]
+              if (typeof expected === 'object' && 'id' in expected && typeof actual === 'object' && 'id' in actual) {
+                if (expected.id !== actual.id || expected.entryIndex !== actual.entryIndex) {
+                  sealTicketsMatch = false
+                  console.log(`  sealTickets[${i}] mismatch: expected id=${expected.id}, entryIndex=${expected.entryIndex}, actual id=${actual.id}, entryIndex=${actual.entryIndex}`)
+                }
+              } else if (expected instanceof Uint8Array && actual instanceof Uint8Array) {
+                const expectedHex = bytesToHex(expected)
+                const actualHex = bytesToHex(actual)
+                if (expectedHex !== actualHex) {
+                  sealTicketsMatch = false
+                  console.log(`  sealTickets[${i}] mismatch: expected=${expectedHex}, actual=${actualHex}`)
+                }
+              } else {
+                sealTicketsMatch = false
+                console.log(`  sealTickets[${i}] type mismatch: expected type=${typeof expected}, actual type=${typeof actual}`)
+              }
+            }
+            if (sealTicketsMatch) {
+              console.log('  sealTickets: MATCH')
+            }
+          }
+          
+          // Compare ticketAccumulator
+          if (expectedSafrole && 
+              (expectedSafrole as SafroleState).ticketAccumulator?.length === (actualSafrole as SafroleState).ticketAccumulator?.length) {
+            const expectedAccum = (expectedSafrole as SafroleState).ticketAccumulator
+            const actualAccum = (actualSafrole as SafroleState).ticketAccumulator
+            let accumMatch = true
+            for (let i = 0; i < (expectedAccum?.length ?? 0); i++) {
+              const expected = expectedAccum![i]
+              const actual = actualAccum![i]
+              if (expected.id !== actual.id || expected.entryIndex !== actual.entryIndex) {
+                accumMatch = false
+                console.log(`  ticketAccumulator[${i}] mismatch: expected id=${expected.id}, entryIndex=${expected.entryIndex}, actual id=${actual.id}, entryIndex=${actual.entryIndex}`)
+              }
+            }
+            if (accumMatch) {
+              console.log('  ticketAccumulator: MATCH')
+            }
+          }
         } else {
           console.log('Actual safrole:', actualSafrole)
         }
@@ -616,8 +689,13 @@ describe('Genesis Parse Tests', () => {
       }
 
       // Process blocks sequentially
-      // Start from block 1 and continue until we run out of block files
-      let blockNumber = 1
+      // Support --start-block CLI argument to start from a specific block
+      const startBlock = getStartBlock()
+      if (startBlock > 1) {
+        console.log(`\n🚀 Starting from block ${startBlock} (--start-block ${startBlock})`)
+      }
+
+      let blockNumber = startBlock
       let hasMoreBlocks = true
 
       while (hasMoreBlocks) {
@@ -635,8 +713,8 @@ describe('Genesis Parse Tests', () => {
 
           console.log(`\n📦 Processing Block ${blockNumber}...`)
 
-          // Only set pre-state for the first block
-          if (blockNumber === 1) {
+          // Only set pre-state for the starting block
+          if (blockNumber === startBlock) {
             // Set pre_state from test vector BEFORE validating the block
             // This ensures entropy3 and other state components match what was used to create the seal signature
             if (blockJsonData.pre_state?.keyvals) {

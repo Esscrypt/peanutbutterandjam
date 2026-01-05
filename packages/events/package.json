@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/events",
+  "name": "@pbnjam/events",
   "version": "0.1.0",
   "description": "Event system for JAM node services",
   "type": "module",
@@ -13,11 +13,11 @@
     "clean": "rm -rf .turbo && rm -rf node_modules"
   },
   "dependencies": {
-    "@pbnj/core": "workspace:*",
-    "@pbnj/types": "workspace:*"
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*"
   },
   "devDependencies": {
-    "@pbnj/typescript-config": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
     "typescript": "^5.0.0",
     "vitest": "^1.0.0"
   },

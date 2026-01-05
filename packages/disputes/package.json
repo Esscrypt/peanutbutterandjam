@@ -1,5 +1,5 @@
 {
-  "name": "@pbnj/disputes",
+  "name": "@pbnjam/disputes",
   "version": "0.0.1",
   "type": "module",
   "main": "src/index.ts",
@@ -11,13 +11,13 @@
     "lint:fix": "biome check --write ."
   },
   "dependencies": {
-    "@pbnj/types": "workspace:*",
-    "@pbnj/core": "workspace:*"
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/core": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.8.2",
     "biome": "0.3.3",
-    "@pbnj/typescript-config": "workspace:*"
+    "@pbnjam/typescript-config": "workspace:*"
   },
   "exports": {
     ".": "./src/index.ts"

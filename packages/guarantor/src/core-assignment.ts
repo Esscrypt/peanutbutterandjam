@@ -12,9 +12,9 @@
  * Each core has exactly 3 validators assigned (1023 validators / 341 cores = 3)
  */
 
-import { bytesToHex, jamShuffle } from '@pbnj/core'
-import type { IConfigService, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, jamShuffle } from '@pbnjam/core'
+import type { IConfigService, Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Calculate assigned core for a validator

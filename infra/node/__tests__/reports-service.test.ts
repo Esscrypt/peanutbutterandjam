@@ -8,10 +8,10 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { EventBusService, type Hex } from '@pbnj/core'
+import { EventBusService, type Hex } from '@pbnjam/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnj/types'
+import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnjam/types'
 import { ValidatorSetManager } from '../services/validator-set'
 import { EntropyService } from '../services/entropy'
 import { RecentHistoryService } from '../services/recent-history-service'
@@ -25,7 +25,8 @@ import { WorkReportService } from '../services/work-report-service'
 import { GuarantorService } from '../services/guarantor-service'
 import { AccumulationService } from '../services/accumulation-service'
 import { ReadyService } from '../services/ready-service'
-import { AccumulateHostFunctionRegistry, AccumulatePVM, HostFunctionRegistry } from '@pbnj/pvm'
+import { AccumulateHostFunctionRegistry, HostFunctionRegistry } from '@pbnjam/pvm'
+import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
@@ -298,6 +299,8 @@ describe('Reports - JAM Test Vectors', () => {
             accumulateHostFunctionRegistry: accumulateHostFunctionRegistry,
             configService: configService,
             entropyService: entropyService,
+            pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+            useWasm: true,
           })
 
           const accumulatedService = new AccumulationService({
@@ -349,14 +352,73 @@ describe('Reports - JAM Test Vectors', () => {
             signatures: g.signatures,
           }))
 
-          const [applyError, reporters] = await guarantorService.applyGuarantees(
+          // Temporarily update previous block's state root for anchor validation
+          // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
+          // This is needed for validateGuarantees because anchor validation checks state_root
+          // For test vectors, we use the guarantee's context.state_root as the priorStateRoot
+          // (assuming all guarantees reference the same anchor, which is the last entry)
+          let previousStateRootForAnchorValidation: Hex | null = null
+          if (recentHistoryService.getRecentHistory().length > 0 && guarantees.length > 0) {
+            const previousEntry =
+              recentHistoryService.getRecentHistory()[
+                recentHistoryService.getRecentHistory().length - 1
+              ]
+            previousStateRootForAnchorValidation = previousEntry.stateRoot
+            // Use the first guarantee's context.state_root as the priorStateRoot
+            // (all guarantees in a test vector should reference the same anchor)
+            previousEntry.stateRoot = guarantees[0].report.context.state_root
+          }
+
+          // PRE-VALIDATE guarantees BEFORE applying them
+          // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),
+          // the report is "simply ignored" - meaning NO state changes occur.
+          const [validateError] = guarantorService.validateGuarantees(
+            guarantees,
+            BigInt(vector.input.slot),
+          )
+          if (validateError) {
+            // Restore previous state root if validation fails
+            if (previousStateRootForAnchorValidation !== null && recentHistoryService.getRecentHistory().length > 0) {
+              const previousEntry =
+                recentHistoryService.getRecentHistory()[
+                  recentHistoryService.getRecentHistory().length - 1
+                ]
+              previousEntry.stateRoot = previousStateRootForAnchorValidation
+            }
+            // Check if this validation error is expected in the test vector
+            if (vector.output?.err !== undefined) {
+              // Expected error case - verify error message matches
+              expect(validateError.message).toBe(vector.output.err)
+              // When validation fails, skip applyGuarantees and post_state validation
+              return
+            } else {
+              // Unexpected validation error - throw it
+              throw validateError
+            }
+          }
+
+          const [applyError, result] = await guarantorService.applyGuarantees(
             guarantees,
             BigInt(vector.input.slot)
           )
 
+          // Restore previous state root after processing (it will be updated properly when a block is added)
+          if (previousStateRootForAnchorValidation !== null && recentHistoryService.getRecentHistory().length > 0) {
+            const previousEntry =
+              recentHistoryService.getRecentHistory()[
+                recentHistoryService.getRecentHistory().length - 1
+              ]
+            previousEntry.stateRoot = previousStateRootForAnchorValidation
+          }
+
+          // Check for unexpected errors
+          if (applyError) {
+            throw applyError
+          }
+
           // Update core statistics from guarantees (normally done in blockImporterService.applyBlockDeltas)
           // This is needed because the test calls applyGuarantees directly instead of importBlock
-          if (!applyError) {
+          if (!result.error) {
             // Create a mock block body with the guarantees for statistics update
             const mockBlockBody = {
               guarantees,
@@ -373,15 +435,15 @@ describe('Reports - JAM Test Vectors', () => {
           }
 
           // Check if error case is expected
-          if (applyError) {
+          if (result.error) {
             if (vector.output?.err !== undefined) {
               // Expected error case - validation will check output.err
-              expect(applyError.message).toBe(vector.output.err)
+              expect(result.error).toBe(vector.output.err)
               // When error is expected, skip post_state validation
               // return
             } else {
-              // Unexpected error - rethrow
-              throw applyError
+              // Unexpected error - throw it
+              throw new Error(result.error)
             }
           } else {
             // Success case - validate output.ok if present
@@ -396,11 +458,11 @@ describe('Reports - JAM Test Vectors', () => {
 
               // Validate reporters (Ed25519 public keys of validators who signed guarantees)
               if (outputOk.reporters) {
-                expect(reporters).toBeDefined()
-                expect(reporters).not.toBeNull()
+                expect(result.reporters).toBeDefined()
+                expect(result.reporters).not.toBeNull()
                 // Sort both arrays for comparison (order might differ)
                 const expectedReporters = [...outputOk.reporters].sort()
-                const actualReporters = [...(reporters || [])].sort()
+                const actualReporters = [...(result.reporters || [])].sort()
                 expect(actualReporters).toEqual(expectedReporters)
               }
 
@@ -430,7 +492,7 @@ describe('Reports - JAM Test Vectors', () => {
 
           // Step 8: Validate post_state against service states
           // Only validate post_state when there was no error (or error was not expected)
-          if (!applyError || vector.output?.err === undefined) {
+          if (!result.error || vector.output?.err === undefined) {
             // Smoke check: has at least one guarantee and recent history present
             expect(vector.input.guarantees.length).toBeGreaterThan(0)
             expect(vector.pre_state.recent_blocks.history.length).toBeGreaterThan(0)

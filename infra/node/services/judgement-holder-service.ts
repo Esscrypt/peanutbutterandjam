@@ -4,13 +4,13 @@
  * Handles ticket accumulation and clearing according to Gray Paper Eq. 321-329
  */
 
-import type { Hex } from '@pbnj/core'
+import type { Hex } from '@pbnjam/core'
 import {
   BaseService,
   type Judgment,
   type SafePromise,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 
 export class JudgementHolderService extends BaseService {
   private judgements: Judgment[] = []

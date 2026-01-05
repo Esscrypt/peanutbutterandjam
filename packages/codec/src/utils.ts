@@ -1,4 +1,4 @@
-import { blake2bHash, type Hex } from '@pbnj/core'
+import { blake2bHash, type Hex } from '@pbnjam/core'
 import type {
   Block,
   BlockHeader,
@@ -6,8 +6,8 @@ import type {
   Safe,
   WorkPackage,
   WorkReport,
-} from '@pbnj/types'
-import { safeError } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeError } from '@pbnjam/types'
 import { encodeHeader } from './block/header'
 import { encodeWorkPackage } from './work-package/package'
 import { encodeWorkReport } from './work-package/work-report'

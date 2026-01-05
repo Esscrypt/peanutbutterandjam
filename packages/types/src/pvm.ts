@@ -6,8 +6,13 @@
  */
 
 import type { Hex } from 'viem'
-import type { OperandTuple, ServiceAccount, WorkPackage, WorkItem } from './serialization'
 import type { Safe } from './safe'
+import type {
+  OperandTuple,
+  ServiceAccount,
+  WorkItem,
+  WorkPackage,
+} from './serialization'
 
 // Register indices: 0-7 are 64-bit, 8-12 are 32-bit
 // All 13 registers (r0-r12) can store 64-bit values
@@ -101,7 +106,14 @@ export interface RAM {
     length: number
     'is-writable': boolean
     accessType: MemoryAccessType
-    region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
+    region:
+      | 'reserved'
+      | 'roData'
+      | 'rwData'
+      | 'heap'
+      | 'stack'
+      | 'argumentData'
+      | 'unknown'
   }>
 
   /** Get memory contents for a specific address range */
@@ -129,7 +141,14 @@ export interface RAM {
       opcode: bigint
       name: string
       type: 'read' | 'write'
-      region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
+      region:
+        | 'reserved'
+        | 'roData'
+        | 'rwData'
+        | 'heap'
+        | 'stack'
+        | 'argumentData'
+        | 'unknown'
       address: bigint
       register?: number
       value?: bigint
@@ -143,9 +162,28 @@ export interface RAM {
     length: number
     'is-writable': boolean
     accessType: MemoryAccessType
-    region: 'reserved' | 'roData' | 'rwData' | 'heap' | 'stack' | 'argumentData' | 'unknown'
+    region:
+      | 'reserved'
+      | 'roData'
+      | 'rwData'
+      | 'heap'
+      | 'stack'
+      | 'argumentData'
+      | 'unknown'
     contents: number[]
   }>
+
+  // JIP-6 trace support: Track last load/store for each instruction step
+  /** Last load address for JIP-6 trace support */
+  lastLoadAddress: number
+  /** Last load value for JIP-6 trace support */
+  lastLoadValue: bigint
+  /** Last store address for JIP-6 trace support */
+  lastStoreAddress: number
+  /** Last store value for JIP-6 trace support */
+  lastStoreValue: bigint
+  /** Clear last load/store tracking (call at start of each instruction) */
+  clearLastMemoryOp(): void
 }
 
 // Result codes as specified in PVM
@@ -290,6 +328,12 @@ export interface InstructionResult {
 export interface HostFunctionResult {
   resultCode: ResultCode | null // null = continue execution
   faultInfo?: FaultInfo
+  /**
+   * Additional gas cost beyond the base 10 gas.
+   * Used by TRANSFER to deduct gas_limit on success.
+   * Gray Paper: TRANSFER gas cost is 10 + l on success (where l = gas_limit)
+   */
+  additionalGasCost?: bigint
 }
 
 export interface SingleStepResult {
@@ -396,7 +440,6 @@ export interface RefineInvocationContext {
   // Core refine context pair (Gray Paper: (m, e))
   machines: Map<bigint, PVMGuest> // m: Dictionary of PVM guests
   exportSegments: Uint8Array[] // e: Sequence of export segments
-
 }
 
 // Refine result type
@@ -503,7 +546,8 @@ export interface Implications {
   nextfreeid: bigint
   xfers: DeferredTransfer[]
   yield: Uint8Array | null
-  provisions: Map<bigint, Uint8Array>
+  // Gray Paper: protoset<tuple{serviceid, blob}> - allows multiple provisions per service
+  provisions: Set<[bigint, Uint8Array]>
 }
 
 export type ImplicationsPair = [Implications, Implications]
@@ -525,7 +569,8 @@ export interface AccumulateOutput {
   defxfers: DeferredTransfer[]
   yield: Uint8Array | null
   gasused: bigint
-  provisions: Map<bigint, Uint8Array>
+  // Gray Paper: protoset<tuple{serviceid, blob}> - allows multiple provisions per service
+  provisions: Set<[bigint, Uint8Array]>
   resultCode: ResultCode // HALT, PANIC, or OOG - needed to determine if accumulation was successful
 }
 
@@ -633,6 +678,4 @@ export interface PVMOptions {
   registerState?: bigint[]
 }
 
-export type ContextMutator = (
-  hostCallId: bigint,
-) => ResultCode | null
+export type ContextMutator = (hostCallId: bigint) => ResultCode | null

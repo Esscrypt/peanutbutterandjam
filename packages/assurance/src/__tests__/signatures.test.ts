@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { ed25519 } from '@noble/curves/ed25519'
-import type { Assurance } from '@pbnj/types'
+import type { Assurance } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import {
   createAssuranceSignature,

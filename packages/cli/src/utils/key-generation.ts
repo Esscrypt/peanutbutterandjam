@@ -1,11 +1,11 @@
+import { decodeFixedLength } from '@pbnjam/codec'
 import {
   bytesToHex,
   deriveSecretSeeds,
   generateAlternativeName,
-} from '@pbnj/core'
-import { decodeFixedLength } from '@pbnj/codec'
-import type { Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/core'
+import type { Safe } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 export interface ValidatorKeys {
   seed: string

@@ -25,8 +25,8 @@
 //   decodeRefineContext,
 //   encodeRefineContext,
 // } from '../index'
-// import { type Safe } from '@pbnj/core'
-// import { type DecodingResult } from '@pbnj/types'
+// import { type Safe } from '@pbnjam/core'
+// import { type DecodingResult } from '@pbnjam/types'
 
 // // Helper function to load test vector data
 // function loadTestVector(name: string) {

@@ -5,7 +5,7 @@ import type {
   QUICServerCrypto,
 } from '@infisical/quic'
 import * as ed from '@noble/ed25519'
-import { bytesToHex, logger, signEd25519, verifyEd25519 } from '@pbnj/core'
+import { bytesToHex, logger, signEd25519, verifyEd25519 } from '@pbnjam/core'
 
 export const getTlsConfig = (certificateData: {
   privateKeyPEM: string

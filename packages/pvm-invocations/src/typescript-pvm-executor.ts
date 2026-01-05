@@ -1,15 +1,19 @@
 /**
  * TypeScript PVM Executor
- * 
+ *
  * Extends the TypeScript PVM implementation to provide accumulation invocation support.
  */
 
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { encodeAccumulateInput, encodeVariableSequence } from '@pbnjam/codec'
+import { logger } from '@pbnjam/core'
 import {
-  AccumulateHostFunctionRegistry,
+  type AccumulateHostFunctionRegistry,
   type HostFunctionRegistry,
   PVM,
   writeTraceDump,
-} from '@pbnj/pvm'
+} from '@pbnjam/pvm'
 import type {
   AccumulateInput,
   ContextMutator,
@@ -25,23 +29,29 @@ import type {
   ResultCode,
   SafePromise,
   ServiceAccount,
-  WorkItem,
   WriteParams,
-} from '@pbnj/types'
-import { RESULT_CODES, safeError, safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import types that aren't exported from main index - use relative path to source
-import { ACCUMULATE_ERROR_CODES } from '../../pvm/src/config'
+import {
+  ACCUMULATE_ERROR_CODES,
+  ACCUMULATE_FUNCTIONS,
+  GENERAL_FUNCTIONS,
+} from '../../pvm/src/config'
 import type { AccumulateHostFunctionContext } from '../../pvm/src/host-functions/accumulate/base'
 
 /**
  * TypeScript PVM Adapter
- * 
+ *
  * Extends the TypeScript PVM implementation to provide accumulation invocation support.
  */
 export class TypeScriptPVMExecutor extends PVM {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly configService: IConfigService
   private readonly entropyService: IEntropyService
+  private readonly workspaceRoot: string
+  private readonly traceSubfolder?: string
+  private accumulateInputs: AccumulateInput[] | null = null // Accumulate inputs for FETCH selectors 14 and 15
   private traceHostFunctionLogs: Array<{
     step: number
     hostCallId: bigint
@@ -56,11 +66,27 @@ export class TypeScriptPVMExecutor extends PVM {
     configService: IConfigService,
     entropyService: IEntropyService,
     pvmOptions?: PVMOptions,
+    traceSubfolder?: string,
   ) {
     super(hostFunctionRegistry, pvmOptions)
     this.accumulateHostFunctionRegistry = accumulateHostFunctionRegistry
     this.configService = configService
     this.entropyService = entropyService
+
+    // Calculate workspace root (same logic as WasmPVMExecutor)
+    const currentDir =
+      typeof __dirname !== 'undefined'
+        ? __dirname
+        : dirname(fileURLToPath(import.meta.url))
+
+    // Go up from src/ to packages/, then to workspace root
+    // currentDir = packages/pvm-invocations/src/
+    // .. = packages/pvm-invocations/
+    // ../.. = packages/
+    // ../../.. = workspace root
+    const packagesDir = join(currentDir, '..', '..')
+    this.workspaceRoot = join(packagesDir, '..')
+    this.traceSubfolder = traceSubfolder
   }
 
   async executeAccumulationInvocation(
@@ -70,19 +96,24 @@ export class TypeScriptPVMExecutor extends PVM {
     implicationsPair: ImplicationsPair,
     timeslot: bigint,
     inputs: AccumulateInput[],
-    workItems: WorkItem[],
     _serviceId: bigint,
+    invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
     context: ImplicationsPair
   }> {
+    // Store accumulate inputs for FETCH host function (selectors 14 and 15)
+    // Gray Paper pvm_invocations.tex lines 359-360:
+    // - Selector 14: encode{var{i}} - returns encoded sequence of AccumulateInputs
+    // - Selector 15: encode{i[registers[11]]} - returns single encoded AccumulateInput
+    // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
+    this.accumulateInputs = inputs.length > 0 ? inputs : []
+
     // Create accumulate context mutator F
     const accumulateContextMutator = this.createAccumulateContextMutator(
       timeslot,
       implicationsPair,
-      inputs,
-      workItems,
     )
 
     // Clear host function logs at the start of each execution run
@@ -98,16 +129,36 @@ export class TypeScriptPVMExecutor extends PVM {
       implicationsPair,
     )
 
-    // Write trace dump if we have execution logs
+    // Write trace dump if we have execution logs AND traceSubfolder is configured
+    // When traceSubfolder is undefined, trace dumping is disabled
     const executionLogs = this.getExecutionLogs()
-    if (executionLogs.length > 0) {
-      // Use timeslot as block number for jamduna-style filename
-      writeTraceDump(
+    if (executionLogs.length > 0 && this.traceSubfolder) {
+      // Extract yield from the updated implications pair (if execution succeeded)
+      const updatedContext = marshallingResult?.context as
+        | ImplicationsPair
+        | undefined
+      const yieldHash = updatedContext?.[0].yield ?? undefined
+
+      // Determine error code based on result
+      // result is Uint8Array (success), 'PANIC', or 'OOG'
+      let errorCode: number | undefined
+      if (error) {
+        errorCode = 1 // General error
+      } else if (marshallingResult?.result === 'PANIC') {
+        errorCode = 1 // PANIC = error code 1
+      } else if (marshallingResult?.result === 'OOG') {
+        errorCode = 2 // OOG = error code 2
+      }
+      // If result is Uint8Array, it's a success - no error code
+
+      this.writeTraceDumpWithOutput(
         executionLogs,
-        this.traceHostFunctionLogs.length > 0 ? this.traceHostFunctionLogs : undefined,
-        undefined,
-        undefined,
+        inputs,
         timeslot,
+        _serviceId,
+        invocationIndex ?? 0,
+        yieldHash,
+        errorCode,
       )
     }
 
@@ -131,8 +182,6 @@ export class TypeScriptPVMExecutor extends PVM {
   private createAccumulateContextMutator(
     timeslot: bigint,
     implicationsPair: ImplicationsPair,
-    _inputs: AccumulateInput[],
-    workItems: WorkItem[],
   ): ContextMutator {
     return (hostCallId: bigint) => {
       // Get current step and gas before host function call
@@ -142,11 +191,30 @@ export class TypeScriptPVMExecutor extends PVM {
 
       // Gray Paper: Apply gas cost (10 gas for all host functions)
       const gasCost = 10n
-      if (this.state.gasCounter < gasCost) {
+      const isOOG = this.state.gasCounter < gasCost
+
+      // Log host function call BEFORE execution (even if OOG) so it appears in trace dump
+      // This ensures we see which host function was attempted even if it fails
+      const hostLogEntry = {
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: isOOG
+          ? this.state.gasCounter
+          : this.state.gasCounter - gasCost, // Will be updated after execution if not OOG
+        serviceId,
+      }
+      this.traceHostFunctionLogs.push(hostLogEntry)
+
+      if (isOOG) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
         return RESULT_CODES.OOG
       }
 
       this.state.gasCounter -= gasCost
+      // Update gasAfter now that we've deducted the base cost
+      hostLogEntry.gasAfter = this.state.gasCounter
 
       // Try accumulate host functions first (14-26)
       if (hostCallId >= 14n && hostCallId <= 26n) {
@@ -155,37 +223,83 @@ export class TypeScriptPVMExecutor extends PVM {
           implicationsPair,
           timeslot,
         )
-        
-        // Log host function call (gasAfter is captured after host function execution)
+
+        // Update gasAfter after host function execution (even if it panicked or OOG)
         // The host function may consume additional gas beyond the base 10 gas cost
-        this.traceHostFunctionLogs.push({
-          step: currentStep,
-          hostCallId,
-          gasBefore,
-          gasAfter: this.state.gasCounter,
-          serviceId,
-        })
-        
+        hostLogEntry.gasAfter = this.state.gasCounter
+
+        // Log panic for debugging
+        if (result === RESULT_CODES.PANIC) {
+          const hostFunctionName = this.getHostFunctionName(hostCallId)
+          logger.error(
+            '[TypeScriptPVMExecutor] Accumulate host function PANIC',
+            {
+              hostFunctionId: hostCallId.toString(),
+              hostFunctionName,
+              serviceId: serviceId.toString(),
+              step: currentStep,
+              pc: this.state.programCounter.toString(),
+              gasBefore: gasBefore.toString(),
+              gasAfter: this.state.gasCounter.toString(),
+              registers: this.state.registerState.map((r) => r.toString()),
+              faultAddress: this.state.faultAddress?.toString() ?? null,
+            },
+          )
+        }
+
         return result
       }
 
-      // General host functions available in accumulate context (0-5)
+      // General host functions available in accumulate context (0-5 only)
+      // Gray Paper pvm_invocations.tex line 188-194:
+      //   0=gas, 1=fetch, 2=lookup, 3=read, 4=write, 5=info
+      // NOTE: 6-13 (historical_lookup, export, machine, peek, poke, pages, invoke, expunge)
+      //       are NOT available in accumulation context - only in refine context
       // Also include log (100) - JIP-1 debug/monitoring function
       if ((hostCallId >= 0n && hostCallId <= 5n) || hostCallId === 100n) {
-        const result = this.handleGeneralHostFunction(hostCallId, implicationsPair, workItems)
-        
-        // Log host function call (gasAfter is captured after host function execution)
-        // The host function may consume additional gas beyond the base 10 gas cost
-        this.traceHostFunctionLogs.push({
-          step: currentStep,
+        const result = this.handleGeneralHostFunction(
           hostCallId,
-          gasBefore,
-          gasAfter: this.state.gasCounter,
-          serviceId,
-        })
-        
+          implicationsPair,
+        )
+
+        // Update gasAfter after host function execution (even if it panicked or OOG)
+        // The host function may consume additional gas beyond the base 10 gas cost
+        hostLogEntry.gasAfter = this.state.gasCounter
+
+        // Log panic for debugging
+        if (result === RESULT_CODES.PANIC) {
+          const hostFunctionName = this.getHostFunctionName(hostCallId)
+          logger.error('[TypeScriptPVMExecutor] General host function PANIC', {
+            hostFunctionId: hostCallId.toString(),
+            hostFunctionName,
+            serviceId: serviceId.toString(),
+            step: currentStep,
+            pc: this.state.programCounter.toString(),
+            gasBefore: gasBefore.toString(),
+            gasAfter: this.state.gasCounter.toString(),
+            registers: this.state.registerState.map((r) => r.toString()),
+            faultAddress: this.state.faultAddress?.toString() ?? null,
+          })
+        }
+
         return result
       }
+
+      // Gray Paper pvm_invocations.tex lines 206-210:
+      // Unknown host function in accumulation context:
+      // - Gas already deducted (10 gas at line 186)
+      // - Set registers[7] = WHAT
+      // - Continue execution (return null)
+      this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+      // Log the unknown host function call
+      this.traceHostFunctionLogs.push({
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: this.state.gasCounter,
+        serviceId,
+      })
 
       return null
     }
@@ -219,13 +333,46 @@ export class TypeScriptPVMExecutor extends PVM {
     }
 
     const result = hostFunction.execute(hostFunctionContext)
+
+    // Deduct additional gas cost if specified (e.g., TRANSFER deducts gas_limit on success)
+    // Gray Paper: TRANSFER gas cost is 10 + l on success (base 10 already deducted in context mutator)
+    if (
+      result.additionalGasCost !== undefined &&
+      result.additionalGasCost > 0n
+    ) {
+      if (this.state.gasCounter < result.additionalGasCost) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
+        return RESULT_CODES.OOG
+      }
+      this.state.gasCounter -= result.additionalGasCost
+    }
+
+    // Log panic for debugging
+    if (result.resultCode === RESULT_CODES.PANIC) {
+      const hostFunctionName = this.getHostFunctionName(hostCallId)
+      logger.error(
+        '[TypeScriptPVMExecutor] Accumulate host function PANIC in handler',
+        {
+          hostFunctionId: hostCallId.toString(),
+          hostFunctionName,
+          serviceId: implicationsPair[0].id.toString(),
+          step: this.executionStep,
+          pc: this.state.programCounter.toString(),
+          gasCounter: this.state.gasCounter.toString(),
+          registers: this.state.registerState.map((r) => r.toString()),
+          faultAddress: this.state.faultAddress?.toString() ?? null,
+          faultInfo: result.faultInfo,
+        },
+      )
+    }
+
     return result.resultCode
   }
 
   private handleGeneralHostFunction(
     hostCallId: bigint,
     implicationsPair: ImplicationsPair,
-    workItems: WorkItem[],
   ): ResultCode | null {
     const hostFunction = this.hostFunctionRegistry.get(hostCallId)
     if (!hostFunction) {
@@ -255,7 +402,7 @@ export class TypeScriptPVMExecutor extends PVM {
       }
       case 1n: {
         // fetch
-        const fetchParams = this.buildFetchParams(workItems)
+        const fetchParams = this.buildFetchParams()
         result = hostFunction.execute(hostFunctionContext, fetchParams)
         break
       }
@@ -275,6 +422,7 @@ export class TypeScriptPVMExecutor extends PVM {
         // write
         const writeParams = this.buildWriteParams(implicationsPair)
         result = hostFunction.execute(hostFunctionContext, writeParams)
+
         break
       }
       case 5n: {
@@ -298,11 +446,61 @@ export class TypeScriptPVMExecutor extends PVM {
       }
     }
 
+    // Log panic for debugging
+    if (result?.resultCode === RESULT_CODES.PANIC) {
+      const hostFunctionName = this.getHostFunctionName(hostCallId)
+      logger.error(
+        '[TypeScriptPVMExecutor] General host function PANIC in handler',
+        {
+          hostFunctionId: hostCallId.toString(),
+          hostFunctionName,
+          serviceId: implicationsPair[0].id.toString(),
+          step: this.executionStep,
+          pc: this.state.programCounter.toString(),
+          gasCounter: this.state.gasCounter.toString(),
+          registers: this.state.registerState.map((r) => r.toString()),
+          faultAddress: this.state.faultAddress?.toString() ?? null,
+          faultInfo: result.faultInfo,
+        },
+      )
+    }
+
     return result?.resultCode ?? null
   }
 
-  private buildFetchParams(workItems: WorkItem[]): FetchParams {
-    const workItemsSequence = workItems.length > 0 ? workItems : null
+  /**
+   * Get host function name from function ID for logging
+   */
+  private getHostFunctionName(hostCallId: bigint): string {
+    // Check general functions
+    for (const [name, id] of Object.entries(GENERAL_FUNCTIONS)) {
+      if (id === hostCallId) {
+        return name.toUpperCase()
+      }
+    }
+
+    // Check accumulate functions
+    for (const [name, id] of Object.entries(ACCUMULATE_FUNCTIONS)) {
+      if (id === hostCallId) {
+        return name.toUpperCase()
+      }
+    }
+
+    return `UNKNOWN_${hostCallId.toString()}`
+  }
+
+  private buildFetchParams(): FetchParams {
+    // Gray Paper pvm_invocations.tex lines 359-360:
+    // - Selector 14: encode{var{i}} when i ≠ none - encoded sequence of AccumulateInputs
+    // - Selector 15: encode{i[registers[11]]} when i ≠ none - single encoded AccumulateInput
+    // Gray Paper equation 126: accinput = operandtuple ∪ defxfer
+    //
+    // During accumulation, accumulateInputs should always be an array (never null)
+    // An empty array [] is distinct from none (null):
+    // - [] (empty array) = provided but empty → returns encode(var{[]}) = 0x00
+    // - null (none) = not provided → returns none (null)
+    // Always pass an array, even if empty, to match Gray Paper specification
+    const accumulateInputs = this.accumulateInputs ?? []
 
     return {
       workPackage: null,
@@ -311,7 +509,7 @@ export class TypeScriptPVMExecutor extends PVM {
       workItemIndex: null,
       importSegments: null,
       exportSegments: null,
-      workItemsSequence,
+      accumulateInputs,
       entropyService: this.entropyService,
     }
   }
@@ -324,7 +522,9 @@ export class TypeScriptPVMExecutor extends PVM {
     const imX = implicationsPair[0]
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
-      throw new Error(`Service account not found for read: ${imX.id.toString()}`)
+      throw new Error(
+        `Service account not found for read: ${imX.id.toString()}`,
+      )
     }
     return {
       serviceAccount,
@@ -337,7 +537,9 @@ export class TypeScriptPVMExecutor extends PVM {
     const imX = implicationsPair[0]
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
-      throw new Error(`Service account not found for write: ${imX.id.toString()}`)
+      throw new Error(
+        `Service account not found for write: ${imX.id.toString()}`,
+      )
     }
     return {
       serviceAccount,
@@ -367,5 +569,59 @@ export class TypeScriptPVMExecutor extends PVM {
       accounts: imX.state.accounts,
     }
   }
-}
 
+  /**
+   * Write trace dump with output/error files for jamduna format
+   */
+  private writeTraceDumpWithOutput(
+    executionLogs: Array<{
+      step: number
+      pc: bigint
+      instructionName: string
+      opcode: string
+      gas: bigint
+      registers: string[]
+      loadAddress?: number
+      loadValue?: bigint
+      storeAddress?: number
+      storeValue?: bigint
+    }>,
+    inputs: AccumulateInput[],
+    timeslot: bigint,
+    serviceId: bigint,
+    invocationIndex: number,
+    yieldHash: Uint8Array | undefined,
+    errorCode: number | undefined,
+  ): void {
+    const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
+    const traceOutputDir = join(baseTraceDir, this.traceSubfolder!)
+
+    // Encode full accumulate inputs for comparison with jamduna traces
+    const [encodeError, encodedInputs] = encodeVariableSequence(
+      inputs,
+      encodeAccumulateInput,
+    )
+
+    const filepath = writeTraceDump(
+      executionLogs,
+      this.traceHostFunctionLogs.length > 0
+        ? this.traceHostFunctionLogs
+        : undefined,
+      traceOutputDir,
+      undefined,
+      timeslot, // blockNumber
+      'typescript', // executorType
+      serviceId, // serviceId
+      encodeError ? undefined : encodedInputs, // accumulate_input
+      invocationIndex, // invocation index
+      yieldHash, // accumulate output (yield hash)
+      errorCode, // error code
+    )
+
+    if (!filepath) {
+      logger.warn(
+        `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
+      )
+    }
+  }
+}

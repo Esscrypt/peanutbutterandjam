@@ -3,15 +3,15 @@
 //  * Tests QUIC connectivity, certificate validation, and message exchange
 //  */
 
-// import { RingVRFProver } from '@pbnj/bandersnatch-vrf'
-// import { bytesToHex, EventBusService, hexToBytes, logger } from '@pbnj/core'
+// import { RingVRFProver } from '@pbnjam/bandersnatch-vrf'
+// import { bytesToHex, EventBusService, hexToBytes, logger } from '@pbnjam/core'
 
 // import {
 //   CE131TicketDistributionProtocol,
 //   generateNetworkingCertificates,
-// } from '@pbnj/networking'
-// import { TicketStore } from '@pbnj/state'
-// import type { StreamKind, TicketDistributionRequest } from '@pbnj/types'
+// } from '@pbnjam/networking'
+// import { TicketStore } from '@pbnjam/state'
+// import type { StreamKind, TicketDistributionRequest } from '@pbnjam/types'
 // import { SQL } from 'bun'
 // import { drizzle } from 'drizzle-orm/bun-sqlite'
 // import { ConfigService } from '../../../infra/node/services/config-service'

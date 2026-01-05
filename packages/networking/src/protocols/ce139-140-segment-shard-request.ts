@@ -6,15 +6,15 @@
  * CE 140: With justification
  */
 
-import type { EventBusService, Hex } from '@pbnj/core'
-import { bytesToHex, hexToBytes } from '@pbnj/core'
+import type { EventBusService, Hex } from '@pbnjam/core'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
   SegmentShardRequest,
   SegmentShardResponse,
-} from '@pbnj/types'
-import { safeResult } from '@pbnj/types'
+} from '@pbnjam/types'
+import { safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**

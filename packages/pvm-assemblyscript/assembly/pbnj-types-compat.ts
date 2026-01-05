@@ -1,7 +1,7 @@
 /**
- * @pbnj/types compatibility layer for AssemblyScript
+ * @pbnjam/types compatibility layer for AssemblyScript
  * 
- * Provides local implementations of types/interfaces from @pbnj/types
+ * Provides local implementations of types/interfaces from @pbnjam/types
  * to make the code compile in AssemblyScript without external dependencies
  */
 
@@ -171,7 +171,7 @@ export interface RefineInvocationContext {
 }
 
 // ============================================================================
-// Constants (from @pbnj/types)
+// Constants (from @pbnjam/types)
 // ============================================================================
 
 export class WORK_PACKAGE_CONSTANTS {

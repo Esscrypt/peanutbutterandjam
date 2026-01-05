@@ -44,9 +44,13 @@
  * This is critical for JAM's accumulation output tracking and audit trail.
  */
 
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnj/core'
-import type { DecodingResult, LastAccumulationOutput, Safe } from '@pbnj/types'
-import { safeError, safeResult } from '@pbnj/types'
+import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
+import type {
+  DecodingResult,
+  LastAccumulationOutput,
+  Safe,
+} from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 import {
   decodeVariableSequence,
   encodeVariableSequence,
@@ -57,13 +61,15 @@ import {
  * var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
  */
 export function encodeLastAccumulationOutputs(
-  lastAccumulationOutput: Map<bigint, Hex>,
+  lastAccumulationOutput: [bigint, Hex][],
 ): Safe<Uint8Array> {
   try {
     // Gray Paper: var{sq{build{tuple{encode[4]{s}, encode{h}}}{tuple{s, h} ∈ lastaccout}}}
     // Variable-length sequence of tuples
+    // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
+    // Do NOT sort - the order is determined by the order of accumulation invocations.
     const [error, encodedData] = encodeVariableSequence(
-      Array.from(lastAccumulationOutput.entries()).map(([serviceId, hash]) => ({
+      lastAccumulationOutput.map(([serviceId, hash]) => ({
         serviceId,
         hash,
       })),

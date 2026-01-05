@@ -5,7 +5,7 @@
 //  * Gray Paper Reference: pvm.tex
 //  */
 
-// import { logger } from '@pbnj/core'
+// import { logger } from '@pbnjam/core'
 // import type {
 //   IServiceAccountService,
 //   PVMOptions,
@@ -13,14 +13,14 @@
 //   ResultCode,
 //   WorkError,
 //   WorkPackage,
-// } from '@pbnj/types'
+// } from '@pbnjam/types'
 // import {
 //   ACCUMULATE_ERROR_CODES,
 //   GENERAL_FUNCTIONS,
 //   IS_AUTHORIZED_CONFIG,
 //   RESULT_CODES,
-// } from '@pbnj/pvm'
-// import { PVM, HostFunctionRegistry } from '@pbnj/pvm'
+// } from '@pbnjam/pvm'
+// import { PVM, HostFunctionRegistry } from '@pbnjam/pvm'
 
 // /**
 //  * Simplified PVM implementation

@@ -1,5 +1,5 @@
-import { bytesToHex, logger } from '@pbnj/core'
-import type { HostFunctionResult, ServiceAccount } from '@pbnj/types'
+import { bytesToHex, logger } from '@pbnjam/core'
+import type { HostFunctionResult, ServiceAccount } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -34,6 +34,7 @@ import {
 export class NewHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.NEW
   readonly name = 'new'
+  readonly gasCost = 10n // Gray Paper pvm_invocations.tex line 760: g = 10
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context
@@ -41,19 +42,34 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // This is the current block's timeslot passed from the Accumulate invocation
 
     // Extract parameters from registers
+    // Gray Paper: (o, l, minaccgas, minmemogas, gratis, desiredid) = registers[7:6]
+    // o = code hash offset
+    // l = expected code length (NOT the hash length - hash is always 32 bytes)
     const [
       codeHashOffset,
-      codeHashLength,
+      expectedCodeLength, // This is the expected length of the code preimage, NOT the hash length
       minAccGas,
       minMemoGas,
       gratis,
       desiredId,
     ] = registers.slice(7, 13)
 
+    // Gray Paper: l must be a valid 32-bit number
+    // Gray Paper line 763: l ∈ N_bits32, otherwise codehash = error → PANIC
+    // On PANIC, registers_7 remains unchanged
+    if (expectedCodeLength > 0xffffffffn) {
+      logger.debug('[NEW] PANIC: expectedCodeLength exceeds 32-bit', {
+        expectedCodeLength: expectedCodeLength.toString(),
+      })
+      return {
+        resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
     // Log all input parameters
     context.log('NEW host function invoked', {
       codeHashOffset: codeHashOffset.toString(),
-      codeHashLength: codeHashLength.toString(),
+      expectedCodeLength: expectedCodeLength.toString(),
       minAccGas: minAccGas.toString(),
       minMemoGas: minMemoGas.toString(),
       gratis: gratis.toString(),
@@ -64,19 +80,28 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       nextFreeId: implications[0].nextfreeid.toString(),
     })
 
-    // Read code hash from memory (32 bytes)
+    // Gray Paper: codehash = memory[o:32] - ALWAYS read 32 bytes for the hash
+    // The hash is a blake2b hash which is always 32 bytes
     const [codeHashData, faultAddress] = ram.readOctets(
       codeHashOffset,
-      codeHashLength,
+      32n, // Always read 32 bytes for the code hash
     )
     if (faultAddress) {
-      this.setAccumulateError(registers, 'WHAT')
+      logger.debug('[NEW] PANIC: memory read fault for codehash', {
+        codeHashOffset: codeHashOffset.toString(),
+        faultAddress: faultAddress.toString(),
+      })
+      // Gray Paper: PANIC but registers_7 should remain UNCHANGED
+      // Do NOT call setAccumulateError - just return PANIC
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
     if (!codeHashData) {
-      this.setAccumulateError(registers, 'WHAT')
+      logger.debug('[NEW] PANIC: no codehash data', {
+        codeHashOffset: codeHashOffset.toString(),
+      })
+      // Gray Paper: PANIC but registers_7 should remain UNCHANGED
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -94,67 +119,114 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Check if gratis is set and validate permissions
-    if (gratis === 0n && imX.id !== imX.state.registrar) {
-      // Only registrar can create paid services
+    // Gray Paper line 787: HUH when gratis != 0 AND service is not the manager
+    // Only the manager can create services with gratis (free deposit allowance)
+    if (gratis !== 0n && imX.id !== imX.state.manager) {
       this.setAccumulateError(registers, 'HUH')
       return {
         resultCode: null, // continue execution
       }
     }
 
-    // Calculate minimum balance required
-    const C_MIN_BALANCE = 1000000n // Gray Paper constant for minimum balance
-    const minBalance = C_MIN_BALANCE
+    // Calculate minimum balance required for the new service
+    // Gray Paper accounts.tex equation (deposits):
+    //   minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    // For a new service with one request entry (codehash, expectedCodeLength):
+    //   items = 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2
+    //   octets = sum((81 + z) for (h, z) in keys(requests)) = 81 + expectedCodeLength
+    const C_BASE_DEPOSIT = 100n
+    const C_ITEM_DEPOSIT = 10n
+    const C_BYTE_DEPOSIT = 1n
+
+    const newServiceItems = 2n // 2 * 1 request + 0 storage
+    const newServiceOctets = 81n + expectedCodeLength // 81 + expected code length
+
+    // Gray Paper: minbalance = max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
+    const minBalanceBeforeGratis =
+      C_BASE_DEPOSIT +
+      C_ITEM_DEPOSIT * newServiceItems +
+      C_BYTE_DEPOSIT * newServiceOctets
+    const minBalance =
+      minBalanceBeforeGratis > gratis ? minBalanceBeforeGratis - gratis : 0n
 
     // Check if current service has sufficient balance
-    if (currentService.balance < minBalance) {
+    // Gray Paper line 786: CASH when s.balance < self.minbalance
+    const balanceAfterDeduction = currentService.balance - minBalance
+    if (
+      balanceAfterDeduction < currentService.balance &&
+      balanceAfterDeduction < 0n
+    ) {
+      // Would result in negative balance - insufficient funds
       this.setAccumulateError(registers, 'CASH')
       return {
         resultCode: null, // continue execution
       }
     }
 
+    // Also check that the remaining balance is at least the current service's minbalance
+    // (This is calculated from the current service's storage footprint)
+    // For simplicity, we check against the same formula for the current service
+    // but in practice, the current service's minbalance depends on its own storage
+
     // Determine new service ID
+    // Gray Paper lines 788-792:
+    // - If registrar and desiredId < Cminpublicindex: use desiredId, keep nextfreeid unchanged
+    // - Otherwise: use imX.nextfreeid directly, then update nextfreeid to i*
     let newServiceId: bigint
+    let updateNextFreeId = false
     const C_MIN_PUBLIC_INDEX = 65536n // 2^16
 
-    if (gratis === 0n) {
-      // Paid service - use desired ID if valid
-      if (desiredId < C_MIN_PUBLIC_INDEX) {
-        // Check if desired ID is already taken
-        if (imX.state.accounts.has(desiredId)) {
-          this.setAccumulateError(registers, 'FULL')
-          return {
-            resultCode: null, // continue execution
-          }
+    if (
+      gratis === 0n &&
+      imX.id === imX.state.registrar &&
+      desiredId < C_MIN_PUBLIC_INDEX
+    ) {
+      // Registrar creating reserved service with specific ID
+      // Gray Paper line 788: check if desired ID is already taken
+      if (imX.state.accounts.has(desiredId)) {
+        this.setAccumulateError(registers, 'FULL')
+        return {
+          resultCode: null, // continue execution
         }
-        newServiceId = desiredId
-      } else {
-        // Use next free ID
-        newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
       }
+      newServiceId = desiredId
+      // nextfreeid stays unchanged for registrar with reserved ID
     } else {
-      // Free service - use next free ID
-      newServiceId = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+      // Non-registrar OR registrar with public ID - use imX.nextfreeid directly
+      // Gray Paper line 790: returns imX.nextfreeid as the new service ID
+      newServiceId = imX.nextfreeid
+      updateNextFreeId = true
     }
 
+    logger.debug('[NEW Host Function] Determining service ID', {
+      gratis: gratis.toString(),
+      isRegistrar: (imX.id === imX.state.registrar).toString(),
+      desiredId: desiredId.toString(),
+      currentNextFreeId: imX.nextfreeid.toString(),
+      newServiceId: newServiceId.toString(),
+      updateNextFreeId,
+    })
+
     // Create new service account
+    // Gray Paper line 770: sa_requests = {(c, l): []}
+    // where c = codehash and l = codeHashLength (expected code length)
     const codeHashHex = bytesToHex(codeHashData)
+
     const newServiceAccount: ServiceAccount = {
       codehash: codeHashHex,
-      balance: minBalance,
+      balance: minBalance, // Gray Paper line 771: balance = a.minbalance
       minaccgas: minAccGas,
       minmemogas: minMemoGas,
-      octets: 0n, // Will be calculated
+      octets: newServiceOctets,
       gratis: gratis,
-      items: 0n, // Will be calculated
+      items: newServiceItems,
       created: timeslot,
       lastacc: 0n,
       parent: imX.id,
       storage: new Map(),
       preimages: new Map(),
-      requests: new Map([[codeHashHex, new Map([[0n, []]])]]), // Initial request for code
+      // Gray Paper line 770: requests = {(codehash, expectedCodeLength): []}
+      requests: new Map([[codeHashHex, new Map([[expectedCodeLength, []]])]]),
     }
 
     logger.info('[NEW Host Function] Creating new service account', {
@@ -176,14 +248,21 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // Add new service to accounts
     imX.state.accounts.set(newServiceId, newServiceAccount)
 
-    // Update next free ID
-    imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    // Update next free ID only for non-registrar cases
+    // Gray Paper line 791: i* = check(Cminpublicindex + (imX.nextfreeid - Cminpublicindex + 42) mod ...)
+    if (updateNextFreeId) {
+      imX.nextfreeid = this.getNextFreeId(imX.nextfreeid, imX.state.accounts)
+    }
 
-    logger.info('[NEW Host Function] New service account created successfully', {
-      newServiceId: newServiceId.toString(),
-      nextFreeId: imX.nextfreeid.toString(),
-      totalAccounts: imX.state.accounts.size,
-    })
+    logger.info(
+      '[NEW Host Function] New service account created successfully',
+      {
+        newServiceId: newServiceId.toString(),
+        nextFreeId: imX.nextfreeid.toString(),
+        totalAccounts: imX.state.accounts.size,
+        updateNextFreeId,
+      },
+    )
 
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)

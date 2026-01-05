@@ -5,7 +5,7 @@ import { decodeAssurances, encodeAssurances } from '../block/assurance'
 import { decodeGuarantees, encodeGuarantees } from '../block/guarantee'
 import { decodePreimages, encodePreimages } from '../block/preimage'
 import { decodeSafroleTickets, encodeSafroleTickets } from '../block/ticket'
-import type { IConfigService } from '@pbnj/types'
+import type { IConfigService } from '@pbnjam/types'
 
 describe('Extrinsic Test Vectors - Round Trip Encoding/Decoding', () => {
   const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')

@@ -21,7 +21,7 @@
  * - Ccorecount = 341 (maximum cores, affects reportedpackagehashes size)
  */
 
-import { calculateBlockHashFromHeader } from '@pbnj/codec'
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import {
   type BlockProcessedEvent,
   bytesToHex,
@@ -35,7 +35,7 @@ import {
   mmrappend,
   mmrsuperpeak,
   zeroHash,
-} from '@pbnj/core'
+} from '@pbnjam/core'
 import type {
   AccoutBelt,
   BlockBody,
@@ -44,13 +44,13 @@ import type {
   Recent,
   RecentHistoryEntry,
   Safe,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import {
   BaseService as BaseServiceClass,
   HISTORY_CONSTANTS,
   safeError,
   safeResult,
-} from '@pbnj/types'
+} from '@pbnjam/types'
 import type { AccumulationService } from './accumulation-service'
 import type { ConfigService } from './config-service'
 
@@ -68,9 +68,7 @@ export class RecentHistoryService extends BaseServiceClass {
   private readonly accoutBelt: AccoutBelt
   /** Full MMR range including null positions (for mmrappend/mmrsuperpeak operations) */
   private mmrPeaks: MMRRange = []
-  private currentBlockNumber = 0n
   private readonly configService: ConfigService
-  private accumulationService: AccumulationService | null
   constructor(options: {
     eventBusService: EventBusService
     configService: ConfigService
@@ -84,7 +82,6 @@ export class RecentHistoryService extends BaseServiceClass {
     }
     this.mmrPeaks = []
     this.configService = options.configService
-    this.accumulationService = options.accumulationService
   }
 
   override start(): Safe<boolean> {
@@ -118,12 +115,6 @@ export class RecentHistoryService extends BaseServiceClass {
   private async handleBlockProcessed(
     event: BlockProcessedEvent,
   ): Promise<Safe<void>> {
-    console.log('Processing block for recent history', {
-      slot: event.slot.toString(),
-      authorIndex: event.authorIndex,
-      blockNumber: this.currentBlockNumber.toString(),
-    })
-
     // Create new recent history entry
     const newEntry = this.createRecentHistoryEntry(
       event.header,
@@ -133,27 +124,6 @@ export class RecentHistoryService extends BaseServiceClass {
 
     // Add to circular buffer
     this.addToHistory(newEntry)
-
-    // Update accumulation belt using accumulation outputs from AccumulationService
-    // Gray Paper: lastaccout' comes from local_fnservouts (accumulation output pairings)
-    if (this.accumulationService) {
-      const accumulationOutputs =
-        this.accumulationService.getLastAccumulationOutputs()
-      this.updateAccoutBelt(accumulationOutputs)
-    } else {
-      // Fallback: extract from block body (legacy behavior, not Gray Paper compliant)
-      logger.warn(
-        'RecentHistoryService: AccumulationService not provided, falling back to block body extraction',
-      )
-    }
-
-    // Increment block counter
-    this.currentBlockNumber++
-
-    console.log('Recent history updated', {
-      historyLength: this.recentHistory.length,
-      blockNumber: this.currentBlockNumber.toString(),
-    })
 
     return safeResult(undefined)
   }
@@ -266,7 +236,6 @@ export class RecentHistoryService extends BaseServiceClass {
   clearHistory(): void {
     this.recentHistory = []
     this.mmrPeaks = []
-    this.currentBlockNumber = 0n
     // this.persistenceCounter = 0
   }
 
@@ -313,10 +282,9 @@ export class RecentHistoryService extends BaseServiceClass {
       // The encoding expects the full MMR structure with null positions
       this.accoutBelt.peaks = peaksArray
 
-      // totalCount should be the full MMR length (including nulls)
-      // If totalCount is provided, use it; otherwise use the peaks array length
-      this.accoutBelt.totalCount =
-        recent.accoutBelt.totalCount ?? BigInt(this.mmrPeaks.length)
+      // totalCount is the number of items appended to the MMR (block number)
+      // Use the provided totalCount, falling back to 0 if not provided
+      this.accoutBelt.totalCount = recent.accoutBelt.totalCount ?? 0n
     } else {
       // If no peaks provided, clear the belt
       this.mmrPeaks = []
@@ -351,7 +319,8 @@ export class RecentHistoryService extends BaseServiceClass {
       .map((peak) => (peak !== null ? bytesToHex(peak) : null))
       .filter((peak): peak is Hex => peak !== null)
 
-    this.accoutBelt.totalCount = BigInt(updatedRange.length)
+    // totalCount is the number of items appended to the MMR (block number)
+    this.accoutBelt.totalCount += 1n
 
     return safeResult(undefined)
   }
@@ -480,10 +449,10 @@ export class RecentHistoryService extends BaseServiceClass {
 
   /**
    * Update the most recent entry's state root to the final calculated state root
-   * 
+   *
    * Gray Paper: After state transition, the new entry's state_root should be updated
    * from the initial 0x0 (eq 41) to the actual computed state root.
-   * 
+   *
    * @param finalStateRoot - The final calculated state root after state transition
    */
   public updateLastEntryStateRoot(finalStateRoot: Hex): void {
@@ -517,32 +486,46 @@ export class RecentHistoryService extends BaseServiceClass {
    *
    * @param lastaccout - Accumulation output pairings from AccumulationService
    */
-  public updateAccoutBelt(lastaccout: Map<bigint, Hex>): Safe<void> {
+  public updateAccoutBelt(lastaccout: [bigint, Hex][]): Safe<void> {
     // Step 1: lastaccout' is provided directly from AccumulationService
     // Gray Paper: lastaccout' ∈ sequence{tuple{serviceid, hash}}
+    // CRITICAL: This is a SEQUENCE - order matters! Same service can appear multiple times.
     // This comes from local_fnservouts tracked during accumulation
+
+    // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    // This is called for EVERY block, even when s is empty.
+    // When s is empty, merklizewb([]) = H([]) = keccak(empty bytes)
 
     // Step 2: Encode the sequence per Gray Paper equation 29
     // s = [encode[4](s) concat encode(h) : (s, h) in lastaccout']
-    const encodedSequence: Uint8Array[] = Array.from(lastaccout.entries()).map(
+    // CRITICAL: Gray Paper says the sequence is in order of accumulation, NOT sorted by service ID
+    // The order is determined by the order of accumulation invocations
+    const encodedSequence: Uint8Array[] = lastaccout.map(
       ([serviceId, hash]) => {
-        // encode[4](serviceId) - 4-byte encoding
+        // encode[4](serviceId) - 4-byte little-endian encoding (Gray Paper convention)
         const serviceIdBytes = new Uint8Array(4)
         const view = new DataView(serviceIdBytes.buffer)
-        view.setUint32(0, Number(serviceId), false) // big-endian
+        view.setUint32(0, Number(serviceId), true) // little-endian per Gray Paper
 
-        // Concatenate serviceId + hash
-        const combined = new Uint8Array(4 + hash.length)
+        // Convert hash hex string to bytes
+        const hashBytes = hexToBytes(hash)
+
+        // Concatenate serviceId (4 bytes) + hash (32 bytes)
+        const combined = new Uint8Array(4 + hashBytes.length)
         combined.set(serviceIdBytes, 0)
-        combined.set(hexToBytes(hash), 4)
+        combined.set(hashBytes, 4)
 
         return combined
       },
     )
 
-    // Step 3: Merklize the encoded sequence
-    // merklizewb(s, keccak) creates a well-balanced merkle tree
-    const [merklizeError, merklizedRoot] = merklizewb(encodedSequence)
+    // Step 3: Merklize the encoded sequence using keccak (per Gray Paper equation 29)
+    // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
+    // Note: merklizewb with keccak is required here, not blake2b
+    const [merklizeError, merklizedRoot] = merklizewb(
+      encodedSequence,
+      defaultKeccakHash,
+    )
     if (merklizeError) {
       logger.error('Failed to merklize accumulation outputs', {
         error: merklizeError,
@@ -550,10 +533,6 @@ export class RecentHistoryService extends BaseServiceClass {
       return safeResult(undefined) // Skip update on error
     }
 
-    // Step 4: Use mmrPeaks (full MMR structure with nulls) for mmrappend
-    // mmrappend requires the full MMR structure including null positions
-    // Step 5: Append to MMR belt
-    // accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     const [mmrError, updatedRange] = mmrappend(
       this.mmrPeaks,
       merklizedRoot,
@@ -573,9 +552,6 @@ export class RecentHistoryService extends BaseServiceClass {
     this.accoutBelt.peaks = updatedRange.map((peak) =>
       peak !== null ? bytesToHex(peak) : null,
     )
-
-    // totalCount should be the full MMR length (including nulls)
-    this.accoutBelt.totalCount = BigInt(updatedRange.length)
 
     return safeResult(undefined)
   }
