@@ -199,7 +199,6 @@ describe('Genesis Parse Tests', () => {
 
 
       const serviceAccountsService = new ServiceAccountService({
-        configService,
         eventBusService,
         clockService,
         networkingService: null,
@@ -447,7 +446,7 @@ describe('Genesis Parse Tests', () => {
           }
           return { ...parsedKey, type: 'C(i)' }
         } else if ('serviceId' in parsedKey && 'hash' in parsedKey) {
-          return { ...parsedKey, type: 'C(s, h)' }
+          return { ...(parsedKey as { chapterIndex: number; serviceId: bigint; hash: string }), type: 'C(s, h)' }
         }
         return parsedKey
       }
@@ -474,6 +473,24 @@ describe('Genesis Parse Tests', () => {
           255: 'service accounts',
         }
         return chapterNames[chapterIndex] || `unknown (${chapterIndex})`
+      }
+
+      // Helper function to truncate long hex strings for logging
+      const truncateHex = (hex: string, maxLength: number = 100) => {
+        if (hex.length <= maxLength) return hex
+        return `${hex.slice(0, maxLength)}... (${hex.length} chars total)`
+      }
+
+      // Helper function to create a JSON stringify replacer that truncates long hex strings
+      const createTruncatingReplacer = (maxHexLength: number = 200) => {
+        return (key: string, value: any) => {
+          if (typeof value === 'string' && value.startsWith('0x') && value.length > maxHexLength) {
+            return truncateHex(value, maxHexLength)
+          }
+          if (typeof value === 'bigint') return value.toString()
+          if (value === undefined) return null
+          return value
+        }
       }
 
       // Helper function to verify post-state
@@ -519,15 +536,17 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('chapterIndex' in keyInfo && !keyInfo.error && keyInfo.chapterIndex !== undefined) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
               console.error(`Key Type: ${keyInfo.type}`)
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
+            } else if ('serviceId' in keyInfo && !keyInfo.error) {
               console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
+              if ('type' in keyInfo) {
+                console.error(`Key Type: ${keyInfo.type}`)
+              }
               if ('hash' in keyInfo) {
                 console.error(`Hash: ${keyInfo.hash}`)
               }
@@ -555,29 +574,49 @@ describe('Genesis Parse Tests', () => {
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
               const chapterIndex = keyInfo.chapterIndex
               try {
-                // Decode expected value from test vector using the same decoder as StateService
-                const expectedBytes = hexToBytes(keyval.value as Hex)
-                // Access private stateTypeRegistry to get the decoder
-                const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
-                if (decoder) {
-                  const [decodeError, decoded] = decoder(expectedBytes)
-                  if (!decodeError && decoded) {
-                    decodedExpected = decoded.value
-                  } else {
-                    decodedExpected = { 
-                      error: decodeError?.message || 'Decode failed',
-                      decodeError: decodeError ? String(decodeError) : undefined
-                    }
+                // Handle C(s, h) keys (chapterIndex: 0) - these are raw keyvals, not decoded
+                if (chapterIndex === 0 && 'serviceId' in keyInfo) {
+                  // For C(s, h) keys, get the keyvals object and look up the specific key
+                  const keyvals = stateService.getStateComponent(
+                    chapterIndex,
+                    keyInfo.serviceId,
+                  ) as Record<Hex, Hex>
+                  decodedActual = {
+                    keyvals: keyvals,
+                    specificKey: keyval.key,
+                    value: keyvals?.[keyval.key] || undefined,
+                  }
+                  decodedExpected = {
+                    key: keyval.key,
+                    value: keyval.value,
                   }
                 } else {
-                  decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
-                }
+                  // For regular chapter keys, decode the value
+                  const expectedBytes = hexToBytes(keyval.value as Hex)
+                  // Access private stateTypeRegistry to get the decoder
+                  const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
+                  if (decoder) {
+                    const [decodeError, decoded] = decoder(expectedBytes)
+                    if (!decodeError && decoded) {
+                      decodedExpected = decoded.value
+                    } else {
+                      decodedExpected = { 
+                        error: decodeError?.message || 'Decode failed',
+                        decodeError: decodeError ? String(decodeError) : undefined
+                      }
+                    }
+                  } else {
+                    decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
+                  }
 
-                // Get decoded actual state component
-                decodedActual = stateService.getStateComponent(
-                  chapterIndex,
-                  'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
-                )
+                  // Get decoded actual state component
+                  if (chapterIndex !== undefined) {
+                    decodedActual = stateService.getStateComponent(
+                      chapterIndex,
+                      'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
+                    )
+                  }
+                }
               } catch (error) {
                 decodedExpected = decodedExpected || { 
                   error: error instanceof Error ? error.message : String(error),
@@ -593,31 +632,45 @@ describe('Genesis Parse Tests', () => {
             // Log detailed mismatch information
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
-            console.error(`State Key: ${keyval.key}`)
-            if ('error' in keyInfo) {
-              console.error(`Key Info Error: ${keyInfo.error}`)
-            } else if ('chapterIndex' in keyInfo) {
+            console.error(`State Key: ${truncateHex(keyval.key)}`)
+            if ('chapterIndex' in keyInfo && !keyInfo.error && keyInfo.chapterIndex !== undefined) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
-              if ('type' in keyInfo) {
-                console.error(`Key Type: ${keyInfo.type}`)
-              }
+              console.error(`Key Type: ${keyInfo.type}`)
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
+              }
+            } else if ('serviceId' in keyInfo && !keyInfo.error) {
+              console.error(`Service ID: ${keyInfo.serviceId}`)
+              if ('type' in keyInfo) {
+                console.error(`Key Type: ${keyInfo.type}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
-            console.error(`Expected Value (hex): ${keyval.value}`)
-            console.error(`Actual Value (hex): ${expectedValue}`)
+            console.error(`Expected Value (hex): ${truncateHex(keyval.value)}`)
+            console.error(`Actual Value (hex): ${truncateHex(expectedValue || '')}`)
             if (decodedExpected) {
-              console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex !== undefined && keyInfo.chapterIndex === 0 && 'keyvals' in decodedExpected) {
+                console.error(`\nDecoded Expected Value:`, {
+                  key: truncateHex(decodedExpected.key || keyval.key),
+                  value: truncateHex(decodedExpected.value || keyval.value),
+                })
+              } else {
+                console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, createTruncatingReplacer(), 2))
+              }
             }
             if (decodedActual) {
-              console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex !== undefined && keyInfo.chapterIndex === 0 && 'keyvals' in decodedActual) {
+                console.error(`\nDecoded Actual Value:`, {
+                  specificKey: truncateHex(decodedActual.specificKey || keyval.key),
+                  value: truncateHex(decodedActual.value || expectedValue || ''),
+                  hasExpectedKey: decodedActual.keyvals ? keyval.key in decodedActual.keyvals : false,
+                })
+              } else {
+                console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, createTruncatingReplacer(), 2))
+              }
             }
             console.error('=====================================\n')
           }

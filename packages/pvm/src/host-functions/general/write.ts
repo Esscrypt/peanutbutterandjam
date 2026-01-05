@@ -1,18 +1,15 @@
 import {
-  calculateServiceAccountItems,
-  calculateServiceAccountOctets,
   deleteServiceStorageValue,
   getServiceStorageValue,
   setServiceStorageValue,
 } from '@pbnjam/codec'
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, calculateMinBalance, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
   ServiceAccount,
   WriteParams,
 } from '@pbnjam/types'
-import { DEPOSIT_CONSTANTS } from '@pbnjam/types'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -57,7 +54,7 @@ export class WriteHostFunction extends BaseHostFunction {
     // Read key from memory
     const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
     if (!key) {
-      context.log('Write host function: Memory read fault for key', {
+      logger.error('Write host function: Memory read fault for key', {
         keyOffset: keyOffset.toString(),
         keyLength: keyLength.toString(),
         faultAddress: faultAddress?.toString() ?? 'null',
@@ -74,48 +71,7 @@ export class WriteHostFunction extends BaseHostFunction {
 
     // Check if this is a delete operation (value length = 0)
     if (valueLength === 0n) {
-      // Gray Paper: Calculate new account state with deletion, then check balance
-      // Calculate what the new storage footprint would be after deletion
-      const newItems = this.calculateItems(serviceAccount, key, true)
-      const newOctets = this.calculateOctets(
-        serviceAccount,
-        serviceId,
-        key,
-        new Uint8Array(0),
-        true,
-      )
-      const newMinBalance = this.calculateMinBalance(
-        newItems,
-        newOctets,
-        serviceAccount.gratis,
-      )
-
-      // Gray Paper equation 450: Check if new minbalance > balance
-      // If so, return FULL and keep old state
-      if (newMinBalance > serviceAccount.balance) {
-        context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
-        context.log(
-          'Write host function: Insufficient balance for delete operation',
-          {
-            balance: serviceAccount.balance.toString(),
-            requiredBalance: newMinBalance.toString(),
-            newItems: newItems.toString(),
-            newOctets: newOctets.toString(),
-          },
-        )
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
-      // Delete the key
-      // Pass newOctets and newItems to avoid recalculating (they were already calculated for balance check)
-      const previousLength = this.deleteStorage(serviceAccount, serviceId, key)
-      context.registers[7] = previousLength
-      context.log('Write host function: Storage key deleted', {
-        keyLength: key.length.toString(),
-        previousLength: previousLength.toString(),
-      })
+      return this.deleteStorage(context, serviceAccount, serviceId, key)
     } else {
       // Read value from memory
       const [value, _faultAddress] = context.ram.readOctets(
@@ -123,7 +79,7 @@ export class WriteHostFunction extends BaseHostFunction {
         valueLength,
       )
       if (!value) {
-        context.log('Write host function: Memory read fault for value', {
+        logger.error('Write host function: Memory read fault for value', {
           valueOffset: valueOffset.toString(),
           valueLength: valueLength.toString(),
           faultAddress: _faultAddress?.toString() ?? 'null',
@@ -138,108 +94,18 @@ export class WriteHostFunction extends BaseHostFunction {
         }
       }
 
-      // Calculate what the new storage footprint would be
-      const newItems = this.calculateItems(serviceAccount, key, false)
-      const newOctets = this.calculateOctets(
-        serviceAccount,
-        serviceId,
-        key,
-        value,
-        false,
-      )
-      const newMinBalance = this.calculateMinBalance(
-        newItems,
-        newOctets,
-        serviceAccount.gratis,
-      )
-
-      // Check if service account has sufficient balance for the new storage footprint
-      if (newMinBalance > serviceAccount.balance) {
-        // Return FULL (2^64 - 5) for insufficient balance
-        context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
-        context.log('Write host function: Insufficient balance', {
-          balance: serviceAccount.balance.toString(),
-          requiredBalance: newMinBalance.toString(),
-          newItems: newItems.toString(),
-          newOctets: newOctets.toString(),
-        })
-        return {
-          resultCode: null, // continue execution
-        }
-      }
-
       // Write key-value pair to storage
-      // Pass newOctets and newItems to avoid recalculating (they were already calculated for balance check)
-      const previousLength = this.writeStorage(
-        serviceAccount,
-        serviceId,
-        key,
-        value,
-      )
-      context.registers[7] = previousLength
-      context.log('Write host function: Storage key-value written', {
-        keyLength: key.length.toString(),
-        valueLength: value.length.toString(),
-        previousLength: previousLength.toString(),
-      })
+      return this.writeStorage(context, serviceAccount, serviceId, key, value)
     }
-
-    return {
-      resultCode: null, // continue execution
-    }
-  }
-
-  private calculateItems(
-    serviceAccount: ServiceAccount,
-    key: Uint8Array,
-    isDelete: boolean,
-  ): bigint {
-    // Use the extracted function from @pbnjam/core
-    return calculateServiceAccountItems(serviceAccount, {
-      writeKey: key,
-      isDelete,
-    })
-  }
-
-  private calculateOctets(
-    serviceAccount: ServiceAccount,
-    serviceId: bigint,
-    key: Uint8Array,
-    value: Uint8Array,
-    isDelete: boolean,
-  ): bigint {
-    // Use the extracted function from @pbnjam/core
-    // Pass serviceId to enable full formula calculation with original key lengths
-    return calculateServiceAccountOctets(serviceAccount, {
-      serviceId,
-      writeKey: key,
-      writeValue: value,
-      isDelete,
-    })
-  }
-
-  private calculateMinBalance(
-    items: bigint,
-    octets: bigint,
-    gratis: bigint,
-  ): bigint {
-    // Gray Paper: a_minbalance = max(0, Cbasedeposit + Citemdeposit * a_items + Cbytedeposit * a_octets - a_gratis)
-    const baseDeposit = BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT)
-    const itemDeposit = BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT) * items
-    const byteDeposit = BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT) * octets
-
-    const totalDeposit = baseDeposit + itemDeposit + byteDeposit
-    const minBalance = totalDeposit - gratis
-
-    return minBalance > 0n ? minBalance : 0n
   }
 
   private writeStorage(
+    context: HostFunctionContext,
     serviceAccount: ServiceAccount,
     serviceId: bigint,
     key: Uint8Array,
     value: Uint8Array,
-  ): bigint {
+  ): HostFunctionResult {
     // Get previous value length before writing
     const keyHex = bytesToHex(key)
     const previousValue = getServiceStorageValue(
@@ -251,51 +117,133 @@ export class WriteHostFunction extends BaseHostFunction {
       ? BigInt(previousValue.length)
       : ACCUMULATE_ERROR_CODES.NONE
 
+    const previousOctets = serviceAccount.octets
+    const previousItems = serviceAccount.items
+
+    // Update storage footprint
+    // Gray Paper: a_octets = sum over storage of (34 + len(y) + len(x))
+    // For new key: add 34 + len(key) + len(value)
+    // For existing key: delta is len(new_value) - len(old_value) (34 and len(key) cancel)
+    if (!previousValue) {
+      // New key: add 34 + len(key) + len(value)
+      serviceAccount.items++
+      serviceAccount.octets += 34n + BigInt(key.length) + BigInt(value.length)
+    } else {
+      // Existing key: delta is len(new_value) - len(old_value)
+      // The 34 constant and key.length cancel out, so we only adjust value length
+      const previousValueLength = BigInt(previousValue.length)
+      const newValueLength = BigInt(value.length)
+      serviceAccount.octets -= previousValueLength
+      serviceAccount.octets += newValueLength
+      // No new item since the key already existed
+    }
+
+    const newMinBalance = calculateMinBalance(
+      serviceAccount.items,
+      serviceAccount.octets,
+      serviceAccount.gratis,
+    )
+
+    // Check if service account has sufficient balance for the new storage footprint
+    if (newMinBalance > serviceAccount.balance) {
+      // Return FULL (2^64 - 5) for insufficient balance
+      context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
+
+      // revert the changes to the service account
+      serviceAccount.octets = previousOctets
+      serviceAccount.items = previousItems
+      logger.warn('Write host function: Insufficient balance', {
+        balance: serviceAccount.balance.toString(),
+        requiredBalance: newMinBalance.toString(),
+        newItems: serviceAccount.items.toString(),
+        newOctets: serviceAccount.octets.toString(),
+      })
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
     // Write key-value pair to service account's storage
     setServiceStorageValue(serviceAccount, serviceId, keyHex, value)
 
-    // Update storage footprint
-    serviceAccount.items = this.calculateItems(serviceAccount, key, false)
-    serviceAccount.octets = this.calculateOctets(
-      serviceAccount,
-      serviceId,
-      key,
-      value,
-      false,
-    )
+    context.registers[7] = previousLength
 
-    return previousLength
+    return {
+      resultCode: null, // continue execution
+    }
   }
 
   private deleteStorage(
+    context: HostFunctionContext,
     serviceAccount: ServiceAccount,
     serviceId: bigint,
     key: Uint8Array,
-  ): bigint {
-    // Get previous value length before deleting
+  ): HostFunctionResult {
+    // Delete the key
+    // Pass newOctets and newItems to avoid recalculating (they were already calculated for balance check)
+    // const previousLength = this.deleteStorage(serviceAccount, serviceId, key)
     const keyHex = bytesToHex(key)
-    const previousValue = getServiceStorageValue(
+    const previousValueToDelete = getServiceStorageValue(
       serviceAccount,
       serviceId,
       keyHex,
     )
-    const previousLength = previousValue
-      ? BigInt(previousValue.length)
+    const previousLength = previousValueToDelete
+      ? BigInt(previousValueToDelete.length)
       : ACCUMULATE_ERROR_CODES.NONE
 
-    // Delete key from service account's storage
-    deleteServiceStorageValue(serviceAccount, serviceId, keyHex)
+    const oldOctets = serviceAccount.octets
+    const oldItems = serviceAccount.items
 
     // Update storage footprint
-    serviceAccount.items = this.calculateItems(serviceAccount, key, true)
-    serviceAccount.octets = this.calculateOctets(
-      serviceAccount,
-      serviceId,
-      key,
-      new Uint8Array(0),
-      true,
+    // Gray Paper: a_octets = sum over storage of (34 + len(y) + len(x))
+    // For delete: subtract 34 + len(key) + len(old_value)
+    if (previousValueToDelete) {
+      // Gray Paper formula: subtract 34 + len(key) + len(old_value)
+      const keyLength = BigInt(key.length)
+      const valueLength = previousLength
+      const deletedOctets = 34n + keyLength + valueLength
+      serviceAccount.octets -= deletedOctets
+      serviceAccount.items--
+    }
+
+    context.registers[7] = previousLength
+
+    const newMinBalance = calculateMinBalance(
+      serviceAccount.items,
+      serviceAccount.octets,
+      serviceAccount.gratis,
     )
 
-    return previousLength
+    // Gray Paper equation 450: Check if new minbalance > balance
+    // If so, return FULL and keep old state
+    if (newMinBalance > serviceAccount.balance) {
+      context.registers[7] = ACCUMULATE_ERROR_CODES.FULL
+
+      // revert the changes to the service account
+      serviceAccount.octets = oldOctets
+      serviceAccount.items = oldItems
+      logger.error(
+        'Write host function: Insufficient balance for delete operation',
+        {
+          balance: serviceAccount.balance.toString(),
+          requiredBalance: newMinBalance.toString(),
+          newItems: serviceAccount.items.toString(),
+          newOctets: serviceAccount.octets.toString(),
+        },
+      )
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    if (previousValueToDelete) {
+      // Delete key from service account's storage
+      deleteServiceStorageValue(serviceAccount, serviceId, keyHex)
+    }
+
+    return {
+      resultCode: null, // continue execution
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { encodeServiceAccountForInfo, getAllServiceRequests, getAllServiceStorageItems } from '@pbnjam/codec'
+import { encodeServiceAccountForInfo } from '@pbnjam/codec'
 import { calculateMinBalance, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
@@ -79,18 +79,13 @@ export class InfoHostFunction extends BaseHostFunction {
     //         encode[4]{items} + encode[8]{gratis} + encode[4]{created, lastacc, parent}
     // Total: 32 + 40 + 4 + 8 + 12 = 96 bytes
 
-    // Gray Paper: items = 2 * len(requests) + len(storage)
-    // This MUST be computed dynamically, not read from the stored field,
-    // to reflect the current state of requests and storage Maps
-    const requests = getAllServiceRequests(serviceAccount, params.currentTimeslot)
-    const storage = getAllServiceStorageItems(serviceAccount, params.currentTimeslot)
-    const requestsSize = requests.size
-    const storageSize = storage.size
-    const computedItems = BigInt(2 * requestsSize + storageSize)
-    
     // Calculate minbalance using computed items (not stored items field)
     // Gray Paper: max(0, Cbasedeposit + Citemdeposit * items + Cbytedeposit * octets - gratis)
-    const minbalance = calculateMinBalance(computedItems, serviceAccount.octets, serviceAccount.gratis)
+    const minbalance = calculateMinBalance(
+      serviceAccount.items,
+      serviceAccount.octets,
+      serviceAccount.gratis,
+    )
 
     const [encodeError, info] = encodeServiceAccountForInfo(
       serviceAccount as ServiceAccount,

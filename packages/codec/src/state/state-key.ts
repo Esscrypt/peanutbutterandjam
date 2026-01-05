@@ -2,7 +2,6 @@ import { blake2bHash, logger } from '@pbnjam/core'
 import type { Hex } from 'viem'
 import { bytesToHex, hexToBytes } from 'viem'
 import { decodeNatural } from '../core/natural-number'
-import { decodeProgramFromPreimage } from '../pvm/blob'
 import { extractServiceIdFromStateKey } from './service-account'
 
 /**
@@ -42,10 +41,10 @@ export function isPreimageKey(
       if (combinedHashHex === blakeHashFromKey) {
         // Blake hash matches - now validate it's a valid program
         // Preimages in state include metadata, so use decodeProgramFromPreimage
-        const [programError, _] = decodeProgramFromPreimage(valueBytes)
-        if (programError) {
-          logger.warn('Preimage found but it is not a parsable program')
-        }
+        // const [programError, _] = decodeProgramFromPreimage(valueBytes)
+        // if (programError) {
+        // logger.warn('Preimage found but it is not a parsable program')
+        // }
         // It's a valid preimage (valid program)!
         return {
           preimageHash: preimageHash,

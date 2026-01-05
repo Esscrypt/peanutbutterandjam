@@ -53,8 +53,21 @@ import { StatisticsService } from '../../services/statistics-service'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
+
 // Helper function to parse CLI arguments for starting block
+// Helper function to parse CLI arguments or environment variable for starting block
+// Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
 function getStartBlock(): number {
+  // Check environment variable first (most reliable with bun test)
+  const envStartBlock = process.env.START_BLOCK
+  if (envStartBlock) {
+    const startBlock = Number.parseInt(envStartBlock, 10)
+    if (!Number.isNaN(startBlock) && startBlock >= 1) {
+      return startBlock
+    }
+  }
+  
+  // Fallback to CLI argument (requires -- separator with bun test)
   const args = process.argv.slice(2)
   const startBlockIndex = args.indexOf('--start-block')
   if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
@@ -66,6 +79,7 @@ function getStartBlock(): number {
   }
   return 1 // Default to block 1 (genesis)
 }
+
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')

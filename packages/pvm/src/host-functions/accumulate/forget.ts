@@ -1,4 +1,9 @@
-import { deleteServicePreimageValue, deleteServiceRequestValue, getServiceRequestValue, setServiceRequestValue } from '@pbnjam/codec'
+import {
+  deleteServicePreimageValue,
+  deleteServiceRequestValue,
+  getServiceRequestValue,
+  setServiceRequestValue,
+} from '@pbnjam/codec'
 import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
@@ -34,7 +39,6 @@ import {
 export class ForgetHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.FORGET
   readonly name = 'forget'
-  readonly gasCost = 10n
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications, timeslot } = context
@@ -72,7 +76,12 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
 
     // Convert hash to hex and get request
     const hashHex = bytesToHex(hashData)
-    const requestValue = getServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
+    const requestValue = getServiceRequestValue(
+      serviceAccount,
+      serviceId,
+      hashHex,
+      preimageLength,
+    )
     if (!requestValue) {
       logger.error('Forget host function: Request does not exist', {
         serviceId: serviceId.toString(),
@@ -96,8 +105,13 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
       // keys(a.sa_requests) = keys(imX.self.sa_requests) \ {(h, z)}
       // keys(a.sa_preimages) = keys(imX.self.sa_preimages) \ {h}
 
-      deleteServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
-      deleteServicePreimageValue(serviceAccount, serviceId, hashHex);
+      deleteServiceRequestValue(
+        serviceAccount,
+        serviceId,
+        hashHex,
+        preimageLength,
+      )
+      deleteServicePreimageValue(serviceAccount, serviceId, hashHex)
       // Gray Paper: Update items and octets when removing a request
       // items -= 2 for each removed request (h, z)
       // octets -= (81 + z) for each removed request
@@ -113,8 +127,13 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
       if (y < timeslot - expungePeriod) {
         // Remove request and preimage completely
 
-        deleteServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength);
-        deleteServicePreimageValue(serviceAccount, serviceId, hashHex);
+        deleteServiceRequestValue(
+          serviceAccount,
+          serviceId,
+          hashHex,
+          preimageLength,
+        )
+        deleteServicePreimageValue(serviceAccount, serviceId, hashHex)
         // Gray Paper: Update items and octets when removing a request
         serviceAccount.items =
           serviceAccount.items >= 2n ? serviceAccount.items - 2n : 0n
@@ -132,13 +151,25 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     } else if (requestValue.length === 1) {
       // Case 3 (line 936): [x] - Update to [x, t] (mark as unavailable)
       const [x] = requestValue
-      setServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength, [x, timeslot]);
+      setServiceRequestValue(
+        serviceAccount,
+        serviceId,
+        hashHex,
+        preimageLength,
+        [x, timeslot],
+      )
     } else if (requestValue.length === 3) {
       // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
       const [, y, w] = requestValue
       if (y < timeslot - expungePeriod) {
         // Update to [w, t] (mark as unavailable again)
-        setServiceRequestValue(serviceAccount, serviceId, hashHex, preimageLength, [w, timeslot]);
+        setServiceRequestValue(
+          serviceAccount,
+          serviceId,
+          hashHex,
+          preimageLength,
+          [w, timeslot],
+        )
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, 'HUH')

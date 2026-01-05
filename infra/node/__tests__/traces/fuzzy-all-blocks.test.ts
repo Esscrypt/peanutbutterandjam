@@ -105,7 +105,7 @@ function getStopBlock(): number | undefined {
 }
 
 // Helper function to convert JSON work report to WorkReport type
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
+export function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
   return {
     ...jsonReport,
     core_index: BigInt(jsonReport.core_index || 0),

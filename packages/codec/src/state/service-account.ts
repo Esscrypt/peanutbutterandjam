@@ -68,7 +68,11 @@ import { encodeFixedLength } from '../core/fixed-length'
 import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { encodeVariableSequence } from '../core/sequence'
 import { determineKeyTypes } from './state-key'
-import { createServicePreimageKey, createServiceRequestKey, createServiceStorageKey } from './state-serialization'
+import {
+  createServicePreimageKey,
+  createServiceRequestKey,
+  createServiceStorageKey,
+} from './state-serialization'
 
 /**
  * Encode service account according to Gray Paper specification.
@@ -159,6 +163,29 @@ export function encodeServiceAccount(
   view.setBigUint64(16, account.minmemogas, true)
 
   // Octets (8 bytes) - use recalculated value
+  // #region agent log
+  if (account.octets > 0n) {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'service-account.ts:encodeServiceAccount',
+          message: 'Encoding service account octets',
+          data: {
+            octets: account.octets.toString(),
+            items: account.items.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run4',
+          hypothesisId: 'T',
+        }),
+      },
+    ).catch(() => {})
+  }
+  // #endregion
   view.setBigUint64(24, account.octets, true)
 
   // Gratis (8 bytes)
@@ -275,7 +302,7 @@ export function encodeServiceAccountForInfo(
   parts.push(metadataBytes)
 
   const result = concatBytes(parts)
-  
+
   return safeResult(result)
 }
 
@@ -404,18 +431,18 @@ export function decodeServiceAccount(
   })
 }
 
- /**
-   * Query service account preimage value
-   *
-   * Gray Paper merklization.tex (lines 105-106):
-   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
-   * C(s, encode[4]{2³²-2} ∥ h) ↦ p
-   *
-   * @param serviceId - Service account ID
-   * @param preimageHash - Preimage hash
-   * @returns Preimage blob if found, undefined if not found
-   */
- export function getServicePreimageValue(
+/**
+ * Query service account preimage value
+ *
+ * Gray Paper merklization.tex (lines 105-106):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨h, p⟩ ∈ sa_preimages:
+ * C(s, encode[4]{2³²-2} ∥ h) ↦ p
+ *
+ * @param serviceId - Service account ID
+ * @param preimageHash - Preimage hash
+ * @returns Preimage blob if found, undefined if not found
+ */
+export function getServicePreimageValue(
   serviceAccount: ServiceAccount,
   serviceId: bigint,
   preimageHash: Hex,
@@ -423,13 +450,11 @@ export function decodeServiceAccount(
   const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
   const stateKeyHex = bytesToHex(preimageStateKey)
 
-
   // Check raw rawCshKeyvals first (for test vectors)
   if (stateKeyHex in serviceAccount.rawCshKeyvals) {
     const value = serviceAccount.rawCshKeyvals[stateKeyHex]
     const valueBytes = hexToBytes(value)
-    
-    
+
     return valueBytes
   }
 
@@ -454,7 +479,11 @@ export function getServiceRequestValue(
   requestHash: Hex,
   length: bigint,
 ): bigint[] | undefined {
-  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const requestStateKey = createServiceRequestKey(
+    serviceId,
+    requestHash,
+    length,
+  )
   const stateKeyHex = bytesToHex(requestStateKey)
 
   // Check raw rawCshKeyvals first (for test vectors)
@@ -481,7 +510,7 @@ export function getServiceRequestValue(
   const expectedBytes = timeslotCount * 4
 
   if (timeslotCount > 3 || remainingBytes !== expectedBytes) {
-      return undefined
+    return undefined
   }
 
   const timeslots: bigint[] = []
@@ -505,39 +534,36 @@ export function getServiceRequestValue(
   return undefined
 }
 
-  /**
-   * Query service account storage value
-   *
-   * Gray Paper merklization.tex (lines 103-104):
-   * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
-   * C(s, encode[4]{2³²-1} ∥ k) ↦ v
-   *
-   * @param serviceId - Service account ID
-   * @param storageKey - Storage key (blob)
-   * @returns Storage value if found, undefined if not found
-   */
-  export function getServiceStorageValue(
-    serviceAccount: ServiceAccount,
-    serviceId: bigint,
-    storageKey: Hex,
-  ): Uint8Array | undefined {
-    const storageStateKey = createServiceStorageKey(serviceId, storageKey)
-    const stateKeyHex = bytesToHex(storageStateKey)
-
-    // Check raw rawCshKeyvals first (for test vectors)
-    if (stateKeyHex in serviceAccount.rawCshKeyvals) {
-      const value = serviceAccount.rawCshKeyvals[stateKeyHex]
-      const valueBytes = hexToBytes(value)
-      return valueBytes
-    }
-
-    return undefined
-  }
-
-export function getServiceStorageKey(
+/**
+ * Query service account storage value
+ *
+ * Gray Paper merklization.tex (lines 103-104):
+ * ∀ ⟨s, sa⟩ ∈ accounts, ⟨k, v⟩ ∈ sa_storage:
+ * C(s, encode[4]{2³²-1} ∥ k) ↦ v
+ *
+ * @param serviceId - Service account ID
+ * @param storageKey - Storage key (blob)
+ * @returns Storage value if found, undefined if not found
+ */
+export function getServiceStorageValue(
+  serviceAccount: ServiceAccount,
   serviceId: bigint,
   storageKey: Hex,
-): Hex {
+): Uint8Array | undefined {
+  const storageStateKey = createServiceStorageKey(serviceId, storageKey)
+  const stateKeyHex = bytesToHex(storageStateKey)
+
+  // Check raw rawCshKeyvals first (for test vectors)
+  if (stateKeyHex in serviceAccount.rawCshKeyvals) {
+    const value = serviceAccount.rawCshKeyvals[stateKeyHex]
+    const valueBytes = hexToBytes(value)
+    return valueBytes
+  }
+
+  return undefined
+}
+
+export function getServiceStorageKey(serviceId: bigint, storageKey: Hex): Hex {
   const storageStateKey = createServiceStorageKey(serviceId, storageKey)
   return bytesToHex(storageStateKey)
 }
@@ -552,8 +578,6 @@ export function deleteServiceStorageValue(
   delete serviceAccount.rawCshKeyvals[stateKeyHex]
 }
 
-
-
 export function setServiceStorageValue(
   serviceAccount: ServiceAccount,
   serviceId: bigint,
@@ -562,7 +586,7 @@ export function setServiceStorageValue(
 ): void {
   const storageStateKey = createServiceStorageKey(serviceId, storageKey)
   const stateKeyHex = bytesToHex(storageStateKey)
-  
+
   serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(storageValue)
 }
 
@@ -594,7 +618,11 @@ export function setServiceRequestValue(
   length: bigint,
   requestValue: bigint[],
 ): void {
-  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const requestStateKey = createServiceRequestKey(
+    serviceId,
+    requestHash,
+    length,
+  )
   const stateKeyHex = bytesToHex(requestStateKey)
 
   // Encode request value: var{sequence{encode[4]{x} | x ∈ t}}
@@ -621,7 +649,11 @@ export function deleteServiceRequestValue(
   requestHash: Hex,
   length: bigint,
 ): void {
-  const requestStateKey = createServiceRequestKey(serviceId, requestHash, length)
+  const requestStateKey = createServiceRequestKey(
+    serviceId,
+    requestHash,
+    length,
+  )
   const stateKeyHex = bytesToHex(requestStateKey)
   delete serviceAccount.rawCshKeyvals[stateKeyHex]
 }
@@ -655,16 +687,19 @@ export function getAllServiceStorageItems(
   currentTimeslot?: bigint,
 ): Map<Hex, Uint8Array> {
   const storageItems = new Map<Hex, Uint8Array>()
-  
+
   // Use determineKeyTypes to classify all keys at once
-  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
-  
+  const keyTypes = determineKeyTypes(
+    serviceAccount.rawCshKeyvals,
+    currentTimeslot,
+  )
+
   for (const [stateKeyHex, keyType] of keyTypes) {
     if (keyType.keyType === 'storage') {
       storageItems.set(stateKeyHex, keyType.value)
     }
   }
-  
+
   return storageItems
 }
 
@@ -712,30 +747,33 @@ export function getAllServiceRequests(
   currentTimeslot?: bigint,
 ): Map<Hex, { timeslots: bigint[]; blobLength: bigint }> {
   const requests = new Map<Hex, { timeslots: bigint[]; blobLength: bigint }>()
-  
+
   // Use determineKeyTypes to classify all keys at once
-  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
-  
+  const keyTypes = determineKeyTypes(
+    serviceAccount.rawCshKeyvals,
+    currentTimeslot,
+  )
+
   // Get all preimages to look up blob lengths
   const preimages = getAllServicePreimages(serviceAccount, currentTimeslot)
   const preimageMap = new Map<Hex, Uint8Array>()
   for (const [, preimageData] of preimages) {
     preimageMap.set(preimageData.preimageHash, preimageData.blob)
   }
-  
+
   for (const [stateKeyHex, keyType] of keyTypes) {
     if (keyType.keyType === 'request') {
       // Get blob length from preimage if it exists, otherwise 0
       const preimageBlob = preimageMap.get(keyType.preimageHash)
       const blobLength = preimageBlob ? BigInt(preimageBlob.length) : 0n
-      
+
       requests.set(stateKeyHex, {
         timeslots: keyType.timeslots,
         blobLength,
       })
     }
   }
-  
+
   return requests
 }
 
@@ -759,10 +797,13 @@ export function getAllServicePreimages(
   currentTimeslot?: bigint,
 ): Map<Hex, { preimageHash: Hex; blob: Uint8Array }> {
   const preimages = new Map<Hex, { preimageHash: Hex; blob: Uint8Array }>()
-  
+
   // Use determineKeyTypes to classify all keys at once
-  const keyTypes = determineKeyTypes(serviceAccount.rawCshKeyvals, currentTimeslot)
-  
+  const keyTypes = determineKeyTypes(
+    serviceAccount.rawCshKeyvals,
+    currentTimeslot,
+  )
+
   for (const [stateKeyHex, keyType] of keyTypes) {
     if (keyType.keyType === 'preimage') {
       preimages.set(stateKeyHex, {
@@ -771,6 +812,6 @@ export function getAllServicePreimages(
       })
     }
   }
-  
+
   return preimages
 }
