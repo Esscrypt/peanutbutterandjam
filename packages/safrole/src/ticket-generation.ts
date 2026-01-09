@@ -255,18 +255,6 @@ export function verifyTicket(
   // Use the same active validator keys that were used during generation
   const ringKeys = validatorSetManager.getActiveValidatorKeys()
 
-  // // const sortedRingKeys = [...activeSet].sort((a, b) => {
-  // //   for (let i = 0; i < Math.min(a.length, b.length); i++) {
-  // //     if (a[i] < b[i]) return -1
-  // //     if (a[i] > b[i]) return 1
-  // //   }
-  // //   return a.length - b.length
-  // // })
-
-  // if (sortedRingKeys.length === 0) {
-  //   return safeError(new Error('No valid ring keys found'))
-  // }
-
   // Gray Paper: Ring VRF proofs are anonymous - we don't need to know which validator
   // created the proof. The verification only needs the ring keys, proof, and context.
   // The proverIndex is not used during verification (it's only needed during proof generation).

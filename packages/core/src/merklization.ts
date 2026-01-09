@@ -1027,6 +1027,121 @@ function combineNodes(
 }
 
 /**
+ * Blake2b Merkle Tree Construction (blakemany)
+ *
+ * Implements Gray Paper specification for blakemany function:
+ * blakemany{a} creates a Merkle tree from sequence a using Blake2b hashing
+ *
+ * Gray Paper formula: H_extrinsichash ≡ blake{encode{blakemany{a}}}
+ *
+ * Gray Paper Reference: merklization.tex (Equation 174-182) - Node function N
+ * Gray Paper Reference: header.tex (Equation 28) - Extrinsic hash calculation
+ *
+ * The ^# notation means blakemany applies blake to each element first, then
+ * builds a Merkle tree internally. However, blakemany returns only the sequence
+ * of leaf hashes (the hashed elements), not all tree nodes. This allows encode{}
+ * to serialize the leaf hashes, then blake{} hashes the result.
+ *
+ * This uses the Gray Paper node function N internally to build the tree:
+ * 1. Splits at ceil(len/2) (well-balanced tree, not adjacent pairing)
+ * 2. Uses "node" prefix for internal node hashing (Gray Paper Equation 179)
+ * 3. Returns zerohash for empty sequence
+ * 4. Returns v₀ (the value itself) for single-item sequence
+ * 5. Recursively builds tree: H(node concat N(left) concat N(right))
+ *
+ * @param items - Array of Uint8Array items to merklize
+ * @returns Sequence of leaf hashes (one hash per input item)
+ */
+export function blakemany(items: Uint8Array[]): Safe<Uint8Array[]> {
+  // Gray Paper Equation 177: N(v, H) = zerohash when len(v) = 0
+  if (items.length === 0) {
+    return safeResult([new Uint8Array(32)])
+  }
+
+  // First, hash all items to get leaf hashes (blake^# applies blake to each element)
+  const leafHashes: Uint8Array[] = []
+  for (const item of items) {
+    const [hashError, hash] = blake2bHash(item)
+    if (hashError) {
+      return safeError(hashError)
+    }
+    leafHashes.push(hexToBytes(hash))
+  }
+
+  // Gray Paper Equation 178: N(v, H) = v₀ when len(v) = 1
+  if (leafHashes.length === 1) {
+    return safeResult(leafHashes)
+  }
+
+  // Gray Paper Equation 179: N(v, H) = H($node concat N(left) concat N(right))
+  // where left = v[0..ceil(len/2)], right = v[ceil(len/2)..]
+  const merkleTree: Uint8Array[] = [...leafHashes] // Start with leaf level
+
+  // Recursive function to build tree using Gray Paper node function N
+  // This works on hashes (not blobs), so N(v) = v₀ when len(v) = 1
+  function buildTree(hashes: Uint8Array[]): Safe<Uint8Array> {
+    if (hashes.length === 0) {
+      const zeroHash = new Uint8Array(32)
+      merkleTree.push(zeroHash)
+      return safeResult(zeroHash)
+    }
+
+    // Gray Paper Equation 178: N(v, H) = v₀ when len(v) = 1
+    // Since we're working with hashes, return the hash itself
+    if (hashes.length === 1) {
+      return safeResult(hashes[0])
+    }
+
+    // Split at ceil(len/2) per Gray Paper Equation 179
+    const mid = Math.ceil(hashes.length / 2)
+    const left = hashes.slice(0, mid)
+    const right = hashes.slice(mid)
+
+    // Recursively compute left and right subtrees
+    const [leftError, leftHash] = buildTree(left)
+    if (leftError) {
+      return safeError(leftError)
+    }
+
+    const [rightError, rightHash] = buildTree(right)
+    if (rightError) {
+      return safeError(rightError)
+    }
+
+    // Gray Paper Equation 179: H($node concat N(left) concat N(right))
+    // Note: Gray Paper uses token{$node}, where $ means start of string, so the literal string is "node"
+    const nodePrefix = new TextEncoder().encode('node')
+    const combined = new Uint8Array(
+      nodePrefix.length + leftHash.length + rightHash.length,
+    )
+    combined.set(nodePrefix, 0)
+    combined.set(leftHash, nodePrefix.length)
+    combined.set(rightHash, nodePrefix.length + leftHash.length)
+
+    const [hashError, hash] = blake2bHash(combined)
+    if (hashError) {
+      return safeError(hashError)
+    }
+
+    const hashBytes = hexToBytes(hash)
+    merkleTree.push(hashBytes)
+
+    return safeResult(hashBytes)
+  }
+
+  // Build the tree and collect all nodes
+  const [rootError] = buildTree(leafHashes)
+  if (rootError) {
+    return safeError(rootError)
+  }
+
+  // Gray Paper: blakemany{a} returns the sequence of leaf hashes (blake^# applied to each element)
+  // The tree is built internally but only the leaf hashes are returned
+  // This allows encode{} to serialize the leaf hashes, then blake{} hashes the result
+  return safeResult(leafHashes)
+}
+
+/**
  * Generate MMR inclusion proof
  *
  * Creates proof for a specific leaf in the MMR

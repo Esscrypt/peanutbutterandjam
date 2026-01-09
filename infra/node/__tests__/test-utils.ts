@@ -14,7 +14,7 @@ import {
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-import { EventBusService, Hex, hexToBytes, logger } from '@pbnjam/core'
+import { EventBusService, type Hex, hexToBytes, logger } from '@pbnjam/core'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
 import {
   DEFAULT_JAM_VERSION,
@@ -22,7 +22,6 @@ import {
   type BlockBody,
   type BlockHeader,
   type JamVersion,
-  safeResult,
   type ValidatorPublicKeys,
   type WorkReport,
 } from '@pbnjam/types'
@@ -57,7 +56,7 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
  */
 export function getStartBlock(): number {
   // Check environment variable first (most reliable with bun test)
-  const envStartBlock = process.env.START_BLOCK
+  const envStartBlock = process.env['START_BLOCK']
   if (envStartBlock) {
     const startBlock = Number.parseInt(envStartBlock, 10)
     if (!Number.isNaN(startBlock) && startBlock >= 1) {
@@ -84,7 +83,7 @@ export function getStartBlock(): number {
  */
 export function getStopBlock(): number | undefined {
   // Check environment variable
-  const envStopBlock = process.env.STOP_BLOCK
+  const envStopBlock = process.env['STOP_BLOCK']
   if (envStopBlock) {
     const stopBlock = Number.parseInt(envStopBlock, 10)
     if (!Number.isNaN(stopBlock) && stopBlock >= 1) {
@@ -128,17 +127,17 @@ export function setupJamVersionAndTraceSubfolder(
   baseTraceFolder: string,
 ): { jamVersion: JamVersion; traceSubfolder: string | undefined } {
   // Set JAM version from environment variable (GP_VERSION) or default to 0.7.2
-  const gpVersion = process.env.GP_VERSION || process.env.JAM_VERSION
+  const gpVersion = process.env['GP_VERSION'] || process.env['JAM_VERSION']
   const jamVersion = parseJamVersion(gpVersion)
   configService.jamVersion = jamVersion
-  console.log(`📋 Using JAM version: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}${gpVersion ? ` (from ${process.env.GP_VERSION ? 'GP_VERSION' : 'JAM_VERSION'})` : ' (default)'}`)
+  console.log(`📋 Using JAM version: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}${gpVersion ? ` (from ${process.env['GP_VERSION'] ? 'GP_VERSION' : 'JAM_VERSION'})` : ' (default)'}`)
 
   // Construct traces subfolder path with version
   // v0.7.1 has only 'fuzzy' directory and does NOT use 'traces/' subdirectory
   // v0.7.2+ has both 'fuzzy' and 'fuzzy_light' directories and uses 'traces/' subdirectory
   // This test uses 'fuzzy_light' for v0.7.2+ and 'fuzzy' for 0.7.1
   const versionString = `v${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`
-  const shouldDumpTraces = process.env.DUMP_TRACES === 'true'
+  const shouldDumpTraces = process.env['DUMP_TRACES'] === 'true'
   const traceSubfolder = shouldDumpTraces ? `${baseTraceFolder}/${versionString}` : undefined
 
   return { jamVersion, traceSubfolder }

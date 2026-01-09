@@ -33,6 +33,7 @@ import {
 } from '@pbnjam/disputes'
 import {
   BaseService,
+  DISPUTES_ERRORS,
   type Dispute,
   type Disputes,
   type Safe,
@@ -143,7 +144,9 @@ export class DisputesService extends BaseService {
           const currentTarget = dispute.verdicts[i].target
           // Check if out of order or duplicate
           if (currentTarget <= prevTarget) {
-            return safeError(new Error('verdicts_not_sorted_unique'))
+            return safeError(
+              new Error(DISPUTES_ERRORS.VERDICTS_NOT_SORTED_UNIQUE),
+            )
           }
         }
       }
@@ -158,7 +161,9 @@ export class DisputesService extends BaseService {
             const currentIndex = verdict.votes[i].index
             // Check if out of order or duplicate
             if (currentIndex <= prevIndex) {
-              return safeError(new Error('judgements_not_sorted_unique'))
+              return safeError(
+                new Error(DISPUTES_ERRORS.JUDGEMENTS_NOT_SORTED_UNIQUE),
+              )
             }
           }
         }
@@ -173,7 +178,7 @@ export class DisputesService extends BaseService {
           pendingBadSet.has(verdict.target) ||
           pendingWonkySet.has(verdict.target)
         ) {
-          return safeError(new Error('already_judged'))
+          return safeError(new Error(DISPUTES_ERRORS.ALREADY_JUDGED))
         }
 
         // Validate verdict signatures
@@ -200,7 +205,7 @@ export class DisputesService extends BaseService {
 
         // The approval value is the sum of positive votes
         if (!allowedApprovalValues.includes(positiveVotes)) {
-          return safeError(new Error('bad_vote_split'))
+          return safeError(new Error(DISPUTES_ERRORS.BAD_VOTE_SPLIT))
         }
 
         // Determine which set to add the verdict target to (track in pending state)
@@ -215,7 +220,7 @@ export class DisputesService extends BaseService {
           pendingWonkySet.add(verdict.target)
         } else {
           // This should never happen due to the validation above, but handle it anyway
-          return safeError(new Error('bad_vote_split'))
+          return safeError(new Error(DISPUTES_ERRORS.BAD_VOTE_SPLIT))
         }
       }
 
@@ -238,7 +243,7 @@ export class DisputesService extends BaseService {
             (f) => f.target === verdict.target,
           )
           if (faultsForTarget.length < 1 && wouldBeGood) {
-            return safeError(new Error('not_enough_faults'))
+            return safeError(new Error(DISPUTES_ERRORS.NOT_ENOUGH_FAULTS))
           }
         }
 
@@ -251,7 +256,7 @@ export class DisputesService extends BaseService {
             (c) => c.target === verdict.target,
           )
           if (culpritsForTarget.length < 2 && wouldBeBad) {
-            return safeError(new Error('not_enough_culprits'))
+            return safeError(new Error(DISPUTES_ERRORS.NOT_ENOUGH_CULPRITS))
           }
         }
       }
@@ -264,7 +269,9 @@ export class DisputesService extends BaseService {
           const currentKey = dispute.culprits[i].key
           // Check if out of order or duplicate
           if (currentKey <= prevKey) {
-            return safeError(new Error('culprits_not_sorted_unique'))
+            return safeError(
+              new Error(DISPUTES_ERRORS.CULPRITS_NOT_SORTED_UNIQUE),
+            )
           }
         }
       }
@@ -279,7 +286,7 @@ export class DisputesService extends BaseService {
           this.offenders.has(culprit.key) ||
           pendingOffenders.includes(culprit.key)
         ) {
-          return safeError(new Error('offender_already_reported'))
+          return safeError(new Error(DISPUTES_ERRORS.OFFENDER_ALREADY_REPORTED))
         }
 
         // Step 2: Validate culprit signature according to Gray Paper
@@ -299,7 +306,7 @@ export class DisputesService extends BaseService {
           !this.badSet.has(culprit.target) &&
           !pendingBadSet.has(culprit.target)
         ) {
-          return safeError(new Error('culprits_verdict_not_bad'))
+          return safeError(new Error(DISPUTES_ERRORS.CULPRITS_VERDICT_NOT_BAD))
         }
 
         // Step 4: Track culprit's Ed25519 key in pending offenders (will be applied later)
@@ -314,7 +321,9 @@ export class DisputesService extends BaseService {
           const currentKey = dispute.faults[i].key
           // Check if out of order or duplicate
           if (currentKey <= prevKey) {
-            return safeError(new Error('faults_not_sorted_unique'))
+            return safeError(
+              new Error(DISPUTES_ERRORS.FAULTS_NOT_SORTED_UNIQUE),
+            )
           }
         }
       }
@@ -329,7 +338,7 @@ export class DisputesService extends BaseService {
           this.offenders.has(fault.key) ||
           pendingOffenders.includes(fault.key)
         ) {
-          return safeError(new Error('offender_already_reported'))
+          return safeError(new Error(DISPUTES_ERRORS.OFFENDER_ALREADY_REPORTED))
         }
 
         // Step 2: Validate fault signature according to Gray Paper
@@ -360,7 +369,7 @@ export class DisputesService extends BaseService {
 
         if (!verdictMatchesFaultVote) {
           // Fault vote does not match verdict state
-          return safeError(new Error(`fault_verdict_wrong`))
+          return safeError(new Error(DISPUTES_ERRORS.FAULT_VERDICT_WRONG))
         }
 
         // Step 4: If verdict matches fault vote, the validator who signed this fault vote

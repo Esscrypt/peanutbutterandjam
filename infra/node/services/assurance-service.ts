@@ -35,6 +35,7 @@ import type {
   WorkReport,
 } from '@pbnjam/types'
 import {
+  ASSURANCES_ERRORS,
   BaseService,
   safeError,
   safeResult,
@@ -223,16 +224,18 @@ export class AssuranceService extends BaseService {
         assurance.validator_index < 0 ||
         assurance.validator_index >= configService.numValidators
       ) {
-        return safeError(new Error('bad_validator_index'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
       }
       if (
         i > 0 &&
         assurances[i - 1].validator_index >= assurance.validator_index
       ) {
-        return safeError(new Error('not_sorted_or_unique_assurers'))
+        return safeError(
+          new Error(ASSURANCES_ERRORS.NOT_SORTED_OR_UNIQUE_ASSURERS),
+        )
       }
       if (assurance.anchor !== parentHash) {
-        return safeError(new Error('bad_attestation_parent'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_ATTESTATION_PARENT))
       }
 
       const [validatorKeyError, validatorKey] =
@@ -243,7 +246,7 @@ export class AssuranceService extends BaseService {
         return safeError(validatorKeyError)
       }
       if (!validatorKey) {
-        return safeError(new Error('bad_validator_index'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
       }
 
       const [sigError, isValid] = verifyAssuranceSignature(
@@ -253,11 +256,11 @@ export class AssuranceService extends BaseService {
       )
 
       if (sigError) {
-        return safeError(new Error('bad_signature'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_SIGNATURE))
       }
 
       if (!isValid) {
-        return safeError(new Error('bad_signature'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_SIGNATURE))
       }
 
       // Gray Paper: ∀ a ∈ XT_assurances, c ∈ coreindex : a_availabilities[c] ⇒ reports_post_judgement[c] ≠ none
@@ -279,7 +282,7 @@ export class AssuranceService extends BaseService {
 
           if (isSet) {
             if (!pendingReports.coreReports[coreIndex]) {
-              return safeError(new Error('core_not_engaged'))
+              return safeError(new Error(ASSURANCES_ERRORS.CORE_NOT_ENGAGED))
             }
             // Store in temporary map (not state)
             assuranceCounts.set(

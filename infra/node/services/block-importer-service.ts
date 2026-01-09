@@ -15,12 +15,16 @@ import {
   validateBlockHeader,
   validatePreStateRoot,
 } from '@pbnjam/block-importer'
-import { calculateBlockHashFromHeader } from '@pbnjam/codec'
+import {
+  calculateBlockHashFromHeader,
+  calculateExtrinsicHash,
+} from '@pbnjam/codec'
 import { type EventBusService, type Hex, logger, zeroHash } from '@pbnjam/core'
 
 import type { Block } from '@pbnjam/types'
 import {
   BaseService,
+  BLOCK_HEADER_ERRORS,
   type SafePromise,
   safeError,
   safeResult,
@@ -158,7 +162,7 @@ export class BlockImporterService extends BaseService {
           error: importError,
           stack: new Error().stack,
         })
-        // Revert state to snapshot
+        // Revert state to snapshot before returning error
         await this.revertStateSnapshot()
         // Revert epoch transition if it happened
         if (epochTransitionEmitted) {
@@ -177,13 +181,14 @@ export class BlockImporterService extends BaseService {
             ]
           previousEntry.stateRoot = this.previousStateRootForAnchorValidation
         }
-        return safeResult(false)
+        // Return error after reverting state so fuzzer can receive Error message
+        return safeError(importError)
       }
       // Clear snapshot on success
       this.stateSnapshot = null
       return safeResult(true)
     } catch (error) {
-      // Revert state to snapshot
+      // Revert state to snapshot before returning error
       logger.error('[BlockImporter] Failed to import block', {
         error: error,
         stack: new Error().stack,
@@ -207,7 +212,10 @@ export class BlockImporterService extends BaseService {
         previousEntry.stateRoot = this.previousStateRootForAnchorValidation
       }
 
-      return safeResult(false)
+      // Return error after reverting state so fuzzer can receive Error message
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
     }
   }
 
@@ -231,6 +239,18 @@ export class BlockImporterService extends BaseService {
     )
     if (blockHeaderValidationError) {
       return safeError(blockHeaderValidationError)
+    }
+
+    // Validate extrinsic hash matches the block body
+    const [extrinsicHashError, computedExtrinsicHash] = calculateExtrinsicHash(
+      block.body,
+      this.configService,
+    )
+    if (extrinsicHashError) {
+      return safeError(extrinsicHashError)
+    }
+    if (computedExtrinsicHash !== block.header.extrinsicHash) {
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EXTRINSIC_HASH))
     }
 
     // Temporarily update previous block's state root for anchor validation

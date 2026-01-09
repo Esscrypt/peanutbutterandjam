@@ -31,6 +31,7 @@ import {
   type FuzzMessage,
   FuzzMessageType,
   type FuzzPeerInfo,
+  formatFuzzerErrorAuto,
   type GetState,
   type ImportBlock,
   type Initialize,
@@ -628,9 +629,11 @@ async function handleImportBlock(
       importBlock.block,
     )
     if (importError) {
+      // Format error according to fuzzer protocol expectations
+      const formattedError = formatFuzzerErrorAuto(importError)
       const response: FuzzMessage = {
         type: FuzzMessageType.Error,
-        payload: { error: `Block import failed: ${importError.message}` },
+        payload: { error: formattedError },
       }
       const encoded = encodeFuzzMessage(response, configService)
       sendMessage(socket, encoded)
@@ -826,8 +829,6 @@ async function handleImportBlock(
     const encoded = encodeFuzzMessage(response, configService)
     sendMessage(socket, encoded)
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-
     // Try to dump state keyvals even on error
     try {
       const [trieError, stateTrie] = stateService.generateStateTrie()
@@ -853,9 +854,13 @@ async function handleImportBlock(
       )
     }
 
+    // Format error according to fuzzer protocol expectations
+    const formattedError = formatFuzzerErrorAuto(
+      error instanceof Error ? error : new Error(String(error)),
+    )
     const response: FuzzMessage = {
       type: FuzzMessageType.Error,
-      payload: { error: errorMsg },
+      payload: { error: formattedError },
     }
     const encoded = encodeFuzzMessage(response, configService)
     sendMessage(socket, encoded)

@@ -28,23 +28,11 @@ import {
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
-  convertJsonReportToWorkReport,
   getStartBlock,
   getStopBlock,
   initializeServices,
-  parseJamVersion,
   setupJamVersionAndTraceSubfolder,
 } from '../test-utils'
-import { ClockService } from '../../services/clock-service'
-import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
@@ -134,7 +122,13 @@ describe('Genesis Parse Tests', () => {
 
       // Helper function to verify post-state
       const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector) => {
+        // #region agent log
+        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:136',message:'verifyPostState start',data:{blockNumber,postStateKeyvalsCount:blockJsonData.post_state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const [stateTrieError, stateTrie] = stateService.generateStateTrie()
+        // #region agent log
+        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:138',message:'After generateStateTrie',data:{blockNumber,stateTrieError:stateTrieError?.message||'none',stateTrieKeysCount:stateTrie?Object.keys(stateTrie).length:0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         expect(stateTrieError).toBeUndefined()
         expect(stateTrie).toBeDefined()
 
@@ -171,6 +165,10 @@ describe('Genesis Parse Tests', () => {
             // Key is missing from generated state trie - this is a failure
             missingKeys++
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:170',message:'Missing state key in post-state verification',data:{blockNumber,missingKey:keyval.key.slice(0,40),chapterIndex:'chapterIndex' in keyInfo?keyInfo.chapterIndex:'unknown',missingKeysCount:missingKeys},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
@@ -211,8 +209,42 @@ describe('Genesis Parse Tests', () => {
           if (keyval.value !== expectedValue) {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:211',message:'State value mismatch in post-state verification',data:{blockNumber,mismatchKey:keyval.key.slice(0,40),expectedValue:keyval.value.slice(0,40),actualValue:expectedValue.slice(0,40),chapterIndex:'chapterIndex' in keyInfo?keyInfo.chapterIndex:'unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             let decodedExpected: any = null
             let decodedActual: any = null
+            
+            // Special handling for Chapter 4 (safrole) - decode and compare each component
+            if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 4) {
+              try {
+                const expectedBytes = hexToBytes(keyval.value as Hex)
+                const actualBytes = hexToBytes(expectedValue as Hex)
+                const decoder = (stateService as any).stateTypeRegistry?.get(4)
+                if (decoder) {
+                  const [decodeExpectedError, decodedExpectedResult] = decoder(expectedBytes)
+                  const [decodeActualError, decodedActualResult] = decoder(actualBytes)
+                  if (!decodeExpectedError && decodedExpectedResult && !decodeActualError && decodedActualResult) {
+                    const expectedSafrole = decodedExpectedResult.value as any
+                    const actualSafrole = decodedActualResult.value as any
+                    
+                    // Compare each component
+                    const pendingsetMatch = JSON.stringify(expectedSafrole.pendingSet) === JSON.stringify(actualSafrole.pendingSet)
+                    const epochRootMatch = expectedSafrole.epochRoot === actualSafrole.epochRoot
+                    const discriminatorMatch = expectedSafrole.discriminator === actualSafrole.discriminator
+                    const sealticketsMatch = JSON.stringify(expectedSafrole.sealTickets) === JSON.stringify(actualSafrole.sealTickets)
+                    const ticketAccumulatorMatch = JSON.stringify(expectedSafrole.ticketAccumulator) === JSON.stringify(actualSafrole.ticketAccumulator)
+                    
+                    // #region agent log
+                    fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:220',message:'Chapter 4 component comparison',data:{blockNumber,pendingsetMatch,epochRootMatch,discriminatorMatch,sealticketsMatch,ticketAccumulatorMatch,expectedPendingsetCount:expectedSafrole.pendingSet?.length||0,actualPendingsetCount:actualSafrole.pendingSet?.length||0,expectedEpochRoot:expectedSafrole.epochRoot?.slice(0,40),actualEpochRoot:actualSafrole.epochRoot?.slice(0,40),expectedDiscriminator:expectedSafrole.discriminator,actualDiscriminator:actualSafrole.discriminator,expectedSealticketsCount:expectedSafrole.sealTickets?.length||0,actualSealticketsCount:actualSafrole.sealTickets?.length||0,expectedTicketAccumulatorCount:expectedSafrole.ticketAccumulator?.length||0,actualTicketAccumulatorCount:actualSafrole.ticketAccumulator?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
+                  }
+                }
+              } catch (error) {
+                // Ignore decode errors for now
+              }
+            }
 
             // Try to decode both expected and actual values if it's a chapter key
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
@@ -423,10 +455,18 @@ describe('Genesis Parse Tests', () => {
             // This ensures entropy3 and other state components match what was used to create the seal signature
             // Set pre-state from test vector
 
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:421',message:'Setting pre-state for starting block',data:{blockNumber,startBlock,hasPreState:!!blockJsonData.pre_state?.keyvals,preStateKeyvalsCount:blockJsonData.pre_state?.keyvals?.length||0,hasGenesisJson:!!genesisJson,genesisKeyvalsCount:genesisJson?.state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+
             if (blockJsonData.pre_state?.keyvals) {
               const [setStateError] = stateService.setState(
                 blockJsonData.pre_state.keyvals,
               )
+              
+              // #region agent log
+              fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:427',message:'After setState from pre_state',data:{blockNumber,setStateError:setStateError?.message||'none',keyvalsCount:blockJsonData.pre_state.keyvals.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
               
               if (setStateError) {
                 throw new Error(`Failed to set pre-state: ${setStateError.message}`)
@@ -436,6 +476,9 @@ describe('Genesis Parse Tests', () => {
               const [setStateError] = stateService.setState(
                 genesisJson?.state?.keyvals ?? [],
               )
+              // #region agent log
+              fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:436',message:'After setState from genesis',data:{blockNumber,setStateError:setStateError?.message||'none',genesisKeyvalsCount:genesisJson?.state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
               if (setStateError) {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
               }
@@ -508,6 +551,11 @@ describe('Genesis Parse Tests', () => {
                 const isChapterKey = firstByte >= 1 && firstByte <= 16 && keyBytes.slice(1).every(b => b === 0)
                 const chapterIndex = isChapterKey ? firstByte : (firstByte === 0xff ? 255 : 0)
                 differentValues.push({key, expected: expectedValue, actual: actualValue, chapterIndex})
+                
+                // #region agent log
+                const keyInfo = parseStateKeyForDebug(key as Hex)
+                fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:505',message:'State value difference detected',data:{blockNumber,key:key.slice(0,40),chapterIndex,expectedValue:expectedValue.slice(0,40),actualValue:actualValue.slice(0,40),expectedLength:expectedValue.length,actualLength:actualValue.length,keyInfo:'chapterIndex' in keyInfo?{chapterIndex:keyInfo.chapterIndex}:keyInfo},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                // #endregion
               }
             }
 
@@ -550,9 +598,14 @@ describe('Genesis Parse Tests', () => {
                 console.error(`\n  Different values (first 10):`)
                 for (const diff of differentValues.slice(0, 10)) {
                   const keyInfo = parseStateKeyForDebug(diff.key as Hex)
+                  const chapterIndex = 'chapterIndex' in keyInfo ? keyInfo.chapterIndex : 'unknown'
                   console.error(`    ${diff.key} - ${'chapterIndex' in keyInfo ? `Chapter ${keyInfo.chapterIndex}` : JSON.stringify(keyInfo)}`)
                   console.error(`      Expected: ${diff.expected.substring(0, 40)}... (${diff.expected.length} bytes)`)
                   console.error(`      Actual:   ${diff.actual.substring(0, 40)}... (${diff.actual.length} bytes)`)
+                  
+                  // #region agent log
+                  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:550',message:'Different value details',data:{blockNumber,key:diff.key.slice(0,40),chapterIndex,expectedValue:diff.expected.slice(0,80),actualValue:diff.actual.slice(0,80),expectedLength:diff.expected.length,actualLength:diff.actual.length,keyInfo:'chapterIndex' in keyInfo?{chapterIndex:keyInfo.chapterIndex,type:keyInfo.type}:keyInfo},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                  // #endregion
                 }
               }
               
@@ -572,6 +625,11 @@ describe('Genesis Parse Tests', () => {
               )
             }
             
+            // #region agent log
+            const differentValueDetails = differentValues.length > 0 ? differentValues[0] : null
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:611',message:'Before state trie verification',data:{blockNumber,missingInTrieCount:missingInTrie.length,differentValuesCount:differentValues.length,extraInTrieCount:extraInTrie.length,computedStateRoot:preStateRoot,expectedStateRoot:blockJsonData.block.header.parent_state_root,stateRootMatches:preStateRoot===blockJsonData.block.header.parent_state_root,differentValueKey:differentValueDetails?.key?.slice(0,40),differentValueChapterIndex:differentValueDetails?.chapterIndex,differentValueExpected:differentValueDetails?.expected?.slice(0,40),differentValueActual:differentValueDetails?.actual?.slice(0,40)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
+
             // Fail test if there are mismatches
             expect(missingInTrie.length).toBe(0)
             expect(differentValues.length).toBe(0)
@@ -595,7 +653,13 @@ describe('Genesis Parse Tests', () => {
           const block = convertJsonBlockToBlock(blockJsonData.block)
 
           // Import the block
+          // #region agent log
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:598',message:'Before block import',data:{blockNumber,parentStateRoot:blockJsonData.block.header.parent_state_root?.slice(0,20),slot:blockJsonData.block.header.slot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           const [importError] = await blockImporterService.importBlock(block)
+          // #region agent log
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:600',message:'After block import',data:{blockNumber,importError:importError?.message||'none',importErrorStack:importError?.stack?.slice(0,200)||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           if (importError) {
             throw new Error(`Failed to import block ${blockNumber}: ${importError.message}`)
           }

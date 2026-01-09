@@ -302,7 +302,7 @@ export class WorkReportService extends BaseService {
     return this.pendingWorkReports.get(coreIndex) || null
   }
 
-  setPendingReports(reports: Reports): void {
+  setPendingReports(reports: Reports, _skipValidation = false): Safe<void> {
     for (const [coreIndex, report] of reports.coreReports.entries()) {
       if (report) {
         this.addPendingWorkReport(
@@ -317,6 +317,7 @@ export class WorkReportService extends BaseService {
         }
       }
     }
+    return safeResult(undefined)
   }
 
   addPendingWorkReport(

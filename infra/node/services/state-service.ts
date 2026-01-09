@@ -279,13 +279,47 @@ export class StateService extends BaseService implements IStateService {
         return this.recentHistoryService.getRecent()
 
       // C(4) = safrole (γ) - Consensus protocol internal state
-      case 4:
+      case 4: {
+        // Use stored epochRoot from Initialize message if available, otherwise compute it
+        // This ensures we match the fuzzer's expected state root
+        const epochRoot =
+          this.validatorSetManager.getStoredEpochRoot() ??
+          this.validatorSetManager.getEpochRoot()
+
+        // #region agent log
+        const storedEpochRoot = this.validatorSetManager.getStoredEpochRoot()
+        const computedEpochRoot = this.validatorSetManager.getEpochRoot()
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-service.ts:282',
+              message: 'getStateComponent Chapter 4',
+              data: {
+                hasStoredEpochRoot: !!storedEpochRoot,
+                storedEpochRoot: storedEpochRoot?.slice(0, 40),
+                computedEpochRoot: computedEpochRoot?.slice(0, 40),
+                usingStored: !!storedEpochRoot,
+                epochRootsMatch: storedEpochRoot === computedEpochRoot,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'A',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
+
         return {
           pendingSet: this.validatorSetManager.getPendingValidators(),
-          epochRoot: this.validatorSetManager.getEpochRoot(),
+          epochRoot: epochRoot,
           sealTickets: this.sealKeyService.getSealKeys(),
           ticketAccumulator: this.ticketService.getTicketAccumulator(),
         }
+      }
 
       // C(5) = disputes (ψ) - Judgments on work-reports and validators
       case 5:
@@ -467,9 +501,17 @@ export class StateService extends BaseService implements IStateService {
         break
 
       // C(10) = reports (ρ) - Work reports awaiting availability assurance
-      case 10:
-        this.workReportService.setPendingReports(value as Reports)
+      case 10: {
+        // Skip validation during state initialization - thetime (Chapter 11) might not be set yet
+        const [setPendingReportsError] =
+          this.workReportService.setPendingReports(value as Reports, true)
+        if (setPendingReportsError) {
+          throw new Error(
+            `Failed to set pending reports: ${setPendingReportsError.message}`,
+          )
+        }
         break
+      }
 
       // C(11) = thetime (τ) - Most recent block's timeslot index
       case 11:
@@ -593,6 +635,29 @@ export class StateService extends BaseService implements IStateService {
         )
         processedKeys.add(keyval.key)
       } catch (error) {
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-service.ts:595',
+              message: 'setStateComponent error caught',
+              data: {
+                chapterIndex: parsedStateKey.chapterIndex,
+                key: keyval.key.slice(0, 40),
+                errorMessage:
+                  error instanceof Error ? error.message : String(error),
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'B',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
         unprocessedKeyvals.push({
           key: keyval.key,
           value: keyval.value,

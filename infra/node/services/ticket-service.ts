@@ -29,9 +29,11 @@ import {
   verifyTicket,
 } from '@pbnjam/safrole'
 import {
+  ADDITIONAL_ERRORS,
   BaseService,
   CONSENSUS_CONSTANTS,
   type ITicketService,
+  SAFROLE_ERRORS,
   type Safe,
   type SafePromise,
   type SafroleTicket,
@@ -285,13 +287,13 @@ export class TicketService extends BaseService implements ITicketService {
     // Gray Paper Eq. 28 - Strict monotonic slot progression: τ' > τ
     // This implements the core constraint that slots must be strictly increasing
     if (targetSlot <= currentSlot) {
-      return safeError(new Error('bad_slot'))
+      return safeError(new Error(SAFROLE_ERRORS.BAD_SLOT))
     }
 
     // Gray Paper Eq. 28 - Validate slot progression is exactly +1 (no gaps allowed)
     // This ensures τ' = τ + 1, maintaining strict monotonicity without gaps
     if (targetSlot !== currentSlot + 1n) {
-      return safeError(new Error('invalid_slot_progression'))
+      return safeError(new Error(ADDITIONAL_ERRORS.INVALID_SLOT_PROGRESSION))
     }
 
     // Gray Paper Eq. 33-34 - Calculate slot phase: e remainder m = τ/Cepochlen
@@ -301,13 +303,13 @@ export class TicketService extends BaseService implements ITicketService {
     // EPOCH_TAIL_START is the same as CONTEST_DURATION
     if (newPhase.phase >= BigInt(this.configService.contestDuration)) {
       if (tickets.length > 0) {
-        return safeError(new Error('unexpected_ticket'))
+        return safeError(new Error(SAFROLE_ERRORS.UNEXPECTED_TICKET))
       }
     } else {
       // Gray Paper Eq. 295-298 - Enforce ticket limit: |xttickets| ≤ Cmaxblocktickets when m' < Cepochtailstart
       const maxTicketsPerBlock = Number(CONSENSUS_CONSTANTS.MAX_BLOCK_TICKETS)
       if (tickets.length > maxTicketsPerBlock) {
-        return safeError(new Error('too_many_extrinsics'))
+        return safeError(new Error(ADDITIONAL_ERRORS.TOO_MANY_EXTRINSICS))
       }
     }
 
@@ -318,7 +320,9 @@ export class TicketService extends BaseService implements ITicketService {
         ticket.entryIndex < 0n ||
         ticket.entryIndex >= this.configService.maxTicketsPerExtrinsic
       ) {
-        return safeError(new Error('invalid_ticket_entry_index'))
+        return safeError(
+          new Error(ADDITIONAL_ERRORS.INVALID_TICKET_ENTRY_INDEX),
+        )
       }
     }
 
@@ -327,13 +331,13 @@ export class TicketService extends BaseService implements ITicketService {
     const entryIndices = tickets.map((t) => t.entryIndex)
     const uniqueIndices = new Set(entryIndices)
     if (uniqueIndices.size !== entryIndices.length) {
-      return safeError(new Error('duplicate_ticket'))
+      return safeError(new Error(SAFROLE_ERRORS.DUPLICATE_TICKET))
     }
 
     if (tickets.length > 1) {
       for (let i = 1; i < tickets.length; i++) {
         if (tickets[i].entryIndex < tickets[i - 1].entryIndex) {
-          return safeError(new Error('bad_ticket_order'))
+          return safeError(new Error(SAFROLE_ERRORS.BAD_TICKET_ORDER))
         }
       }
     }
@@ -453,7 +457,7 @@ export class TicketService extends BaseService implements ITicketService {
           },
         ).catch(() => {})
         // #endregion
-        return safeError(new Error('bad_ticket_proof'))
+        return safeError(new Error(SAFROLE_ERRORS.BAD_TICKET_PROOF))
       }
     }
 

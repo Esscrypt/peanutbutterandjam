@@ -49,6 +49,7 @@ import type {
 } from '@pbnjam/types'
 import {
   BaseService,
+  REPORTS_ERRORS,
   safeError,
   safeResult,
   WORK_REPORT_CONSTANTS,
@@ -1309,7 +1310,7 @@ export class GuarantorService extends BaseService {
 
       // Validate no duplicate package hashes across all guarantees
       if (seenPackageHashes.has(packageHash)) {
-        return safeError(new Error('duplicate_package'))
+        return safeError(new Error(REPORTS_ERRORS.DUPLICATE_PACKAGE))
       }
       seenPackageHashes.add(packageHash)
 
@@ -1319,14 +1320,14 @@ export class GuarantorService extends BaseService {
         const recentHistory = this.recentHistoryService.getRecentHistory()
         for (const entry of recentHistory) {
           if (entry.reportedPackageHashes.has(packageHash)) {
-            return safeError(new Error('duplicate_package'))
+            return safeError(new Error(REPORTS_ERRORS.DUPLICATE_PACKAGE))
           }
         }
       }
 
       // Validate guarantee slot is not in the future
       if (guarantee.slot > currentSlot) {
-        return safeError(new Error('future_report_slot'))
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
       }
 
       // Validate guarantee is not from before the last rotation
@@ -1337,17 +1338,17 @@ export class GuarantorService extends BaseService {
 
       // Check if guarantee is from before the last rotation (more than 1 rotation ago)
       if (guaranteeRotation < currentRotation - 1n) {
-        return safeError(new Error('report_epoch_before_last'))
+        return safeError(new Error(REPORTS_ERRORS.REPORT_EPOCH_BEFORE_LAST))
       }
 
       // Validate core_index is within valid range
       if (coreIndex < 0 || coreIndex >= this.configService.numCores) {
-        return safeError(new Error('bad_core_index'))
+        return safeError(new Error(REPORTS_ERRORS.BAD_CORE_INDEX))
       }
 
       // Check uniqueness
       if (processedCores.has(coreIndex)) {
-        return safeError(new Error('out_of_order_guarantee'))
+        return safeError(new Error(REPORTS_ERRORS.OUT_OF_ORDER_GUARANTEE))
       }
       processedCores.add(coreIndex)
 
@@ -1355,7 +1356,7 @@ export class GuarantorService extends BaseService {
       if (i > 0) {
         const prevCoreIndex = Number(guarantees[i - 1].report.core_index)
         if (coreIndex <= prevCoreIndex) {
-          return safeError(new Error('out_of_order_guarantee'))
+          return safeError(new Error(REPORTS_ERRORS.OUT_OF_ORDER_GUARANTEE))
         }
       }
 
@@ -1410,23 +1411,23 @@ export class GuarantorService extends BaseService {
             !expectedStateRoot &&
             !this.recentHistoryService.isValidAnchor(anchorHash)
           ) {
-            return safeError(new Error('anchor_not_recent'))
+            return safeError(new Error(REPORTS_ERRORS.ANCHOR_NOT_RECENT))
           }
 
           // If we still don't have expected values after all checks, anchor is not valid
           if (!expectedStateRoot) {
-            return safeError(new Error('anchor_not_recent'))
+            return safeError(new Error(REPORTS_ERRORS.ANCHOR_NOT_RECENT))
           }
         }
 
         if (contextStateRoot !== expectedStateRoot) {
-          return safeError(new Error('bad_state_root'))
+          return safeError(new Error(REPORTS_ERRORS.BAD_STATE_ROOT))
         }
 
         // Gray Paper equation 335: Validate beefy_root (accoutLogSuperPeak) matches
         const contextBeefyRoot = guarantee.report.context.beefy_root
         if (contextBeefyRoot !== expectedBeefyRoot) {
-          return safeError(new Error('bad_beefy_mmr_root'))
+          return safeError(new Error(REPORTS_ERRORS.BAD_BEEFY_MMR_ROOT))
         }
       }
 
@@ -1450,7 +1451,7 @@ export class GuarantorService extends BaseService {
                 error: serviceAccountError.message,
               },
             )
-            return safeError(new Error('bad_service_id'))
+            return safeError(new Error(REPORTS_ERRORS.BAD_SERVICE_ID))
           }
 
           // Validate code_hash matches service account codehash
@@ -1470,7 +1471,7 @@ export class GuarantorService extends BaseService {
             // // Only fail if service hasn't been modified since lookup anchor
             // // If lastacc > lookup_anchor_slot, service may have been upgraded (but not ejected)
             if (serviceAccount.lastacc <= lookupAnchorSlot) {
-              return safeError(new Error('bad_code_hash'))
+              return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
             }
             // TODO: double check this
             // return safeError(new Error('bad_code_hash'))
@@ -1482,7 +1483,7 @@ export class GuarantorService extends BaseService {
           if (
             BigInt(result.accumulate_gas) < BigInt(serviceAccount.minaccgas)
           ) {
-            return safeError(new Error('service_item_gas_too_low'))
+            return safeError(new Error(REPORTS_ERRORS.SERVICE_ITEM_GAS_TOO_LOW))
           }
         }
       }
@@ -1490,7 +1491,7 @@ export class GuarantorService extends BaseService {
       // Validate work report has at least one result
       // Gray Paper: Work reports must have at least one work result
       if (!guarantee.report.results || guarantee.report.results.length === 0) {
-        return safeError(new Error('missing_work_results'))
+        return safeError(new Error(REPORTS_ERRORS.MISSING_WORK_RESULTS))
       }
     }
 
@@ -1535,7 +1536,7 @@ export class GuarantorService extends BaseService {
 
       // Validate no duplicate package hashes across all guarantees
       if (seenPackageHashes.has(packageHash)) {
-        return safeError(new Error('duplicate_package'))
+        return safeError(new Error(REPORTS_ERRORS.DUPLICATE_PACKAGE))
       }
       seenPackageHashes.add(packageHash)
 
@@ -1545,14 +1546,14 @@ export class GuarantorService extends BaseService {
         const recentHistory = this.recentHistoryService.getRecentHistory()
         for (const entry of recentHistory) {
           if (entry.reportedPackageHashes.has(packageHash)) {
-            return safeError(new Error('duplicate_package'))
+            return safeError(new Error(REPORTS_ERRORS.DUPLICATE_PACKAGE))
           }
         }
       }
 
       // Validate guarantee slot is not in the future
       if (guarantee.slot > currentSlot) {
-        return safeError(new Error('future_report_slot'))
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
       }
 
       // Validate guarantee is not from before the last rotation
@@ -1563,17 +1564,17 @@ export class GuarantorService extends BaseService {
 
       // Check if guarantee is from before the last rotation (more than 1 rotation ago)
       if (guaranteeRotation < currentRotation - 1n) {
-        return safeError(new Error('report_epoch_before_last'))
+        return safeError(new Error(REPORTS_ERRORS.REPORT_EPOCH_BEFORE_LAST))
       }
 
       // Validate core_index is within valid range
       if (coreIndex < 0 || coreIndex >= this.configService.numCores) {
-        return safeError(new Error('bad_core_index'))
+        return safeError(new Error(REPORTS_ERRORS.BAD_CORE_INDEX))
       }
 
       // Check uniqueness
       if (processedCores.has(coreIndex)) {
-        return safeError(new Error('out_of_order_guarantee'))
+        return safeError(new Error(REPORTS_ERRORS.OUT_OF_ORDER_GUARANTEE))
       }
       processedCores.add(coreIndex)
 
@@ -1581,7 +1582,7 @@ export class GuarantorService extends BaseService {
       if (i > 0) {
         const prevCoreIndex = Number(guarantees[i - 1].report.core_index)
         if (coreIndex <= prevCoreIndex) {
-          return safeError(new Error('out_of_order_guarantee'))
+          return safeError(new Error(REPORTS_ERRORS.OUT_OF_ORDER_GUARANTEE))
         }
       }
 
@@ -1636,23 +1637,23 @@ export class GuarantorService extends BaseService {
             !expectedStateRoot &&
             !this.recentHistoryService.isValidAnchor(anchorHash)
           ) {
-            return safeError(new Error('anchor_not_recent'))
+            return safeError(new Error(REPORTS_ERRORS.ANCHOR_NOT_RECENT))
           }
 
           // If we still don't have expected values after all checks, anchor is not valid
           if (!expectedStateRoot) {
-            return safeError(new Error('anchor_not_recent'))
+            return safeError(new Error(REPORTS_ERRORS.ANCHOR_NOT_RECENT))
           }
         }
 
         if (contextStateRoot !== expectedStateRoot) {
-          return safeError(new Error('bad_state_root'))
+          return safeError(new Error(REPORTS_ERRORS.BAD_STATE_ROOT))
         }
 
         // Gray Paper equation 335: Validate beefy_root (accoutLogSuperPeak) matches
         const contextBeefyRoot = guarantee.report.context.beefy_root
         if (contextBeefyRoot !== expectedBeefyRoot) {
-          return safeError(new Error('bad_beefy_mmr_root'))
+          return safeError(new Error(REPORTS_ERRORS.BAD_BEEFY_MMR_ROOT))
         }
       }
 
@@ -1676,7 +1677,7 @@ export class GuarantorService extends BaseService {
                 error: serviceAccountError.message,
               },
             )
-            return safeError(new Error('bad_service_id'))
+            return safeError(new Error(REPORTS_ERRORS.BAD_SERVICE_ID))
           }
 
           // Validate code_hash matches service account codehash
@@ -1684,7 +1685,7 @@ export class GuarantorService extends BaseService {
           if (result.code_hash !== serviceAccount.codehash) {
             // Always reject if service was modified since lookup anchor
             if (serviceAccount.lastacc <= lookupAnchorSlot) {
-              return safeError(new Error('bad_code_hash'))
+              return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
             }
           }
 
@@ -1693,7 +1694,7 @@ export class GuarantorService extends BaseService {
           if (
             BigInt(result.accumulate_gas) < BigInt(serviceAccount.minaccgas)
           ) {
-            return safeError(new Error('service_item_gas_too_low'))
+            return safeError(new Error(REPORTS_ERRORS.SERVICE_ITEM_GAS_TOO_LOW))
           }
         }
       }
@@ -1701,7 +1702,7 @@ export class GuarantorService extends BaseService {
       // Validate work report has at least one result
       // Gray Paper: Work reports must have at least one work result
       if (!guarantee.report.results || guarantee.report.results.length === 0) {
-        return safeError(new Error('missing_work_results'))
+        return safeError(new Error(REPORTS_ERRORS.MISSING_WORK_RESULTS))
       }
     }
 
@@ -1727,7 +1728,10 @@ export class GuarantorService extends BaseService {
       // Gray Paper equation 260-262: Credential must have 2-3 signatures, sorted by validator index
       const guaranteeSignatures = guarantee.signatures
       if (guaranteeSignatures.length < 2) {
-        return safeResult({ reporters: [], error: 'insufficient_guarantees' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.INSUFFICIENT_GUARANTEES,
+        })
       }
       if (guaranteeSignatures.length > 3) {
         return safeResult({
@@ -1745,7 +1749,7 @@ export class GuarantorService extends BaseService {
         if (validatorIndices.has(validatorIdx)) {
           return safeResult({
             reporters: [],
-            error: 'not_sorted_or_unique_guarantors',
+            error: REPORTS_ERRORS.NOT_SORTED_OR_UNIQUE_GUARANTORS,
           })
         }
         validatorIndices.add(validatorIdx)
@@ -1757,7 +1761,7 @@ export class GuarantorService extends BaseService {
         ) {
           return safeResult({
             reporters: [],
-            error: 'not_sorted_or_unique_guarantors',
+            error: REPORTS_ERRORS.NOT_SORTED_OR_UNIQUE_GUARANTORS,
           })
         }
       }
@@ -1807,7 +1811,10 @@ export class GuarantorService extends BaseService {
           // Current epoch guarantee: use active validators only
           // Verify validator is actually in the active set (not previous set)
           if (!this.validatorSetManager.isValidatorActive(validatorIdx)) {
-            return safeResult({ reporters: [], error: 'bad_validator_index' })
+            return safeResult({
+              reporters: [],
+              error: REPORTS_ERRORS.BAD_VALIDATOR_INDEX,
+            })
           }
           // Use the active validators we got above
           if (!activeValidators) {
@@ -1818,7 +1825,10 @@ export class GuarantorService extends BaseService {
           }
           // Explicitly check that this validator exists in the active set (not just get it)
           if (validatorIdx < 0 || validatorIdx >= activeValidators.length) {
-            return safeResult({ reporters: [], error: 'bad_validator_index' })
+            return safeResult({
+              reporters: [],
+              error: REPORTS_ERRORS.BAD_VALIDATOR_INDEX,
+            })
           }
           const activeValidator = activeValidators[validatorIdx]
           // For current epoch guarantees, we MUST use the active validator's key from the active set
@@ -1835,14 +1845,20 @@ export class GuarantorService extends BaseService {
           // Previous epoch guarantee: use previous validators only
           const prevValidator = previousValidators[validatorIdx]
           if (!prevValidator) {
-            return safeResult({ reporters: [], error: 'bad_validator_index' })
+            return safeResult({
+              reporters: [],
+              error: REPORTS_ERRORS.BAD_VALIDATOR_INDEX,
+            })
           }
           validatorKey = { ed25519: prevValidator.ed25519 }
         }
 
         // Check if validator is banned/offender
         if (this.validatorSetManager.isOffender(validatorIdx)) {
-          return safeResult({ reporters: [], error: 'banned_validator' })
+          return safeResult({
+            reporters: [],
+            error: REPORTS_ERRORS.BANNED_VALIDATOR,
+          })
         }
 
         // Get assigned core for validator at the guarantee's slot time
@@ -1874,7 +1890,10 @@ export class GuarantorService extends BaseService {
         // For guarantees from previous rotation, assignment validation uses previous validator set
         // The assignment calculation should still work, but we verify rotation is valid
         if (!isValidRotation) {
-          return safeResult({ reporters: [], error: 'wrong_assignment' })
+          return safeResult({
+            reporters: [],
+            error: REPORTS_ERRORS.WRONG_ASSIGNMENT,
+          })
         }
 
         // Check that validator was assigned to this core at guarantee slot time
@@ -1886,7 +1905,10 @@ export class GuarantorService extends BaseService {
         // so we allow some flexibility for previous epoch guarantees.
         if (!isFromPreviousRotation && assignedCore !== coreIndex) {
           // Current rotation guarantee: strict assignment check
-          return safeResult({ reporters: [], error: 'wrong_assignment' })
+          return safeResult({
+            reporters: [],
+            error: REPORTS_ERRORS.WRONG_ASSIGNMENT,
+          })
         }
 
         // For previous rotation guarantees, we still verify the assignment if possible,
@@ -1900,12 +1922,18 @@ export class GuarantorService extends BaseService {
             const prevValidator = previousValidators[validatorIdx]
             if (!prevValidator) {
               // Validator not in previous set - this is an error
-              return safeResult({ reporters: [], error: 'wrong_assignment' })
+              return safeResult({
+                reporters: [],
+                error: REPORTS_ERRORS.WRONG_ASSIGNMENT,
+              })
             }
             // Validator is in previous set - assignment check passed via validator existence
           } else {
             // Previous rotation but same epoch: still require strict assignment match
-            return safeResult({ reporters: [], error: 'wrong_assignment' })
+            return safeResult({
+              reporters: [],
+              error: REPORTS_ERRORS.WRONG_ASSIGNMENT,
+            })
           }
         }
 
@@ -1979,7 +2007,7 @@ export class GuarantorService extends BaseService {
           },
         ).catch(() => {})
         // #endregion
-        return safeResult({ reporters: [], error: 'core_engaged' })
+        return safeResult({ reporters: [], error: REPORTS_ERRORS.CORE_ENGAGED })
       }
 
       // Note: We don't need to check hasAvailableReport() here because:
@@ -1999,7 +2027,10 @@ export class GuarantorService extends BaseService {
       }
       const coreAuthPool = authPool[coreIndex]
       if (!coreAuthPool.includes(authorizerHash)) {
-        return safeResult({ reporters: [], error: 'core_unauthorized' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.CORE_UNAUTHORIZED,
+        })
       }
 
       if (!this.accumulationService) {
@@ -2046,7 +2077,10 @@ export class GuarantorService extends BaseService {
 
         // Prerequisite must be in at least one of: known_packages, any guarantee in batch, or recent history
         if (!isInKnownPackages && !isInAnyGuarantee && !isInRecentHistory) {
-          return safeResult({ reporters: [], error: 'dependency_missing' })
+          return safeResult({
+            reporters: [],
+            error: REPORTS_ERRORS.DEPENDENCY_MISSING,
+          })
         }
       }
 
@@ -2080,7 +2114,7 @@ export class GuarantorService extends BaseService {
           ) {
             return safeResult({
               reporters: [],
-              error: 'segment_root_lookup_invalid',
+              error: REPORTS_ERRORS.SEGMENT_ROOT_LOOKUP_INVALID,
             })
           }
         }
@@ -2096,7 +2130,7 @@ export class GuarantorService extends BaseService {
               if (exportsRoot !== expectedSegmentTreeRoot) {
                 return safeResult({
                   reporters: [],
-                  error: 'segment_root_lookup_invalid',
+                  error: REPORTS_ERRORS.SEGMENT_ROOT_LOOKUP_INVALID,
                 })
               }
               isInRecentHistory = true
@@ -2110,7 +2144,7 @@ export class GuarantorService extends BaseService {
         if (!isInAnyGuarantee && !isInRecentHistory) {
           return safeResult({
             reporters: [],
-            error: 'segment_root_lookup_invalid',
+            error: REPORTS_ERRORS.SEGMENT_ROOT_LOOKUP_INVALID,
           })
         }
       }
@@ -2119,7 +2153,10 @@ export class GuarantorService extends BaseService {
       // len(segment_root_lookup) + len(prerequisites) <= C_maxreportdeps
       const totalDependencies = prerequisites.length + segmentRootLookup.length
       if (totalDependencies > WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS) {
-        return safeResult({ reporters: [], error: 'too_many_dependencies' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.TOO_MANY_DEPENDENCIES,
+        })
       }
 
       // Gray Paper equation 210: Validate work report size
@@ -2157,13 +2194,19 @@ export class GuarantorService extends BaseService {
 
       // Check if total size exceeds limit
       if (totalUnboundedSize > WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE) {
-        return safeResult({ reporters: [], error: 'work_report_too_big' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.WORK_REPORT_TOO_BIG,
+        })
       }
 
       // Validate work report has at least one result
       // Gray Paper: Work reports must have at least one work result
       if (!guarantee.report.results || guarantee.report.results.length === 0) {
-        return safeResult({ reporters: [], error: 'missing_work_results' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.MISSING_WORK_RESULTS,
+        })
       }
 
       // Gray Paper equation 121-125: Validate total accumulate_gas
@@ -2175,7 +2218,10 @@ export class GuarantorService extends BaseService {
 
       // Check if total accumulate_gas > C_REPORTACCGAS (greater than is not allowed, equal is allowed)
       if (totalAccumulateGas > BigInt(WORK_REPORT_CONSTANTS.C_REPORTACCGAS)) {
-        return safeResult({ reporters: [], error: 'work_report_gas_too_high' })
+        return safeResult({
+          reporters: [],
+          error: REPORTS_ERRORS.WORK_REPORT_GAS_TOO_HIGH,
+        })
       }
 
       // All validations passed - mark work report as available

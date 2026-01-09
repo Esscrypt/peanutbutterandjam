@@ -23,6 +23,7 @@ import type {
   SealKey,
 } from '@pbnjam/types'
 import {
+  BLOCK_HEADER_ERRORS,
   type Safe,
   safeError,
   safeResult,
@@ -108,18 +109,12 @@ export async function validateBlockHeader(
     (latestStateTimeslot + 1n) % BigInt(configService.epochDuration)
   if (header.winnersMark) {
     if (currentPhase < configService.contestDuration) {
-      return safeError(
-        new Error(
-          `winners mark is present at phase < contest duration: ${currentPhase} <= ${configService.contestDuration}`,
-        ),
-      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK))
     }
 
     // winners mark should contain exactly as amny tickets as number of slots in an epoch
     if (header.winnersMark.length !== configService.epochDuration) {
-      return safeError(
-        new Error('winners mark contains incorrect number of tickets'),
-      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK))
     }
   }
 
@@ -134,9 +129,7 @@ export async function validateBlockHeader(
     // }
     // if the validators are not as many as in config, return an error
     if (header.epochMark.validators.length !== configService.numValidators) {
-      return safeError(
-        new Error('epoch mark contains incorrect number of validators'),
-      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
     }
 
     // Verify epoch root matches the validators in the epoch mark
@@ -160,9 +153,7 @@ export async function validateBlockHeader(
       )
     }
     if (!isValid) {
-      return safeError(
-        new Error('Epoch root does not match the validators in the epoch mark'),
-      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
     }
   }
 
@@ -238,19 +229,11 @@ export function validateSealSignature(
   // According to Gray Paper equation 154, we use the validator from the active set
   const activeValidators = validatorSetManagerService.getActiveValidators()
   if (header.authorIndex < 0 || header.authorIndex >= activeValidators.length) {
-    return safeError(
-      new Error(
-        `Validator at index ${header.authorIndex} not found in active set (size: ${activeValidators.length})`,
-      ),
-    )
+    return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_AUTHOR_INDEX))
   }
   const validatorKeys = activeValidators[Number(header.authorIndex)]
   if (!validatorKeys) {
-    return safeError(
-      new Error(
-        `Validator at index ${header.authorIndex} not found in active set`,
-      ),
-    )
+    return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_AUTHOR_INDEX))
   }
   const publicKeys = validatorKeys
 
@@ -287,7 +270,7 @@ export function validateSealSignature(
       return safeError(verificationError)
     }
     if (!isValid) {
-      return safeError(new Error('Ticket-based seal signature is invalid'))
+      return safeError(new Error(BLOCK_HEADER_ERRORS.BAD_SEAL_SIGNATURE))
     }
   } else {
     // Fallback sealing validation (Gray Paper eq. 154)
@@ -299,12 +282,7 @@ export function validateSealSignature(
     // This ensures the seal key sequence was calculated correctly for this epoch
     const sealKeyHex = bytesToHex(sealKey as Uint8Array)
     if (sealKeyHex !== publicKeys.bandersnatch) {
-      return safeError(
-        new Error(
-          `Seal key mismatch: expected ${publicKeys.bandersnatch}, got ${sealKeyHex}. ` +
-            `This may indicate the seal key sequence was not updated correctly on epoch transition.`,
-        ),
-      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.UNEXPECTED_AUTHOR))
     }
 
     // But we use H_authorbskey from active set for verification
@@ -319,7 +297,7 @@ export function validateSealSignature(
       return safeError(verificationError)
     }
     if (!isValid) {
-      return safeError(new Error('Fallback seal signature is invalid'))
+      return safeError(new Error(BLOCK_HEADER_ERRORS.BAD_SEAL_SIGNATURE))
     }
   }
 
@@ -346,81 +324,20 @@ export function validateSealSignature(
 export function validateVRFSignature(
   header: BlockHeader,
   validatorSetManagerService: IValidatorSetManager,
-  pendingSet?: ValidatorPublicKeys[],
 ): Safe<boolean> {
-  // #region agent log
-  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'header.ts:338',
-      message: 'validateVRFSignature entry',
-      data: {
-        authorIndex:
-          typeof header.authorIndex === 'bigint'
-            ? header.authorIndex.toString()
-            : header.authorIndex,
-        timeslot: header.timeslot.toString(),
-        hasPendingSet: !!pendingSet,
-        sealSig: header.sealSig.substring(0, 66),
-        vrfSig: header.vrfSig.substring(0, 66),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'pre-fix',
-      hypothesisId: 'A',
-    }),
-  }).catch(() => {})
-  // #endregion
-
   // Get validator's Bandersnatch public key from active set
   // On epoch transition, use pending validators (which become the new active set)
   // Gray Paper Eq. 115-118: activeSet' = pendingSet on epoch transition
-  const activeValidators = pendingSet
-    ? pendingSet
-    : validatorSetManagerService.getActiveValidators()
+  const activeValidators = validatorSetManagerService.getActiveValidators()
 
   if (header.authorIndex < 0 || header.authorIndex >= activeValidators.length) {
-    return safeError(
-      new Error(
-        `Validator at index ${header.authorIndex} not found in active set (size: ${activeValidators.length})`,
-      ),
-    )
+    return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_AUTHOR_INDEX))
   }
   const validatorKeys = activeValidators[Number(header.authorIndex)]
   if (!validatorKeys) {
-    return safeError(
-      new Error(
-        `Validator at index ${header.authorIndex} not found in active set (size: ${activeValidators.length})`,
-      ),
-    )
+    return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_AUTHOR_INDEX))
   }
   const authorPublicKey = hexToBytes(validatorKeys.bandersnatch)
-
-  // #region agent log
-  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'header.ts:358',
-      message: 'Validator key extracted',
-      data: {
-        authorIndex:
-          typeof header.authorIndex === 'bigint'
-            ? header.authorIndex.toString()
-            : header.authorIndex,
-        bandersnatchKey: bytesToHex(authorPublicKey),
-        keyLength: authorPublicKey.length,
-        isAllZeros: authorPublicKey.every((b) => b === 0),
-        firstBytes: Array.from(authorPublicKey.slice(0, 8)),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'pre-fix',
-      hypothesisId: 'A',
-    }),
-  }).catch(() => {})
-  // #endregion
 
   // Extract VRF output from seal signature using banderout function
   // Gray Paper: banderout{H_sealsig} - first 32 bytes of VRF output hash
@@ -428,27 +345,6 @@ export function validateVRFSignature(
   if (extractError) {
     return safeError(extractError)
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'header.ts:362',
-      message: 'Seal output extracted',
-      data: {
-        sealSig: header.sealSig.substring(0, 66),
-        sealOutput: bytesToHex(sealOutput),
-        sealOutputLength: sealOutput.length,
-        isAllZeros: sealOutput.every((b) => b === 0),
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'pre-fix',
-      hypothesisId: 'C',
-    }),
-  }).catch(() => {})
-  // #endregion
 
   // Verify VRF signature using existing entropy VRF verification function
   // Gray Paper Eq. 158: H_vrfsig ∈ bssignature{H_authorbskey}{Xentropy ∥ banderout{H_sealsig}}{[]}
@@ -458,24 +354,6 @@ export function validateVRFSignature(
     sealOutput,
   )
   if (verifyError) {
-    // #region agent log
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'header.ts:369',
-          message: 'verifyEntropyVRFSignature error',
-          data: { error: verifyError.message, stack: verifyError.stack },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'pre-fix',
-          hypothesisId: 'B',
-        }),
-      },
-    ).catch(() => {})
-    // #endregion
     return safeError(verifyError)
   }
 

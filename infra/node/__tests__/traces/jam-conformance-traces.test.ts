@@ -24,7 +24,6 @@ import {
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
-  convertJsonReportToWorkReport,
   initializeServices,
 } from '../test-utils'
 
@@ -42,13 +41,6 @@ const STATE_CACHE_DIR = path.join(WORKSPACE_ROOT, '.state-cache/jam-conformance'
 
 // Mismatch logs directory
 const MISMATCH_LOGS_DIR = path.join(WORKSPACE_ROOT, 'mismatch-logs/jam-conformance')
-
-// Ensure cache directory exists
-function ensureCacheDir(): void {
-  if (!existsSync(STATE_CACHE_DIR)) {
-    mkdirSync(STATE_CACHE_DIR, { recursive: true })
-  }
-}
 
 // Ensure mismatch logs directory exists
 function ensureMismatchLogsDir(): void {

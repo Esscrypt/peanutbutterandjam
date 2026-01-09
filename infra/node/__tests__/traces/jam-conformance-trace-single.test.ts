@@ -15,48 +15,19 @@ import * as path from 'node:path'
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
 import { decodeRecent } from '@pbnjam/codec'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
-  convertJsonReportToWorkReport,
   initializeServices,
 } from '../test-utils'
-import { ClockService } from '../../services/clock-service'
-import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
