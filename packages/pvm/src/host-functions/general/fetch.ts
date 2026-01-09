@@ -5,7 +5,7 @@ import {
   encodeWorkItemSummary,
   encodeWorkPackage,
 } from '@pbnjam/codec'
-import { hexToBytes, logger } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   FetchParams,
   HostFunctionContext,
@@ -124,8 +124,7 @@ export class FetchHostFunction extends BaseHostFunction {
       logger.debug('Fetch host function: Data fetched successfully', {
         selector: selector.toString(),
         dataLength: fetchedData.length.toString(),
-        actualLength: actualLength.toString(),
-        gasUsed: context.gasCounter.toString(),
+        data: bytesToHex(fetchedData),
       })
     }
 

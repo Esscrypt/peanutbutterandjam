@@ -9,63 +9,24 @@ import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
 import type { SafroleState } from '@pbnjam/types'
-import { getTicketIdFromProof } from '@pbnjam/safrole'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
-  type Block,
-  type BlockBody,
-  type BlockHeader,
   type BlockTraceTestVector,
 } from '@pbnjam/types'
-import { ClockService } from '../../services/clock-service'
 import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+  convertJsonBlockToBlock,
+  getStartBlock,
+  initializeServices,
+} from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
-// Helper function to parse CLI arguments for starting block
-function getStartBlock(): number {
-  const args = process.argv.slice(2)
-  const startBlockIndex = args.indexOf('--start-block')
-  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
-    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
-    if (Number.isNaN(startBlock) || startBlock < 1) {
-      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
-    }
-    return startBlock
-  }
-  return 1 // Default to block 1 (genesis)
-}
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
@@ -81,16 +42,6 @@ describe('Genesis Parse Tests', () => {
         genesisJsonPath,
       })
 
-      const srsFilePath = path.join(
-        WORKSPACE_ROOT,
-        'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-      )
-      const ringProver = new RingVRFProverWasm(srsFilePath)
-      const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-      await ringProver.init()
-      await ringVerifier.init()
-
       // Verify genesis JSON was loaded
       const [error, genesisJson] = genesisManager.getGenesisJson()
       expect(error).toBeUndefined()
@@ -100,292 +51,17 @@ describe('Genesis Parse Tests', () => {
         throw new Error('Genesis JSON not loaded')
       }
 
-      const eventBusService = new EventBusService()
-      const clockService = new ClockService({
-        configService: configService,
-        eventBusService: eventBusService,
-      })
-      const entropyService = new EntropyService(eventBusService)
-      const ticketService = new TicketService({
-        configService: configService,
-        eventBusService: eventBusService,
-        keyPairService: null,
-        entropyService: entropyService,
-        networkingService: null,
-        ce131TicketDistributionProtocol: null,
-        ce132TicketDistributionProtocol: null,
-        clockService: clockService,
-        prover: ringProver,
-        ringVerifier: ringVerifier,
-        validatorSetManager: null,
-      })
-      const sealKeyService = new SealKeyService({
-        configService,
-        eventBusService,
-        entropyService,
-        ticketService,
-      })
-
       // Extract validators from genesis.json header
-      const initialValidators = genesisJson.header?.epoch_mark?.validators || []
+      const initialValidators = (genesisJson.header?.epoch_mark?.validators || []).map((validator) => ({
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
+        bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
+        metadata: bytesToHex(new Uint8Array(128)),
+      }))
 
-    const validatorSetManager = new ValidatorSetManager({
-        eventBusService,
-        sealKeyService,
-        ringProver,
-        ticketService,
-        configService,
-        initialValidators: initialValidators.map((validator) => ({
-          bandersnatch: validator.bandersnatch,
-          ed25519: validator.ed25519,
-          bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
-          metadata: bytesToHex(new Uint8Array(128)),
-        })),
-      })
-      
-      ticketService.setValidatorSetManager(validatorSetManager)
-
-      const authQueueService = new AuthQueueService({
-        configService,
-      })
-
-      const disputesService = new DisputesService({
-        eventBusService: eventBusService,
-        configService: configService,
-        validatorSetManagerService: validatorSetManager,
-      })
-      const readyService = new ReadyService({
-        configService: configService,
-      })
-
-      const workReportService = new WorkReportService({
-        eventBus: eventBusService,
-        networkingService: null,
-        ce136WorkReportRequestProtocol: null,
-        validatorSetManager: validatorSetManager,
-        configService: configService,
-        entropyService: entropyService,
-        clockService: clockService,
-      })
-
-      const authPoolService = new AuthPoolService({
-        configService,
-        eventBusService: eventBusService,
-        workReportService: workReportService,
-        authQueueService: authQueueService,
-      })
-
-      const privilegesService = new PrivilegesService({
-        configService,
-      })
-
-
-      const serviceAccountsService = new ServiceAccountService({
-        eventBusService,
-        clockService,
-        networkingService: null,
-        preimageRequestProtocol: null,
-      })
-
-      const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-      const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
-      })
-
-      const accumulatedService = new AccumulationService({
-        configService: configService,
-        clockService: clockService,
-        serviceAccountsService: serviceAccountsService,
-        privilegesService: privilegesService,
-        validatorSetManager: validatorSetManager,
-        authQueueService: authQueueService,
-        readyService: readyService,
-        statisticsService: statisticsService,
-        accumulatePVM: new AccumulatePVM({
-          hostFunctionRegistry,
-          accumulateHostFunctionRegistry,
-          configService: configService,
-          entropyService: entropyService,
-          pvmOptions: { gasCounter: 1_000_000n },
-          useWasm: false,
-          traceSubfolder: 'fallback',
-        }),
-      })
-            
-      const recentHistoryService = new RecentHistoryService({
-        eventBusService: eventBusService,
-        configService: configService,
-        accumulationService: accumulatedService,
-      })
-
-
-
-      const stateService = new StateService({
-        configService,
-        genesisManagerService: genesisManager,
-        validatorSetManager: validatorSetManager,
-        entropyService: entropyService,
-        ticketService: ticketService,
-        authQueueService: authQueueService,
-        authPoolService: authPoolService,
-        statisticsService: statisticsService,
-        disputesService: disputesService,
-        readyService: readyService,
-        accumulationService: accumulatedService,
-        workReportService: workReportService,
-        privilegesService: privilegesService,
-        serviceAccountsService: serviceAccountsService,
-        recentHistoryService: recentHistoryService,
-        sealKeyService: sealKeyService,
-        clockService: clockService,
-      })
-
-      const assuranceService = new AssuranceService({
-        configService: configService,
-        workReportService: workReportService,
-        validatorSetManager: validatorSetManager,
-        eventBusService: eventBusService,
-        sealKeyService: sealKeyService,
-        recentHistoryService: recentHistoryService,
-      })
-
-      const guarantorService = new GuarantorService({
-        configService: configService,
-        clockService: clockService,
-        entropyService: entropyService,
-        authPoolService: authPoolService,
-        networkService: null,
-        ce134WorkPackageSharingProtocol: null,
-        keyPairService: null,
-        workReportService: workReportService,
-        eventBusService: eventBusService,
-        validatorSetManager: validatorSetManager,
-        recentHistoryService: recentHistoryService,
-        serviceAccountService: serviceAccountsService,
-        statisticsService: statisticsService,
-        accumulationService: accumulatedService,
-      })
-
-      const blockImporterService = new BlockImporterService({
-        configService: configService,
-        eventBusService: eventBusService,
-        clockService: clockService,
-        recentHistoryService: recentHistoryService,
-        stateService: stateService,
-        serviceAccountService: serviceAccountsService,
-        disputesService: disputesService,
-        validatorSetManagerService: validatorSetManager,
-        entropyService: entropyService,
-        sealKeyService: sealKeyService,
-        assuranceService: assuranceService,
-        guarantorService: guarantorService,
-        ticketService: ticketService,
-        statisticsService: statisticsService,
-        authPoolService: authPoolService,
-        accumulationService: accumulatedService,
-      })
-
-      // Set validatorSetManager on sealKeyService (needed for fallback key generation)
-      sealKeyService.setValidatorSetManager(validatorSetManager)
-      // SealKeyService epoch transition callback is registered in constructor
-      // ValidatorSetManager should be constructed before SealKeyService to ensure
-      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
-
-      // Start all services
-      // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
-      // so they work without explicit start(), but we start them for consistency
-      const [entropyStartError] = await entropyService.start()
-      expect(entropyStartError).toBeUndefined()
-      
-      const [validatorSetStartError] = await validatorSetManager.start()
-      expect(validatorSetStartError).toBeUndefined()
-      
-      const [startError] = await blockImporterService.start()
-      expect(startError).toBeUndefined()
-
-      // Helper function to convert JSON block to Block type
-      const convertJsonBlockToBlock = (jsonBlock: any): Block => {
-        const jsonHeader = jsonBlock.header
-        const jsonExtrinsic = jsonBlock.extrinsic
-
-        const blockHeader: BlockHeader = {
-          parent: jsonHeader.parent,
-          priorStateRoot: jsonHeader.parent_state_root,
-          extrinsicHash: jsonHeader.extrinsic_hash,
-          timeslot: BigInt(jsonHeader.slot),
-          epochMark: jsonHeader.epoch_mark
-            ? {
-                entropyAccumulator: jsonHeader.epoch_mark.entropy,
-                entropy1: jsonHeader.epoch_mark.tickets_entropy,
-                validators: jsonHeader.epoch_mark.validators.map((validator: any) => ({
-                  bandersnatch: validator.bandersnatch,
-                  ed25519: validator.ed25519,
-                })),
-              }
-            : null,
-          winnersMark: jsonHeader.tickets_mark
-            ? jsonHeader.tickets_mark.map((ticket: any) => ({
-                id: ticket.id,
-                entryIndex: BigInt(ticket.entry_index),
-                proof: '0x' as Hex,
-              }))
-            : null,
-          offendersMark: jsonHeader.offenders_mark || [],
-          authorIndex: BigInt(jsonHeader.author_index),
-          vrfSig: jsonHeader.entropy_source,
-          sealSig: jsonHeader.seal,
-        }
-
-        const blockBody: BlockBody = {
-          tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
-            entryIndex: BigInt(ticket.attempt),
-            proof: ticket.signature as Hex,
-            id: getTicketIdFromProof(hexToBytes(ticket.signature as Hex)),
-          })),
-          preimages: (jsonExtrinsic.preimages || []).map((preimage: any) => ({
-            requester: BigInt(preimage.requester),
-            blob: preimage.blob,
-          })),
-          guarantees: (jsonExtrinsic.guarantees || []).map((guarantee: any) => ({
-            report: guarantee.report,
-            slot: BigInt(guarantee.slot),
-            signatures: guarantee.signatures,
-          })),
-          assurances: jsonExtrinsic.assurances || [],
-          disputes: jsonExtrinsic.disputes
-            ? [
-                {
-                  verdicts: jsonExtrinsic.disputes.verdicts.map((verdict: any) => ({
-                    target: verdict.target,
-                    age: BigInt(verdict.age),
-                    votes: verdict.votes.map((vote: any) => ({
-                      vote: vote.vote,
-                      index: BigInt(vote.index),
-                      signature: vote.signature,
-                    })),
-                  })),
-                  culprits: jsonExtrinsic.disputes.culprits,
-                  faults: jsonExtrinsic.disputes.faults,
-                },
-              ]
-            : [
-                {
-                  verdicts: [],
-                  culprits: [],
-                  faults: [],
-                },
-              ],
-        }
-
-        return {
-          header: blockHeader,
-          body: blockBody,
-        }
-      }
+      // Initialize services using shared utility
+      const services = await initializeServices('tiny', 'fallback', genesisManager, initialValidators)
+      const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service
       const parseStateKeyForDebug = (keyHex: Hex): { error?: string; type?: string; chapterIndex?: number; serviceId?: bigint } => {

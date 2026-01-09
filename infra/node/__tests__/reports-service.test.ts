@@ -28,35 +28,9 @@ import { ReadyService } from '../services/ready-service'
 import { AccumulateHostFunctionRegistry, HostFunctionRegistry } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { PrivilegesService } from '../services/privileges-service'
+import { convertJsonReportToWorkReport } from './test-utils'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
-
-
-// Helper function to convert JSON numbers to bigints for WorkReport
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-    },
-    results: jsonReport.results.map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load.gas_used || 0),
-        imports: BigInt(r.refine_load.imports || 0),
-        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-        exports: BigInt(r.refine_load.exports || 0),
-      },
-    })),
-  }
-}
 
 // Helper function to convert WorkReport bigints back to numbers for JSON comparison
 function convertWorkReportToJson(workReport: WorkReport): any {
@@ -368,15 +342,16 @@ describe('Reports - JAM Test Vectors', () => {
             previousEntry.stateRoot = guarantees[0].report.context.state_root
           }
 
-          // PRE-VALIDATE guarantees BEFORE applying them
+          // Process guarantees (validate and apply)
           // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),
           // the report is "simply ignored" - meaning NO state changes occur.
-          const [validateError] = guarantorService.validateGuarantees(
+          const [applyError, result] = await guarantorService.applyGuarantees(
             guarantees,
-            BigInt(vector.input.slot),
+            BigInt(vector.input.slot)
           )
-          if (validateError) {
-            // Restore previous state root if validation fails
+          
+          if (applyError) {
+            // Restore previous state root if processing fails
             if (previousStateRootForAnchorValidation !== null && recentHistoryService.getRecentHistory().length > 0) {
               const previousEntry =
                 recentHistoryService.getRecentHistory()[
@@ -384,22 +359,17 @@ describe('Reports - JAM Test Vectors', () => {
                 ]
               previousEntry.stateRoot = previousStateRootForAnchorValidation
             }
-            // Check if this validation error is expected in the test vector
+            // Check if this error is expected in the test vector
             if (vector.output?.err !== undefined) {
               // Expected error case - verify error message matches
-              expect(validateError.message).toBe(vector.output.err)
-              // When validation fails, skip applyGuarantees and post_state validation
+              expect(applyError.message).toBe(vector.output.err)
+              // When processing fails, skip post_state validation
               return
             } else {
-              // Unexpected validation error - throw it
-              throw validateError
+              // Unexpected error - throw it
+              throw applyError
             }
           }
-
-          const [applyError, result] = await guarantorService.applyGuarantees(
-            guarantees,
-            BigInt(vector.input.slot)
-          )
 
           // Restore previous state root after processing (it will be updated properly when a block is added)
           if (previousStateRootForAnchorValidation !== null && recentHistoryService.getRecentHistory().length > 0) {

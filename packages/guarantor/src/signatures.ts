@@ -216,10 +216,14 @@ export function verifyGuaranteeSignature(
   for (const signature of guarantee.signatures) {
     const validatorIdx = Number(signature.validator_index)
 
+    if (validatorIdx < 0 || validatorIdx >= activeValidators.length) {
+      return safeError(new Error('bad_validator_index'))
+    }
+
     // Step 4: Get validator from the appropriate set based on rotation
     // Prioritize the set that matches the guarantee's rotation
-    const activeValidator = activeValidators.get(validatorIdx)
-    const previousValidator = previousValidators.get(validatorIdx)
+    const activeValidator = activeValidators[validatorIdx]
+    const previousValidator = previousValidators[validatorIdx]
 
     // Check if validator exists in either set
     if (!activeValidator && !previousValidator) {

@@ -55,6 +55,11 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     const [hashData, faultAddress] = ram.readOctets(hashOffset, 32n)
     // Gray Paper line 941: panic when h = error, registers[7] unchanged
     if (faultAddress || !hashData) {
+      logger.error('Forget host function: Memory read failed', {
+        hashOffset: hashOffset.toString(),
+        preimageLength: preimageLength.toString(),
+        faultAddress: faultAddress?.toString() ?? 'null',
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -67,6 +72,10 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 928-939: a = imX.self except modifications based on request state
     const serviceAccount = imX.state.accounts.get(imX.id)
     if (!serviceAccount) {
+      logger.error('Forget host function: Service account not found', {
+        serviceId: serviceId.toString(),
+        preimageLength: preimageLength.toString(),
+      })
       // Gray Paper line 942: HUH when a = error
       this.setAccumulateError(registers, 'HUH')
       return {

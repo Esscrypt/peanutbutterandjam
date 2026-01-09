@@ -10,16 +10,19 @@ import type {
 } from '@pbnjam/bandersnatch-vrf'
 import {
   bytesToHex,
+  type EpochTransitionEvent,
   type EventBusService,
   type Hex,
   hexToBytes,
   logger,
+  type RevertEpochTransitionEvent,
 } from '@pbnjam/core'
 import type {
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
 } from '@pbnjam/networking'
 import {
+  calculateSlotPhase,
   determineProxyValidator,
   generateTicketsForEpoch,
   getTicketIdFromProof,
@@ -27,6 +30,7 @@ import {
 } from '@pbnjam/safrole'
 import {
   BaseService,
+  CONSENSUS_CONSTANTS,
   type ITicketService,
   type Safe,
   type SafePromise,
@@ -54,6 +58,9 @@ export class TicketService extends BaseService implements ITicketService {
   private ticketAccumulator: SafroleTicketWithoutProof[] = []
   private ticketToHolderPublicKey: Map<Hex, Hex> = new Map()
   private proxyValidatorTickets: SafroleTicket[] = []
+  // Store state before epoch transition for revert
+  private preTransitionTicketAccumulator: SafroleTicketWithoutProof[] | null =
+    null
 
   private configService: ConfigService
   private eventBusService: EventBusService
@@ -103,6 +110,12 @@ export class TicketService extends BaseService implements ITicketService {
     this.eventBusService.addTicketDistributionRequestCallback(
       this.handleTicketDistributionRequest.bind(this),
     )
+    this.eventBusService.addEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.addRevertEpochTransitionCallback(
+      this.handleRevertEpochTransition.bind(this),
+    )
   }
 
   start(): Safe<boolean> {
@@ -139,6 +152,9 @@ export class TicketService extends BaseService implements ITicketService {
 
     this.eventBusService.removeTicketDistributionRequestCallback(
       this.handleTicketDistributionRequest.bind(this),
+    )
+    this.eventBusService.removeEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
     )
     return safeResult(true)
   }
@@ -262,6 +278,69 @@ export class TicketService extends BaseService implements ITicketService {
     return left
   }
 
+  validateTickets(tickets: SafroleTicket[], targetSlot: bigint): Safe<void> {
+    // Get current slot for phase calculation
+    const currentSlot = this.clockService.getLatestReportedBlockTimeslot()
+
+    // Gray Paper Eq. 28 - Strict monotonic slot progression: τ' > τ
+    // This implements the core constraint that slots must be strictly increasing
+    if (targetSlot <= currentSlot) {
+      return safeError(new Error('bad_slot'))
+    }
+
+    // Gray Paper Eq. 28 - Validate slot progression is exactly +1 (no gaps allowed)
+    // This ensures τ' = τ + 1, maintaining strict monotonicity without gaps
+    if (targetSlot !== currentSlot + 1n) {
+      return safeError(new Error('invalid_slot_progression'))
+    }
+
+    // Gray Paper Eq. 33-34 - Calculate slot phase: e remainder m = τ/Cepochlen
+    const newPhase = calculateSlotPhase(targetSlot, this.configService)
+
+    // Gray Paper Eq. 295-298 - Epoch tail validation: |xttickets| = 0 when m' ≥ Cepochtailstart
+    // EPOCH_TAIL_START is the same as CONTEST_DURATION
+    if (newPhase.phase >= BigInt(this.configService.contestDuration)) {
+      if (tickets.length > 0) {
+        return safeError(new Error('unexpected_ticket'))
+      }
+    } else {
+      // Gray Paper Eq. 295-298 - Enforce ticket limit: |xttickets| ≤ Cmaxblocktickets when m' < Cepochtailstart
+      const maxTicketsPerBlock = Number(CONSENSUS_CONSTANTS.MAX_BLOCK_TICKETS)
+      if (tickets.length > maxTicketsPerBlock) {
+        return safeError(new Error('too_many_extrinsics'))
+      }
+    }
+
+    // Gray Paper Eq. 291 - Validate entry index bounds: xt_entryindex ∈ Nmax{Cticketentries}
+    // Nmax{Cticketentries} means natural numbers less than Cticketentries (0 to Cticketentries-1)
+    for (const ticket of tickets) {
+      if (
+        ticket.entryIndex < 0n ||
+        ticket.entryIndex >= this.configService.maxTicketsPerExtrinsic
+      ) {
+        return safeError(new Error('invalid_ticket_entry_index'))
+      }
+    }
+
+    // Check for duplicate entry indices (additional validation)
+    // Gray Paper Eq. 315-317: Check for duplicate entry indices
+    const entryIndices = tickets.map((t) => t.entryIndex)
+    const uniqueIndices = new Set(entryIndices)
+    if (uniqueIndices.size !== entryIndices.length) {
+      return safeError(new Error('duplicate_ticket'))
+    }
+
+    if (tickets.length > 1) {
+      for (let i = 1; i < tickets.length; i++) {
+        if (tickets[i].entryIndex < tickets[i - 1].entryIndex) {
+          return safeError(new Error('bad_ticket_order'))
+        }
+      }
+    }
+
+    return safeResult(undefined)
+  }
+
   /**
    * Add tickets to accumulator according to Gray Paper Eq. 321-324
    *
@@ -269,24 +348,59 @@ export class TicketService extends BaseService implements ITicketService {
    * ticketaccumulator' = sorted union of new tickets + existing accumulator ^Cepochlen
    *
    * Constraints:
+   * - Gray Paper Eq. 291: Entry index bounds: xt_entryindex ∈ Nmax{Cticketentries}
+   * - Gray Paper Eq. 295-298: Epoch tail validation: |xttickets| = 0 when m' ≥ Cepochtailstart
+   * - Gray Paper Eq. 295-298: Ticket limit: |xttickets| ≤ Cmaxblocktickets when m' < Cepochtailstart
    * - Gray Paper Eq. 315: No duplicate ticket IDs in new tickets
    * - Gray Paper Eq. 316: No duplicate ticket IDs between new and existing tickets
    * - Gray Paper Eq. 322: Sort by ticket ID (ascending order)
    * - Gray Paper Eq. 322: Truncate to Cepochlen (600 tickets)
+   * - Ticket attempt ordering: entry indices must be sequential starting from 0
    *
    * @param newTickets - Tickets from block extrinsic to add to accumulator
-   * @param isNewEpoch - Whether this is a new epoch (e' > e)
+   * @param slot - Optional slot number for phase calculation (defaults to current slot + 1)
    * @returns Updated ticket accumulator
    */
   applyTickets(
     newTickets: SafroleTicket[],
-    isNewEpoch = false,
+    targetSlot: bigint,
+    validateTickets = false,
   ): Safe<SafroleTicketWithoutProof[]> {
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
-    // for each new ticket, verify the proof
+
+    if (validateTickets) {
+      const [validateError] = this.validateTickets(newTickets, targetSlot)
+      if (validateError) {
+        return safeError(validateError)
+      }
+    }
+
+    // Verify ticket proofs BEFORE checking for duplicates
+    // Gray Paper: Verify each ticket proof before processing duplicates
     for (const ticket of newTickets) {
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'ticket-service.ts:363',
+            message: 'Verifying ticket proof',
+            data: {
+              ticketId: ticket.id.slice(0, 20),
+              entryIndex: ticket.entryIndex.toString(),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'E',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
       const [verifyError, isValid] = verifyTicket(
         ticket,
         this.entropyService,
@@ -294,12 +408,55 @@ export class TicketService extends BaseService implements ITicketService {
         this.ringVerifier,
       )
       if (verifyError) {
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'ticket-service.ts:370',
+              message: 'Ticket verification error',
+              data: {
+                ticketId: ticket.id.slice(0, 20),
+                error: verifyError.message,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'E',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
         return safeError(verifyError)
       }
       if (!isValid) {
-        return safeError(new Error('Invalid ticket'))
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'ticket-service.ts:376',
+              message: 'Returning bad_ticket_proof',
+              data: {
+                ticketId: ticket.id.slice(0, 20),
+                entryIndex: ticket.entryIndex.toString(),
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'E',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
+        return safeError(new Error('bad_ticket_proof'))
       }
     }
+
     // Gray Paper Eq. 315: Remove duplicates from new tickets
     const uniqueNewTickets = this.removeDuplicateTickets(newTickets)
 
@@ -314,12 +471,9 @@ export class TicketService extends BaseService implements ITicketService {
     }
 
     // Gray Paper Eq. 322: Create union of new tickets and existing accumulator
-    const existingAccumulator = isNewEpoch
-      ? [] // Gray Paper Eq. 322: ∅ when e' > e (new epoch)
-      : this.ticketAccumulator // Gray Paper Eq. 322: ticketaccumulator when e' = e (same epoch)
-
+    // Note: Accumulator is automatically cleared on epoch transition via handleEpochTransition
     // Gray Paper Eq. 322: Union of new tickets and existing accumulator
-    const unionTickets = [...validNewTickets, ...existingAccumulator]
+    const unionTickets = [...validNewTickets, ...this.ticketAccumulator]
 
     // Gray Paper Eq. 322: Sort by ticket ID (ascending order)
     const sortedTickets = this.sortTicketsByID(unionTickets)
@@ -376,8 +530,55 @@ export class TicketService extends BaseService implements ITicketService {
     const existingIds = new Set(existingAccumulator.map((t) => t.id))
     const validTickets: SafroleTicketWithoutProof[] = []
 
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'ticket-service.ts:472',
+          message: 'filterDuplicateTickets entry',
+          data: {
+            newTicketCount: newTickets.length,
+            existingAccumulatorSize: existingAccumulator.length,
+            newTicketIds: newTickets.map((t) => t.id.slice(0, 20)),
+            existingTicketIds: Array.from(existingIds).map((id) =>
+              id.slice(0, 20),
+            ),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'C',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+
     for (const ticket of newTickets) {
       if (existingIds.has(ticket.id)) {
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'ticket-service.ts:477',
+              message: 'Duplicate ticket ID found',
+              data: {
+                duplicateTicketId: ticket.id.slice(0, 40),
+                errorMessage: `Duplicate ticket ID found: ${ticket.id}`,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'A',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
         return safeError(new Error(`Duplicate ticket ID found: ${ticket.id}`))
       }
       validTickets.push(ticket)
@@ -408,6 +609,60 @@ export class TicketService extends BaseService implements ITicketService {
    */
   clearTicketAccumulator(): void {
     this.ticketAccumulator = []
+  }
+
+  /**
+   * Handle epoch transition event
+   * Clears ticket accumulator according to Gray Paper Eq. 321-329: ticketaccumulator' = ∅ when e' > e
+   */
+  private handleEpochTransition(event: EpochTransitionEvent): Safe<void> {
+    // Save state before clearing for potential revert
+    this.preTransitionTicketAccumulator = [...this.ticketAccumulator]
+
+    // Gray Paper Eq. 321-329: ticketaccumulator' = ∅ when e' > e
+    this.clearTicketAccumulator()
+
+    logger.debug(
+      '[TicketService] Epoch transition - ticket accumulator cleared',
+      {
+        slot: event.slot.toString(),
+        previousAccumulatorSize: this.preTransitionTicketAccumulator.length,
+      },
+    )
+
+    return safeResult(undefined)
+  }
+
+  /**
+   * Handle revert epoch transition event
+   * Restores ticket accumulator to its state before the epoch transition
+   */
+  private handleRevertEpochTransition(
+    event: RevertEpochTransitionEvent,
+  ): Safe<void> {
+    if (!this.preTransitionTicketAccumulator) {
+      logger.warn(
+        '[TicketService] No pre-transition ticket accumulator to revert to',
+        {
+          slot: event.slot.toString(),
+        },
+      )
+      return safeResult(undefined)
+    }
+
+    // Restore ticket accumulator to pre-transition state
+    this.ticketAccumulator = [...this.preTransitionTicketAccumulator]
+    this.preTransitionTicketAccumulator = null
+
+    logger.debug(
+      '[TicketService] Epoch transition reverted - ticket accumulator restored',
+      {
+        slot: event.slot.toString(),
+        restoredAccumulatorSize: this.ticketAccumulator.length,
+      },
+    )
+
+    return safeResult(undefined)
   }
 
   /**

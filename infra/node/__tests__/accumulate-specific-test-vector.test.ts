@@ -33,7 +33,7 @@ import {
   setServicePreimageValue,
   setServiceRequestValue,
 } from '@pbnjam/codec'
-import { convertJsonReportToWorkReport } from './traces/fuzzy-all-blocks.test'
+import { convertJsonReportToWorkReport } from './test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -396,8 +396,8 @@ function convertToAccounts(accounts: AccumulateTestVector['pre_state']['accounts
     }
 
     // Set preimage values from test vector
-    if (accountData.data.preimages_blob) {
-      for (const preimageEntry of accountData.data.preimages_blob) {
+    if (accountData.data.preimage_blobs) {
+      for (const preimageEntry of accountData.data.preimage_blobs) {
         const preimageHash = preimageEntry.hash as Hex
         const preimageValue = hexToBytes(preimageEntry.blob as Hex)
         setServicePreimageValue(serviceAccount, serviceId, preimageHash, preimageValue)
@@ -406,8 +406,18 @@ function convertToAccounts(accounts: AccumulateTestVector['pre_state']['accounts
 
     // Set preimage requests from test vector
     // Test vector has preimage_requests with key.hash, key.length, and value array
+    // Check both top-level (for backwards compatibility) and data-level
     if ((accountData as any).preimage_requests) {
       for (const requestEntry of (accountData as any).preimage_requests) {
+        const hash = requestEntry.key.hash as Hex
+        const length = BigInt(requestEntry.key.length)
+        const status: PreimageRequestStatus = requestEntry.value.map(BigInt)
+        setServiceRequestValue(serviceAccount, serviceId, hash, length, status)
+      }
+    }
+    // Also check data.preimage_requests (actual location in test vectors)
+    if ((accountData.data as any).preimage_requests) {
+      for (const requestEntry of (accountData.data as any).preimage_requests) {
         const hash = requestEntry.key.hash as Hex
         const length = BigInt(requestEntry.key.length)
         const status: PreimageRequestStatus = requestEntry.value.map(BigInt)

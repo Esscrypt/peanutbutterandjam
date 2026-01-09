@@ -211,6 +211,76 @@ export class AccumulationService extends BaseService {
   }
 
   /**
+   * Check if ready queue is empty
+   */
+  isReadyQueueEmpty(): boolean {
+    if (!this.readyService) {
+      return true // If service not initialized, consider queue empty
+    }
+    const ready = this.readyService.getReady()
+    // Check if any slot has items
+    // ready.epochSlots is ReadyItem[][] - array of arrays
+    for (const slotItems of ready.epochSlots) {
+      if (slotItems && slotItems.length > 0) {
+        return false
+      }
+    }
+    return true
+  }
+
+  /**
+   * Shift accumulated packages history and ready queue for state transition
+   * Gray Paper equations 417-418: Shift is part of the state transition from τ to τ'
+   * This must be called for every block, even when accumulation is skipped
+   *
+   * @param slot - Current block timeslot
+   */
+  shiftStateForBlockTransition(slot: bigint): void {
+    const epochDuration = this.configService.epochDuration
+
+    // Determine slot delta: if lastProcessedSlot is set, calculate delta; otherwise assume delta=1
+    let slotDelta = 1
+    if (this.lastProcessedSlot !== null) {
+      slotDelta = Number(slot - this.lastProcessedSlot)
+    }
+
+    // Handle edge cases
+    if (slotDelta < 0) {
+      // Error condition: earlier slot processed after later one
+      logger.error(
+        '[AccumulationService] Invalid slot delta: earlier slot processed after later one',
+        {
+          slot: slot.toString(),
+          lastProcessedSlot: this.lastProcessedSlot?.toString() ?? 'null',
+          slotDelta,
+        },
+      )
+      // Don't shift on error - state should remain unchanged
+      return
+    } else if (slotDelta === 0) {
+      // Same slot processed twice - no time advancement, no shift needed
+      logger.debug(
+        '[AccumulationService] Same slot processed twice, skipping shift',
+        {
+          slot: slot.toString(),
+        },
+      )
+      return
+    } else if (slotDelta > 0) {
+      // Normal case: slot advanced, shift accumulated history and ready queue
+      // Shift accumulated packages history (equation 417-418)
+      // Gray Paper equation 418: accumulated'[i] = accumulated[i + 1] for i < Cepochlen - 1
+      // This is ALWAYS a shift by 1, regardless of slotDelta
+      // The accumulated history shifts once per block, not once per slot advanced
+      this.shiftAccumulatedPackagesHistory(1, epochDuration)
+
+      // Shift ready queue - clear old slots (equation 419-424)
+      const currentEpochSlot = Number(slot) % epochDuration
+      this.shiftReadyQueue(slotDelta, epochDuration, currentEpochSlot)
+    }
+  }
+
+  /**
    * Set last processed slot (the slot that the current accumulated/ready state represents)
    */
   setLastProcessedSlot(slot: bigint): void {
@@ -1070,8 +1140,7 @@ export class AccumulationService extends BaseService {
     }
 
     const accounts = this.serviceAccountsService.getServiceAccounts().accounts
-    
-    
+
     return {
       accounts,
       stagingset,
@@ -1605,7 +1674,6 @@ export class AccumulationService extends BaseService {
     reports: WorkReport[],
   ): Promise<{ ok: true } | { ok: false; err: Error }> {
     const transitionStartTime = performance.now()
-    const epochDuration = this.configService.epochDuration
 
     // Reset global invocation index for this slot (used for trace file naming)
     this.globalInvocationIndex = 0
@@ -1632,45 +1700,7 @@ export class AccumulationService extends BaseService {
 
     // Step 2: Shift accumulated packages history and ready queue if slot advanced
     // Gray Paper equations 417-418: Shift is part of the state transition from τ to τ'
-
-    // Determine slot delta: if lastProcessedSlot is set, calculate delta; otherwise assume delta=1
-    let slotDelta = 1
-    if (this.lastProcessedSlot !== null) {
-      slotDelta = Number(slot - this.lastProcessedSlot)
-    }
-
-    // Handle edge cases
-    if (slotDelta < 0) {
-      // Error condition: earlier slot processed after later one
-      logger.error(
-        '[AccumulationService] Invalid slot delta: earlier slot processed after later one',
-        {
-          slot: slot.toString(),
-          lastProcessedSlot: this.lastProcessedSlot?.toString() ?? 'null',
-          slotDelta,
-        },
-      )
-      // Don't shift on error - state should remain unchanged
-    } else if (slotDelta === 0) {
-      // Same slot processed twice - no time advancement, no shift needed
-      logger.debug(
-        '[AccumulationService] Same slot processed twice, skipping shift',
-        {
-          slot: slot.toString(),
-        },
-      )
-    } else if (slotDelta > 0) {
-      // Normal case: slot advanced, shift accumulated history and ready queue
-      // Shift accumulated packages history (equation 417-418)
-      // Gray Paper equation 418: accumulated'[i] = accumulated[i + 1] for i < Cepochlen - 1
-      // This is ALWAYS a shift by 1, regardless of slotDelta
-      // The accumulated history shifts once per block, not once per slot advanced
-      this.shiftAccumulatedPackagesHistory(1, epochDuration)
-
-      // Shift ready queue - clear old slots (equation 419-424)
-      const currentEpochSlot = Number(slot) % epochDuration
-      this.shiftReadyQueue(slotDelta, epochDuration, currentEpochSlot)
-    }
+    this.shiftStateForBlockTransition(slot)
 
     // Step 3: Build and edit queue
     // Gray Paper equation 89: q = E(ready[m:] concat ready[:m] concat justbecameavailable^Q, P(justbecameavailable^!))
@@ -2180,7 +2210,11 @@ export class AccumulationService extends BaseService {
 
           // Check if provision is still providable (request exists and is not already provided)
           const preimageLength = BigInt(preimageData.length)
-          const request = this.serviceAccountsService.getServiceAccountRequest(provisionServiceId, preimageHash, preimageLength)
+          const request = this.serviceAccountsService.getServiceAccountRequest(
+            provisionServiceId,
+            preimageHash,
+            preimageLength,
+          )
           // const requestMap = account.requests.get(preimageHash)
           if (!request) {
             logger.debug(
@@ -2197,9 +2231,19 @@ export class AccumulationService extends BaseService {
           // Apply the provision
           // Gray Paper line 275-276: set preimages[blake(i)] = i, requests[(blake(i), len(i))] = [thetime']
           // Use helper functions to set preimage and request values in rawCshKeyvals
-          setServicePreimageValue(account, provisionServiceId, preimageHash, preimageData)
-          setServiceRequestValue(account, provisionServiceId, preimageHash, preimageLength, [currentSlot])
-          
+          setServicePreimageValue(
+            account,
+            provisionServiceId,
+            preimageHash,
+            preimageData,
+          )
+          setServiceRequestValue(
+            account,
+            provisionServiceId,
+            preimageHash,
+            preimageLength,
+            [currentSlot],
+          )
 
           logger.info('[AccumulationService] Applied provision', {
             serviceId: provisionServiceId.toString(),

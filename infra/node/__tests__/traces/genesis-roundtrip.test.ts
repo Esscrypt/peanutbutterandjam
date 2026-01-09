@@ -41,6 +41,7 @@ import {
 } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { StatisticsService } from '../../services/statistics-service'
+import { initializeServices } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
@@ -72,167 +73,29 @@ describe('Genesis Round-Trip Encoding/Decoding', () => {
     console.log(`  Pre-state keyvals count: ${block1Json.pre_state?.keyvals?.length || 0}`)
     console.log(`  Block header parent_state_root: ${block1Json.block?.header?.parent_state_root}`)
 
-    // Initialize Ring VRF
-    const srsFilePath = path.join(
-      WORKSPACE_ROOT,
-      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
-    const ringProver = new RingVRFProverWasm(srsFilePath)
-    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-    await ringProver.init()
-    await ringVerifier.init()
-
-    // Initialize services
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({
-      configService: configService,
-      eventBusService: eventBusService,
-    })
-    const entropyService = new EntropyService(eventBusService)
-    const ticketService = new TicketService({
-      configService: configService,
-      eventBusService: eventBusService,
-      keyPairService: null,
-      entropyService: entropyService,
-      networkingService: null,
-      ce131TicketDistributionProtocol: null,
-      ce132TicketDistributionProtocol: null,
-      clockService: clockService,
-      prover: ringProver,
-      ringVerifier: ringVerifier,
-      validatorSetManager: null,
-    })
-    const sealKeyService = new SealKeyService({
-      configService,
-      eventBusService,
-      entropyService,
-      ticketService,
-    })
-
-    const initialValidators = genesisJson.header?.epoch_mark?.validators || []
-    const validatorSetManager = new ValidatorSetManager({
-      eventBusService,
-      sealKeyService,
-      ringProver,
-      ticketService,
-      configService,
-      initialValidators: initialValidators.map((validator: any) => ({
-        bandersnatch: validator.bandersnatch,
-        ed25519: validator.ed25519,
-        bls: bytesToHex(new Uint8Array(144)),
-        metadata: bytesToHex(new Uint8Array(128)),
-      })),
-    })
-
-    ticketService.setValidatorSetManager(validatorSetManager)
-
-    const authQueueService = new AuthQueueService({
-      configService,
-    })
-
-    const disputesService = new DisputesService({
-      eventBusService: eventBusService,
-      configService: configService,
-      validatorSetManagerService: validatorSetManager,
-    })
-    const readyService = new ReadyService({
-      configService: configService,
-    })
-
-    const workReportService = new WorkReportService({
-      eventBus: eventBusService,
-      networkingService: null,
-      ce136WorkReportRequestProtocol: null,
-      validatorSetManager: validatorSetManager,
-      configService: configService,
-      entropyService: entropyService,
-      clockService: clockService,
-    })
-
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService: eventBusService,
-      workReportService: workReportService,
-      authQueueService: authQueueService,
-    })
-
-    const privilegesService = new PrivilegesService({
-      configService,
-    })
-
-    const serviceAccountsService = new ServiceAccountService({
-      configService,
-      eventBusService,
-      clockService,
-      networkingService: null,
-      preimageRequestProtocol: null,
-    })
-
-    const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: 1_000_000n },
-      traceSubfolder: 'safrole',
-    })
-
-    const statisticsService = new StatisticsService({
-      eventBusService: eventBusService,
-      configService: configService,
-      clockService: clockService,
-    })
-
-    const accumulatedService = new AccumulationService({
-      configService: configService,
-      clockService: clockService,
-      serviceAccountsService: serviceAccountsService,
-      privilegesService: privilegesService,
-      validatorSetManager: validatorSetManager,
-      authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
-      readyService: readyService,
-      statisticsService: statisticsService,
-    })
-
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService: eventBusService,
-      configService: configService,
-      accumulationService: accumulatedService,
-    })
-
+    // Create genesis manager
     const genesisManager = new NodeGenesisManager(configService, {
       genesisJsonPath,
     })
 
-    const stateService = new StateService({
-      configService,
-      genesisManagerService: genesisManager,
-      validatorSetManager: validatorSetManager,
-      entropyService: entropyService,
-      ticketService: ticketService,
-      authQueueService: authQueueService,
-      authPoolService: authPoolService,
-      statisticsService: statisticsService,
-      disputesService: disputesService,
-      readyService: readyService,
-      accumulationService: accumulatedService,
-      workReportService: workReportService,
-      privilegesService: privilegesService,
-      serviceAccountsService: serviceAccountsService,
-      recentHistoryService: recentHistoryService,
-      sealKeyService: sealKeyService,
-      clockService: clockService,
-    })
+    // Extract initial validators from genesis.json
+    const initialValidators = genesisJson.header?.epoch_mark?.validators || []
 
-    sealKeyService.setValidatorSetManager(validatorSetManager)
+    // Initialize services using shared utility
+    const services = await initializeServices(
+      'tiny',
+      'safrole',
+      genesisManager,
+      initialValidators.map((validator: any) => ({
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
+        bls: bytesToHex(new Uint8Array(144)) as Hex,
+        metadata: bytesToHex(new Uint8Array(128)) as Hex,
+      })),
+      false,
+    )
 
-    // Start services
-    await entropyService.start()
-    await validatorSetManager.start()
+    const { stateService } = services
 
     // Set state from genesis.json keyvals
     const genesisKeyvals = genesisJson.state?.keyvals || []

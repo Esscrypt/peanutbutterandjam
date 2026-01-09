@@ -80,3 +80,24 @@ export interface ValidatorInfo {
   /** Validator metadata */
   metadata: Record<string, unknown>
 }
+
+/**
+ * Parsed state key result with type-safe discriminated union
+ *
+ * Note: For C(s, h) keys, we can only extract the Blake hash of the combined key.
+ * The original storage key, preimage hash, or request hash cannot be extracted
+ * from the Blake hash (it's a one-way function). The keyType must be determined
+ * by context when querying, or by attempting to match against known keys.
+ */
+export type ParsedStateKey =
+  | {
+      chapterIndex: number
+    }
+  | {
+      chapterIndex: 255
+      serviceId: bigint
+    }
+  | {
+      chapterIndex: 0 // Special indicator for C(s, h) keys
+      serviceId: bigint
+    }

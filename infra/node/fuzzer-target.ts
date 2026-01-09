@@ -98,11 +98,6 @@ logger.init()
 // Initialize services (similar to safrole-all-blocks.test.ts)
 const configService = new ConfigService(spec as 'tiny' | 'full')
 
-// Feature flags
-const FEATURE_ANCESTRY = 0x01 // 2^0
-const FEATURE_FORKS = 0x02 // 2^1
-const SUPPORTED_FEATURES = FEATURE_ANCESTRY | FEATURE_FORKS
-
 // Default JAM version (will be updated from PeerInfo message)
 let JAM_VERSION: JamVersion = DEFAULT_JAM_VERSION
 
@@ -153,7 +148,6 @@ export async function initializeServices() {
     const fs = await import('node:fs/promises')
     try {
       await fs.access(srsFilePath)
-      logger.info('SRS file exists')
     } catch {
       logger.error(`SRS file not found at ${srsFilePath}`)
       throw new Error(`SRS file not found: ${srsFilePath}`)
@@ -162,10 +156,8 @@ export async function initializeServices() {
     ringProver = new RingVRFProverWasm(srsFilePath)
     ringVerifier = new RingVRFVerifierWasm(srsFilePath)
 
-    logger.info('Initializing ring prover...')
     try {
       // Add timeout to prevent hanging - WASM initialization can take time but shouldn't hang indefinitely
-      logger.debug('Starting ring prover init promise...')
       const initStartTime = Date.now()
       const initPromise = ringProver.init()
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -178,13 +170,7 @@ export async function initializeServices() {
           )
         }, 30000)
       })
-      logger.debug('Racing init promise against timeout...')
-      const initResult = await Promise.race([initPromise, timeoutPromise])
-      const elapsed = Date.now() - initStartTime
-      logger.info(
-        `Ring prover initialized in ${elapsed}ms, result:`,
-        initResult,
-      )
+      await Promise.race([initPromise, timeoutPromise])
     } catch (initError) {
       logger.error('Failed to initialize ring prover:', initError)
       if (initError instanceof Error) {
@@ -194,10 +180,8 @@ export async function initializeServices() {
       throw initError
     }
 
-    logger.info('Initializing ring verifier...')
     try {
       // Add timeout to prevent hanging
-      logger.debug('Starting ring verifier init promise...')
       const initStartTime = Date.now()
       const initPromise = ringVerifier.init()
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -210,13 +194,7 @@ export async function initializeServices() {
           )
         }, 30000)
       })
-      logger.debug('Racing init promise against timeout...')
-      const initResult = await Promise.race([initPromise, timeoutPromise])
-      const elapsed = Date.now() - initStartTime
-      logger.info(
-        `Ring verifier initialized in ${elapsed}ms, result:`,
-        initResult,
-      )
+      await Promise.race([initPromise, timeoutPromise])
     } catch (initError) {
       logger.error('Failed to initialize ring verifier:', initError)
       if (initError instanceof Error) {
@@ -225,8 +203,6 @@ export async function initializeServices() {
       }
       throw initError
     }
-
-    logger.info('Ring VRF initialized successfully')
   } catch (error) {
     logger.error('Failed to initialize Ring VRF:', error)
     if (error instanceof Error) {
@@ -434,6 +410,7 @@ export async function initializeServices() {
       statisticsService: statisticsService,
       authPoolService: authPoolService,
       accumulationService: accumulatedService,
+      workReportService: workReportService,
     })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
@@ -539,7 +516,7 @@ function handlePeerInfo(socket: UnixSocket, peerInfo: FuzzPeerInfo): void {
     type: FuzzMessageType.PeerInfo,
     payload: {
       fuzz_version: 1,
-      fuzz_features: SUPPORTED_FEATURES,
+      fuzz_features: 0,
       jam_version: JAM_VERSION,
       app_version: APP_VERSION,
       app_name: APP_NAME,
@@ -981,16 +958,6 @@ async function handleConnection(socket: UnixSocket) {
           )
         }
 
-        // For Initialize messages, verify we received the expected amount of data
-        // The test file is 177945 bytes and decodes 21 keyvals
-        if (messageData.length > 0 && messageData[0] === 0x01) {
-          if (messageData.length !== 177945) {
-            logger.warn(
-              `⚠️  Initialize message size mismatch: received ${messageData.length} bytes, expected 177945 bytes (from test file)`,
-            )
-          }
-        }
-
         let message: FuzzMessage
         try {
           message = decodeFuzzMessage(messageData, configService)
@@ -999,30 +966,6 @@ async function handleConnection(socket: UnixSocket) {
             logger.info(
               `Initialize message decoded: ${message.payload.keyvals.length} keyvals, ${message.payload.ancestry.length} ancestry items`,
             )
-            if (message.payload.keyvals.length > 0) {
-              const firstKv = message.payload.keyvals[0]
-              const valueBytes = firstKv.value.startsWith('0x')
-                ? (firstKv.value.length - 2) / 2
-                : firstKv.value.length / 2
-              logger.debug(
-                `First keyval - key: ${firstKv.key.substring(0, 50)}..., value: ${firstKv.value.substring(0, 50)}... (${valueBytes} bytes)`,
-              )
-            }
-            if (message.payload.keyvals.length !== 21) {
-              logger.error(
-                `❌ Expected 21 keyvals but decoded ${message.payload.keyvals.length} keyvals - this indicates a decoding issue!`,
-              )
-              logger.error(
-                `   Message data length: ${messageData.length} bytes`,
-              )
-              logger.error(
-                `   First 20 bytes: ${Array.from(messageData.slice(0, 20))
-                  .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
-                  .join(' ')}`,
-              )
-            } else {
-              logger.info(`✅ Successfully decoded 21 keyvals as expected`)
-            }
           }
         } catch (decodeError) {
           logger.error(
@@ -1126,7 +1069,6 @@ async function main() {
     logger.info(`Spec: ${spec}`)
 
     // Initialize services
-    logger.info('Initializing services...')
     await initializeServices()
     logger.info('Services initialized successfully')
 
@@ -1134,7 +1076,6 @@ async function main() {
     const socketDir = path.dirname(socketPath)
     try {
       mkdirSync(socketDir, { recursive: true })
-      logger.info(`Ensured socket directory exists: ${socketDir}`)
     } catch (error) {
       logger.error(`Failed to create socket directory ${socketDir}:`, error)
       throw new Error(
@@ -1199,9 +1140,6 @@ async function main() {
     server.listen(socketPath, () => {
       logger.info(`✅ Fuzzer target listening on ${socketPath}`)
       logger.info(`Spec: ${spec}`)
-      logger.info(
-        `Features: ancestry=${!!(SUPPORTED_FEATURES & FEATURE_ANCESTRY)}, forks=${!!(SUPPORTED_FEATURES & FEATURE_FORKS)}`,
-      )
       logger.info('Ready to accept connections (press Ctrl+C to stop)')
     })
 

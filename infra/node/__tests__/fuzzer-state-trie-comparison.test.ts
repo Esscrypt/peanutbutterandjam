@@ -11,31 +11,8 @@ import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
 import { FuzzMessageType } from '@pbnjam/types'
-import { ConfigService } from '../services/config-service'
-import { StateService } from '../services/state-service'
-import { ValidatorSetManager } from '../services/validator-set'
-import { EntropyService } from '../services/entropy'
-import { TicketService } from '../services/ticket-service'
-import { AuthQueueService } from '../services/auth-queue-service'
-import { AuthPoolService } from '../services/auth-pool-service'
-import { DisputesService } from '../services/disputes-service'
-import { ReadyService } from '../services/ready-service'
-import { AccumulationService } from '../services/accumulation-service'
-import { WorkReportService } from '../services/work-report-service'
-import { PrivilegesService } from '../services/privileges-service'
-import { ServiceAccountService } from '../services/service-account-service'
-import { RecentHistoryService } from '../services/recent-history-service'
-import { NodeGenesisManager } from '../services/genesis-manager'
-import { SealKeyService } from '../services/seal-key'
-import { ClockService } from '../services/clock-service'
-import { EventBusService } from '@pbnjam/core'
-import { StatisticsService } from '../services/statistics-service'
 import { bytesToHex } from '@pbnjam/core'
-import { safeResult } from '@pbnjam/types'
-import { RingVRFProverWasm, RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
-import { HostFunctionRegistry } from '@pbnjam/pvm'
-import { AccumulateHostFunctionRegistry } from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import { initializeServices } from './test-utils'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
@@ -43,7 +20,9 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
 describe('Fuzzer State Trie Comparison', async () => {
   it('should compare generateStateTrie with fuzzer keyvals and identify differences', async () => {
-    const configService = new ConfigService('tiny')
+    // Initialize services using shared utility
+    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const { stateService, configService } = services
 
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
@@ -104,182 +83,10 @@ describe('Fuzzer State Trie Comparison', async () => {
 
     console.log(`\n📋 Initialize message loaded:`)
     console.log(`  Keyvals count: ${init.keyvals.length}`)
-
-    // Initialize services (minimal setup for state service)
-    // Initialize Ring VRF
-    const srsFilePath = path.join(
-      WORKSPACE_ROOT,
-      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
-    const ringProver = new RingVRFProverWasm(srsFilePath)
-    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-    await ringProver.init()
-    await ringVerifier.init()
-    // Initialize services (similar to safrole-all-blocks.test.ts)
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({
-      configService: configService,
-      eventBusService: eventBusService,
-    })
-    const entropyService = new EntropyService(eventBusService)
-    const ticketService = new TicketService({
-      configService: configService,
-      eventBusService: eventBusService,
-      keyPairService: null,
-      entropyService: entropyService,
-      networkingService: null,
-      ce131TicketDistributionProtocol: null,
-      ce132TicketDistributionProtocol: null,
-      clockService: clockService,
-      prover: ringProver,
-      ringVerifier: ringVerifier,
-      validatorSetManager: null,
-    })
-    const sealKeyService = new SealKeyService({
-      configService,
-      eventBusService,
-      entropyService,
-      ticketService,
-    })
-
-    const validatorSetManager = new ValidatorSetManager({
-      eventBusService,
-      sealKeyService,
-      ringProver,
-      ticketService,
-      configService,
-      initialValidators: [],
-    })
-
-    ticketService.setValidatorSetManager(validatorSetManager)
-
-    const authQueueService = new AuthQueueService({
-      configService,
-    })
-
-    const disputesService = new DisputesService({
-      eventBusService: eventBusService,
-      configService: configService,
-      validatorSetManagerService: validatorSetManager,
-    })
-    const readyService = new ReadyService({
-      configService: configService,
-    })
-
-    const workReportService = new WorkReportService({
-      eventBus: eventBusService,
-      networkingService: null,
-      ce136WorkReportRequestProtocol: null,
-      validatorSetManager: validatorSetManager,
-      configService: configService,
-      entropyService: entropyService,
-      clockService: clockService,
-    })
-
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService: eventBusService,
-      workReportService: workReportService,
-      authQueueService: authQueueService,
-    })
-
-    const privilegesService = new PrivilegesService({
-      configService,
-    })
-
-    const serviceAccountsService = new ServiceAccountService({
-      configService,
-      eventBusService,
-      clockService,
-      networkingService: null,
-      preimageRequestProtocol: null,
-    })
-
-    const hostFunctionRegistry = new HostFunctionRegistry(
-      serviceAccountsService,
-      configService,
-    )
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
-      configService,
-    )
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: false,
-      traceSubfolder: 'fuzzer-state-trie-comparison',
-    })
-
-    const statisticsService = new StatisticsService({
-      eventBusService: eventBusService,
-      configService: configService,
-      clockService: clockService,
-    })
-
-    const accumulatedService = new AccumulationService({
-      configService: configService,
-      clockService: clockService,
-      serviceAccountsService: serviceAccountsService,
-      privilegesService: privilegesService,
-      validatorSetManager: validatorSetManager,
-      authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
-      readyService: readyService,
-      statisticsService: statisticsService,
-    })
-
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService: eventBusService,
-      configService: configService,
-      accumulationService: accumulatedService,
-    })
-
-    // Create a minimal genesis manager for fuzzer test
-    // Override getState to return empty state - will be set via Initialize message
-    const genesisManager = new NodeGenesisManager(configService, {})
-    const originalGetState = genesisManager.getState.bind(genesisManager)
-    genesisManager.getState = () => {
-      // Return empty state - will be set via Initialize message
-      // Safe type is [error, value] tuple - use safeResult helper
-      return safeResult({ keyvals: [] })
-    }
-
-    const stateService = new StateService({
-      configService,
-      genesisManagerService: genesisManager,
-      validatorSetManager: validatorSetManager,
-      entropyService: entropyService,
-      ticketService: ticketService,
-      authQueueService: authQueueService,
-      authPoolService: authPoolService,
-      statisticsService: statisticsService,
-      disputesService: disputesService,
-      readyService: readyService,
-      accumulationService: accumulatedService,
-      workReportService: workReportService,
-      privilegesService: privilegesService,
-      serviceAccountsService: serviceAccountsService,
-      recentHistoryService: recentHistoryService,
-      sealKeyService: sealKeyService,
-      clockService: clockService,
-    })
-
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
-
-    // Start services
-    const [entropyStartError] = await entropyService.start()
-    expect(entropyStartError).toBeUndefined()
-
-    const [validatorSetStartError] = await validatorSetManager.start()
-    expect(validatorSetStartError).toBeUndefined()
     // Set state from keyvals with JAM version from PeerInfo
     // Note: Some keyvals may fail to decode (e.g., Chapter 12 with incomplete data)
     // setState now handles errors gracefully and continues processing
-    const [setStateError] = stateService.setState(init.keyvals, jamVersion)
+    const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       console.log(`⚠️  Warning: Some keyvals may have failed to decode: ${setStateError.message}`)
     }
@@ -416,7 +223,9 @@ describe('Fuzzer State Trie Comparison', async () => {
   })
 
   it('should verify round-trip encoding for Recent History, Reports, and Statistics after block 1', async () => {
-    const configService = new ConfigService('tiny')
+    // Initialize services using shared utility
+    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const { stateService, blockImporterService, configService } = services
 
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
@@ -505,149 +314,8 @@ describe('Fuzzer State Trie Comparison', async () => {
 
     console.log(`📦 ImportBlock message loaded: timeslot ${importBlock.block.header.timeslot}`)
 
-    // Initialize Ring VRF
-    const srsFilePath = path.join(
-      WORKSPACE_ROOT,
-      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
-    const ringProver = new RingVRFProverWasm(srsFilePath)
-    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-    await ringProver.init()
-    await ringVerifier.init()
-
-    // Initialize all services
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({
-      configService: configService,
-      eventBusService: eventBusService,
-    })
-    const entropyService = new EntropyService(eventBusService)
-    const ticketService = new TicketService({
-      configService: configService,
-      eventBusService: eventBusService,
-      keyPairService: null,
-      entropyService: entropyService,
-      networkingService: null,
-      ce131TicketDistributionProtocol: null,
-      ce132TicketDistributionProtocol: null,
-      clockService: clockService,
-      prover: ringProver,
-      ringVerifier: ringVerifier,
-      validatorSetManager: null,
-    })
-    const sealKeyService = new SealKeyService({
-      configService,
-      eventBusService,
-      entropyService,
-      ticketService,
-    })
-    const validatorSetManager = new ValidatorSetManager({
-      eventBusService,
-      sealKeyService,
-      ringProver,
-      ticketService,
-      configService,
-      initialValidators: [],
-    })
-    ticketService.setValidatorSetManager(validatorSetManager)
-
-    const authQueueService = new AuthQueueService({ configService })
-    const disputesService = new DisputesService({
-      eventBusService: eventBusService,
-      configService: configService,
-      validatorSetManagerService: validatorSetManager,
-    })
-    const readyService = new ReadyService({ configService: configService })
-    const workReportService = new WorkReportService({
-      eventBus: eventBusService,
-      networkingService: null,
-      ce136WorkReportRequestProtocol: null,
-      validatorSetManager: validatorSetManager,
-      configService: configService,
-      entropyService: entropyService,
-      clockService: clockService,
-    })
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService: eventBusService,
-      workReportService: workReportService,
-      authQueueService: authQueueService,
-    })
-    const privilegesService = new PrivilegesService({ configService })
-    const serviceAccountsService = new ServiceAccountService({
-      configService,
-      eventBusService,
-      clockService,
-      networkingService: null,
-      preimageRequestProtocol: null,
-    })
-
-    const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
-    })
-
-    const statisticsService = new StatisticsService({
-      eventBusService: eventBusService,
-      configService: configService,
-      clockService: clockService,
-    })
-
-    const accumulationService = new AccumulationService({
-      configService: configService,
-      clockService: clockService,
-      serviceAccountsService: serviceAccountsService,
-      privilegesService: privilegesService,
-      validatorSetManager: validatorSetManager,
-      authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
-      readyService: readyService,
-      statisticsService: statisticsService,
-    })
-
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService: eventBusService,
-      configService: configService,
-      accumulationService: accumulationService,
-    })
-
-    const genesisManager = new NodeGenesisManager(configService, {})
-    genesisManager.getState = () => safeResult({ keyvals: [] })
-
-    const stateService = new StateService({
-      configService,
-      genesisManagerService: genesisManager,
-      validatorSetManager: validatorSetManager,
-      entropyService: entropyService,
-      ticketService: ticketService,
-      authQueueService: authQueueService,
-      authPoolService: authPoolService,
-      statisticsService: statisticsService,
-      disputesService: disputesService,
-      readyService: readyService,
-      accumulationService: accumulationService,
-      workReportService: workReportService,
-      privilegesService: privilegesService,
-      serviceAccountsService: serviceAccountsService,
-      recentHistoryService: recentHistoryService,
-      sealKeyService: sealKeyService,
-      clockService: clockService,
-    })
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
-
-    // Start services
-    await entropyService.start()
-    await validatorSetManager.start()
-
     // Set initial state from Initialize message
-    const [setStateError] = stateService.setState(init.keyvals, jamVersion)
+    const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       console.log(`⚠️  Warning during setState: ${setStateError.message}`)
     }
@@ -656,6 +324,9 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Store initial state for chapters 3, 10, 13
     const [initTrieError, initTrie] = stateService.generateStateTrie()
     expect(initTrieError).toBeUndefined()
+    if (!initTrie) {
+      throw new Error('Failed to generate initial state trie')
+    }
 
     const chapter3Key = '0x03000000000000000000000000000000000000000000000000000000000000'
     const chapter6Key = '0x06000000000000000000000000000000000000000000000000000000000000'
@@ -671,58 +342,6 @@ describe('Fuzzer State Trie Comparison', async () => {
     console.log(`  Chapter 13 (Statistics): ${initTrie[chapter13Key]?.length || 0} chars`)
     console.log(`  Chapter 6 value: ${initTrie[chapter6Key]?.substring(0, 70)}...`)
     console.log(`  Chapter 11 value: ${initTrie[chapter11Key]}`)
-
-    // Set up additional services needed for BlockImporterService
-    const { AssuranceService } = await import('../services/assurance-service')
-    const { GuarantorService } = await import('../services/guarantor-service')
-    const { BlockImporterService } = await import('../services/block-importer-service')
-
-    const assuranceService = new AssuranceService({
-      configService,
-      workReportService,
-      validatorSetManager,
-      eventBusService,
-      sealKeyService,
-      recentHistoryService,
-    })
-
-    const guarantorService = new GuarantorService({
-      configService,
-      clockService,
-      entropyService,
-      accumulationService,
-      authPoolService,
-      networkService: null,
-      ce134WorkPackageSharingProtocol: null,
-      keyPairService: null,
-      workReportService,
-      eventBusService,
-      validatorSetManager,
-      recentHistoryService,
-      serviceAccountService: serviceAccountsService,
-      statisticsService: statisticsService,
-    })
-
-    const blockImporterService = new BlockImporterService({
-      eventBusService,
-      clockService,
-      recentHistoryService,
-      stateService: stateService,
-      serviceAccountService: serviceAccountsService,
-      configService,
-      disputesService,
-      validatorSetManagerService: validatorSetManager,
-      entropyService,
-      sealKeyService,
-      assuranceService,
-      guarantorService,
-      ticketService,
-      statisticsService,
-      authPoolService,
-      accumulationService,
-    })
-
-    await blockImporterService.start()
 
     // Import block 1
     console.log(`\n🔄 Importing block 1...`)
@@ -822,7 +441,7 @@ describe('Fuzzer State Trie Comparison', async () => {
       if (decodeErr) {
         console.log(`    ❌ Decode error: ${decodeErr.message}`)
       } else {
-        console.log(`    ✅ Decoded: ${decodedRecent?.value?.length || 0} entries`)
+        console.log(`    ✅ Decoded: ${decodedRecent?.value?.history?.length || 0} entries`)
         
         const [encodeErr, reEncodedBytes] = encodeRecent(decodedRecent!.value)
         if (encodeErr) {
@@ -1077,18 +696,20 @@ describe('Fuzzer State Trie Comparison', async () => {
       // Also verify the preimage/request keys haven't changed
       console.log(`\n🔍 PREIMAGE/REQUEST KEYS VERIFICATION:`)
       let preimageKeysUnchanged = true
-      for (const key of Object.keys(initTrie)) {
-        if (!unchangedChapters.includes(key) && !['0x03', '0x06', '0x0a', '0x0b', '0x0d'].some(prefix => key.startsWith(prefix))) {
-          const initVal = initTrie[key]
-          const afterVal = afterTrie[key]
-          if (initVal !== afterVal) {
-            console.log(`  ❌ ${key.substring(0, 30)}... CHANGED!`)
-            preimageKeysUnchanged = false
+      if (initTrie) {
+        for (const key of Object.keys(initTrie)) {
+          if (!unchangedChapters.includes(key) && !['0x03', '0x06', '0x0a', '0x0b', '0x0d'].some(prefix => key.startsWith(prefix))) {
+            const initVal = initTrie[key]
+            const afterVal = afterTrie[key]
+            if (initVal !== afterVal) {
+              console.log(`  ❌ ${key.substring(0, 30)}... CHANGED!`)
+              preimageKeysUnchanged = false
+            }
           }
         }
-      }
-      if (preimageKeysUnchanged) {
-        console.log(`  ✅ All preimage/request keys unchanged`)
+        if (preimageKeysUnchanged) {
+          console.log(`  ✅ All preimage/request keys unchanged`)
+        }
       }
       
       // Dump full values for changed chapters to compare

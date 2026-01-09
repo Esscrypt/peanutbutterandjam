@@ -1,5 +1,5 @@
 import { encodeFixedLength, getServiceRequestValue } from '@pbnjam/codec'
-import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -89,8 +89,7 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
         resultCode: RESULT_CODES.PANIC,
       }
     }
-    const serviceCodeHash = hexToBytes(serviceAccount.codehash)
-    if (!this.arraysEqual(serviceCodeHash, expectedCodeHash)) {
+    if (serviceAccount.codehash !== bytesToHex(expectedCodeHash)) {
       logger.warning('[EjectHostFunction] Codehash mismatch', {
         serviceIdToEject: serviceIdToEject.toString(),
         currentServiceId: imX.id.toString(),
@@ -117,7 +116,12 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Get request using nested map structure: requests[hash][length]
     const hashHex = bytesToHex(hashData)
-    const requestValue = getServiceRequestValue(serviceAccount, serviceIdToEject, hashHex, BigInt(l));
+    const requestValue = getServiceRequestValue(
+      serviceAccount,
+      serviceIdToEject,
+      hashHex,
+      BigInt(l),
+    )
 
     // const requestMap = serviceAccount.requests.get(hashHex)
     if (!requestValue) {
@@ -131,7 +135,6 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-
     // Check if the ejection period has expired
     // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
     // For test vectors, Cexpungeperiod = 32 (as per README)
@@ -139,7 +142,10 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     const expungePeriod = context.expungePeriod
     const threshold = timeslot - expungePeriod
 
-    if (requestValue.length < 2 || requestValue[1] >= timeslot - expungePeriod) {
+    if (
+      requestValue.length < 2 ||
+      requestValue[1] >= timeslot - expungePeriod
+    ) {
       logger.warning('[EjectHostFunction] Expunge period check failed', {
         requestLength: requestValue.length,
         y: requestValue[1]?.toString(),
@@ -184,13 +190,5 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     return {
       resultCode: null, // continue execution
     }
-  }
-
-  private arraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
   }
 }

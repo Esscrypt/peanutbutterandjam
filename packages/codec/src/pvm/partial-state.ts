@@ -57,7 +57,6 @@ import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
 import { encodeSequenceGeneric } from '../core/sequence'
 import { decodeAuthqueue, encodeAuthqueue } from '../state/authqueue'
-import { extractServiceIdFromStateKey } from '../state/service-account'
 import { determineKeyTypes } from '../state/state-key'
 import { decodeValidatorSet, encodeValidatorSet } from '../state/validator-set'
 
@@ -611,67 +610,6 @@ export function decodeCompleteServiceAccount(
   const octets = totalOctets
   // Items = 2 * requests + storage
   const items = 2n * requestsCount + storageCount
-
-  // #region agent log
-  // Extract service ID from first key to check if this is service 0 or 3953987649
-  let foundServiceId: bigint | null = null
-  for (const stateKeyHex of Object.keys(rawCshKeyvals)) {
-    const stateKeyBytes = hexToBytes(stateKeyHex as Hex)
-    if (stateKeyBytes.length === 31) {
-      foundServiceId = extractServiceIdFromStateKey(stateKeyBytes)
-      if (foundServiceId === 0n || foundServiceId === 3953987649n) break
-    }
-  }
-  if (foundServiceId === 0n) {
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'partial-state.ts:decodeCompleteServiceAccount',
-          message: 'Service 0 octets calculation in decode',
-          data: {
-            serviceId: foundServiceId.toString(),
-            storageCount: storageCount.toString(),
-            requestsCount: requestsCount.toString(),
-            calculatedOctets: octets.toString(),
-            calculatedItems: items.toString(),
-            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run2',
-          hypothesisId: 'J',
-        }),
-      },
-    ).catch(() => {})
-  }
-  if (foundServiceId === 3953987649n) {
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'partial-state.ts:decodeCompleteServiceAccount',
-          message: 'Service 3953987649 items calculation in decode',
-          data: {
-            serviceId: foundServiceId.toString(),
-            storageCount: storageCount.toString(),
-            requestsCount: requestsCount.toString(),
-            calculatedItems: items.toString(),
-            totalKeys: Object.keys(rawCshKeyvals).length.toString(),
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run1',
-          hypothesisId: 'G',
-        }),
-      },
-    ).catch(() => {})
-  }
-  // #endregion
 
   const account: ServiceAccount = {
     codehash,

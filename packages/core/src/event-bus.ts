@@ -76,7 +76,7 @@ export interface RevertEpochTransitionEvent {
 export interface ValidatorSetChangeEvent {
   timestamp: number
   epoch: bigint
-  validators: Map<number, ValidatorKeyTuple>
+  validators: ValidatorKeyTuple[]
 }
 
 export interface BlockProcessedEvent {

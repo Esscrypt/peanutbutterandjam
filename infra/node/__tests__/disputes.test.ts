@@ -13,32 +13,7 @@ import type { DisputesTestVector, WorkReport } from '@pbnjam/types'
 import { DisputesService } from '../services/disputes-service'
 import { ConfigService } from '../services/config-service'
 import { ValidatorSetManager } from '../services/validator-set'
-
-// Helper function to convert JSON numbers to bigints for WorkReport
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-    },
-    results: jsonReport.results.map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load.gas_used || 0),
-        imports: BigInt(r.refine_load.imports || 0),
-        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-        exports: BigInt(r.refine_load.exports || 0),
-      },
-    })),
-  }
-}
+import { convertJsonReportToWorkReport } from './test-utils'
 
 // Helper function to convert WorkReport bigints back to numbers for JSON comparison
 function convertWorkReportToJson(workReport: WorkReport): any {

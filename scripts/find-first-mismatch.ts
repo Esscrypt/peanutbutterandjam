@@ -221,9 +221,29 @@ async function runComparison(
       const output = stdout + stderr
 
       // Check for missing trace directory error
-      if (output.includes('Trace directory not found') || output.includes('not found')) {
+      const traceNotFound = output.includes('Trace directory not found') || output.includes('not found')
+      
+      if (traceNotFound) {
+        // If traces are not available in jamduna, check if there are mismatches in pvm-traces
+        // This happens when we have traces in pvm-traces but not in jamduna
+        const hasMismatches = output.includes('Differences:') || 
+                              output.includes('✗ Mismatch') ||
+                              output.includes('Error code:') ||
+                              output.includes('Output (yield):')
+        
+        if (hasMismatches) {
+          // Traces not in jamduna but mismatches found - this is a real mismatch
+          resolve({
+            success: false,
+            output,
+            error: 'no_trace_in_jamduna',
+          })
+          return
+        }
+        
+        // No traces and no mismatches - skip
         resolve({
-          success: true, // Skip blocks without traces
+          success: true,
           output,
           error: 'no_trace',
         })
@@ -371,6 +391,27 @@ async function main() {
           continue
         }
 
+        if (error === 'no_trace_in_jamduna') {
+          // Traces not in jamduna but mismatches found - treat as mismatch
+          blockSuccess = false
+          blockMismatches.push({
+            block,
+            invocationIndex: loc.invocationIndex,
+            serviceId: loc.serviceId,
+            output: output + '\n⚠️  Note: Traces not available in jamduna, but mismatches found in pvm-traces',
+          })
+          mismatches.push({
+            block,
+            invocationIndex: loc.invocationIndex,
+            serviceId: loc.serviceId,
+            output: output + '\n⚠️  Note: Traces not available in jamduna, but mismatches found in pvm-traces',
+          })
+          if (!checkAllTraces) {
+            break
+          }
+          continue
+        }
+
         if (!success) {
           blockSuccess = false
           blockMismatches.push({
@@ -432,6 +473,24 @@ async function main() {
       if (error === 'no_trace') {
         console.log('⏭️  No trace (skipped)')
         skippedCount++
+      } else if (error === 'no_trace_in_jamduna') {
+        mismatches.push({
+          block,
+          output: output + '\n⚠️  Note: Traces not available in jamduna, but mismatches found in pvm-traces',
+        })
+        if (checkAllTraces) {
+          console.log('❌ MISMATCH FOUND (traces not in jamduna)')
+        } else {
+          console.log('❌ MISMATCH FOUND (traces not in jamduna)!\n')
+          console.log('='.repeat(80))
+          console.log(`First mismatch at Block ${block}`)
+          console.log(`Format: ${formatFlag}, Executor: ${executorType}`)
+          console.log('⚠️  Note: Traces not available in jamduna, but mismatches found in pvm-traces')
+          console.log('='.repeat(80))
+          console.log('\nComparison output:')
+          console.log(output)
+          process.exit(1)
+        }
       } else if (success) {
         console.log('✅ Match')
       } else {

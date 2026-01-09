@@ -15,7 +15,6 @@ export * from './fallback-sealing'
 export * from './phase'
 // Network protocol implementation
 // Safrole implementation
-export * from './state-transitions'
 export * from './ticket-generation'
 export * from './ticket-sealing'
 export * from './winners-marker'

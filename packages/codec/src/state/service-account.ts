@@ -163,29 +163,6 @@ export function encodeServiceAccount(
   view.setBigUint64(16, account.minmemogas, true)
 
   // Octets (8 bytes) - use recalculated value
-  // #region agent log
-  if (account.octets > 0n) {
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'service-account.ts:encodeServiceAccount',
-          message: 'Encoding service account octets',
-          data: {
-            octets: account.octets.toString(),
-            items: account.items.toString(),
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run4',
-          hypothesisId: 'T',
-        }),
-      },
-    ).catch(() => {})
-  }
-  // #endregion
   view.setBigUint64(24, account.octets, true)
 
   // Gratis (8 bytes)
@@ -586,6 +563,33 @@ export function setServiceStorageValue(
 ): void {
   const storageStateKey = createServiceStorageKey(serviceId, storageKey)
   const stateKeyHex = bytesToHex(storageStateKey)
+
+  // #region agent log
+  if (typeof fetch !== 'undefined') {
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'service-account.ts:564',
+          message: 'Setting service storage value',
+          data: {
+            serviceId: serviceId.toString(),
+            stateKeyHex: stateKeyHex,
+            storageKeyLength: storageKey.length,
+            storageValueLength: storageValue.length,
+            alreadyExists: !!serviceAccount.rawCshKeyvals[stateKeyHex],
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'post-fix',
+          hypothesisId: 'C',
+        }),
+      },
+    ).catch(() => {})
+  }
+  // #endregion
 
   serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(storageValue)
 }

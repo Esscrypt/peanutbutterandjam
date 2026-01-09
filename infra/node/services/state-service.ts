@@ -8,27 +8,6 @@
  * State Definition: Equation (34) - thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy, stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
  */
 
-/**
- * Parsed state key result with type-safe discriminated union
- *
- * Note: For C(s, h) keys, we can only extract the Blake hash of the combined key.
- * The original storage key, preimage hash, or request hash cannot be extracted
- * from the Blake hash (it's a one-way function). The keyType must be determined
- * by context when querying, or by attempting to match against known keys.
- */
-type ParsedStateKey =
-  | {
-      chapterIndex: number
-    }
-  | {
-      chapterIndex: 255
-      serviceId: bigint
-    }
-  | {
-      chapterIndex: 0 // Special indicator for C(s, h) keys
-      serviceId: bigint
-    }
-
 import {
   createStateTrie,
   decodeAccumulated,
@@ -57,6 +36,8 @@ import type {
   Disputes,
   EntropyState,
   GlobalState,
+  IGenesisManagerService,
+  ParsedStateKey,
   Privileges,
   Ready,
   Recent,
@@ -121,7 +102,7 @@ export class StateService extends BaseService implements IStateService {
   private serviceAccountsService: ServiceAccountService
   private recentHistoryService: RecentHistoryService
   // private authService?: AuthService
-  private genesisManagerService: NodeGenesisManager
+  private genesisManagerService?: NodeGenesisManager
   private sealKeyService: SealKeyService
   private clockService: ClockService
 
@@ -139,7 +120,7 @@ export class StateService extends BaseService implements IStateService {
     serviceAccountsService: ServiceAccountService
     recentHistoryService: RecentHistoryService
     configService: ConfigService
-    genesisManagerService: NodeGenesisManager
+    genesisManagerService?: NodeGenesisManager
     sealKeyService: SealKeyService
     clockService: ClockService
     statisticsService: StatisticsService
@@ -221,14 +202,18 @@ export class StateService extends BaseService implements IStateService {
       } else {
         this.setState(genesisHeader.keyvals)
       }
+    } else {
+      // No genesis manager - start with empty state
+      // The state will be set from trace pre_state or Initialize message
+      this.setState([])
     }
   }
 
   /**
    * Get genesis manager service
    */
-  getGenesisManager(): NodeGenesisManager {
-    return this.genesisManagerService
+  getGenesisManager(): IGenesisManagerService | undefined {
+    return this.genesisManagerService ?? undefined
   }
 
   /**
@@ -296,9 +281,7 @@ export class StateService extends BaseService implements IStateService {
       // C(4) = safrole (γ) - Consensus protocol internal state
       case 4:
         return {
-          pendingSet: Array.from(
-            this.validatorSetManager.getPendingValidators().values(),
-          ),
+          pendingSet: this.validatorSetManager.getPendingValidators(),
           epochRoot: this.validatorSetManager.getEpochRoot(),
           sealTickets: this.sealKeyService.getSealKeys(),
           ticketAccumulator: this.ticketService.getTicketAccumulator(),
@@ -314,21 +297,15 @@ export class StateService extends BaseService implements IStateService {
 
       // C(7) = stagingset (ι) - Validators queued for next epoch
       case 7:
-        return Array.from(
-          this.validatorSetManager.getStagingValidators().values(),
-        )
+        return this.validatorSetManager.getStagingValidators()
 
       // C(8) = activeset (κ) - Currently active validators
       case 8:
-        return Array.from(
-          this.validatorSetManager.getActiveValidators().values(),
-        )
+        return this.validatorSetManager.getActiveValidators()
 
       // C(9) = previousset (λ) - Previous epoch validators
       case 9:
-        return Array.from(
-          this.validatorSetManager.getPreviousValidators().values(),
-        )
+        return this.validatorSetManager.getPreviousValidators()
 
       // C(10) = reports (ρ) - Work reports awaiting availability assurance
       case 10:
@@ -664,9 +641,7 @@ export class StateService extends BaseService implements IStateService {
       lastAccumulationOutput:
         this.accumulationService.getLastAccumulationOutputs(),
       safrole: {
-        pendingSet: Array.from(
-          this.validatorSetManager.getPendingValidators().values(),
-        ),
+        pendingSet: this.validatorSetManager.getPendingValidators(),
         // Use stored epochRoot from Initialize message if available, otherwise compute it
         // This ensures we match the fuzzer's expected state root
         epochRoot:
@@ -677,15 +652,9 @@ export class StateService extends BaseService implements IStateService {
       },
       accounts: this.serviceAccountsService.getServiceAccounts(),
       entropy: this.entropyService.getEntropy(),
-      stagingset: Array.from(
-        this.validatorSetManager.getStagingValidators().values().toArray(),
-      ),
-      activeset: Array.from(
-        this.validatorSetManager.getActiveValidators().values(),
-      ),
-      previousset: Array.from(
-        this.validatorSetManager.getPreviousValidators().values(),
-      ),
+      stagingset: this.validatorSetManager.getStagingValidators(),
+      activeset: this.validatorSetManager.getActiveValidators(),
+      previousset: this.validatorSetManager.getPreviousValidators(),
       reports: this.workReportService.getPendingReports(),
       thetime: this.clockService.getLatestReportedBlockTimeslot(),
       authqueue: this.authQueueService.getAuthQueue(),

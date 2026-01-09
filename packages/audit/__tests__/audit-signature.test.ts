@@ -45,8 +45,8 @@ describe('Audit Signature Functions', () => {
     // Mock other required methods (not used in our tests)
     getActiveValidatorKeys: () => [],
     getValidatorIndex: () => [new Error('Not implemented'), undefined] as const,
-    getActiveValidators: () => new Map(),
-    getPendingValidators: () => new Map(),
+    getActiveValidators: () => [],
+    getPendingValidators: () => [],
     setStagingSet: () => {},
     setActiveSet: () => {},
     setPreviousSet: () => {},

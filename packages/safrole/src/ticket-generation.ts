@@ -318,7 +318,7 @@ export function determineProxyValidator(
   )
   const proxyIndex = view.getUint32(0, false) // false = big-endian
 
-  const totalValidators = validatorSetManager.getActiveValidators().size
+  const totalValidators = validatorSetManager.getActiveValidators().length
 
   // Modulo the number of validators
   const finalIndex = proxyIndex % totalValidators

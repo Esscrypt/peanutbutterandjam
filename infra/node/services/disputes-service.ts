@@ -386,7 +386,50 @@ export class DisputesService extends BaseService {
   }
 
   /**
-   * Apply dispute state transitions
+   * Process disputes: validate and apply state transitions
+   *
+   * @param disputes - Array of dispute extrinsics to process
+   * @param currentTimeslot - Current timeslot (tau) for age validation
+   * @returns Safe result containing offenders_mark (Ed25519 keys of offenders) or error
+   */
+  public processDisputes(
+    disputes: Dispute[],
+    currentTimeslot: bigint,
+  ): Safe<Hex[]> {
+    // First validate disputes
+    const [validationError, validatedData] = this.validateDisputes(
+      disputes,
+      currentTimeslot,
+    )
+    if (validationError) {
+      return safeError(validationError)
+    }
+    if (!validatedData) {
+      return safeError(new Error('Dispute validation failed'))
+    }
+
+    // Now apply the state transitions
+    // Apply verdicts to sets
+    for (const target of validatedData.pendingGoodSet) {
+      this.goodSet.add(target)
+    }
+    for (const target of validatedData.pendingBadSet) {
+      this.badSet.add(target)
+    }
+    for (const target of validatedData.pendingWonkySet) {
+      this.wonkySet.add(target)
+    }
+
+    // Apply offenders
+    for (const offender of validatedData.pendingOffenders) {
+      this.offenders.add(offender)
+    }
+
+    return safeResult(validatedData.pendingOffenders)
+  }
+
+  /**
+   * Apply dispute state transitions (kept for backward compatibility)
    * This should be called AFTER validateDisputes passes.
    *
    * @param validatedData - Validated disputes data from validateDisputes
