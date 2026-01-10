@@ -29,6 +29,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Initialize specific submodules
+        run: |
+          git submodule update --init --depth 1 packages/bandersnatch
+          git submodule update --init --depth 1 packages/bandersnatch-vrf
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 

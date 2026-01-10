@@ -18,6 +18,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Initialize specific submodules
+        run: |
+          git submodule update --init --depth 1 packages/bandersnatch
+          git submodule update --init --depth 1 packages/bandersnatch-vrf
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
