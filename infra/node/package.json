@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc",
     "build:bin": "bun build ./services/main-service.ts --compile --outfile ./bin --sourcemap --minify-whitespace --minify-syntax --target bun ",
-    "build:fuzzer": "bun build ./fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --sourcemap --minify-whitespace --minify-syntax --target bun ",
+    "build:fuzzer": "bun build ./fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --minify --target bun ",
     "check": "tsc --pretty --noEmit",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "cli": "tsx src/cli.ts",

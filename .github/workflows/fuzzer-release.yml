@@ -49,6 +49,11 @@ jobs:
         run: |
           sha256sum bin/fuzzer-target > bin/fuzzer-target.sha256
 
+      - name: Compress binary
+        run: |
+          gzip -k -9 bin/fuzzer-target
+          sha256sum bin/fuzzer-target.gz > bin/fuzzer-target.gz.sha256
+
       - name: Checkout releases repository
         uses: actions/checkout@v4
         with:
@@ -60,7 +65,9 @@ jobs:
       - name: Copy binaries to releases repository
         run: |
           mkdir -p releases-repo/bin
-          cp bin/fuzzer-target releases-repo/bin/
+          cp bin/fuzzer-target.gz releases-repo/bin/
+          cp bin/fuzzer-target.gz.sha256 releases-repo/bin/
+          # Also include uncompressed version checksum for reference
           cp bin/fuzzer-target.sha256 releases-repo/bin/
 
       - name: Commit and push to releases repository
@@ -73,8 +80,13 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Add fuzzer-target binary from commit ${{ github.sha }}"
-            # Detect default branch and push
-            DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+            # Try to detect default branch, fallback to main/master
+            if git show-ref --verify --quiet refs/remotes/origin/HEAD; then
+              DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+            else
+              # Try to get default branch from remote
+              DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | awk '{print $3}' || echo "main")
+            fi
             git push origin HEAD:$DEFAULT_BRANCH || git push origin HEAD:main || git push origin HEAD:master
           fi
 
@@ -89,12 +101,22 @@ jobs:
             Fuzzer target binary built from commit ${{ github.sha }}
             
             ## Usage
+            
+            ### Extract and run:
             ```bash
+            gunzip fuzzer-target.gz
+            chmod +x fuzzer-target
             ./fuzzer-target --socket /tmp/jam_target.sock --spec tiny
+            ```
+            
+            Or in one command:
+            ```bash
+            gunzip -c fuzzer-target.gz > fuzzer-target && chmod +x fuzzer-target && ./fuzzer-target --socket /tmp/jam_target.sock --spec tiny
             ```
           draft: false
           prerelease: true
           files: |
-            releases-repo/bin/fuzzer-target
+            releases-repo/bin/fuzzer-target.gz
+            releases-repo/bin/fuzzer-target.gz.sha256
             releases-repo/bin/fuzzer-target.sha256
 
