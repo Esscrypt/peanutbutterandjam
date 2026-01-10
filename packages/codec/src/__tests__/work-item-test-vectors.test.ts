@@ -13,7 +13,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeWorkItem, encodeWorkItem } from '../work-package/package'
 import type { WorkItem } from '@pbnjam/types'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 
 describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
   const testVectorsDir = join(

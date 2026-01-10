@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { decodeTheTime, encodeTheTime } from '../state/the-time'
 
 describe('TheTime Serialization', () => {

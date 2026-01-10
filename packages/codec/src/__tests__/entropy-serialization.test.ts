@@ -2,7 +2,7 @@
  * Tests for entropy state serialization
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import type { Hex } from '@pbnjam/core'
 import { decodeEntropy, encodeEntropy, } from '../state/entropy'
 import type { EntropyState } from '@pbnjam/types'

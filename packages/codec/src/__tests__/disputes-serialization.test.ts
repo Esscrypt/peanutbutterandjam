@@ -2,7 +2,7 @@
  * Tests for dispute state serialization
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import type { Disputes } from '@pbnjam/types'
 import type { Hex } from '@pbnjam/core'
 import { decodeDisputeState, encodeDisputeState } from '../state/disputes'

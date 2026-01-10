@@ -12,8 +12,8 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeWorkResult, encodeWorkResult } from '../work-package/work-result'
-import type { WorkResult } from '@pbnjam/types'
-import { describe, it, expect } from 'vitest'
+import type { WorkExecResultValue, WorkResult } from '@pbnjam/types'
+import { describe, it, expect } from 'bun:test'
 
 describe('Work Result Test Vectors - Round Trip Encoding/Decoding', () => {
   const testVectorsDir = join(
@@ -50,7 +50,7 @@ describe('Work Result Test Vectors - Round Trip Encoding/Decoding', () => {
       })
 
       // Verify result structure (success case with discriminator 0)
-      expect(decodedResult.value.result).toBe((jsonData.result as { ok: string }).ok)
+      expect(decodedResult.value.result).toBe((jsonData.result as { ok: string }).ok as WorkExecResultValue)
 
       // Encode the decoded result back to binary
       const [encodeError, encodedData] = encodeWorkResult(decodedResult.value)

@@ -5,12 +5,12 @@
  * Gray Paper Reference: pvm.tex
  */
 
-import { encodeNatural, getServicePreimageValue } from '@pbnjam/codec'
 import {
-  concatBytes,
+  encodeNatural,
   generateNextServiceId,
-  logger,
-} from '@pbnjam/core'
+  getServicePreimageValue,
+} from '@pbnjam/codec'
+import { concatBytes, logger } from '@pbnjam/core'
 import type {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
@@ -31,7 +31,12 @@ import type {
   Safe,
   ServiceAccount,
 } from '@pbnjam/types'
-import { DEFAULT_JAM_VERSION, RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
+import {
+  DEFAULT_JAM_VERSION,
+  RESULT_CODES,
+  safeError,
+  safeResult,
+} from '@pbnjam/types'
 import {
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
@@ -134,8 +139,12 @@ export class AccumulatePVM {
 
     // Gray Paper: Get service code from preimages using codehash
     // Gray Paper accounts.tex equation 42-43: c = none when codehash not in preimages
-    const serviceCode = getServicePreimageValue(serviceAccount, serviceId, serviceAccount.codehash)
-    
+    const serviceCode = getServicePreimageValue(
+      serviceAccount,
+      serviceId,
+      serviceAccount.codehash,
+    )
+
     // Gray Paper pvm_invocations.tex line 162: Process deferred transfers FIRST,
     // even when c = none or len(c) > Cmaxservicecodesize
     // postxferstate = basestate except balance += sum of deferred transfer amounts
@@ -318,8 +327,6 @@ export class AccumulatePVM {
       result: marshallingResultValue,
       context: updatedImplicationsPair,
     } = marshallingResult
-
-
 
     // Panic dump and host function logs are now handled inside executeMarshallingInvocation in the PVM class
 
@@ -564,8 +571,7 @@ export class AccumulatePVM {
     // Second element: exceptional dimension (imY) - initialized identically
     // CRITICAL: Each dimension needs its OWN deep-cloned state to prevent cross-contamination
     const imYState = this.deepClonePartialState(partialState) // Separate clone for imY
-    
-    
+
     return safeResult([
       implications, // Regular dimension (imX)
       {
@@ -578,7 +584,6 @@ export class AccumulatePVM {
       }, // Exceptional dimension (imY)
     ])
   }
-
 
   /**
    * Encode accumulate arguments according to Gray Paper specification
@@ -659,8 +664,7 @@ export class AccumulatePVM {
       //   yield = imY.yield
       //   provisions = imY.provisions
       // Transfers executed in imX are NOT applied on panic/OOG - they are discarded
-      
-      
+
       return {
         ok: true,
         value: {

@@ -13,7 +13,7 @@ import {
   generateDevAccountSeed,
 } from '../keys'
 import { generateEd25519KeyPairFromSeed, generateAlternativeName } from '../..'
-import { decodeFixedLength } from '@pbnjam/codec'
+import { decodeFixedLength } from '../../../../../packages/codec/src/core/fixed-length'
 
 // Test vectors from JAM documentation
 const TEST_VECTORS = [

@@ -5,7 +5,7 @@
  * to ensure Gray Paper compliance.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import type { SafroleState, SafroleTicket, ValidatorPublicKeys } from '@pbnjam/types'
 import { CORE_CONSTANTS } from '@pbnjam/types'
 import { decodeSafrole, encodeSafrole } from '../state/safrole'

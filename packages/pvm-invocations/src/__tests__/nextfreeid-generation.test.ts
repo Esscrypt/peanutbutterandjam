@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { generateNextServiceId } from '@pbnjam/core'
+import { generateNextServiceId } from '@pbnjam/codec'
 import type { ServiceAccount } from '@pbnjam/types'
 
 /**

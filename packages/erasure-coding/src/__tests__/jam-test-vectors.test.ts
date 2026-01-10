@@ -8,7 +8,7 @@
 import { type Hex, logger, bytesToHex, hexToBytes } from '@pbnjam/core'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'bun:test'
 import { RustReedSolomonCoder, isRustModuleAvailable } from '../rust-wrapper'
 
 beforeAll(() => {

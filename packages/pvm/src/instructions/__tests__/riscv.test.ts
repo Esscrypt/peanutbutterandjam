@@ -13,7 +13,7 @@
  */
 
 import { logger } from '@pbnjam/core'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'bun:test'
 import { loadTestVectorsByPrefix, executeTestVector } from './test-vector-helper'
 
 beforeAll(() => {

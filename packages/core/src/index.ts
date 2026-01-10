@@ -13,8 +13,8 @@ export * from './logger'
 // Export merklization implementation
 export * from './merklization'
 export * from './schemas'
-// Export service ID generation utilities
 export * from './service-id'
+// Export service ID generation utilities
 // Export shuffle functions
 export * from './shuffle'
 // Export all utilities

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import {
   encodeServiceAccount,
   decodeServiceAccount,
@@ -231,7 +231,7 @@ describe('Service Account Serialization', () => {
       const [decodeError, decoded] = decodeServiceAccount(encodedData!)
       expect(decodeError).toBeUndefined()
       expect(decoded).toBeDefined()
-      expect(decoded!.value.codehash).toBe(codehash)
+      expect(decoded!.value.codehash).toBe(codehash as `0x${string}`)
     }
   })
 
@@ -283,13 +283,13 @@ describe('Service Account Serialization', () => {
         // Verify the value is stored correctly in rawCshKeyvals
         expect(stateKeyHex in account.rawCshKeyvals).toBe(true)
         const storedValue = account.rawCshKeyvals[stateKeyHex]
-        expect(storedValue).toBe(testCase.expectedHex)
+        expect(storedValue).toBe(testCase.expectedHex as `0x${string}`)
         expect(storedValue.length).toBe(testCase.expectedHex.length)
 
         // Verify we can retrieve it correctly
         const retrievedValue = getServiceStorageValue(account, serviceId, testCase.storageKey)
         expect(retrievedValue).toBeDefined()
-        expect(bytesToHex(retrievedValue!)).toBe(testCase.expectedHex)
+        expect(bytesToHex(retrievedValue!)).toBe(testCase.expectedHex as `0x${string}`)
 
         // Extract the Blake hash from the state key using the helper function
         // Verify determineSingleKeyType correctly identifies it as storage, NOT request
@@ -302,7 +302,7 @@ describe('Service Account Serialization', () => {
         
         // Verify the value is not truncated (only storage type has 'value' property)
         if (keyType.keyType === 'storage') {
-          expect(bytesToHex(keyType.value)).toBe(testCase.expectedHex)
+          expect(bytesToHex(keyType.value)).toBe(testCase.expectedHex as `0x${string}`)
           expect(keyType.value.length).toBe(testCase.storageValue.length)
         }
       }

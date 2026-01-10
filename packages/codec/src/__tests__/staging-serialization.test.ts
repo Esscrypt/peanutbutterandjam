@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { encodeValidatorSet, decodeValidatorSet } from '../state/validator-set'
 import type { ValidatorPublicKeys } from '@pbnjam/types'
 import { ConfigService } from '../../../../infra/node/services/config-service'

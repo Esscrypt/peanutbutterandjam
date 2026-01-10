@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { encodePrivileges, decodePrivileges } from '../state/privileges'
 import type { IConfigService, Privileges } from '@pbnjam/types'
 

@@ -108,6 +108,7 @@
       "name": "@pbnjam/audit",
       "version": "0.0.1",
       "dependencies": {
+        "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/codec": "workspace:*",
         "@pbnjam/core": "workspace:*",
         "@pbnjam/types": "workspace:*",
@@ -153,6 +154,7 @@
       "name": "@pbnjam/block-authoring",
       "version": "0.0.1",
       "dependencies": {
+        "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/core": "workspace:*",
         "@pbnjam/types": "workspace:*",
       },

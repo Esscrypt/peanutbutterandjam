@@ -4,7 +4,7 @@
  * Tests for Gray Paper compliant activity encoding/decoding
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import type { Activity, ValidatorStats, CoreStats, ServiceStats } from '@pbnjam/types'
 import { encodeActivity, decodeActivity } from '../state/activity'
 import type { IConfigService } from '@pbnjam/types'
