@@ -49,10 +49,40 @@ jobs:
         run: |
           sha256sum bin/fuzzer-target > bin/fuzzer-target.sha256
 
-      - name: Create release
-        id: create_release
+      - name: Checkout releases repository
+        uses: actions/checkout@v4
+        with:
+          repository: Esscrypt/pbnj-fuzzer-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          path: releases-repo
+          fetch-depth: 0
+
+      - name: Copy binaries to releases repository
+        run: |
+          mkdir -p releases-repo/bin
+          cp bin/fuzzer-target releases-repo/bin/
+          cp bin/fuzzer-target.sha256 releases-repo/bin/
+
+      - name: Commit and push to releases repository
+        run: |
+          cd releases-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add fuzzer-target binary from commit ${{ github.sha }}"
+            # Detect default branch and push
+            DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+            git push origin HEAD:$DEFAULT_BRANCH || git push origin HEAD:main || git push origin HEAD:master
+          fi
+
+      - name: Create release in releases repository
         uses: softprops/action-gh-release@v1
         with:
+          repository: Esscrypt/pbnj-fuzzer-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
           tag_name: fuzzer-target-${{ github.sha }}
           name: Fuzzer Target ${{ github.sha }}
           body: |
@@ -65,8 +95,6 @@ jobs:
           draft: false
           prerelease: true
           files: |
-            bin/fuzzer-target
-            bin/fuzzer-target.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            releases-repo/bin/fuzzer-target
+            releases-repo/bin/fuzzer-target.sha256
 
