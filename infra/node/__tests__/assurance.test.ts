@@ -17,32 +17,7 @@ import { AssuranceService } from '../services/assurance-service'
 import { ConfigService } from '../services/config-service'
 import { ValidatorSetManager } from '../services/validator-set'
 import { WorkReportService } from '../services/work-report-service'
-
-// Helper function to convert JSON numbers to bigints for WorkReport
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-    },
-    results: jsonReport.results.map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load.gas_used || 0),
-        imports: BigInt(r.refine_load.imports || 0),
-        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-        exports: BigInt(r.refine_load.exports || 0),
-      },
-    })),
-  }
-}
+import { convertJsonReportToWorkReport } from './test-utils'
 
 // Helper function to convert WorkReport bigints back to numbers for JSON comparison
 function convertWorkReportToJson(workReport: WorkReport): any {
@@ -77,6 +52,22 @@ const fullConfigService = new ConfigService('full')
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
+// Get test vector name from CLI argument: bun test <file> -- <test-vector-name>
+// Example: bun test assurance.test.ts -- assurances_for_stale_report-1
+// Bun test passes arguments after -- differently, so we check both process.argv and Bun's test filter
+const args = process.argv.slice(2)
+// Try to find test vector name in args (not starting with -)
+let testVectorArg = args.find((arg) => !arg.startsWith('-') && !arg.includes('/') && !arg.includes('\\'))
+// Also check environment variable as fallback
+if (!testVectorArg && process.env.TEST_VECTOR) {
+  testVectorArg = process.env.TEST_VECTOR
+}
+const SPECIFIC_TEST_VECTOR: string | null = testVectorArg || null
+
+console.log('Test execution settings:')
+console.log(`  Specific test vector: ${SPECIFIC_TEST_VECTOR || 'ALL'}`)
+console.log(`  Args: ${JSON.stringify(args)}`)
+
 /**
  * Load all test vector JSON files from the directory for a given configuration
  */
@@ -91,7 +82,7 @@ function loadTestVectors(
   const files = fs.readdirSync(testVectorsDir)
   const jsonFiles = files.filter((file) => file.endsWith('.json'))
 
-  return jsonFiles.map((file) => {
+  const allVectors = jsonFiles.map((file) => {
     const filePath = path.join(testVectorsDir, file)
     const content = fs.readFileSync(filePath, 'utf-8')
     const vector = JSON.parse(content) as AssuranceTestVector
@@ -101,6 +92,13 @@ function loadTestVectors(
       vector,
     }
   })
+
+  // Filter by specific test vector name if specified
+  if (SPECIFIC_TEST_VECTOR) {
+    return allVectors.filter((v) => v.name === SPECIFIC_TEST_VECTOR)
+  }
+
+  return allVectors
 }
 
 describe('Assurance Service - JAM Test Vectors', () => {
@@ -182,27 +180,14 @@ describe('Assurance Service - JAM Test Vectors', () => {
               }
             }
 
-            // Step 3: Validate assurances first
-            const [validationError, assuranceCounts] =
-              assuranceService.validateAssurances(
+            // Step 3: Process assurances (validate and apply)
+            const [transitionError, availableWorkReports] =
+              assuranceService.processAssurances(
                 vector.input.assurances,
                 vector.input.slot,
                 vector.input.parent,
                 configService,
               )
-
-            // Step 4: If validation passed, apply assurances
-            let transitionError: Error | null = null
-            if (!validationError && assuranceCounts) {
-              const [applyError] = assuranceService.applyAssurances(
-                assuranceCounts,
-                vector.input.slot,
-                configService,
-              )
-              transitionError = applyError || null
-            } else {
-              transitionError = validationError
-            }
 
             // Step 5: Check expected outcome
             if (vector.output && 'err' in vector.output && vector.output.err) {

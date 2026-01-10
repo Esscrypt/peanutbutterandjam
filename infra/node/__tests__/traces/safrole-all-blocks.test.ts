@@ -6,83 +6,35 @@
 
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { getTicketIdFromProof } from '@pbnjam/safrole'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
-  DEFAULT_JAM_VERSION,
-  type Block,
-  type BlockBody,
-  type BlockHeader,
   type BlockTraceTestVector,
 } from '@pbnjam/types'
-import { ClockService } from '../../services/clock-service'
 import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
+  convertJsonBlockToBlock,
+  getStartBlock,
+  initializeServices,
+  setupJamVersionAndTraceSubfolder,
+} from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 
-// Helper function to parse CLI arguments for starting block
-// Helper function to parse CLI arguments or environment variable for starting block
-// Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
-function getStartBlock(): number {
-  // Check environment variable first (most reliable with bun test)
-  const envStartBlock = process.env.START_BLOCK
-  if (envStartBlock) {
-    const startBlock = Number.parseInt(envStartBlock, 10)
-    if (!Number.isNaN(startBlock) && startBlock >= 1) {
-      return startBlock
-    }
-  }
-  
-  // Fallback to CLI argument (requires -- separator with bun test)
-  const args = process.argv.slice(2)
-  const startBlockIndex = args.indexOf('--start-block')
-  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
-    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
-    if (Number.isNaN(startBlock) || startBlock < 1) {
-      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
-    }
-    return startBlock
-  }
-  return 1 // Default to block 1 (genesis)
-}
 
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
+  
+  // Set JAM version and trace subfolder from environment variables
+  const { traceSubfolder } = setupJamVersionAndTraceSubfolder(configService, 'safrole')
 
   describe('Safrole Genesis', () => {
     it('should parse genesis.json from traces/safrole', async () => {
@@ -95,16 +47,6 @@ describe('Genesis Parse Tests', () => {
         genesisJsonPath,
       })
 
-      const srsFilePath = path.join(
-        WORKSPACE_ROOT,
-        'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-      )
-      const ringProver = new RingVRFProverWasm(srsFilePath)
-      const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-      await ringProver.init()
-      await ringVerifier.init()
-
       // Verify genesis JSON was loaded
       const [error, genesisJson] = genesisManager.getGenesisJson()
       expect(error).toBeUndefined()
@@ -114,291 +56,17 @@ describe('Genesis Parse Tests', () => {
         throw new Error('Genesis JSON not loaded')
       }
 
-      const eventBusService = new EventBusService()
-      const clockService = new ClockService({
-        configService: configService,
-        eventBusService: eventBusService,
-      })
-      const entropyService = new EntropyService(eventBusService)
-      const ticketService = new TicketService({
-        configService: configService,
-        eventBusService: eventBusService,
-        keyPairService: null,
-        entropyService: entropyService,
-        networkingService: null,
-        ce131TicketDistributionProtocol: null,
-        ce132TicketDistributionProtocol: null,
-        clockService: clockService,
-        prover: ringProver,
-        ringVerifier: ringVerifier,
-        validatorSetManager: null,
-      })
-      const sealKeyService = new SealKeyService({
-        configService,
-        eventBusService,
-        entropyService,
-        ticketService,
-      })
-
       // Extract validators from genesis.json header
-      const initialValidators = genesisJson.header?.epoch_mark?.validators || []
+      const initialValidators = (genesisJson.header?.epoch_mark?.validators || []).map((validator) => ({
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
+        bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
+        metadata: bytesToHex(new Uint8Array(128)),
+      }))
 
-    const validatorSetManager = new ValidatorSetManager({
-        eventBusService,
-        sealKeyService,
-        ringProver,
-        ticketService,
-        configService,
-        initialValidators: initialValidators.map((validator) => ({
-          bandersnatch: validator.bandersnatch,
-          ed25519: validator.ed25519,
-          bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
-          metadata: bytesToHex(new Uint8Array(128)),
-        })),
-      })
-      
-      ticketService.setValidatorSetManager(validatorSetManager)
-
-      const authQueueService = new AuthQueueService({
-        configService,
-      })
-
-      const disputesService = new DisputesService({
-        eventBusService: eventBusService,
-        configService: configService,
-        validatorSetManagerService: validatorSetManager,
-      })
-      const readyService = new ReadyService({
-        configService: configService,
-      })
-
-      const workReportService = new WorkReportService({
-        eventBus: eventBusService,
-        networkingService: null,
-        ce136WorkReportRequestProtocol: null,
-        validatorSetManager: validatorSetManager,
-        configService: configService,
-        entropyService: entropyService,
-        clockService: clockService,
-      })
-
-      const authPoolService = new AuthPoolService({
-        configService,
-        eventBusService: eventBusService,
-        workReportService: workReportService,
-        authQueueService: authQueueService,
-      })
-
-      const privilegesService = new PrivilegesService({
-        configService,
-      })
-
-
-      const serviceAccountsService = new ServiceAccountService({
-        eventBusService,
-        clockService,
-        networkingService: null,
-        preimageRequestProtocol: null,
-      })
-
-      const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-      const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-      const accumulatePVM = new AccumulatePVM({
-        hostFunctionRegistry,
-        accumulateHostFunctionRegistry,
-        configService: configService,
-        entropyService: entropyService,
-        pvmOptions: { gasCounter: 1_000_000n },
-        traceSubfolder: 'safrole',
-        useWasm: false,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
-      })
-
-      const accumulatedService = new AccumulationService({
-        configService: configService,
-        clockService: clockService,
-        serviceAccountsService: serviceAccountsService,
-        privilegesService: privilegesService,
-        validatorSetManager: validatorSetManager,
-        authQueueService: authQueueService,
-        accumulatePVM: accumulatePVM,
-        readyService: readyService,
-        statisticsService: statisticsService,
-      })
-            
-      const recentHistoryService = new RecentHistoryService({
-        eventBusService: eventBusService,
-        configService: configService,
-        accumulationService: accumulatedService,
-      })
-
-
-      const stateService = new StateService({
-        configService,
-        genesisManagerService: genesisManager,
-        validatorSetManager: validatorSetManager,
-        entropyService: entropyService,
-        ticketService: ticketService,
-        authQueueService: authQueueService,
-        authPoolService: authPoolService,
-        statisticsService: statisticsService,
-        disputesService: disputesService,
-        readyService: readyService,
-        accumulationService: accumulatedService,
-        workReportService: workReportService,
-        privilegesService: privilegesService,
-        serviceAccountsService: serviceAccountsService,
-        recentHistoryService: recentHistoryService,
-        sealKeyService: sealKeyService,
-        clockService: clockService,
-      })
-
-      const assuranceService = new AssuranceService({
-        configService: configService,
-        workReportService: workReportService,
-        validatorSetManager: validatorSetManager,
-        eventBusService: eventBusService,
-        sealKeyService: sealKeyService,
-        recentHistoryService: recentHistoryService,
-      })
-
-      const guarantorService = new GuarantorService({
-        configService: configService,
-        clockService: clockService,
-        entropyService: entropyService,
-        authPoolService: authPoolService,
-        networkService: null,
-        ce134WorkPackageSharingProtocol: null,
-        keyPairService: null,
-        workReportService: workReportService,
-        eventBusService: eventBusService,
-        validatorSetManager: validatorSetManager,
-        recentHistoryService: recentHistoryService,
-        serviceAccountService: serviceAccountsService,
-        statisticsService: statisticsService,
-        accumulationService: accumulatedService,
-      })
-
-      const blockImporterService = new BlockImporterService({
-        configService: configService,
-        eventBusService: eventBusService,
-        clockService: clockService,
-        recentHistoryService: recentHistoryService,
-        stateService: stateService,
-        serviceAccountService: serviceAccountsService,
-        disputesService: disputesService,
-        validatorSetManagerService: validatorSetManager,
-        entropyService: entropyService,
-        sealKeyService: sealKeyService, 
-        assuranceService: assuranceService,
-        guarantorService: guarantorService,
-        ticketService: ticketService,
-        statisticsService: statisticsService,
-        authPoolService: authPoolService,
-        accumulationService: accumulatedService,
-      })
-
-      // Set validatorSetManager on sealKeyService (needed for fallback key generation)
-      sealKeyService.setValidatorSetManager(validatorSetManager)
-      // SealKeyService epoch transition callback is registered in constructor
-      // ValidatorSetManager should be constructed before SealKeyService to ensure
-      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
-
-      // Start all services
-      // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
-      // so they work without explicit start(), but we start them for consistency
-      const [entropyStartError] = await entropyService.start()
-      expect(entropyStartError).toBeUndefined()
-      
-      const [validatorSetStartError] = await validatorSetManager.start()
-      expect(validatorSetStartError).toBeUndefined()
-      
-      const [startError] = await blockImporterService.start()
-      expect(startError).toBeUndefined()
-
-      // Helper function to convert JSON block to Block type
-      const convertJsonBlockToBlock = (jsonBlock: any): Block => {
-        const jsonHeader = jsonBlock.header
-        const jsonExtrinsic = jsonBlock.extrinsic
-
-        const blockHeader: BlockHeader = {
-          parent: jsonHeader.parent,
-          priorStateRoot: jsonHeader.parent_state_root,
-          extrinsicHash: jsonHeader.extrinsic_hash,
-          timeslot: BigInt(jsonHeader.slot),
-          epochMark: jsonHeader.epoch_mark
-            ? {
-                entropyAccumulator: jsonHeader.epoch_mark.entropy,
-                entropy1: jsonHeader.epoch_mark.tickets_entropy,
-                validators: jsonHeader.epoch_mark.validators.map((validator: any) => ({
-                  bandersnatch: validator.bandersnatch,
-                  ed25519: validator.ed25519,
-                })),
-              }
-            : null,
-          winnersMark: jsonHeader.tickets_mark
-            ? jsonHeader.tickets_mark.map((ticket: any) => ({
-                id: ticket.id,
-                entryIndex: BigInt(ticket.attempt)
-              }))
-            : null,
-          offendersMark: jsonHeader.offenders_mark || [],
-          authorIndex: BigInt(jsonHeader.author_index),
-          vrfSig: jsonHeader.entropy_source,
-          sealSig: jsonHeader.seal,
-        }
-
-        const blockBody: BlockBody = {
-          tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
-            entryIndex: BigInt(ticket.attempt),
-            proof: ticket.signature as Hex,
-            id: getTicketIdFromProof(hexToBytes(ticket.signature as Hex)),
-          })),
-          preimages: (jsonExtrinsic.preimages || []).map((preimage: any) => ({
-            requester: BigInt(preimage.requester),
-            blob: preimage.blob,
-          })),
-          guarantees: (jsonExtrinsic.guarantees || []).map((guarantee: any) => ({
-            report: guarantee.report,
-            slot: BigInt(guarantee.slot),
-            signatures: guarantee.signatures,
-          })),
-          assurances: jsonExtrinsic.assurances || [],
-          disputes: jsonExtrinsic.disputes
-            ? [
-                {
-                  verdicts: jsonExtrinsic.disputes.verdicts.map((verdict: any) => ({
-                    target: verdict.target,
-                    age: BigInt(verdict.age),
-                    votes: verdict.votes.map((vote: any) => ({
-                      vote: vote.vote,
-                      index: BigInt(vote.index),
-                      signature: vote.signature,
-                    })),
-                  })),
-                  culprits: jsonExtrinsic.disputes.culprits,
-                  faults: jsonExtrinsic.disputes.faults,
-                },
-              ]
-            : [
-                {
-                  verdicts: [],
-                  culprits: [],
-                  faults: [],
-                },
-              ],
-        }
-
-        return {
-          header: blockHeader,
-          body: blockBody,
-        }
-      }
+      // Initialize services using shared utility
+      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators)
+      const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service
       const parseStateKeyForDebug = (keyHex: Hex) => {
@@ -408,12 +76,13 @@ describe('Genesis Parse Tests', () => {
         }
         // Add type information for better debugging
         if ('chapterIndex' in parsedKey) {
+          if (parsedKey.chapterIndex === 0 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(s, h)' }
+          }
           if (parsedKey.chapterIndex === 255 && 'serviceId' in parsedKey) {
             return { ...parsedKey, type: 'C(255, s)' }
           }
           return { ...parsedKey, type: 'C(i)' }
-        } else if ('serviceId' in parsedKey && 'hash' in parsedKey) {
-          return { ...(parsedKey as { chapterIndex: number; serviceId: bigint; hash: string }), type: 'C(s, h)' }
         }
         return parsedKey
       }
@@ -421,6 +90,7 @@ describe('Genesis Parse Tests', () => {
       // Helper function to get chapter name
       const getChapterName = (chapterIndex: number): string => {
         const chapterNames: Record<number, string> = {
+          0: 'C(s, h) keyvals',
           1: 'authpool (α)',
           2: 'authqueue (φ)',
           3: 'recent (β)',
@@ -440,6 +110,24 @@ describe('Genesis Parse Tests', () => {
           255: 'service accounts',
         }
         return chapterNames[chapterIndex] || `unknown (${chapterIndex})`
+      }
+
+      // Helper function to truncate long hex strings for logging
+      const truncateHex = (hex: string, maxLength: number = 100) => {
+        if (hex.length <= maxLength) return hex
+        return `${hex.slice(0, maxLength)}... (${hex.length} chars total)`
+      }
+
+      // Helper function to create a JSON stringify replacer that truncates long hex strings
+      const createTruncatingReplacer = (maxHexLength: number = 200) => {
+        return (key: string, value: any) => {
+          if (typeof value === 'string' && value.startsWith('0x') && value.length > maxHexLength) {
+            return truncateHex(value, maxHexLength)
+          }
+          if (typeof value === 'bigint') return value.toString()
+          if (value === undefined) return null
+          return value
+        }
       }
 
       // Helper function to verify post-state
@@ -509,11 +197,14 @@ describe('Genesis Parse Tests', () => {
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
-              console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
+            } else if ('serviceId' in keyInfo && !('error' in keyInfo) && !('chapterIndex' in keyInfo)) {
+              const serviceKeyInfo = keyInfo as { serviceId: bigint; type?: string; hash?: Hex }
+              console.error(`Service ID: ${serviceKeyInfo.serviceId}`)
+              if ('type' in serviceKeyInfo && serviceKeyInfo.type) {
+                console.error(`Key Type: ${serviceKeyInfo.type}`)
+              }
+              if ('hash' in serviceKeyInfo && serviceKeyInfo.hash) {
+                console.error(`Hash: ${serviceKeyInfo.hash}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
@@ -532,6 +223,7 @@ describe('Genesis Parse Tests', () => {
           if (keyval.value !== expectedValue) {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
             let decodedExpected: any = null
             let decodedActual: any = null
 
@@ -539,7 +231,24 @@ describe('Genesis Parse Tests', () => {
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
               const chapterIndex = keyInfo.chapterIndex
               try {
-                // Decode expected value from test vector using the same decoder as StateService
+                // Handle C(s, h) keys (chapterIndex: 0) - these are raw keyvals, not decoded
+                if (chapterIndex === 0 && 'serviceId' in keyInfo) {
+                  // For C(s, h) keys, get the keyvals object and look up the specific key
+                  const keyvals = stateService.getStateComponent(
+                    chapterIndex,
+                    keyInfo.serviceId,
+                  ) as Record<Hex, Hex>
+                  decodedActual = {
+                    keyvals: keyvals,
+                    specificKey: keyval.key,
+                    value: keyvals?.[keyval.key] || undefined,
+                  }
+                  decodedExpected = {
+                    key: keyval.key,
+                    value: keyval.value,
+                  }
+                } else {
+                  // For regular chapter keys, decode the value
                 const expectedBytes = hexToBytes(keyval.value as Hex)
                 // Access private stateTypeRegistry to get the decoder
                 const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
@@ -562,6 +271,7 @@ describe('Genesis Parse Tests', () => {
                   chapterIndex,
                   'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
                 )
+                }
               } catch (error) {
                 decodedExpected = decodedExpected || { 
                   error: error instanceof Error ? error.message : String(error),
@@ -578,34 +288,94 @@ describe('Genesis Parse Tests', () => {
             console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
             console.error('=====================================')
             console.error(`State Key: ${keyval.key}`)
-            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+            if ('error' in keyInfo) {
+              console.error(`Key Info Error: ${keyInfo.error}`)
+            } else if ('chapterIndex' in keyInfo) {
               console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
+              if ('type' in keyInfo) {
               console.error(`Key Type: ${keyInfo.type}`)
+              }
               if ('serviceId' in keyInfo) {
                 console.error(`Service ID: ${keyInfo.serviceId}`)
               }
-            } else if ('serviceId' in keyInfo) {
-              console.error(`Service ID: ${keyInfo.serviceId}`)
-              console.error(`Key Type: ${keyInfo.type}`)
-              if ('hash' in keyInfo) {
-                console.error(`Hash: ${keyInfo.hash}`)
+            } else if ('serviceId' in keyInfo && !('error' in keyInfo) && !('chapterIndex' in keyInfo)) {
+              const serviceKeyInfo = keyInfo as { serviceId: bigint; type?: string; hash?: Hex }
+              console.error(`Service ID: ${serviceKeyInfo.serviceId}`)
+              if (serviceKeyInfo.type) {
+                console.error(`Key Type: ${serviceKeyInfo.type}`)
+              }
+              if (serviceKeyInfo.hash) {
+                console.error(`Hash: ${serviceKeyInfo.hash}`)
               }
             } else {
               console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
             }
-            console.error(`Expected Value (hex): ${keyval.value}`)
-            console.error(`Actual Value (hex): ${expectedValue}`)
+            console.error(`Expected Value (hex): ${truncateHex(keyval.value)}`)
+            console.error(`Actual Value (hex): ${truncateHex(expectedValue || '')}`)
             if (decodedExpected) {
-              console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedExpected) {
+                console.error(`\nDecoded Expected Value:`, {
+                  key: decodedExpected.key || keyval.key,
+                  value: decodedExpected.value || keyval.value,
+                  keyvalsCount: Object.keys(decodedExpected.keyvals || {}).length,
+                })
+              } else {
+                console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, createTruncatingReplacer(), 2))
+              }
             }
             if (decodedActual) {
-              console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, (_, v) =>
-                typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
-                2))
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedActual) {
+                console.error(`\nDecoded Actual Value:`, {
+                  specificKey: decodedActual.specificKey || keyval.key,
+                  value: decodedActual.value || expectedValue,
+                  keyvalsCount: Object.keys(decodedActual.keyvals || {}).length,
+                  hasExpectedKey: decodedActual.keyvals ? keyval.key in decodedActual.keyvals : false,
+                })
+              } else {
+                console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, createTruncatingReplacer(), 2))
+              }
             }
             console.error('=====================================\n')
+            
+            // Dump expected and actual values to files for easier comparison
+            const mismatchDir = path.join(WORKSPACE_ROOT, '.state-mismatches')
+            if (!existsSync(mismatchDir)) {
+              mkdirSync(mismatchDir, { recursive: true })
+            }
+            const keyShort = keyval.key.slice(0, 20)
+            const chapterStr = 'chapterIndex' in keyInfo && !keyInfo.error ? `chapter${keyInfo.chapterIndex}` : 'unknown'
+            const filePrefix = `block${blockNumber.toString().padStart(8, '0')}-${chapterStr}-${keyShort}`
+            
+            // Write hex values
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-expected.hex`), keyval.value)
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-actual.hex`), expectedValue || '')
+            
+            // Write binary values
+            writeFileSync(path.join(mismatchDir, `${filePrefix}-expected.bin`), hexToBytes(keyval.value as Hex))
+            if (expectedValue) {
+              writeFileSync(path.join(mismatchDir, `${filePrefix}-actual.bin`), hexToBytes(expectedValue as Hex))
+            }
+            
+            // Write decoded JSON values
+            if (decodedExpected) {
+              writeFileSync(
+                path.join(mismatchDir, `${filePrefix}-expected.json`),
+                JSON.stringify(decodedExpected, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2)
+              )
+            }
+            if (decodedActual) {
+              writeFileSync(
+                path.join(mismatchDir, `${filePrefix}-actual.json`),
+                JSON.stringify(decodedActual, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2)
+              )
+            }
+            console.log(`📁 Mismatch files dumped to: ${mismatchDir}/${filePrefix}-*`)
           }
           expect(keyval.value).toBe(expectedValue)
         }
@@ -656,9 +426,7 @@ describe('Genesis Parse Tests', () => {
           if (blockNumber === startBlock) {
             // Set pre_state from test vector BEFORE validating the block
             // This ensures entropy3 and other state components match what was used to create the seal signature
-            // Use JAM version 0.7.1+ for safrole traces (includes registrar in privileges and discriminator in service accounts)
-            const jamVersion = DEFAULT_JAM_VERSION // v0.7.2
-            configService.jamVersion = jamVersion
+            // JAM version is already set by setupJamVersionAndTraceSubfolder above
             if (blockJsonData.pre_state?.keyvals) {
               const [setStateError] = stateService.setState(blockJsonData.pre_state.keyvals)
               if (setStateError) {

@@ -15,48 +15,19 @@ import * as path from 'node:path'
 import { readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
 import { decodeRecent } from '@pbnjam/codec'
-import { getTicketIdFromProof } from '@pbnjam/safrole'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
-  type Block,
-  type BlockBody,
-  type BlockHeader,
   type BlockTraceTestVector,
-  type WorkReport,
 } from '@pbnjam/types'
-import { ClockService } from '../../services/clock-service'
 import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-
+  convertJsonBlockToBlock,
+  initializeServices,
+} from '../test-utils'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
@@ -92,110 +63,6 @@ function getTracePath(): string | null {
   return null
 }
 
-// Helper function to convert JSON work report to WorkReport type
-const convertJsonReportToWorkReport = (jsonReport: any): WorkReport => {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-    },
-    results: jsonReport.results.map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load.gas_used || 0),
-        imports: BigInt(r.refine_load.imports || 0),
-        extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-        exports: BigInt(r.refine_load.exports || 0),
-      },
-    })),
-  }
-}
-
-// Helper function to convert JSON block to Block type
-const convertJsonBlockToBlock = (jsonBlock: any): Block => {
-  const jsonHeader = jsonBlock.header
-  const jsonExtrinsic = jsonBlock.extrinsic
-
-  const blockHeader: BlockHeader = {
-    parent: jsonHeader.parent,
-    priorStateRoot: jsonHeader.parent_state_root,
-    extrinsicHash: jsonHeader.extrinsic_hash,
-    timeslot: BigInt(jsonHeader.slot),
-    epochMark: jsonHeader.epoch_mark
-      ? {
-          entropyAccumulator: jsonHeader.epoch_mark.entropy,
-          entropy1: jsonHeader.epoch_mark.tickets_entropy,
-          validators: jsonHeader.epoch_mark.validators.map((validator: any) => ({
-            bandersnatch: validator.bandersnatch,
-            ed25519: validator.ed25519,
-          })),
-        }
-      : null,
-    winnersMark: jsonHeader.tickets_mark
-      ? jsonHeader.tickets_mark.map((ticket: any) => ({
-          id: ticket.id,
-          entryIndex: BigInt(ticket.attempt)
-        }))
-      : null,
-    offendersMark: jsonHeader.offenders_mark || [],
-    authorIndex: BigInt(jsonHeader.author_index),
-    vrfSig: jsonHeader.entropy_source,
-    sealSig: jsonHeader.seal,
-  }
-
-  const blockBody: BlockBody = {
-    tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
-      entryIndex: BigInt(ticket.attempt),
-      proof: ticket.signature as Hex,
-      id: getTicketIdFromProof(hexToBytes(ticket.signature as Hex)),
-    })),
-    preimages: (jsonExtrinsic.preimages || []).map((preimage: any) => ({
-      requester: BigInt(preimage.requester),
-      blob: preimage.blob,
-    })),
-    guarantees: (jsonExtrinsic.guarantees || []).map((guarantee: any) => ({
-      report: convertJsonReportToWorkReport(guarantee.report),
-      slot: BigInt(guarantee.slot),
-      signatures: guarantee.signatures,
-    })),
-    assurances: jsonExtrinsic.assurances || [],
-    disputes: jsonExtrinsic.disputes
-      ? [
-          {
-            verdicts: jsonExtrinsic.disputes.verdicts.map((verdict: any) => ({
-              target: verdict.target,
-              age: BigInt(verdict.age),
-              votes: verdict.votes.map((vote: any) => ({
-                vote: vote.vote,
-                index: BigInt(vote.index),
-                signature: vote.signature,
-              })),
-            })),
-            culprits: jsonExtrinsic.disputes.culprits,
-            faults: jsonExtrinsic.disputes.faults,
-          },
-        ]
-      : [
-          {
-            verdicts: [],
-            culprits: [],
-            faults: [],
-          },
-        ],
-  }
-
-  return {
-    header: blockHeader,
-    body: blockBody,
-  }
-}
 
 describe('JAM Conformance Single Trace', () => {
   const configService = new ConfigService('tiny')
@@ -250,47 +117,11 @@ describe('JAM Conformance Single Trace', () => {
       genesisJsonPath: existsSync(genesisJsonPath) ? genesisJsonPath : undefined,
     })
 
-    const srsFilePath = path.join(
-      WORKSPACE_ROOT,
-      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
-    const ringProver = new RingVRFProverWasm(srsFilePath)
-    const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-    await ringProver.init()
-    await ringVerifier.init()
-
     // Verify genesis JSON was loaded
     const [error, genesisJson] = genesisManager.getGenesisJson()
     if (error) {
       console.warn(`⚠️  Genesis JSON not found, using defaults: ${error.message}`)
     }
-
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({
-      configService: configService,
-      eventBusService: eventBusService,
-    })
-    const entropyService = new EntropyService(eventBusService)
-    const ticketService = new TicketService({
-      configService: configService,
-      eventBusService: eventBusService,
-      keyPairService: null,
-      entropyService: entropyService,
-      networkingService: null,
-      ce131TicketDistributionProtocol: null,
-      ce132TicketDistributionProtocol: null,
-      clockService: clockService,
-      prover: ringProver,
-      ringVerifier: ringVerifier,
-      validatorSetManager: null,
-    })
-    const sealKeyService = new SealKeyService({
-      configService,
-      eventBusService,
-      entropyService,
-      ticketService,
-    })
 
     // Extract validators from genesis.json or trace data
     const initialValidators = genesisJson?.header?.epoch_mark?.validators || 
@@ -298,179 +129,20 @@ describe('JAM Conformance Single Trace', () => {
                                 kv.key === '0x08000000000000000000000000000000000000000000000000000000000000'
                               ) ? [] : []
 
-    const validatorSetManager = new ValidatorSetManager({
-      eventBusService,
-      sealKeyService,
-      ringProver,
-      ticketService,
-      configService,
-      initialValidators: initialValidators.map((validator: any) => ({
+    // Initialize services using shared utility
+    const services = await initializeServices(
+      'tiny',
+      `jam-conformance/${relativePathWithoutExt}`,
+      genesisManager,
+      initialValidators.map((validator: any) => ({
         bandersnatch: validator.bandersnatch,
         ed25519: validator.ed25519,
-        bls: bytesToHex(new Uint8Array(144)),
-        metadata: bytesToHex(new Uint8Array(128)),
+        bls: bytesToHex(new Uint8Array(144)) as Hex,
+        metadata: bytesToHex(new Uint8Array(128)) as Hex,
       })),
-    })
-    
-    ticketService.setValidatorSetManager(validatorSetManager)
+    )
 
-    const authQueueService = new AuthQueueService({
-      configService,
-    })
-
-    const disputesService = new DisputesService({
-      eventBusService: eventBusService,
-      configService: configService,
-      validatorSetManagerService: validatorSetManager,
-    })
-    const readyService = new ReadyService({
-      configService: configService,
-    })
-
-    const workReportService = new WorkReportService({
-      eventBus: eventBusService,
-      networkingService: null,
-      ce136WorkReportRequestProtocol: null,
-      validatorSetManager: validatorSetManager,
-      configService: configService,
-      entropyService: entropyService,
-      clockService: clockService,
-    })
-
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService: eventBusService,
-      workReportService: workReportService,
-      authQueueService: authQueueService,
-    })
-
-    const privilegesService = new PrivilegesService({
-      configService,
-    })
-
-    const serviceAccountsService = new ServiceAccountService({
-      eventBusService,
-      clockService,
-      networkingService: null,
-      preimageRequestProtocol: null,
-    })
-
-    const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-    
-    // Always dump traces to the trace-specific directory, preserving subdirectory structure
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: false,
-      traceSubfolder: `jam-conformance/${relativePathWithoutExt}`,
-    })
-
-    const statisticsService = new StatisticsService({
-      eventBusService: eventBusService,
-      configService: configService,
-      clockService: clockService,
-    })
-
-    const accumulatedService = new AccumulationService({
-      configService: configService,
-      clockService: clockService,
-      serviceAccountsService: serviceAccountsService,
-      privilegesService: privilegesService,
-      validatorSetManager: validatorSetManager,
-      authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
-      readyService: readyService,
-      statisticsService: statisticsService,
-    })
-          
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService: eventBusService,
-      configService: configService,
-      accumulationService: accumulatedService,
-    })
-    recentHistoryService.start()
-
-    const stateService = new StateService({
-      configService,
-      genesisManagerService: genesisManager,
-      validatorSetManager: validatorSetManager,
-      entropyService: entropyService,
-      ticketService: ticketService,
-      authQueueService: authQueueService,
-      authPoolService: authPoolService,
-      statisticsService: statisticsService,
-      disputesService: disputesService,
-      readyService: readyService,
-      accumulationService: accumulatedService,
-      workReportService: workReportService,
-      privilegesService: privilegesService,
-      serviceAccountsService: serviceAccountsService,
-      recentHistoryService: recentHistoryService,
-      sealKeyService: sealKeyService,
-      clockService: clockService,
-    })
-
-    const assuranceService = new AssuranceService({
-      configService: configService,
-      workReportService: workReportService,
-      validatorSetManager: validatorSetManager,
-      eventBusService: eventBusService,
-      sealKeyService: sealKeyService,
-      recentHistoryService: recentHistoryService,
-    })
-
-    const guarantorService = new GuarantorService({
-      configService: configService,
-      clockService: clockService,
-      entropyService: entropyService,
-      authPoolService: authPoolService,
-      networkService: null,
-      ce134WorkPackageSharingProtocol: null,
-      keyPairService: null,
-      workReportService: workReportService,
-      eventBusService: eventBusService,
-      validatorSetManager: validatorSetManager,
-      recentHistoryService: recentHistoryService,
-      serviceAccountService: serviceAccountsService,
-      statisticsService: statisticsService,
-      stateService: stateService,
-      accumulationService: accumulatedService,
-    })
-
-    const blockImporterService = new BlockImporterService({
-      configService: configService,
-      eventBusService: eventBusService,
-      clockService: clockService,
-      recentHistoryService: recentHistoryService,
-      stateService: stateService,
-      serviceAccountService: serviceAccountsService,
-      disputesService: disputesService,
-      validatorSetManagerService: validatorSetManager,
-      entropyService: entropyService,
-      sealKeyService: sealKeyService,
-      assuranceService: assuranceService,
-      guarantorService: guarantorService,
-      ticketService: ticketService,
-      statisticsService: statisticsService,
-      authPoolService: authPoolService,
-      accumulationService: accumulatedService,
-    })
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
-
-    // Start all services
-    const [entropyStartError] = await entropyService.start()
-    expect(entropyStartError).toBeUndefined()
-    
-    const [validatorSetStartError] = await validatorSetManager.start()
-    expect(validatorSetStartError).toBeUndefined()
-    
-    const [startError] = await blockImporterService.start()
-    expect(startError).toBeUndefined()
+    const { stateService, blockImporterService, recentHistoryService } = services
 
     // Set pre-state from trace
     if (traceData.pre_state?.keyvals) {

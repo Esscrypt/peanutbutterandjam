@@ -16,6 +16,7 @@ import type { BlockBody, BlockHeader, WorkReport, StatisticsTestVector } from '@
 import { ConfigService } from '../services/config-service'
 import { StatisticsService } from '../services/statistics-service'
 import { ClockService } from '../services/clock-service'
+import { convertJsonReportToWorkReport } from './test-utils'
 
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
@@ -36,32 +37,6 @@ function loadStatisticsVectors(
     const vector = JSON.parse(content) as StatisticsTestVector
     return { name: file.replace('.json', ''), vector }
   })
-}
-
-// Helper: convert JSON WorkReport (numbers) to WorkReport with bigint fields where required
-function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
-  return {
-    ...jsonReport,
-    core_index: BigInt(jsonReport.core_index || 0),
-    auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-    context: {
-      ...jsonReport.context,
-      lookup_anchor_slot: BigInt(jsonReport.context?.lookup_anchor_slot || 0),
-    },
-    results: (jsonReport.results || []).map((r: any) => ({
-      ...r,
-      service_id: BigInt(r.service_id || 0),
-      accumulate_gas: BigInt(r.accumulate_gas || 0),
-      refine_load: {
-        ...r.refine_load,
-        gas_used: BigInt(r.refine_load?.gas_used || 0),
-        imports: BigInt(r.refine_load?.imports || 0),
-        extrinsic_count: BigInt(r.refine_load?.extrinsic_count || 0),
-        extrinsic_size: BigInt(r.refine_load?.extrinsic_size || 0),
-        exports: BigInt(r.refine_load?.exports || 0),
-      },
-    })),
-  }
 }
 
 describe('Statistics Service - JAM Test Vectors', () => {

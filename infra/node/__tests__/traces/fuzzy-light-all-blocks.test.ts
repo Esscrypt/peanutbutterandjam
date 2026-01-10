@@ -12,22 +12,8 @@ import * as path from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
@@ -37,100 +23,26 @@ import {
   setServicePreimageValue,
   setServiceRequestValue,
 } from '@pbnjam/codec'
-import { getTicketIdFromProof } from '@pbnjam/safrole'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import {
-  DEFAULT_JAM_VERSION,
-  type Block,
-  type BlockBody,
-  type BlockHeader,
   type BlockTraceTestVector,
-  type JamVersion,
-  type WorkReport,
 } from '@pbnjam/types'
-import { ClockService } from '../../services/clock-service'
 import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { BlockImporterService } from '../../services/block-importer-service'
-import { AssuranceService } from '../../services/assurance-service'
-import { GuarantorService } from '../../services/guarantor-service'
-import { StatisticsService } from '../../services/statistics-service'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+  convertJsonBlockToBlock,
+  getStartBlock,
+  getStopBlock,
+  initializeServices,
+  setupJamVersionAndTraceSubfolder,
+} from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
-// Helper function to parse CLI arguments or environment variable for starting block
-// Usage: START_BLOCK=50 bun test ... OR bun test ... -- --start-block 50
-function getStartBlock(): number {
-  // Check environment variable first (most reliable with bun test)
-  const envStartBlock = process.env.START_BLOCK
-  if (envStartBlock) {
-    const startBlock = Number.parseInt(envStartBlock, 10)
-    if (!Number.isNaN(startBlock) && startBlock >= 1) {
-      return startBlock
-    }
-  }
-  
-  // Fallback to CLI argument (requires -- separator with bun test)
-  const args = process.argv.slice(2)
-  const startBlockIndex = args.indexOf('--start-block')
-  if (startBlockIndex !== -1 && startBlockIndex + 1 < args.length) {
-    const startBlock = Number.parseInt(args[startBlockIndex + 1]!, 10)
-    if (Number.isNaN(startBlock) || startBlock < 1) {
-      throw new Error(`Invalid --start-block argument: ${args[startBlockIndex + 1]}. Must be a number >= 1`)
-    }
-    return startBlock
-  }
-  return 1 // Default to block 1 (genesis)
-}
-
-// Helper function to parse CLI arguments or environment variable for stopping block
-// Usage: STOP_BLOCK=50 bun test ... to stop after processing block 50
-function getStopBlock(): number | undefined {
-  // Check environment variable
-  const envStopBlock = process.env.STOP_BLOCK
-  if (envStopBlock) {
-    const stopBlock = Number.parseInt(envStopBlock, 10)
-    if (!Number.isNaN(stopBlock) && stopBlock >= 1) {
-      return stopBlock
-    }
-  }
-  return undefined // No stop block by default
-}
-
-// Helper function to parse JAM version from environment variable or string
-// Format: "0.7.0", "0.7.2", etc.
-function parseJamVersion(versionStr?: string): JamVersion {
-  if (!versionStr) {
-    return DEFAULT_JAM_VERSION
-  }
-  
-  const parts = versionStr.split('.').map(s => Number.parseInt(s, 10))
-  if (parts.length !== 3 || parts.some(isNaN)) {
-    console.warn(`⚠️  Invalid JAM version format: "${versionStr}", using default ${DEFAULT_JAM_VERSION.major}.${DEFAULT_JAM_VERSION.minor}.${DEFAULT_JAM_VERSION.patch}`)
-    return DEFAULT_JAM_VERSION
-  }
-  
-  return {
-    major: parts[0]!,
-    minor: parts[1]!,
-    patch: parts[2]!,
-  }
-}
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
   
-  // Set JAM version from environment variable (GP_VERSION) or default to 0.7.2
-  const gpVersion = process.env.GP_VERSION || process.env.JAM_VERSION
-  const jamVersion = parseJamVersion(gpVersion)
-  configService.jamVersion = jamVersion
-  console.log(`📋 Using JAM version: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}${gpVersion ? ` (from ${process.env.GP_VERSION ? 'GP_VERSION' : 'JAM_VERSION'})` : ' (default)'}`)
+  // Set JAM version and trace subfolder from environment variables
+  const { traceSubfolder } = setupJamVersionAndTraceSubfolder(configService, 'fuzzy_light')
 
   describe('Safrole Genesis', () => {
     it('should parse genesis.json from traces/fuzzy_light', async () => {
@@ -143,16 +55,6 @@ describe('Genesis Parse Tests', () => {
         genesisJsonPath,
       })
 
-      const srsFilePath = path.join(
-        WORKSPACE_ROOT,
-        'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-      )
-      const ringProver = new RingVRFProverWasm(srsFilePath)
-      const ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-      await ringProver.init()
-      await ringVerifier.init()
-
       // Verify genesis JSON was loaded
       const [error, genesisJson] = genesisManager.getGenesisJson()
       expect(error).toBeUndefined()
@@ -162,320 +64,17 @@ describe('Genesis Parse Tests', () => {
         throw new Error('Genesis JSON not loaded')
       }
 
-      const eventBusService = new EventBusService()
-      const clockService = new ClockService({
-        configService: configService,
-        eventBusService: eventBusService,
-      })
-      const entropyService = new EntropyService(eventBusService)
-      const ticketService = new TicketService({
-        configService: configService,
-        eventBusService: eventBusService,
-        keyPairService: null,
-        entropyService: entropyService,
-        networkingService: null,
-        ce131TicketDistributionProtocol: null,
-        ce132TicketDistributionProtocol: null,
-        clockService: clockService,
-        prover: ringProver,
-        ringVerifier: ringVerifier,
-        validatorSetManager: null,
-      })
-      const sealKeyService = new SealKeyService({
-        configService,
-        eventBusService,
-        entropyService,
-        ticketService,
-      })
-
       // Extract validators from genesis.json header
-      const initialValidators = genesisJson.header?.epoch_mark?.validators || []
+      const initialValidators = (genesisJson.header?.epoch_mark?.validators || []).map((validator) => ({
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
+        bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
+        metadata: bytesToHex(new Uint8Array(128)),
+      }))
 
-    const validatorSetManager = new ValidatorSetManager({
-        eventBusService,
-        sealKeyService,
-        ringProver,
-        ticketService,
-        configService,
-        initialValidators: initialValidators.map((validator) => ({
-          bandersnatch: validator.bandersnatch,
-          ed25519: validator.ed25519,
-          bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
-          metadata: bytesToHex(new Uint8Array(128)),
-        })),
-      })
-      
-      ticketService.setValidatorSetManager(validatorSetManager)
-
-      const authQueueService = new AuthQueueService({
-        configService,
-      })
-
-      const disputesService = new DisputesService({
-        eventBusService: eventBusService,
-        configService: configService,
-        validatorSetManagerService: validatorSetManager,
-      })
-      const readyService = new ReadyService({
-        configService: configService,
-      })
-
-      const workReportService = new WorkReportService({
-        eventBus: eventBusService,
-        networkingService: null,
-        ce136WorkReportRequestProtocol: null,
-        validatorSetManager: validatorSetManager,
-        configService: configService,
-        entropyService: entropyService,
-        clockService: clockService,
-      })
-
-      const authPoolService = new AuthPoolService({
-        configService,
-        eventBusService: eventBusService,
-        workReportService: workReportService,
-        authQueueService: authQueueService,
-      })
-
-      const privilegesService = new PrivilegesService({
-        configService,
-      })
-
-
-      const serviceAccountsService = new ServiceAccountService({
-        eventBusService,
-        clockService,
-        networkingService: null,
-        preimageRequestProtocol: null,
-      })
-
-      const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountsService, configService)
-      const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(configService)
-      // Only dump traces if DUMP_TRACES=true is set
-      const shouldDumpTraces = process.env.DUMP_TRACES === 'true'
-      const accumulatePVM = new AccumulatePVM({
-        hostFunctionRegistry,
-        accumulateHostFunctionRegistry,
-        configService: configService,
-        entropyService: entropyService,
-        pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-        useWasm: false,
-        traceSubfolder: shouldDumpTraces ? 'fuzzy_light' : undefined,
-      })
-
-      const statisticsService = new StatisticsService({
-        eventBusService: eventBusService,
-        configService: configService,
-        clockService: clockService,
-      })
-
-      const accumulatedService = new AccumulationService({
-        configService: configService,
-        clockService: clockService,
-        serviceAccountsService: serviceAccountsService,
-        privilegesService: privilegesService,
-        validatorSetManager: validatorSetManager,
-        authQueueService: authQueueService,
-        accumulatePVM: accumulatePVM,
-        readyService: readyService,
-        statisticsService: statisticsService,
-      })
-            
-      const recentHistoryService = new RecentHistoryService({
-        eventBusService: eventBusService,
-        configService: configService,
-        accumulationService: accumulatedService,
-      })
-      recentHistoryService.start()
-
-      const stateService = new StateService({
-        configService,
-        genesisManagerService: genesisManager,
-        validatorSetManager: validatorSetManager,
-        entropyService: entropyService,
-        ticketService: ticketService,
-        authQueueService: authQueueService,
-        authPoolService: authPoolService,
-        statisticsService: statisticsService,
-        disputesService: disputesService,
-        readyService: readyService,
-        accumulationService: accumulatedService,
-        workReportService: workReportService,
-        privilegesService: privilegesService,
-        serviceAccountsService: serviceAccountsService,
-        recentHistoryService: recentHistoryService,
-        sealKeyService: sealKeyService,
-        clockService: clockService,
-      })
-
-      const assuranceService = new AssuranceService({
-        configService: configService,
-        workReportService: workReportService,
-        validatorSetManager: validatorSetManager,
-        eventBusService: eventBusService,
-        sealKeyService: sealKeyService,
-        recentHistoryService: recentHistoryService,
-      })
-
-      const guarantorService = new GuarantorService({
-        configService: configService,
-        clockService: clockService,
-        entropyService: entropyService,
-        authPoolService: authPoolService,
-        networkService: null,
-        ce134WorkPackageSharingProtocol: null,
-        keyPairService: null,
-        workReportService: workReportService,
-        eventBusService: eventBusService,
-        validatorSetManager: validatorSetManager,
-        recentHistoryService: recentHistoryService,
-        serviceAccountService: serviceAccountsService,
-        statisticsService: statisticsService,
-        stateService: stateService,
-        accumulationService: accumulatedService,
-      })
-
-      const blockImporterService = new BlockImporterService({
-        configService: configService,
-        eventBusService: eventBusService,
-        clockService: clockService,
-        recentHistoryService: recentHistoryService,
-        stateService: stateService,
-        serviceAccountService: serviceAccountsService,
-        disputesService: disputesService,
-        validatorSetManagerService: validatorSetManager,
-        entropyService: entropyService,
-        sealKeyService: sealKeyService,
-        assuranceService: assuranceService,
-        guarantorService: guarantorService,
-        ticketService: ticketService,
-        statisticsService: statisticsService,
-        authPoolService: authPoolService,
-        accumulationService: accumulatedService,
-      })
-
-      // Set validatorSetManager on sealKeyService (needed for fallback key generation)
-      sealKeyService.setValidatorSetManager(validatorSetManager)
-      // SealKeyService epoch transition callback is registered in constructor
-      // ValidatorSetManager should be constructed before SealKeyService to ensure
-      // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
-
-      // Start all services
-      // Note: EntropyService and ValidatorSetManager register their callbacks in constructors,
-      // so they work without explicit start(), but we start them for consistency
-      const [entropyStartError] = await entropyService.start()
-      expect(entropyStartError).toBeUndefined()
-      
-      const [validatorSetStartError] = await validatorSetManager.start()
-      expect(validatorSetStartError).toBeUndefined()
-      
-      const [startError] = await blockImporterService.start()
-      expect(startError).toBeUndefined()
-
-      // Helper function to convert JSON work report to WorkReport type
-      const convertJsonReportToWorkReport = (jsonReport: any): WorkReport => {
-        return {
-          ...jsonReport,
-          core_index: BigInt(jsonReport.core_index || 0),
-          auth_gas_used: BigInt(jsonReport.auth_gas_used || 0),
-          context: {
-            ...jsonReport.context,
-            lookup_anchor_slot: BigInt(jsonReport.context.lookup_anchor_slot || 0),
-          },
-          results: jsonReport.results.map((r: any) => ({
-            ...r,
-            service_id: BigInt(r.service_id || 0),
-            accumulate_gas: BigInt(r.accumulate_gas || 0),
-            refine_load: {
-              ...r.refine_load,
-              gas_used: BigInt(r.refine_load.gas_used || 0),
-              imports: BigInt(r.refine_load.imports || 0),
-              extrinsic_count: BigInt(r.refine_load.extrinsic_count || 0),
-              extrinsic_size: BigInt(r.refine_load.extrinsic_size || 0),
-              exports: BigInt(r.refine_load.exports || 0),
-            },
-          })),
-        }
-      }
-
-      // Helper function to convert JSON block to Block type
-      const convertJsonBlockToBlock = (jsonBlock: any): Block => {
-        const jsonHeader = jsonBlock.header
-        const jsonExtrinsic = jsonBlock.extrinsic
-
-        const blockHeader: BlockHeader = {
-          parent: jsonHeader.parent,
-          priorStateRoot: jsonHeader.parent_state_root,
-          extrinsicHash: jsonHeader.extrinsic_hash,
-          timeslot: BigInt(jsonHeader.slot),
-          epochMark: jsonHeader.epoch_mark
-            ? {
-                entropyAccumulator: jsonHeader.epoch_mark.entropy,
-                entropy1: jsonHeader.epoch_mark.tickets_entropy,
-                validators: jsonHeader.epoch_mark.validators.map((validator: any) => ({
-                  bandersnatch: validator.bandersnatch,
-                  ed25519: validator.ed25519,
-                })),
-              }
-            : null,
-          winnersMark: jsonHeader.tickets_mark
-            ? jsonHeader.tickets_mark.map((ticket: any) => ({
-                id: ticket.id,
-                entryIndex: BigInt(ticket.attempt)
-              }))
-            : null,
-          offendersMark: jsonHeader.offenders_mark || [],
-          authorIndex: BigInt(jsonHeader.author_index),
-          vrfSig: jsonHeader.entropy_source,
-          sealSig: jsonHeader.seal,
-        }
-
-        const blockBody: BlockBody = {
-          tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
-            entryIndex: BigInt(ticket.attempt),
-            proof: ticket.signature as Hex,
-            id: getTicketIdFromProof(hexToBytes(ticket.signature as Hex)),
-          })),
-          preimages: (jsonExtrinsic.preimages || []).map((preimage: any) => ({
-            requester: BigInt(preimage.requester),
-            blob: preimage.blob,
-          })),
-          guarantees: (jsonExtrinsic.guarantees || []).map((guarantee: any) => ({
-            report: convertJsonReportToWorkReport(guarantee.report),
-            slot: BigInt(guarantee.slot),
-            signatures: guarantee.signatures,
-          })),
-          assurances: jsonExtrinsic.assurances || [],
-          disputes: jsonExtrinsic.disputes
-            ? [
-                {
-                  verdicts: jsonExtrinsic.disputes.verdicts.map((verdict: any) => ({
-                    target: verdict.target,
-                    age: BigInt(verdict.age),
-                    votes: verdict.votes.map((vote: any) => ({
-                      vote: vote.vote,
-                      index: BigInt(vote.index),
-                      signature: vote.signature,
-                    })),
-                  })),
-                  culprits: jsonExtrinsic.disputes.culprits,
-                  faults: jsonExtrinsic.disputes.faults,
-                },
-              ]
-            : [
-                {
-                  verdicts: [],
-                  culprits: [],
-                  faults: [],
-                },
-              ],
-        }
-
-        return {
-          header: blockHeader,
-          body: blockBody,
-        }
-      }
+      // Initialize services using shared utility
+      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators)
+      const { stateService, blockImporterService, recentHistoryService } = services
 
       // Helper function to parse state key using state service
       const parseStateKeyForDebug = (keyHex: Hex) => {
@@ -523,7 +122,13 @@ describe('Genesis Parse Tests', () => {
 
       // Helper function to verify post-state
       const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector) => {
+        // #region agent log
+        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:136',message:'verifyPostState start',data:{blockNumber,postStateKeyvalsCount:blockJsonData.post_state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         const [stateTrieError, stateTrie] = stateService.generateStateTrie()
+        // #region agent log
+        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:138',message:'After generateStateTrie',data:{blockNumber,stateTrieError:stateTrieError?.message||'none',stateTrieKeysCount:stateTrie?Object.keys(stateTrie).length:0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+        // #endregion
         expect(stateTrieError).toBeUndefined()
         expect(stateTrie).toBeDefined()
 
@@ -560,6 +165,10 @@ describe('Genesis Parse Tests', () => {
             // Key is missing from generated state trie - this is a failure
             missingKeys++
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:170',message:'Missing state key in post-state verification',data:{blockNumber,missingKey:keyval.key.slice(0,40),chapterIndex:'chapterIndex' in keyInfo?keyInfo.chapterIndex:'unknown',missingKeysCount:missingKeys},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             
             console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
             console.error('=====================================')
@@ -600,8 +209,42 @@ describe('Genesis Parse Tests', () => {
           if (keyval.value !== expectedValue) {
             // Parse the state key to get chapter information
             const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:211',message:'State value mismatch in post-state verification',data:{blockNumber,mismatchKey:keyval.key.slice(0,40),expectedValue:keyval.value.slice(0,40),actualValue:expectedValue.slice(0,40),chapterIndex:'chapterIndex' in keyInfo?keyInfo.chapterIndex:'unknown'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+            // #endregion
             let decodedExpected: any = null
             let decodedActual: any = null
+            
+            // Special handling for Chapter 4 (safrole) - decode and compare each component
+            if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 4) {
+              try {
+                const expectedBytes = hexToBytes(keyval.value as Hex)
+                const actualBytes = hexToBytes(expectedValue as Hex)
+                const decoder = (stateService as any).stateTypeRegistry?.get(4)
+                if (decoder) {
+                  const [decodeExpectedError, decodedExpectedResult] = decoder(expectedBytes)
+                  const [decodeActualError, decodedActualResult] = decoder(actualBytes)
+                  if (!decodeExpectedError && decodedExpectedResult && !decodeActualError && decodedActualResult) {
+                    const expectedSafrole = decodedExpectedResult.value as any
+                    const actualSafrole = decodedActualResult.value as any
+                    
+                    // Compare each component
+                    const pendingsetMatch = JSON.stringify(expectedSafrole.pendingSet) === JSON.stringify(actualSafrole.pendingSet)
+                    const epochRootMatch = expectedSafrole.epochRoot === actualSafrole.epochRoot
+                    const discriminatorMatch = expectedSafrole.discriminator === actualSafrole.discriminator
+                    const sealticketsMatch = JSON.stringify(expectedSafrole.sealTickets) === JSON.stringify(actualSafrole.sealTickets)
+                    const ticketAccumulatorMatch = JSON.stringify(expectedSafrole.ticketAccumulator) === JSON.stringify(actualSafrole.ticketAccumulator)
+                    
+                    // #region agent log
+                    fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:220',message:'Chapter 4 component comparison',data:{blockNumber,pendingsetMatch,epochRootMatch,discriminatorMatch,sealticketsMatch,ticketAccumulatorMatch,expectedPendingsetCount:expectedSafrole.pendingSet?.length||0,actualPendingsetCount:actualSafrole.pendingSet?.length||0,expectedEpochRoot:expectedSafrole.epochRoot?.slice(0,40),actualEpochRoot:actualSafrole.epochRoot?.slice(0,40),expectedDiscriminator:expectedSafrole.discriminator,actualDiscriminator:actualSafrole.discriminator,expectedSealticketsCount:expectedSafrole.sealTickets?.length||0,actualSealticketsCount:actualSafrole.sealTickets?.length||0,expectedTicketAccumulatorCount:expectedSafrole.ticketAccumulator?.length||0,actualTicketAccumulatorCount:actualSafrole.ticketAccumulator?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+                    // #endregion
+                  }
+                }
+              } catch (error) {
+                // Ignore decode errors for now
+              }
+            }
 
             // Try to decode both expected and actual values if it's a chapter key
             if ('chapterIndex' in keyInfo && !keyInfo.error) {
@@ -812,10 +455,18 @@ describe('Genesis Parse Tests', () => {
             // This ensures entropy3 and other state components match what was used to create the seal signature
             // Set pre-state from test vector
 
+            // #region agent log
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:421',message:'Setting pre-state for starting block',data:{blockNumber,startBlock,hasPreState:!!blockJsonData.pre_state?.keyvals,preStateKeyvalsCount:blockJsonData.pre_state?.keyvals?.length||0,hasGenesisJson:!!genesisJson,genesisKeyvalsCount:genesisJson?.state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+            // #endregion
+
             if (blockJsonData.pre_state?.keyvals) {
               const [setStateError] = stateService.setState(
                 blockJsonData.pre_state.keyvals,
               )
+              
+              // #region agent log
+              fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:427',message:'After setState from pre_state',data:{blockNumber,setStateError:setStateError?.message||'none',keyvalsCount:blockJsonData.pre_state.keyvals.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
               
               if (setStateError) {
                 throw new Error(`Failed to set pre-state: ${setStateError.message}`)
@@ -825,6 +476,9 @@ describe('Genesis Parse Tests', () => {
               const [setStateError] = stateService.setState(
                 genesisJson?.state?.keyvals ?? [],
               )
+              // #region agent log
+              fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:436',message:'After setState from genesis',data:{blockNumber,setStateError:setStateError?.message||'none',genesisKeyvalsCount:genesisJson?.state?.keyvals?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+              // #endregion
               if (setStateError) {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
               }
@@ -855,15 +509,6 @@ describe('Genesis Parse Tests', () => {
             // - Chapter 4 (safrole): sets seal keys via sealKeyService.setSealKeys()
             // - Chapter 6 (entropy): sets entropy via entropyService.setEntropy()
             // So we don't need to manually load these here.
-            // Just log what was loaded for debugging:
-            const entropyState = entropyService.getEntropy()
-            console.log(`📂 Entropy after setState:`, {
-              accumulator: entropyState.accumulator?.slice(0, 20) + '...',
-              entropy1: entropyState.entropy1?.slice(0, 20) + '...',
-              entropy2: entropyState.entropy2?.slice(0, 20) + '...',
-              entropy3: entropyState.entropy3?.slice(0, 20) + '...',
-            })
-            console.log(`📂 Seal keys after setState: ${sealKeyService.getSealKeys().length} keys`)
 
             // Deep compare generated state trie with pre-state keyvals
 
@@ -906,6 +551,11 @@ describe('Genesis Parse Tests', () => {
                 const isChapterKey = firstByte >= 1 && firstByte <= 16 && keyBytes.slice(1).every(b => b === 0)
                 const chapterIndex = isChapterKey ? firstByte : (firstByte === 0xff ? 255 : 0)
                 differentValues.push({key, expected: expectedValue, actual: actualValue, chapterIndex})
+                
+                // #region agent log
+                const keyInfo = parseStateKeyForDebug(key as Hex)
+                fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:505',message:'State value difference detected',data:{blockNumber,key:key.slice(0,40),chapterIndex,expectedValue:expectedValue.slice(0,40),actualValue:actualValue.slice(0,40),expectedLength:expectedValue.length,actualLength:actualValue.length,keyInfo:'chapterIndex' in keyInfo?{chapterIndex:keyInfo.chapterIndex}:keyInfo},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                // #endregion
               }
             }
 
@@ -948,9 +598,14 @@ describe('Genesis Parse Tests', () => {
                 console.error(`\n  Different values (first 10):`)
                 for (const diff of differentValues.slice(0, 10)) {
                   const keyInfo = parseStateKeyForDebug(diff.key as Hex)
+                  const chapterIndex = 'chapterIndex' in keyInfo ? keyInfo.chapterIndex : 'unknown'
                   console.error(`    ${diff.key} - ${'chapterIndex' in keyInfo ? `Chapter ${keyInfo.chapterIndex}` : JSON.stringify(keyInfo)}`)
                   console.error(`      Expected: ${diff.expected.substring(0, 40)}... (${diff.expected.length} bytes)`)
                   console.error(`      Actual:   ${diff.actual.substring(0, 40)}... (${diff.actual.length} bytes)`)
+                  
+                  // #region agent log
+                  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:550',message:'Different value details',data:{blockNumber,key:diff.key.slice(0,40),chapterIndex,expectedValue:diff.expected.slice(0,80),actualValue:diff.actual.slice(0,80),expectedLength:diff.expected.length,actualLength:diff.actual.length,keyInfo:'chapterIndex' in keyInfo?{chapterIndex:keyInfo.chapterIndex,type:keyInfo.type}:keyInfo},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                  // #endregion
                 }
               }
               
@@ -970,6 +625,11 @@ describe('Genesis Parse Tests', () => {
               )
             }
             
+            // #region agent log
+            const differentValueDetails = differentValues.length > 0 ? differentValues[0] : null
+            fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:611',message:'Before state trie verification',data:{blockNumber,missingInTrieCount:missingInTrie.length,differentValuesCount:differentValues.length,extraInTrieCount:extraInTrie.length,computedStateRoot:preStateRoot,expectedStateRoot:blockJsonData.block.header.parent_state_root,stateRootMatches:preStateRoot===blockJsonData.block.header.parent_state_root,differentValueKey:differentValueDetails?.key?.slice(0,40),differentValueChapterIndex:differentValueDetails?.chapterIndex,differentValueExpected:differentValueDetails?.expected?.slice(0,40),differentValueActual:differentValueDetails?.actual?.slice(0,40)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+            // #endregion
+
             // Fail test if there are mismatches
             expect(missingInTrie.length).toBe(0)
             expect(differentValues.length).toBe(0)
@@ -993,7 +653,13 @@ describe('Genesis Parse Tests', () => {
           const block = convertJsonBlockToBlock(blockJsonData.block)
 
           // Import the block
+          // #region agent log
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:598',message:'Before block import',data:{blockNumber,parentStateRoot:blockJsonData.block.header.parent_state_root?.slice(0,20),slot:blockJsonData.block.header.slot},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           const [importError] = await blockImporterService.importBlock(block)
+          // #region agent log
+          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzy-light-all-blocks.test.ts:600',message:'After block import',data:{blockNumber,importError:importError?.message||'none',importErrorStack:importError?.stack?.slice(0,200)||'none'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+          // #endregion
           if (importError) {
             throw new Error(`Failed to import block ${blockNumber}: ${importError.message}`)
           }

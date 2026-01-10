@@ -236,33 +236,16 @@ export class SealKeyService extends BaseService implements ISealKeyService {
    * @param overrides.storeInState Optional: Whether to store the computed seal keys in state (default: true)
    * @returns The computed seal key for the specified phase, or all phases if phase is not specified
    */
-  calculateNewSealKeySequence(options?: {
-    pendingWinnersMarkOverride?: SafroleTicketWithoutProof[] | null
-    ticketAccumulatorOverride?: SafroleTicketWithoutProof[] | null
-    entropy2Override?: Uint8Array | null
-    activeValidatorsOverride?: Map<number, ValidatorPublicKeys> | null
-    storeInState?: boolean
-    phase?: number // If specified, only compute and return the seal key for this phase
-  }): Safe<
-    | SafroleTicketWithoutProof
-    | Uint8Array
-    | (SafroleTicketWithoutProof | Uint8Array)[]
-    | undefined
-  > {
-    const storeInState = options?.storeInState !== false // Default to true
-    const targetPhase = options?.phase
-
+  calculateNewSealKeySequence(): Safe<undefined> {
     // Priority 1: Use winnersMark from block header if available
     // Gray Paper Eq. 202-207: sealtickets' = Z(ticketaccumulator) when e' = e + 1 ∧ m ≥ Cepochtailstart ∧ |ticketaccumulator| = Cepochlen
     // The winnersMark is already Z-sequenced, so we use it directly
-    const pendingWinnersMark =
-      options?.pendingWinnersMarkOverride ?? this.pendingWinnersMark
+    const pendingWinnersMark = this.pendingWinnersMark
     if (pendingWinnersMark) {
       logger.info(
         '[SealKeyService] Using winnersMark from block header for seal keys',
         {
           winnersMarkLength: pendingWinnersMark.length,
-          hasOverride: options?.pendingWinnersMarkOverride !== undefined,
         },
       )
 
@@ -275,54 +258,27 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         )
       }
 
-      // If phase is specified, return only that phase
-      if (targetPhase !== undefined) {
-        if (targetPhase >= pendingWinnersMark.length) {
-          return safeError(
-            new Error(
-              `Phase ${targetPhase} >= winnersMark length (${pendingWinnersMark.length})`,
-            ),
-          )
-        }
-        const ticket = pendingWinnersMark[targetPhase]
+      // Set seal keys from winnersMark (already Z-sequenced)
+      for (let phase = 0; phase < this.configService.epochDuration; phase++) {
+        const ticket = pendingWinnersMark[phase]
         if (!ticket) {
           return safeError(
-            new Error(`Missing ticket at phase ${targetPhase} in winnersMark`),
+            new Error(`Missing ticket at phase ${phase} in winnersMark`),
           )
         }
-        return safeResult(ticket)
+        this.sealTicketForPhase.set(BigInt(phase), ticket)
       }
 
-      // Set seal keys from winnersMark (already Z-sequenced)
-      if (storeInState) {
-        for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-          const ticket = pendingWinnersMark[phase]
-          if (!ticket) {
-            return safeError(
-              new Error(`Missing ticket at phase ${phase} in winnersMark`),
-            )
-          }
-          this.sealTicketForPhase.set(BigInt(phase), ticket)
-        }
-
-        // Clear pending winnersMark after using it (only if using state version)
-        if (!options?.pendingWinnersMarkOverride) {
-          this.pendingWinnersMark = null
-        }
-      } else {
-        // Return all phases without storing in state
-        return safeResult([...pendingWinnersMark])
-      }
+      // Clear pending winnersMark after using it
+      this.pendingWinnersMark = null
 
       return safeResult(undefined)
     }
 
     // Priority 2: Use ticket accumulator if full (fallback if winnersMark not available)
-    const ticketAccumulator =
-      options?.ticketAccumulatorOverride ??
-      (this.ticketService.isAccumulatorFull()
-        ? this.ticketService.getTicketAccumulator()
-        : null)
+    const ticketAccumulator = this.ticketService.isAccumulatorFull()
+      ? this.ticketService.getTicketAccumulator()
+      : null
 
     if (
       ticketAccumulator &&
@@ -338,44 +294,15 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         return safeError(new Error('Reordered tickets is null'))
       }
 
-      // If phase is specified, return only that phase
-      if (targetPhase !== undefined) {
-        if (targetPhase >= reorderedTickets.length) {
-          return safeError(
-            new Error(
-              `Phase ${targetPhase} >= reordered tickets length (${reorderedTickets.length})`,
-            ),
-          )
-        }
-        const ticket = reorderedTickets[targetPhase]
+      // Generate seal keys for ALL 600 slots in the epoch
+      for (let phase = 0; phase < this.configService.epochDuration; phase++) {
+        const ticket = reorderedTickets[phase]
         if (!ticket) {
           return safeError(
-            new Error(
-              `Missing ticket at phase ${targetPhase} in reordered tickets`,
-            ),
+            new Error(`Missing ticket at phase ${phase} in reordered tickets`),
           )
         }
-        return safeResult(ticket)
-      }
-
-      // Generate seal keys for ALL 600 slots in the epoch
-      if (storeInState) {
-        for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-          const ticket = reorderedTickets[phase]
-          if (!ticket) {
-            return safeError(
-              new Error(
-                `Missing ticket at phase ${phase} in reordered tickets`,
-              ),
-            )
-          }
-          this.sealTicketForPhase.set(BigInt(phase), ticket)
-        }
-      } else {
-        // Return all phases without storing in state
-        return safeResult(
-          reorderedTickets.slice(0, this.configService.epochDuration),
-        )
+        this.sealTicketForPhase.set(BigInt(phase), ticket)
       }
       return safeResult(undefined)
     }
@@ -383,19 +310,16 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     // Priority 3: Fallback mode - compute using F(entropy'_2, activeset')
     // Try using old entropy2 (before rotation) first, as test vectors may expect this
     // If oldEntropy2BeforeRotation is null, fall back to entropy'_2 (after rotation)
-    const entropy2 =
-      options?.entropy2Override ?? this.entropyService.getEntropy2()
+    const entropy2 = this.entropyService.getEntropy2()
 
     // Gray Paper Eq. 202-207: F(entropy'_2, activeset')
     // The epoch mark contains pendingSet' (validators for NEXT epoch), NOT activeSet'
     // After epoch transition: activeSet' = pendingSet (old pending becomes new active)
     // So we MUST use validatorSetManager.getActiveValidators() which returns activeSet'
     // This must be called AFTER validatorSetManager.handleEpochTransition has updated activeSet'
-    const activeValidators =
-      options?.activeValidatorsOverride ??
-      this.validatorSetManager.getActiveValidators()
+    const activeValidators = this.validatorSetManager.getActiveValidators()
 
-    if (activeValidators.size === 0) {
+    if (activeValidators.length === 0) {
       return safeError(
         new Error(
           'Active validator set is empty - validator set manager may not have updated yet',
@@ -403,97 +327,33 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       )
     }
 
-    // For fallback, we need to use generateFallbackKeySequence which requires ValidatorSetManager
-    // If we have an override, we need to create a temporary validator set array
-    if (options?.activeValidatorsOverride) {
-      // Convert Map to array for generateFallbackKeySequence
-      // We need to create a temporary ValidatorSetManager-like object or use a different approach
-      // For now, let's use the computeFallbackSealKeyForPhase approach from BlockImporterService
-      // But we need to generate all phases, not just one
-      const fallbackKeys: Uint8Array[] = []
-      for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-        const [fallbackError, fallbackKey] =
-          this.computeFallbackSealKeyForPhase(entropy2, activeValidators, phase)
-        if (fallbackError) {
-          return safeError(fallbackError)
-        }
-        if (!fallbackKey) {
-          return safeError(new Error(`Missing fallback key at phase ${phase}`))
-        }
-        fallbackKeys.push(fallbackKey)
+    // Use the standard generateFallbackKeySequence
+    const [error, fallbackKeys] = generateFallbackKeySequence(
+      entropy2,
+      this.validatorSetManager,
+      this.configService,
+    )
+    if (error) {
+      return safeError(error)
+    }
 
-        // If phase is specified, return only that phase
-        if (targetPhase !== undefined && phase === targetPhase) {
-          return safeResult(fallbackKey)
-        }
+    if (!fallbackKeys) {
+      return safeError(new Error('Fallback keys is null'))
+    }
+
+    for (let phase = 0; phase < this.configService.epochDuration; phase++) {
+      const ticket = fallbackKeys[phase]
+      if (!ticket) {
+        return safeError(new Error(`Missing fallback key at phase ${phase}`))
       }
+      this.fallbackKeyForPhase.set(BigInt(phase), ticket)
 
-      if (storeInState) {
-        for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-          const ticket = fallbackKeys[phase]
-          if (!ticket) {
-            return safeError(
-              new Error(`Missing fallback key at phase ${phase}`),
-            )
-          }
-          this.fallbackKeyForPhase.set(BigInt(phase), ticket)
-
-          // Log first few phases and phase 12 specifically for debugging
-          if (phase < 3 || phase === 12) {
-            logger.debug('[SealKeyService] Fallback key for phase', {
-              phase,
-              sealKey: bytesToHex(ticket),
-            })
-          }
-        }
-      } else {
-        return safeResult(fallbackKeys)
-      }
-    } else {
-      // Use the standard generateFallbackKeySequence when using state
-      const [error, fallbackKeys] = generateFallbackKeySequence(
-        entropy2,
-        this.validatorSetManager,
-        this.configService,
-      )
-      if (error) {
-        return safeError(error)
-      }
-
-      if (!fallbackKeys) {
-        return safeError(new Error('Fallback keys is null'))
-      }
-
-      // If phase is specified, return only that phase
-      if (targetPhase !== undefined) {
-        if (targetPhase >= fallbackKeys.length) {
-          return safeError(
-            new Error(
-              `Phase ${targetPhase} >= fallback keys length (${fallbackKeys.length})`,
-            ),
-          )
-        }
-        const ticket = fallbackKeys[targetPhase]
-        if (!ticket) {
-          return safeError(
-            new Error(`Missing fallback key at phase ${targetPhase}`),
-          )
-        }
-        return safeResult(ticket)
-      }
-
-      if (storeInState) {
-        for (let phase = 0; phase < this.configService.epochDuration; phase++) {
-          const ticket = fallbackKeys[phase]
-          if (!ticket) {
-            return safeError(
-              new Error(`Missing fallback key at phase ${phase}`),
-            )
-          }
-          this.fallbackKeyForPhase.set(BigInt(phase), ticket)
-        }
-      } else {
-        return safeResult(fallbackKeys)
+      // Log first few phases and phase 12 specifically for debugging
+      if (phase < 3 || phase === 12) {
+        logger.debug('[SealKeyService] Fallback key for phase', {
+          phase,
+          sealKey: bytesToHex(ticket),
+        })
       }
     }
 
@@ -511,9 +371,9 @@ export class SealKeyService extends BaseService implements ISealKeyService {
    * @param phase - Phase index (slot % epochDuration)
    * @returns The Bandersnatch key for this phase
    */
-  private computeFallbackSealKeyForPhase(
+  computeFallbackSealKeyForPhase(
     entropy2: Uint8Array,
-    activeValidators: Map<number, ValidatorPublicKeys>,
+    activeValidators: ValidatorPublicKeys[],
     phase: number,
   ): Safe<Uint8Array> {
     // Gray Paper: encode[4]{i} - Encode phase as 4 bytes (little-endian)
@@ -535,7 +395,7 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     const dataView = new DataView(hashBytes.buffer.slice(0, 4))
     const decodedIndex = dataView.getUint32(0, true) // true = little-endian
 
-    const activeValidatorSize = activeValidators.size
+    const activeValidatorSize = activeValidators.length
     if (activeValidatorSize === 0) {
       return safeError(
         new Error(
@@ -548,7 +408,7 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     const validatorIndex = decodedIndex % activeValidatorSize
 
     // Gray Paper: cyclic{k[index]}_bs - Get Bandersnatch key from validator
-    const validator = activeValidators.get(validatorIndex)
+    const validator = activeValidators[validatorIndex]
     if (!validator) {
       return safeError(
         new Error(

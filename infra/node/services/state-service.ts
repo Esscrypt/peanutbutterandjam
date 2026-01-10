@@ -8,27 +8,6 @@
  * State Definition: Equation (34) - thestate ≡ (authpool, recent, lastaccout, safrole, accounts, entropy, stagingset, activeset, previousset, reports, thetime, authqueue, privileges, disputes, activity, ready, accumulated)
  */
 
-/**
- * Parsed state key result with type-safe discriminated union
- *
- * Note: For C(s, h) keys, we can only extract the Blake hash of the combined key.
- * The original storage key, preimage hash, or request hash cannot be extracted
- * from the Blake hash (it's a one-way function). The keyType must be determined
- * by context when querying, or by attempting to match against known keys.
- */
-type ParsedStateKey =
-  | {
-      chapterIndex: number
-    }
-  | {
-      chapterIndex: 255
-      serviceId: bigint
-    }
-  | {
-      chapterIndex: 0 // Special indicator for C(s, h) keys
-      serviceId: bigint
-    }
-
 import {
   createStateTrie,
   decodeAccumulated,
@@ -57,6 +36,8 @@ import type {
   Disputes,
   EntropyState,
   GlobalState,
+  IGenesisManagerService,
+  ParsedStateKey,
   Privileges,
   Ready,
   Recent,
@@ -121,7 +102,7 @@ export class StateService extends BaseService implements IStateService {
   private serviceAccountsService: ServiceAccountService
   private recentHistoryService: RecentHistoryService
   // private authService?: AuthService
-  private genesisManagerService: NodeGenesisManager
+  private genesisManagerService?: NodeGenesisManager
   private sealKeyService: SealKeyService
   private clockService: ClockService
 
@@ -139,7 +120,7 @@ export class StateService extends BaseService implements IStateService {
     serviceAccountsService: ServiceAccountService
     recentHistoryService: RecentHistoryService
     configService: ConfigService
-    genesisManagerService: NodeGenesisManager
+    genesisManagerService?: NodeGenesisManager
     sealKeyService: SealKeyService
     clockService: ClockService
     statisticsService: StatisticsService
@@ -221,14 +202,18 @@ export class StateService extends BaseService implements IStateService {
       } else {
         this.setState(genesisHeader.keyvals)
       }
+    } else {
+      // No genesis manager - start with empty state
+      // The state will be set from trace pre_state or Initialize message
+      this.setState([])
     }
   }
 
   /**
    * Get genesis manager service
    */
-  getGenesisManager(): NodeGenesisManager {
-    return this.genesisManagerService
+  getGenesisManager(): IGenesisManagerService | undefined {
+    return this.genesisManagerService ?? undefined
   }
 
   /**
@@ -294,15 +279,47 @@ export class StateService extends BaseService implements IStateService {
         return this.recentHistoryService.getRecent()
 
       // C(4) = safrole (γ) - Consensus protocol internal state
-      case 4:
+      case 4: {
+        // Use stored epochRoot from Initialize message if available, otherwise compute it
+        // This ensures we match the fuzzer's expected state root
+        const epochRoot =
+          this.validatorSetManager.getStoredEpochRoot() ??
+          this.validatorSetManager.getEpochRoot()
+
+        // #region agent log
+        const storedEpochRoot = this.validatorSetManager.getStoredEpochRoot()
+        const computedEpochRoot = this.validatorSetManager.getEpochRoot()
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-service.ts:282',
+              message: 'getStateComponent Chapter 4',
+              data: {
+                hasStoredEpochRoot: !!storedEpochRoot,
+                storedEpochRoot: storedEpochRoot?.slice(0, 40),
+                computedEpochRoot: computedEpochRoot?.slice(0, 40),
+                usingStored: !!storedEpochRoot,
+                epochRootsMatch: storedEpochRoot === computedEpochRoot,
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'A',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
+
         return {
-          pendingSet: Array.from(
-            this.validatorSetManager.getPendingValidators().values(),
-          ),
-          epochRoot: this.validatorSetManager.getEpochRoot(),
+          pendingSet: this.validatorSetManager.getPendingValidators(),
+          epochRoot: epochRoot,
           sealTickets: this.sealKeyService.getSealKeys(),
           ticketAccumulator: this.ticketService.getTicketAccumulator(),
         }
+      }
 
       // C(5) = disputes (ψ) - Judgments on work-reports and validators
       case 5:
@@ -314,21 +331,15 @@ export class StateService extends BaseService implements IStateService {
 
       // C(7) = stagingset (ι) - Validators queued for next epoch
       case 7:
-        return Array.from(
-          this.validatorSetManager.getStagingValidators().values(),
-        )
+        return this.validatorSetManager.getStagingValidators()
 
       // C(8) = activeset (κ) - Currently active validators
       case 8:
-        return Array.from(
-          this.validatorSetManager.getActiveValidators().values(),
-        )
+        return this.validatorSetManager.getActiveValidators()
 
       // C(9) = previousset (λ) - Previous epoch validators
       case 9:
-        return Array.from(
-          this.validatorSetManager.getPreviousValidators().values(),
-        )
+        return this.validatorSetManager.getPreviousValidators()
 
       // C(10) = reports (ρ) - Work reports awaiting availability assurance
       case 10:
@@ -490,9 +501,17 @@ export class StateService extends BaseService implements IStateService {
         break
 
       // C(10) = reports (ρ) - Work reports awaiting availability assurance
-      case 10:
-        this.workReportService.setPendingReports(value as Reports)
+      case 10: {
+        // Skip validation during state initialization - thetime (Chapter 11) might not be set yet
+        const [setPendingReportsError] =
+          this.workReportService.setPendingReports(value as Reports, true)
+        if (setPendingReportsError) {
+          throw new Error(
+            `Failed to set pending reports: ${setPendingReportsError.message}`,
+          )
+        }
         break
+      }
 
       // C(11) = thetime (τ) - Most recent block's timeslot index
       case 11:
@@ -616,6 +635,29 @@ export class StateService extends BaseService implements IStateService {
         )
         processedKeys.add(keyval.key)
       } catch (error) {
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'state-service.ts:595',
+              message: 'setStateComponent error caught',
+              data: {
+                chapterIndex: parsedStateKey.chapterIndex,
+                key: keyval.key.slice(0, 40),
+                errorMessage:
+                  error instanceof Error ? error.message : String(error),
+              },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'B',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
         unprocessedKeyvals.push({
           key: keyval.key,
           value: keyval.value,
@@ -664,9 +706,7 @@ export class StateService extends BaseService implements IStateService {
       lastAccumulationOutput:
         this.accumulationService.getLastAccumulationOutputs(),
       safrole: {
-        pendingSet: Array.from(
-          this.validatorSetManager.getPendingValidators().values(),
-        ),
+        pendingSet: this.validatorSetManager.getPendingValidators(),
         // Use stored epochRoot from Initialize message if available, otherwise compute it
         // This ensures we match the fuzzer's expected state root
         epochRoot:
@@ -677,15 +717,9 @@ export class StateService extends BaseService implements IStateService {
       },
       accounts: this.serviceAccountsService.getServiceAccounts(),
       entropy: this.entropyService.getEntropy(),
-      stagingset: Array.from(
-        this.validatorSetManager.getStagingValidators().values().toArray(),
-      ),
-      activeset: Array.from(
-        this.validatorSetManager.getActiveValidators().values(),
-      ),
-      previousset: Array.from(
-        this.validatorSetManager.getPreviousValidators().values(),
-      ),
+      stagingset: this.validatorSetManager.getStagingValidators(),
+      activeset: this.validatorSetManager.getActiveValidators(),
+      previousset: this.validatorSetManager.getPreviousValidators(),
       reports: this.workReportService.getPendingReports(),
       thetime: this.clockService.getLatestReportedBlockTimeslot(),
       authqueue: this.authQueueService.getAuthQueue(),

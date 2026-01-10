@@ -37,7 +37,7 @@
  * validators to participate while maintaining efficient encoding.
  */
 
-import { bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
+import { blake2bHash, bytesToHex, concatBytes, hexToBytes } from '@pbnjam/core'
 import type {
   DecodingResult,
   Guarantee,
@@ -383,4 +383,96 @@ export function decodeGuarantees(
     remaining: sequenceResult.remaining,
     consumed,
   })
+}
+
+/**
+ * Encode guarantee for extrinsic hash calculation
+ *
+ * Gray Paper formula for extrinsic hash:
+ * g = encode{var{sequence{
+ *   tuple{blake{xg_workreport}, encode[4]{xg_slot}, var{xg_signatures}}
+ *   {
+ *     tuple{xg_workreport, xg_slot, xg_signatures} ∈ XT_guarantees
+ *   }
+ * }}}
+ *
+ * This is different from regular guarantee encoding - we hash the work report first!
+ *
+ * Gray Paper Reference: header.tex (Equation 28) - Extrinsic hash calculation
+ *
+ * @param guarantee - Guarantee to encode
+ * @returns Encoded guarantee for extrinsic hash
+ */
+export function encodeGuaranteeForExtrinsicHash(
+  guarantee: Guarantee,
+): Safe<Uint8Array> {
+  const parts: Uint8Array[] = []
+
+  // 1. blake{xg_workreport} - Hash the work report first
+  const [encodeError, encodedReport] = encodeWorkReport(guarantee.report)
+  if (encodeError) {
+    return safeError(encodeError)
+  }
+  const [hashError, reportHash] = blake2bHash(encodedReport)
+  if (hashError) {
+    return safeError(hashError)
+  }
+  parts.push(hexToBytes(reportHash))
+
+  // 2. encode[4]{xg_slot} - 4-byte fixed-length timeslot
+  const [slotError, slotEncoded] = encodeFixedLength(BigInt(guarantee.slot), 4n)
+  if (slotError) {
+    return safeError(slotError)
+  }
+  parts.push(slotEncoded)
+
+  // 3. var{xg_signatures} - Variable-length sequence of signatures
+  const [sigError, sigEncoded] = encodeVariableSequence(
+    guarantee.signatures,
+    (sig: GuaranteeSignature): Safe<Uint8Array> => {
+      // encode[2]{v} - 2-byte validator index
+      const [idxError, idxEncoded] = encodeFixedLength(
+        BigInt(sig.validator_index),
+        2n,
+      )
+      if (idxError) {
+        return safeError(idxError)
+      }
+      // s - signature (variable-length)
+      const sigBytes = hexToBytes(sig.signature)
+      return safeResult(concatBytes([idxEncoded, sigBytes]))
+    },
+  )
+  if (sigError) {
+    return safeError(sigError)
+  }
+  parts.push(sigEncoded)
+
+  return safeResult(concatBytes(parts))
+}
+
+/**
+ * Encode guarantees for extrinsic hash calculation
+ *
+ * Gray Paper formula: g = encode{var{sequence{...}}}
+ * This encodes a variable-length sequence of guarantees, where each guarantee
+ * has the work report hashed first (blake{xg_workreport}).
+ *
+ * Gray Paper Reference: header.tex (Equation 28) - Extrinsic hash calculation
+ *
+ * @param guarantees - Array of guarantees to encode
+ * @returns Encoded guarantees for extrinsic hash
+ */
+export function encodeGuaranteesForExtrinsicHash(
+  guarantees: Guarantee[],
+): Safe<Uint8Array> {
+  // Sort guarantees by work report authorizer hash for deterministic encoding
+  const sortedGuarantees = [...guarantees].sort((a, b) => {
+    return a.report.authorizer_hash.localeCompare(b.report.authorizer_hash)
+  })
+
+  return encodeVariableSequence(
+    sortedGuarantees,
+    encodeGuaranteeForExtrinsicHash,
+  )
 }

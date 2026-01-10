@@ -1,32 +1,31 @@
 import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
+import type { JamVersion } from './fuzz'
 import type { EntropyState, RecentHistoryEntry } from './global-state'
 import type { ValidatorCredentials } from './keys'
 import type { Safe, SafePromise } from './safe'
-
 import type {
   Guarantee,
   GuaranteeSignature,
   Judgment,
-  ServiceAccount,
   SafroleTicket,
   SafroleTicketWithoutProof,
+  ServiceAccount,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
 } from './serialization'
 import type { BaseService } from './service'
-import type { JamVersion } from './fuzz'
 
 export interface IValidatorSetManager extends BaseService {
   getEpochRoot(): Hex
   getActiveValidatorKeys(): Uint8Array[]
   getValidatorIndex(ed25519PublicKey: Hex): Safe<number>
-  getActiveValidators(): Map<number, ValidatorKeyTuple>
-  getPreviousValidators(): Map<number, ValidatorKeyTuple>
+  getActiveValidators(): ValidatorKeyTuple[]
+  getPreviousValidators(): ValidatorKeyTuple[]
   getValidatorAtIndex(validatorIndex: number): Safe<ValidatorKeyTuple>
-  getPendingValidators(): Map<number, ValidatorKeyTuple>
+  getPendingValidators(): ValidatorKeyTuple[]
 
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
@@ -38,19 +37,7 @@ export interface ISealKeyService extends BaseService {
   getSealKeyForSlot(slot: bigint): Safe<SafroleTicketWithoutProof | Uint8Array>
   setSealKeys(sealKeys: (SafroleTicketWithoutProof | Uint8Array)[]): void
   getPendingWinnersMark(): SafroleTicketWithoutProof[] | null
-  calculateNewSealKeySequence(options?: {
-    pendingWinnersMarkOverride?: SafroleTicketWithoutProof[] | null
-    ticketAccumulatorOverride?: SafroleTicketWithoutProof[] | null
-    entropy2Override?: Uint8Array | null
-    activeValidatorsOverride?: Map<number, ValidatorPublicKeys> | null
-    storeInState?: boolean
-    phase?: number
-  }): Safe<
-    | SafroleTicketWithoutProof
-    | Uint8Array
-    | (SafroleTicketWithoutProof | Uint8Array)[]
-    | undefined
-  >
+  calculateNewSealKeySequence(): Safe<undefined>
 }
 
 export interface IRecentHistoryService extends BaseService {
@@ -60,8 +47,7 @@ export interface IRecentHistoryService extends BaseService {
 
 export interface IStateService extends BaseService {
   getStateRoot(): Safe<Hex>
-  getGenesisManager(): IGenesisManagerService
-
+  getGenesisManager(): IGenesisManagerService | undefined
 }
 
 export interface IGenesisManagerService extends BaseService {

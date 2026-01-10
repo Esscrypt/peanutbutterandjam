@@ -27,29 +27,6 @@ docker run --rm \
   --socket /tmp/jam_target.sock
 ```
 
-#### Building for AMD64 (x86_64) Architecture
-
-To build specifically for amd64 architecture (required for most CI/CD environments and cloud platforms), use Docker Buildx:
-
-```bash
-# Set up Docker Buildx (if not already done)
-docker buildx create --use
-
-# Build for amd64 architecture
-docker buildx build --platform linux/amd64 \
-  -f infra/node/Dockerfile.fuzzer-target \
-  -t pbnjam-fuzzer-target:latest \
-  --load .
-
-# Test the amd64 image locally
-docker run --rm \
-  -v /tmp:/tmp \
-  pbnjam-fuzzer-target:latest \
-  --socket /tmp/jam_target.sock
-```
-
-**Note**: The `--load` flag loads the image into your local Docker daemon. If you're building on a different architecture (e.g., Apple Silicon), this will use emulation which may be slower.
-
 #### Building Multi-Architecture Images
 
 To build for both amd64 and arm64:

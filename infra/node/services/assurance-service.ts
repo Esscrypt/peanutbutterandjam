@@ -35,6 +35,7 @@ import type {
   WorkReport,
 } from '@pbnjam/types'
 import {
+  ASSURANCES_ERRORS,
   BaseService,
   safeError,
   safeResult,
@@ -181,23 +182,34 @@ export class AssuranceService extends BaseService {
   }
 
   /**
-   * Validate assurances without modifying state
-   * This should be called BEFORE applyAssurances to check for errors
-   * that should cause the entire block to be skipped (no state changes).
+   * Process assurances: validate and apply state transition
    *
-   * @param assurances - Array of assurances to validate
+   * Gray Paper: equation eq:reportspostguaranteesdef
+   *
+   * ∀ c ∈ coreindex: reportspostguarantees[c] ≡
+   *   none when report[c].workreport ∈ justbecameavailable ∨
+   *            H_timeslot >= report[c].timestamp + C_assurancetimeoutperiod
+   *   report[c] otherwise
+   *
+   * This removes reports that either:
+   * 1. Just became available (reached 2/3 supermajority)
+   * 2. Timed out (exceeded assurance timeout period)
+   *
+   * @param assurances - Array of assurances to process
    * @param currentSlot - Current block timeslot
    * @param parentHash - Parent block hash
    * @param configService - Configuration service
-   * @returns Safe result with error if validation fails, or assurance counts map if successful
+   * @returns Safe result with error if validation fails, or array of work reports that became available
    */
-  validateAssurances(
+  processAssurances(
     assurances: Assurance[],
-    _currentSlot: number,
+    currentSlot: number,
     parentHash: Hex,
     configService: IConfigService,
-  ): Safe<Map<number, number>> {
+  ): Safe<WorkReport[]> {
     // Get pending reports to check for engaged cores during validation
+    // Gray Paper: justbecameavailable is built from reportspostjudgement (reports after disputes)
+    // This should be the state AFTER disputes are processed
     const pendingReports = this.workReportService.getPendingReports()
 
     // Track assurance counts in a temporary map (not stored in state)
@@ -212,16 +224,18 @@ export class AssuranceService extends BaseService {
         assurance.validator_index < 0 ||
         assurance.validator_index >= configService.numValidators
       ) {
-        return safeError(new Error('bad_validator_index'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
       }
       if (
         i > 0 &&
         assurances[i - 1].validator_index >= assurance.validator_index
       ) {
-        return safeError(new Error('not_sorted_or_unique_assurers'))
+        return safeError(
+          new Error(ASSURANCES_ERRORS.NOT_SORTED_OR_UNIQUE_ASSURERS),
+        )
       }
       if (assurance.anchor !== parentHash) {
-        return safeError(new Error('bad_attestation_parent'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_ATTESTATION_PARENT))
       }
 
       const [validatorKeyError, validatorKey] =
@@ -232,7 +246,7 @@ export class AssuranceService extends BaseService {
         return safeError(validatorKeyError)
       }
       if (!validatorKey) {
-        return safeError(new Error('bad_validator_index'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
       }
 
       const [sigError, isValid] = verifyAssuranceSignature(
@@ -242,11 +256,11 @@ export class AssuranceService extends BaseService {
       )
 
       if (sigError) {
-        return safeError(new Error('bad_signature'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_SIGNATURE))
       }
 
       if (!isValid) {
-        return safeError(new Error('bad_signature'))
+        return safeError(new Error(ASSURANCES_ERRORS.BAD_SIGNATURE))
       }
 
       // Gray Paper: ∀ a ∈ XT_assurances, c ∈ coreindex : a_availabilities[c] ⇒ reports_post_judgement[c] ≠ none
@@ -268,7 +282,7 @@ export class AssuranceService extends BaseService {
 
           if (isSet) {
             if (!pendingReports.coreReports[coreIndex]) {
-              return safeError(new Error('core_not_engaged'))
+              return safeError(new Error(ASSURANCES_ERRORS.CORE_NOT_ENGAGED))
             }
             // Store in temporary map (not state)
             assuranceCounts.set(
@@ -280,41 +294,37 @@ export class AssuranceService extends BaseService {
       }
     }
 
-    return safeResult(assuranceCounts)
-  }
-
-  /**
-   * Apply assurance state transition to reports
-   *
-   * Gray Paper: equation eq:reportspostguaranteesdef
-   *
-   * ∀ c ∈ coreindex: reportspostguarantees[c] ≡
-   *   none when report[c].workreport ∈ justbecameavailable ∨
-   *            H_timeslot >= report[c].timestamp + C_assurancetimeoutperiod
-   *   report[c] otherwise
-   *
-   * This removes reports that either:
-   * 1. Just became available (reached 2/3 supermajority)
-   * 2. Timed out (exceeded assurance timeout period)
-   *
-   * @param assuranceCounts - Validated assurance counts from validateAssurances
-   * @param currentSlot - Current block timeslot
-   * @param configService - Configuration service
-   * @returns Array of work reports that became available
-   */
-  applyAssurances(
-    assuranceCounts: Map<number, number>,
-    currentSlot: number,
-    configService: IConfigService,
-  ): Safe<WorkReport[]> {
+    // Now apply the state transition
     // Track work reports that become available in this block
     const availableWorkReports: WorkReport[] = []
 
-    // Get pending reports
-    const pendingReports = this.workReportService.getPendingReports()
+    // Gray Paper: A work-report becomes available if > 2/3 of validators have marked it
+    // This requires strictly more than 2/3, not >= 2/3
+    // Gray Paper accumulation.tex: These are the "newly available work-reports" (ρ̂)
+    // that should be passed to accumulation
+    const threshold = Math.floor((configService.numValidators * 2) / 3) + 1
+
+    // Check for supermajority FIRST (before timeout removal)
+    // Gray Paper equation 174: justbecameavailable includes reports with supermajority
+    // regardless of timeout status. Timeout only affects accumulation, not inclusion.
+    const coresWithSupermajority = new Set<number>()
+    for (const [coreIndex, count] of assuranceCounts.entries()) {
+      if (count >= threshold) {
+        const pendingReport = pendingReports.coreReports[coreIndex]
+        if (pendingReport) {
+          coresWithSupermajority.add(coreIndex)
+          // Collect the work report that just became available
+          // NOTE: According to Gray Paper equation 174, justbecameavailable includes reports
+          // with supermajority regardless of timeout. Timeout only prevents accumulation.
+          availableWorkReports.push(pendingReport.workReport)
+        }
+      }
+    }
 
     // Check for timeouts on all pending reports (must happen regardless of assurances)
     // Gray Paper: H_timeslot >= timestamp + C_assurancetimeoutperiod
+    // Gray Paper equation 186: reportspostguarantees removes reports that are either
+    // in justbecameavailable OR timed out
     for (
       let coreIndex = 0;
       coreIndex < this.configService.numCores;
@@ -325,28 +335,15 @@ export class AssuranceService extends BaseService {
         continue
       }
 
-      if (
+      const isTimedOut =
         currentSlot >=
         pendingReport.timeslot + TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD
-      ) {
-        this.workReportService.removePendingWorkReport(BigInt(coreIndex))
-      }
-    }
+      const hasSupermajority = coresWithSupermajority.has(coreIndex)
 
-    // Gray Paper: A work-report becomes available if > 2/3 of validators have marked it
-    // This requires strictly more than 2/3, not >= 2/3
-    // Gray Paper accumulation.tex: These are the "newly available work-reports" (ρ̂)
-    // that should be passed to accumulation
-    const threshold = Math.floor((configService.numValidators * 2) / 3) + 1
-
-    for (const [coreIndex, count] of assuranceCounts.entries()) {
-      if (count >= threshold) {
-        const pendingReport = pendingReports.coreReports[coreIndex]
-        if (pendingReport) {
-          // Collect the work report that just became available
-          availableWorkReports.push(pendingReport.workReport)
-        }
-        // Remove from reports state (chapter 10)
+      // Gray Paper equation 186: reportspostguarantees removes reports that are either
+      // in justbecameavailable (has supermajority) OR timed out
+      if (hasSupermajority || isTimedOut) {
+        // Remove from reports state
         this.workReportService.removePendingWorkReport(BigInt(coreIndex))
       }
     }

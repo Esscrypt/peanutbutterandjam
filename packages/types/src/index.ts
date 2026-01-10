@@ -45,6 +45,8 @@ export * from './constants'
 // Core types - export ValidatorPublicKeys from core as CoreValidatorKey
 export * from './core'
 export * from './erasure-coding'
+// Error constants and utilities
+export * from './errors'
 // Fuzz types
 export * from './fuzz'
 // Genesis and Global State types - comprehensive Gray Paper compliant state

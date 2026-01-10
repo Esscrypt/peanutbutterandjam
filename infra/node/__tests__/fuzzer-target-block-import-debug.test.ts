@@ -12,13 +12,7 @@ import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
 import { hexToBytes } from '@pbnjam/core'
 import { decodeRecent } from '@pbnjam/codec'
-import {
-  initializeServices,
-  getStateService,
-  getBlockImporterService,
-  getRecentHistoryService,
-  getConfigService,
-} from '../fuzzer-target'
+import { initializeServices } from './test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -26,12 +20,12 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 describe('Fuzzer Target Block Import', () => {
   it('should match state root after importing block 2 using fuzzer-target initializeServices', async () => {
     // Initialize services using the exact same function as fuzzer-target.ts
-    await initializeServices()
+    const services = await initializeServices()
 
-    const stateService = getStateService()
-    const blockImporterService = getBlockImporterService()
-    const recentHistoryService = getRecentHistoryService()
-    const configService = getConfigService()
+    const stateService = services.stateService
+    const blockImporterService = services.blockImporterService
+    const recentHistoryService = services.recentHistoryService
+    const configService = services.configService
 
     // Disable ancestry validation by patching isValidAnchor to always return true
     // This allows anchors that are not in recent history to be accepted

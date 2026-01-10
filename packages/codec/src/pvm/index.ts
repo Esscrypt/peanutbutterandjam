@@ -1,3 +1,4 @@
+export * from './accumulate-arguments'
 export * from './accumulate-input'
 export * from './blob'
 export * from './deferred-transfer'

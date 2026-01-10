@@ -244,7 +244,8 @@ export function generateFallbackKeySequence(
     const dataView = new DataView(hashBytes.buffer.slice(0, 4))
     const decodedIndex = dataView.getUint32(0, true) // true = little-endian
 
-    const activeValidatorSize = validatorSetManager.getActiveValidators().size
+    const activeValidators = validatorSetManager.getActiveValidators()
+    const activeValidatorSize = activeValidators.length
     // Use the decoded index to select a validator (cyclic indexing)
     const validatorIndex = decodedIndex % activeValidatorSize
 

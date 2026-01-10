@@ -15,11 +15,6 @@ COPY . .
 
 RUN bun install --ignore-scripts
 
-# Build the application
-# Note: Some packages may not have build scripts, so we continue on failure
-# but we verify that workspace packages are properly linked
-RUN bun run build:fuzzer
-
 FROM oven/bun:1.3.5-slim
 WORKDIR /app
 

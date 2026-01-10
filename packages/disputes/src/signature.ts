@@ -101,7 +101,13 @@ export function validateJudgmentSignature(
   if (useActiveSet) {
     // Check active set (kappa) only
     const activeValidators = validatorSetManagerService.getActiveValidators()
-    const validatorFromActive = activeValidators.get(Number(judgment.index))
+    if (
+      Number(judgment.index) < 0 ||
+      Number(judgment.index) >= activeValidators.length
+    ) {
+      return safeError(new Error('bad_validator_index'))
+    }
+    const validatorFromActive = activeValidators[Number(judgment.index)]
     if (validatorFromActive) {
       validatorFound = true
       publicKeys = validatorFromActive
@@ -110,7 +116,13 @@ export function validateJudgmentSignature(
     // Check previous set (lambda) only
     const previousValidators =
       validatorSetManagerService.getPreviousValidators()
-    const validatorFromPrevious = previousValidators.get(Number(judgment.index))
+    if (
+      Number(judgment.index) < 0 ||
+      Number(judgment.index) >= previousValidators.length
+    ) {
+      return safeError(new Error('bad_validator_index'))
+    }
+    const validatorFromPrevious = previousValidators[Number(judgment.index)]
     if (validatorFromPrevious) {
       validatorFound = true
       publicKeys = validatorFromPrevious
@@ -174,7 +186,8 @@ export function validateFaultSignature(
 
   // Check active set (kappa)
   const activeValidators = validatorSetManagerService.getActiveValidators()
-  for (const [index, validator] of activeValidators) {
+  for (let index = 0; index < activeValidators.length; index++) {
+    const validator = activeValidators[index]
     if (validator.ed25519 === fault.key) {
       keyFound = true
       validatorIndex = index
@@ -186,7 +199,8 @@ export function validateFaultSignature(
   if (!keyFound) {
     const previousValidators =
       validatorSetManagerService.getPreviousValidators()
-    for (const [index, validator] of previousValidators) {
+    for (let index = 0; index < previousValidators.length; index++) {
+      const validator = previousValidators[index]
       if (validator.ed25519 === fault.key) {
         keyFound = true
         validatorIndex = index
@@ -255,7 +269,8 @@ export function validateCulpritSignature(
 
   // Check active set (kappa)
   const activeValidators = validatorSetManagerService.getActiveValidators()
-  for (const [index, validator] of activeValidators) {
+  for (let index = 0; index < activeValidators.length; index++) {
+    const validator = activeValidators[index]
     if (validator.ed25519 === culprit.key) {
       keyFound = true
       validatorIndex = index
@@ -267,7 +282,8 @@ export function validateCulpritSignature(
   if (!keyFound) {
     const previousValidators =
       validatorSetManagerService.getPreviousValidators()
-    for (const [index, validator] of previousValidators) {
+    for (let index = 0; index < previousValidators.length; index++) {
+      const validator = previousValidators[index]
       if (validator.ed25519 === culprit.key) {
         keyFound = true
         validatorIndex = index

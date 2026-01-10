@@ -5,7 +5,7 @@ import {
   encodeWorkItemSummary,
   encodeWorkPackage,
 } from '@pbnjam/codec'
-import { hexToBytes, logger } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   FetchParams,
   HostFunctionContext,
@@ -77,7 +77,7 @@ export class FetchHostFunction extends BaseHostFunction {
     if (fetchedData === null) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Fetch host function: Data not found', {
+      logger.warn('Fetch host function: Data not found', {
         selector: selector.toString(),
       })
     } else {
@@ -103,7 +103,7 @@ export class FetchHostFunction extends BaseHostFunction {
         // Write data (may be empty if length was 0 or fromOffset beyond data)
         const faultAddress = context.ram.writeOctets(outputOffset, dataToWrite)
         if (faultAddress) {
-          context.log('Fetch host function: Memory write fault', {
+          logger.warn('Fetch host function: Memory write fault', {
             selector: selector.toString(),
             outputOffset: outputOffset.toString(),
             faultAddress: faultAddress.toString(),
@@ -123,9 +123,7 @@ export class FetchHostFunction extends BaseHostFunction {
       context.registers[7] = BigInt(fetchedData.length)
       logger.debug('Fetch host function: Data fetched successfully', {
         selector: selector.toString(),
-        dataLength: fetchedData.length.toString(),
-        actualLength: actualLength.toString(),
-        gasUsed: context.gasCounter.toString(),
+        data: `${bytesToHex(fetchedData).slice(0, 50)}...${bytesToHex(fetchedData).slice(-50)}`,
       })
     }
 

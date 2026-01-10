@@ -20,12 +20,15 @@ RUN bun install --ignore-scripts
 # but we verify that workspace packages are properly linked
 RUN bun run build:fuzzer
 
-FROM gcr.io/distroless/base-debian11
+FROM debian:bullseye-slim
 WORKDIR /app
 
 # Set environment variables for logging
 ENV ENABLE_LOGGER=true
 ENV PINO_LEVEL=debug
+
+# Ensure /tmp exists and is writable for Unix domain sockets
+RUN mkdir -p /tmp && chmod 1777 /tmp
 
 # Copy the compiled binary
 COPY --from=build /app/bin/fuzzer-target /app/bin/fuzzer-target

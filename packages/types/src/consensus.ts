@@ -104,15 +104,6 @@ export interface SafroleInput {
   extrinsic: SafroleTicket[]
 }
 
-export interface SafroleOutput {
-  /** Updated Safrole state */
-  state: SafroleState
-  /** Generated tickets */
-  tickets: SafroleTicket[]
-  /** Processing errors */
-  errors: SafroleErrorCode[]
-}
-
 export interface SafroleError {
   code: number
   message: string
@@ -242,87 +233,6 @@ export const SMALL_SAFROLE_CONSTANTS: IChainSpecConstants = {
 // Formally, this value is denoted T .
 // export const JAM_COMMON_ERA_START_TIME = new Date('2025-01-01T12:00:00Z').getTime()
 export const JAM_COMMON_ERA_START_TIME = 1735732800000
-/**
- * Safrole Error Code Type
- *
- * Comprehensive error code system for Safrole State Transition Function
- * Based on Gray Paper specifications and test vector error codes
- *
- * Reference:
- * - graypaper/text/safrole.tex
- * - submodules/jamtestvectors/stf/safrole/safrole.asn
- */
-export type SafroleErrorCode =
-  // Slot progression errors
-  | 'bad_slot'
-  | 'invalid_slot_progression'
-  | 'slot_too_old'
-  | 'slot_too_far_ahead'
-
-  // Ticket validation errors
-  | 'bad_ticket_attempt'
-  | 'bad_ticket_order'
-  | 'bad_ticket_proof'
-  | 'duplicate_ticket'
-  | 'unexpected_ticket'
-  | 'invalid_ticket_entry_index'
-  | 'invalid_ticket_signature'
-  | 'ticket_signature_too_short'
-  | 'ticket_signature_too_long'
-  | 'ticket_signature_invalid_format'
-  | 'ticket_signature_all_zeros'
-
-  // Entropy validation errors
-  | 'invalid_entropy_format'
-  | 'invalid_entropy_size'
-  | 'invalid_entropy_all_zeros'
-
-  // Extrinsic validation errors
-  | 'too_many_extrinsics'
-  | 'invalid_extrinsic_count'
-  | 'extrinsic_empty_when_required'
-
-  // State validation errors
-  | 'invalid_pending_set'
-  | 'invalid_epoch_root'
-  | 'invalid_seal_tickets'
-  | 'invalid_ticket_accumulator'
-
-  // Epoch transition errors
-  | 'invalid_epoch_transition'
-  | 'missing_epoch_mark'
-  | 'invalid_epoch_mark'
-
-  // Ticket accumulation errors
-  | 'ticket_accumulator_overflow'
-  | 'ticket_accumulator_underflow'
-  | 'invalid_ticket_accumulator_size'
-
-  // VRF and cryptographic errors
-  | 'vrf_proof_invalid'
-  | 'vrf_proof_generation_failed'
-  | 'ring_proof_invalid'
-  | 'bandersnatch_signature_invalid'
-
-  // Validator set errors
-  | 'invalid_validator_set'
-  | 'validator_set_empty'
-  | 'validator_key_invalid'
-  | 'validator_metadata_invalid'
-
-  // Timing and epoch errors
-  | 'epoch_tail_violation'
-  | 'invalid_epoch_length'
-  | 'invalid_slot_phase'
-
-  // Memory and resource errors
-  | 'memory_allocation_failed'
-  | 'resource_exhausted'
-  | 'buffer_overflow'
-
-  // Internal implementation errors
-  | 'internal_error' // Unexpected internal error
-  | 'validation_failed' // General validation failure
 
 /**
  * Consensus input
@@ -389,30 +299,6 @@ export const CONSENSUS_CONSTANTS = {
   /** Maximum seal tickets */
   MAX_SEAL_TICKETS: 10n,
 } as const
-
-/**
- * Consensus error codes
- */
-export enum ConsensusErrorCode {
-  BAD_SLOT = 0,
-  UNEXPECTED_TICKET = 1,
-  BAD_TICKET_ORDER = 2,
-  BAD_TICKET_PROOF = 3,
-  BAD_TICKET_ATTEMPT = 4,
-  DUPLICATE_TICKET = 6,
-}
-
-/**
- * Consensus error
- */
-export interface ConsensusError {
-  /** Error code */
-  code: ConsensusErrorCode
-  /** Error message */
-  message: string
-  /** Error context */
-  context?: Record<string, unknown>
-}
 
 /**
  * Validator key pair (for epoch marks - only bs + ed25519)

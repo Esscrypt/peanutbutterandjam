@@ -10,28 +10,24 @@ import * as path from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
-import { hexToBytes } from '@pbnjam/core'
 import { decodeRecent } from '@pbnjam/codec'
 import {
   initializeServices,
-  getStateService,
-  getBlockImporterService,
-  getRecentHistoryService,
-  getConfigService,
-} from '../fuzzer-target'
+} from './test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
+
 describe('Fuzzer Target Block Import', () => {
   it('should match state root after importing block 2 using fuzzer-target initializeServices', async () => {
     // Initialize services using the exact same function as fuzzer-target.ts
-    await initializeServices()
+    const services = await initializeServices()
 
-    const stateService = getStateService()
-    const blockImporterService = getBlockImporterService()
-    const recentHistoryService = getRecentHistoryService()
-    const configService = getConfigService()
+    const stateService = services.stateService
+    const blockImporterService = services.blockImporterService
+    const recentHistoryService = services.recentHistoryService
+    const configService = services.configService
 
     // Disable ancestry validation by patching isValidAnchor to always return true
     // This allows anchors that are not in recent history to be accepted
@@ -63,6 +59,9 @@ describe('Fuzzer Target Block Import', () => {
     } catch (error) {
       console.warn(`⚠️  Failed to load PeerInfo, using default JAM version: ${error instanceof Error ? error.message : String(error)}`)
     }
+    
+    // Set JAM version on configService
+    configService.jamVersion = jamVersion
 
     // Load Initialize message
     const initializeBinPath = path.join(
@@ -107,25 +106,6 @@ describe('Fuzzer Target Block Import', () => {
     }
     console.log(`✅ Initial state set from ${init.keyvals.length} keyvals`)
 
-    // Initialize recent history from pre-state beta chapter
-    const betaKeyval = init.keyvals.find(
-      (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-    )
-    if (betaKeyval) {
-      const betaData = hexToBytes(betaKeyval.value)
-      const [decodeError, decodeResult] = decodeRecent(betaData)
-      if (!decodeError && decodeResult) {
-        console.log(`📂 Decoded recent history:`, {
-          historyLength: decodeResult.value.history?.length ?? 0,
-          peaks: decodeResult.value.accoutBelt?.peaks ?? [],
-          totalCount: decodeResult.value.accoutBelt?.totalCount?.toString() ?? '0',
-        })
-        recentHistoryService.setRecent(decodeResult.value)
-        console.log(`📂 Loaded recent history from pre-state (totalCount: ${decodeResult.value.accoutBelt?.totalCount ?? 0})`)
-      } else {
-        console.warn(`⚠️  Failed to decode beta from pre-state:`, decodeError)
-      }
-    }
 
     // Verify initial state root
     const [initStateRootError, initStateRoot] = stateService.getStateRoot()
@@ -535,5 +515,3 @@ describe('Fuzzer Target Block Import', () => {
     expect(successCount).toBeGreaterThan(0)
   }, 600000) // 10 minute timeout for importing many blocks
 })
-
-

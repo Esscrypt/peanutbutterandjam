@@ -15,12 +15,16 @@ import {
   validateBlockHeader,
   validatePreStateRoot,
 } from '@pbnjam/block-importer'
-import { calculateBlockHashFromHeader } from '@pbnjam/codec'
+import {
+  calculateBlockHashFromHeader,
+  calculateExtrinsicHash,
+} from '@pbnjam/codec'
 import { type EventBusService, type Hex, logger, zeroHash } from '@pbnjam/core'
 
 import type { Block } from '@pbnjam/types'
 import {
   BaseService,
+  BLOCK_HEADER_ERRORS,
   type SafePromise,
   safeError,
   safeResult,
@@ -41,6 +45,7 @@ import type { StateService } from './state-service'
 import type { StatisticsService } from './statistics-service'
 import type { TicketService } from './ticket-service'
 import type { ValidatorSetManager } from './validator-set'
+import type { WorkReportService } from './work-report-service'
 
 /**
  * Block Importer Service
@@ -65,6 +70,7 @@ export class BlockImporterService extends BaseService {
   private readonly statisticsService: StatisticsService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
+  private readonly workReportService: WorkReportService
 
   private previousStateRootForAnchorValidation: Hex | null = null
   private stateSnapshot: { key: Hex; value: Hex }[] | null = null
@@ -85,6 +91,7 @@ export class BlockImporterService extends BaseService {
     statisticsService: StatisticsService
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
+    workReportService: WorkReportService
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -103,6 +110,10 @@ export class BlockImporterService extends BaseService {
     this.statisticsService = options.statisticsService
     this.authPoolService = options.authPoolService
     this.accumulationService = options.accumulationService
+    this.workReportService = options.workReportService
+
+    // Noop usage to satisfy linter (workReportService may be used in future)
+    void this.workReportService
   }
 
   // ============================================================================
@@ -151,7 +162,7 @@ export class BlockImporterService extends BaseService {
           error: importError,
           stack: new Error().stack,
         })
-        // Revert state to snapshot
+        // Revert state to snapshot before returning error
         await this.revertStateSnapshot()
         // Revert epoch transition if it happened
         if (epochTransitionEmitted) {
@@ -170,13 +181,14 @@ export class BlockImporterService extends BaseService {
             ]
           previousEntry.stateRoot = this.previousStateRootForAnchorValidation
         }
-        return safeResult(false)
+        // Return error after reverting state so fuzzer can receive Error message
+        return safeError(importError)
       }
       // Clear snapshot on success
       this.stateSnapshot = null
       return safeResult(true)
     } catch (error) {
-      // Revert state to snapshot
+      // Revert state to snapshot before returning error
       logger.error('[BlockImporter] Failed to import block', {
         error: error,
         stack: new Error().stack,
@@ -200,7 +212,10 @@ export class BlockImporterService extends BaseService {
         previousEntry.stateRoot = this.previousStateRootForAnchorValidation
       }
 
-      return safeResult(false)
+      // Return error after reverting state so fuzzer can receive Error message
+      return safeError(
+        error instanceof Error ? error : new Error(String(error)),
+      )
     }
   }
 
@@ -226,6 +241,18 @@ export class BlockImporterService extends BaseService {
       return safeError(blockHeaderValidationError)
     }
 
+    // Validate extrinsic hash matches the block body
+    const [extrinsicHashError, computedExtrinsicHash] = calculateExtrinsicHash(
+      block.body,
+      this.configService,
+    )
+    if (extrinsicHashError) {
+      return safeError(extrinsicHashError)
+    }
+    if (computedExtrinsicHash !== block.header.extrinsicHash) {
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EXTRINSIC_HASH))
+    }
+
     // Temporarily update previous block's state root for anchor validation
     // Gray Paper eq 23-25: Update previous entry's state_root to parent_state_root (H_priorstateroot)
     // This is needed for validateGuarantees because anchor validation checks state_root
@@ -238,15 +265,13 @@ export class BlockImporterService extends BaseService {
       previousEntry.stateRoot = block.header.priorStateRoot
     }
 
-    // PRE-VALIDATE guarantees BEFORE other state mutations (assurances, accumulation, etc.)
-    // Gray Paper: When a guarantee fails validation (e.g., bad_code_hash for ejected service),
-    // the report is "simply ignored" - meaning NO state changes occur for the block.
-    const [validateError] = this.guarantorService.validateGuarantees(
-      block.body.guarantees,
+    // Process disputes (validate and apply)
+    const [disputeError] = this.disputesService.processDisputes(
+      block.body.disputes,
       block.header.timeslot,
     )
-    if (validateError) {
-      return safeError(validateError)
+    if (disputeError) {
+      return safeError(disputeError)
     }
 
     // Gray Paper: Process assurances FIRST, then guarantees
@@ -256,30 +281,18 @@ export class BlockImporterService extends BaseService {
     // for new guarantees to be processed.
     // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
     // passed to accumulation
-    const [assuranceValidationError, assuranceCounts] =
-      this.assuranceService.validateAssurances(
+    const [assuranceError, availableWorkReports] =
+      this.assuranceService.processAssurances(
         block.body.assurances,
         Number(block.header.timeslot),
         block.header.parent,
         this.configService,
       )
-    if (assuranceValidationError) {
-      return safeError(assuranceValidationError)
-    }
-    if (!assuranceCounts) {
-      return safeError(new Error('Assurance validation failed'))
-    }
-    const [assuranceApplyError, availableWorkReports] =
-      this.assuranceService.applyAssurances(
-        assuranceCounts,
-        Number(block.header.timeslot),
-        this.configService,
-      )
-    if (assuranceApplyError) {
-      return safeError(assuranceApplyError)
+    if (assuranceError) {
+      return safeError(assuranceError)
     }
     if (!availableWorkReports) {
-      return safeError(new Error('Assurance application failed'))
+      return safeError(new Error('Assurance processing failed'))
     }
 
     // Process guarantees AFTER assurances
@@ -328,36 +341,10 @@ export class BlockImporterService extends BaseService {
     // Note: Extrinsic tickets include proof, but accumulator only stores (st_id, st_entryindex)
     const [ticketApplyError] = this.ticketService.applyTickets(
       block.body.tickets,
+      block.header.timeslot,
     )
     if (ticketApplyError) {
       return safeError(ticketApplyError)
-    }
-
-    // apply the service account transition
-    const [serviceAccountValidationError] =
-      this.serviceAccountService.applyPreimages(
-        block.body.preimages,
-        block.header.timeslot,
-      )
-    if (serviceAccountValidationError) {
-      return safeError(serviceAccountValidationError)
-    }
-    // Apply disputes (validate first, then apply)
-    const [disputeValidationError, validatedDisputes] =
-      this.disputesService.validateDisputes(
-        block.body.disputes,
-        block.header.timeslot,
-      )
-    if (disputeValidationError) {
-      return safeError(disputeValidationError)
-    }
-    if (!validatedDisputes) {
-      return safeError(new Error('Dispute validation failed'))
-    }
-    const [disputeApplyError] =
-      this.disputesService.applyDisputes(validatedDisputes)
-    if (disputeApplyError) {
-      return safeError(disputeApplyError)
     }
 
     // Update entropy accumulator with VRF signature from block header
@@ -373,25 +360,16 @@ export class BlockImporterService extends BaseService {
     // This MUST happen for EVERY block, even empty ones, as thetime is part of the state
     this.clockService.setLatestReportedBlockTimeslot(block.header.timeslot)
 
-    // Update authpool for this block
-    // Gray Paper Eq. 26-27: authpool'[c] ≡ tail(F(c)) + [authqueue'[c][H_timeslot]]^C_authpoolsize
-    // This MUST happen for EVERY block, even empty ones, as authpool is part of the state
-    const [authPoolError] = this.authPoolService.applyBlockTransition(
-      block.header.timeslot,
-      block.body.guarantees,
-    )
-    if (authPoolError) {
-      return safeError(authPoolError)
-    }
-
     // Reset per-block statistics (coreStats and serviceStats) at the START of block processing
     // Gray Paper: These stats are per-block, not cumulative across blocks
     // Must be called BEFORE accumulation so accumulation stats are fresh for this block
     this.statisticsService.resetPerBlockStats()
 
+    const currentTimeslot = this.clockService.getLatestReportedBlockTimeslot()
     // Run accumulation for available work reports
     const accumulationResult = await this.accumulationService.applyTransition(
-      block.header.timeslot,
+      // block.header.timeslot,
+      currentTimeslot,
       availableWorkReports, // Newly available work reports (ρ̂) from assurances
     )
     if (!accumulationResult.ok) {
@@ -408,6 +386,31 @@ export class BlockImporterService extends BaseService {
     )
     if (beltError) {
       logger.warn('Failed to update accout belt', { error: beltError })
+    }
+
+    // Apply preimages to service accounts (MUST happen AFTER accumulation)
+    // Gray Paper eq 62: accountspostpreimage ≺ (xt_preimages, accountspostxfer, thetime')
+    // Preimages depend on accountspostxfer, which is produced by accumulation
+    const [serviceAccountValidationError] =
+      this.serviceAccountService.applyPreimages(
+        block.body.preimages,
+        block.header.timeslot,
+      )
+    if (serviceAccountValidationError) {
+      return safeError(serviceAccountValidationError)
+    }
+
+    // Update authpool for this block (MUST happen AFTER accumulation)
+    // Gray Paper eq 63: authpool' ≺ (theheader, xt_guarantees, authqueue', authpool)
+    // Authpool depends on authqueue', which is produced by accumulation
+    // Gray Paper Eq. 26-27: authpool'[c] ≡ tail(F(c)) + [authqueue'[c][H_timeslot]]^C_authpoolsize
+    // This MUST happen for EVERY block, even empty ones, as authpool is part of the state
+    const [authPoolError] = this.authPoolService.applyBlockTransition(
+      block.header.timeslot,
+      block.body.guarantees,
+    )
+    if (authPoolError) {
+      return safeError(authPoolError)
     }
 
     // Add block to recent history at the end, after all state updates are complete

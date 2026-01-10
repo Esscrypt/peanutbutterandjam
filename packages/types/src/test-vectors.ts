@@ -59,7 +59,7 @@ export interface AccumulateTestVector {
           key: string
           value: string
         }>
-        preimages_blob: Array<{
+        preimage_blobs: Array<{
           hash: string
           blob: string
         }>
@@ -126,7 +126,7 @@ export interface AccumulateTestVector {
           key: string
           value: string
         }>
-        preimages_blob: Array<{
+        preimage_blobs: Array<{
           hash: string
           blob: string
         }>

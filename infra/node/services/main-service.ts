@@ -498,6 +498,7 @@ export class MainService extends BaseService {
       statisticsService: this.statisticsService,
       authPoolService: this.authPoolService,
       accumulationService: this.accumulationService,
+      workReportService: this.workReportService,
     })
 
     // Register created services with the registry
