@@ -53,19 +53,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 #### Publishing AMD64 Images to GitHub Container Registry
 
-To build and push an amd64-specific image:
-
-```bash
-# Build and push for amd64
-docker buildx build --platform linux/amd64 \
-  -f infra/node/Dockerfile.fuzzer-target \
-  -t ghcr.io/shimonchick/pbnjam-fuzzer-target:latest \
-  --push .
 
 # Or build multi-arch (amd64 + arm64) and push
+
+```
+# Clear buildx cache first (optional)
+docker buildx prune -f
+
+# Build without cache
 docker buildx build --platform linux/amd64,linux/arm64 \
+  --no-cache \
+  --pull \
   -f infra/node/Dockerfile.fuzzer-target \
-  -t ghcr.io/shimonchick/pbnjam-fuzzer-target:latest \
+  -t shimonchick/pbnjam-fuzzer-target:latest \
   --push .
 ```
 

@@ -13,7 +13,7 @@ COPY packages ./packages
 COPY infra ./infra
 # COPY apis ./apis
 
-RUN bun install --frozen-lockfile --ignore-scripts
+RUN bun install --ignore-scripts
 # Copy remaining source code
 COPY . .
 

@@ -15,9 +15,8 @@ COPY . .
 
 RUN bun install --ignore-scripts
 
-# Build the application
-# Note: Some packages may not have build scripts, so we continue on failure
-# but we verify that workspace packages are properly linked
+# Build the fuzzer target binary
+# Note: This compiles TypeScript and needs all workspace dependencies to be available and built
 RUN bun run build:fuzzer
 
 FROM debian:bullseye-slim
