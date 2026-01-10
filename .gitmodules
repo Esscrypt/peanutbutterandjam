@@ -22,9 +22,12 @@
 [submodule "submodules/arkworks-algebra"]
 	path = submodules/arkworks-algebra
 	url = https://github.com/arkworks-rs/algebra.git
-[submodule "submodules/jam-testvectors"]
-	path = submodules/jam-testvectors
+[submodule "submodules/jam-test-vectors"]
+	path = submodules/jam-test-vectors
 	url = https://github.com/davxy/jam-test-vectors.git
+[submodule "submodules/new-gas-cost-model"]
+	path = submodules/new-gas-cost-model
+	url = https://github.com/koute/new-gas-cost-model.git
 [submodule "submodules/jam-conformance"]
 	path = submodules/jam-conformance
 	url = https://github.com/davxy/jam-conformance.git
@@ -38,3 +41,6 @@
 [submodule "packages/bandersnatch-vrf"]
 	path = packages/bandersnatch-vrf
 	url = https://github.com/Esscrypt/bandersnatch-vrf.git
+[submodule "submodules/ring-proof"]
+	path = submodules/ring-proof
+	url = https://github.com/w3f/ring-proof.git
