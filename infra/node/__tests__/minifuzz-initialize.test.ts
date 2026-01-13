@@ -54,7 +54,7 @@ describe('Fuzzer Initialize Test', () => {
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
     )
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
@@ -162,11 +162,10 @@ describe('Fuzzer Initialize Test', () => {
     })
 
     const privilegesService = new PrivilegesService({
-      configService,
+      configService: configService,
     })
 
     const serviceAccountsService = new ServiceAccountService({
-      configService,
       eventBusService,
       clockService,
       networkingService: null,
@@ -220,7 +219,7 @@ describe('Fuzzer Initialize Test', () => {
     genesisManager.getState = () => {
       // Return empty state - will be set via Initialize message
       // Safe type is [error, value] tuple - use safeResult helper
-      return safeResult({ keyvals: [] })
+      return safeResult({ state_root: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`, keyvals: [] })
     }
 
     const stateService = new StateService({
@@ -307,7 +306,7 @@ describe('Fuzzer Initialize Test', () => {
     }
 
     // Set state from keyvals with JAM version from PeerInfo
-    const [setStateError] = stateService.setState(init.keyvals, jamVersion)
+    const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       throw new Error(`Failed to set state: ${setStateError.message}`)
     }

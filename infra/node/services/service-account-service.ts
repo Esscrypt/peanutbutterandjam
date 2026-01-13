@@ -5,7 +5,15 @@
  * Handles mapping from hash to preimage data and announcement tracking
  */
 
-import { getServicePreimageValue, getServiceRequestValue, getServiceStorageKey, getServiceStorageValue, setServicePreimageValue, setServiceRequestValue, setServiceStorageValue } from '@pbnjam/codec'
+import {
+  getServicePreimageValue,
+  getServiceRequestValue,
+  getServiceStorageKey,
+  getServiceStorageValue,
+  setServicePreimageValue,
+  setServiceRequestValue,
+  setServiceStorageValue,
+} from '@pbnjam/codec'
 import {
   blake2bHash,
   bytesToHex,
@@ -102,12 +110,10 @@ export class ServiceAccountService
     return safeResult(true)
   }
 
-
   async handlePreimageRequested(
     request: PreimageRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-
     if (!this.preimageRequestProtocol) {
       return safeError(new Error('Preimage request protocol not found'))
     }
@@ -116,11 +122,18 @@ export class ServiceAccountService
       return safeError(new Error('Networking service not found'))
     }
 
-    let foundPreimage: Hex | undefined 
-    let foundServiceId: bigint | undefined 
+    let foundPreimage: Hex | undefined
+    let foundServiceId: bigint | undefined
     // try to find the preimage from known service accounts
-    for (const [serviceId, serviceAccount] of this.coreServiceAccounts.entries()) {
-      const preimage = getServicePreimageValue(serviceAccount, serviceId, request.hash)
+    for (const [
+      serviceId,
+      serviceAccount,
+    ] of this.coreServiceAccounts.entries()) {
+      const preimage = getServicePreimageValue(
+        serviceAccount,
+        serviceId,
+        request.hash,
+      )
       if (preimage) {
         foundPreimage = bytesToHex(preimage)
         foundServiceId = serviceId
@@ -133,7 +146,10 @@ export class ServiceAccountService
     }
 
     const [serializeError, serializedPreimageMessage] =
-      this.preimageRequestProtocol.serializeResponse({ requester: foundServiceId, blob: foundPreimage })
+      this.preimageRequestProtocol.serializeResponse({
+        requester: foundServiceId,
+        blob: foundPreimage,
+      })
     if (serializeError) {
       return safeError(serializeError)
     }
@@ -208,7 +224,9 @@ export class ServiceAccountService
     // Store the preimage
     setServicePreimageValue(serviceAccount, serviceId, hash, blobBytes)
 
-    setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, [creationSlot])
+    setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, [
+      creationSlot,
+    ])
 
     return safeResult(hash)
   }
@@ -217,7 +235,6 @@ export class ServiceAccountService
    * Validate a preimage against current state without mutating it
    */
   private validatePreimageRequest(preimage: Preimage): Safe<void> {
-
     // Compute hash over blob only
     const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
     if (hashError) {
@@ -229,16 +246,25 @@ export class ServiceAccountService
       return safeError(new Error('Service account not found'))
     }
     // Already present for this service -> unneeded
-    const existing = getServicePreimageValue(serviceAccount, preimage.requester, hash)
+    const existing = getServicePreimageValue(
+      serviceAccount,
+      preimage.requester,
+      hash,
+    )
     if (existing) {
       return safeError(new Error('preimage_unneeded'))
     }
 
     // Must be requested for this service and exact byte length
     const blobLength = BigInt(hexToBytes(preimage.blob).length)
-    
-    const requestStatus = getServiceRequestValue(serviceAccount, preimage.requester, hash, blobLength)
-    
+
+    const requestStatus = getServiceRequestValue(
+      serviceAccount,
+      preimage.requester,
+      hash,
+      blobLength,
+    )
+
     if (!requestStatus) {
       // Return preimage_unneeded when blob is not requested (per test vector expectations)
       return safeError(new Error('preimage_unneeded'))
@@ -298,7 +324,6 @@ export class ServiceAccountService
     return safeResult(undefined)
   }
 
-
   /**
    * Clean up expired preimages
    *
@@ -351,7 +376,12 @@ export class ServiceAccountService
       return safeResult(null)
     }
 
-    const requestStatus = getServiceRequestValue(serviceAccount, serviceId, hash, BigInt(preimage.length))
+    const requestStatus = getServiceRequestValue(
+      serviceAccount,
+      serviceId,
+      hash,
+      BigInt(preimage.length),
+    )
     if (!requestStatus) {
       logger.debug('No request map found for hash', { hash })
       return safeResult(null)
@@ -428,18 +458,23 @@ export class ServiceAccountService
   getServiceAccounts(): ServiceAccounts {
     const accounts = new Map<bigint, ServiceAccount>()
 
-    for (const [serviceId, serviceAccount] of this.coreServiceAccounts.entries()) {
+    for (const [
+      serviceId,
+      serviceAccount,
+    ] of this.coreServiceAccounts.entries()) {
       // Deep copy rawCshKeyvals to prevent mutations
-      const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals));
-      
+      const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(
+        JSON.stringify(serviceAccount.rawCshKeyvals),
+      )
+
       const serviceAccountCopy: ServiceAccount = {
         ...serviceAccount,
         rawCshKeyvals: rawCshKeyvalsCopy,
       }
-      
+
       accounts.set(serviceId, serviceAccountCopy)
     }
-    
+
     return { accounts }
   }
 
@@ -453,8 +488,10 @@ export class ServiceAccountService
     // Clone the core properties to prevent external mutations from affecting stored state
     // This is critical because JavaScript objects are passed by reference
     // Deep copy rawCshKeyvals to prevent mutations
-    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals))
-    
+    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(
+      JSON.stringify(serviceAccount.rawCshKeyvals),
+    )
+
     const clonedCore: ServiceAccount = {
       codehash: serviceAccount.codehash,
       balance: serviceAccount.balance,
@@ -468,7 +505,7 @@ export class ServiceAccountService
       parent: serviceAccount.parent,
       rawCshKeyvals: rawCshKeyvalsCopy, // DEEP COPY - prevents mutations
     }
-    
+
     this.coreServiceAccounts.set(serviceId, clonedCore)
 
     return safeResult(undefined)
@@ -481,7 +518,8 @@ export class ServiceAccountService
     let serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       const newServiceAccount: ServiceAccount = {
-        codehash: '0x0000000000000000000000000000000000000000000000000000000000000000',
+        codehash:
+          '0x0000000000000000000000000000000000000000000000000000000000000000',
         balance: 0n,
         minaccgas: 0n,
         minmemogas: 0n,
@@ -497,18 +535,20 @@ export class ServiceAccountService
       this.coreServiceAccounts.set(serviceId, newServiceAccount)
       serviceAccount = newServiceAccount
     }
-    
+
     // Merge new keyvals with existing rawCshKeyvals
     // Deep copy existing values to prevent mutations from affecting stored state
     // Then merge in new keyvals (new values overwrite existing ones for the same key)
-    const newRawCshKeyvals: Record<Hex, Hex> = JSON.parse(JSON.stringify(serviceAccount.rawCshKeyvals))
+    const newRawCshKeyvals: Record<Hex, Hex> = JSON.parse(
+      JSON.stringify(serviceAccount.rawCshKeyvals),
+    )
     // Merge: add new keyvals, overwriting existing ones if the same key appears
     for (const key in keyvals) {
       newRawCshKeyvals[key as Hex] = keyvals[key as Hex]
     }
-    
+
     serviceAccount.rawCshKeyvals = newRawCshKeyvals
-    
+
     return safeResult(undefined)
   }
 
@@ -518,25 +558,29 @@ export class ServiceAccountService
   ): Safe<void> {
     // CRITICAL: Merge rawCshKeyvals instead of overwriting
     // If an existing account has rawCshKeyvals, preserve them and merge with new ones
-    const existingAccount = this.coreServiceAccounts.get(serviceId);
-    const existingRawCshKeyvalsCount = existingAccount ? Object.keys(existingAccount.rawCshKeyvals).length : 0;
-    
+    const existingAccount = this.coreServiceAccounts.get(serviceId)
+    const existingRawCshKeyvalsCount = existingAccount
+      ? Object.keys(existingAccount.rawCshKeyvals).length
+      : 0
+
     if (existingAccount && existingRawCshKeyvalsCount > 0) {
       // Merge existing rawCshKeyvals with new ones (new values overwrite existing ones)
-      const mergedRawCshKeyvals: Record<Hex, Hex> = JSON.parse(JSON.stringify(existingAccount.rawCshKeyvals))
+      const mergedRawCshKeyvals: Record<Hex, Hex> = JSON.parse(
+        JSON.stringify(existingAccount.rawCshKeyvals),
+      )
       for (const key in serviceAccountCore.rawCshKeyvals) {
-        mergedRawCshKeyvals[key as Hex] = serviceAccountCore.rawCshKeyvals[key as Hex]
+        mergedRawCshKeyvals[key as Hex] =
+          serviceAccountCore.rawCshKeyvals[key as Hex]
       }
       serviceAccountCore.rawCshKeyvals = mergedRawCshKeyvals
     }
-    
+
     this.coreServiceAccounts.set(serviceId, serviceAccountCore)
 
     return safeResult(undefined)
   }
 
   setStorage(serviceId: bigint, key: Hex, value: Uint8Array): Safe<void> {
-
     const serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       return safeError(new Error('Service account not found'))
@@ -562,15 +606,22 @@ export class ServiceAccountService
   /**
    * Get service account storage
    */
-  getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined {
+  getServiceAccountStorage(
+    serviceId: bigint,
+    key: Hex,
+  ): Uint8Array | undefined {
     const serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       return undefined
     }
-    return  getServiceStorageValue(serviceAccount, serviceId, key)
+    return getServiceStorageValue(serviceAccount, serviceId, key)
   }
 
-  setServiceAccountStorage(serviceId: bigint, key: Hex, value: Uint8Array): Safe<void> {
+  setServiceAccountStorage(
+    serviceId: bigint,
+    key: Hex,
+    value: Uint8Array,
+  ): Safe<void> {
     const serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       return safeError(new Error('Service account not found'))
@@ -606,11 +657,17 @@ export class ServiceAccountService
       return {}
     }
     // Deep clone rawCshKeyvals to prevent mutations from affecting stored state
-    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(JSON.stringify(accountCore.rawCshKeyvals))
+    const rawCshKeyvalsCopy: Record<Hex, Hex> = JSON.parse(
+      JSON.stringify(accountCore.rawCshKeyvals),
+    )
     return rawCshKeyvalsCopy
   }
 
-  getServiceAccountRequest(serviceId: bigint, hash: Hex, blobLength: bigint): PreimageRequestStatus | undefined {
+  getServiceAccountRequest(
+    serviceId: bigint,
+    hash: Hex,
+    blobLength: bigint,
+  ): PreimageRequestStatus | undefined {
     const serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       return undefined
@@ -618,12 +675,23 @@ export class ServiceAccountService
     return getServiceRequestValue(serviceAccount, serviceId, hash, blobLength)
   }
 
-  setServiceAccountRequest(serviceId: bigint, hash: Hex, blobLength: bigint, timeslots: bigint[]): Safe<void> {
+  setServiceAccountRequest(
+    serviceId: bigint,
+    hash: Hex,
+    blobLength: bigint,
+    timeslots: bigint[],
+  ): Safe<void> {
     const serviceAccount = this.coreServiceAccounts.get(serviceId)
     if (!serviceAccount) {
       return safeError(new Error('Service account not found'))
     }
-    setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, timeslots)
+    setServiceRequestValue(
+      serviceAccount,
+      serviceId,
+      hash,
+      blobLength,
+      timeslots,
+    )
     return safeResult(undefined)
   }
 
@@ -635,6 +703,16 @@ export class ServiceAccountService
     return safeResult(undefined)
   }
 
+  /**
+   * Clear all service accounts
+   *
+   * Used when switching between forks or resetting state for tests.
+   * According to Gray Paper, when switching to a different fork,
+   * the entire state must be reset, not merged.
+   */
+  clearAllServiceAccounts(): void {
+    this.coreServiceAccounts.clear()
+  }
 
   /**
    * Get storage value for service
@@ -650,7 +728,6 @@ export class ServiceAccountService
     return storage
   }
 
-
   /**
    * Delete storage value for service
    */
@@ -663,5 +740,4 @@ export class ServiceAccountService
 
     delete serviceAccount.rawCshKeyvals[storageKey]
   }
-
 }

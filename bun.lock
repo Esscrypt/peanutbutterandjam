@@ -359,6 +359,9 @@
       "version": "0.0.1",
       "devDependencies": {
         "@assemblyscript/loader": "^0.27.29",
+        "@pbnjam/codec": "workspace:*",
+        "@pbnjam/core": "workspace:*",
+        "@pbnjam/types": "workspace:*",
         "assemblyscript": "^0.27.29",
         "prettier": "^3.0.0",
       },

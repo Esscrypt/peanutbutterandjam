@@ -33,7 +33,7 @@ import type {
   ResultCode,
   SafePromise,
 } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
 import { InstructionRegistry } from '../../pvm/src/instructions/registry'
 
@@ -58,6 +58,11 @@ export class WasmPVMExecutor {
     opcode: string
     gas: bigint
     registers: string[]
+    // JIP-6 trace support: load/store tracking
+    loadAddress: number
+    loadValue: bigint
+    storeAddress: number
+    storeValue: bigint
   }> = []
   private traceHostFunctionLogs: Array<{
     step: number
@@ -197,6 +202,7 @@ export class WasmPVMExecutor {
     timeslot: bigint,
     _inputs: AccumulateInput[],
     serviceId: bigint,
+    invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -322,6 +328,11 @@ export class WasmPVMExecutor {
       this.configService.numValidators,
       this.configService.numEcPiecesPerSegment,
       this.configService.contestDuration,
+      this.configService.maxLookupAnchorage,
+      this.configService.ecPieceSize,
+      this.configService.jamVersion.major,
+      this.configService.jamVersion.minor,
+      this.configService.jamVersion.patch,
     )
 
     // Clear execution logs at the start of each execution run
@@ -405,9 +416,18 @@ export class WasmPVMExecutor {
         }
       }
 
+      // Clear last memory operation tracking before step (JIP-6 trace support)
+      this.wasm.clearLastMemoryOp()
+
       // Execute one step
       const shouldContinue = this.wasm.nextStep()
       steps++
+
+      // Capture load/store values after step (JIP-6 trace support)
+      const loadAddress = this.wasm.getLastLoadAddress()
+      const loadValue = this.wasm.getLastLoadValue()
+      const storeAddress = this.wasm.getLastStoreAddress()
+      const storeValue = this.wasm.getLastStoreValue()
 
       // Get state after step (for trace logging)
       const gasAfter = BigInt(this.wasm.getGasLeft())
@@ -430,10 +450,18 @@ export class WasmPVMExecutor {
         // Log host function call (for trace comparison with TypeScript)
         // Even if status is not HOST (4), we still log it because the host function
         // was handled internally and execution continued
+        //
+        // Note: We use gasBefore - 1n to match TypeScript's behavior:
+        // TypeScript captures gasBefore INSIDE the context mutator, which is called
+        // AFTER the 1-gas instruction cost is deducted in step(). So gasBefore
+        // in TypeScript is actually after the instruction cost.
+        // WASM captures gasBefore BEFORE nextStep(), which includes both the
+        // instruction cost and host function cost.
+        // By subtracting 1n, we align with TypeScript's "gasBefore" value.
         this.traceHostFunctionLogs.push({
           step: steps,
           hostCallId,
-          gasBefore,
+          gasBefore: gasBefore - 1n, // Subtract 1 gas for instruction cost to match TypeScript
           gasAfter,
           serviceId,
         })
@@ -469,6 +497,11 @@ export class WasmPVMExecutor {
         opcode,
         gas: gasAfter,
         registers: registerStateAfter.map((r) => r.toString()),
+        // JIP-6 trace support: load/store tracking
+        loadAddress,
+        loadValue,
+        storeAddress,
+        storeValue,
       })
 
       // Check if execution should stop
@@ -498,8 +531,20 @@ export class WasmPVMExecutor {
     }
 
     const finalGas = BigInt(this.wasm.getGasLeft())
-    const gasConsumed = initialGas - (finalGas > 0n ? finalGas : 0n)
     const status = this.wasm.getStatus()
+
+    // Calculate gas consumed based on status
+    // Gray Paper equation 834: u = gascounter - max(gascounter', 0)
+    // For OOG (status === 5): All gas is consumed, including what was left before the failed operation
+    // This matches TypeScript behavior where gasCounter is decremented before OOG check
+    let gasConsumed: bigint
+    if (status === 5) {
+      // OOG: All initial gas is consumed
+      gasConsumed = initialGas
+    } else {
+      // Normal execution: subtract remaining gas
+      gasConsumed = initialGas - (finalGas > 0n ? finalGas : 0n)
+    }
 
     // Determine result
     // Status enum from wasm-wrapper.ts:
@@ -512,48 +557,21 @@ export class WasmPVMExecutor {
       // PANIC
       result = 'PANIC'
     } else {
-      // HALT - extract result from memory
-      // TODO: Read result from memory using registers[7] and registers[8]
-      result = new Uint8Array(0)
+      // HALT or OK - extract result from memory using registers[7] and registers[8]
+      // Gray Paper equation 831: When HALT, read result blob from memory
+      // Note: For accumulation, even OK status means successful completion
+      const rawResult = this.wasm.getResult()
+      // Handle case where WASM returns undefined/null instead of empty array
+      // AssemblyScript loader returns null for null pointers
+      if (!rawResult || !(rawResult instanceof Uint8Array)) {
+        result = new Uint8Array(0)
+      } else {
+        result = rawResult
+      }
     }
 
     // Update state
     this.updateStateFromWasm()
-
-    // Only write trace dump if traceSubfolder is configured (enables trace dumping)
-    // When traceSubfolder is undefined, trace dumping is disabled
-    if (this.executionLogs.length > 0 && this.traceSubfolder) {
-      // Write to pvm-traces folder in workspace root
-      // traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
-      const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
-      const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
-      // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
-      // Don't pass executorType to get jamduna format when blockNumber is provided
-      // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
-      // Since we always have timeslot (block number), we use jamduna format by default
-      // If trace format is needed, it can be enabled via a flag or by not passing timeslot
-      // Include serviceId to avoid collisions when multiple services execute in the same slot
-      const filepath = writeTraceDump(
-        this.executionLogs,
-        this.traceHostFunctionLogs.length > 0
-          ? this.traceHostFunctionLogs
-          : undefined,
-        traceOutputDir,
-        undefined,
-        timeslot, // blockNumber
-        'wasm', // executorType - generates wasm-{slot}-{serviceId}.log format
-        serviceId, // serviceId - included to prevent file collisions
-      )
-      if (!filepath) {
-        logger.warning(
-          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
-        )
-      }
-    } else {
-      logger.warning(
-        `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
-      )
-    }
 
     // Get the updated implications from WASM after execution
     // This is critical for host functions like SOLICIT that modify service account state
@@ -579,6 +597,82 @@ export class WasmPVMExecutor {
     } else {
       logger.warning(
         `[WasmPVMExecutor] No updated implications from WASM (updatedEncodedContext.length=${updatedEncodedContext?.length ?? 0})`,
+      )
+    }
+
+    // Only write trace dump if traceSubfolder is configured (enables trace dumping)
+    // When traceSubfolder is undefined, trace dumping is disabled
+    // NOTE: Trace dump must be written AFTER context decoding to extract yieldHash
+    if (this.executionLogs.length > 0 && this.traceSubfolder) {
+      // Write to pvm-traces folder in workspace root
+      // traceSubfolder is provided, write to pvm-traces/{traceSubfolder}/
+      const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
+      const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
+
+      // Encode full accumulate inputs for comparison with jamduna traces (same as TypeScript executor)
+      const [encodeError, encodedInputs] = encodeVariableSequence(
+        _inputs,
+        encodeAccumulateInput,
+      )
+
+      // Determine error code based on status (same as TypeScript executor)
+      // WASM status enum: OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
+      // Error codes for trace files match Gray Paper: HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
+      let errorCode: number | undefined
+      if (status === 2) {
+        // PANIC
+        errorCode = RESULT_CODES.PANIC
+      } else if (status === 5) {
+        // OOG (WASM status 5, not 4!)
+        errorCode = RESULT_CODES.OOG
+      }
+      // If status is 1 (HALT), it's success - no error code
+
+      // Extract yield based on Gray Paper collapse rules (same as TypeScript executor):
+      // 1. If result is PANIC/OOG: use imY.yield (exceptional dimension)
+      // 2. If result is 32-byte blob: use resultBlob as yield (not imX.yield)
+      // 3. Otherwise: use imX.yield
+      let yieldHash: Uint8Array | null | undefined
+      if (result === 'PANIC' || result === 'OOG') {
+        // Gray Paper: When o ∈ {oog, panic}, use imY.yield
+        yieldHash = updatedContext?.[1]?.yield ?? undefined
+      } else if (result instanceof Uint8Array && result.length === 32) {
+        // Gray Paper: When o ∈ hash (32-byte blob), use the result blob as yield
+        yieldHash = result
+      } else {
+        // Gray Paper: Otherwise use imX.yield
+        yieldHash = updatedContext?.[0]?.yield ?? undefined
+      }
+
+      // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
+      // Don't pass executorType to get jamduna format when blockNumber is provided
+      // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
+      // Since we always have timeslot (block number), we use jamduna format by default
+      // If trace format is needed, it can be enabled via a flag or by not passing timeslot
+      // Include serviceId to avoid collisions when multiple services execute in the same slot
+      const filepath = writeTraceDump(
+        this.executionLogs,
+        this.traceHostFunctionLogs.length > 0
+          ? this.traceHostFunctionLogs
+          : undefined,
+        traceOutputDir,
+        undefined,
+        timeslot, // blockNumber
+        'wasm', // executorType - generates wasm-{slot}-{serviceId}.log format
+        serviceId, // serviceId - included to prevent file collisions
+        encodeError ? undefined : encodedInputs, // accumulate_input (same as TypeScript)
+        invocationIndex ?? 0, // invocation index (same as TypeScript)
+        yieldHash, // accumulate output (yield hash, same as TypeScript)
+        errorCode, // error code for PANIC/OOG
+      )
+      if (!filepath) {
+        logger.warning(
+          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
+        )
+      }
+    } else {
+      logger.warning(
+        `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
       )
     }
 

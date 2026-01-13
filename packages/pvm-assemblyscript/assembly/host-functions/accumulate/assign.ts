@@ -2,8 +2,7 @@ import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_CORE,
   ACCUMULATE_ERROR_HUH,
-  ACCUMULATE_ERROR_WHAT,
-  ACCUMULATE_ERROR_WHO,
+  ACCUMULATE_ERROR_OOB,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -37,12 +36,13 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
   // Gray Paper constants
   C_AUTH_QUEUE_SIZE: u64 = u64(80) // Cauthqueuesize
-  C_CORE_COUNT: u64 = u64(341) // Ccorecount (default, can be configured)
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const registers = context.registers
     const ram = context.ram
     const implications = context.implications
+    const numCores = context.numCores // Get from config via context
+    
     // Extract parameters from registers
     const coreIndex = u64(registers[7])
     const authQueueOffset = u64(registers[8])
@@ -56,12 +56,10 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     )
     const authQueueData = readResult1.data
     const faultAddress = readResult1.faultAddress
-    if (faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (authQueueData === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Note: jamduna sets OOB on memory faults before PANIC to indicate why it failed
+    // According to GP, registers[7] should be unchanged, but we set OOB to match jamduna behavior
+    if (faultAddress !== 0 || authQueueData === null) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_OOB)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
@@ -74,7 +72,7 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
     // Check if core index is valid
     // Gray Paper: c >= Ccorecount
-    if (coreIndex >= this.C_CORE_COUNT) {
+    if (coreIndex >= u64(numCores)) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_CORE)
       return new HostFunctionResult(255) // continue execution
     }
@@ -96,12 +94,8 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Check if service account ID is valid
-    // Gray Paper: a not in serviceid (assuming positive service IDs)
-    if (serviceIdToAssign === u64(0)) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
-      return new HostFunctionResult(255) // continue execution
-    }
+    // Note: TypeScript version only checks for negative service IDs
+    // Service ID 0 is a valid service ID in JAM
 
     // Update auth queue and assigner for the core
     // Gray Paper: imX.state.authqueue[c] = q, imX.state.assigners[c] = a

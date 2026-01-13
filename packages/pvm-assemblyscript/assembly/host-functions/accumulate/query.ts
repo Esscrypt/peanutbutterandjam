@@ -1,4 +1,5 @@
 import { RESULT_CODE_PANIC } from '../../config'
+import { getRequestValue, decodeRequestTimeslots } from '../../codec'
 import {
   ACCUMULATE_ERROR_NONE,
   AccumulateHostFunctionContext,
@@ -68,11 +69,20 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
     }
     const serviceAccount = accountEntry.account
 
-    // Look up request (hashData is already Uint8Array)
-    const requestStatus = serviceAccount.requests.get(hashData, preimageLength)
+    // Look up request using rawCshKeyvals helper
+    const requestValue = getRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength)
 
-    if (requestStatus === null) {
+    if (requestValue === null) {
       // Request doesn't exist
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
+      registers[8] = u64(0)
+      return new HostFunctionResult(255) // continue execution
+    }
+
+    // Decode the request timeslots
+    const timeslots = decodeRequestTimeslots(requestValue)
+    if (timeslots === null) {
+      // Invalid request value
       this.setAccumulateError(registers, ACCUMULATE_ERROR_NONE)
       registers[8] = u64(0)
       return new HostFunctionResult(255) // continue execution
@@ -80,7 +90,6 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
 
     // Return encoded status based on request length
     const TWO_TO_32: u64 = u64(4294967296) // 2^32
-    const timeslots = requestStatus.timeslots
     if (timeslots.length === 0) {
       // Empty request []
       registers[7] = u64(0)

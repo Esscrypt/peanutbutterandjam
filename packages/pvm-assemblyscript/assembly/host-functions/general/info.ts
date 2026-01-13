@@ -154,9 +154,9 @@ export class InfoHostFunction extends BaseHostFunction {
       return new HostFunctionResult(RESULT_CODES.PANIC)
     }
 
-    // Gray Paper equation 480: Return length of written data (requested length if padded)
-    // Match jamduna behavior: return the length that was actually written
-    context.registers[7] = u64(dataToWrite.length)
+    // Gray Paper equation 480: Return length of full info data (v)
+    // Like FETCH, INFO returns len(v) = 96 (the full info length), not the written slice length
+    context.registers[7] = u64(info.length)
 
     return new HostFunctionResult(255) // continue execution
   }

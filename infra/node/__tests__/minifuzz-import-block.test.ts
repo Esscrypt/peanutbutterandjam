@@ -23,7 +23,7 @@ describe('Fuzzer ImportBlock Decoding', () => {
     // Load ImportBlock message
     const importBlockBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000002_fuzzer_import_block.bin',
     )
 
     let importBlockBin: Uint8Array

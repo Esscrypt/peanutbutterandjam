@@ -1,10 +1,9 @@
 import { RESULT_CODE_PANIC } from '../../config'
-import { CompleteServiceAccount, PreimageRequestStatus, AccountEntry } from '../../codec'
+import { CompleteServiceAccount, AccountEntry, setRequestValue, encodeRequestTimeslots } from '../../codec'
 import {
   ACCUMULATE_ERROR_CASH,
   ACCUMULATE_ERROR_FULL,
   ACCUMULATE_ERROR_HUH,
-  ACCUMULATE_ERROR_WHAT,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -61,8 +60,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     const desiredId = u64(registers[12])
 
     // Gray Paper: l must be a valid 32-bit number
+    // Gray Paper line 763: l ∈ N_bits32, otherwise codehash = error → PANIC
+    // On PANIC, registers_7 remains unchanged - do NOT set error
     if (expectedCodeLength > u64(0xFFFFFFFF)) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
@@ -72,12 +72,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       u32(codeHashOffset),
       u32(32),  // Always read 32 bytes for the code hash
     )
-    if (readResult_codeHash.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_codeHash.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Gray Paper: PANIC but registers_7 should remain UNCHANGED
+    // Do NOT call setAccumulateError - just return PANIC
+    if (readResult_codeHash.faultAddress !== 0 || readResult_codeHash.data === null) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const codeHashData = readResult_codeHash.data!
@@ -168,8 +165,9 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     newServiceAccount.lastacc = 0
     newServiceAccount.parent = u32(imX.id)
     // Gray Paper line 770: Initial request for code: requests[(codeHashData, expectedCodeLength)] = []
-    const initialStatus = new PreimageRequestStatus()
-    newServiceAccount.requests.set(codeHashData, expectedCodeLength, initialStatus)
+    // Using rawCshKeyvals helper - empty timeslots array
+    const emptyTimeslots: u32[] = []
+    setRequestValue(newServiceAccount, u32(newServiceId), codeHashData, expectedCodeLength, encodeRequestTimeslots(emptyTimeslots))
 
     // Deduct balance from current service
     currentService.balance -= minBalance
@@ -210,18 +208,67 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       C_MIN_PUBLIC_INDEX + ((currentId - C_MIN_PUBLIC_INDEX + u64(42)) % MODULUS)
 
     // Gray Paper line 252-255: Apply check function to ensure ID is available
-    return this.checkServiceId(candidateId, accounts)
+    // Note: This uses v0.7.1+ formula (no version parameter needed for post-creation update)
+    return this.checkServiceIdV071(candidateId, accounts)
   }
 
   /**
    * Check function from Gray Paper line 252-255
+   * Version-aware: uses different formulas for v0.7.0 and v0.7.1+
    *
-   * check(i ∈ serviceid) = {
-   *   i                          if i ∉ keys(accounts)
-   *   check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)  otherwise
-   * }
+   * @param id - Candidate service ID to check
+   * @param accounts - Array of existing service accounts
+   * @param jamVersionMajor - JAM version major
+   * @param jamVersionMinor - JAM version minor
+   * @param jamVersionPatch - JAM version patch
    */
   checkServiceId(
+    id: u64,
+    accounts: Array<AccountEntry>,
+    jamVersionMajor: u8,
+    jamVersionMinor: u8,
+    jamVersionPatch: u8,
+  ): u64 {
+    // Check if version is <= 0.7.0
+    const isV070OrEarlier = 
+      jamVersionMajor < 0 ||
+      (jamVersionMajor == 0 && jamVersionMinor < 7) ||
+      (jamVersionMajor == 0 && jamVersionMinor == 7 && jamVersionPatch <= 0)
+    
+    if (isV070OrEarlier) {
+      return this.checkServiceIdV070(id, accounts)
+    }
+    return this.checkServiceIdV071(id, accounts)
+  }
+
+  /**
+   * Check function for v0.7.0 and earlier
+   * v0.7.0: check((i - 2^8 + 1) mod (2^32 - 2^9) + 2^8)
+   */
+  checkServiceIdV070(
+    id: u64,
+    accounts: Array<AccountEntry>,
+  ): u64 {
+    const OFFSET: u64 = u64(256) // 2^8
+    const MODULUS: u64 = u64(4294967296) - u64(512) // 2^32 - 512
+
+    // If ID is not in accounts, return it
+    if (!this.hasAccountEntry(accounts, id)) {
+      return id
+    }
+
+    // Otherwise, recursively check the next candidate
+    // v0.7.0: (i - 2^8 + 1) mod (2^32 - 512) + 2^8
+    const nextCandidate = OFFSET + ((id - OFFSET + u64(1)) % MODULUS)
+
+    return this.checkServiceIdV070(nextCandidate, accounts)
+  }
+
+  /**
+   * Check function for v0.7.1 and later
+   * v0.7.1+: check((i - Cminpublicindex + 1) mod (2^32 - 2^8 - Cminpublicindex) + Cminpublicindex)
+   */
+  checkServiceIdV071(
     id: u64,
     accounts: Array<AccountEntry>,
   ): u64 {
@@ -238,6 +285,6 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     const nextCandidate =
       C_MIN_PUBLIC_INDEX + ((id - C_MIN_PUBLIC_INDEX + u64(1)) % MODULUS)
 
-    return this.checkServiceId(nextCandidate, accounts)
+    return this.checkServiceIdV071(nextCandidate, accounts)
   }
 }

@@ -17,11 +17,11 @@ import {
   getStartBlock,
   getStopBlock,
   initializeServices,
-} from './test-utils'
-import { StateService } from '../services/state-service'
-import { RecentHistoryService } from '../services/recent-history-service'
-import { ConfigService } from '../services/config-service'
-import { BlockImporterService } from '../services/block-importer-service'
+} from '../test-utils'
+import { StateService } from '../../services/state-service'
+import { RecentHistoryService } from '../../services/recent-history-service'
+import { ConfigService } from '../../services/config-service'
+import { BlockImporterService } from '../../services/block-importer-service'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../')
@@ -36,7 +36,7 @@ describe('Fuzzer Traces Test', () => {
 
   beforeAll(async () => {
         // Initialize services using the exact same function as fuzzer-target.ts
-        services = await initializeServices('tiny', 'fuzzer-traces', undefined, undefined)
+        services = await initializeServices('tiny', 'fuzzer-traces', undefined, undefined, true)
 
         stateService = services.stateService
         blockImporterService = services.blockImporterService
@@ -275,9 +275,28 @@ describe('Fuzzer Traces Test', () => {
       fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzer-target-import-traces.test.ts:743',message:'Block converted',data:{traceFile,blockTimeslot:block.header.timeslot.toString(),hasEpochMark:!!block.header.epochMark,hasWinnersMark:!!block.header.winnersMark,ticketsCount:block.body.tickets.length,guaranteesCount:block.body.guarantees.length,assurancesCount:block.body.assurances.length},timestamp:Date.now(),sessionId:'debug-session',runId:'trace-import',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
 
+      // Check if block import is expected to fail (pre_state == post_state)
+      const preStateJson = JSON.stringify(traceData.pre_state)
+      const postStateJson = JSON.stringify(traceData.post_state)
+      const expectBlockToFail = preStateJson === postStateJson
+
       // Import the block
       console.log(`🔄 Importing block (timeslot ${block.header.timeslot})...`)
       const [importError] = await blockImporterService.importBlock(block)
+      
+      if (expectBlockToFail) {
+        // Block import should fail - this is expected behavior
+        if (importError) {
+          console.log(`✅ Block ${blockNum} correctly failed to import: ${importError.message}`)
+          // State should remain unchanged (already verified by snapshot revert in block importer)
+          failCount++
+          continue
+        } else {
+          // Block imported when it should have failed
+          throw new Error(`Block ${blockNum} imported successfully but was expected to fail (pre_state == post_state)`)
+        }
+      }
+      
       if (importError) {
         console.error(`❌ Import error: ${importError.message}`)
         if (importError.stack) {
@@ -607,9 +626,28 @@ describe('Fuzzer Traces Test', () => {
       fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'fuzzer-target-import-traces.test.ts:743',message:'Block converted',data:{traceFile,blockTimeslot:block.header.timeslot.toString(),hasEpochMark:!!block.header.epochMark,hasWinnersMark:!!block.header.winnersMark,ticketsCount:block.body.tickets.length,guaranteesCount:block.body.guarantees.length,assurancesCount:block.body.assurances.length},timestamp:Date.now(),sessionId:'debug-session',runId:'trace-import',hypothesisId:'C'})}).catch(()=>{});
       // #endregion
 
+      // Check if block import is expected to fail (pre_state == post_state)
+      const preStateJson = JSON.stringify(traceData.pre_state)
+      const postStateJson = JSON.stringify(traceData.post_state)
+      const expectBlockToFail = preStateJson === postStateJson
+
       // Import the block
       console.log(`🔄 Importing block (timeslot ${block.header.timeslot})...`)
       const [importError] = await blockImporterService.importBlock(block)
+      
+      if (expectBlockToFail) {
+        // Block import should fail - this is expected behavior
+        if (importError) {
+          console.log(`✅ Block ${blockNum} correctly failed to import: ${importError.message}`)
+          // State should remain unchanged (already verified by snapshot revert in block importer)
+          failCount++
+          continue
+        } else {
+          // Block imported when it should have failed
+          throw new Error(`Block ${blockNum} imported successfully but was expected to fail (pre_state == post_state)`)
+        }
+      }
+      
       if (importError) {
         console.error(`❌ Import error: ${importError.message}`)
         if (importError.stack) {

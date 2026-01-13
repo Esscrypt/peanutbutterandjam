@@ -397,9 +397,9 @@ async function testJamdunaTestVectorRoundTrip(): Promise<boolean> {
     logger.error(`Expected type 0 (OperandTuple), got ${input.type}`)
     return false
   }
-  
+
   const ot = input.value as OperandTuple
-  if (ot.gasLimit !== 10000000n) {
+  if (ot.gasLimit !== BigInt(10000000)) {
     logger.error(`Expected gasLimit 10000000n, got ${ot.gasLimit}`)
     return false
   }

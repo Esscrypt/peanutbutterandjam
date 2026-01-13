@@ -1436,9 +1436,6 @@ export class GuarantorService extends BaseService {
       // lookup_anchor_slot (when refinement occurred), not necessarily current state.
       // If the service was modified (lastacc > lookup_anchor_slot), we skip the check
       // since the codehash may have changed via UPGRADE since refinement.
-      const lookupAnchorSlot = BigInt(
-        guarantee.report.context.lookup_anchor_slot,
-      )
       if (this.serviceAccountService) {
         for (const result of guarantee.report.results) {
           const [serviceAccountError, serviceAccount] =
@@ -1457,25 +1454,7 @@ export class GuarantorService extends BaseService {
           // Validate code_hash matches service account codehash
           // Skip if service was modified after lookup anchor (codehash may have changed)
           if (result.code_hash !== serviceAccount.codehash) {
-            // Always reject if service was ejected (codehash = zeros)
-            // An ejected service means the work report can never be valid
-            // const zeroHash = '0x0000000000000000000000000000000000000000000000000000000000000000'
-            // if (serviceAccount.codehash === zeroHash) {
-            //   logger.debug('[GuarantorService] Service was ejected, rejecting guarantee', {
-            //     serviceId: result.service_id.toString(),
-            //     lastacc: serviceAccount.lastacc.toString(),
-            //     lookupAnchorSlot: lookupAnchorSlot.toString(),
-            //   })
-            //   return safeError(new Error('bad_code_hash'))
-            // }
-            // // Only fail if service hasn't been modified since lookup anchor
-            // // If lastacc > lookup_anchor_slot, service may have been upgraded (but not ejected)
-            if (serviceAccount.lastacc <= lookupAnchorSlot) {
-              return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
-            }
-            // TODO: double check this
-            // return safeError(new Error('bad_code_hash'))
-            // Otherwise, codehash mismatch is expected (service was upgraded since refinement)
+            return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
           }
 
           // Validate accumulate_gas >= minaccgas
@@ -1662,9 +1641,6 @@ export class GuarantorService extends BaseService {
       // lookup_anchor_slot (when refinement occurred), not necessarily current state.
       // If the service was modified (lastacc > lookup_anchor_slot), we skip the check
       // since the codehash may have changed via UPGRADE since refinement.
-      const lookupAnchorSlot = BigInt(
-        guarantee.report.context.lookup_anchor_slot,
-      )
       if (this.serviceAccountService) {
         for (const result of guarantee.report.results) {
           const [serviceAccountError, serviceAccount] =
@@ -1683,10 +1659,7 @@ export class GuarantorService extends BaseService {
           // Validate code_hash matches service account codehash
           // Skip if service was modified after lookup anchor (codehash may have changed)
           if (result.code_hash !== serviceAccount.codehash) {
-            // Always reject if service was modified since lookup anchor
-            if (serviceAccount.lastacc <= lookupAnchorSlot) {
-              return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
-            }
+            return safeError(new Error(REPORTS_ERRORS.BAD_CODE_HASH))
           }
 
           // Validate accumulate_gas >= minaccgas
@@ -2260,9 +2233,16 @@ export class GuarantorService extends BaseService {
     }
 
     // Update statistics from successfully processed guarantees
-    // This updates validator, core, and service statistics based on the guarantees
+    // Gray Paper equation 62-63: vs_guarantees += (activeset'[v] ∈ reporters)
+    // IMPORTANT: We pass the reporters set (ED25519 keys) and the CURRENT active validators
+    // This ensures cross-epoch guarantees correctly credit the current active set positions
     if (this.statisticsService) {
-      this.statisticsService.updateGuarantees(guarantees)
+      const currentActiveValidators =
+        this.validatorSetManager.getActiveValidators()
+      this.statisticsService.updateGuarantees(
+        Array.from(reporters),
+        currentActiveValidators,
+      )
     }
 
     // Convert Set to array for return (reporters should be unique)

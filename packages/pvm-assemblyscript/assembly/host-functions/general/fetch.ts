@@ -339,9 +339,13 @@ export class FetchHostFunction extends BaseHostFunction {
         }
         const accInputs14 = params.accumulateInputs!
         // Encode each accumulate input and collect into array
+        // Pass JAM version from PVM instance for version-aware encoding
+        const jamMajor = this.pvmInstance ? this.pvmInstance!.jamVersionMajor : u8(0)
+        const jamMinor = this.pvmInstance ? this.pvmInstance!.jamVersionMinor : u8(7)
+        const jamPatch = this.pvmInstance ? this.pvmInstance!.jamVersionPatch : u8(2)
         const encodedInputs = new Array<Uint8Array>(accInputs14.length)
         for (let i: i32 = 0; i < accInputs14.length; i++) {
-          encodedInputs[i] = encodeAccumulateInput(accInputs14[i])
+          encodedInputs[i] = encodeAccumulateInput(accInputs14[i], jamMajor, jamMinor, jamPatch)
         }
         // encodeVariableSequence will encode length prefix (0 for empty array) + items
         // This always returns a Uint8Array (even for empty sequence, it's length prefix 0x00)
@@ -636,7 +640,11 @@ export class FetchHostFunction extends BaseHostFunction {
     }
 
     const input = inputs[idx]
-    const encoded = encodeAccumulateInput(input)
+    // Pass JAM version from PVM instance for version-aware encoding
+    const jamMajor = this.pvmInstance ? this.pvmInstance!.jamVersionMajor : u8(0)
+    const jamMinor = this.pvmInstance ? this.pvmInstance!.jamVersionMinor : u8(7)
+    const jamPatch = this.pvmInstance ? this.pvmInstance!.jamVersionPatch : u8(2)
+    const encoded = encodeAccumulateInput(input, jamMajor, jamMinor, jamPatch)
     return encoded
   }
 }

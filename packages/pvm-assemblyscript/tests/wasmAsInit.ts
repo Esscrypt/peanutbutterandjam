@@ -181,8 +181,8 @@ export async function instantiate(module, imports = {}) {
         __release(entropyAccumulator);
       }
     },
-    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize) {
-      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?) => void
+    setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize, jamVersionMajor, jamVersionMinor, jamVersionPatch) {
+      // assembly/index/setupAccumulateInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32, i32, i32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, i32?, u32?, u32?, u64?, u64?, u16?, u16?, u16?, u16?, u16?, u32?, u32?, u32?, u32?, u8?, u8?, u8?) => void
       program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
       args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
       context = __retain(__lowerTypedArray(Uint8Array, 15, 0, context) || __notnull());
@@ -190,9 +190,12 @@ export async function instantiate(module, imports = {}) {
       encodedWorkItems = __lowerTypedArray(Uint8Array, 15, 0, encodedWorkItems) || __notnull();
       configMaxBlockGas = configMaxBlockGas || 0n;
       configMaxRefineGas = configMaxRefineGas || 0n;
+      jamVersionMajor = jamVersionMajor ?? 0;
+      jamVersionMinor = jamVersionMinor ?? 7;
+      jamVersionPatch = jamVersionPatch ?? 2;
       try {
         exports.__setArgumentsLength(arguments.length);
-        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize);
+        exports.setupAccumulateInvocation(gasLimit, program, args, context, numCores, numValidators, authQueueSize, entropyAccumulator, encodedWorkItems, configNumCores, configPreimageExpungePeriod, configEpochDuration, configMaxBlockGas, configMaxRefineGas, configMaxTicketsPerExtrinsic, configTicketsPerValidator, configSlotDuration, configRotationPeriod, configNumValidators, configNumEcPiecesPerSegment, configContestDuration, configMaxLookupAnchorage, configEcPieceSize, jamVersionMajor, jamVersionMinor, jamVersionPatch);
       } finally {
         __release(program);
         __release(args);
@@ -229,6 +232,31 @@ export async function instantiate(module, imports = {}) {
     getResultCode() {
       // assembly/index/getResultCode() => u32
       return exports.getResultCode() >>> 0;
+    },
+    getResult() {
+      // assembly/index/getResult() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.getResult() >>> 0);
+    },
+    // JIP-6 trace support: memory operation tracking
+    getLastLoadAddress() {
+      // assembly/index/getLastLoadAddress() => u32
+      return exports.getLastLoadAddress() >>> 0;
+    },
+    getLastLoadValue() {
+      // assembly/index/getLastLoadValue() => u64
+      return exports.getLastLoadValue();
+    },
+    getLastStoreAddress() {
+      // assembly/index/getLastStoreAddress() => u32
+      return exports.getLastStoreAddress() >>> 0;
+    },
+    getLastStoreValue() {
+      // assembly/index/getLastStoreValue() => u64
+      return exports.getLastStoreValue();
+    },
+    clearLastMemoryOp() {
+      // assembly/index/clearLastMemoryOp() => void
+      exports.clearLastMemoryOp();
     },
     getCode() {
       // assembly/index/getCode() => ~lib/typedarray/Uint8Array
@@ -729,6 +757,112 @@ export async function instantiate(module, imports = {}) {
       bytes = __lowerTypedArray(Uint8Array, 15, 0, bytes) || __notnull();
       return __liftString(exports.bytesToHex(bytes) >>> 0);
     },
+    blake2b256(data) {
+      // assembly/crypto/blake2b256(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.blake2b256(data) >>> 0);
+    },
+    testCreateStorageKey(serviceId, storageKey) {
+      // assembly/test-exports/testCreateStorageKey(u32, ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      storageKey = __lowerTypedArray(Uint8Array, 15, 0, storageKey) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.testCreateStorageKey(serviceId, storageKey) >>> 0);
+    },
+    testCreatePreimageKey(serviceId, preimageHash) {
+      // assembly/test-exports/testCreatePreimageKey(u32, ~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      preimageHash = __lowerTypedArray(Uint8Array, 15, 0, preimageHash) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.testCreatePreimageKey(serviceId, preimageHash) >>> 0);
+    },
+    testCreateRequestKey(serviceId, requestHash, length) {
+      // assembly/test-exports/testCreateRequestKey(u32, ~lib/typedarray/Uint8Array, u64) => ~lib/typedarray/Uint8Array
+      requestHash = __lowerTypedArray(Uint8Array, 15, 0, requestHash) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.testCreateRequestKey(serviceId, requestHash, length) >>> 0);
+    },
+    testBlake2b256(data) {
+      // assembly/test-exports/testBlake2b256(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.testBlake2b256(data) >>> 0);
+    },
+    testEncodeFixedLength(value, length) {
+      // assembly/test-exports/testEncodeFixedLength(u64, i32) => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.testEncodeFixedLength(value, length) >>> 0);
+    },
+    testCalculateMinBalance(items, octets, gratis) {
+      // assembly/test-exports/testCalculateMinBalance(u64, u64, u64) => u64
+      return exports.testCalculateMinBalance(items, octets, gratis);
+    },
+    testSolicitLogic(encodedAccount, serviceId, requestHash, preimageLength, timeslot) {
+      // assembly/test-exports/testSolicitLogic(...) => HostFunctionTestResult
+      encodedAccount = __lowerTypedArray(Uint8Array, 15, 0, encodedAccount) || __notnull();
+      requestHash = __lowerTypedArray(Uint8Array, 15, 0, requestHash) || __notnull();
+      const resultPtr = exports.testSolicitLogic(encodedAccount, serviceId, requestHash, preimageLength, timeslot);
+      return __liftHostFunctionTestResult(resultPtr >>> 0);
+    },
+    testForgetLogic(encodedAccount, serviceId, requestHash, preimageLength, timeslot, expungePeriod) {
+      // assembly/test-exports/testForgetLogic(...) => HostFunctionTestResult
+      encodedAccount = __lowerTypedArray(Uint8Array, 15, 0, encodedAccount) || __notnull();
+      requestHash = __lowerTypedArray(Uint8Array, 15, 0, requestHash) || __notnull();
+      const resultPtr = exports.testForgetLogic(encodedAccount, serviceId, requestHash, preimageLength, timeslot, expungePeriod);
+      return __liftHostFunctionTestResult(resultPtr >>> 0);
+    },
+    testQueryLogic(encodedAccount, serviceId, requestHash, preimageLength) {
+      // assembly/test-exports/testQueryLogic(...) => HostFunctionTestResult
+      encodedAccount = __lowerTypedArray(Uint8Array, 15, 0, encodedAccount) || __notnull();
+      requestHash = __lowerTypedArray(Uint8Array, 15, 0, requestHash) || __notnull();
+      const resultPtr = exports.testQueryLogic(encodedAccount, serviceId, requestHash, preimageLength);
+      return __liftHostFunctionTestResult(resultPtr >>> 0);
+    },
+    testWriteLogic(encodedAccount, serviceId, key, value) {
+      // assembly/test-exports/testWriteLogic(...) => HostFunctionTestResult
+      encodedAccount = __lowerTypedArray(Uint8Array, 15, 0, encodedAccount) || __notnull();
+      key = __lowerTypedArray(Uint8Array, 15, 0, key) || __notnull();
+      value = __lowerTypedArray(Uint8Array, 15, 0, value) || __notnull();
+      const resultPtr = exports.testWriteLogic(encodedAccount, serviceId, key, value);
+      return __liftHostFunctionTestResult(resultPtr >>> 0);
+    },
+    testReadLogic(encodedAccount, serviceId, key, fromOffset, length) {
+      // assembly/test-exports/testReadLogic(...) => HostFunctionTestResult
+      encodedAccount = __lowerTypedArray(Uint8Array, 15, 0, encodedAccount) || __notnull();
+      key = __lowerTypedArray(Uint8Array, 15, 0, key) || __notnull();
+      const resultPtr = exports.testReadLogic(encodedAccount, serviceId, key, fromOffset, length);
+      return __liftHostFunctionTestResult(resultPtr >>> 0);
+    },
+    testEncodeRequestTimeslots(timeslots) {
+      // assembly/test-exports/testEncodeRequestTimeslots(u32[]) => ~lib/typedarray/Uint8Array
+      const loweredTimeslots = __lowerArray((ptr, v) => new Uint32Array(memory.buffer)[ptr >>> 2] = v, 17, 2, timeslots) || __notnull();
+      return __liftTypedArray(Uint8Array, exports.testEncodeRequestTimeslots(loweredTimeslots) >>> 0);
+    },
+    testDecodeRequestTimeslots(data) {
+      // assembly/test-exports/testDecodeRequestTimeslots(~lib/typedarray/Uint8Array) => u32[] | null
+      data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
+      const resultPtr = exports.testDecodeRequestTimeslots(data);
+      if (resultPtr === 0) return null;
+      return __liftArray(ptr => new Uint32Array(memory.buffer)[ptr >>> 2], 2, resultPtr >>> 0);
+    },
+    testSbrkLogic(currentHeapPointer, requestedSize) {
+      // assembly/test-exports/testSbrkLogic(u32, u64) => SBRKTestResult
+      const resultPtr = exports.testSbrkLogic(currentHeapPointer, requestedSize);
+      return __liftSBRKTestResult(resultPtr >>> 0);
+    },
+    testAlignToPage(address) {
+      // assembly/test-exports/testAlignToPage(u32) => u32
+      return exports.testAlignToPage(address);
+    },
+    testGetMemoryConfig() {
+      // assembly/test-exports/testGetMemoryConfig() => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.testGetMemoryConfig() >>> 0);
+    },
+    testGetSystemConstants(
+      numCores, preimageExpungePeriod, epochDuration, maxBlockGas, maxRefineGas,
+      maxTicketsPerExtrinsic, ticketsPerValidator, slotDuration, rotationPeriod,
+      numValidators, numEcPiecesPerSegment, contestDuration, maxLookupAnchorage, ecPieceSize
+    ) {
+      // assembly/test-exports/testGetSystemConstants(...) => ~lib/typedarray/Uint8Array
+      return __liftTypedArray(Uint8Array, exports.testGetSystemConstants(
+        numCores, preimageExpungePeriod, epochDuration, maxBlockGas, maxRefineGas,
+        maxTicketsPerExtrinsic, ticketsPerValidator, slotDuration, rotationPeriod,
+        numValidators, numEcPiecesPerSegment, contestDuration, maxLookupAnchorage, ecPieceSize
+      ) >>> 0);
+    },
     Status: (values => (
       // assembly/wasm-wrapper/Status
       values[values.OK = exports["Status.OK"].valueOf()] = "OK",
@@ -785,6 +919,36 @@ export async function instantiate(module, imports = {}) {
     if (!pointer) return null;
     return {
     };
+  }
+  function __liftHostFunctionTestResult(pointer) {
+    // assembly/test-exports/HostFunctionTestResult
+    // Structure: resultCode: i64, encodedAccount: Uint8Array, returnValue: u64
+    if (!pointer) return null;
+    return {
+      resultCode: __dataview.getBigInt64(pointer + 0, true),
+      encodedAccount: __liftTypedArray(Uint8Array, __getU32(pointer + 8)),
+      returnValue: __dataview.getBigUint64(pointer + 16, true),
+    };
+  }
+  function __liftSBRKTestResult(pointer) {
+    // assembly/test-exports/SBRKTestResult
+    // Structure: resultValue: u64, newHeapPointer: u32, pagesAllocated: u32, startPageIndex: u32
+    if (!pointer) return null;
+    return {
+      resultValue: __dataview.getBigUint64(pointer + 0, true),
+      newHeapPointer: __dataview.getUint32(pointer + 8, true),
+      pagesAllocated: __dataview.getUint32(pointer + 12, true),
+      startPageIndex: __dataview.getUint32(pointer + 16, true),
+    };
+  }
+  function __liftArray(liftElement, align, pointer) {
+    if (!pointer) return null;
+    const
+      length = __dataview.getUint32(pointer + 12, true),
+      values = new Array(length),
+      buffer = __getU32(pointer + 4);
+    for (let i = 0; i < length; ++i) values[i] = liftElement(buffer + (i << align >>> 0));
+    return values;
   }
   function __liftString(pointer) {
     if (!pointer) return null;

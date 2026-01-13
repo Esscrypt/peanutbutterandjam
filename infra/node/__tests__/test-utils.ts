@@ -269,14 +269,15 @@ export interface FuzzerTargetServices {
  * @param spec - Chain spec to use ('tiny' or 'full')
  * @param traceSubfolder - Optional trace subfolder for AccumulatePVM (e.g., 'fuzzy/v0.7.2', 'fuzzer-target')
  * @param genesisManager - Optional genesis manager (if not provided, creates a minimal one that returns empty state)
- * @param genesisManager - Optional genesis manager (if not provided, creates a minimal one that returns empty state)
  * @param initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
+ * @param useWasm - Whether to use WebAssembly PVM implementation (default: false)
  */
 export async function initializeServices(
   spec: 'tiny' | 'full' = 'tiny',
   traceSubfolder?: string,
   genesisManager?: NodeGenesisManager,
   initialValidators: ValidatorPublicKeys[] = [],
+  useWasm: boolean = false,
 ): Promise<FuzzerTargetServices> {
   let ringProver: RingVRFProverWasm
   let ringVerifier: RingVRFVerifierWasm
@@ -451,7 +452,7 @@ export async function initializeServices(
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: false,
+      useWasm,
       traceSubfolder: traceSubfolder,
     })
 

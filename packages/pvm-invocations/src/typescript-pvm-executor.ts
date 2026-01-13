@@ -130,11 +130,31 @@ export class TypeScriptPVMExecutor extends PVM {
     // When traceSubfolder is undefined, trace dumping is disabled
     const executionLogs = this.getExecutionLogs()
     if (executionLogs.length > 0 && this.traceSubfolder) {
-      // Extract yield from the updated implications pair (if execution succeeded)
+      // Extract yield based on Gray Paper collapse rules:
+      // 1. If result is PANIC/OOG: use imY.yield (exceptional dimension)
+      // 2. If result is 32-byte blob: use resultBlob as yield (not imX.yield)
+      // 3. Otherwise: use imX.yield
       const updatedContext = marshallingResult?.context as
         | ImplicationsPair
         | undefined
-      const yieldHash = updatedContext?.[0].yield ?? undefined
+      let yieldHash: Uint8Array | null | undefined
+
+      if (
+        marshallingResult?.result === 'PANIC' ||
+        marshallingResult?.result === 'OOG'
+      ) {
+        // Gray Paper: When o ∈ {oog, panic}, use imY.yield
+        yieldHash = updatedContext?.[1]?.yield ?? undefined
+      } else if (
+        marshallingResult?.result instanceof Uint8Array &&
+        marshallingResult.result.length === 32
+      ) {
+        // Gray Paper: When o ∈ hash (32-byte blob), use the result blob as yield
+        yieldHash = marshallingResult.result
+      } else {
+        // Gray Paper: Otherwise use imX.yield
+        yieldHash = updatedContext?.[0]?.yield ?? undefined
+      }
 
       // Determine error code based on result
       // result is Uint8Array (success), 'PANIC', or 'OOG'
@@ -196,8 +216,7 @@ export class TypeScriptPVMExecutor extends PVM {
         jamVersion.major === 0 &&
         jamVersion.minor === 7 &&
         jamVersion.patch === 1
-      const gasCost =
-        isLogFunction && isJamVersion071 ? 0n : 10n
+      const gasCost = isLogFunction && isJamVersion071 ? 0n : 10n
       const isOOG = gasCost > 0n && this.state.gasCounter < gasCost
 
       // Log host function call BEFORE execution (even if OOG) so it appears in trace dump
@@ -214,7 +233,6 @@ export class TypeScriptPVMExecutor extends PVM {
         serviceId,
       }
       this.traceHostFunctionLogs.push(hostLogEntry)
-      
 
       if (isOOG) {
         // Gray Paper: On OOG, all remaining gas is consumed
@@ -549,7 +567,7 @@ export class TypeScriptPVMExecutor extends PVM {
   }
 
   private buildWriteParams(implicationsPair: ImplicationsPair): {
-    serviceAccount: ServiceAccount,
+    serviceAccount: ServiceAccount
     serviceId: bigint
   } {
     const imX = implicationsPair[0]
@@ -580,7 +598,10 @@ export class TypeScriptPVMExecutor extends PVM {
     }
   }
 
-  private buildInfoParams(implicationsPair: ImplicationsPair, timeslot: bigint): InfoParams {
+  private buildInfoParams(
+    implicationsPair: ImplicationsPair,
+    timeslot: bigint,
+  ): InfoParams {
     const imX = implicationsPair[0]
     return {
       serviceId: imX.id,

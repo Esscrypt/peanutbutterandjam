@@ -33,7 +33,6 @@ import type {
   Assurance,
   BlockBody,
   CoreStats,
-  Guarantee,
   Preimage,
   Safe,
   ServiceStats,
@@ -407,22 +406,56 @@ export class StatisticsService extends BaseService {
   // Private Implementation - Validator Statistics
   // ============================================================================
 
-  public updateGuarantees(guarantees: Guarantee[]): void {
-    // Gray Paper equation 62-63: vs_guarantees += (activeset'[v] ∈ reporters)
-    // This is a BOOLEAN increment - each validator gets +1 if they signed ANY guarantee in this block
-    // NOT +1 for each guarantee they signed
-    // Collect unique validator indices from all guarantee signatures (this is the "reporters" set)
-    const reporters = new Set<number>()
-    for (const guarantee of guarantees) {
-      if (guarantee.signatures) {
-        for (const signature of guarantee.signatures) {
-          reporters.add(signature.validator_index)
-        }
+  /**
+   * Update guarantee statistics based on reporters set
+   *
+   * Gray Paper equation 62-63: vs_guarantees += (activeset'[v] ∈ reporters)
+   *
+   * IMPORTANT: The reporters set contains ED25519 KEYS, not validator indices.
+   * For cross-epoch guarantees, the validator_index in the signature refers to
+   * the PREVIOUS epoch's validator set, but we need to credit the CURRENT epoch's
+   * validator at each position. So we must:
+   * 1. Accept the reporters set of ED25519 keys (computed by guarantor service)
+   * 2. Accept the current active validators list
+   * 3. Find which index in the current active set has each reporter's key
+   * 4. Increment guarantees count for those indices
+   *
+   * @param reporterKeys - Set of ED25519 keys of validators who signed guarantees
+   * @param activeValidators - Current epoch's active validator set (ordered list of { ed25519 } objects)
+   */
+  public updateGuarantees(
+    reporterKeys: Hex[],
+    activeValidators: Array<{ ed25519: Hex }>,
+  ): void {
+    // Build a lookup map: ED25519 key -> index in current active set
+    const keyToIndex = new Map<Hex, number>()
+    for (let i = 0; i < activeValidators.length; i++) {
+      const validator = activeValidators[i]
+      if (validator?.ed25519) {
+        keyToIndex.set(validator.ed25519, i)
       }
     }
 
-    // Increment guarantees count by 1 for each validator who is a reporter
-    for (const validatorIdx of reporters) {
+    // Track which indices to credit (use Set to ensure each validator gets +1 max)
+    const indicesToCredit = new Set<number>()
+    for (const key of reporterKeys) {
+      const index = keyToIndex.get(key)
+      if (index !== undefined) {
+        indicesToCredit.add(index)
+      } else {
+        // Key not found in current active set - this could happen if:
+        // 1. Validator was in previous set but not in current set (should be rare for tiny config)
+        // 2. Key format mismatch
+        logger.warn('Reporter key not found in current active set', {
+          key: key.slice(0, 20) + '...',
+          activeValidatorsCount: activeValidators.length,
+        })
+      }
+    }
+
+    // Increment guarantees count by 1 for each validator in the current active set
+    // whose ED25519 key is in the reporters set
+    for (const validatorIdx of indicesToCredit) {
       let validatorStats = this.activity.validatorStatsAccumulator[validatorIdx]
       if (!validatorStats) {
         validatorStats = this.createEmptyValidatorStat()

@@ -61,6 +61,8 @@ export interface IServiceAccountService extends BaseService {
     serviceAccount: ServiceAccount,
   ): Safe<void>
   deleteServiceAccount(serviceId: bigint): Safe<void>
+  /** Clear all service accounts - used for fork switching or state reset */
+  clearAllServiceAccounts(): void
 
   getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined
   histLookupServiceAccount(

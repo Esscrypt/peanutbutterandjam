@@ -55,6 +55,23 @@ export class PVMRAM implements RAM {
 
   MAX_ADDRESS: u32 = 0xffffffff // 4GB address space
 
+  // JIP-6 trace support: Track last load/store for each instruction step
+  // These are updated by readOctets/writeOctets and should be cleared after each instruction
+  lastLoadAddress: u32 = 0
+  lastLoadValue: u64 = 0
+  lastStoreAddress: u32 = 0
+  lastStoreValue: u64 = 0
+
+  /**
+   * Clear last load/store tracking (call at start of each instruction)
+   */
+  clearLastMemoryOp(): void {
+    this.lastLoadAddress = 0
+    this.lastLoadValue = 0
+    this.lastStoreAddress = 0
+    this.lastStoreValue = 0
+  }
+
   /**
    * Initialize memory layout according to Gray Paper equation 770-802
    *
@@ -357,6 +374,18 @@ export class PVMRAM implements RAM {
       currentAddr += bytesInPage
     }
 
+    // JIP-6 trace support: Track last load address and value
+    this.lastLoadAddress = addr
+    // Convert result bytes to u64 value (little-endian, up to 8 bytes)
+    if (length > 0) {
+      let value: u64 = 0
+      const bytesToRead = min(length, 8)
+      for (let i: u32 = 0; i < bytesToRead; i++) {
+        value |= u64(result[i]) << (i * 8)
+      }
+      this.lastLoadValue = value
+    }
+
     return new ReadResult(result, 0)
   }
 
@@ -403,7 +432,19 @@ export class PVMRAM implements RAM {
       currentAddr += bytesInPage
     }
 
-      return new WriteResult(false, 0)
+    // JIP-6 trace support: Track last store address and value
+    this.lastStoreAddress = addr
+    // Convert values bytes to u64 value (little-endian, up to 8 bytes)
+    if (length > 0) {
+      let value: u64 = 0
+      const bytesToRead = min(length, 8)
+      for (let i: i32 = 0; i < bytesToRead; i++) {
+        value |= u64(values[i]) << (i * 8)
+      }
+      this.lastStoreValue = value
+    }
+
+    return new WriteResult(false, 0)
   }
 
   /**
@@ -448,7 +489,11 @@ export class PVMRAM implements RAM {
       return new FaultCheckResult(true, 0)
     }
 
-    if (address + size > this.MAX_ADDRESS) {
+    // Check for overflow before adding - if size is so large that address + size overflows,
+    // or if address + size exceeds MAX_ADDRESS, then it's a fault
+    // Use 64-bit arithmetic to avoid overflow
+    const endAddress = u64(address) + u64(size)
+    if (endAddress > u64(this.MAX_ADDRESS)) {
       return new FaultCheckResult(false, address)
     }
 
@@ -472,7 +517,16 @@ export class PVMRAM implements RAM {
   }
 
   isWritableWithFault(address: u32, size: u32 = u32(1)): FaultCheckResult {
-    if (address + size > this.MAX_ADDRESS) {
+    // Gray Paper: Empty range is trivially writable
+    if (size === 0) {
+      return new FaultCheckResult(true, 0)
+    }
+
+    // Check for overflow before adding - if size is so large that address + size overflows,
+    // or if address + size exceeds MAX_ADDRESS, then it's a fault
+    // Use 64-bit arithmetic to avoid overflow
+    const endAddress = u64(address) + u64(size)
+    if (endAddress > u64(this.MAX_ADDRESS)) {
       const faultAddress =
         this.getPageIndex(address) * MEMORY_CONFIG.PAGE_SIZE
       return new FaultCheckResult(false, faultAddress)

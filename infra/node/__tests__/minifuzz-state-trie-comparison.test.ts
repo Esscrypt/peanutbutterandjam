@@ -27,7 +27,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
     )
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
@@ -43,7 +43,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load Initialize message
     const initializeBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000001_fuzzer_initialize.bin',
     )
 
     let initializeBin: Uint8Array
@@ -230,7 +230,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
     )
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
@@ -246,7 +246,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load Initialize message
     const initializeBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000001_fuzzer_initialize.bin',
     )
 
     let initializeBin: Uint8Array
@@ -282,7 +282,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load ImportBlock message (block 1)
     const importBlockBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000002_fuzzer_import_block.bin',
     )
     let importBlockBin: Uint8Array
     try {

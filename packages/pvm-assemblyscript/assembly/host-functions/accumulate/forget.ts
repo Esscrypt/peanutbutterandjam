@@ -1,5 +1,13 @@
 import { RESULT_CODE_PANIC } from '../../config'
 import {
+  getRequestValue,
+  setRequestValue,
+  deleteRequestValue,
+  deletePreimageValue,
+  decodeRequestTimeslots,
+  encodeRequestTimeslots,
+} from '../../codec'
+import {
   ACCUMULATE_ERROR_HUH,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
@@ -72,29 +80,26 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     }
     const serviceAccount = accountEntry.account
 
-    // Get request (hashData is already Uint8Array)
-    const requestStatus = serviceAccount.requests.get(hashData, preimageLength)
-    if (requestStatus === null) {
+    // Get request using rawCshKeyvals helper
+    const requestValue = getRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength)
+    if (requestValue === null) {
       // Gray Paper line 942: HUH when a = error (request doesn't exist)
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution
     }
 
+    // Decode the request timeslots
+    const timeslots = decodeRequestTimeslots(requestValue)
+    if (timeslots === null) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(255) // continue execution
+    }
+
     // Apply Gray Paper logic for different request states (line 935-938)
-    const timeslots = requestStatus.timeslots
     if (timeslots.length === 0) {
       // Case 1 (line 935): [] (empty) - Remove request and preimage completely
-      // For Array-based structure, we need to remove the entry
-      // This is a simplified implementation - full version would remove from requests array
-      // For now, we'll just clear the status
-      requestStatus.timeslots = []
-      // Remove preimage
-      for (let i = 0; i < serviceAccount.preimages.entries.length; i++) {
-        if (this.compareHashes(serviceAccount.preimages.entries[i].hash, hashData)) {
-          serviceAccount.preimages.entries.splice(i, 1)
-          break
-        }
-      }
+      deleteRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength)
+      deletePreimageValue(serviceAccount, u32(imX.id), hashData)
       // Gray Paper: Update items and octets when removing a request
       // items -= 2 for each removed request (h, z)
       // octets -= (81 + z) for each removed request
@@ -103,7 +108,7 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
       } else {
         serviceAccount.items = u32(0)
       }
-      const octetsDelta = u32(81) + preimageLength
+      const octetsDelta = u64(81) + preimageLength
       if (serviceAccount.octets >= octetsDelta) {
         serviceAccount.octets -= octetsDelta
       } else {
@@ -112,18 +117,13 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     } else if (timeslots.length === 2) {
       // Case 2 (line 935): [x, y] where y < t - Cexpungeperiod - Remove request and preimage completely
       const y = u64(timeslots[1])
-      if (y < timeslot - expungePeriod) {
+      // Use y + expungePeriod < timeslot to avoid unsigned underflow when timeslot < expungePeriod
+      if (y + expungePeriod < timeslot) {
         // Remove request and preimage completely
-        requestStatus.timeslots = []
-        // Remove preimage
-        for (let i = 0; i < serviceAccount.preimages.entries.length; i++) {
-          if (this.compareHashes(serviceAccount.preimages.entries[i].hash, hashData)) {
-            serviceAccount.preimages.entries.splice(i, 1)
-            break
-          }
-        }
+        deleteRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength)
+        deletePreimageValue(serviceAccount, u32(imX.id), hashData)
         // Gray Paper: Update items and octets when removing a request
-        if (serviceAccount.items >= u64(2)) {
+        if (serviceAccount.items >= u32(2)) {
           serviceAccount.items -= u32(2)
         } else {
           serviceAccount.items = u32(0)
@@ -142,14 +142,17 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     } else if (timeslots.length === 1) {
       // Case 3 (line 936): [x] - Update to [x, t] (mark as unavailable)
       const x = timeslots[0]
-      requestStatus.timeslots = [x, u32(timeslot)]
+      const newTimeslots: u32[] = [x, u32(timeslot)]
+      setRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength, encodeRequestTimeslots(newTimeslots))
     } else if (timeslots.length === 3) {
       // Case 4 (line 937): [x, y, w] where y < t - Cexpungeperiod - Update to [w, t]
       const y = u64(timeslots[1])
       const w = timeslots[2]
-      if (y < timeslot - expungePeriod) {
+      // Use y + expungePeriod < timeslot to avoid unsigned underflow when timeslot < expungePeriod
+      if (y + expungePeriod < timeslot) {
         // Update to [w, t] (mark as unavailable again)
-        requestStatus.timeslots = [w, u32(timeslot)]
+        const newTimeslots2: u32[] = [w, u32(timeslot)]
+        setRequestValue(serviceAccount, u32(imX.id), hashData, preimageLength, encodeRequestTimeslots(newTimeslots2))
       } else {
         // Gray Paper line 938: otherwise → error (HUH)
         this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
@@ -165,13 +168,5 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 943: OK when otherwise
     this.setAccumulateSuccess(registers)
     return new HostFunctionResult(255) // continue execution
-  }
-
-  private compareHashes(a: Uint8Array, b: Uint8Array): bool {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
   }
 }

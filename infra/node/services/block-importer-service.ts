@@ -121,9 +121,10 @@ export class BlockImporterService extends BaseService {
   // ============================================================================
 
   async importBlock(block: Block): SafePromise<boolean> {
-    const isEpochTransition = this.clockService.isEpochTransition(
-      block.header.timeslot,
-    )
+    // const currentSlot = this.clockService.getLatestReportedBlockTimeslot() + 1n
+    // const isEpochTransition = this.clockService.isEpochTransition(
+    //   currentSlot,
+    // )
     let epochTransitionEmitted = false
 
     // Create state snapshot before processing block
@@ -147,7 +148,8 @@ export class BlockImporterService extends BaseService {
     try {
       validatePreStateRoot(block.header, this.stateService)
       // Emit epoch transition before processing if needed
-      if (isEpochTransition && block.header.epochMark) {
+      // if (isEpochTransition && block.header.epochMark) {
+      if (block.header.epochMark) {
         const epochTransitionEvent = {
           slot: block.header.timeslot,
           epochMark: block.header.epochMark,

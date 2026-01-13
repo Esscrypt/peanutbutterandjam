@@ -12,6 +12,22 @@ import { MEMORY_CONFIG } from './config'
 export class MockRAM implements RAM {
   currentHeapPointer: u32 = 0
 
+  // JIP-6 trace support: Track last load/store (no-op, always 0)
+  lastLoadAddress: u32 = 0
+  lastLoadValue: u64 = 0
+  lastStoreAddress: u32 = 0
+  lastStoreValue: u64 = 0
+
+  /**
+   * Clear last load/store tracking (no-op)
+   */
+  clearLastMemoryOp(): void {
+    this.lastLoadAddress = 0
+    this.lastLoadValue = 0
+    this.lastStoreAddress = 0
+    this.lastStoreValue = 0
+  }
+
   /**
    * Read multiple octets from memory (no-op)
    * Returns zero-filled data with no faults

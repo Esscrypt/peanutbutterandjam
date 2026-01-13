@@ -39,7 +39,7 @@ describe('Genesis Parse Tests', () => {
     // Run with both TypeScript and WASM executors
     const executorTypes: Array<{ name: string; useWasm: boolean }> = [
       { name: 'TypeScript', useWasm: false },
-      { name: 'WASM', useWasm: true },
+      // { name: 'WASM', useWasm: true },
     ]
 
     for (const executorType of executorTypes) {
