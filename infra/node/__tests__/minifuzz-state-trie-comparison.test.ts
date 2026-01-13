@@ -21,7 +21,7 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 describe('Fuzzer State Trie Comparison', async () => {
   it('should compare generateStateTrie with fuzzer keyvals and identify differences', async () => {
     // Initialize services using shared utility
-    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const services = await initializeServices({ traceSubfolder: 'fuzzer-state-trie-comparison' })
     const { stateService, configService } = services
 
     // Load PeerInfo message to get JAM version
@@ -32,8 +32,8 @@ describe('Fuzzer State Trie Comparison', async () => {
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
@@ -224,7 +224,7 @@ describe('Fuzzer State Trie Comparison', async () => {
 
   it('should verify round-trip encoding for Recent History, Reports, and Statistics after block 1', async () => {
     // Initialize services using shared utility
-    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const services = await initializeServices({ traceSubfolder: 'fuzzer-state-trie-comparison' })
     const { stateService, blockImporterService, configService } = services
 
     // Load PeerInfo message to get JAM version
@@ -235,8 +235,8 @@ describe('Fuzzer State Trie Comparison', async () => {
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {

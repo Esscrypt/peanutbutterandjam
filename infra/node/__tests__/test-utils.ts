@@ -272,13 +272,15 @@ export interface FuzzerTargetServices {
  * @param initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
  * @param useWasm - Whether to use WebAssembly PVM implementation (default: false)
  */
-export async function initializeServices(
-  spec: 'tiny' | 'full' = 'tiny',
+export async function initializeServices(options?: {
+  spec?: 'tiny' | 'full',
   traceSubfolder?: string,
   genesisManager?: NodeGenesisManager,
-  initialValidators: ValidatorPublicKeys[] = [],
-  useWasm: boolean = false,
-): Promise<FuzzerTargetServices> {
+  initialValidators?: ValidatorPublicKeys[],
+  useWasm?: boolean,
+}): Promise<FuzzerTargetServices> {
+  const { spec = 'tiny', traceSubfolder, genesisManager, initialValidators = [], useWasm = false } = options || {}
+
   let ringProver: RingVRFProverWasm
   let ringVerifier: RingVRFVerifierWasm
 

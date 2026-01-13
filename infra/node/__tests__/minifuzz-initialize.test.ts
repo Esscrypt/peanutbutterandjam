@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
 import { ConfigService } from '../services/config-service'
 import { StateService } from '../services/state-service'
@@ -36,8 +36,6 @@ import {
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-import { AssuranceService } from '../services/assurance-service'
-import { GuarantorService } from '../services/guarantor-service'
 import { StatisticsService } from '../services/statistics-service'
 import { NodeGenesisManager } from '../services/genesis-manager'
 import { FuzzMessageType, safeResult } from '@pbnjam/types'
@@ -48,30 +46,46 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../')
 
 describe('Fuzzer Initialize Test', () => {
   const configService = new ConfigService('tiny')
-  const EXPECTED_STATE_ROOT = '0x80748e40b5f83342b844a54aed5fd65861b982288e35ce1e7503fc45645d45b6' as const
 
   it('should produce expected state root from fuzzer Initialize message', async () => {
-    // Load PeerInfo message to get JAM version
-    const peerInfoJsonPath = path.join(
+    // Examples directory
+    const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
+
+    // Load PeerInfo message to get JAM version
+    const peerInfoJsonPath = path.join(examplesDir, '00000000_fuzzer_peer_info.json')
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
       console.warn(`⚠️  Failed to load PeerInfo, using default JAM version: ${error instanceof Error ? error.message : String(error)}`)
     }
 
+    // Load expected state root from target_state_root.json
+    const expectedStateRootPath = path.join(examplesDir, '00000001_target_state_root.json')
+    let expectedStateRoot: string | null = null
+    if (existsSync(expectedStateRootPath)) {
+      try {
+        const expectedJson = JSON.parse(readFileSync(expectedStateRootPath, 'utf-8'))
+        expectedStateRoot = expectedJson.state_root?.toLowerCase()
+        console.log(`📋 Expected state root loaded from file: ${expectedStateRoot}`)
+      } catch (error) {
+        throw new Error(
+          `Failed to load expected state root: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    } else {
+      throw new Error(`Expected state root file not found: ${expectedStateRootPath}`)
+    }
+
     // Load Initialize message from fuzzer test vectors
-    const initializeBinPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
-    )
+    const initializeBinPath = path.join(examplesDir, '00000001_fuzzer_initialize.bin')
 
     let initializeBin: Uint8Array
     try {
@@ -329,13 +343,17 @@ describe('Fuzzer Initialize Test', () => {
       )
     }
 
+    if (!expectedStateRoot) {
+      throw new Error('Expected state root is null')
+    }
+
     console.log(`\n🔍 State Root Comparison:`)
-    console.log(`  Expected: ${EXPECTED_STATE_ROOT}`)
+    console.log(`  Expected: ${expectedStateRoot}`)
     console.log(`  Computed: ${computedStateRoot}`)
-    console.log(`  Match: ${computedStateRoot === EXPECTED_STATE_ROOT ? '✅' : '❌'}`)
+    console.log(`  Match: ${computedStateRoot?.toLowerCase() === expectedStateRoot ? '✅' : '❌'}`)
 
     // Verify state root matches expected value
-    expect(computedStateRoot).toBe(EXPECTED_STATE_ROOT)
+    expect(computedStateRoot?.toLowerCase()).toBe(expectedStateRoot)
   })
 })
 

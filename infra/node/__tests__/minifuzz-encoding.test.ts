@@ -20,11 +20,14 @@ describe('Fuzzer ImportBlock Decoding', () => {
   it('should decode ImportBlock message from binary file', () => {
     const configService = new ConfigService('tiny')
 
-    // Load ImportBlock message
-    const importBlockBinPath = path.join(
+    // Examples directory
+    const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000002_fuzzer_import_block.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
+
+    // Load ImportBlock message
+    const importBlockBinPath = path.join(examplesDir, '00000002_fuzzer_import_block.bin')
 
     let importBlockBin: Uint8Array
     try {
@@ -149,10 +152,7 @@ describe('Fuzzer ImportBlock Decoding', () => {
     }
 
     // Load corresponding JSON for comparison
-    const importBlockJsonPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.json',
-    )
+    const importBlockJsonPath = path.join(examplesDir, '00000002_fuzzer_import_block.json')
 
     let jsonData: any
     try {
@@ -437,7 +437,7 @@ describe('Fuzzer ImportBlock Decoding', () => {
     const configService = new ConfigService('tiny')
     const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
 
     // Dynamically discover all ImportBlock files
