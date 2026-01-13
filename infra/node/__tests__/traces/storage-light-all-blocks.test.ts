@@ -19,7 +19,6 @@ import {
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
-  convertJsonReportToWorkReport,
   getStartBlock,
   initializeServices,
 } from '../test-utils'

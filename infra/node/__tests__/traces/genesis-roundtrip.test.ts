@@ -13,34 +13,10 @@ import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { ConfigService } from '../../services/config-service'
-import { StateService } from '../../services/state-service'
-import { ValidatorSetManager } from '../../services/validator-set'
-import { EntropyService } from '../../services/entropy'
-import { TicketService } from '../../services/ticket-service'
-import { AuthQueueService } from '../../services/auth-queue-service'
-import { AuthPoolService } from '../../services/auth-pool-service'
-import { DisputesService } from '../../services/disputes-service'
-import { ReadyService } from '../../services/ready-service'
-import { AccumulationService } from '../../services/accumulation-service'
-import { WorkReportService } from '../../services/work-report-service'
-import { PrivilegesService } from '../../services/privileges-service'
-import { ServiceAccountService } from '../../services/service-account-service'
-import { RecentHistoryService } from '../../services/recent-history-service'
 import {
   bytesToHex,
-  EventBusService,
   type Hex,
 } from '@pbnjam/core'
-import { SealKeyService } from '../../services/seal-key'
-import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
-import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
-import { ClockService } from '../../services/clock-service'
-import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-import { StatisticsService } from '../../services/statistics-service'
 import { initializeServices } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
@@ -82,18 +58,18 @@ describe('Genesis Round-Trip Encoding/Decoding', () => {
     const initialValidators = genesisJson.header?.epoch_mark?.validators || []
 
     // Initialize services using shared utility
-    const services = await initializeServices(
-      'tiny',
-      'safrole',
+    const services = await initializeServices({
+      spec: 'tiny',
+      traceSubfolder: 'safrole',
       genesisManager,
-      initialValidators.map((validator: any) => ({
+      initialValidators: initialValidators.map((validator: any) => ({
         bandersnatch: validator.bandersnatch,
         ed25519: validator.ed25519,
         bls: bytesToHex(new Uint8Array(144)) as Hex,
         metadata: bytesToHex(new Uint8Array(128)) as Hex,
       })),
-      false,
-    )
+      useWasm: false,
+    })
 
     const { stateService } = services
 

@@ -24,7 +24,7 @@ import { ConfigService } from '../../services/config-service'
 import { BlockImporterService } from '../../services/block-importer-service'
 
 // Test vectors directory (relative to workspace root)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 let stateService: StateService
 let blockImporterService: BlockImporterService
