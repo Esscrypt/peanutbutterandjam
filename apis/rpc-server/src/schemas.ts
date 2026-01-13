@@ -30,6 +30,9 @@ const uint8ArraySchema = z
         if (hex.length % 2 !== 0) {
           throw new Error('Invalid hex string length')
         }
+        if (hex.length === 0) {
+          return new Uint8Array(0)
+        }
         return new Uint8Array(
           hex.match(/.{1,2}/g)!.map((byte) => Number.parseInt(byte, 16)),
         )

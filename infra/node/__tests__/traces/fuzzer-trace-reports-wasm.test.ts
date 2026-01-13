@@ -61,7 +61,7 @@ describe('Fuzzer Traces Test', () => {
         // Load PeerInfo message to get JAM version
         const peerInfoJsonPath = path.join(
           WORKSPACE_ROOT,
-          'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+          'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
         )
         let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 2 }
         try {
