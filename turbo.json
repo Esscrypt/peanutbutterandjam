@@ -33,7 +33,8 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": [],
-      "env": []
+      "env": [],
+      "cache": false
     }
   }
 }

@@ -9,14 +9,14 @@
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
-import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
+import { decodeFuzzMessage } from '../../../../packages/codec/src/fuzz'
 import { FuzzMessageType } from '@pbnjam/types'
 import { bytesToHex } from '@pbnjam/core'
-import { initializeServices } from './test-utils'
+import { initializeServices } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 describe('Fuzzer State Trie Comparison', async () => {
   it('should compare generateStateTrie with fuzzer keyvals and identify differences', async () => {
@@ -423,9 +423,9 @@ describe('Fuzzer State Trie Comparison', async () => {
     }
 
     // Test round-trip encoding for each chapter
-    const { decodeRecent, encodeRecent } = await import('../../../packages/codec/src/state/recent')
-    const { decodeStateWorkReports, encodeStateWorkReports } = await import('../../../packages/codec/src/state/reports')
-    const { decodeActivity, encodeActivity } = await import('../../../packages/codec/src/state/activity')
+    const { decodeRecent, encodeRecent } = await import('../../../../packages/codec/src/state/recent')
+    const { decodeStateWorkReports, encodeStateWorkReports } = await import('../../../../packages/codec/src/state/reports')
+    const { decodeActivity, encodeActivity } = await import('../../../../packages/codec/src/state/activity')
     const { hexToBytes } = await import('@pbnjam/core')
 
     console.log(`\n🔄 ROUND-TRIP ENCODING TESTS:`)

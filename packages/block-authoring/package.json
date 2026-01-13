@@ -7,9 +7,6 @@
   "types": "src/index.ts",
   "scripts": {
     "build": "tsc",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "clean": "rm -rf dist"

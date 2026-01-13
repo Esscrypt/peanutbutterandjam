@@ -14,7 +14,8 @@
  * - subscribeServiceRequest
  */
 
-// @ts-expect-error - Module exists at runtime, types may not be available yet
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore - Module exists at runtime, types may not be available yet
 import { createNodeWebSocket } from '@hono/node-ws'
 import { logger } from '@pbnjam/core'
 import type { Context, Hono } from 'hono'

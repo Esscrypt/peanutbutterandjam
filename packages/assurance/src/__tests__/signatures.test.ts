@@ -5,7 +5,7 @@
  * according to Gray Paper specifications.
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { ed25519 } from '@noble/curves/ed25519'
 import type { Assurance } from '@pbnjam/types'
 import type { Hex } from 'viem'
@@ -17,7 +17,7 @@ import {
 
 describe('Assurance Signature Round-Trip', () => {
   // Generate a test key pair
-  const privateKey = ed25519.utils.randomPrivateKey()
+  const privateKey = ed25519.utils.randomSecretKey()
   const publicKey = ed25519.getPublicKey(privateKey)
 
   const parentHash: Hex =
@@ -180,7 +180,7 @@ describe('Assurance Signature Round-Trip', () => {
 
     it('should fail verification with wrong public key', () => {
       const bitfield: Hex = '0x01'
-      const wrongPrivateKey = ed25519.utils.randomPrivateKey()
+      const wrongPrivateKey = ed25519.utils.randomSecretKey()
       const wrongPublicKey = ed25519.getPublicKey(wrongPrivateKey)
 
       const [createError, signature] = createAssuranceSignature(
@@ -245,7 +245,7 @@ describe('Assurance Signature Round-Trip', () => {
     it('should validate multiple assurances from different validators', () => {
       // Create 3 validator key pairs
       const validators = Array.from({ length: 3 }, () => {
-        const privKey = ed25519.utils.randomPrivateKey()
+        const privKey = ed25519.utils.randomSecretKey()
         const pubKey = ed25519.getPublicKey(privKey)
         return { privKey, pubKey }
       })
@@ -287,7 +287,7 @@ describe('Assurance Signature Round-Trip', () => {
     it('should fail validation if one signature is invalid', () => {
       // Create 3 validator key pairs
       const validators = Array.from({ length: 3 }, () => {
-        const privKey = ed25519.utils.randomPrivateKey()
+        const privKey = ed25519.utils.randomSecretKey()
         const pubKey = ed25519.getPublicKey(privKey)
         return { privKey, pubKey }
       })
@@ -529,7 +529,7 @@ describe('Assurance Signature Round-Trip', () => {
 
       // Test with 10 different key pairs
       for (let i = 0; i < 10; i++) {
-        const testPrivateKey = ed25519.utils.randomPrivateKey()
+        const testPrivateKey = ed25519.utils.randomSecretKey()
         const testPublicKey = ed25519.getPublicKey(testPrivateKey)
 
         const [createError, signature] = createAssuranceSignature(

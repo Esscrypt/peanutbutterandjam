@@ -135,10 +135,15 @@ export class WasmPVMExecutor {
     // Read WASM file
     const wasmBytes = readFileSync(wasmPath)
     // Convert Buffer to ArrayBuffer
-    this.wasmModuleBytes = wasmBytes.buffer.slice(
+    // Create a new ArrayBuffer and copy the data to ensure it's not a SharedArrayBuffer
+    const uint8Array = new Uint8Array(
+      wasmBytes.buffer,
       wasmBytes.byteOffset,
-      wasmBytes.byteOffset + wasmBytes.byteLength,
+      wasmBytes.byteLength,
     )
+    // Create a new ArrayBuffer by copying the data
+    this.wasmModuleBytes = new ArrayBuffer(uint8Array.length)
+    new Uint8Array(this.wasmModuleBytes).set(uint8Array)
 
     this.configService = configService
     this.entropyService = entropyService

@@ -12,10 +12,10 @@ import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
 import {
   initializeServices,
-} from './test-utils'
+} from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 
 describe('Fuzzer Target Block Import', () => {

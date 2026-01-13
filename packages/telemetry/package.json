@@ -13,7 +13,6 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
-    "test": "bun test",
     "lint": "biome check .",
     "lint:fix": "biome check . --fix"
   },

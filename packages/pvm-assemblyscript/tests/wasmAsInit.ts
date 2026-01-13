@@ -289,6 +289,12 @@ export async function instantiate(module, imports = {}) {
       data = __lowerTypedArray(Uint8Array, 15, 0, data) || __notnull();
       exports.setMemory(address, data);
     },
+    getPageDump(pageIndex) {
+      // assembly/index/getPageDump(i32) => ~lib/typedarray/Uint8Array
+      const pointer = exports.getPageDump(pageIndex) >>> 0;
+      if (!pointer) return null;
+      return __liftTypedArray(Uint8Array, pointer);
+    },
     getAccumulationContext(numCores, numValidators, authQueueSize) {
       // assembly/index/getAccumulationContext(i32, i32, i32) => ~lib/typedarray/Uint8Array
       return __liftTypedArray(Uint8Array, exports.getAccumulationContext(numCores, numValidators, authQueueSize) >>> 0);

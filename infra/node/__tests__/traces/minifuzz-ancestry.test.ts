@@ -16,10 +16,10 @@ import * as path from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
-import { initializeServices } from './test-utils'
+import { initializeServices } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 // Test configuration via environment variables
 const TEST_MODE = process.env.TEST_MODE || 'forks' // 'forks' or 'no_forks'

@@ -8,13 +8,13 @@
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
-import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
+import { decodeFuzzMessage } from '../../../../packages/codec/src/fuzz'
 import { FuzzMessageType } from '@pbnjam/types'
-import { ConfigService } from '../services/config-service'
+import { ConfigService } from '../../services/config-service'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 describe('Fuzzer ImportBlock Decoding', () => {
   it('should decode ImportBlock message from binary file', () => {

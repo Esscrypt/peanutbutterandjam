@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
-import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { bytesToHex } from '@pbnjam/core'
 import {
   createServiceStorageKey,
   createServicePreimageKey,
