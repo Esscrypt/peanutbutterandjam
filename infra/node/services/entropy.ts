@@ -234,7 +234,8 @@ export class EntropyService extends BaseService {
   }
 
   setEntropy(entropy: EntropyState): void {
-    this.entropy = entropy
+    // Create a copy to avoid modifying the source object (e.g., snapshot)
+    this.entropy = { ...entropy }
   }
 
   /**

@@ -9,6 +9,11 @@
  * - Mutations should fail import with an error
  * - Original blocks should succeed and update state
  * - Mutations are never used as parents for subsequent blocks
+ *
+ * Uses ChainManagerService for:
+ * - Tracking fork heads and ancestry
+ * - Validating lookup anchors (Gray Paper: must be within last L headers)
+ * - Detecting equivocations
  */
 
 import { describe, it, expect } from 'bun:test'
@@ -16,7 +21,7 @@ import * as path from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
-import { initializeServices } from '../test-utils'
+import { initializeServices, getStartBlock, getStopBlock } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
@@ -102,18 +107,25 @@ function decodeMessageFromFile(
 describe('Minifuzz Ancestry Test', () => {
   it(`should handle block imports with ${TEST_MODE} test vectors`, async () => {
     // Initialize services
-    const services = await initializeServices()
-    const { stateService, blockImporterService, recentHistoryService, configService } = services
+    // Note: useWasm: true ensures state trie calculation matches the fuzzer's expected state root
+    const services = await initializeServices({ useWasm: true })
+    const { stateService, blockImporterService, chainManagerService, recentHistoryService, configService } = services
 
-    // Configure ancestry validation based on test mode
+    // Configure ancestry and forking via ConfigService
+    configService.ancestryEnabled = ANCESTRY_ENABLED
+    configService.forkingEnabled = TEST_MODE === 'forks'
+
+    // Log configuration
     if (!ANCESTRY_ENABLED) {
-      // Disable ancestry validation by patching isValidAnchor
-      // According to fuzz-proto README: "When this feature is disabled, the check
-      // described in the GP reference should also be skipped."
-      recentHistoryService.isValidAnchor = () => true
       console.log('🔓 Ancestry validation disabled (isValidAnchor always returns true)')
+      // Also patch recentHistoryService for backward compatibility
+      recentHistoryService.isValidAnchor = () => true
     } else {
       console.log('🔒 Ancestry validation enabled')
+    }
+
+    if (TEST_MODE === 'forks') {
+      console.log('🔀 Forking mode enabled - mutations will be tracked')
     }
 
     // Examples directory
@@ -137,8 +149,8 @@ describe('Minifuzz Ancestry Test', () => {
     let jamVersion = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
@@ -158,10 +170,15 @@ describe('Minifuzz Ancestry Test', () => {
 
     // Handle ancestry from Initialize message
     // jam-conformance: The Initialize message includes ancestors for lookup anchor validation
-    if (init.ancestors && init.ancestors.length > 0) {
-      console.log(`📋 Ancestors provided: ${init.ancestors.length} block hashes`)
-      recentHistoryService.initializeAncestry(init.ancestors)
-      console.log(`✅ Ancestry initialized with ${init.ancestors.length} block hashes`)
+    // AncestryItem contains { slot, header_hash } - services need just the header hashes
+    if (init.ancestry && init.ancestry.length > 0) {
+      console.log(`📋 Ancestors provided: ${init.ancestry.length} AncestryItems`)
+      // Extract header hashes from AncestryItem array
+      const ancestorHashes = init.ancestry.map((item: { slot: bigint; header_hash: string }) => item.header_hash)
+      // Initialize ancestry in both services for compatibility
+      recentHistoryService.initializeAncestry(ancestorHashes)
+      chainManagerService.initializeAncestry(ancestorHashes)
+      console.log(`✅ Ancestry initialized with ${init.ancestry.length} block hashes`)
     }
 
     // Set initial state
@@ -214,13 +231,34 @@ describe('Minifuzz Ancestry Test', () => {
         return numA - numB
       })
 
-    // Apply max blocks limit if set
-    const blocksToProcess = MAX_BLOCKS > 0 ? importBlockFiles.slice(0, MAX_BLOCKS) : importBlockFiles
+    // Get start and stop block from environment
+    const startBlock = getStartBlock()
+    const stopBlock = getStopBlock()
 
-    console.log(`\n📦 Found ${importBlockFiles.length} blocks to import`)
+    // Filter blocks based on start/stop and max blocks
+    let blocksToProcess = importBlockFiles.filter((file) => {
+      const fileNumber = parseInt(file.substring(0, 8), 10)
+      if (fileNumber < startBlock) return false
+      if (stopBlock !== undefined && fileNumber > stopBlock) return false
+      return true
+    })
+
+    // Apply max blocks limit if set (after start/stop filtering)
     if (MAX_BLOCKS > 0) {
-      console.log(`📦 Processing first ${blocksToProcess.length} blocks (MAX_BLOCKS=${MAX_BLOCKS})`)
+      blocksToProcess = blocksToProcess.slice(0, MAX_BLOCKS)
     }
+
+    console.log(`\n📦 Found ${importBlockFiles.length} blocks total`)
+    if (startBlock > 1) {
+      console.log(`🚀 Starting from block ${startBlock} (START_BLOCK=${startBlock})`)
+    }
+    if (stopBlock !== undefined) {
+      console.log(`🛑 Will stop at block ${stopBlock} (STOP_BLOCK=${stopBlock})`)
+    }
+    if (MAX_BLOCKS > 0) {
+      console.log(`📦 Processing max ${MAX_BLOCKS} blocks (MAX_BLOCKS=${MAX_BLOCKS})`)
+    }
+    console.log(`📦 Processing ${blocksToProcess.length} blocks`)
 
     // Statistics
     let successCount = 0
@@ -228,10 +266,31 @@ describe('Minifuzz Ancestry Test', () => {
     let unexpectedErrorCount = 0
     let stateRootMismatchCount = 0
 
+    // Store initial state snapshot in ChainManagerService for fork rollback
+    // This allows rolling back to initial state if first block fails
+    const [initTrieError, initTrie] = stateService.generateStateTrie()
+    if (!initTrieError && initTrie) {
+      const initKeyvals = Object.entries(initTrie).map(([k, v]) => ({
+        key: k as `0x${string}`,
+        value: v as `0x${string}`,
+      }))
+      // Get service-specific state for complete snapshot
+      const { fullContext } = services
+      chainManagerService.setInitialStateSnapshot({
+        keyvals: initKeyvals,
+        accumulationSlot: fullContext.accumulationService.getLastProcessedSlot(),
+        clockSlot: fullContext.clockService.getLatestReportedBlockTimeslot(),
+        entropy: { ...fullContext.entropyService.getEntropy() },
+      })
+    }
+
     // Process each block
     for (const testFile of blocksToProcess) {
       const fileNumber = parseInt(testFile.substring(0, 8), 10)
       const blockBinPath = path.join(examplesDir, testFile)
+
+      // Load expected outcome FIRST - we need to know if decode failures are expected
+      const expected = loadExpectedOutcome(examplesDir, fileNumber)
 
       // Decode block
       let blockMessage
@@ -249,6 +308,13 @@ describe('Minifuzz Ancestry Test', () => {
         if (error instanceof Error && error.message.startsWith('Unexpected message type')) {
           throw error // Re-throw fail-fast errors
         }
+        // If this block was expected to fail anyway, count decode failure as expected error
+        // Some mutation test vectors have corrupted binary data that can't be decoded
+        if (expected?.type === 'error') {
+          console.log(`✅ Block ${fileNumber}: Expected error, got decode error (${error instanceof Error ? error.message.substring(0, 50) : 'unknown'}...)`)
+          expectedErrorCount++
+          continue
+        }
         console.error(`❌ Failed to decode ${testFile}: ${error instanceof Error ? error.message : String(error)}`)
         unexpectedErrorCount++
         if (FAIL_FAST) {
@@ -259,10 +325,12 @@ describe('Minifuzz Ancestry Test', () => {
 
       const block = (blockMessage.payload as any).block
       const timeslot = block?.header?.timeslot
-      const parentHash = block?.header?.parent?.substring(0, 18) + '...'
+      const parentHash = block?.header?.parent as string
+      const parentHashShort = parentHash?.substring(0, 18) + '...'
 
-      // Load expected outcome
-      const expected = loadExpectedOutcome(examplesDir, fileNumber)
+      // Fork handling is now handled by BlockImporterService + ChainManagerService
+      // BlockImporterService checks ChainManagerService.getParentSnapshotIfFork()
+      // and automatically rolls back to parent state before importing sibling blocks
 
       // Import the block
       const [importError] = await blockImporterService.importBlock(block)

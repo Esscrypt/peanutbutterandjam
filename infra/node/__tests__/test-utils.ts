@@ -234,6 +234,7 @@ export function convertJsonBlockToBlock(jsonBlock: any): Block {
 export interface FuzzerTargetServices {
   stateService: ServiceContext['stateService']
   blockImporterService: ServiceContext['blockImporterService']
+  chainManagerService: ServiceContext['chainManagerService']
   recentHistoryService: ServiceContext['recentHistoryService']
   configService: ServiceContext['configService']
   validatorSetManager: ServiceContext['validatorSetManager']
@@ -294,6 +295,7 @@ export async function initializeServices(options?: {
   return {
     stateService: context.stateService,
     blockImporterService: context.blockImporterService,
+    chainManagerService: context.chainManagerService,
     recentHistoryService: context.recentHistoryService,
     configService: context.configService,
     validatorSetManager: context.validatorSetManager,

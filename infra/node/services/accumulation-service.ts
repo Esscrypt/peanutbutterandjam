@@ -19,6 +19,7 @@
 
 import {
   calculateWorkReportHash,
+  decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
   setServicePreimageValue,
   setServiceRequestValue,
@@ -36,6 +37,7 @@ import {
   type Ready,
   type ReadyItem,
   type ServiceAccount,
+  type ValidatorPublicKeys,
   WORK_REPORT_CONSTANTS,
   type WorkExecResultValue,
   type WorkExecutionResult,
@@ -281,9 +283,16 @@ export class AccumulationService extends BaseService {
   }
 
   /**
+   * Get last processed slot (the slot that the current accumulated/ready state represents)
+   */
+  getLastProcessedSlot(): bigint | null {
+    return this.lastProcessedSlot
+  }
+
+  /**
    * Set last processed slot (the slot that the current accumulated/ready state represents)
    */
-  setLastProcessedSlot(slot: bigint): void {
+  setLastProcessedSlot(slot: bigint | null): void {
     this.lastProcessedSlot = slot
   }
 
@@ -2299,6 +2308,40 @@ export class AccumulationService extends BaseService {
           registrar: poststate.registrar,
           alwaysaccers: new Map(poststate.alwaysaccers),
         })
+
+        // Gray Paper: Apply staging set update if the delegator service called DESIGNATE
+        // The DESIGNATE host function updates imX.state.stagingset, which becomes poststate.stagingset
+        // We need to apply this to the global ValidatorSetManager
+        // Only update if the current service is the delegator (DESIGNATE host function checks this)
+        if (
+          accumulatedServiceId === poststate.delegator &&
+          poststate.stagingset &&
+          poststate.stagingset.length > 0
+        ) {
+          // Convert Uint8Array[] back to ValidatorPublicKeys[]
+          const updatedStagingSet: ValidatorPublicKeys[] = []
+          for (const encoded of poststate.stagingset) {
+            const [decodeError, decoded] = decodeValidatorPublicKeys(encoded)
+            if (decodeError || !decoded) {
+              logger.warn(
+                '[AccumulationService] Failed to decode staging set validator',
+                { error: decodeError?.message },
+              )
+              continue
+            }
+            updatedStagingSet.push(decoded.value)
+          }
+          if (updatedStagingSet.length > 0) {
+            this.validatorSetManager.setStagingSet(updatedStagingSet)
+            logger.info(
+              '[AccumulationService] Applied staging set update from DESIGNATE',
+              {
+                serviceId: accumulatedServiceId.toString(),
+                validatorCount: updatedStagingSet.length,
+              },
+            )
+          }
+        }
       } else {
         logger.debug('[AccumulationService] Accumulation failed', {
           invocationIndex: i,

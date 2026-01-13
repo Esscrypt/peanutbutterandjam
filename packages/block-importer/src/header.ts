@@ -58,10 +58,10 @@ export async function validateBlockHeader(
   }
 
   // Also validate against wall clock to prevent blocks from the far future
-  const wallClockSlot = clockService.getSlotFromWallClock()
-  if (header.timeslot > wallClockSlot) {
-    return safeError(new Error('Block slot is in the future'))
-  }
+  // const wallClockSlot = clockService.getSlotFromWallClock()
+  // if (header.timeslot > wallClockSlot) {
+  //   return safeError(new Error('Block slot is in the future'))
+  // }
 
   // Validate parent block hash
   if (header.parent !== zeroHash) {

@@ -49,6 +49,7 @@ export type ConfigServiceSizeType =
   | '3xlarge'
   | 'full'
 
+import { ChainManagerService } from './chain-manager-service'
 import { DisputesService } from './disputes-service'
 import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
@@ -164,6 +165,7 @@ export interface ServiceContext {
 
   // Block services
   blockImporterService: BlockImporterService
+  chainManagerService: ChainManagerService
   genesisManagerService: NodeGenesisManager
 
   // Erasure coding services
@@ -529,6 +531,12 @@ export async function createCoreServices(
     stateService,
   })
 
+  // ChainManagerService for fork handling and state snapshots
+  const chainManagerService = new ChainManagerService(
+    configService,
+    sealKeyService,
+  )
+
   const blockImporterService = new BlockImporterService({
     configService,
     eventBusService,
@@ -547,6 +555,7 @@ export async function createCoreServices(
     authPoolService,
     accumulationService,
     workReportService,
+    chainManagerService,
   })
 
   // Optional services
@@ -586,6 +595,7 @@ export async function createCoreServices(
     assuranceService,
     guarantorService,
     blockImporterService,
+    chainManagerService,
     genesisManagerService,
     erasureCodingService,
     shardService,

@@ -575,10 +575,17 @@ export class StateService extends BaseService implements IStateService {
    * According to Gray Paper, when switching between forks, the entire state
    * must be reset, not merged. This method clears all service accounts and
    * resets other stateful services to prevent state leakage between forks.
+   *
+   * Note: Most services are "replaced" by setState() which calls setters that
+   * overwrite their internal state. Only services with Map/Set collections that
+   * aren't fully replaced need explicit clearing here.
    */
   clearState(): void {
     // Clear service accounts - this is critical for fork switching
     this.serviceAccountsService.clearAllServiceAccounts()
+
+    // Clear pending work reports - these can accumulate from failed block attempts
+    this.workReportService.clearPendingReports()
   }
 
   /**

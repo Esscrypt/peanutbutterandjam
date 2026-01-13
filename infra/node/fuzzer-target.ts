@@ -979,7 +979,7 @@ async function handleConnection(socket: UnixSocket) {
           if (decodeError instanceof Error && decodeError.stack) {
             logger.error(`Decode error stack: ${decodeError.stack}`)
           }
-          // Send error response
+          // Send error response and continue processing - don't close connection
           const errorResponse: FuzzMessage = {
             type: FuzzMessageType.Error,
             payload: {
@@ -988,7 +988,8 @@ async function handleConnection(socket: UnixSocket) {
           }
           const encoded = encodeFuzzMessage(errorResponse, configService)
           sendMessage(socket, encoded)
-          throw decodeError
+          // Continue to next message instead of re-throwing
+          continue
         }
 
         switch (message.type) {

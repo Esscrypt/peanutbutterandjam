@@ -28,6 +28,8 @@ import {
  */
 export class ConfigService extends BaseService implements IConfigService {
   private _jamVersion: JamVersion = DEFAULT_JAM_VERSION
+  private _ancestryEnabled = true
+  private _forkingEnabled = true
 
   constructor(
     private readonly mode:
@@ -319,5 +321,29 @@ export class ConfigService extends BaseService implements IConfigService {
       default:
         throw new Error('Invalid mode')
     }
+  }
+
+  /**
+   * Whether ancestry feature is enabled
+   * jam-conformance: When disabled, lookup anchor validation is skipped
+   */
+  get ancestryEnabled(): boolean {
+    return this._ancestryEnabled
+  }
+
+  set ancestryEnabled(enabled: boolean) {
+    this._ancestryEnabled = enabled
+  }
+
+  /**
+   * Whether forking feature is enabled
+   * jam-conformance: When enabled, mutations (sibling blocks) are tracked
+   */
+  get forkingEnabled(): boolean {
+    return this._forkingEnabled
+  }
+
+  set forkingEnabled(enabled: boolean) {
+    this._forkingEnabled = enabled
   }
 }

@@ -36,9 +36,6 @@ const JAM_CONFORMANCE_VERSION = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
 // Traces directory from jam-conformance
 const TRACES_DIR = path.join(WORKSPACE_ROOT, 'submodules/jam-conformance/fuzz-reports', JAM_CONFORMANCE_VERSION, 'traces')
 
-// Cache directory for storing unhashed state after each block
-const STATE_CACHE_DIR = path.join(WORKSPACE_ROOT, '.state-cache/jam-conformance')
-
 // Mismatch logs directory
 const MISMATCH_LOGS_DIR = path.join(WORKSPACE_ROOT, 'mismatch-logs/jam-conformance')
 
