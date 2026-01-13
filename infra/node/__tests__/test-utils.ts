@@ -2,19 +2,10 @@
  * Test Utilities
  *
  * Shared utility functions for test files
+ * Uses the service factory for consistent service initialization
  */
 
-import * as path from 'node:path'
-import {
-  RingVRFProverWasm,
-  RingVRFVerifierWasm,
-} from '@pbnjam/bandersnatch-vrf'
-import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-import { EventBusService, type Hex, hexToBytes, logger } from '@pbnjam/core'
+import { hexToBytes, type Hex } from '@pbnjam/core'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
 import {
   DEFAULT_JAM_VERSION,
@@ -25,30 +16,14 @@ import {
   type ValidatorPublicKeys,
   type WorkReport,
 } from '@pbnjam/types'
-import { AccumulationService } from '../services/accumulation-service'
-import { AssuranceService } from '../services/assurance-service'
-import { AuthPoolService } from '../services/auth-pool-service'
-import { AuthQueueService } from '../services/auth-queue-service'
-import { BlockImporterService } from '../services/block-importer-service'
-import { ClockService } from '../services/clock-service'
-import { ConfigService } from '../services/config-service'
-import { DisputesService } from '../services/disputes-service'
-import { EntropyService } from '../services/entropy'
-import { NodeGenesisManager } from '../services/genesis-manager'
-import { GuarantorService } from '../services/guarantor-service'
-import { PrivilegesService } from '../services/privileges-service'
-import { ReadyService } from '../services/ready-service'
-import { RecentHistoryService } from '../services/recent-history-service'
-import { SealKeyService } from '../services/seal-key'
-import { ServiceAccountService } from '../services/service-account-service'
-import { StateService } from '../services/state-service'
-import { StatisticsService } from '../services/statistics-service'
-import { TicketService } from '../services/ticket-service'
-import { ValidatorSetManager } from '../services/validator-set'
-import { WorkReportService } from '../services/work-report-service'
-
-// Workspace root (relative to test-utils.ts location)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+import {
+  createCoreServices,
+  startCoreServices,
+  type ServiceContext,
+  type ConfigServiceSizeType,
+} from '../services/service-factory'
+import type { NodeGenesisManager } from '../services/genesis-manager'
+import type { ConfigService } from '../services/config-service'
 
 /**
  * Helper function to parse CLI arguments or environment variable for starting block
@@ -254,341 +229,74 @@ export function convertJsonBlockToBlock(jsonBlock: any): Block {
 
 /**
  * Services context returned by initializeServices
+ * This is a subset of ServiceContext for backward compatibility
  */
 export interface FuzzerTargetServices {
-  stateService: StateService
-  blockImporterService: BlockImporterService
-  recentHistoryService: RecentHistoryService
-  configService: ConfigService
-  validatorSetManager: ValidatorSetManager
+  stateService: ServiceContext['stateService']
+  blockImporterService: ServiceContext['blockImporterService']
+  recentHistoryService: ServiceContext['recentHistoryService']
+  configService: ServiceContext['configService']
+  validatorSetManager: ServiceContext['validatorSetManager']
+  // Full context for advanced use cases
+  fullContext: ServiceContext
 }
 
 /**
  * Initialize services for fuzzer target tests
- * This is the same implementation as in fuzzer-target.ts, but returns services instead of storing them in module variables
- * @param spec - Chain spec to use ('tiny' or 'full')
- * @param traceSubfolder - Optional trace subfolder for AccumulatePVM (e.g., 'fuzzy/v0.7.2', 'fuzzer-target')
- * @param genesisManager - Optional genesis manager (if not provided, creates a minimal one that returns empty state)
- * @param initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
- * @param useWasm - Whether to use WebAssembly PVM implementation (default: false)
+ *
+ * Uses the shared service factory for consistent service initialization.
+ *
+ * @param options - Configuration options
+ * @param options.spec - Chain spec to use ('tiny' or 'full')
+ * @param options.traceSubfolder - Optional trace subfolder for AccumulatePVM (e.g., 'fuzzy/v0.7.2', 'fuzzer-target')
+ * @param options.genesisManager - Optional genesis manager (if not provided, uses empty state)
+ * @param options.initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
+ * @param options.useWasm - Whether to use WebAssembly PVM implementation (default: false)
  */
 export async function initializeServices(options?: {
-  spec?: 'tiny' | 'full',
-  traceSubfolder?: string,
-  genesisManager?: NodeGenesisManager,
-  initialValidators?: ValidatorPublicKeys[],
-  useWasm?: boolean,
+  spec?: ConfigServiceSizeType
+  traceSubfolder?: string
+  genesisManager?: NodeGenesisManager
+  initialValidators?: ValidatorPublicKeys[]
+  useWasm?: boolean
 }): Promise<FuzzerTargetServices> {
-  const { spec = 'tiny', traceSubfolder, genesisManager, initialValidators = [], useWasm = false } = options || {}
+  const {
+    spec = 'tiny',
+    traceSubfolder,
+    genesisManager,
+    initialValidators = [],
+    useWasm = false,
+  } = options || {}
 
-  let ringProver: RingVRFProverWasm
-  let ringVerifier: RingVRFVerifierWasm
+  // Create services using the factory
+  const context = await createCoreServices({
+    configSize: spec,
+    traceSubfolder,
+    useWasm,
+    initialValidators,
+    // Don't enable networking for tests
+    enableNetworking: false,
+    // If a genesis manager is provided, we'll override it after creation
+    genesis: genesisManager ? undefined : undefined,
+  })
 
-  const configService = new ConfigService(spec)
-
-  try {
-    logger.info('Loading SRS file...')
-    const srsFilePath = path.join(
-      WORKSPACE_ROOT,
-      'packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
-    logger.info(`SRS file path: ${srsFilePath}`)
-
-    // Check if file exists
-    const fs = await import('node:fs/promises')
-    try {
-      await fs.access(srsFilePath)
-    } catch {
-      logger.error(`SRS file not found at ${srsFilePath}`)
-      throw new Error(`SRS file not found: ${srsFilePath}`)
-    }
-
-    ringProver = new RingVRFProverWasm(srsFilePath)
-    ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-
-    try {
-      // Add timeout to prevent hanging - WASM initialization can take time but shouldn't hang indefinitely
-      const initStartTime = Date.now()
-      const initPromise = ringProver.init()
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          const elapsed = Date.now() - initStartTime
-          reject(
-            new Error(
-              `Ring prover initialization timeout after ${elapsed}ms (30 second limit)`,
-            ),
-          )
-        }, 30000)
-      })
-      await Promise.race([initPromise, timeoutPromise])
-    } catch (initError) {
-      logger.error('Failed to initialize ring prover:', initError)
-      if (initError instanceof Error) {
-        logger.error('Init error message:', initError.message)
-        logger.error('Init error stack:', initError.stack)
-      }
-      throw initError
-    }
-
-    try {
-      // Add timeout to prevent hanging
-      const initStartTime = Date.now()
-      const initPromise = ringVerifier.init()
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => {
-          const elapsed = Date.now() - initStartTime
-          reject(
-            new Error(
-              `Ring verifier initialization timeout after ${elapsed}ms (30 second limit)`,
-            ),
-          )
-        }, 30000)
-      })
-      await Promise.race([initPromise, timeoutPromise])
-    } catch (initError) {
-      logger.error('Failed to initialize ring verifier:', initError)
-      if (initError instanceof Error) {
-        logger.error('Init error message:', initError.message)
-        logger.error('Init error stack:', initError.stack)
-      }
-      throw initError
-    }
-  } catch (error) {
-    logger.error('Failed to initialize Ring VRF:', error)
-    if (error instanceof Error) {
-      logger.error('Error message:', error.message)
-      logger.error('Error stack:', error.stack)
-    }
-    throw error
+  // If a custom genesis manager is provided, use it in the state service
+  // The factory creates its own, but we can override if needed
+  if (genesisManager) {
+    // Access the internal genesisManagerService and replace with provided one
+    // Note: This is a workaround; ideally the factory would accept a genesis manager
+    Object.assign(context, { genesisManagerService: genesisManager })
   }
 
-  try {
-    const eventBusService = new EventBusService()
-    const clockService = new ClockService({
-      configService: configService,
-      eventBusService: eventBusService,
-    })
-    const entropyService = new EntropyService(eventBusService)
-    const ticketService = new TicketService({
-      configService: configService,
-      eventBusService: eventBusService,
-      keyPairService: null,
-      entropyService: entropyService,
-      networkingService: null,
-      ce131TicketDistributionProtocol: null,
-      ce132TicketDistributionProtocol: null,
-      clockService: clockService,
-      prover: ringProver,
-      ringVerifier: ringVerifier,
-      validatorSetManager: null,
-    })
-    const sealKeyService = new SealKeyService({
-      configService,
-      eventBusService,
-      entropyService,
-      ticketService,
-    })
+  // Start the services
+  await startCoreServices(context)
 
-    const validatorSetManager = new ValidatorSetManager({
-      eventBusService,
-      sealKeyService,
-      ringProver,
-      ticketService,
-      configService,
-      initialValidators: initialValidators,
-    })
-
-    ticketService.setValidatorSetManager(validatorSetManager)
-
-    const authQueueService = new AuthQueueService({
-      configService,
-    })
-
-    const disputesService = new DisputesService({
-      eventBusService: eventBusService,
-      configService: configService,
-      validatorSetManagerService: validatorSetManager,
-    })
-    const readyService = new ReadyService({
-      configService: configService,
-    })
-
-    const workReportService = new WorkReportService({
-      eventBus: eventBusService,
-      networkingService: null,
-      ce136WorkReportRequestProtocol: null,
-      validatorSetManager: validatorSetManager,
-      configService: configService,
-      entropyService: entropyService,
-      clockService: clockService,
-    })
-
-    const authPoolService = new AuthPoolService({
-      configService,
-      eventBusService: eventBusService,
-      workReportService: workReportService,
-      authQueueService: authQueueService,
-    })
-
-    const privilegesService = new PrivilegesService({
-      configService,
-    })
-
-    const serviceAccountsService = new ServiceAccountService({
-      eventBusService,
-      clockService,
-      networkingService: null,
-      preimageRequestProtocol: null,
-    })
-
-    const hostFunctionRegistry = new HostFunctionRegistry(
-      serviceAccountsService,
-      configService,
-    )
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
-      configService,
-    )
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm,
-      traceSubfolder: traceSubfolder,
-    })
-
-    const statisticsService = new StatisticsService({
-      eventBusService: eventBusService,
-      configService: configService,
-      clockService: clockService,
-    })
-
-    const accumulatedService = new AccumulationService({
-      configService: configService,
-      clockService: clockService,
-      serviceAccountsService: serviceAccountsService,
-      privilegesService: privilegesService,
-      validatorSetManager: validatorSetManager,
-      authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
-      readyService: readyService,
-      statisticsService: statisticsService,
-    })
-
-    const recentHistoryService = new RecentHistoryService({
-      eventBusService: eventBusService,
-      configService: configService,
-      accumulationService: accumulatedService,
-    })
-    recentHistoryService.start()
-
-    // Use provided genesis manager or undefined (no genesis manager)
-    // The state will be set via Initialize message or trace pre-state
-    const stateService = new StateService({
-      configService,
-      genesisManagerService: genesisManager,
-      validatorSetManager: validatorSetManager,
-      entropyService: entropyService,
-      ticketService: ticketService,
-      authQueueService: authQueueService,
-      authPoolService: authPoolService,
-      statisticsService: statisticsService,
-      disputesService: disputesService,
-      readyService: readyService,
-      accumulationService: accumulatedService,
-      workReportService: workReportService,
-      privilegesService: privilegesService,
-      serviceAccountsService: serviceAccountsService,
-      recentHistoryService: recentHistoryService,
-      sealKeyService: sealKeyService,
-      clockService: clockService,
-    })
-
-    const assuranceService = new AssuranceService({
-      configService: configService,
-      workReportService: workReportService,
-      validatorSetManager: validatorSetManager,
-      eventBusService: eventBusService,
-      sealKeyService: sealKeyService,
-      recentHistoryService: recentHistoryService,
-    })
-
-    const guarantorService = new GuarantorService({
-      configService: configService,
-      clockService: clockService,
-      entropyService: entropyService,
-      accumulationService: accumulatedService,
-      authPoolService: authPoolService,
-      networkService: null,
-      ce134WorkPackageSharingProtocol: null,
-      keyPairService: null,
-      workReportService: workReportService,
-      eventBusService: eventBusService,
-      validatorSetManager: validatorSetManager,
-      recentHistoryService: recentHistoryService,
-      serviceAccountService: serviceAccountsService,
-      statisticsService: statisticsService,
-      stateService: stateService,
-    })
-
-    const blockImporterService = new BlockImporterService({
-      configService: configService,
-      eventBusService: eventBusService,
-      clockService: clockService,
-      recentHistoryService: recentHistoryService,
-      stateService: stateService,
-      serviceAccountService: serviceAccountsService,
-      disputesService: disputesService,
-      validatorSetManagerService: validatorSetManager,
-      entropyService: entropyService,
-      sealKeyService: sealKeyService,
-      assuranceService: assuranceService,
-      guarantorService: guarantorService,
-      ticketService: ticketService,
-      statisticsService: statisticsService,
-      authPoolService: authPoolService,
-      accumulationService: accumulatedService,
-      workReportService: workReportService,
-    })
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
-
-    logger.info('Starting entropy service...')
-    const [entropyStartError] = await entropyService.start()
-    if (entropyStartError) {
-      logger.error('Failed to start entropy service:', entropyStartError)
-      throw entropyStartError
-    }
-
-    logger.info('Starting validator set manager...')
-    const [validatorSetStartError] = await validatorSetManager.start()
-    if (validatorSetStartError) {
-      logger.error(
-        'Failed to start validator set manager:',
-        validatorSetStartError,
-      )
-      throw validatorSetStartError
-    }
-
-    logger.info('Starting block importer service...')
-    const [startError] = await blockImporterService.start()
-    if (startError) {
-      logger.error('Failed to start block importer service:', startError)
-      throw startError
-    }
-    logger.info('All services started successfully')
-
-    return {
-      stateService,
-      blockImporterService,
-      recentHistoryService,
-      configService,
-      validatorSetManager,
-    }
-  } catch (error) {
-    logger.error('Failed to start services:', error)
-    throw error
+  return {
+    stateService: context.stateService,
+    blockImporterService: context.blockImporterService,
+    recentHistoryService: context.recentHistoryService,
+    configService: context.configService,
+    validatorSetManager: context.validatorSetManager,
+    fullContext: context,
   }
 }
-

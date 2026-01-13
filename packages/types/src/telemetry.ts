@@ -121,14 +121,18 @@ export enum PreimageDiscardReason {
 
 /**
  * Node information message (first message sent)
+ * JIP-3 specification for initial telemetry handshake
  */
 export interface NodeInfo {
   protocolVersion: bigint // 0 for current version
-  peerId: Uint8Array
-  peerAddress: { address: Uint8Array; port: bigint }
-  nodeFlags: bigint // Bitmask
+  jamParameters: Uint8Array // Encoded JAM parameters (as returned by fetch host call)
+  genesisHeaderHash: Uint8Array // Genesis header hash (32 bytes)
+  peerId: Uint8Array // Ed25519 public key (32 bytes)
+  peerAddress: { address: Uint8Array; port: bigint } // IPv6 address + port
+  nodeFlags: bigint // Bitmask (Bit 0: PVM recompiler if 1, interpreter if 0)
   implementationName: string // Max 32 UTF-8 bytes
   implementationVersion: string // Max 32 UTF-8 bytes
+  grayPaperVersion: string // Max 16 UTF-8 bytes (e.g., "0.7.1")
   additionalInfo: string // Max 512 UTF-8 bytes
 }
 
@@ -744,6 +748,76 @@ export interface SegmentsVerifiedEvent extends BaseEvent {
   verifiedSegmentIndices: bigint[] // Indices of verified segments in import list
 }
 
+export interface SendingSegmentRequestEvent extends BaseEvent {
+  eventType: 173n
+  workPackageSubmissionEventId: bigint // ID of work-package submission event
+  peerId: Uint8Array // Previous guarantor
+  requestedSegmentIndices: bigint[] // Indices of requested segments in import list
+}
+
+export interface ReceivingSegmentRequestEvent extends BaseEvent {
+  eventType: 174n
+  peerId: Uint8Array // Guarantor
+}
+
+export interface SegmentRequestFailedEvent extends BaseEvent {
+  eventType: 175n
+  segmentRequestEventId: bigint // ID of sending or receiving segment request event
+  reason: string
+}
+
+export interface SegmentRequestSentEvent extends BaseEvent {
+  eventType: 176n
+  sendingSegmentRequestEventId: bigint // ID of sending segment request event
+}
+
+export interface SegmentRequestReceivedEvent extends BaseEvent {
+  eventType: 177n
+  receivingSegmentRequestEventId: bigint // ID of receiving segment request event
+  segmentCount: bigint // Number of segments requested
+}
+
+export interface SegmentsTransferredEvent extends BaseEvent {
+  eventType: 178n
+  segmentRequestEventId: bigint // ID of sending or receiving segment request event
+}
+
+/**
+ * Bundle request events (148-153)
+ */
+export interface SendingBundleRequestEvent extends BaseEvent {
+  eventType: 148n
+  auditingEventId: bigint // TODO: reference auditing event
+  peerId: Uint8Array // Guarantor
+}
+
+export interface ReceivingBundleRequestEvent extends BaseEvent {
+  eventType: 149n
+  peerId: Uint8Array // Auditor
+}
+
+export interface BundleRequestFailedEvent extends BaseEvent {
+  eventType: 150n
+  bundleRequestEventId: bigint // ID of sending or receiving bundle request event
+  reason: string
+}
+
+export interface BundleRequestSentEvent extends BaseEvent {
+  eventType: 151n
+  sendingBundleRequestEventId: bigint // ID of sending bundle request event
+}
+
+export interface BundleRequestReceivedEvent extends BaseEvent {
+  eventType: 152n
+  receivingBundleRequestEventId: bigint // ID of receiving bundle request event
+  erasureRoot: Uint8Array
+}
+
+export interface BundleTransferredEvent extends BaseEvent {
+  eventType: 153n
+  bundleRequestEventId: bigint // ID of sending or receiving bundle request event
+}
+
 /**
  * Preimage distribution events (190-199)
  */
@@ -909,6 +983,18 @@ export type TelemetryEvent =
   | SegmentsReconstructedEvent
   | SegmentVerificationFailedEvent
   | SegmentsVerifiedEvent
+  | SendingSegmentRequestEvent
+  | ReceivingSegmentRequestEvent
+  | SegmentRequestFailedEvent
+  | SegmentRequestSentEvent
+  | SegmentRequestReceivedEvent
+  | SegmentsTransferredEvent
+  | SendingBundleRequestEvent
+  | ReceivingBundleRequestEvent
+  | BundleRequestFailedEvent
+  | BundleRequestSentEvent
+  | BundleRequestReceivedEvent
+  | BundleTransferredEvent
   | PreimageAnnouncementFailedEvent
   | PreimageAnnouncedEvent
   | AnnouncedPreimageForgottenEvent

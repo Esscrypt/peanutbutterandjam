@@ -73,7 +73,7 @@ describe('Genesis Parse Tests', () => {
       // Initialize services using shared utility
       // Note: Currently only supports TypeScript executor (useWasm: false)
       // WASM executor testing would require adding useWasm parameter to initializeServices
-      const services = await initializeServices('tiny', 'preimages_light', genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder: 'preimages_light', genesisManager, initialValidators })
       const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service

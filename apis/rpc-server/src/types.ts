@@ -1,7 +1,7 @@
 // JIP-2 Node RPC Types
 // Based on https://docs.jamcha.in/advanced/rpc/jip2-node-rpc
 
-import type { Hex } from 'viem'
+import type { Hex } from '@pbnjam/core'
 
 // WebSocket types
 export interface WebSocket {

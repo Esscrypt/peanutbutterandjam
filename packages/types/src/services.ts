@@ -2,13 +2,14 @@ import type { Hex } from 'viem'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
 import type { JamVersion } from './fuzz'
-import type { EntropyState, RecentHistoryEntry } from './global-state'
+import type { Activity, EntropyState, RecentHistoryEntry } from './global-state'
 import type { ValidatorCredentials } from './keys'
 import type { Safe, SafePromise } from './safe'
 import type {
   Guarantee,
   GuaranteeSignature,
   Judgment,
+  Preimage,
   SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
@@ -71,7 +72,30 @@ export interface IServiceAccountService extends BaseService {
     hash: Hex,
     timeslot: bigint,
   ): Safe<Uint8Array | null>
-  /** Lookup using service id and internal state */
+
+  /** Get storage value for service */
+  getStorageValue(serviceId: bigint, key: Hex): Uint8Array | undefined
+
+  /** Store a preimage */
+  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<Hex>
+
+  /** Get list of all service IDs */
+  listServiceIds(): bigint[]
+
+  /**
+   * Get preimage request status for a given service, hash, and length
+   * Gray Paper: sa_requests[(hash, length)] -> sequence[:3]{timeslot}
+   *
+   * @param serviceId - Service account ID
+   * @param hash - Preimage hash
+   * @param length - Expected preimage length
+   * @returns Request status (array of timeslots) or undefined if not found
+   */
+  getPreimageRequestStatus(
+    serviceId: bigint,
+    hash: Hex,
+    length: bigint,
+  ): bigint[] | undefined
 }
 
 export interface IKeyPairService extends BaseService {
@@ -129,6 +153,19 @@ export interface IClockService extends BaseService {
   getCurrentSlot(): bigint
   getCurrentEpoch(): bigint
   getCurrentPhase(): bigint
+}
+
+/**
+ * Statistics Service Interface
+ *
+ * Provides access to validator, core, and service activity statistics.
+ * Gray Paper Reference: graypaper/text/statistics.tex
+ */
+export interface IStatisticsService extends BaseService {
+  /**
+   * Get the current activity (statistics) data
+   */
+  getActivity(): Activity
 }
 
 /**

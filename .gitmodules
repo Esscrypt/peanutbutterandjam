@@ -44,3 +44,6 @@
 [submodule "submodules/ring-proof"]
 	path = submodules/ring-proof
 	url = https://github.com/w3f/ring-proof.git
+[submodule "submodules/JIPs"]
+	path = submodules/JIPs
+	url = https://github.com/polkadot-fellows/JIPs.git

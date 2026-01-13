@@ -19,9 +19,6 @@ import {
 } from '@pbnjam/core'
 import {
   decodeRecent,
-  setServiceStorageValue,
-  setServicePreimageValue,
-  setServiceRequestValue,
 } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
@@ -76,7 +73,7 @@ describe('Genesis Parse Tests', () => {
       }))
 
       // Initialize services using shared utility
-      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators, true)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
       const { stateService, blockImporterService, recentHistoryService } = services
 
       // Helper function to parse state key using state service

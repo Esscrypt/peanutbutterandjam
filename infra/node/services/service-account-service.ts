@@ -740,4 +740,38 @@ export class ServiceAccountService
 
     delete serviceAccount.rawCshKeyvals[storageKey]
   }
+
+  /**
+   * List all service IDs
+   */
+  listServiceIds(): bigint[] {
+    return Array.from(this.coreServiceAccounts.keys())
+  }
+
+  /**
+   * Get preimage request status for a given service, hash, and length
+   *
+   * Gray Paper: sa_requests[(hash, length)] -> sequence[:3]{timeslot}
+   * Returns the timeslot array indicating request status:
+   * - [] = requested but not yet supplied
+   * - [t0] = available since timeslot t0
+   * - [t0, t1] = was available from t0 until t1 (now unavailable)
+   * - [t0, t1, t2] = was available t0-t1, now available again since t2
+   *
+   * @param serviceId - Service account ID
+   * @param hash - Preimage hash
+   * @param length - Expected preimage length
+   * @returns Request status (array of timeslots) or undefined if not found
+   */
+  getPreimageRequestStatus(
+    serviceId: bigint,
+    hash: Hex,
+    length: bigint,
+  ): bigint[] | undefined {
+    const serviceAccount = this.coreServiceAccounts.get(serviceId)
+    if (!serviceAccount) {
+      return undefined
+    }
+    return getServiceRequestValue(serviceAccount, serviceId, hash, length)
+  }
 }

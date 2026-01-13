@@ -172,7 +172,7 @@ describe('JAM Conformance Traces', () => {
       const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
       // Initialize services using shared utility
-      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators })
       const { stateService, blockImporterService, recentHistoryService } = services
 
       // Set pre-state from trace
