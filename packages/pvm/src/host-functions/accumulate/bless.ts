@@ -1,11 +1,10 @@
-import {logger} from '@pbnjam/core'
+import { logger } from '@pbnjam/core'
 import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
 } from './base'
-
 
 /**
  * BLESS accumulation host function (Ω_B)

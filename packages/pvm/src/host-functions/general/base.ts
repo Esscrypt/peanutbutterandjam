@@ -27,6 +27,7 @@ export abstract class BaseHostFunction {
    */
   abstract execute(
     context: HostFunctionContext,
+    // biome-ignore lint/suspicious/noExplicitAny: params type varies by host function implementation
     params: any,
   ): HostFunctionResult
 }

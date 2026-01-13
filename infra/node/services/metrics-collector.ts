@@ -37,7 +37,6 @@ export class MetricsCollector extends BaseService {
   // private tracer = trace.getTracer('pbnj-node')
 
   // OpenTelemetry metrics
-  // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   // private blockCreationTimeHistogram: any
   // // biome-ignore lint/suspicious/noExplicitAny: OpenTelemetry metrics have complex types
   // private blockValidationTimeHistogram: any

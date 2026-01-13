@@ -88,9 +88,12 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const currentService = imX.state.accounts.get(imX.id)
     if (!currentService) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn('TRANSFER host function invoked but current service account not found', {
-        currentServiceId: imX.id.toString(),
-      })
+      logger.warn(
+        'TRANSFER host function invoked but current service account not found',
+        {
+          currentServiceId: imX.id.toString(),
+        },
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -100,9 +103,12 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const destService = imX.state.accounts.get(destinationServiceId)
     if (!destService) {
       this.setAccumulateError(registers, 'WHO')
-      logger.warn('TRANSFER host function invoked but destination service account not found', {
-        destinationServiceId: destinationServiceId.toString(),
-      })
+      logger.warn(
+        'TRANSFER host function invoked but destination service account not found',
+        {
+          destinationServiceId: destinationServiceId.toString(),
+        },
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -112,10 +118,13 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: l < destService.sa_minmemogas
     if (gasLimit < destService.minmemogas) {
       this.setAccumulateError(registers, 'LOW')
-      logger.warn('TRANSFER host function invoked but gas limit is insufficient for destination', {
-        gasLimit: gasLimit.toString(),
-        destServiceMinmemogas: destService.minmemogas.toString(),
-      })
+      logger.warn(
+        'TRANSFER host function invoked but gas limit is insufficient for destination',
+        {
+          gasLimit: gasLimit.toString(),
+          destServiceMinmemogas: destService.minmemogas.toString(),
+        },
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -178,9 +187,12 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const accountInState = imX.state.accounts.get(imX.id)
     if (!accountInState) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn('TRANSFER host function invoked but account in state not found', {
-        serviceId: imX.id.toString(),
-      })
+      logger.warn(
+        'TRANSFER host function invoked but account in state not found',
+        {
+          serviceId: imX.id.toString(),
+        },
+      )
       return {
         resultCode: null, // continue execution
       }

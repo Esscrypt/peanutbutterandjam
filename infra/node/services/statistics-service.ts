@@ -447,7 +447,7 @@ export class StatisticsService extends BaseService {
         // 1. Validator was in previous set but not in current set (should be rare for tiny config)
         // 2. Key format mismatch
         logger.warn('Reporter key not found in current active set', {
-          key: key.slice(0, 20) + '...',
+          key: `${key.slice(0, 20)}...`,
           activeValidatorsCount: activeValidators.length,
         })
       }

@@ -102,7 +102,7 @@ function decodeMessageFromFile(
 describe('Minifuzz Ancestry Test', () => {
   it(`should handle block imports with ${TEST_MODE} test vectors`, async () => {
     // Initialize services
-    const services = await initializeServices({ spec: 'tiny' })
+    const services = await initializeServices()
     const { stateService, blockImporterService, recentHistoryService, configService } = services
 
     // Configure ancestry validation based on test mode
@@ -137,8 +137,8 @@ describe('Minifuzz Ancestry Test', () => {
     let jamVersion = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.peer_info?.jam_version) {
-        jamVersion = peerInfoJson.peer_info.jam_version
+      if (peerInfoJson.jam_version) {
+        jamVersion = peerInfoJson.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {

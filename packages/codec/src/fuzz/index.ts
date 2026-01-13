@@ -67,6 +67,7 @@ export function encodeFuzzMessage(
       payload = encodeError(message.payload)
       break
     default:
+      // biome-ignore lint/suspicious/noExplicitAny: message type is unknown in default case
       throw new Error(`Unknown message type: ${(message as any).type}`)
   }
 

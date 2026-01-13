@@ -1,3 +1,4 @@
+import { getServiceRequestValue } from '@pbnjam/codec'
 import { bytesToHex } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
@@ -5,7 +6,6 @@ import {
   type AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
 } from './base'
-import { getServiceRequestValue } from '@pbnjam/codec'
 
 /**
  * QUERY accumulation host function (Ω_Q)
@@ -74,7 +74,12 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
 
     // Convert hash to hex and look up request
     const hashHex = bytesToHex(hashData)
-    const requestValue = getServiceRequestValue(serviceAccount, imX.id, hashHex, preimageLength);
+    const requestValue = getServiceRequestValue(
+      serviceAccount,
+      imX.id,
+      hashHex,
+      preimageLength,
+    )
 
     if (!requestValue) {
       // Request doesn't exist
@@ -84,7 +89,6 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
         resultCode: null, // continue execution
       }
     }
-
 
     // Return encoded status based on request length
     if (requestValue.length === 0) {

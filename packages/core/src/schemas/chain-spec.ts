@@ -298,6 +298,7 @@ export function parseChainSpec(jsonString: string): Safe<ChainSpecJson> {
  * Check if chain spec is in config format (has genesis_validators)
  */
 export function isChainSpecConfig(
+  // biome-ignore lint/suspicious/noExplicitAny: type guard function accepts unknown input
   chainSpec: any,
 ): chainSpec is ChainSpecConfig {
   return 'genesis_validators' in chainSpec
@@ -306,6 +307,7 @@ export function isChainSpecConfig(
 /**
  * Check if chain spec is in full JSON format (has genesis_state)
  */
+// biome-ignore lint/suspicious/noExplicitAny: type guard function accepts unknown input
 export function isChainSpecJson(chainSpec: any): chainSpec is ChainSpecJson {
   return 'genesis_state' in chainSpec
 }

@@ -248,6 +248,7 @@ export class NetworkingService extends BaseService {
   async handleIncomingData(quicStream: QUICStream): SafePromise<number> {
     // Access connection ID safely from the stream
     const connectionId =
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream types don't expose connection property
       (quicStream as any).connection?.connectionIdShared?.toString() ||
       'unknown'
     logger.info('📨 Handling incoming QUIC stream data...', {
@@ -259,6 +260,7 @@ export class NetworkingService extends BaseService {
 
     try {
       // Check if the stream is locked
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream readable property type is incomplete
       const isLocked = (quicStream.readable as any).locked
       if (isLocked) {
         logger.warn('⚠️ Stream is locked, cannot read data directly', {
@@ -640,6 +642,7 @@ export class NetworkingService extends BaseService {
     }
 
     // Extract certificate to get peer public key for server role validation
+    // biome-ignore lint/suspicious/noExplicitAny: QUIC connection type doesn't expose certDERs property
     const certDERs = (connection as any).certDERs
     if (certDERs && certDERs.length > 0) {
       const [extractError, peerPublicKey] = extractPublicKeyFromDERCertificate(
@@ -670,6 +673,7 @@ export class NetworkingService extends BaseService {
           logger.info('✅ Created server stream for peer communication', {
             connectionId: `${connectionId.slice(0, 20)}...`,
             peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
+            // biome-ignore lint/suspicious/noExplicitAny: QUIC stream type doesn't expose id property
             streamId: (serverStream as any).id || 'unknown',
           })
         } catch (error) {
@@ -702,6 +706,7 @@ export class NetworkingService extends BaseService {
     // Set up connection events for streams and cleanup
     connection.addEventListener(
       'EventQUICConnectionStream',
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC event types are not fully typed
       async (streamEvent: any) => {
         if (!streamEvent?.detail) {
           logger.warn('⚠️ Stream event has no detail property')
@@ -774,6 +779,7 @@ export class NetworkingService extends BaseService {
 
     // Add debug listeners for all server events
     for (const eventName of serverEvents) {
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC server event types are not fully typed
       this.server?.addEventListener(eventName, (event: any) => {
         logger.debug(`🔔 Server event received: ${eventName}`, {
           hasDetail: !!event?.detail,
@@ -824,6 +830,7 @@ export class NetworkingService extends BaseService {
     )
   }
 
+  // biome-ignore lint/suspicious/noExplicitAny: QUIC error event type is not fully typed
   async serverErrorHandler(event: any): Promise<void> {
     logger.error('❌ Server error:', event.detail)
   }
