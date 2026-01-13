@@ -314,23 +314,25 @@ async function handleSubscriptionMethod(
     }
 
     case 'submitWorkPackage': {
-      const coreIndex = BigInt(params?.[0] as number)
+      const coreIndexParam = params?.[0]
       const workPackage = params?.[1] as Uint8Array
       const extrinsics = params?.[2] as Uint8Array[]
-      if (coreIndex === undefined || !workPackage || !extrinsics) {
+      if (coreIndexParam === undefined || !workPackage || !extrinsics) {
         throw new Error('Missing required parameters')
       }
+      const coreIndex = BigInt(coreIndexParam as number)
       await rpcHandler.submitWorkPackage(coreIndex, workPackage, extrinsics)
       return { success: true }
     }
 
     case 'submitPreimage': {
-      const serviceId = BigInt(params?.[0] as number)
+      const serviceIdParam = params?.[0]
       const preimage = params?.[1] as Uint8Array
       const blockHash = params?.[2] as `0x${string}`
-      if (serviceId === undefined || !preimage || !blockHash) {
+      if (serviceIdParam === undefined || !preimage || !blockHash) {
         throw new Error('Missing required parameters')
       }
+      const serviceId = BigInt(serviceIdParam as number)
       await rpcHandler.submitPreimage(serviceId, preimage, blockHash)
       return { success: true }
     }
