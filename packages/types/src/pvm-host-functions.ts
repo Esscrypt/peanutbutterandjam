@@ -108,9 +108,7 @@ export interface LookupParams {
 export interface WriteParams {
   serviceAccount: ServiceAccount
   serviceId: bigint
-
 }
-
 export interface ReadParams {
   serviceAccount: ServiceAccount
   serviceId: bigint

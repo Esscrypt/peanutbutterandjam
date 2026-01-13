@@ -1,0 +1,574 @@
+/**
+ * Genesis Parse Test
+ *
+ * Tests parsing of genesis.json files from test vectors using NodeGenesisManager
+ */
+
+import { describe, it, expect } from 'bun:test'
+import * as path from 'node:path'
+import { readFileSync } from 'node:fs'
+import { NodeGenesisManager } from '../../services/genesis-manager'
+import { ConfigService } from '../../services/config-service'
+import {
+  bytesToHex,
+  Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
+import {
+  type BlockTraceTestVector,
+} from '@pbnjam/types'
+import {
+  convertJsonBlockToBlock,
+  convertJsonReportToWorkReport,
+  getStartBlock,
+  initializeServices,
+} from '../test-utils'
+
+// Test vectors directory (relative to workspace root)
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
+
+describe('Genesis Parse Tests', () => {
+  const configService = new ConfigService('tiny')
+
+  // Initialize logger to ensure LOG host function messages are visible
+  logger.init()
+
+  describe('Safrole Genesis', () => {
+    // Run with both TypeScript and WASM executors
+    const executorTypes: Array<{ name: string; useWasm: boolean }> = [
+      // { name: 'TypeScript', useWasm: false },
+      { name: 'WASM', useWasm: true },
+    ]
+
+    for (const executorType of executorTypes) {
+      it(`should process all blocks with ${executorType.name} executor`, async () => {
+      const genesisJsonPath = path.join(
+        WORKSPACE_ROOT,
+        'submodules/jam-test-vectors/traces/preimages_light/genesis.json',
+      )
+
+      const genesisManager = new NodeGenesisManager(configService, {
+        genesisJsonPath,
+      })
+
+      // Verify genesis JSON was loaded
+      const [error, genesisJson] = genesisManager.getGenesisJson()
+      expect(error).toBeUndefined()
+      expect(genesisJson).toBeDefined()
+
+      if (!genesisJson) {
+        throw new Error('Genesis JSON not loaded')
+      }
+
+      // Extract validators from genesis.json header
+      const initialValidators = (genesisJson.header?.epoch_mark?.validators || []).map((validator) => ({
+        bandersnatch: validator.bandersnatch,
+        ed25519: validator.ed25519,
+        bls: bytesToHex(new Uint8Array(144)), // Gray Paper: BLS key must be 144 bytes
+        metadata: bytesToHex(new Uint8Array(128)),
+      }))
+
+      // Initialize services using shared utility
+      // Note: Currently only supports TypeScript executor (useWasm: false)
+      // WASM executor testing would require adding useWasm parameter to initializeServices
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder: 'preimages_light', genesisManager, initialValidators, useWasm: true })
+      const { stateService, blockImporterService } = services
+
+      // Helper function to parse state key using state service
+      const parseStateKeyForDebug = (keyHex: Hex): { error: string } | { chapterIndex: number; type: string; serviceId?: bigint; error?: never } => {
+        const [error, parsedKey] = stateService.parseStateKey(keyHex)
+        if (error) {
+          return { error: error.message }
+        }
+        // Add type information for better debugging
+        if ('chapterIndex' in parsedKey) {
+          if (parsedKey.chapterIndex === 0 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(s, h)' }
+          }
+          if (parsedKey.chapterIndex === 255 && 'serviceId' in parsedKey) {
+            return { ...parsedKey, type: 'C(255, s)' }
+          }
+          return { ...parsedKey, type: 'C(i)' }
+        }
+        return parsedKey as { chapterIndex: number; type: string }
+      }
+
+      // Helper function to get chapter name
+      const getChapterName = (chapterIndex: number): string => {
+        const chapterNames: Record<number, string> = {
+          1: 'authpool (α)',
+          2: 'authqueue (φ)',
+          3: 'recent (β)',
+          4: 'safrole (γ)',
+          5: 'disputes (ψ)',
+          6: 'entropy (ε)',
+          7: 'stagingset (ι)',
+          8: 'activeset (κ)',
+          9: 'previousset (λ)',
+          10: 'reports (ρ)',
+          11: 'thetime (τ)',
+          12: 'privileges',
+          13: 'activity (π)',
+          14: 'ready (ω)',
+          15: 'accumulated (ξ)',
+          16: 'lastaccout (θ)',
+          255: 'service accounts',
+        }
+        return chapterNames[chapterIndex] || `unknown (${chapterIndex})`
+      }
+
+      // Helper function to check if a key exists in pre-state or post-state
+      const checkKeyInStates = (key: Hex, blockJsonData: BlockTraceTestVector) => {
+        const inPreState = blockJsonData.pre_state?.keyvals?.some(kv => kv.key === key) ?? false
+        const inPostState = blockJsonData.post_state.keyvals.some(kv => kv.key === key) ?? false
+        return { inPreState, inPostState }
+      }
+
+      // Helper function to get key value from pre-state
+      const getKeyFromPreState = (key: Hex, blockJsonData: BlockTraceTestVector): Hex | undefined => {
+        return blockJsonData.pre_state?.keyvals?.find(kv => kv.key === key)?.value
+      }
+
+      // Helper function to verify post-state
+      const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector) => {
+        const [stateTrieError, stateTrie] = stateService.generateStateTrie()
+        expect(stateTrieError).toBeUndefined()
+        expect(stateTrie).toBeDefined()
+
+        // Extract and print safrole state (chapter 4) - pendingSet and epochRoot only
+        const safroleChapterIndex = 4
+        const actualSafrole = stateService.getStateComponent(safroleChapterIndex)
+        let expectedSafrole: any = null
+        
+        // Find safrole key in post_state
+        for (const keyval of blockJsonData.post_state.keyvals) {
+          const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+          if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === safroleChapterIndex) {
+            const decoder = (stateService as any).stateTypeRegistry?.get(safroleChapterIndex)
+            if (decoder) {
+              const expectedBytes = hexToBytes(keyval.value as Hex)
+              const [decodeError, decoded] = decoder(expectedBytes)
+              if (!decodeError && decoded) {
+                expectedSafrole = decoded.value
+              }
+            }
+            break
+          }
+        }
+        
+        // Track which keys are checked vs missing
+        let checkedKeys = 0
+        let missingKeys = 0
+
+        for (const keyval of blockJsonData.post_state.keyvals) {
+          const actualValue = stateTrie?.[keyval.key]
+          
+          // Check if key exists in generated state trie
+          if (actualValue === undefined) {
+            // Key is missing from generated state trie - this is a failure
+            missingKeys++
+            const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            const stateCheck = checkKeyInStates(keyval.key as Hex, blockJsonData)
+            const preStateValue = getKeyFromPreState(keyval.key as Hex, blockJsonData)
+            
+            console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
+            console.error('=====================================')
+            console.error(`State Key: ${keyval.key}`)
+            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+              console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
+              console.error(`Key Type: ${keyInfo.type}`)
+              if ('serviceId' in keyInfo) {
+                console.error(`Service ID: ${keyInfo.serviceId}`)
+              }
+            } else if ('serviceId' in keyInfo && 'type' in keyInfo) {
+              console.error(`Service ID: ${keyInfo.serviceId}`)
+              console.error(`Key Type: ${keyInfo.type}`)
+            } else {
+              console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
+            }
+            console.error(`Expected Value (from post_state): ${keyval.value}`)
+            console.error(`In Pre-State: ${stateCheck.inPreState ? 'YES' : 'NO'}`)
+            if (stateCheck.inPreState && preStateValue) {
+              console.error(`Pre-State Value: ${preStateValue}`)
+              console.error(`Pre-State vs Post-State Match: ${preStateValue === keyval.value ? 'YES' : 'NO'}`)
+            }
+            console.error(`In Post-State: ${stateCheck.inPostState ? 'YES' : 'NO'}`)
+            console.error(`Actual Value: undefined (key not found in state trie)`)
+            console.error('=====================================\n')
+            
+            // Fail the test - key should exist
+            expect(actualValue).toBeDefined()
+            continue
+          }
+
+          // Key exists - check if value matches
+          checkedKeys++
+          if (keyval.value !== actualValue) {
+            // Parse the state key to get chapter information
+            const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
+            let decodedExpected: any = null
+            let decodedActual: any = null
+
+            // Try to decode both expected and actual values if it's a chapter key
+            if ('chapterIndex' in keyInfo && !keyInfo.error) {
+              const chapterIndex = keyInfo.chapterIndex
+              try {
+                // Handle C(s, h) keys (chapterIndex: 0) - these are raw keyvals, not decoded
+                if (chapterIndex === 0 && 'serviceId' in keyInfo) {
+                  // For C(s, h) keys, get the keyvals object and look up the specific key
+                  const keyvals = stateService.getStateComponent(
+                    chapterIndex,
+                    keyInfo.serviceId,
+                  ) as Record<Hex, Hex>
+                  decodedActual = {
+                    keyvals: keyvals,
+                    specificKey: keyval.key,
+                    value: keyvals?.[keyval.key] || undefined,
+                  }
+                  decodedExpected = {
+                    key: keyval.key,
+                    value: keyval.value,
+                  }
+                } else {
+                  // For regular chapter keys, decode the value
+                  const expectedBytes = hexToBytes(keyval.value as Hex)
+                  // Access private stateTypeRegistry to get the decoder
+                  const decoder = (stateService as any).stateTypeRegistry?.get(chapterIndex)
+                  if (decoder) {
+                    const [decodeError, decoded] = decoder(expectedBytes)
+                    if (!decodeError && decoded) {
+                      decodedExpected = decoded.value
+                    } else {
+                      decodedExpected = { 
+                        error: decodeError?.message || 'Decode failed',
+                        decodeError: decodeError ? String(decodeError) : undefined
+                      }
+                    }
+                  } else {
+                    decodedExpected = { error: `No decoder found for chapter ${chapterIndex}` }
+                  }
+
+                  // Get decoded actual state component
+                  decodedActual = stateService.getStateComponent(
+                    chapterIndex,
+                    'serviceId' in keyInfo ? keyInfo.serviceId : undefined,
+                  )
+                }
+              } catch (error) {
+                decodedExpected = decodedExpected || { 
+                  error: error instanceof Error ? error.message : String(error),
+                  stack: error instanceof Error ? error.stack : undefined
+                }
+                decodedActual = decodedActual || { 
+                  error: error instanceof Error ? error.message : String(error),
+                  stack: error instanceof Error ? error.stack : undefined
+                }
+              }
+            }
+
+            // Log detailed mismatch information
+            console.error(`\n❌ [Block ${blockNumber}] State Value Mismatch Detected:`)
+            console.error('=====================================')
+            console.error(`State Key: ${keyval.key}`)
+            if ('error' in keyInfo) {
+              console.error(`Key Info Error: ${keyInfo.error}`)
+            } else if ('chapterIndex' in keyInfo) {
+              console.error(`Chapter: ${keyInfo.chapterIndex} - ${getChapterName(keyInfo.chapterIndex)}`)
+              if ('type' in keyInfo) {
+                console.error(`Key Type: ${keyInfo.type}`)
+              }
+              if ('serviceId' in keyInfo) {
+                console.error(`Service ID: ${keyInfo.serviceId}`)
+              }
+            } else {
+              console.error(`Key Info: ${JSON.stringify(keyInfo)}`)
+            }
+            console.error(`Expected Value (hex): ${keyval.value}`)
+            console.error(`Actual Value (hex): ${actualValue}`)
+            
+            // Special handling for accumulated (chapter 15) - show detailed inner structure
+            if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 15) {
+              console.error(`\n📦 Accumulated State Detailed Analysis:`)
+              console.error('-------------------------------------')
+              
+              // Decode and show expected accumulated structure
+              if (decodedExpected && Array.isArray(decodedExpected)) {
+                console.error(`\nExpected Accumulated (${decodedExpected.length} slots):`)
+                decodedExpected.forEach((item: any, slotIndex: number) => {
+                  const data = item?.data || new Uint8Array(0)
+                  const dataHex = bytesToHex(data)
+                  // Each hash is 32 bytes, so number of hashes = data.length / 32
+                  const hashCount = data.length / 32
+                  console.error(`  Slot ${slotIndex}:`)
+                  console.error(`    Data length: ${data.length} bytes`)
+                  console.error(`    Hash count: ${hashCount}`)
+                  console.error(`    Data (hex): ${dataHex}`)
+                  
+                  // Decode individual hashes if present
+                  if (data.length > 0 && data.length % 32 === 0) {
+                    const hashes: string[] = []
+                    for (let i = 0; i < data.length; i += 32) {
+                      const hashBytes = data.slice(i, i + 32)
+                      hashes.push(bytesToHex(hashBytes))
+                    }
+                    console.error(`    Hashes:`)
+                    hashes.forEach((hash, idx) => {
+                      console.error(`      [${idx}]: ${hash}`)
+                    })
+                  } else if (data.length > 0) {
+                    console.error(`    ⚠️  Data length is not a multiple of 32 bytes (hash size)`)
+                  }
+                })
+              }
+              
+              // Decode and show actual accumulated structure
+              if (decodedActual && Array.isArray(decodedActual)) {
+                console.error(`\nActual Accumulated (${decodedActual.length} slots):`)
+                decodedActual.forEach((item: any, slotIndex: number) => {
+                  const data = item?.data || new Uint8Array(0)
+                  const dataHex = bytesToHex(data)
+                  // Each hash is 32 bytes, so number of hashes = data.length / 32
+                  const hashCount = data.length / 32
+                  console.error(`  Slot ${slotIndex}:`)
+                  console.error(`    Data length: ${data.length} bytes`)
+                  console.error(`    Hash count: ${hashCount}`)
+                  console.error(`    Data (hex): ${dataHex}`)
+                  
+                  // Decode individual hashes if present
+                  if (data.length > 0 && data.length % 32 === 0) {
+                    const hashes: string[] = []
+                    for (let i = 0; i < data.length; i += 32) {
+                      const hashBytes = data.slice(i, i + 32)
+                      hashes.push(bytesToHex(hashBytes))
+                    }
+                    console.error(`    Hashes:`)
+                    hashes.forEach((hash, idx) => {
+                      console.error(`      [${idx}]: ${hash}`)
+                    })
+                  } else if (data.length > 0) {
+                    console.error(`    ⚠️  Data length is not a multiple of 32 bytes (hash size)`)
+                  }
+                })
+                
+                // Compare slot by slot
+                console.error(`\n📊 Slot-by-Slot Comparison:`)
+                const maxSlots = Math.max(
+                  decodedExpected?.length || 0,
+                  decodedActual?.length || 0,
+                )
+                for (let slotIndex = 0; slotIndex < maxSlots; slotIndex++) {
+                  const expectedItem = decodedExpected?.[slotIndex]
+                  const actualItem = decodedActual?.[slotIndex]
+                  const expectedData = expectedItem?.data || new Uint8Array(0)
+                  const actualData = actualItem?.data || new Uint8Array(0)
+                  const expectedHashes = expectedData.length / 32
+                  const actualHashes = actualData.length / 32
+                  
+                  if (expectedHashes !== actualHashes || bytesToHex(expectedData) !== bytesToHex(actualData)) {
+                    console.error(`  Slot ${slotIndex}: ❌ MISMATCH`)
+                    console.error(`    Expected: ${expectedHashes} hash(es), ${expectedData.length} bytes`)
+                    console.error(`    Actual:   ${actualHashes} hash(es), ${actualData.length} bytes`)
+                    if (expectedData.length > 0 && expectedData.length % 32 === 0) {
+                      console.error(`    Expected hashes:`)
+                      for (let i = 0; i < expectedData.length; i += 32) {
+                        console.error(`      ${bytesToHex(expectedData.slice(i, i + 32))}`)
+                      }
+                    }
+                    if (actualData.length > 0 && actualData.length % 32 === 0) {
+                      console.error(`    Actual hashes:`)
+                      for (let i = 0; i < actualData.length; i += 32) {
+                        console.error(`      ${bytesToHex(actualData.slice(i, i + 32))}`)
+                      }
+                    }
+                  } else {
+                    console.error(`  Slot ${slotIndex}: ✅ Match (${expectedHashes} hash(es))`)
+                  }
+                }
+              }
+              console.error('-------------------------------------\n')
+            }
+            
+            if (decodedExpected) {
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedExpected) {
+                console.error(`\nDecoded Expected Value:`, {
+                  key: decodedExpected.key || keyval.key,
+                  value: decodedExpected.value || keyval.value,
+                  keyvalsCount: Object.keys(decodedExpected.keyvals || {}).length,
+                })
+              } else {
+                console.error(`\nDecoded Expected Value:`, JSON.stringify(decodedExpected, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2))
+              }
+            }
+            if (decodedActual) {
+              // For chapter 0 (C(s, h) keys), don't show the entire keyvals object
+              if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && 'keyvals' in decodedActual) {
+                console.error(`\nDecoded Actual Value:`, {
+                  specificKey: decodedActual.specificKey || keyval.key,
+                  value: decodedActual.value || actualValue,
+                  keyvalsCount: Object.keys(decodedActual.keyvals || {}).length,
+                  hasExpectedKey: decodedActual.keyvals ? keyval.key in decodedActual.keyvals : false,
+                })
+              } else {
+                console.error(`\nDecoded Actual Value:`, JSON.stringify(decodedActual, (_, v) =>
+                  typeof v === 'bigint' ? v.toString() : v === undefined ? null : v,
+                  2))
+              }
+            }
+            console.error('=====================================\n')
+          }
+          expect(actualValue).toBe(keyval.value)
+        }
+
+        // Log summary
+        console.log(`\n✅ [Block ${blockNumber}] State Key Verification Summary:`)
+        console.log(`  Total keys in post_state: ${blockJsonData.post_state.keyvals.length}`)
+        console.log(`  Keys checked (found in state trie): ${checkedKeys}`)
+        console.log(`  Keys missing (not in state trie): ${missingKeys}`)
+        if (missingKeys > 0) {
+          console.error(`  ⚠️  ${missingKeys} key(s) are missing from the generated state trie`)
+        }
+
+        // Compare state root with expected post_state
+        const [stateRootError, computedStateRoot] = stateService.getStateRoot()
+        expect(stateRootError).toBeUndefined()
+        expect(computedStateRoot).toBeDefined()
+        const expectedStateRoot = blockJsonData.post_state.state_root
+        expect(computedStateRoot).toBe(expectedStateRoot)
+      }
+
+      // Process blocks sequentially
+      // Support --start-block CLI argument or START_BLOCK env var to start from a specific block
+      const startBlock = getStartBlock()
+      if (startBlock > 1) {
+        console.log(`\n🚀 Starting from block ${startBlock} (START_BLOCK=${startBlock})`)
+      }
+
+      let blockNumber = startBlock
+      let hasMoreBlocks = true
+
+      while (hasMoreBlocks) {
+        const blockFileName = blockNumber.toString().padStart(8, '0') + '.json'
+        const blockJsonPath = path.join(
+          WORKSPACE_ROOT,
+          `submodules/jam-test-vectors/traces/preimages_light/${blockFileName}`,
+        )
+
+        // Check if block file exists
+        try {
+          const blockJsonData: BlockTraceTestVector = JSON.parse(
+            readFileSync(blockJsonPath, 'utf-8'),
+          )
+
+          console.log(`\n📦 Processing Block ${blockNumber}...`)
+
+          // Only set pre-state for the starting block
+          if (blockNumber === startBlock) {
+            // Set pre_state from test vector BEFORE validating the block
+            // This ensures entropy3 and other state components match what was used to create the seal signature
+            if (blockJsonData.pre_state?.keyvals) {
+              const [setStateError] = stateService.setState(blockJsonData.pre_state.keyvals)
+              if (setStateError) {
+                throw new Error(`Failed to set pre-state: ${setStateError.message}`)
+              }
+            } else {
+              // Fallback to genesis state if pre_state is not available
+              const [setStateError] = stateService.setState(genesisJson?.state?.keyvals ?? [])
+              if (setStateError) {
+                throw new Error(`Failed to set genesis state: ${setStateError.message}`)
+              }
+            }
+
+            // Verify pre-state root matches block header's priorStateRoot
+            const [preStateRootError, preStateRoot] = stateService.getStateRoot()
+            expect(preStateRootError).toBeUndefined()
+            expect(preStateRoot).toBeDefined()
+
+            if (preStateRoot !== blockJsonData.block.header.parent_state_root) {
+              console.warn(
+                `⚠️  [Block ${blockNumber}] Pre-state root doesn't match block header: computed ${preStateRoot}, expected ${blockJsonData.block.header.parent_state_root}`,
+              )
+            }
+          } else {
+            // For subsequent blocks, verify that the current state root matches the block's parent_state_root
+            const [currentStateRootError, currentStateRoot] = stateService.getStateRoot()
+            expect(currentStateRootError).toBeUndefined()
+            expect(currentStateRoot).toBeDefined()
+
+            if (currentStateRoot !== blockJsonData.block.header.parent_state_root) {
+              console.warn(
+                `⚠️  [Block ${blockNumber}] Current state root doesn't match block header's parent_state_root: computed ${currentStateRoot}, expected ${blockJsonData.block.header.parent_state_root}`,
+              )
+            }
+          }
+
+          // Convert JSON block to Block type
+          const block = convertJsonBlockToBlock(blockJsonData.block)
+
+          // Import the block
+          const [importError] = await blockImporterService.importBlock(block)
+          if (importError) {
+            throw new Error(`Failed to import block ${blockNumber}: ${importError.message}`)
+          }
+          expect(importError).toBeUndefined()
+
+          // Verify post-state matches expected post_state from test vector
+          verifyPostState(blockNumber, blockJsonData)
+
+          // Special check for the specific key mentioned in the error
+          const specificKey: Hex = '0x0001007100a000ab5cbd7e82c9744baf137918fe8d08741476a397e9dc2884'
+          const specificKeyCheck = checkKeyInStates(specificKey, blockJsonData)
+          const specificKeyPreValue = getKeyFromPreState(specificKey, blockJsonData)
+          const [specificKeyStateTrieError, specificKeyStateTrie] = stateService.generateStateTrie()
+          const specificKeyActualValue = !specificKeyStateTrieError && specificKeyStateTrie ? specificKeyStateTrie[specificKey] : undefined
+          const specificKeyExpectedValue = blockJsonData.post_state.keyvals.find(kv => kv.key === specificKey)?.value
+          
+          if (specificKeyCheck.inPreState || specificKeyCheck.inPostState || specificKeyActualValue !== undefined) {
+            console.log(`\n🔍 [Block ${blockNumber}] Specific Key Analysis: ${specificKey}`)
+            console.log('='.repeat(80))
+            const keyInfo = parseStateKeyForDebug(specificKey)
+            // Use replacer to convert BigInt to string for JSON serialization
+            const jsonReplacer = (_key: string, value: unknown) =>
+              typeof value === 'bigint' ? value.toString() : value
+            console.log(`Key Info: ${JSON.stringify(keyInfo, jsonReplacer, 2)}`)
+            console.log(`In Pre-State: ${specificKeyCheck.inPreState ? 'YES' : 'NO'}`)
+            if (specificKeyCheck.inPreState) {
+              console.log(`Pre-State Value: ${specificKeyPreValue ?? 'undefined'}`)
+            }
+            console.log(`In Post-State: ${specificKeyCheck.inPostState ? 'YES' : 'NO'}`)
+            if (specificKeyCheck.inPostState) {
+              console.log(`Post-State Expected Value: ${specificKeyExpectedValue ?? 'undefined'}`)
+            }
+            console.log(`In Current State Trie: ${specificKeyActualValue !== undefined ? 'YES' : 'NO'}`)
+            if (specificKeyActualValue !== undefined) {
+              console.log(`Current State Value: ${specificKeyActualValue}`)
+              if (specificKeyExpectedValue) {
+                console.log(`Current == Expected: ${specificKeyActualValue === specificKeyExpectedValue ? 'YES' : 'NO'}`)
+              }
+            }
+            console.log('='.repeat(80))
+          }
+
+          console.log(`✅ [${executorType.name}] Block ${blockNumber} imported and verified successfully`)
+
+          blockNumber++
+        } catch (error: any) {
+          // If file doesn't exist, stop processing
+          if (error.code === 'ENOENT') {
+            hasMoreBlocks = false
+            console.log(`\n📋 [${executorType.name}] Processed ${blockNumber - 1} blocks total`)
+          } else {
+            // Re-throw other errors
+            throw error
+          }
+        }
+      }
+      })
+    }
+  })
+})
+

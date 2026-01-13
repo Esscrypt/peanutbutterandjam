@@ -65,7 +65,7 @@ describe('Genesis Parse Tests', () => {
       }))
 
       // Initialize services using shared utility
-      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators })
       const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service

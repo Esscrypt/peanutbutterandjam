@@ -22,10 +22,6 @@ export class GasHostFunction extends BaseHostFunction {
     // Set registers[7] = gascounter (remaining gas)
     context.registers[7] = context.gasCounter
 
-    context.log('Gas host function: Gas counter returned', {
-      remainingGas: context.gasCounter.toString(),
-    })
-
     // Return updated gas counter
     return {
       resultCode: null, // continue execution

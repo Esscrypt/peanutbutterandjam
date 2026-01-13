@@ -1,7 +1,6 @@
 import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_HUH,
-  ACCUMULATE_ERROR_WHAT,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -31,39 +30,50 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
   gasCost: u64 = u64(10)
 
   // Gray Paper constants
-  C_VALCOUNT: i32 = 1023 // Cvalcount (number of validators)
   VALIDATOR_SIZE: i32 = 336 // bytes per validator
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const registers = context.registers
     const ram = context.ram
     const implications = context.implications
+    const numValidators = context.numValidators // Get from config via context
+    
+    // Get the current implications context
+    const imX = implications.regular
+
     // Extract parameters from registers
     const validatorsOffset = u64(registers[7])
 
     // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
-    // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
-    const totalSize = this.VALIDATOR_SIZE * this.C_VALCOUNT
+    // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount comes from config
+    // Gray Paper: v = sequence{memory[o+336i:336] for i in valindex} when readable, error otherwise
+    const totalSize = this.VALIDATOR_SIZE * i32(numValidators)
 
     const readResult_validators = ram.readOctets(
       u32(validatorsOffset),
       u32(totalSize),
     )
-    if (readResult_validators.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_validators.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    
+    // Gray Paper: (panic, registers_7, stagingset) when v = error
+    // Check memory read FIRST (before delegator check) per Gray Paper order
+    // DO NOT modify registers[7] - it must remain unchanged on panic
+    if (readResult_validators.faultAddress !== 0 || readResult_validators.data === null) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const validatorsData = readResult_validators.data!
+
+    // Gray Paper: (continue, HUH, stagingset) otherwhen imX_id ≠ (imX_state)_ps_delegator
+    // Check delegator AFTER successful memory read per Gray Paper order
+    if (imX.id !== u64(imX.state.delegator)) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(255) // continue execution
+    }
 
     // Parse validators array (336 bytes per validator)
     // Note: For AssemblyScript, we store raw validator data as Uint8Array
     // Full implementation would decode ValidatorPublicKeys structure
     const validators: Uint8Array[] = []
-    for (let i: i32 = 0; i < this.C_VALCOUNT; i++) {
+    for (let i: i32 = 0; i < i32(numValidators); i++) {
       const validatorData = validatorsData.slice(
         i * this.VALIDATOR_SIZE,
         (i + 1) * this.VALIDATOR_SIZE,
@@ -71,16 +81,6 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       // Note: Would decode ValidatorPublicKeys here if codec available
       // For now, store raw bytes
       validators.push(validatorData)
-    }
-
-    // Get the current implications context
-    const imX = implications.regular
-
-    // Check if current service is the delegator
-    // Gray Paper: imX.id !== imX.state.ps_delegator
-    if (imX.id !== u64(imX.state.delegator)) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
-      return new HostFunctionResult(255) // continue execution
     }
 
     // Update staging set with new validators

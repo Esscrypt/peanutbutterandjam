@@ -1,5 +1,6 @@
 import { blake2b256 } from '../../crypto'
 import { RESULT_CODE_PANIC } from '../../config'
+import { getRequestValue } from '../../codec'
 import {
   ACCUMULATE_ERROR_HUH,
   ACCUMULATE_ERROR_WHO,
@@ -81,8 +82,8 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper line 985: a.sa_requests[(blake(i), z)] ≠ []
     // Compute blake2b hash of the preimage data
     const preimageHash = blake2b256(preimageData)
-    const requestStatus = serviceAccount.requests.get(preimageHash, preimageLength)
-    if (requestStatus === null) {
+    const requestValue = getRequestValue(serviceAccount, u32(serviceId), preimageHash, preimageLength)
+    if (requestValue === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution
     }

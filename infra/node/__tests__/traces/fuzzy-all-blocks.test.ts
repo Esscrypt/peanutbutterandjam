@@ -77,7 +77,7 @@ describe('Genesis Parse Tests', () => {
       }))
 
       // Initialize services using shared utility
-      const services = await initializeServices('tiny', traceSubfolder, genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators })
       const { stateService, blockImporterService, recentHistoryService } = services
 
       // Helper function to parse state key using state service
@@ -611,8 +611,29 @@ describe('Genesis Parse Tests', () => {
           // Convert JSON block to Block type
           const block = convertJsonBlockToBlock(blockJsonData.block)
 
+          // Check if block import is expected to fail (pre_state == post_state)
+          const preStateJson = JSON.stringify(blockJsonData.pre_state)
+          const postStateJson = JSON.stringify(blockJsonData.post_state)
+          const expectBlockToFail = preStateJson === postStateJson
+
           // Import the block
           const [importError] = await blockImporterService.importBlock(block)
+          
+          if (expectBlockToFail) {
+            // Block import should fail - this is expected behavior
+            if (importError) {
+              console.log(`✅ Block ${blockNumber} correctly failed to import: ${importError.message}`)
+              // State should remain unchanged (already verified by snapshot revert in block importer)
+              // Continue to next block
+              blockNumber++
+              continue
+            } else {
+              // Block imported when it should have failed
+              throw new Error(`Block ${blockNumber} imported successfully but was expected to fail (pre_state == post_state)`)
+            }
+          }
+          
+          // Normal case: block should import successfully
           if (importError) {
             throw new Error(`Failed to import block ${blockNumber}: ${importError.message}, stack: ${importError.stack}`)
           }

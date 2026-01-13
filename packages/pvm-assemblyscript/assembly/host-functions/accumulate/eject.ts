@@ -1,4 +1,4 @@
-import { encodeFixedLength } from '../../codec'
+import { encodeFixedLength, getRequestValue, decodeRequestTimeslots } from '../../codec'
 import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_HUH,
@@ -95,9 +95,16 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Get request using requests structure: requests.get(hash, length)
-    const requestStatus = serviceAccount.requests.get(hashData, u64(l))
-    if (requestStatus === null) {
+    // Get request using rawCshKeyvals helper
+    const requestValue = getRequestValue(serviceAccount, u32(serviceIdToEject), hashData, u64(l))
+    if (requestValue === null) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(255) // continue execution
+    }
+
+    // Decode the request timeslots
+    const timeslots = decodeRequestTimeslots(requestValue)
+    if (timeslots === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution
     }
@@ -106,7 +113,6 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: d.sa_requests[h, l] = [x, y], y < t - Cexpungeperiod
     // For test vectors, Cexpungeperiod = 32 (as per README)
     // For production, Cexpungeperiod = 19200 (Gray Paper constant)
-    const timeslots = requestStatus.timeslots
     if (timeslots.length < 2 || u64(timeslots[1]) >= timeslot - expungePeriod) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
       return new HostFunctionResult(255) // continue execution

@@ -605,7 +605,7 @@ export function encodeActivity(
   const parts: Uint8Array[] = []
 
   const version = jamVersion ?? DEFAULT_JAM_VERSION
-  
+
   // Gray Paper: encode[4]{valstatsaccumulator, valstatsprevious}
   // According to Gray Paper statistics.tex line 12:
   // tuple{valstatsaccumulator, valstatsprevious} ∈ sequence[Cvalcount]{tuple{...}}^2

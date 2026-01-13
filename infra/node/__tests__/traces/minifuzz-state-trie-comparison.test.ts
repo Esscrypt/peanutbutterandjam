@@ -9,31 +9,31 @@
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync } from 'node:fs'
-import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
+import { decodeFuzzMessage } from '../../../../packages/codec/src/fuzz'
 import { FuzzMessageType } from '@pbnjam/types'
 import { bytesToHex } from '@pbnjam/core'
-import { initializeServices } from './test-utils'
+import { initializeServices } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 describe('Fuzzer State Trie Comparison', async () => {
   it('should compare generateStateTrie with fuzzer keyvals and identify differences', async () => {
     // Initialize services using shared utility
-    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const services = await initializeServices({ traceSubfolder: 'fuzzer-state-trie-comparison' })
     const { stateService, configService } = services
 
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
     )
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
@@ -43,7 +43,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load Initialize message
     const initializeBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000001_fuzzer_initialize.bin',
     )
 
     let initializeBin: Uint8Array
@@ -224,19 +224,19 @@ describe('Fuzzer State Trie Comparison', async () => {
 
   it('should verify round-trip encoding for Recent History, Reports, and Statistics after block 1', async () => {
     // Initialize services using shared utility
-    const services = await initializeServices('tiny', 'fuzzer-state-trie-comparison')
+    const services = await initializeServices({ traceSubfolder: 'fuzzer-state-trie-comparison' })
     const { stateService, blockImporterService, configService } = services
 
     // Load PeerInfo message to get JAM version
     const peerInfoJsonPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000000_fuzzer_peer_info.json',
     )
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
@@ -246,7 +246,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load Initialize message
     const initializeBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000001_fuzzer_initialize.bin',
     )
 
     let initializeBin: Uint8Array
@@ -282,7 +282,7 @@ describe('Fuzzer State Trie Comparison', async () => {
     // Load ImportBlock message (block 1)
     const importBlockBinPath = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks/00000002_fuzzer_import_block.bin',
     )
     let importBlockBin: Uint8Array
     try {
@@ -423,9 +423,9 @@ describe('Fuzzer State Trie Comparison', async () => {
     }
 
     // Test round-trip encoding for each chapter
-    const { decodeRecent, encodeRecent } = await import('../../../packages/codec/src/state/recent')
-    const { decodeStateWorkReports, encodeStateWorkReports } = await import('../../../packages/codec/src/state/reports')
-    const { decodeActivity, encodeActivity } = await import('../../../packages/codec/src/state/activity')
+    const { decodeRecent, encodeRecent } = await import('../../../../packages/codec/src/state/recent')
+    const { decodeStateWorkReports, encodeStateWorkReports } = await import('../../../../packages/codec/src/state/reports')
+    const { decodeActivity, encodeActivity } = await import('../../../../packages/codec/src/state/activity')
     const { hexToBytes } = await import('@pbnjam/core')
 
     console.log(`\n🔄 ROUND-TRIP ENCODING TESTS:`)

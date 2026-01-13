@@ -212,7 +212,7 @@ for (let i = 0; i < testVectors.length; i++) {
         // Prepare instructions with names (same format as dumpParsedInstructions)
         const registry = new InstructionRegistry()
         const instructionsWithNames = parsed.success ? parsed.instructions.map((inst, index) => {
-          const handler = registry.getHandler(Number(inst.opcode))
+          const handler = registry.getHandler(BigInt(inst.opcode))
           const instructionName = handler ? handler.name : `UNKNOWN_OPCODE_${inst.opcode.toString()}`
           const operandsStr = Array.from(inst.operands)
             .map(b => `0x${b.toString(16).padStart(2, '0')}`)

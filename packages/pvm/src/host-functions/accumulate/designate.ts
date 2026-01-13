@@ -45,8 +45,12 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications } = context
+
     // Extract parameters from registers
     const validatorsOffset = registers[7]
+
+    // Get the current implications context
+    const [imX] = implications
 
     // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
     // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
@@ -60,26 +64,31 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       validatorCount: C_VALCOUNT.toString(),
       validatorSize: VALIDATOR_SIZE.toString(),
       totalSize: totalSize.toString(),
-      currentServiceId: implications[0].id.toString(),
-      delegator: implications[0].state.delegator.toString(),
+      currentServiceId: imX.id.toString(),
+      delegator: imX.state.delegator.toString(),
     })
 
     // Gray Paper pvm_invocations.tex lines 736-739:
     // v = sequence{memory[o+336i:336] for i in valindex} when Nrange(o,336*Cvalcount) ⊆ readable(memory), error otherwise
+    // IMPORTANT: Memory read happens FIRST per Gray Paper order
     const [validatorsData, faultAddress] = ram.readOctets(
       validatorsOffset,
       BigInt(totalSize),
     )
-    // Gray Paper line 741: (panic, registers_7, ...) when v = error
-    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+
+    // Gray Paper: (panic, registers_7, stagingset) when v = error
+    // Check memory read FIRST (before delegator check) per Gray Paper order
+    // DO NOT modify registers[7] - it must remain unchanged on panic
     if (faultAddress || !validatorsData) {
-      // DO NOT modify registers[7] - it must remain unchanged on panic
-      logger.error('DESIGNATE host function invoked but validators data read failed', {
-        totalSize: totalSize.toString(),
-        validatorsOffset: validatorsOffset.toString(),
-        C_VALCOUNT: C_VALCOUNT.toString(),
-        VALIDATOR_SIZE: VALIDATOR_SIZE.toString(),
-      })
+      logger.error(
+        'DESIGNATE host function invoked but validators data read failed',
+        {
+          totalSize: totalSize.toString(),
+          validatorsOffset: validatorsOffset.toString(),
+          C_VALCOUNT: C_VALCOUNT.toString(),
+          VALIDATOR_SIZE: VALIDATOR_SIZE.toString(),
+        },
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -95,14 +104,16 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       )
       const [error, validator] = decodeValidatorPublicKeys(validatorData)
       // If decoding fails, treat as invalid data and panic
-      // Gray Paper line 741: (panic, registers_7, ...) when v = error
-      // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+      // Gray Paper: (panic, registers_7, stagingset) when v = error
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       if (error) {
-        // DO NOT modify registers[7] - it must remain unchanged on panic
-        logger.error('DESIGNATE host function invoked but validator decoding failed', {
-          error: error.message,
-          validatorData: bytesToHex(validatorData),
-        })
+        logger.error(
+          'DESIGNATE host function invoked but validator decoding failed',
+          {
+            error: error.message,
+            validatorData: bytesToHex(validatorData),
+          },
+        )
         return {
           resultCode: RESULT_CODES.PANIC,
         }
@@ -110,11 +121,8 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       validators.push(validator.value)
     }
 
-    // Get the current implications context
-    const [imX] = implications
-
-    // Check if current service is the delegator
-    // Gray Paper: imX.id !== imX.state.ps_delegator
+    // Gray Paper: (continue, HUH, stagingset) otherwhen imX_id ≠ (imX_state)_ps_delegator
+    // Check delegator AFTER successful memory read per Gray Paper order
     if (imX.id !== imX.state.delegator) {
       this.setAccumulateError(registers, 'HUH')
       logger.warn('DESIGNATE host function invoked but not the delegator', {
@@ -126,6 +134,7 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
+    // Gray Paper: (continue, OK, v) otherwise
     // Update staging set with new validators
     // Gray Paper: (imX'.state).ps_stagingset = v
     imX.state.stagingset = validators.map(encodeValidatorPublicKeys)

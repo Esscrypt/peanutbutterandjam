@@ -249,9 +249,8 @@ export function decodeImplications(
   currentData = nextFreeIdResult.remaining
 
   // im_xfers: decode{var{sequence{defxfer}}}
-  const [error4, xfersResult] = decodeVariableSequence(
-    currentData,
-    (data) => decodeDeferredTransfer(data, version),
+  const [error4, xfersResult] = decodeVariableSequence(currentData, (data) =>
+    decodeDeferredTransfer(data, version),
   )
   if (error4) {
     return safeError(error4)
@@ -406,7 +405,11 @@ export function decodeImplicationsPair(
   jamVersion?: JamVersion,
 ): Safe<DecodingResult<ImplicationsPair>> {
   // Decode regular dimension (first element)
-  const [error1, regularResult] = decodeImplications(data, configService, jamVersion)
+  const [error1, regularResult] = decodeImplications(
+    data,
+    configService,
+    jamVersion,
+  )
   if (error1) {
     return safeError(error1)
   }

@@ -1,6 +1,5 @@
 import { RESULT_CODE_PANIC } from '../../config'
 import {
-  ACCUMULATE_ERROR_WHAT,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -36,13 +35,13 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     const hashOffset = u64(registers[7])
 
     // Read hash from memory (32 bytes)
+    // Gray Paper pvm_invocations.tex lines 953-956:
+    // h = memory[o:32] when Nrange(o,32) ⊆ readable(memory), error otherwise
     const readResult_hash = ram.readOctets(u32(hashOffset), u32(32))
-    if (readResult_hash.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_hash.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Gray Paper line 958: (panic, registers_7, ...) when h = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    if (readResult_hash.faultAddress !== 0 || readResult_hash.data === null) {
+      // DO NOT modify registers[7] - it must remain unchanged on panic
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const hashData = readResult_hash.data!

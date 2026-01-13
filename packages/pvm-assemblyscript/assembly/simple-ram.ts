@@ -28,6 +28,21 @@ export class SimpleRAM implements RAM {
   // Track current heap pointer for SBRK operations
   currentHeapPointer: u32 = 0
 
+  // JIP-6 trace support: Track last load/store for each instruction step
+  lastLoadAddress: u32 = 0
+  lastLoadValue: u64 = 0
+  lastStoreAddress: u32 = 0
+  lastStoreValue: u64 = 0
+
+  /**
+   * Clear last load/store tracking (call at start of each instruction)
+   */
+  clearLastMemoryOp(): void {
+    this.lastLoadAddress = 0
+    this.lastLoadValue = 0
+    this.lastStoreAddress = 0
+    this.lastStoreValue = 0
+  }
 
   /**
    * Get page index for an address
@@ -118,6 +133,17 @@ export class SimpleRAM implements RAM {
     const sourceView = this.memory.subarray(address, address + count)
     result.set(sourceView, 0)
 
+    // JIP-6 trace support: Track last load address and value
+    this.lastLoadAddress = address
+    if (count > 0) {
+      let value: u64 = 0
+      const bytesToRead = min(count, 8)
+      for (let i: u32 = 0; i < bytesToRead; i++) {
+        value |= u64(result[i]) << (i * 8)
+      }
+      this.lastLoadValue = value
+    }
+
     return new ReadResult(result, 0) // No faults
   }
 
@@ -144,6 +170,17 @@ export class SimpleRAM implements RAM {
     // Update heap pointer if writing beyond current heap
     if (address + values.length > this.currentHeapPointer) {
       this.currentHeapPointer = address + values.length
+    }
+
+    // JIP-6 trace support: Track last store address and value
+    this.lastStoreAddress = address
+    if (values.length > 0) {
+      let value: u64 = 0
+      const bytesToRead = min(u32(values.length), 8)
+      for (let i: u32 = 0; i < bytesToRead; i++) {
+        value |= u64(values[i]) << (i * 8)
+      }
+      this.lastStoreValue = value
     }
 
     return new WriteResult(false, 0) // No faults

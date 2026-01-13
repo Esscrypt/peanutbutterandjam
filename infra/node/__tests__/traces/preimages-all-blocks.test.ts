@@ -19,7 +19,6 @@ import {
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
-  convertJsonReportToWorkReport,
   getStartBlock,
   initializeServices,
 } from '../test-utils'
@@ -69,7 +68,7 @@ describe('Genesis Parse Tests', () => {
       // Initialize services using shared utility
       // Note: Currently only supports TypeScript executor (useWasm: false)
       // WASM executor testing would require adding useWasm parameter to initializeServices
-      const services = await initializeServices('tiny', 'preimages', genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder: 'preimages', genesisManager, initialValidators })
       const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service

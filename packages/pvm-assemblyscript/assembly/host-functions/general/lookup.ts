@@ -4,7 +4,7 @@ import {
   HostFunctionParams,
   LookupParams,
 } from './base'
-import { CompleteServiceAccount } from '../../codec'
+import { CompleteServiceAccount, getPreimageValue } from '../../codec'
 import {
   ACCUMULATE_ERROR_CODES,
   GENERAL_FUNCTIONS,
@@ -111,8 +111,15 @@ export class LookupHostFunction extends BaseHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Look up preimage by hash
-    const preimage = serviceAccount.preimages.get(hashData)
+    // Determine the actual service ID to use for the lookup
+    // Gray Paper: a = s when registers[7] ∈ {s, 2^64 - 1}
+    const actualServiceId: u32 = queryServiceId == MAX_U64 
+      ? u32(lookupParams.serviceId) 
+      : u32(queryServiceId)
+
+    // Look up preimage by hash using rawCshKeyvals helper
+    // This matches TypeScript's getServicePreimageValue()
+    const preimage = getPreimageValue(serviceAccount, actualServiceId, hashData)
     if (!preimage) {
       // v = none - preimage not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE

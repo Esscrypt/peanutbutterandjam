@@ -6,6 +6,7 @@
 export * from './alignment-helpers'
 export * from './codec'
 export * from './config'
+export * from './crypto'
 export * from './pbnj-types-compat'
 
 // Host functions
@@ -256,6 +257,9 @@ export function setupAccumulateInvocation(
   configContestDuration: u32 = 500,
   configMaxLookupAnchorage: u32 = 14400,
   configEcPieceSize: u32 = 684,
+  jamVersionMajor: u8 = 0,
+  jamVersionMinor: u8 = 7,
+  jamVersionPatch: u8 = 2,
 ): void {
   if (!pvmInstance) return
   pvmInstance!.pvm.setupAccumulateInvocation(
@@ -282,6 +286,9 @@ export function setupAccumulateInvocation(
     configContestDuration,
     configMaxLookupAnchorage,
     configEcPieceSize,
+    jamVersionMajor,
+    jamVersionMinor,
+    jamVersionPatch,
   )
 }
 
@@ -364,6 +371,87 @@ export function getExitArg(): u32 {
 export function getResultCode(): u32 {
   if (!pvmInstance) return 2 // PANIC
   return pvmInstance!.pvm.state.resultCode
+}
+
+/**
+ * Get result blob from execution
+ * Gray Paper equation 831: When HALT, read result from memory at registers[7] with length registers[8]
+ * @returns Result blob from memory, or empty array if not available
+ */
+export function getResult(): Uint8Array {
+  if (!pvmInstance) return new Uint8Array(0)
+  
+  // Get result offset and length from registers
+  const offset = pvmInstance!.pvm.state.registerState[7]
+  const length = pvmInstance!.pvm.state.registerState[8]
+  
+  // Empty result
+  if (length === u64(0)) {
+    return new Uint8Array(0)
+  }
+  
+  // Validate length is reasonable
+  if (length > u64(0xffffffff)) {
+    return new Uint8Array(0)
+  }
+  
+  // Read directly from memory
+  const readResult = pvmInstance!.pvm.state.ram.readOctets(u32(offset), u32(length))
+  
+  // If fault or no data, return empty
+  if (readResult.faultAddress !== 0 || readResult.data === null) {
+    return new Uint8Array(0)
+  }
+  
+  return readResult.data!
+}
+
+// ============================================================================
+// JIP-6 Trace Support Functions
+// ============================================================================
+
+/**
+ * Get last load address from RAM (for JIP-6 trace support)
+ * @returns Last address read from
+ */
+export function getLastLoadAddress(): u32 {
+  if (!pvmInstance) return 0
+  return pvmInstance!.pvm.state.ram.lastLoadAddress
+}
+
+/**
+ * Get last load value from RAM (for JIP-6 trace support)
+ * @returns Last value read (up to 8 bytes, little-endian u64)
+ */
+export function getLastLoadValue(): u64 {
+  if (!pvmInstance) return 0
+  return pvmInstance!.pvm.state.ram.lastLoadValue
+}
+
+/**
+ * Get last store address from RAM (for JIP-6 trace support)
+ * @returns Last address written to
+ */
+export function getLastStoreAddress(): u32 {
+  if (!pvmInstance) return 0
+  return pvmInstance!.pvm.state.ram.lastStoreAddress
+}
+
+/**
+ * Get last store value from RAM (for JIP-6 trace support)
+ * @returns Last value stored (up to 8 bytes, little-endian u64)
+ */
+export function getLastStoreValue(): u64 {
+  if (!pvmInstance) return 0
+  return pvmInstance!.pvm.state.ram.lastStoreValue
+}
+
+/**
+ * Clear last memory operation tracking (call at start of each instruction)
+ */
+export function clearLastMemoryOp(): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.state.ram.clearLastMemoryOp()
 }
 
 /**

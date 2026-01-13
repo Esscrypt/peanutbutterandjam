@@ -225,6 +225,8 @@ async function executeRunCommand(
         endpoint: options['telemetry'],
         nodeInfo: {
           protocolVersion: 0n,
+          jamParameters: new Uint8Array(0), // Will be populated from config service
+          genesisHeaderHash: new Uint8Array(32), // Will be populated from chain spec
           peerId: new Uint8Array(32), // Placeholder, would be actual node peer ID
           peerAddress: {
             address: new Uint8Array(16), // IPv6 address, would be actual address
@@ -233,6 +235,7 @@ async function executeRunCommand(
           nodeFlags: 0n,
           implementationName: 'PeanutButterAndJam',
           implementationVersion: '0.1.0',
+          grayPaperVersion: '0.7.2', // Gray Paper version implemented
           additionalInfo: 'JAM node CLI implementation',
         },
         maxBufferSize: 1000n,
@@ -258,8 +261,12 @@ async function executeRunCommand(
       nodeId: 'jam-node-cli',
       telemetry: telemetryConfig || {
         enabled: false,
+        endpoint: '',
         nodeInfo: {
           protocolVersion: 0n,
+          jamParameters: new Uint8Array(0),
+          genesisHeaderHash: new Uint8Array(32),
+          grayPaperVersion: '0.7.2',
           peerId: new Uint8Array(32),
           peerAddress: {
             address: new Uint8Array(16),

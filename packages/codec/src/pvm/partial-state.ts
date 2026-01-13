@@ -57,7 +57,6 @@ import { decodeFixedLength, encodeFixedLength } from '../core/fixed-length'
 import { encodeNatural } from '../core/natural-number'
 import { encodeSequenceGeneric } from '../core/sequence'
 import { decodeAuthqueue, encodeAuthqueue } from '../state/authqueue'
-import { determineKeyTypes } from '../state/state-key'
 import { decodeValidatorSet, encodeValidatorSet } from '../state/validator-set'
 
 /**
@@ -195,11 +194,13 @@ export function encodeCompleteServiceAccount(
 
   // Manually encode dictionary: var{sequence{sorted(key, value)}}
   // Each key and value must be encoded with var{} discriminator (length prefix + blob)
+  // Sort keys for deterministic encoding
+  const sortedKeys = Object.keys(account.rawCshKeyvals).sort() as Hex[]
   const storagePairs: Uint8Array[] = []
-  for (const key in account.rawCshKeyvals) {
-    const value = account.rawCshKeyvals[key as Hex]
+  for (const key of sortedKeys) {
+    const value = account.rawCshKeyvals[key]
     // Key: encode{var{blob}} = encode{len(key)} || key
-    const keyBytes = hexToBytes(key as Hex)
+    const keyBytes = hexToBytes(key)
     const [keyLengthError, encodedKey] = encodeVariableLength(keyBytes)
     if (keyLengthError) {
       return safeError(keyLengthError)
@@ -222,6 +223,20 @@ export function encodeCompleteServiceAccount(
     return safeError(storageLengthError)
   }
   parts.push(concatBytes([encodedStorageLength, concatenatedStoragePairs]))
+
+  // sa_octets: encode[8]{octets} (8-byte fixed-length) - NEW: include octets in encoding
+  const [octetsError, encodedOctets] = encodeFixedLength(account.octets, 8n)
+  if (octetsError) {
+    return safeError(octetsError)
+  }
+  parts.push(encodedOctets)
+
+  // sa_items: encode[4]{items} (4-byte fixed-length) - NEW: include items in encoding
+  const [itemsError, encodedItems] = encodeFixedLength(account.items, 4n)
+  if (itemsError) {
+    return safeError(itemsError)
+  }
+  parts.push(encodedItems)
 
   // sa_gratis: encode[8]{balance} (8-byte fixed-length)
   const [gratisError, encodedGratis] = encodeFixedLength(account.gratis, 8n)
@@ -513,6 +528,22 @@ export function decodeCompleteServiceAccount(
     rawCshKeyvals[stateKey] = stateValue
   }
 
+  // sa_octets: decode[8]{octets} (8-byte fixed-length) - NEW: read octets from encoding
+  const [octetsError, octetsResult] = decodeFixedLength(currentData, 8n)
+  if (octetsError) {
+    return safeError(octetsError)
+  }
+  const octets = octetsResult.value
+  currentData = octetsResult.remaining
+
+  // sa_items: decode[4]{items} (4-byte fixed-length) - NEW: read items from encoding
+  const [itemsError, itemsResult] = decodeFixedLength(currentData, 4n)
+  if (itemsError) {
+    return safeError(itemsError)
+  }
+  const items = itemsResult.value
+  currentData = itemsResult.remaining
+
   // sa_gratis: decode[8]{balance} (8-byte fixed-length)
   const [gratisError, gratisResult] = decodeFixedLength(currentData, 8n)
   if (gratisError) {
@@ -576,40 +607,8 @@ export function decodeCompleteServiceAccount(
   const parent = parentResult.value
   currentData = parentResult.remaining
 
-  // Compute octets and items from rawCshKeyvals according to Gray Paper
-  // Gray Paper: a_octets = sum over requests (81 + z) + sum over storage (34 + len(y) + len(x))
-  // Gray Paper: a_items = 2 * len(requests) + len(storage)
-  // where z is request value length, x is storage key, y is storage value
-  // NOTE: We cannot get the original storage key length (len(x)) from the state key alone,
-  // as state keys only contain the blake hash of the original key. We use 34 + len(value) as
-  // an approximation, which will be slightly lower than the true value but closer than
-  // the previous implementation that only summed value lengths.
-  const keyTypes = determineKeyTypes(rawCshKeyvals)
-  let totalOctets = 0n
-  let requestsCount = 0n
-  let storageCount = 0n
-
-  for (const [stateKeyHex, keyType] of keyTypes) {
-    if (keyType.keyType === 'storage') {
-      // Storage: 34 + len(value) + len(key)
-      // We don't have the original key length, so we approximate with 34 + len(value)
-      // This is slightly lower than the true value but much closer than the previous implementation
-      const valueLength = BigInt(keyType.value.length)
-      totalOctets += 34n + valueLength
-      storageCount += 1n
-    } else if (keyType.keyType === 'request') {
-      // Request: 81 + len(value)
-      const valueHex = rawCshKeyvals[stateKeyHex]
-      const valueBytes = hexToBytes(valueHex)
-      totalOctets += 81n + BigInt(valueBytes.length)
-      requestsCount += 1n
-    }
-    // Preimages are not counted in octets
-  }
-
-  const octets = totalOctets
-  // Items = 2 * requests + storage
-  const items = 2n * requestsCount + storageCount
+  // items and octets are now read directly from the encoding (above)
+  // No need to compute them from rawCshKeyvals
 
   const account: ServiceAccount = {
     codehash,

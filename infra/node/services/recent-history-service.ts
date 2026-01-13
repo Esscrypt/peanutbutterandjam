@@ -240,6 +240,40 @@ export class RecentHistoryService extends BaseServiceClass {
   }
 
   /**
+   * Initialize ancestry from external source (e.g., fuzzer Initialize message)
+   *
+   * jam-conformance (M1 requirement): The Initialize message includes the list of
+   * ancestors for the first block to be imported. This allows validating lookup
+   * anchors even when we don't have the full chain history.
+   *
+   * Gray Paper Reference: The lookup anchor of each report in guarantees extrinsic
+   * must be included within the last L imported headers in the chain.
+   *
+   * @param ancestors - Array of block header hashes (most recent first)
+   */
+  initializeAncestry(ancestors: Hex[]): void {
+    // Clear existing history first
+    this.clearHistory()
+
+    // Add each ancestor as a minimal history entry
+    // These are placeholder entries just for anchor validation
+    for (const ancestorHash of ancestors) {
+      this.recentHistory.push({
+        headerHash: ancestorHash,
+        stateRoot: zeroHash, // Placeholder - not needed for anchor validation
+        accoutLogSuperPeak: zeroHash, // Placeholder
+        reportedPackageHashes: new Map<Hex, Hex>(),
+      })
+    }
+
+    logger.info('Ancestry initialized from external source', {
+      ancestorCount: ancestors.length,
+      firstAncestor: ancestors[0],
+      lastAncestor: ancestors[ancestors.length - 1],
+    })
+  }
+
+  /**
    * Set recent history from pre-state (for test vectors)
    *
    * Sets both recentHistory and accoutBelt from pre_state.beta
@@ -552,12 +586,6 @@ export class RecentHistoryService extends BaseServiceClass {
     this.accoutBelt.peaks = updatedRange.map((peak) =>
       peak !== null ? bytesToHex(peak) : null,
     )
-
-    // Step 8: Increment totalCount (number of blocks appended to the belt)
-    // Gray Paper: totalCount tracks the number of items in the MMR (block number)
-    // This must be incremented for every block, even when lastaccout is empty
-    // TODO: investigate
-    // this.accoutBelt.totalCount += 1n
 
     return safeResult(undefined)
   }

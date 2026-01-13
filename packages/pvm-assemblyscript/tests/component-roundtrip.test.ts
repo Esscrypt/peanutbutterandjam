@@ -7,6 +7,11 @@
 
 import { describe, it, expect, beforeAll } from 'bun:test'
 import { logger } from '@pbnjam/core'
+import type { Implications, ImplicationsPair, PartialState, ServiceAccount, IConfigService, DeferredTransfer } from '@pbnjam/types'
+import { hexToBytes, type Hex } from '@pbnjam/core'
+import { instantiate } from './wasmAsInit'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   encodeImplications,
   decodeImplications,
@@ -14,14 +19,11 @@ import {
   decodeImplicationsPair,
   encodePartialState,
   decodePartialState,
-  type ImplicationsPair,
+  setServiceStorageValue,
+  setServicePreimageValue,
+  setServiceRequestValue,
 } from '@pbnjam/codec'
-import { ConfigService, type IConfigService } from '../../../infra/node/services/config-service'
-import { hexToBytes, type Hex } from '@pbnjam/core'
-import type { Implications, PartialState, ServiceAccount, PreimageRequestStatus } from '@pbnjam/types'
-import { instantiate } from './wasmAsInit'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { ConfigService } from '../../../infra/node/services/config-service'
 
 let wasm: any = null
 
@@ -34,16 +36,18 @@ beforeAll(async () => {
 /**
  * Create a test Implications object with complex data
  * Based on examples from implications-roundtrip.test.ts
+ * 
+ * NOTE: Uses rawCshKeyvals instead of the old storage/preimages/requests Maps
  */
 function createTestImplications(configService: IConfigService): Implications {
   const numCores = configService.numCores
   const numValidators = configService.numValidators
   const authQueueSize = 80 // AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE
 
-  // Create mock service accounts with storage, preimages, and requests
+  // Create mock service accounts with rawCshKeyvals
   const accounts = new Map<bigint, ServiceAccount>()
   
-  // Service account 1 - main service with storage, preimages, and requests
+  // Service account 1 - main service
   const serviceAccount1: ServiceAccount = {
     codehash: '0x0101010101010101010101010101010101010101010101010101010101010101' as Hex,
     balance: 1000000n,
@@ -55,23 +59,50 @@ function createTestImplications(configService: IConfigService): Implications {
     created: 1n,
     lastacc: 10n,
     parent: 0n,
-    storage: new Map<Hex, Uint8Array>([
-      ['0x0000000000000000000000000000000000000000000000000000000000000001' as Hex, hexToBytes('0xdeadbeef' as Hex)],
-      ['0x0000000000000000000000000000000000000000000000000000000000000002' as Hex, hexToBytes('0xcafebabe' as Hex)],
-    ]),
-    preimages: new Map<Hex, Uint8Array>([
-      ['0x1111111111111111111111111111111111111111111111111111111111111111' as Hex, hexToBytes('0x1234567890abcdef' as Hex)],
-    ]),
-    requests: new Map<Hex, Map<bigint, PreimageRequestStatus>>([
-      ['0x2222222222222222222222222222222222222222222222222222222222222222' as Hex, new Map<bigint, PreimageRequestStatus>([
-        [32n, [100n, 200n]], // [t0, t1] - was available from t0 until t1
-        [64n, [150n]], // [t0] - available since t0
-      ])],
-    ]),
+    rawCshKeyvals: {},
   }
+  
+  // Add storage items using rawCshKeyvals helpers
+  setServiceStorageValue(
+    serviceAccount1,
+    1n,
+    '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+    hexToBytes('0xdeadbeef' as Hex),
+  )
+  setServiceStorageValue(
+    serviceAccount1,
+    1n,
+    '0x0000000000000000000000000000000000000000000000000000000000000002' as Hex,
+    hexToBytes('0xcafebabe' as Hex),
+  )
+  
+  // Add preimage using rawCshKeyvals helper
+  setServicePreimageValue(
+    serviceAccount1,
+    1n,
+    '0x1111111111111111111111111111111111111111111111111111111111111111' as Hex,
+    hexToBytes('0x1234567890abcdef' as Hex),
+  )
+  
+  // Add requests using rawCshKeyvals helper
+  setServiceRequestValue(
+    serviceAccount1,
+    1n,
+    '0x2222222222222222222222222222222222222222222222222222222222222222' as Hex,
+    32n,
+    [100n, 200n], // [t0, t1] - was available from t0 until t1
+  )
+  setServiceRequestValue(
+    serviceAccount1,
+    1n,
+    '0x2222222222222222222222222222222222222222222222222222222222222222' as Hex,
+    64n,
+    [150n], // [t0] - available since t0
+  )
+  
   accounts.set(1n, serviceAccount1)
   
-  // Service account 2 - secondary service with storage, preimages, and requests
+  // Service account 2 - secondary service
   const serviceAccount2: ServiceAccount = {
     codehash: '0x0202020202020202020202020202020202020202020202020202020202020202' as Hex,
     balance: 500000n,
@@ -83,16 +114,26 @@ function createTestImplications(configService: IConfigService): Implications {
     created: 5n,
     lastacc: 8n,
     parent: 1n,
-    storage: new Map<Hex, Uint8Array>([
-      ['0x0000000000000000000000000000000000000000000000000000000000000003' as Hex, hexToBytes('0xfeedface' as Hex)],
-    ]),
-    preimages: new Map<Hex, Uint8Array>(),
-    requests: new Map<Hex, Map<bigint, PreimageRequestStatus>>([
-      ['0x3333333333333333333333333333333333333333333333333333333333333333' as Hex, new Map<bigint, PreimageRequestStatus>([
-        [128n, []], // [] - requested but not supplied
-      ])],
-    ]),
+    rawCshKeyvals: {},
   }
+  
+  // Add storage items using rawCshKeyvals helper
+  setServiceStorageValue(
+    serviceAccount2,
+    2n,
+    '0x0000000000000000000000000000000000000000000000000000000000000003' as Hex,
+    hexToBytes('0xfeedface' as Hex),
+  )
+  
+  // Add request using rawCshKeyvals helper
+  setServiceRequestValue(
+    serviceAccount2,
+    2n,
+    '0x3333333333333333333333333333333333333333333333333333333333333333' as Hex,
+    128n,
+    [], // [] - requested but not supplied
+  )
+  
   accounts.set(2n, serviceAccount2)
 
   // Create mock stagingset (validator keys - 336 bytes each)
@@ -143,27 +184,35 @@ function createTestImplications(configService: IConfigService): Implications {
   }
 
   // Create mock deferred transfers
-  const xfers = [
+  // Note: memo must be EXACTLY 128 bytes per Gray Paper
+  const MEMO_SIZE = 128
+  const memo1 = new Uint8Array(MEMO_SIZE)
+  memo1.set(hexToBytes('0x54657374207472616e73666572' as Hex)) // "Test transfer" in hex, rest is zeros
+  const memo2 = new Uint8Array(MEMO_SIZE)
+  memo2.set(hexToBytes('0x52657475726e' as Hex)) // "Return" in hex, rest is zeros
+  
+  const xfers: DeferredTransfer[] = [
     {
       source: 1n,
       dest: 2n,
       amount: 10000n,
-      memo: hexToBytes('0x54657374207472616e73666572' as any), // "Test transfer" in hex
+      memo: memo1,
       gasLimit: 1000n,
     },
     {
       source: 2n,
       dest: 1n,
       amount: 5000n,
-      memo: hexToBytes('0x52657475726e' as any), // "Return" in hex
+      memo: memo2,
       gasLimit: 500n,
     },
   ]
 
   // Create mock provisions
-  const provisions = new Map<bigint, Uint8Array>([
-    [1n, hexToBytes('0x0102030405060708090a0b0c0d0e0f' as any)],
-    [2n, hexToBytes('0x102030405060708090a0b0c0d0e0f0' as any)],
+  // Gray Paper: protoset<tuple{serviceid, blob}> - Set of [bigint, Uint8Array] tuples
+  const provisions = new Set<[bigint, Uint8Array]>([
+    [1n, hexToBytes('0x0102030405060708090a0b0c0d0e0f' as Hex)],
+    [2n, hexToBytes('0x102030405060708090a0b0c0d0e0f0' as Hex)],
   ])
 
   // Create partial state
@@ -196,16 +245,18 @@ function createTestImplications(configService: IConfigService): Implications {
 
 /**
  * Create a test PartialState object with complex data
+ * 
+ * NOTE: Uses rawCshKeyvals: Record<Hex, Hex> instead of Map<Hex, Uint8Array>
  */
 function createTestPartialState(configService: IConfigService): PartialState {
   const numCores = configService.numCores
   const numValidators = configService.numValidators
   const authQueueSize = 80
 
-  // Create multiple service accounts with storage, preimages
+  // Create multiple service accounts with rawCshKeyvals
   const accounts = new Map<bigint, ServiceAccount>()
   
-  // Service account 1 with storage, preimages, and requests
+  // Service account 1
   const account1: ServiceAccount = {
     codehash: '0x0101010101010101010101010101010101010101010101010101010101010101' as Hex,
     balance: 1000000n,
@@ -217,23 +268,26 @@ function createTestPartialState(configService: IConfigService): PartialState {
     created: 1n,
     lastacc: 10n,
     parent: 0n,
-    storage: new Map<Hex, Uint8Array>([
-      ['0x0000000000000000000000000000000000000000000000000000000000000001' as Hex, hexToBytes('0xdeadbeef' as Hex)],
-      ['0x0000000000000000000000000000000000000000000000000000000000000002' as Hex, hexToBytes('0xcafebabe' as Hex)],
-    ]),
-    preimages: new Map<Hex, Uint8Array>([
-      ['0x1111111111111111111111111111111111111111111111111111111111111111' as Hex, hexToBytes('0x1234567890abcdef' as Hex)],
-    ]),
-    requests: new Map<Hex, Map<bigint, PreimageRequestStatus>>([
-      ['0x2222222222222222222222222222222222222222222222222222222222222222' as Hex, new Map<bigint, PreimageRequestStatus>([
-        [32n, [100n, 200n]], // [t0, t1] - was available from t0 until t1
-        [64n, [150n]], // [t0] - available since t0
-      ])],
-    ]),
+    rawCshKeyvals: {},
   }
+  
+  // Add storage items using rawCshKeyvals helpers
+  setServiceStorageValue(
+    account1,
+    1n,
+    '0x0000000000000000000000000000000000000000000000000000000000000001' as Hex,
+    hexToBytes('0xdeadbeef' as Hex),
+  )
+  setServiceStorageValue(
+    account1,
+    1n,
+    '0x0000000000000000000000000000000000000000000000000000000000000002' as Hex,
+    hexToBytes('0xcafebabe' as Hex),
+  )
+  
   accounts.set(1n, account1)
 
-  // Service account 2 with storage, preimages, and requests
+  // Service account 2
   const account2: ServiceAccount = {
     codehash: '0x0202020202020202020202020202020202020202020202020202020202020202' as Hex,
     balance: 500000n,
@@ -245,16 +299,17 @@ function createTestPartialState(configService: IConfigService): PartialState {
     created: 5n,
     lastacc: 8n,
     parent: 1n,
-    storage: new Map<Hex, Uint8Array>([
-      ['0x0000000000000000000000000000000000000000000000000000000000000003' as Hex, hexToBytes('0xfeedface' as Hex)],
-    ]),
-    preimages: new Map<Hex, Uint8Array>(),
-    requests: new Map<Hex, Map<bigint, PreimageRequestStatus>>([
-      ['0x3333333333333333333333333333333333333333333333333333333333333333' as Hex, new Map<bigint, PreimageRequestStatus>([
-        [128n, []], // [] - requested but not supplied
-      ])],
-    ]),
+    rawCshKeyvals: {},
   }
+  
+  // Add storage items using rawCshKeyvals helper
+  setServiceStorageValue(
+    account2,
+    2n,
+    '0x0000000000000000000000000000000000000000000000000000000000000003' as Hex,
+    hexToBytes('0xfeedface' as Hex),
+  )
+  
   accounts.set(2n, account2)
 
   // Create mock stagingset (validator keys - 336 bytes each)
@@ -314,7 +369,7 @@ function createTestPartialState(configService: IConfigService): PartialState {
 
 /**
  * Compare two ServiceAccount objects deeply
- * Note: octets and items are computed from storage, so we compute them for comparison
+ * Note: octets and items are computed from rawCshKeyvals, so we skip comparing them strictly
  */
 function compareServiceAccount(a: ServiceAccount, b: ServiceAccount): boolean {
   if (a.codehash !== b.codehash) {
@@ -331,30 +386,6 @@ function compareServiceAccount(a: ServiceAccount, b: ServiceAccount): boolean {
   }
   if (a.minmemogas !== b.minmemogas) {
     logger.error(`minmemogas mismatch: ${a.minmemogas} !== ${b.minmemogas}`)
-    return false
-  }
-  
-  // Compute octets and items from storage for comparison (they're computed fields)
-  let totalOctetsA = 0n
-  for (const value of a.storage.values()) {
-    totalOctetsA += BigInt(value.length)
-  }
-  const octetsA = totalOctetsA
-  const itemsA = BigInt(a.storage.size)
-  
-  let totalOctetsB = 0n
-  for (const value of b.storage.values()) {
-    totalOctetsB += BigInt(value.length)
-  }
-  const octetsB = totalOctetsB
-  const itemsB = BigInt(b.storage.size)
-  
-  if (octetsA !== octetsB) {
-    logger.error(`octets mismatch: ${octetsA} !== ${octetsB}`)
-    return false
-  }
-  if (itemsA !== itemsB) {
-    logger.error(`items mismatch: ${itemsA} !== ${itemsB}`)
     return false
   }
   
@@ -375,83 +406,22 @@ function compareServiceAccount(a: ServiceAccount, b: ServiceAccount): boolean {
     return false
   }
 
-  // Compare storage
-  if (a.storage.size !== b.storage.size) {
-    logger.error(`storage size mismatch: ${a.storage.size} !== ${b.storage.size}`)
-    return false
-  }
-  for (const [key, valueA] of a.storage.entries()) {
-    const valueB = b.storage.get(key)
-    if (!valueB) {
-      logger.error(`storage key ${key} missing in b`)
-      return false
-    }
-    if (valueA.length !== valueB.length) {
-      logger.error(`storage[${key}] length mismatch: ${valueA.length} !== ${valueB.length}`)
-      return false
-    }
-    for (let i = 0; i < valueA.length; i++) {
-      if (valueA[i] !== valueB[i]) {
-        logger.error(`storage[${key}][${i}] mismatch: ${valueA[i]} !== ${valueB[i]}`)
-        return false
-      }
-    }
-  }
+  // NOTE: octets and items are computed fields, skip strict comparison
+  // They are recomputed from rawCshKeyvals during decode
 
-  // Compare preimages
-  if (a.preimages.size !== b.preimages.size) {
-    logger.error(`preimages size mismatch: ${a.preimages.size} !== ${b.preimages.size}`)
+  // Compare rawCshKeyvals
+  const keysA = Object.keys(a.rawCshKeyvals)
+  const keysB = Object.keys(b.rawCshKeyvals)
+  if (keysA.length !== keysB.length) {
+    logger.error(`rawCshKeyvals size mismatch: ${keysA.length} !== ${keysB.length}`)
     return false
   }
-  for (const [key, valueA] of a.preimages.entries()) {
-    const valueB = b.preimages.get(key)
-    if (!valueB) {
-      logger.error(`preimages key ${key} missing in b`)
+  for (const key of keysA) {
+    const valueA = a.rawCshKeyvals[key as Hex]
+    const valueB = b.rawCshKeyvals[key as Hex]
+    if (valueA !== valueB) {
+      logger.error(`rawCshKeyvals[${key}] mismatch`)
       return false
-    }
-    if (valueA.length !== valueB.length) {
-      logger.error(`preimages[${key}] length mismatch: ${valueA.length} !== ${valueB.length}`)
-      return false
-    }
-    for (let i = 0; i < valueA.length; i++) {
-      if (valueA[i] !== valueB[i]) {
-        logger.error(`preimages[${key}][${i}] mismatch: ${valueA[i]} !== ${valueB[i]}`)
-        return false
-      }
-    }
-  }
-
-  // Compare requests
-  if (a.requests.size !== b.requests.size) {
-    logger.error(`requests size mismatch: ${a.requests.size} !== ${b.requests.size}`)
-    return false
-  }
-  for (const [hash, lengthMapA] of a.requests.entries()) {
-    const lengthMapB = b.requests.get(hash)
-    if (!lengthMapB) {
-      logger.error(`requests hash ${hash} missing in b`)
-      return false
-    }
-    if (lengthMapA.size !== lengthMapB.size) {
-      logger.error(`requests[${hash}] size mismatch: ${lengthMapA.size} !== ${lengthMapB.size}`)
-      return false
-    }
-    for (const [length, statusA] of lengthMapA.entries()) {
-      const statusB = lengthMapB.get(length)
-      if (!statusB) {
-        logger.error(`requests[${hash}][${length}] missing in b`)
-        return false
-      }
-      if (statusA.length !== statusB.length) {
-        logger.error(`requests[${hash}][${length}] length mismatch: ${statusA.length} !== ${statusB.length}`)
-        return false
-      }
-      for (let i = 0; i < statusA.length; i++) {
-        if (statusA[i] !== statusB[i]) {
-          logger.error(`requests[${hash}][${length}][${i}] mismatch: ${statusA[i]} !== ${statusB[i]}`)
-          return false
-        }
-      }
     }
   }
 
@@ -669,24 +639,28 @@ function compareImplications(a: Implications, b: Implications): boolean {
     }
   }
   
-  // Compare provisions
-  if (a.provisions.size !== b.provisions.size) {
-    logger.error(`provisions size mismatch: ${a.provisions.size} !== ${b.provisions.size}`)
+  // Compare provisions (Set<[bigint, Uint8Array]>)
+  // Convert to arrays for comparison, sorted by serviceId
+  const aProvArray = Array.from(a.provisions).sort((x, y) => Number(x[0] - y[0]))
+  const bProvArray = Array.from(b.provisions).sort((x, y) => Number(x[0] - y[0]))
+  if (aProvArray.length !== bProvArray.length) {
+    logger.error(`provisions size mismatch: ${aProvArray.length} !== ${bProvArray.length}`)
     return false
   }
-  for (const [key, valueA] of a.provisions.entries()) {
-    const valueB = b.provisions.get(key)
-    if (!valueB) {
-      logger.error(`provisions key ${key} missing in b`)
+  for (let i = 0; i < aProvArray.length; i++) {
+    const [serviceIdA, blobA] = aProvArray[i]
+    const [serviceIdB, blobB] = bProvArray[i]
+    if (serviceIdA !== serviceIdB) {
+      logger.error(`provisions[${i}] serviceId mismatch: ${serviceIdA} !== ${serviceIdB}`)
       return false
     }
-    if (valueA.length !== valueB.length) {
-      logger.error(`provisions[${key}] length mismatch: ${valueA.length} !== ${valueB.length}`)
+    if (blobA.length !== blobB.length) {
+      logger.error(`provisions[${i}] blob length mismatch: ${blobA.length} !== ${blobB.length}`)
       return false
     }
-    for (let i = 0; i < valueA.length; i++) {
-      if (valueA[i] !== valueB[i]) {
-        logger.error(`provisions[${key}][${i}] mismatch`)
+    for (let j = 0; j < blobA.length; j++) {
+      if (blobA[j] !== blobB[j]) {
+        logger.error(`provisions[${i}].blob[${j}] mismatch`)
         return false
       }
     }

@@ -94,13 +94,13 @@ export function encodeAccumulateInput(
   jamVersion?: JamVersion,
 ): Safe<Uint8Array> {
   const version = jamVersion ?? DEFAULT_JAM_VERSION
-  
+
   // Check if version is <= 0.7.0 (accinput encoding didn't exist)
   const isV070OrEarlier =
     version.major < 0 ||
     (version.major === 0 && version.minor < 7) ||
     (version.major === 0 && version.minor === 7 && version.patch <= 0)
-  
+
   if (isV070OrEarlier) {
     // In v0.7.0, accinput didn't exist - encode as raw type
     if (accumulateInput.type === 0) {
@@ -108,7 +108,10 @@ export function encodeAccumulateInput(
       return encodeOperandTuple(accumulateInput.value as OperandTuple)
     } else {
       // Deferred transfer: just encode the tuple directly
-      return encodeDeferredTransfer(accumulateInput.value as DeferredTransfer, version)
+      return encodeDeferredTransfer(
+        accumulateInput.value as DeferredTransfer,
+        version,
+      )
     }
   }
   const parts: Uint8Array[] = []
@@ -184,13 +187,13 @@ export function decodeAccumulateInput(
   jamVersion?: JamVersion,
 ): Safe<DecodingResult<AccumulateInput>> {
   const version = jamVersion ?? DEFAULT_JAM_VERSION
-  
+
   // Check if version is <= 0.7.0 (accinput encoding didn't exist)
   const isV070OrEarlier =
     version.major < 0 ||
     (version.major === 0 && version.minor < 7) ||
     (version.major === 0 && version.minor === 7 && version.patch <= 0)
-  
+
   if (isV070OrEarlier) {
     // In v0.7.0, accinput didn't exist - try to decode as raw operand tuple first
     // (operand tuples are more common, so try that first)
@@ -202,7 +205,7 @@ export function decodeAccumulateInput(
         consumed: operandResult.consumed,
       })
     }
-    
+
     // If operand tuple fails, try deferred transfer
     const [error2, transferResult] = decodeDeferredTransfer(data, version)
     if (!error2) {
@@ -212,8 +215,12 @@ export function decodeAccumulateInput(
         consumed: transferResult.consumed,
       })
     }
-    
-    return safeError(new Error('Could not decode as v0.7.0 format (neither operand tuple nor deferred transfer)'))
+
+    return safeError(
+      new Error(
+        'Could not decode as v0.7.0 format (neither operand tuple nor deferred transfer)',
+      ),
+    )
   }
   if (data.length === 0) {
     return safeError(
@@ -241,8 +248,10 @@ export function decodeAccumulateInput(
     })
   } else if (discriminator === 1) {
     // Deferred transfer: decode{1, decode[X]{o}}
-    const [error, deferredTransferResult] =
-      decodeDeferredTransfer(remainingData, version)
+    const [error, deferredTransferResult] = decodeDeferredTransfer(
+      remainingData,
+      version,
+    )
     if (error) {
       return safeError(error)
     }

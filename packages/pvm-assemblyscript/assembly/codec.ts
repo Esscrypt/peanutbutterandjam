@@ -1517,11 +1517,13 @@ export function decodeVariableSequence<T>(
 // ============================================================================
 
 /**
- * Storage entry structure
+ * RawCshKeyvals entry structure
+ * Matches TypeScript's Record<Hex, Hex> - a flat key-value dictionary
+ * where keys are state keys and values are state values
  */
-export class StorageEntry {
-  key: Uint8Array
-  value: Uint8Array
+export class CshEntry {
+  key: Uint8Array   // State key (variable length)
+  value: Uint8Array // State value (variable length)
   
   constructor(key: Uint8Array, value: Uint8Array) {
     this.key = key
@@ -1530,13 +1532,17 @@ export class StorageEntry {
 }
 
 /**
- * Service Account Storage Map (simplified for AssemblyScript)
+ * RawCshKeyvals - Flat key-value store for service account data
+ * Matches TypeScript's rawCshKeyvals: Record<Hex, Hex>
+ * 
+ * This flattened structure contains all storage, preimages, and requests
+ * in a single dictionary, matching the TypeScript implementation.
  */
-export class ServiceAccountStorage {
-  entries: Array<StorageEntry>
+export class RawCshKeyvals {
+  entries: Array<CshEntry>
   
   constructor() {
-    this.entries = new Array<StorageEntry>()
+    this.entries = new Array<CshEntry>()
   }
   
   set(key: Uint8Array, value: Uint8Array): void {
@@ -1548,7 +1554,7 @@ export class ServiceAccountStorage {
       }
     }
     // Add new entry
-    this.entries.push(new StorageEntry(key, value))
+    this.entries.push(new CshEntry(key, value))
   }
   
   get(key: Uint8Array): Uint8Array | null {
@@ -1560,12 +1566,355 @@ export class ServiceAccountStorage {
     return null
   }
   
+  has(key: Uint8Array): bool {
+    return this.get(key) !== null
+  }
+  
+  delete(key: Uint8Array): bool {
+    for (let i = 0; i < this.entries.length; i++) {
+      if (this.compareKeys(this.entries[i].key, key)) {
+        this.entries.splice(i, 1)
+        return true
+      }
+    }
+    return false
+  }
+  
+  keys(): Array<Uint8Array> {
+    const result = new Array<Uint8Array>()
+    for (let i = 0; i < this.entries.length; i++) {
+      result.push(this.entries[i].key)
+    }
+    return result
+  }
+  
   private compareKeys(a: Uint8Array, b: Uint8Array): bool {
     if (a.length !== b.length) return false
     for (let i = 0; i < a.length; i++) {
       if (a[i] !== b[i]) return false
     }
     return true
+  }
+}
+
+// ============================================================================
+// RawCshKeyvals Helper Functions
+// These functions help access storage/preimages/requests from the flattened
+// rawCshKeyvals dictionary, matching the TypeScript helper functions.
+// ============================================================================
+
+/**
+ * Create a C(s, h) state key from serviceId and blake hash
+ * 
+ * Gray Paper format: C(s, h) = ⟨n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆⟩
+ * where n = encode[4](serviceId), a = blake(h)[0:27]
+ * 
+ * This creates a 31-byte interleaved key.
+ */
+function createCshKey(serviceId: u32, combinedData: Uint8Array): Uint8Array {
+  // Compute Blake2b-256 hash of the combined data
+  const blakeHashFull = blake2b256(combinedData)
+  
+  // Take first 27 bytes of Blake hash
+  const blakeHash = blakeHashFull.slice(0, 27)
+  
+  // Encode serviceId as 4 bytes little-endian
+  const serviceBytes = new Uint8Array(4)
+  serviceBytes[0] = u8(serviceId & 0xFF)
+  serviceBytes[1] = u8((serviceId >> 8) & 0xFF)
+  serviceBytes[2] = u8((serviceId >> 16) & 0xFF)
+  serviceBytes[3] = u8((serviceId >> 24) & 0xFF)
+  
+  // Create 31-byte interleaved key
+  const key = new Uint8Array(31)
+  
+  // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+  key[0] = serviceBytes[0]  // n₀
+  key[1] = blakeHash[0]     // a₀
+  key[2] = serviceBytes[1]  // n₁
+  key[3] = blakeHash[1]     // a₁
+  key[4] = serviceBytes[2]  // n₂
+  key[5] = blakeHash[2]     // a₂
+  key[6] = serviceBytes[3]  // n₃
+  key[7] = blakeHash[3]     // a₃
+  
+  // Remaining 23 bytes: a₄, a₅, ..., a₂₆
+  for (let i = 4; i < 27; i++) {
+    key[8 + (i - 4)] = blakeHash[i]
+  }
+  
+  return key
+}
+
+/**
+ * Create a storage key from service ID and storage key blob
+ * Gray Paper: C(s, encode[4]{2^32-1} || k)
+ * 
+ * Special handling: If storageKey is already 27 bytes (Blake hash from state loading),
+ * skip hashing and directly interleave with serviceId.
+ */
+export function createStorageKey(serviceId: u32, storageKey: Uint8Array): Uint8Array {
+  // Check if storageKey is already a 27-byte Blake hash (from state loading)
+  // When loading from state, we store h (27-byte Blake hash) directly
+  // When creating new storage (from PVM), we have k (original storage key)
+  if (storageKey.length === 27) {
+    // Storage key is already a Blake hash - use it directly to construct state key
+    // C(s, h) where h is already blake(encode[4]{0xFFFFFFFF} || k)
+    // We just need to interleave serviceId with the 27-byte hash
+    const key = new Uint8Array(31)
+    
+    // Encode serviceId as 4 bytes little-endian
+    const serviceBytes = new Uint8Array(4)
+    serviceBytes[0] = u8(serviceId & 0xFF)
+    serviceBytes[1] = u8((serviceId >> 8) & 0xFF)
+    serviceBytes[2] = u8((serviceId >> 16) & 0xFF)
+    serviceBytes[3] = u8((serviceId >> 24) & 0xFF)
+    
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceBytes[0]    // n₀
+    key[1] = storageKey[0]      // a₀
+    key[2] = serviceBytes[1]    // n₁
+    key[3] = storageKey[1]      // a₁
+    key[4] = serviceBytes[2]    // n₂
+    key[5] = storageKey[2]      // a₂
+    key[6] = serviceBytes[3]    // n₃
+    key[7] = storageKey[3]      // a₃
+    
+    // Remaining 23 bytes: a₄, a₅, ..., a₂₆
+    for (let i = 4; i < 27; i++) {
+      key[8 + (i - 4)] = storageKey[i]
+    }
+    
+    return key
+  }
+  
+  // Storage key is the original key `k` - compute blake(encode[4]{0xFFFFFFFF} || k)
+  // Prefix: encode[4]{2^32-1} = 0xFFFFFFFF (little-endian)
+  const prefix = new Uint8Array(4)
+  prefix[0] = 0xFF
+  prefix[1] = 0xFF
+  prefix[2] = 0xFF
+  prefix[3] = 0xFF
+  // Concatenate prefix + storage key
+  const combinedData = concatBytes([prefix, storageKey])
+  // Create proper C(s, h) key
+  return createCshKey(serviceId, combinedData)
+}
+
+/**
+ * Create a preimage key from service ID and preimage hash
+ * Gray Paper: C(s, encode[4]{2^32-2} || h)
+ * 
+ * Special handling: If preimageHash is already 27 bytes (Blake hash from state loading),
+ * skip hashing and directly interleave with serviceId.
+ */
+export function createPreimageKey(serviceId: u32, preimageHash: Uint8Array): Uint8Array {
+  // Check if preimageHash is already a 27-byte Blake hash (from state loading)
+  if (preimageHash.length === 27) {
+    // Preimage hash is already a Blake hash - use it directly to construct state key
+    const key = new Uint8Array(31)
+    
+    // Encode serviceId as 4 bytes little-endian
+    const serviceBytes = new Uint8Array(4)
+    serviceBytes[0] = u8(serviceId & 0xFF)
+    serviceBytes[1] = u8((serviceId >> 8) & 0xFF)
+    serviceBytes[2] = u8((serviceId >> 16) & 0xFF)
+    serviceBytes[3] = u8((serviceId >> 24) & 0xFF)
+    
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceBytes[0]      // n₀
+    key[1] = preimageHash[0]      // a₀
+    key[2] = serviceBytes[1]      // n₁
+    key[3] = preimageHash[1]      // a₁
+    key[4] = serviceBytes[2]      // n₂
+    key[5] = preimageHash[2]      // a₂
+    key[6] = serviceBytes[3]      // n₃
+    key[7] = preimageHash[3]      // a₃
+    
+    // Remaining 23 bytes: a₄, a₅, ..., a₂₆
+    for (let i = 4; i < 27; i++) {
+      key[8 + (i - 4)] = preimageHash[i]
+    }
+    
+    return key
+  }
+  
+  // Preimage hash is the full 32-byte hash - compute blake(encode[4]{0xFFFFFFFE} || h)
+  // Prefix: encode[4]{2^32-2} = 0xFEFFFFFF (little-endian)
+  const prefix = new Uint8Array(4)
+  prefix[0] = 0xFE
+  prefix[1] = 0xFF
+  prefix[2] = 0xFF
+  prefix[3] = 0xFF
+  // Concatenate prefix + preimage hash
+  const combinedData = concatBytes([prefix, preimageHash])
+  // Create proper C(s, h) key
+  return createCshKey(serviceId, combinedData)
+}
+
+/**
+ * Create a request key from service ID, request hash, and length
+ * Gray Paper: C(s, encode[4]{l} || h)
+ * 
+ * Special handling: If requestHash is already 27 bytes (Blake hash from state loading),
+ * skip hashing and directly interleave with serviceId.
+ */
+export function createRequestKey(serviceId: u32, requestHash: Uint8Array, length: u64): Uint8Array {
+  // Check if requestHash is already a 27-byte Blake hash (from state loading)
+  if (requestHash.length === 27) {
+    // Request hash is already a Blake hash - use it directly to construct state key
+    const key = new Uint8Array(31)
+    
+    // Encode serviceId as 4 bytes little-endian
+    const serviceBytes = new Uint8Array(4)
+    serviceBytes[0] = u8(serviceId & 0xFF)
+    serviceBytes[1] = u8((serviceId >> 8) & 0xFF)
+    serviceBytes[2] = u8((serviceId >> 16) & 0xFF)
+    serviceBytes[3] = u8((serviceId >> 24) & 0xFF)
+    
+    // Interleave: n₀, a₀, n₁, a₁, n₂, a₂, n₃, a₃, a₄, a₅, ..., a₂₆
+    key[0] = serviceBytes[0]      // n₀
+    key[1] = requestHash[0]       // a₀
+    key[2] = serviceBytes[1]      // n₁
+    key[3] = requestHash[1]       // a₁
+    key[4] = serviceBytes[2]      // n₂
+    key[5] = requestHash[2]       // a₂
+    key[6] = serviceBytes[3]      // n₃
+    key[7] = requestHash[3]       // a₃
+    
+    // Remaining 23 bytes: a₄, a₅, ..., a₂₆
+    for (let i = 4; i < 27; i++) {
+      key[8 + (i - 4)] = requestHash[i]
+    }
+    
+    return key
+  }
+  
+  // Request hash is the full 32-byte hash - compute blake(encode[4]{l} || h)
+  // Prefix: encode[4]{length} (little-endian)
+  const prefix = encodeFixedLength(length, 4)
+  // Concatenate prefix + request hash
+  const combinedData = concatBytes([prefix, requestHash])
+  // Create proper C(s, h) key
+  return createCshKey(serviceId, combinedData)
+}
+
+/**
+ * Get storage value from rawCshKeyvals
+ */
+export function getStorageValue(account: CompleteServiceAccount, serviceId: u32, storageKey: Uint8Array): Uint8Array | null {
+  const key = createStorageKey(serviceId, storageKey)
+  return account.rawCshKeyvals.get(key)
+}
+
+/**
+ * Set storage value in rawCshKeyvals
+ */
+export function setStorageValue(account: CompleteServiceAccount, serviceId: u32, storageKey: Uint8Array, value: Uint8Array): void {
+  const key = createStorageKey(serviceId, storageKey)
+  account.rawCshKeyvals.set(key, value)
+}
+
+/**
+ * Delete storage value from rawCshKeyvals
+ */
+export function deleteStorageValue(account: CompleteServiceAccount, serviceId: u32, storageKey: Uint8Array): bool {
+  const key = createStorageKey(serviceId, storageKey)
+  return account.rawCshKeyvals.delete(key)
+}
+
+/**
+ * Get preimage value from rawCshKeyvals
+ */
+export function getPreimageValue(account: CompleteServiceAccount, serviceId: u32, preimageHash: Uint8Array): Uint8Array | null {
+  const key = createPreimageKey(serviceId, preimageHash)
+  return account.rawCshKeyvals.get(key)
+}
+
+/**
+ * Set preimage value in rawCshKeyvals
+ */
+export function setPreimageValue(account: CompleteServiceAccount, serviceId: u32, preimageHash: Uint8Array, blob: Uint8Array): void {
+  const key = createPreimageKey(serviceId, preimageHash)
+  account.rawCshKeyvals.set(key, blob)
+}
+
+/**
+ * Delete preimage value from rawCshKeyvals
+ */
+export function deletePreimageValue(account: CompleteServiceAccount, serviceId: u32, preimageHash: Uint8Array): bool {
+  const key = createPreimageKey(serviceId, preimageHash)
+  return account.rawCshKeyvals.delete(key)
+}
+
+/**
+ * Get request value from rawCshKeyvals
+ * Returns the raw encoded value (sequence of timeslots)
+ */
+export function getRequestValue(account: CompleteServiceAccount, serviceId: u32, requestHash: Uint8Array, length: u64): Uint8Array | null {
+  const key = createRequestKey(serviceId, requestHash, length)
+  return account.rawCshKeyvals.get(key)
+}
+
+/**
+ * Set request value in rawCshKeyvals
+ * Value should be the encoded sequence of timeslots
+ */
+export function setRequestValue(account: CompleteServiceAccount, serviceId: u32, requestHash: Uint8Array, length: u64, value: Uint8Array): void {
+  const key = createRequestKey(serviceId, requestHash, length)
+  account.rawCshKeyvals.set(key, value)
+}
+
+/**
+ * Delete request value from rawCshKeyvals
+ */
+export function deleteRequestValue(account: CompleteServiceAccount, serviceId: u32, requestHash: Uint8Array, length: u64): bool {
+  const key = createRequestKey(serviceId, requestHash, length)
+  return account.rawCshKeyvals.delete(key)
+}
+
+/**
+ * Encode request timeslots to value format
+ * Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}
+ */
+export function encodeRequestTimeslots(timeslots: u32[]): Uint8Array {
+  return encodeVariableSequenceGeneric<u32>(
+    timeslots,
+    (slot: u32) => encodeFixedLength(u64(slot), 4),
+  )
+}
+
+/**
+ * Decode request timeslots from value format
+ */
+export function decodeRequestTimeslots(value: Uint8Array): u32[] | null {
+  const result = decodeVariableSequence<u32>(
+    value,
+    (data: Uint8Array) => {
+      const fixedResult = decodeFixedLength(data, 4)
+      if (!fixedResult) {
+        return null
+      }
+      return new DecodingResult<u32>(u32(fixedResult.value), 4)
+    },
+  )
+  if (!result) {
+    return null
+  }
+  return result.value
+}
+
+/**
+ * Storage entry structure
+ * @deprecated Use RawCshKeyvals instead
+ */
+export class StorageEntry {
+  key: Uint8Array
+  value: Uint8Array
+  
+  constructor(key: Uint8Array, value: Uint8Array) {
+    this.key = key
+    this.value = value
   }
 }
 
@@ -1579,46 +1928,6 @@ export class PreimageEntry {
   constructor(hash: Uint8Array, blob: Uint8Array) {
     this.hash = hash
     this.blob = blob
-  }
-}
-
-/**
- * Service Account Preimages Map (simplified for AssemblyScript)
- */
-export class ServiceAccountPreimages {
-  entries: Array<PreimageEntry>
-  
-  constructor() {
-    this.entries = new Array<PreimageEntry>()
-  }
-  
-  set(hash: Uint8Array, blob: Uint8Array): void {
-    // Find existing entry
-    for (let i = 0; i < this.entries.length; i++) {
-      if (this.compareHashes(this.entries[i].hash, hash)) {
-        this.entries[i].blob = blob
-        return
-      }
-    }
-    // Add new entry
-    this.entries.push(new PreimageEntry(hash, blob))
-  }
-  
-  get(hash: Uint8Array): Uint8Array | null {
-    for (let i = 0; i < this.entries.length; i++) {
-      if (this.compareHashes(this.entries[i].hash, hash)) {
-        return this.entries[i].blob
-      }
-    }
-    return null
-  }
-  
-  private compareHashes(a: Uint8Array, b: Uint8Array): bool {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
   }
 }
 
@@ -1648,48 +1957,12 @@ export class RequestEntry {
   }
 }
 
-/**
- * Service Account Requests Map (simplified for AssemblyScript)
- */
-export class ServiceAccountRequests {
-  entries: Array<RequestEntry>
-  
-  constructor() {
-    this.entries = new Array<RequestEntry>()
-  }
-  
-  set(hash: Uint8Array, length: u64, status: PreimageRequestStatus): void {
-    // Find existing entry
-    for (let i = 0; i < this.entries.length; i++) {
-      if (this.compareHashes(this.entries[i].hash, hash) && this.entries[i].length === length) {
-        this.entries[i].status = status
-        return
-      }
-    }
-    // Add new entry
-    this.entries.push(new RequestEntry(hash, length, status))
-  }
-  
-  get(hash: Uint8Array, length: u64): PreimageRequestStatus | null {
-    for (let i = 0; i < this.entries.length; i++) {
-      if (this.compareHashes(this.entries[i].hash, hash) && this.entries[i].length === length) {
-        return this.entries[i].status
-      }
-    }
-    return null
-  }
-  
-  private compareHashes(a: Uint8Array, b: Uint8Array): bool {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false
-    }
-    return true
-  }
-}
 
 /**
  * Complete Service Account structure (AssemblyScript)
+ * 
+ * Matches TypeScript ServiceAccount interface with rawCshKeyvals
+ * for flattened storage/preimages/requests dictionary.
  */
 export class CompleteServiceAccount {
   codehash: Uint8Array // 32 bytes
@@ -1702,9 +1975,13 @@ export class CompleteServiceAccount {
   created: u32
   lastacc: u32
   parent: u32
-  storage: ServiceAccountStorage
-  preimages: ServiceAccountPreimages
-  requests: ServiceAccountRequests
+  
+  /**
+   * Flattened key-value store for storage, preimages, and requests
+   * Matches TypeScript's rawCshKeyvals: Record<Hex, Hex>
+   */
+  rawCshKeyvals: RawCshKeyvals
+
   
   constructor() {
     this.codehash = new Uint8Array(32)
@@ -1717,15 +1994,16 @@ export class CompleteServiceAccount {
     this.created = 0
     this.lastacc = 0
     this.parent = 0
-    this.storage = new ServiceAccountStorage()
-    this.preimages = new ServiceAccountPreimages()
-    this.requests = new ServiceAccountRequests()
+    this.rawCshKeyvals = new RawCshKeyvals()
   }
 }
 
 
 /**
  * Decode complete ServiceAccount according to Gray Paper accounts.tex equation 12-27
+ * 
+ * NOTE: This implementation matches TypeScript's decodeCompleteServiceAccount
+ * which decodes rawCshKeyvals as a SINGLE dictionary (flattened storage/preimages/requests).
  * 
  * Gray Paper: serviceaccount ≡ tuple{
  *   sa_storage ∈ dictionary{blob}{blob},
@@ -1751,132 +2029,53 @@ export function decodeCompleteServiceAccount(
   
   const account = new CompleteServiceAccount()
   
-  // sa_storage: decode{dictionary{blob}{blob}}
-  // Manually decode dictionary with variable-length keys and values
-  const storageVarResult = decodeVariableLength(currentData)
-  if (!storageVarResult) {
+  // rawCshKeyvals: decode{dictionary{blob}{blob}}
+  // This is a single flattened dictionary matching TypeScript's rawCshKeyvals
+  const keyvalVarResult = decodeVariableLength(currentData)
+  if (!keyvalVarResult) {
     return null
   }
-  const storagePairs = storageVarResult.value
-  currentData = currentData.slice(storageVarResult.consumed)
+  const keyvalPairs = keyvalVarResult.value
+  currentData = currentData.slice(keyvalVarResult.consumed)
   
-  let storageData = storagePairs
+  let keyvalData = keyvalPairs
   // Decode pairs until we've processed all bytes
-  while (storageData.length > 0) {
+  while (keyvalData.length > 0) {
     // Decode key: var{blob} = length prefix + blob
-    const keyVarResult = decodeVariableLength(storageData)
+    const keyVarResult = decodeVariableLength(keyvalData)
     if (!keyVarResult) {
       break
     }
-    const keyBytes = keyVarResult.value // Already the blob data (blob has identity encoding)
-    storageData = storageData.slice(keyVarResult.consumed)
+    const keyBytes = keyVarResult.value
+    keyvalData = keyvalData.slice(keyVarResult.consumed)
     
     // Decode value: var{blob} = length prefix + blob
-    const valueVarResult = decodeVariableLength(storageData)
+    const valueVarResult = decodeVariableLength(keyvalData)
     if (!valueVarResult) {
       break
     }
-    const storageValue = valueVarResult.value // Already the blob data (blob has identity encoding)
-    storageData = storageData.slice(valueVarResult.consumed)
+    const valueBytes = valueVarResult.value
+    keyvalData = keyvalData.slice(valueVarResult.consumed)
     
-    account.storage.set(keyBytes, storageValue)
+    // Store in rawCshKeyvals
+    account.rawCshKeyvals.set(keyBytes, valueBytes)
   }
   
-  // sa_preimages: decode{dictionary{hash}{blob}}
-  // Manually decode dictionary with variable-length values
-  const preimagesVarResult = decodeVariableLength(currentData)
-  if (!preimagesVarResult) {
+  // sa_octets: decode[8]{octets} (8-byte fixed-length) - read octets from encoding
+  const octetsResult = decodeFixedLength(currentData, 8)
+  if (!octetsResult) {
     return null
   }
-  const preimagesPairs = preimagesVarResult.value
-  currentData = currentData.slice(preimagesVarResult.consumed)
+  account.octets = octetsResult.value
+  currentData = currentData.slice(octetsResult.consumed)
   
-  let preimagesData = preimagesPairs
-  // Decode pairs until we've processed all bytes
-  while (preimagesData.length > 0) {
-    // Decode key: hash (32 bytes fixed)
-    if (preimagesData.length < 32) {
-      break
-    }
-    const preimageHash = preimagesData.slice(0, 32)
-    preimagesData = preimagesData.slice(32)
-    
-    // Decode value: var{blob} = length prefix + blob
-    const blobVarResult = decodeVariableLength(preimagesData)
-    if (!blobVarResult) {
-      break
-    }
-    const preimageBlob = blobVarResult.value // Already the blob data (blob has identity encoding)
-    preimagesData = preimagesData.slice(blobVarResult.consumed)
-    
-    account.preimages.set(preimageHash, preimageBlob)
-  }
-  
-  // sa_requests: decode{dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}}
-  // Manually decode dictionary with variable-length values
-  const requestsVarResult = decodeVariableLength(currentData)
-  if (!requestsVarResult) {
+  // sa_items: decode[4]{items} (4-byte fixed-length) - read items from encoding
+  const itemsResult = decodeFixedLength(currentData, 4)
+  if (!itemsResult) {
     return null
   }
-  const requestsPairs = requestsVarResult.value
-  currentData = currentData.slice(requestsVarResult.consumed)
-  
-  let requestsData = requestsPairs
-  // Decode pairs until we've processed all bytes
-  while (requestsData.length > 0) {
-    // Decode key: tuple{hash, bloblength} = hash (32 bytes) || encode[4]{length} (4 bytes)
-    if (requestsData.length < 36) {
-      break
-    }
-    const hashBytes = requestsData.slice(0, 32)
-    
-    const lengthResult = decodeFixedLength(requestsData.slice(32), 4)
-    if (!lengthResult) {
-      return null
-    }
-    const blobLength = lengthResult.value
-    requestsData = requestsData.slice(36) // Consume key
-    
-    // Decode value: sequence[:3]{timeslot} = var{sequence{encode[4]{timeslot}}}
-    // First decode the var{} prefix to get the length prefix bytes and element count
-    const lengthPrefixResult = decodeNatural(requestsData)
-    if (!lengthPrefixResult) {
-      return null
-    }
-    const lengthPrefixBytes = requestsData.slice(0, lengthPrefixResult.consumed)
-    const elementCount = i32(lengthPrefixResult.value)
-    // Each timeslot is 4 bytes (encode[4]{timeslot})
-    const elementSize = 4
-    const totalValueLength = lengthPrefixResult.consumed + (elementCount * elementSize)
-    if (requestsData.length < totalValueLength) {
-      return null
-    }
-    const valueData = requestsData.slice(0, totalValueLength) // Includes length prefix
-    requestsData = requestsData.slice(totalValueLength) // Consume value
-    
-    // Now decode the sequence from valueData (which includes the length prefix)
-    const statusResult = decodeVariableSequence<u32>(
-      valueData,
-      (data: Uint8Array) => {
-        const result = decodeFixedLength(data, 4)
-        if (!result) {
-          return null
-        }
-        return new DecodingResult<u32>(u32(result.value), 4)
-      },
-    )
-    if (!statusResult) {
-      return null
-    }
-    
-    const status = new PreimageRequestStatus()
-    const statusArray = statusResult.value
-    for (let j = 0; j < statusArray.length; j++) {
-      status.timeslots.push(statusArray[j])
-    }
-    
-    account.requests.set(hashBytes, blobLength, status)
-  }
+  account.items = u32(itemsResult.value)
+  currentData = currentData.slice(itemsResult.consumed)
   
   // sa_gratis: decode[8]{balance} (8-byte fixed-length)
   const gratisResult = decodeFixedLength(currentData, 8)
@@ -1941,13 +2140,8 @@ export function decodeCompleteServiceAccount(
   account.parent = u32(parentResult.value)
   currentData = currentData.slice(parentResult.consumed)
   
-  // Compute octets and items from storage
-  let totalOctets: u64 = u64(0)
-  for (let i = 0; i < account.storage.entries.length; i++) {
-    totalOctets += u64(account.storage.entries[i].value.length)
-  }
-  account.octets = totalOctets
-  account.items = account.storage.entries.length
+  // Note: octets and items are already read from the encoding above (lines 2093-2107)
+  // Do NOT recompute them - they should be preserved from the encoding
   
   const consumed = data.length - currentData.length
   return new DecodingResult<CompleteServiceAccount>(account, consumed)
@@ -2756,8 +2950,38 @@ export function encodeOperandTuple(ot: OperandTuple): Uint8Array {
  *   encode{0, encode[U]{o}}  when AI ∈ operandtuple
  *   encode{1, encode[X]{o}}  when AI ∈ defxfer
  * }
+ * 
+ * For v0.7.0 and earlier, accinput encoding didn't exist - encode as raw type
+ * For v0.7.1+, include type discriminator byte
+ * 
+ * @param input - AccumulateInput to encode
+ * @param jamVersionMajor - JAM version major (default 0)
+ * @param jamVersionMinor - JAM version minor (default 7)
+ * @param jamVersionPatch - JAM version patch (default 2)
  */
-export function encodeAccumulateInput(input: AccumulateInput): Uint8Array {
+export function encodeAccumulateInput(
+  input: AccumulateInput,
+  jamVersionMajor: u8 = 0,
+  jamVersionMinor: u8 = 7,
+  jamVersionPatch: u8 = 2,
+): Uint8Array {
+  // Check if version is <= 0.7.0 (accinput encoding didn't exist)
+  const isV070OrEarlier = 
+    jamVersionMajor < 0 ||
+    (jamVersionMajor == 0 && jamVersionMinor < 7) ||
+    (jamVersionMajor == 0 && jamVersionMinor == 7 && jamVersionPatch <= 0)
+  
+  if (isV070OrEarlier) {
+    // In v0.7.0, accinput didn't exist - encode as raw type without discriminator
+    if (input.inputType == 0 && input.operandTuple != null) {
+      return encodeOperandTuple(input.operandTuple!)
+    } else if (input.inputType == 1 && input.deferredTransfer != null) {
+      return encodeDeferredTransfer(input.deferredTransfer!)
+    }
+    return new Uint8Array(0)
+  }
+  
+  // v0.7.1+ encoding with discriminator
   const parts: Uint8Array[] = []
   
   // Type discriminator
@@ -2962,6 +3186,9 @@ export function encodeVariableSequenceGeneric<T>(
 /**
  * Encode complete service account according to Gray Paper specification
  * 
+ * NOTE: This implementation matches TypeScript's encodeCompleteServiceAccount
+ * which encodes rawCshKeyvals as a SINGLE dictionary (flattened storage/preimages/requests).
+ * 
  * Gray Paper accounts.tex equation 12-27:
  * serviceaccount ≡ tuple{
  *   sa_storage ∈ dictionary{blob}{blob},
@@ -2983,10 +3210,10 @@ export function encodeVariableSequenceGeneric<T>(
 export function encodeCompleteServiceAccount(account: CompleteServiceAccount): Uint8Array {
   const parts: Uint8Array[] = []
   
-  // sa_storage: encode{dictionary{blob}{blob}}
-  // Sort storage entries by key for deterministic encoding
-  const sortedStorage = account.storage.entries.slice()
-  sortedStorage.sort((a, b) => {
+  // rawCshKeyvals: encode{dictionary{blob}{blob}}
+  // Sort entries by key for deterministic encoding (matching TypeScript)
+  const sortedEntries = account.rawCshKeyvals.entries.slice()
+  sortedEntries.sort((a, b) => {
     // Compare Uint8Array keys byte-by-byte
     const minLen = a.key.length < b.key.length ? a.key.length : b.key.length
     for (let i = 0; i < minLen; i++) {
@@ -2999,83 +3226,25 @@ export function encodeCompleteServiceAccount(account: CompleteServiceAccount): U
   })
   
   // Manually encode dictionary: var{sequence{sorted(key, value)}}
-  const storagePairs: Uint8Array[] = []
-  for (let i = 0; i < sortedStorage.length; i++) {
-    const entry = sortedStorage[i]
-    // Key: encode{var{blob}} = encode{len(key)} || key (already Uint8Array)
-    const key = concatBytes([encodeNatural(u64(entry.key.length)), entry.key])
+  // Each key and value must be encoded with var{} discriminator (length prefix + blob)
+  const keyvalPairs: Uint8Array[] = []
+  for (let i = 0; i < sortedEntries.length; i++) {
+    const entry = sortedEntries[i]
+    // Key: encode{var{blob}} = encode{len(key)} || key
+    const encodedKey = concatBytes([encodeNatural(u64(entry.key.length)), entry.key])
     // Value: encode{var{blob}} = encode{len(value)} || value
-    const value = concatBytes([encodeNatural(u64(entry.value.length)), entry.value])
-    storagePairs.push(concatBytes([key, value]))
+    const encodedValue = concatBytes([encodeNatural(u64(entry.value.length)), entry.value])
+    keyvalPairs.push(concatBytes([encodedKey, encodedValue]))
   }
-  const concatenatedStoragePairs = concatBytes(storagePairs)
+  const concatenatedPairs = concatBytes(keyvalPairs)
   // Wrap with var{} discriminator
-  parts.push(concatBytes([encodeNatural(u64(concatenatedStoragePairs.length)), concatenatedStoragePairs]))
+  parts.push(concatBytes([encodeNatural(u64(concatenatedPairs.length)), concatenatedPairs]))
   
-  // sa_preimages: encode{dictionary{hash}{blob}}
-  // Sort preimage entries by hash for deterministic encoding
-  const sortedPreimages = account.preimages.entries.slice()
-  sortedPreimages.sort((a, b) => {
-    // Compare Uint8Array hashes byte-by-byte
-    const minLen = a.hash.length < b.hash.length ? a.hash.length : b.hash.length
-    for (let i = 0; i < minLen; i++) {
-      if (a.hash[i] < b.hash[i]) return -1
-      if (a.hash[i] > b.hash[i]) return 1
-    }
-    if (a.hash.length < b.hash.length) return -1
-    if (a.hash.length > b.hash.length) return 1
-    return 0
-  })
+  // sa_octets: encode[8]{octets} (8-byte fixed-length) - include octets in encoding
+  parts.push(encodeFixedLength(account.octets, 8))
   
-  // Manually encode dictionary: var{sequence{sorted(key, value)}}
-  const preimagePairs: Uint8Array[] = []
-  for (let i = 0; i < sortedPreimages.length; i++) {
-    const entry = sortedPreimages[i]
-    // Key: hash (32-byte fixed-length, already Uint8Array)
-    const key = entry.hash
-    // Value: encode{var{blob}} = encode{len(blob)} || blob
-    const value = concatBytes([encodeNatural(u64(entry.blob.length)), entry.blob])
-    preimagePairs.push(concatBytes([key, value]))
-  }
-  const concatenatedPreimagePairs = concatBytes(preimagePairs)
-  // Wrap with var{} discriminator
-  parts.push(concatBytes([encodeNatural(u64(concatenatedPreimagePairs.length)), concatenatedPreimagePairs]))
-  
-  // sa_requests: encode{dictionary{tuple{hash, bloblength}}{sequence[:3]{timeslot}}}
-  // Sort request entries by hash+length for deterministic encoding
-  const sortedRequests = account.requests.entries.slice()
-  sortedRequests.sort((a, b) => {
-    // Compare Uint8Array hashes byte-by-byte
-    const minLen = a.hash.length < b.hash.length ? a.hash.length : b.hash.length
-    for (let i = 0; i < minLen; i++) {
-      if (a.hash[i] < b.hash[i]) return -1
-      if (a.hash[i] > b.hash[i]) return 1
-    }
-    if (a.hash.length < b.hash.length) return -1
-    if (a.hash.length > b.hash.length) return 1
-    if (a.length < b.length) return -1
-    if (a.length > b.length) return 1
-    return 0
-  })
-  
-  // Manually encode dictionary: var{sequence{sorted(key, value)}}
-  const requestPairs: Uint8Array[] = []
-  for (let i = 0; i < sortedRequests.length; i++) {
-    const entry = sortedRequests[i]
-    // Key: tuple{hash, bloblength} = hash (32 bytes, already Uint8Array) || encode[4]{length} (4 bytes)
-    const hashBytes = entry.hash
-    const lengthBytes = encodeFixedLength(entry.length, 4)
-    const key = concatBytes([hashBytes, lengthBytes])
-    // Value: sequence[:3]{timeslot} = var{sequence{encode[4]{timeslot}}}
-    const timeslots = encodeVariableSequenceGeneric<u32>(
-      entry.status.timeslots,
-      (slot: u32) => encodeFixedLength(u64(slot), 4),
-    )
-    requestPairs.push(concatBytes([key, timeslots]))
-  }
-  const concatenatedRequestPairs = concatBytes(requestPairs)
-  // Wrap with var{} discriminator
-  parts.push(concatBytes([encodeNatural(u64(concatenatedRequestPairs.length)), concatenatedRequestPairs]))
+  // sa_items: encode[4]{items} (4-byte fixed-length) - include items in encoding
+  parts.push(encodeFixedLength(u64(account.items), 4))
   
   // sa_gratis: encode[8]{balance} (8-byte fixed-length)
   parts.push(encodeFixedLength(account.gratis, 8))

@@ -94,7 +94,7 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     if (!requestValue) {
       logger.error('Forget host function: Request does not exist', {
         serviceId: serviceId.toString(),
-        hashHex: hashHex.substring(0, 40) + '...',
+        hashHex: `${hashHex.substring(0, 40)}...`,
         preimageLength: preimageLength.toString(),
       })
       // Gray Paper line 942: HUH when a = error (request doesn't exist)

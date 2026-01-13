@@ -73,7 +73,9 @@ export interface WasmPvmShellInterface {
   getPageDump(index: u32): Uint8Array
   setMemory(address: u32, data: Uint8Array): void
   initPage(address: u32, length: u32, accessType: MemoryAccessType): void
-  
+
+  // Result extraction
+  getResult(): Uint8Array
 }
 
 /**
@@ -222,22 +224,27 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
     const resultCode = this.pvm.step(instruction)
     
     // Check result code
-    if (resultCode === RESULT_CODE_HALT) {
+    // -1 means continue, >= 0 means halt with that code
+    if (resultCode === -1) {
+      // Continue execution - fall through to gas check
+    } else if (resultCode === i32(RESULT_CODE_HALT)) {
       this.lastStatus = Status.HALT
       this.exitArg = i32(this.pvm.state.registerState[7] & u64(0xffffffff))
       return false
-    } else if (resultCode === RESULT_CODE_PANIC) {
+    } else if (resultCode === i32(RESULT_CODE_PANIC)) {
       this.lastStatus = Status.PANIC
       return false
-    } else if (resultCode === RESULT_CODE_OOG) {
+    } else if (resultCode === i32(RESULT_CODE_OOG)) {
       this.lastStatus = Status.OOG
       return false
     } else if (resultCode === RESULT_CODE_FAULT) {
       this.lastStatus = Status.FAULT
       return false
-    } else if (resultCode === RESULT_CODE_HOST) {
+    } else if (resultCode === i32(RESULT_CODE_HOST)) {
       this.lastStatus = Status.HOST
       return false
+    } else {
+      // Unknown result code - treat as continue (likely -1)
     }
     
     // Check gas
@@ -511,6 +518,47 @@ export class PVMWasmWrapper implements WasmPvmShellInterface {
   getPageDump(index: u32): Uint8Array {
     // All RAM implementations now have getPageDump method
     return this.pvm.state.ram.getPageDump(index)
+  }
+
+  /**
+   * Get result blob from execution
+   * 
+   * Gray Paper equation 831: When HALT, read result from memory at registers[7] with length registers[8]
+   * This is used to extract the yield hash for accumulation (32 bytes) or other result data.
+   * 
+   * @returns Result blob from memory, or empty array if result is not readable
+   */
+  getResult(): Uint8Array {
+    // Result extraction is meaningful for HALT and OK statuses (successful completion)
+    // For PANIC, FAULT, HOST, OOG - result is not valid
+    if (this.lastStatus !== Status.HALT && this.lastStatus !== Status.OK) {
+      return new Uint8Array(0)
+    }
+
+    // Get result range from registers
+    const startOffset = this.pvm.state.registerState[7]
+    const length = this.pvm.state.registerState[8]
+
+    // Empty result
+    if (length === u64(0)) {
+      return new Uint8Array(0)
+    }
+
+    // Validate length is reasonable (avoid overflow)
+    if (length > u64(0xffffffff)) {
+      return new Uint8Array(0)
+    }
+
+    // Read result from memory using RAM's readOctets
+    const readResult = this.pvm.state.ram.readOctets(u32(startOffset), u32(length))
+    
+    // If fault or no data, return empty array
+    if (readResult.faultAddress !== 0 || readResult.data === null) {
+      return new Uint8Array(0)
+    }
+
+    // Safe to return data (AssemblyScript requires explicit non-null handling)
+    return readResult.data!
   }
   
   /**

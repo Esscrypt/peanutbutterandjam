@@ -77,10 +77,12 @@ export class ReadParams extends HostFunctionParams {
 }
 
 export class WriteParams extends HostFunctionParams {
+  serviceId: u64
   serviceAccount: CompleteServiceAccount
 
-  constructor(serviceAccount: CompleteServiceAccount) {
+  constructor(serviceId: u64, serviceAccount: CompleteServiceAccount) {
     super()
+    this.serviceId = serviceId
     this.serviceAccount = serviceAccount
   }
 }

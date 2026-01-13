@@ -128,10 +128,7 @@ export class SubscriptionManager {
       logger.debug('Sent notification to subscription', { id })
       return true
     } catch (error) {
-      logger.error('Failed to send notification to subscription', {
-        id,
-        error,
-      })
+      logger.error('Failed to send notification to subscription', { id, error })
       this.removeSubscription(id)
       return false
     }

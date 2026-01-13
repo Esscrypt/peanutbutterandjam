@@ -34,8 +34,26 @@ import {
   GENERAL_FUNCTIONS,
 } from './config'
 import { FetchHostFunction } from './host-functions/general/fetch'
+import { LookupHostFunction } from './host-functions/general/lookup'
+import { ReadHostFunction } from './host-functions/general/read'
+import { WriteHostFunction } from './host-functions/general/write'
+import { InfoHostFunction } from './host-functions/general/info'
+import { LogHostFunction } from './host-functions/general/log'
 import { AccumulateHostFunctionRegistry } from './host-functions/accumulate/registry'
-import { AccumulateHostFunctionContext } from './host-functions/accumulate/base'
+import { AccumulateHostFunctionContext, ACCUMULATE_ERROR_WHAT } from './host-functions/accumulate/base'
+import { BlessHostFunction } from './host-functions/accumulate/bless'
+import { AssignHostFunction } from './host-functions/accumulate/assign'
+import { DesignateHostFunction } from './host-functions/accumulate/designate'
+import { CheckpointHostFunction } from './host-functions/accumulate/checkpoint'
+import { NewHostFunction } from './host-functions/accumulate/new'
+import { UpgradeHostFunction } from './host-functions/accumulate/upgrade'
+import { TransferHostFunction } from './host-functions/accumulate/transfer'
+import { EjectHostFunction } from './host-functions/accumulate/eject'
+import { QueryHostFunction } from './host-functions/accumulate/query'
+import { SolicitHostFunction } from './host-functions/accumulate/solicit'
+import { ForgetHostFunction } from './host-functions/accumulate/forget'
+import { YieldHostFunction } from './host-functions/accumulate/yield'
+import { ProvideHostFunction } from './host-functions/accumulate/provide'
 import { HostFunctionRegistry } from './host-functions/general/registry'
 import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams, FetchParams } from './host-functions/general/base'
 import { ServiceAccount } from './pbnj-types-compat'
@@ -151,6 +169,11 @@ export class PVM {
   configContestDuration: u32 = 500
   configMaxLookupAnchorage: u32 = 14400
   configEcPieceSize: u32 = 684
+  
+  // JAM version (for version-aware encoding)
+  jamVersionMajor: u8 = 0
+  jamVersionMinor: u8 = 7
+  jamVersionPatch: u8 = 2
 
   constructor(
     registerState: RegisterState,
@@ -557,7 +580,7 @@ export class PVM {
     if ((hostCallId >= u64(0) && hostCallId <= u64(5)) || hostCallId === u64(100)) {
       const result = this.handleGeneralHostFunction(hostCallId, instruction)
       
-      // If result code is 255 (sentinel for null), continue execution
+      // If result code is -1 (continue), advance PC
       if (result === -1) {
         // Advance PC by instruction length (host function handled it)
         const instructionLength = u32(1 + instruction.fskip)
@@ -570,9 +593,17 @@ export class PVM {
       return result
     }
     
-    // Unknown host function
-    this.state.resultCode = RESULT_CODE_PANIC
-    return i32(RESULT_CODE_PANIC)
+    // Gray Paper pvm_invocations.tex lines 206-210:
+    // Unknown host function in accumulation context:
+    // - Gas already deducted (10 gas above)
+    // - Set registers[7] = WHAT (name unknown)
+    // - Continue execution
+    this.state.registerState[7] = ACCUMULATE_ERROR_WHAT
+    
+    // Advance PC by instruction length
+    const instructionLength = u32(1 + instruction.fskip)
+    this.state.programCounter += instructionLength
+    return -1 // Continue execution
   }
 
   /**
@@ -585,14 +616,9 @@ export class PVM {
    * @returns Result code (-1 = continue, >= 0 = halt)
    */
   private handleAccumulateHostFunction(hostCallId: u64, instruction: PVMInstruction): i32 {
-    const accumulateHandler = this.accumulateHostFunctionRegistry.get(hostCallId)
-    if (accumulateHandler === null) {
-      // Unknown accumulation host function
-      this.state.resultCode = RESULT_CODE_PANIC
-      return i32(RESULT_CODE_PANIC)
-    }
-
-    // Create accumulation host function context (similar to TypeScript handleAccumulateHostFunction)
+    // NOTE: AssemblyScript doesn't support runtime polymorphism, so we use explicit dispatch
+    
+    // Create accumulation host function context
     if (!this.accumulationContext) {
       this.state.resultCode = RESULT_CODE_PANIC
       return i32(RESULT_CODE_PANIC)
@@ -604,25 +630,163 @@ export class PVM {
       this.state.ram,
       this.accumulationContext!,
       this.timeslot,
-      u64(19200), // Cexpungeperiod = 19200
+      u64(this.configPreimageExpungePeriod),
+      u32(this.configNumCores), // Pass numCores from config
+      u32(this.configNumValidators), // Pass numValidators from config
+      this.jamVersionMajor, // Pass JAM version for version-aware behavior
+      this.jamVersionMinor,
+      this.jamVersionPatch,
     )
     
-    // Execute accumulation host function
-    const result = accumulateHandler.execute(context)
+    let resultCode: u8 = 255
     
-    // Update gas counter from context (host function may consume additional gas beyond base 10)
+    switch (u32(hostCallId)) {
+      case u32(14): {
+        // BLESS
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const bless = changetype<BlessHostFunction>(handler)
+        const result = bless.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(15): {
+        // ASSIGN
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const assign = changetype<AssignHostFunction>(handler)
+        const result = assign.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(16): {
+        // DESIGNATE
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const designate = changetype<DesignateHostFunction>(handler)
+        const result = designate.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(17): {
+        // CHECKPOINT
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const checkpoint = changetype<CheckpointHostFunction>(handler)
+        const result = checkpoint.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(18): {
+        // NEW
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const newFn = changetype<NewHostFunction>(handler)
+        const result = newFn.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(19): {
+        // UPGRADE
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const upgrade = changetype<UpgradeHostFunction>(handler)
+        const result = upgrade.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(20): {
+        // TRANSFER
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const transfer = changetype<TransferHostFunction>(handler)
+        const result = transfer.execute(context)
+        resultCode = result.resultCode
+        // Gray Paper: On success, TRANSFER deducts gasLimit (additionalGasCost) from gas counter
+        if (result.additionalGasCost > u64(0)) {
+          if (u64(context.gasCounter) < result.additionalGasCost) {
+            // OOG - not enough gas for additional cost
+            this.state.gasCounter = 0
+            this.state.resultCode = RESULT_CODE_OOG
+            return i32(RESULT_CODE_OOG)
+          }
+          context.gasCounter -= u32(result.additionalGasCost)
+        }
+        break
+      }
+      case u32(21): {
+        // EJECT
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const eject = changetype<EjectHostFunction>(handler)
+        const result = eject.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(22): {
+        // QUERY
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const query = changetype<QueryHostFunction>(handler)
+        const result = query.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(23): {
+        // SOLICIT
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const solicit = changetype<SolicitHostFunction>(handler)
+        const result = solicit.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(24): {
+        // FORGET
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const forget = changetype<ForgetHostFunction>(handler)
+        const result = forget.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(25): {
+        // YIELD
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const yieldFn = changetype<YieldHostFunction>(handler)
+        const result = yieldFn.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      case u32(26): {
+        // PROVIDE
+        const handler = this.accumulateHostFunctionRegistry.get(hostCallId)
+        if (handler === null) { this.state.resultCode = RESULT_CODE_PANIC; return i32(RESULT_CODE_PANIC) }
+        const provide = changetype<ProvideHostFunction>(handler)
+        const result = provide.execute(context)
+        resultCode = result.resultCode
+        break
+      }
+      default: {
+        // Gray Paper: Unknown accumulation host function
+        // - Set registers[7] = WHAT (name unknown)
+        // - Continue execution
+        this.state.registerState[7] = ACCUMULATE_ERROR_WHAT
+        return -1 // Continue execution
+      }
+    }
+    
+    // Update gas counter from context
     this.state.gasCounter = context.gasCounter
     
-    // Update implications from context (mutations are done in-place)
-    // The context.implications is the same reference, so mutations are already reflected
-    
     // If result code is 255 (sentinel for null), continue execution
-    if (result.resultCode === u8(255)) {
+    if (resultCode === u8(255)) {
       return -1 // Continue
     }
     
-    // Otherwise, return the result code (will be converted to halt code by caller)
-    return i32(result.resultCode)
+    // Otherwise, return the result code
+    return i32(resultCode)
   }
 
   /**
@@ -635,36 +799,108 @@ export class PVM {
    * @returns Result code (-1 = continue, >= 0 = halt)
    */
   private handleGeneralHostFunction(hostCallId: u64, instruction: PVMInstruction): i32 {
-    const generalHandler = this.hostFunctionRegistry.get(hostCallId)
-    if (generalHandler === null) {
-      // Unknown general host function
-      this.state.resultCode = RESULT_CODE_PANIC
-      return i32(RESULT_CODE_PANIC)
-    }
-
-    // Create host function context (similar to TypeScript handleGeneralHostFunction)
+    // NOTE: AssemblyScript doesn't support runtime polymorphism, so we use explicit dispatch
+    // like TypeScript does in typescript-pvm-executor.ts handleGeneralHostFunction
+    
+    // Create host function context once (shared for all cases that need it)
     const hostContext = new HostFunctionContext(
       this.state.gasCounter,
       this.state.registerState,
       this.state.ram,
     )
     
-    // Build params based on function type (similar to TypeScript handleGeneralHostFunction)
+    switch (u32(hostCallId)) {
+      case u32(0): {
+        // GAS - inline implementation (Gray Paper: set registers[7] = gasCounter)
+        this.state.registerState[7] = u64(this.state.gasCounter)
+        return -1 // Continue
+      }
+      case u32(1): {
+        // FETCH
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
     const params = this.buildGeneralHostFunctionParams(hostCallId)
-    
-    // Execute host function
-    const result = generalHandler.execute(hostContext, params)
-    
-    // Update gas counter from context (host function may consume additional gas beyond base 10)
+        const fetch = changetype<FetchHostFunction>(handler)
+        const result = fetch.execute(hostContext, params)
     this.state.gasCounter = hostContext.gasCounter
-    
-    // If result code is 255 (sentinel for null), continue execution
-    if (result.resultCode === u8(255)) {
-      return -1 // Continue
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      case u32(2): {
+        // LOOKUP
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
+        const params = this.buildGeneralHostFunctionParams(hostCallId)
+        const lookup = changetype<LookupHostFunction>(handler)
+        const result = lookup.execute(hostContext, params)
+        this.state.gasCounter = hostContext.gasCounter
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      case u32(3): {
+        // READ
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
+        const params = this.buildGeneralHostFunctionParams(hostCallId)
+        const read = changetype<ReadHostFunction>(handler)
+        const result = read.execute(hostContext, params)
+        this.state.gasCounter = hostContext.gasCounter
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      case u32(4): {
+        // WRITE
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
+        const params = this.buildGeneralHostFunctionParams(hostCallId)
+        const write = changetype<WriteHostFunction>(handler)
+        const result = write.execute(hostContext, params)
+        this.state.gasCounter = hostContext.gasCounter
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      case u32(5): {
+        // INFO
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
+        const params = this.buildGeneralHostFunctionParams(hostCallId)
+        const info = changetype<InfoHostFunction>(handler)
+        const result = info.execute(hostContext, params)
+        this.state.gasCounter = hostContext.gasCounter
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      case u32(100): {
+        // LOG (JIP-1)
+        const handler = this.hostFunctionRegistry.get(hostCallId)
+        if (handler === null) {
+          this.state.resultCode = RESULT_CODE_PANIC
+          return i32(RESULT_CODE_PANIC)
+        }
+        const params = this.buildGeneralHostFunctionParams(hostCallId)
+        const log = changetype<LogHostFunction>(handler)
+        const result = log.execute(hostContext, params)
+        this.state.gasCounter = hostContext.gasCounter
+        return result.resultCode === u8(255) ? -1 : i32(result.resultCode)
+      }
+      default: {
+        // Gray Paper: Unknown general host function
+        // - Set registers[7] = WHAT (name unknown)
+        // - Continue execution
+        this.state.registerState[7] = ACCUMULATE_ERROR_WHAT
+        return -1 // Continue execution
+      }
     }
-    
-    // Otherwise, return the result code (will be converted to halt code by caller)
-    return i32(result.resultCode)
   }
 
   /**
@@ -701,12 +937,12 @@ export class PVM {
         return new ReadParams(u64(imX.id), serviceAccount, accountsMap)
       }
       case u32(4): {
-        // write - WriteParams with service account
+        // write - WriteParams with service ID and service account
         const serviceAccount = this.findServiceAccount(imX.state, u32(imX.id))
         if (!serviceAccount) {
           return null
         }
-        return new WriteParams(serviceAccount)
+        return new WriteParams(u64(imX.id), serviceAccount)
       }
       case u32(5): {
         // info - InfoParams with service ID and accounts Map
@@ -1111,6 +1347,9 @@ export class PVM {
     configContestDuration: u32 = 500,
     configMaxLookupAnchorage: u32 = 14400,
     configEcPieceSize: u32 = 684,
+    jamVersionMajor: u8 = 0,
+    jamVersionMinor: u8 = 7,
+    jamVersionPatch: u8 = 2,
   ): void {
     // CRITICAL: Reset PVM state completely before each accumulation invocation
     // This ensures no state leaks between invocations
@@ -1137,6 +1376,9 @@ export class PVM {
     this.configContestDuration = configContestDuration
     this.configMaxLookupAnchorage = configMaxLookupAnchorage
     this.configEcPieceSize = configEcPieceSize
+    this.jamVersionMajor = jamVersionMajor
+    this.jamVersionMinor = jamVersionMinor
+    this.jamVersionPatch = jamVersionPatch
     this.state.gasCounter = gasLimit
     this.state.programCounter = 5 // initial PC for accumulate invocation
     

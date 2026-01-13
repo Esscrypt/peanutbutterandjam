@@ -1,4 +1,4 @@
-import { CompleteServiceAccount, PreimageRequestStatus } from '../../codec'
+import { CompleteServiceAccount, PreimageRequestStatus, getPreimageValue, getRequestValue, decodeRequestTimeslots } from '../../codec'
 import { HostFunctionResult } from '../accumulate/base'
 import { HostFunctionContext, HostFunctionParams, HistoricalLookupParams } from './base'
 import {
@@ -98,8 +98,15 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     // Perform historical lookup using histlookup function
     // We use the service account we determined from the lookup logic
     // serviceAccount is guaranteed to be non-null here due to check above
+    
+    // Determine actual service ID for the lookup
+    const actualServiceId: u32 = requestedServiceId === ACCUMULATE_ERROR_CODES.NONE
+      ? u32(lookupParams.serviceId)
+      : u32(requestedServiceId)
+    
     const preimage = this.histLookupServiceAccount(
       serviceAccount,
+      actualServiceId,
       hashData,
       lookupParams.lookupTimeslot,
     )
@@ -145,31 +152,39 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
    * histlookup(a, t, h) ≡ a.sa_preimages[h] when h ∈ keys(a.sa_preimages) ∧ I(a.sa_requests[h, len(a.sa_preimages[h])], t)
    *
    * @param serviceAccount - Service account containing preimages and requests
+   * @param serviceId - Service ID for the account
    * @param hashBytes - Hash to lookup (as Uint8Array)
    * @param timeslot - Timeslot for historical lookup
    * @returns Preimage blob or null if not found/not available
    */
   private histLookupServiceAccount(
     serviceAccount: CompleteServiceAccount,
+    serviceId: u32,
     hashBytes: Uint8Array,
     timeslot: u64,
   ): Uint8Array | null {
-    // Get the preimage for this hash
-    const preimage = serviceAccount.preimages.get(hashBytes)
+    // Get the preimage for this hash using rawCshKeyvals helper
+    const preimage = getPreimageValue(serviceAccount, serviceId, hashBytes)
     if (!preimage) {
       return null
     }
 
     const length = u64(preimage.length)
 
-    // Get the request status for this hash and length
-    const requestStatus = serviceAccount.requests.get(hashBytes, length)
-    if (!requestStatus) {
+    // Get the request status for this hash and length using rawCshKeyvals helper
+    const requestValue = getRequestValue(serviceAccount, serviceId, hashBytes, length)
+    if (!requestValue) {
+      return null
+    }
+    
+    // Decode the request timeslots
+    const timeslots = decodeRequestTimeslots(requestValue)
+    if (!timeslots) {
       return null
     }
 
     // Apply the Gray Paper histlookup logic using I(l, t) function
-    const isValid = this.checkRequestValidity(requestStatus, timeslot)
+    const isValid = this.checkRequestValidityArray(timeslots, timeslot)
 
     if (!isValid) {
       return null
@@ -187,15 +202,14 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
    * I(l, t) = x ≤ t < y when [x, y] = l
    * I(l, t) = x ≤ t < y ∨ z ≤ t when [x, y, z] = l
    *
-   * @param requestStatus - Request status sequence (up to 3 timeslots)
+   * @param timeslots - Array of timeslots (up to 3)
    * @param timeslot - Timeslot to check availability
    * @returns True if preimage is available at the given timeslot
    */
-  private checkRequestValidity(
-    requestStatus: PreimageRequestStatus,
+  private checkRequestValidityArray(
+    timeslots: u32[],
     timeslot: u64,
   ): bool {
-    const timeslots = requestStatus.timeslots
     switch (timeslots.length) {
       case 0:
         // Empty request - not available

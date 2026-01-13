@@ -82,7 +82,7 @@ export declare function prepareBlob(program: Uint8Array): void;
  * @param configNumValidators `u16`
  * @returns `assembly/pvm/AccumulateInvocationResult`
  */
-export declare function accumulateInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, context: Uint8Array, numCores: number, numValidators: number, authQueueSize: number, entropyAccumulator: Uint8Array, encodedWorkItems: Uint8Array, configNumCores?: number, configPreimageExpungePeriod?: number, configEpochDuration?: number, configMaxBlockGas?: bigint, configTicketsPerValidator?: number, configSlotDuration?: number, configRotationPeriod?: number, configNumValidators?: number): __Internref253;
+export declare function accumulateInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, context: Uint8Array, numCores: number, numValidators: number, authQueueSize: number, entropyAccumulator: Uint8Array, encodedWorkItems: Uint8Array, configNumCores?: number, configPreimageExpungePeriod?: number, configEpochDuration?: number, configMaxBlockGas?: bigint, configTicketsPerValidator?: number, configSlotDuration?: number, configRotationPeriod?: number, configNumValidators?: number): __Internref254;
 /**
  * assembly/index/setupAccumulateInvocation
  * @param gasLimit `u32`
@@ -108,18 +108,21 @@ export declare function accumulateInvocation(gasLimit: number, program: Uint8Arr
  * @param configContestDuration `u32`
  * @param configMaxLookupAnchorage `u32`
  * @param configEcPieceSize `u32`
+ * @param jamVersionMajor `u8`
+ * @param jamVersionMinor `u8`
+ * @param jamVersionPatch `u8`
  */
-export declare function setupAccumulateInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, context: Uint8Array, numCores: number, numValidators: number, authQueueSize: number, entropyAccumulator: Uint8Array, encodedWorkItems: Uint8Array, configNumCores?: number, configPreimageExpungePeriod?: number, configEpochDuration?: number, configMaxBlockGas?: bigint, configMaxRefineGas?: bigint, configMaxTicketsPerExtrinsic?: number, configTicketsPerValidator?: number, configSlotDuration?: number, configRotationPeriod?: number, configNumValidators?: number, configNumEcPiecesPerSegment?: number, configContestDuration?: number, configMaxLookupAnchorage?: number, configEcPieceSize?: number): void;
+export declare function setupAccumulateInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, context: Uint8Array, numCores: number, numValidators: number, authQueueSize: number, entropyAccumulator: Uint8Array, encodedWorkItems: Uint8Array, configNumCores?: number, configPreimageExpungePeriod?: number, configEpochDuration?: number, configMaxBlockGas?: bigint, configMaxRefineGas?: bigint, configMaxTicketsPerExtrinsic?: number, configTicketsPerValidator?: number, configSlotDuration?: number, configRotationPeriod?: number, configNumValidators?: number, configNumEcPiecesPerSegment?: number, configContestDuration?: number, configMaxLookupAnchorage?: number, configEcPieceSize?: number, jamVersionMajor?: number, jamVersionMinor?: number, jamVersionPatch?: number): void;
 /**
  * assembly/index/setAccumulateInputs
  * @param inputs `~lib/array/Array<assembly/codec/AccumulateInput> | null`
  */
-export declare function setAccumulateInputs(inputs: Array<__Internref49> | null): void;
+export declare function setAccumulateInputs(inputs: Array<__Internref42> | null): void;
 /**
  * assembly/index/runProgram
  * @returns `assembly/types/RunProgramResult`
  */
-export declare function runProgram(): __Internref286;
+export declare function runProgram(): __Internref280;
 /**
  * assembly/index/getProgramCounter
  * @returns `u32`
@@ -155,6 +158,35 @@ export declare function getExitArg(): number;
  * @returns `u32`
  */
 export declare function getResultCode(): number;
+/**
+ * assembly/index/getResult
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function getResult(): Uint8Array;
+/**
+ * assembly/index/getLastLoadAddress
+ * @returns `u32`
+ */
+export declare function getLastLoadAddress(): number;
+/**
+ * assembly/index/getLastLoadValue
+ * @returns `u64`
+ */
+export declare function getLastLoadValue(): bigint;
+/**
+ * assembly/index/getLastStoreAddress
+ * @returns `u32`
+ */
+export declare function getLastStoreAddress(): number;
+/**
+ * assembly/index/getLastStoreValue
+ * @returns `u64`
+ */
+export declare function getLastStoreValue(): bigint;
+/**
+ * assembly/index/clearLastMemoryOp
+ */
+export declare function clearLastMemoryOp(): void;
 /**
  * assembly/index/getCode
  * @returns `~lib/typedarray/Uint8Array`
@@ -242,31 +274,31 @@ export declare function alignToZone(size: number): number;
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<u64> | null`
  */
-export declare function decodeNatural(data: Uint8Array): __Internref228 | null;
+export declare function decodeNatural(data: Uint8Array): __Internref221 | null;
 /**
  * assembly/codec/decodeBlob
  * @param programBlob `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodedBlob | null`
  */
-export declare function decodeBlob(programBlob: Uint8Array): __Internref230 | null;
+export declare function decodeBlob(programBlob: Uint8Array): __Internref223 | null;
 /**
  * assembly/codec/decodeServiceCodeFromPreimage
  * @param preimageBlob `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/ServiceCodeResult> | null`
  */
-export declare function decodeServiceCodeFromPreimage(preimageBlob: Uint8Array): __Internref227 | null;
+export declare function decodeServiceCodeFromPreimage(preimageBlob: Uint8Array): __Internref220 | null;
 /**
  * assembly/codec/decodeProgram
  * @param programBlob `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodedProgram | null`
  */
-export declare function decodeProgram(programBlob: Uint8Array): __Internref225 | null;
+export declare function decodeProgram(programBlob: Uint8Array): __Internref218 | null;
 /**
  * assembly/codec/decodeProgramFromPreimage
  * @param preimageBlob `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodedProgram | null`
  */
-export declare function decodeProgramFromPreimage(preimageBlob: Uint8Array): __Internref225 | null;
+export declare function decodeProgramFromPreimage(preimageBlob: Uint8Array): __Internref218 | null;
 /**
  * assembly/codec/encodeServiceAccount
  * @param account `assembly/codec/ServiceAccountData`
@@ -275,7 +307,7 @@ export declare function decodeProgramFromPreimage(preimageBlob: Uint8Array): __I
  * @param patch `i32`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeServiceAccount(account: __Internref287, major?: number, minor?: number, patch?: number): Uint8Array;
+export declare function encodeServiceAccount(account: __Internref281, major?: number, minor?: number, patch?: number): Uint8Array;
 /**
  * assembly/codec/decodeServiceAccount
  * @param data `~lib/typedarray/Uint8Array`
@@ -284,7 +316,7 @@ export declare function encodeServiceAccount(account: __Internref287, major?: nu
  * @param patch `i32`
  * @returns `assembly/codec/DecodingResult<assembly/codec/ServiceAccountData> | null`
  */
-export declare function decodeServiceAccount(data: Uint8Array, major?: number, minor?: number, patch?: number): __Internref289 | null;
+export declare function decodeServiceAccount(data: Uint8Array, major?: number, minor?: number, patch?: number): __Internref282 | null;
 /**
  * assembly/codec/encodeFixedLength
  * @param value `u64`
@@ -303,19 +335,19 @@ export declare function encodeNatural(value: bigint): Uint8Array;
  * @param context `assembly/codec/RefineContext`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeRefineContext(context: __Internref240): Uint8Array;
+export declare function encodeRefineContext(context: __Internref239): Uint8Array;
 /**
  * assembly/codec/encodeImportReference
  * @param importRef `assembly/codec/ImportSegment`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeImportReference(importRef: __Internref242): Uint8Array;
+export declare function encodeImportReference(importRef: __Internref241): Uint8Array;
 /**
  * assembly/codec/encodeExtrinsicReference
  * @param extrinsicRef `assembly/codec/ExtrinsicReference`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeExtrinsicReference(extrinsicRef: __Internref244): Uint8Array;
+export declare function encodeExtrinsicReference(extrinsicRef: __Internref243): Uint8Array;
 /**
  * assembly/codec/encodeVariableSequence
  * @param sequence `~lib/array/Array<~lib/typedarray/Uint8Array>`
@@ -327,90 +359,199 @@ export declare function encodeVariableSequence(sequence: Array<Uint8Array>): Uin
  * @param workItem `assembly/codec/WorkItem`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeWorkItem(workItem: __Internref241): Uint8Array;
+export declare function encodeWorkItem(workItem: __Internref240): Uint8Array;
 /**
  * assembly/codec/encodeWorkItemSummary
  * @param workItem `assembly/codec/WorkItem`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeWorkItemSummary(workItem: __Internref241): Uint8Array;
+export declare function encodeWorkItemSummary(workItem: __Internref240): Uint8Array;
 /**
  * assembly/codec/decodeImportReference
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/ImportSegment> | null`
  */
-export declare function decodeImportReference(data: Uint8Array): __Internref290 | null;
+export declare function decodeImportReference(data: Uint8Array): __Internref283 | null;
 /**
  * assembly/codec/decodeExtrinsicReference
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/ExtrinsicReference> | null`
  */
-export declare function decodeExtrinsicReference(data: Uint8Array): __Internref291 | null;
+export declare function decodeExtrinsicReference(data: Uint8Array): __Internref284 | null;
 /**
  * assembly/codec/decodeWorkItem
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/WorkItem> | null`
  */
-export declare function decodeWorkItem(data: Uint8Array): __Internref292 | null;
+export declare function decodeWorkItem(data: Uint8Array): __Internref285 | null;
 /**
  * assembly/codec/encodeWorkPackage
  * @param workPackage `assembly/codec/WorkPackage`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeWorkPackage(workPackage: __Internref239): Uint8Array;
+export declare function encodeWorkPackage(workPackage: __Internref238): Uint8Array;
 /**
  * assembly/codec/decodeAccumulateArgs
  * @param args `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/DecodedAccumulateArgs> | null`
  */
-export declare function decodeAccumulateArgs(args: Uint8Array): __Internref270 | null;
+export declare function decodeAccumulateArgs(args: Uint8Array): __Internref268 | null;
 /**
  * assembly/codec/decodeFixedLength
  * @param data `~lib/typedarray/Uint8Array`
  * @param length `i32`
  * @returns `assembly/codec/DecodingResult<u64> | null`
  */
-export declare function decodeFixedLength(data: Uint8Array, length: number): __Internref228 | null;
+export declare function decodeFixedLength(data: Uint8Array, length: number): __Internref221 | null;
 /**
  * assembly/codec/decodeVariableLength
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<~lib/typedarray/Uint8Array> | null`
  */
-export declare function decodeVariableLength(data: Uint8Array): __Internref258 | null;
+export declare function decodeVariableLength(data: Uint8Array): __Internref259 | null;
 /**
  * assembly/codec/decodeVariableSequence<u32>
  * @param data `~lib/typedarray/Uint8Array`
  * @param elementDecoder `(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<u32> | null`
  * @returns `assembly/codec/DecodingResult<~lib/array/Array<u32>> | null`
  */
-export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref262): __Internref261 | null;
+export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref234): __Internref233 | null;
 /**
  * assembly/codec/decodeVariableSequence<assembly/codec/DeferredTransfer>
  * @param data `~lib/typedarray/Uint8Array`
  * @param elementDecoder `(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> | null`
  * @returns `assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/DeferredTransfer>> | null`
  */
-export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref265): __Internref264 | null;
+export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref263): __Internref262 | null;
 /**
  * assembly/codec/decodeVariableSequence<assembly/codec/ProvisionEntry>
  * @param data `~lib/typedarray/Uint8Array`
  * @param elementDecoder `(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/ProvisionEntry> | null`
  * @returns `assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/ProvisionEntry>> | null`
  */
-export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref268): __Internref267 | null;
+export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref266): __Internref265 | null;
 /**
  * assembly/codec/decodeVariableSequence<assembly/codec/AccumulateInput>
  * @param data `~lib/typedarray/Uint8Array`
  * @param elementDecoder `(~lib/typedarray/Uint8Array) => assembly/codec/DecodingResult<assembly/codec/AccumulateInput> | null`
  * @returns `assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/AccumulateInput>> | null`
  */
-export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref274): __Internref272 | null;
+export declare function decodeVariableSequence(data: Uint8Array, elementDecoder: __Internref272): __Internref270 | null;
+/**
+ * assembly/codec/createStorageKey
+ * @param serviceId `u32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createStorageKey(serviceId: number, storageKey: Uint8Array): Uint8Array;
+/**
+ * assembly/codec/createPreimageKey
+ * @param serviceId `u32`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createPreimageKey(serviceId: number, preimageHash: Uint8Array): Uint8Array;
+/**
+ * assembly/codec/createRequestKey
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function createRequestKey(serviceId: number, requestHash: Uint8Array, length: bigint): Uint8Array;
+/**
+ * assembly/codec/getStorageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array | null`
+ */
+export declare function getStorageValue(account: __Internref29, serviceId: number, storageKey: Uint8Array): Uint8Array | null;
+/**
+ * assembly/codec/setStorageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @param value `~lib/typedarray/Uint8Array`
+ */
+export declare function setStorageValue(account: __Internref29, serviceId: number, storageKey: Uint8Array, value: Uint8Array): void;
+/**
+ * assembly/codec/deleteStorageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `bool`
+ */
+export declare function deleteStorageValue(account: __Internref29, serviceId: number, storageKey: Uint8Array): boolean;
+/**
+ * assembly/codec/getPreimageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array | null`
+ */
+export declare function getPreimageValue(account: __Internref29, serviceId: number, preimageHash: Uint8Array): Uint8Array | null;
+/**
+ * assembly/codec/setPreimageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @param blob `~lib/typedarray/Uint8Array`
+ */
+export declare function setPreimageValue(account: __Internref29, serviceId: number, preimageHash: Uint8Array, blob: Uint8Array): void;
+/**
+ * assembly/codec/deletePreimageValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @returns `bool`
+ */
+export declare function deletePreimageValue(account: __Internref29, serviceId: number, preimageHash: Uint8Array): boolean;
+/**
+ * assembly/codec/getRequestValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @returns `~lib/typedarray/Uint8Array | null`
+ */
+export declare function getRequestValue(account: __Internref29, serviceId: number, requestHash: Uint8Array, length: bigint): Uint8Array | null;
+/**
+ * assembly/codec/setRequestValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @param value `~lib/typedarray/Uint8Array`
+ */
+export declare function setRequestValue(account: __Internref29, serviceId: number, requestHash: Uint8Array, length: bigint, value: Uint8Array): void;
+/**
+ * assembly/codec/deleteRequestValue
+ * @param account `assembly/codec/CompleteServiceAccount`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @returns `bool`
+ */
+export declare function deleteRequestValue(account: __Internref29, serviceId: number, requestHash: Uint8Array, length: bigint): boolean;
+/**
+ * assembly/codec/encodeRequestTimeslots
+ * @param timeslots `~lib/array/Array<u32>`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function encodeRequestTimeslots(timeslots: Array<number>): Uint8Array;
+/**
+ * assembly/codec/decodeRequestTimeslots
+ * @param value `~lib/typedarray/Uint8Array`
+ * @returns `~lib/array/Array<u32> | null`
+ */
+export declare function decodeRequestTimeslots(value: Uint8Array): Array<number> | null;
 /**
  * assembly/codec/decodeCompleteServiceAccount
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/CompleteServiceAccount> | null`
  */
-export declare function decodeCompleteServiceAccount(data: Uint8Array): __Internref259 | null;
+export declare function decodeCompleteServiceAccount(data: Uint8Array): __Internref260 | null;
 /**
  * assembly/codec/decodePartialState
  * @param data `~lib/typedarray/Uint8Array`
@@ -419,13 +560,13 @@ export declare function decodeCompleteServiceAccount(data: Uint8Array): __Intern
  * @param authQueueSize `i32`
  * @returns `assembly/codec/DecodingResult<assembly/codec/PartialState> | null`
  */
-export declare function decodePartialState(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref257 | null;
+export declare function decodePartialState(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref258 | null;
 /**
  * assembly/codec/decodeDeferredTransfer
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> | null`
  */
-export declare function decodeDeferredTransfer(data: Uint8Array): __Internref263 | null;
+export declare function decodeDeferredTransfer(data: Uint8Array): __Internref261 | null;
 /**
  * assembly/codec/decodeImplications
  * @param data `~lib/typedarray/Uint8Array`
@@ -434,7 +575,7 @@ export declare function decodeDeferredTransfer(data: Uint8Array): __Internref263
  * @param authQueueSize `i32`
  * @returns `assembly/codec/DecodingResult<assembly/codec/Implications> | null`
  */
-export declare function decodeImplications(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref256 | null;
+export declare function decodeImplications(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref257 | null;
 /**
  * assembly/codec/decodeImplicationsPair
  * @param data `~lib/typedarray/Uint8Array`
@@ -443,20 +584,20 @@ export declare function decodeImplications(data: Uint8Array, numCores: number, n
  * @param authQueueSize `i32`
  * @returns `assembly/codec/DecodingResult<assembly/codec/ImplicationsPair> | null`
  */
-export declare function decodeImplicationsPair(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref255 | null;
+export declare function decodeImplicationsPair(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): __Internref256 | null;
 /**
  * assembly/codec/encodeOptional
  * @param value `~lib/typedarray/Uint8Array | null`
  * @param encoder `(~lib/typedarray/Uint8Array) => ~lib/typedarray/Uint8Array`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeOptional(value: Uint8Array | null, encoder: __Internref283): Uint8Array;
+export declare function encodeOptional(value: Uint8Array | null, encoder: __Internref277): Uint8Array;
 /**
  * assembly/codec/encodeDeferredTransfer
  * @param transfer `assembly/codec/DeferredTransfer`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeDeferredTransfer(transfer: __Internref45): Uint8Array;
+export declare function encodeDeferredTransfer(transfer: __Internref38): Uint8Array;
 /**
  * assembly/codec/encodeWorkResult
  * @param resultType `u8`
@@ -469,59 +610,62 @@ export declare function encodeWorkResult(resultType: number, result: Uint8Array)
  * @param ot `assembly/codec/OperandTuple`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeOperandTuple(ot: __Internref50): Uint8Array;
+export declare function encodeOperandTuple(ot: __Internref43): Uint8Array;
 /**
  * assembly/codec/encodeAccumulateInput
  * @param input `assembly/codec/AccumulateInput`
+ * @param jamVersionMajor `u8`
+ * @param jamVersionMinor `u8`
+ * @param jamVersionPatch `u8`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeAccumulateInput(input: __Internref49): Uint8Array;
+export declare function encodeAccumulateInput(input: __Internref42, jamVersionMajor?: number, jamVersionMinor?: number, jamVersionPatch?: number): Uint8Array;
 /**
  * assembly/codec/decodeWorkResult
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/OperandTuple> | null`
  */
-export declare function decodeWorkResult(data: Uint8Array): __Internref273 | null;
+export declare function decodeWorkResult(data: Uint8Array): __Internref271 | null;
 /**
  * assembly/codec/decodeOperandTuple
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/OperandTuple> | null`
  */
-export declare function decodeOperandTuple(data: Uint8Array): __Internref273 | null;
+export declare function decodeOperandTuple(data: Uint8Array): __Internref271 | null;
 /**
  * assembly/codec/decodeAccumulateInput
  * @param data `~lib/typedarray/Uint8Array`
  * @returns `assembly/codec/DecodingResult<assembly/codec/AccumulateInput> | null`
  */
-export declare function decodeAccumulateInput(data: Uint8Array): __Internref271 | null;
+export declare function decodeAccumulateInput(data: Uint8Array): __Internref269 | null;
 /**
  * assembly/codec/encodeVariableSequenceGeneric<u32>
  * @param sequence `~lib/array/Array<u32>`
  * @param elementEncoder `(u32) => ~lib/typedarray/Uint8Array`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeVariableSequenceGeneric(sequence: Array<number>, elementEncoder: __Internref280): Uint8Array;
+export declare function encodeVariableSequenceGeneric(sequence: Array<number>, elementEncoder: __Internref231): Uint8Array;
 /**
  * assembly/codec/encodeVariableSequenceGeneric<assembly/codec/DeferredTransfer>
  * @param sequence `~lib/array/Array<assembly/codec/DeferredTransfer>`
  * @param elementEncoder `(assembly/codec/DeferredTransfer) => ~lib/typedarray/Uint8Array`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref45>, elementEncoder: __Internref282): Uint8Array;
+export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref38>, elementEncoder: __Internref276): Uint8Array;
 /**
  * assembly/codec/encodeVariableSequenceGeneric<assembly/codec/ProvisionEntry>
  * @param sequence `~lib/array/Array<assembly/codec/ProvisionEntry>`
  * @param elementEncoder `(assembly/codec/ProvisionEntry) => ~lib/typedarray/Uint8Array`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref47>, elementEncoder: __Internref285): Uint8Array;
+export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref40>, elementEncoder: __Internref279): Uint8Array;
 /**
  * assembly/codec/encodeVariableSequenceGeneric<assembly/codec/AccumulateInput>
  * @param sequence `~lib/array/Array<assembly/codec/AccumulateInput>`
  * @param elementEncoder `(assembly/codec/AccumulateInput) => ~lib/typedarray/Uint8Array`
  * @returns `~lib/typedarray/Uint8Array`
  */
-export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref49>, elementEncoder: __Internref294): Uint8Array;
+export declare function encodeVariableSequenceGeneric(sequence: Array<__Internref42>, elementEncoder: __Internref287): Uint8Array;
 /**
  * assembly/codec/encodeCompleteServiceAccount
  * @param account `assembly/codec/CompleteServiceAccount`
@@ -1603,6 +1747,12 @@ export declare function REGISTER_INIT_STACK_SEGMENT_END(): number;
  * @returns `u32`
  */
 export declare function REGISTER_INIT_ARGS_SEGMENT_START(): number;
+/**
+ * assembly/crypto/blake2b256
+ * @param data `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function blake2b256(data: Uint8Array): Uint8Array;
 /** assembly/types/MemoryAccessType */
 export declare enum MemoryAccessType {
   /** @type `i32` */
@@ -1676,7 +1826,7 @@ export declare function roundTripPartialState(data: Uint8Array, numCores: number
  * @param preimageBlob `~lib/typedarray/Uint8Array`
  * @returns `assembly/test-exports/DecodedProgramFields | null`
  */
-export declare function getDecodedProgramFields(preimageBlob: Uint8Array): __Internref293 | null;
+export declare function getDecodedProgramFields(preimageBlob: Uint8Array): __Internref286 | null;
 /**
  * assembly/test-exports/roundTripAccumulateInputs
  * @param data `~lib/typedarray/Uint8Array`
@@ -1689,219 +1839,388 @@ export declare function roundTripAccumulateInputs(data: Uint8Array): Uint8Array;
  * @returns `~lib/typedarray/Uint8Array`
  */
 export declare function roundTripSingleAccumulateInput(data: Uint8Array): Uint8Array;
+/**
+ * assembly/test-exports/testCreateStorageKey
+ * @param serviceId `u32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testCreateStorageKey(serviceId: number, storageKey: Uint8Array): Uint8Array;
+/**
+ * assembly/test-exports/testCreatePreimageKey
+ * @param serviceId `u32`
+ * @param preimageHash `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testCreatePreimageKey(serviceId: number, preimageHash: Uint8Array): Uint8Array;
+/**
+ * assembly/test-exports/testCreateRequestKey
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param length `u64`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testCreateRequestKey(serviceId: number, requestHash: Uint8Array, length: bigint): Uint8Array;
+/**
+ * assembly/test-exports/testBlake2b256
+ * @param data `~lib/typedarray/Uint8Array`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testBlake2b256(data: Uint8Array): Uint8Array;
+/**
+ * assembly/test-exports/testEncodeFixedLength
+ * @param value `u64`
+ * @param length `i32`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testEncodeFixedLength(value: bigint, length: number): Uint8Array;
+/**
+ * assembly/test-exports/testCalculateMinBalance
+ * @param items `u64`
+ * @param octets `u64`
+ * @param gratis `u64`
+ * @returns `u64`
+ */
+export declare function testCalculateMinBalance(items: bigint, octets: bigint, gratis: bigint): bigint;
+/**
+ * assembly/test-exports/testSolicitLogic
+ * @param encodedAccount `~lib/typedarray/Uint8Array`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param preimageLength `u64`
+ * @param timeslot `u64`
+ * @returns `assembly/test-exports/HostFunctionTestResult`
+ */
+export declare function testSolicitLogic(encodedAccount: Uint8Array, serviceId: number, requestHash: Uint8Array, preimageLength: bigint, timeslot: bigint): __Internref288;
+/**
+ * assembly/test-exports/testForgetLogic
+ * @param encodedAccount `~lib/typedarray/Uint8Array`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param preimageLength `u64`
+ * @param timeslot `u64`
+ * @param expungePeriod `u64`
+ * @returns `assembly/test-exports/HostFunctionTestResult`
+ */
+export declare function testForgetLogic(encodedAccount: Uint8Array, serviceId: number, requestHash: Uint8Array, preimageLength: bigint, timeslot: bigint, expungePeriod: bigint): __Internref288;
+/**
+ * assembly/test-exports/testQueryLogic
+ * @param encodedAccount `~lib/typedarray/Uint8Array`
+ * @param serviceId `u32`
+ * @param requestHash `~lib/typedarray/Uint8Array`
+ * @param preimageLength `u64`
+ * @returns `assembly/test-exports/HostFunctionTestResult`
+ */
+export declare function testQueryLogic(encodedAccount: Uint8Array, serviceId: number, requestHash: Uint8Array, preimageLength: bigint): __Internref288;
+/**
+ * assembly/test-exports/testWriteLogic
+ * @param encodedAccount `~lib/typedarray/Uint8Array`
+ * @param serviceId `u32`
+ * @param key `~lib/typedarray/Uint8Array`
+ * @param value `~lib/typedarray/Uint8Array`
+ * @returns `assembly/test-exports/HostFunctionTestResult`
+ */
+export declare function testWriteLogic(encodedAccount: Uint8Array, serviceId: number, key: Uint8Array, value: Uint8Array): __Internref288;
+/**
+ * assembly/test-exports/testReadLogic
+ * @param encodedAccount `~lib/typedarray/Uint8Array`
+ * @param serviceId `u32`
+ * @param key `~lib/typedarray/Uint8Array`
+ * @param fromOffset `u32`
+ * @param length `u32`
+ * @returns `assembly/test-exports/HostFunctionTestResult`
+ */
+export declare function testReadLogic(encodedAccount: Uint8Array, serviceId: number, key: Uint8Array, fromOffset: number, length: number): __Internref288;
+/**
+ * assembly/test-exports/testEncodeRequestTimeslots
+ * @param timeslots `~lib/array/Array<u32>`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testEncodeRequestTimeslots(timeslots: Array<number>): Uint8Array;
+/**
+ * assembly/test-exports/testDecodeRequestTimeslots
+ * @param data `~lib/typedarray/Uint8Array`
+ * @returns `~lib/array/Array<u32> | null`
+ */
+export declare function testDecodeRequestTimeslots(data: Uint8Array): Array<number> | null;
+/**
+ * assembly/test-exports/testSbrkLogic
+ * @param currentHeapPointer `u32`
+ * @param requestedSize `u64`
+ * @returns `assembly/test-exports/SBRKTestResult`
+ */
+export declare function testSbrkLogic(currentHeapPointer: number, requestedSize: bigint): __Internref289;
+/**
+ * assembly/test-exports/testAlignToPage
+ * @param address `u32`
+ * @returns `u32`
+ */
+export declare function testAlignToPage(address: number): number;
+/**
+ * assembly/test-exports/testGetMemoryConfig
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testGetMemoryConfig(): Uint8Array;
+/**
+ * assembly/test-exports/testGetSystemConstants
+ * @param numCores `u16`
+ * @param preimageExpungePeriod `u32`
+ * @param epochDuration `u32`
+ * @param maxBlockGas `u64`
+ * @param maxRefineGas `u64`
+ * @param maxTicketsPerExtrinsic `u16`
+ * @param ticketsPerValidator `u16`
+ * @param slotDuration `u16`
+ * @param rotationPeriod `u16`
+ * @param numValidators `u16`
+ * @param numEcPiecesPerSegment `u32`
+ * @param contestDuration `u32`
+ * @param maxLookupAnchorage `u32`
+ * @param ecPieceSize `u32`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function testGetSystemConstants(numCores: number, preimageExpungePeriod: number, epochDuration: number, maxBlockGas: bigint, maxRefineGas: bigint, maxTicketsPerExtrinsic: number, ticketsPerValidator: number, slotDuration: number, rotationPeriod: number, numValidators: number, numEcPiecesPerSegment: number, contestDuration: number, maxLookupAnchorage: number, ecPieceSize: number): Uint8Array;
+/**
+ * assembly/test-exports/debugDecodeAndCheckStorage
+ * @param data `~lib/typedarray/Uint8Array`
+ * @param numCores `i32`
+ * @param numValidators `i32`
+ * @param authQueueSize `i32`
+ * @returns `i32`
+ */
+export declare function debugDecodeAndCheckStorage(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): number;
+/**
+ * assembly/test-exports/debugStorageLookup
+ * @param data `~lib/typedarray/Uint8Array`
+ * @param numCores `i32`
+ * @param numValidators `i32`
+ * @param authQueueSize `i32`
+ * @param storageKey `~lib/typedarray/Uint8Array`
+ * @returns `i32`
+ */
+export declare function debugStorageLookup(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number, storageKey: Uint8Array): number;
+/**
+ * assembly/test-exports/debugGetFirstStorageKey
+ * @param data `~lib/typedarray/Uint8Array`
+ * @param numCores `i32`
+ * @param numValidators `i32`
+ * @param authQueueSize `i32`
+ * @returns `~lib/typedarray/Uint8Array`
+ */
+export declare function debugGetFirstStorageKey(data: Uint8Array, numCores: number, numValidators: number, authQueueSize: number): Uint8Array;
 /** assembly/pvm/AccumulateInvocationResult */
-declare class __Internref253 extends Number {
-  private __nominal253: symbol;
+declare class __Internref254 extends Number {
+  private __nominal254: symbol;
   private __nominal0: symbol;
 }
 /** assembly/codec/AccumulateInput */
-declare class __Internref49 extends Number {
-  private __nominal49: symbol;
+declare class __Internref42 extends Number {
+  private __nominal42: symbol;
   private __nominal0: symbol;
 }
 /** assembly/types/RunProgramResult */
-declare class __Internref286 extends Number {
-  private __nominal286: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<u64> */
-declare class __Internref228 extends Number {
-  private __nominal228: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodedBlob */
-declare class __Internref230 extends Number {
-  private __nominal230: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/ServiceCodeResult> */
-declare class __Internref227 extends Number {
-  private __nominal227: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodedProgram */
-declare class __Internref225 extends Number {
-  private __nominal225: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/ServiceAccountData */
-declare class __Internref287 extends Number {
-  private __nominal287: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/ServiceAccountData> */
-declare class __Internref289 extends Number {
-  private __nominal289: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/RefineContext */
-declare class __Internref240 extends Number {
-  private __nominal240: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/ImportSegment */
-declare class __Internref242 extends Number {
-  private __nominal242: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/ExtrinsicReference */
-declare class __Internref244 extends Number {
-  private __nominal244: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/WorkItem */
-declare class __Internref241 extends Number {
-  private __nominal241: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/ImportSegment> */
-declare class __Internref290 extends Number {
-  private __nominal290: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/ExtrinsicReference> */
-declare class __Internref291 extends Number {
-  private __nominal291: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/WorkItem> */
-declare class __Internref292 extends Number {
-  private __nominal292: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/WorkPackage */
-declare class __Internref239 extends Number {
-  private __nominal239: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/DecodedAccumulateArgs> */
-declare class __Internref270 extends Number {
-  private __nominal270: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<~lib/typedarray/Uint8Array> */
-declare class __Internref258 extends Number {
-  private __nominal258: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<u32>|null> */
-declare class __Internref262 extends Number {
-  private __nominal262: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<~lib/array/Array<u32>> */
-declare class __Internref261 extends Number {
-  private __nominal261: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/DeferredTransfer>|null> */
-declare class __Internref265 extends Number {
-  private __nominal265: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/DeferredTransfer>> */
-declare class __Internref264 extends Number {
-  private __nominal264: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/ProvisionEntry>|null> */
-declare class __Internref268 extends Number {
-  private __nominal268: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/ProvisionEntry>> */
-declare class __Internref267 extends Number {
-  private __nominal267: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/AccumulateInput>|null> */
-declare class __Internref274 extends Number {
-  private __nominal274: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/AccumulateInput>> */
-declare class __Internref272 extends Number {
-  private __nominal272: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/CompleteServiceAccount> */
-declare class __Internref259 extends Number {
-  private __nominal259: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/PartialState> */
-declare class __Internref257 extends Number {
-  private __nominal257: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> */
-declare class __Internref263 extends Number {
-  private __nominal263: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/Implications> */
-declare class __Internref256 extends Number {
-  private __nominal256: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/ImplicationsPair> */
-declare class __Internref255 extends Number {
-  private __nominal255: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>~lib/typedarray/Uint8Array> */
-declare class __Internref283 extends Number {
-  private __nominal283: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DeferredTransfer */
-declare class __Internref45 extends Number {
-  private __nominal45: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/OperandTuple */
-declare class __Internref50 extends Number {
-  private __nominal50: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/OperandTuple> */
-declare class __Internref273 extends Number {
-  private __nominal273: symbol;
-  private __nominal0: symbol;
-}
-/** assembly/codec/DecodingResult<assembly/codec/AccumulateInput> */
-declare class __Internref271 extends Number {
-  private __nominal271: symbol;
-  private __nominal0: symbol;
-}
-/** ~lib/function/Function<%28u32%29=>~lib/typedarray/Uint8Array> */
 declare class __Internref280 extends Number {
   private __nominal280: symbol;
   private __nominal0: symbol;
 }
-/** ~lib/function/Function<%28assembly/codec/DeferredTransfer%29=>~lib/typedarray/Uint8Array> */
+/** assembly/codec/DecodingResult<u64> */
+declare class __Internref221 extends Number {
+  private __nominal221: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodedBlob */
+declare class __Internref223 extends Number {
+  private __nominal223: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/ServiceCodeResult> */
+declare class __Internref220 extends Number {
+  private __nominal220: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodedProgram */
+declare class __Internref218 extends Number {
+  private __nominal218: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/ServiceAccountData */
+declare class __Internref281 extends Number {
+  private __nominal281: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/ServiceAccountData> */
 declare class __Internref282 extends Number {
   private __nominal282: symbol;
   private __nominal0: symbol;
 }
-/** assembly/codec/ProvisionEntry */
-declare class __Internref47 extends Number {
-  private __nominal47: symbol;
+/** assembly/codec/RefineContext */
+declare class __Internref239 extends Number {
+  private __nominal239: symbol;
   private __nominal0: symbol;
 }
-/** ~lib/function/Function<%28assembly/codec/ProvisionEntry%29=>~lib/typedarray/Uint8Array> */
+/** assembly/codec/ImportSegment */
+declare class __Internref241 extends Number {
+  private __nominal241: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/ExtrinsicReference */
+declare class __Internref243 extends Number {
+  private __nominal243: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/WorkItem */
+declare class __Internref240 extends Number {
+  private __nominal240: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/ImportSegment> */
+declare class __Internref283 extends Number {
+  private __nominal283: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/ExtrinsicReference> */
+declare class __Internref284 extends Number {
+  private __nominal284: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/WorkItem> */
 declare class __Internref285 extends Number {
   private __nominal285: symbol;
   private __nominal0: symbol;
 }
-/** ~lib/function/Function<%28assembly/codec/AccumulateInput%29=>~lib/typedarray/Uint8Array> */
-declare class __Internref294 extends Number {
-  private __nominal294: symbol;
+/** assembly/codec/WorkPackage */
+declare class __Internref238 extends Number {
+  private __nominal238: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/DecodedAccumulateArgs> */
+declare class __Internref268 extends Number {
+  private __nominal268: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<~lib/typedarray/Uint8Array> */
+declare class __Internref259 extends Number {
+  private __nominal259: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<u32>|null> */
+declare class __Internref234 extends Number {
+  private __nominal234: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<~lib/array/Array<u32>> */
+declare class __Internref233 extends Number {
+  private __nominal233: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/DeferredTransfer>|null> */
+declare class __Internref263 extends Number {
+  private __nominal263: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/DeferredTransfer>> */
+declare class __Internref262 extends Number {
+  private __nominal262: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/ProvisionEntry>|null> */
+declare class __Internref266 extends Number {
+  private __nominal266: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/ProvisionEntry>> */
+declare class __Internref265 extends Number {
+  private __nominal265: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>assembly/codec/DecodingResult<assembly/codec/AccumulateInput>|null> */
+declare class __Internref272 extends Number {
+  private __nominal272: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<~lib/array/Array<assembly/codec/AccumulateInput>> */
+declare class __Internref270 extends Number {
+  private __nominal270: symbol;
   private __nominal0: symbol;
 }
 /** assembly/codec/CompleteServiceAccount */
 declare class __Internref29 extends Number {
   private __nominal29: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/CompleteServiceAccount> */
+declare class __Internref260 extends Number {
+  private __nominal260: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/PartialState> */
+declare class __Internref258 extends Number {
+  private __nominal258: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/DeferredTransfer> */
+declare class __Internref261 extends Number {
+  private __nominal261: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/Implications> */
+declare class __Internref257 extends Number {
+  private __nominal257: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/ImplicationsPair> */
+declare class __Internref256 extends Number {
+  private __nominal256: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28~lib/typedarray/Uint8Array%29=>~lib/typedarray/Uint8Array> */
+declare class __Internref277 extends Number {
+  private __nominal277: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DeferredTransfer */
+declare class __Internref38 extends Number {
+  private __nominal38: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/OperandTuple */
+declare class __Internref43 extends Number {
+  private __nominal43: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/OperandTuple> */
+declare class __Internref271 extends Number {
+  private __nominal271: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/DecodingResult<assembly/codec/AccumulateInput> */
+declare class __Internref269 extends Number {
+  private __nominal269: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28u32%29=>~lib/typedarray/Uint8Array> */
+declare class __Internref231 extends Number {
+  private __nominal231: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28assembly/codec/DeferredTransfer%29=>~lib/typedarray/Uint8Array> */
+declare class __Internref276 extends Number {
+  private __nominal276: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/codec/ProvisionEntry */
+declare class __Internref40 extends Number {
+  private __nominal40: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28assembly/codec/ProvisionEntry%29=>~lib/typedarray/Uint8Array> */
+declare class __Internref279 extends Number {
+  private __nominal279: symbol;
+  private __nominal0: symbol;
+}
+/** ~lib/function/Function<%28assembly/codec/AccumulateInput%29=>~lib/typedarray/Uint8Array> */
+declare class __Internref287 extends Number {
+  private __nominal287: symbol;
   private __nominal0: symbol;
 }
 /** assembly/codec/PartialState */
@@ -1923,7 +2242,17 @@ declare class __Internref25 extends Number {
 declare interface __Record9<TOmittable> {
 }
 /** assembly/test-exports/DecodedProgramFields */
-declare class __Internref293 extends Number {
-  private __nominal293: symbol;
+declare class __Internref286 extends Number {
+  private __nominal286: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/test-exports/HostFunctionTestResult */
+declare class __Internref288 extends Number {
+  private __nominal288: symbol;
+  private __nominal0: symbol;
+}
+/** assembly/test-exports/SBRKTestResult */
+declare class __Internref289 extends Number {
+  private __nominal289: symbol;
   private __nominal0: symbol;
 }

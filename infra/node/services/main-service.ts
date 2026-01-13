@@ -157,6 +157,59 @@ export class MainService extends BaseService {
   > = new Map()
 
   private readonly configService: ConfigService
+
+  // ============================================================================
+  // Service Getters for RPC Server
+  // ============================================================================
+
+  /**
+   * Get the configuration service
+   * Exposed for RPC server and other external access
+   */
+  getConfigService(): ConfigService {
+    return this.configService
+  }
+
+  /**
+   * Get the recent history service
+   * Exposed for RPC server block queries
+   */
+  getRecentHistoryService(): RecentHistoryService {
+    return this.recentHistoryService
+  }
+
+  /**
+   * Get the statistics service
+   * Exposed for RPC server statistics queries
+   */
+  getStatisticsService(): StatisticsService {
+    return this.statisticsService
+  }
+
+  /**
+   * Get the service account service
+   * Exposed for RPC server service-related queries
+   */
+  getServiceAccountService(): ServiceAccountService {
+    return this.serviceAccountService
+  }
+
+  /**
+   * Get the guarantor service
+   * Exposed for RPC server work package submission
+   */
+  getGuarantorService(): GuarantorService {
+    return this.guarantorService
+  }
+
+  /**
+   * Get the clock service
+   * Exposed for RPC server time queries
+   */
+  getClockService(): ClockService {
+    return this.clockService
+  }
+
   private readonly shardService: ShardService
   private readonly erasureCodingService: ErasureCodingService
   private readonly workReportService: WorkReportService
@@ -358,24 +411,6 @@ export class MainService extends BaseService {
       genesisManagerService: this.genesisManagerService,
     })
 
-    // this.connectionManagerService = new ConnectionManagerService({
-    //   validatorSetManager: this.validatorSetManagerService,
-    //   peerDiscoveryManager: this.peerDiscoveryManagerService,
-    //   gridStructureManager: this.gridStructureManagerService,
-    //   eventBusService: this.eventBusService,
-    // })
-
-    // this.safroleConsensusService = new SafroleConsensusService(
-    //   {
-    //     initialState: this.config.safroleConsensus.initialState,
-    //   },
-    //   this.eventBusService,
-    //   this.keyPairService,
-    //   this.sealKeyService,
-    //   this.validatorSetManagerService,
-    //   this.blockStore,
-    // )
-
     // this.blockAuthoringService = new BlockAuthoringService({
     //   config: this.config.blockAuthoring,
     //   eventBusService: this.eventBusService,
@@ -519,7 +554,6 @@ export class MainService extends BaseService {
     this.registry.register(this.networkingService)
     // this.registry.register(this.telemetryService)
     this.registry.register(this.keyPairService)
-    // this.registry.register(this.safroleConsensusService)
     this.registry.register(this.ticketService)
     this.registry.register(this.shardService)
     this.registry.register(this.workReportService)

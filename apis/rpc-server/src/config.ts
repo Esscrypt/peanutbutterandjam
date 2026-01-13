@@ -1,5 +1,5 @@
-import { createEnvSchema, loadEnvVariables } from '@pbnjam/core'
 import { z } from 'zod'
+import { createEnvSchema, loadEnvVariables } from './utils/env'
 
 // Define RPC server specific environment schema
 const rpcServerAdditionalSchema = {

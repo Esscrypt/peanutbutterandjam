@@ -1,7 +1,6 @@
 import { RESULT_CODE_PANIC } from '../../config'
 import {
   ACCUMULATE_ERROR_HUH,
-  ACCUMULATE_ERROR_WHAT,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -43,12 +42,10 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
 
     // Read code hash from memory (32 bytes)
     const readResult_codeHash = ram.readOctets(u32(codeHashOffset), u32(32))
-    if (readResult_codeHash.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_codeHash.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Gray Paper line 808: (panic, registers_7, ...) when c = error
+    // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
+    // DO NOT modify registers[7] - it must remain unchanged on panic
+    if (readResult_codeHash.faultAddress !== 0 || readResult_codeHash.data === null) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const codeHashData = readResult_codeHash.data!

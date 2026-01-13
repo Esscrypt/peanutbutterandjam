@@ -534,7 +534,6 @@ function buildCompleteCertificate(
 /**
  * Validate ASN.1 DER certificate structure
  */
-// biome-ignore lint/correctness/noUnusedVariables: <explanation>
 export function validateDERCertificate(certBytes: Uint8Array): boolean {
   try {
     // Basic DER structure validation

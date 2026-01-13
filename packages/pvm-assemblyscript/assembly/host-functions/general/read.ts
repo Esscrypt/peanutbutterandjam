@@ -1,7 +1,7 @@
 import { RESULT_CODE_PANIC } from '../../config'
+import { CompleteServiceAccount, getStorageValue } from '../../codec'
 import {
   ACCUMULATE_ERROR_NONE,
-  ACCUMULATE_ERROR_OOB,
   HostFunctionResult,
 } from '../accumulate/base'
 import { HostFunctionContext, HostFunctionParams, ReadParams } from './base'
@@ -46,10 +46,12 @@ export class ReadHostFunction extends BaseHostFunction {
 
     // Gray Paper equation 408-412: Select service account
     // a = s when s^* = s, otherwise d[s^*] if s^* in keys(d), otherwise none
-    const serviceAccount =
-      requestedServiceId === readParams.serviceId
-        ? readParams.serviceAccount
-        : readParams.accounts.get(requestedServiceId) || null
+    let serviceAccount: CompleteServiceAccount | null = null
+    if (requestedServiceId === readParams.serviceId) {
+      serviceAccount = readParams.serviceAccount
+    } else if (readParams.accounts.has(requestedServiceId)) {
+      serviceAccount = readParams.accounts.get(requestedServiceId)
+    }
 
     const keyOffset = u64(context.registers[8])
     const keyLength = u64(context.registers[9])
@@ -62,7 +64,8 @@ export class ReadHostFunction extends BaseHostFunction {
     const key = readResult_key.data
     const faultAddress = readResult_key.faultAddress
     if (key === null || faultAddress !== 0) {
-      context.registers[7] = ACCUMULATE_ERROR_OOB
+      // Gray Paper line 420: registers_7 remains UNCHANGED on panic
+      // Do NOT set context.registers[7] - just return PANIC
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
 
@@ -72,9 +75,9 @@ export class ReadHostFunction extends BaseHostFunction {
       return new HostFunctionResult(255) // continue execution
     }
 
-    // Gray Paper equation 414-418: Read storage value by key
+    // Gray Paper equation 414-418: Read storage value by key using rawCshKeyvals helper
     // v = a_storage[k] if a != none and k in keys(a_storage), otherwise none
-    const value = serviceAccount.storage.get(key!) || null
+    const value = getStorageValue(serviceAccount, u32(requestedServiceId), key!)
     if (!value) {
       // Gray Paper equation 423: Return NONE if storage key not found
       context.registers[7] = ACCUMULATE_ERROR_NONE

@@ -3,8 +3,6 @@
   "version": "0.0.1",
   "type": "module",
   "description": "PVM implementation in AssemblyScript (compiles to WebAssembly)",
-  "main": "build/pvm.js",
-  "types": "build/pvm.d.ts",
   "scripts": {
     "build": "npm run build:debug && npm run build:release && npm run copy:wasm",
     "build:all": "npm run build:debug && npm run build:release && npm run build:raw && npm run build:release-mini && npm run build:release-stub && npm run copy:wasm",
@@ -23,6 +21,11 @@
   "devDependencies": {
     "@assemblyscript/loader": "^0.27.29",
     "assemblyscript": "^0.27.29",
+    "@pbnjam/codec": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/typescript-config": "workspace:*",
+    "@pbnjam/pvm": "workspace:*",
     "prettier": "^3.0.0"
   },
   "exports": {

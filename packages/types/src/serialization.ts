@@ -1134,8 +1134,6 @@ export const PreimageRequestUtils = {
     return cloned
   },
 } as const
-
-
 // Note: GenesisState moved to @pbnjam/types/genesis for Gray Paper compliance
 
 /**

@@ -1,150 +1,128 @@
-import { createServer } from 'node:http'
+/**
+ * JAM RPC Server
+ *
+ * HTTP JSON-RPC server implementing JIP-2 specification.
+ * Uses @pbnjam/node services directly via ServiceContext.
+ *
+ * JIP-2 Reference: https://hackmd.io/@polkadot/jip2
+ *
+ * Ports:
+ * - HTTP RPC: configured via PORT env (default 3000)
+ * - WebSocket: port 19800 (as per JIP-2 spec)
+ */
+
+import path from 'node:path'
+import { serve } from '@hono/node-server'
 import { logger } from '@pbnjam/core'
-import cors from 'cors'
-import express from 'express'
-import { WebSocketServer } from 'ws'
+import {
+  createCoreServices,
+  type ServiceContext,
+  startCoreServices,
+  stopCoreServices,
+} from '@pbnjam/node'
 import { config } from './config'
-import { RpcHandler } from './rpc-handler'
-import { SubscriptionManager } from './subscription-manager'
+import { app } from './routes'
+import { setServiceContext } from './rpc-handler'
+import { setupWebSocket } from './ws-routes'
 
-const app = express()
-const server = createServer(app)
-const wss = new WebSocketServer({ server })
+/**
+ * Initialize and start the JAM node services
+ */
+async function initializeNodeServices(): Promise<ServiceContext> {
+  // Determine SRS file path
+  const srsFilePath =
+    process.env['SRS_FILE_PATH'] ||
+    path.join(
+      __dirname,
+      '../../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
+    )
 
-logger.init()
+  logger.info(`Initializing JAM node services... ${srsFilePath}`)
 
-// Middleware
-app.use(
-  cors({
-    origin: config.corsOrigin,
-    credentials: true,
-  }),
-)
-app.use(express.json({ limit: config.maxPayloadSize }))
+  // Create core services using the shared factory
+  const services = await createCoreServices({
+    configSize: (process.env['CONFIG_SIZE'] as 'tiny' | 'full') || 'tiny',
+    srsFilePath,
+    enableNetworking: false, // RPC server doesn't need full networking
+    genesis: {
+      chainSpecPath: process.env['CHAIN_SPEC_PATH'],
+    },
+    useWasm: process.env['USE_WASM'] === 'true',
+    nodeId: process.env['NODE_ID'] || 'rpc-server',
+  })
 
-// Initialize services
-const subscriptionManager = new SubscriptionManager()
-const rpcHandler = new RpcHandler(subscriptionManager)
+  // Start services
+  await startCoreServices(services)
 
-// Health check endpoint
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
-})
+  // Set global service context for RPC handler
+  setServiceContext(services)
 
-// JSON-RPC endpoint
-app.post('/rpc', async (req, res) => {
+  logger.info('Node services initialized successfully')
+
+  return services
+}
+
+// Main server startup
+async function main(): Promise<void> {
+  let services: ServiceContext | null = null
+
   try {
-    const { jsonrpc, id, method, params } = req.body
-
-    if (jsonrpc !== '2.0') {
-      return res.json({
-        jsonrpc: '2.0',
-        id,
-        error: { code: -32600, message: 'Invalid Request' },
-      })
-    }
-
-    const result = await rpcHandler.handleMethod(method, params)
-
-    res.json({
-      jsonrpc: '2.0',
-      id,
-      result,
-    })
+    // Initialize node services first
+    services = await initializeNodeServices()
   } catch (error) {
-    logger.error('RPC error:', error)
-    res.json({
-      jsonrpc: '2.0',
-      id: req.body.id,
-      error: {
-        code: -32603,
-        message: 'Internal error',
-        data: error instanceof Error ? error.message : String(error),
-      },
-    })
+    logger.error(`Failed to initialize node services: ${error}`)
+    process.exit(1)
   }
-})
 
-// WebSocket connection handler
-wss.on('connection', (ws, req) => {
-  logger.info('WebSocket connection established', {
-    ip: req.socket.remoteAddress,
-    userAgent: req.headers['user-agent'],
+  // Setup WebSocket support on the app
+  const { injectWebSocket } = setupWebSocket(app)
+
+  // Start HTTP server with WebSocket support
+  const port = config.port
+  logger.info(
+    `JIP-2 RPC Server starting on http://${config.host}:${port} ${config.environment}`,
+  )
+
+  const server = serve({
+    fetch: app.fetch,
+    port,
+    hostname: config.host,
   })
 
-  ws.on('message', async (data) => {
-    try {
-      const message = JSON.parse(data.toString())
-      const { jsonrpc, id, method, params } = message
+  // Inject WebSocket handler into the server
+  injectWebSocket(server)
 
-      if (jsonrpc !== '2.0') {
-        ws.send(
-          JSON.stringify({
-            jsonrpc: '2.0',
-            id,
-            error: { code: -32600, message: 'Invalid Request' },
-          }),
-        )
-        return
+  logger.info(`RPC Server is ready on port ${port}`)
+  logger.info(
+    `WebSocket subscriptions available at ws://${config.host}:${port}/ws`,
+  )
+
+  // Graceful shutdown
+  async function shutdown(): Promise<void> {
+    logger.info('Shutting down gracefully...')
+    if (services) {
+      try {
+        await stopCoreServices(services)
+        logger.info('Services stopped')
+      } catch (error) {
+        logger.error(`Error stopping services: ${error}`)
       }
-
-      const result = await rpcHandler.handleMethod(method, params, ws)
-
-      ws.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id,
-          result,
-        }),
-      )
-    } catch (error) {
-      logger.error('WebSocket RPC error:', error)
-      ws.send(
-        JSON.stringify({
-          jsonrpc: '2.0',
-          id: 'error',
-          error: {
-            code: -32603,
-            message: 'Internal error',
-            data: error instanceof Error ? error.message : String(error),
-          },
-        }),
-      )
     }
-  })
-
-  ws.on('close', () => {
-    logger.info('WebSocket connection closed')
-    subscriptionManager.removeSubscriptions(ws)
-  })
-
-  ws.on('error', (error) => {
-    logger.error('WebSocket error:', error)
-  })
-})
-
-// Start server
-server.listen(config.port, config.host, () => {
-  logger.info('JIP-2 RPC Server started', {
-    host: config.host,
-    port: config.port,
-    environment: config.environment,
-  })
-})
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully')
-  server.close(() => {
-    logger.info('Server closed')
     process.exit(0)
-  })
-})
+  }
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully')
-  server.close(() => {
-    logger.info('Server closed')
-    process.exit(0)
+  process.on('SIGTERM', () => {
+    logger.info('SIGTERM received, shutting down gracefully...')
+    shutdown()
   })
+
+  process.on('SIGINT', () => {
+    logger.info('SIGINT received')
+    shutdown()
+  })
+}
+
+main().catch((error) => {
+  logger.error(`Fatal error starting RPC server: ${error}`)
+  process.exit(1)
 })

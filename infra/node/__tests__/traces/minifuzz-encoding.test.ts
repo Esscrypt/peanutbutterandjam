@@ -8,23 +8,26 @@
 import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, readdirSync } from 'node:fs'
-import { decodeFuzzMessage } from '../../../packages/codec/src/fuzz'
+import { decodeFuzzMessage } from '../../../../packages/codec/src/fuzz'
 import { FuzzMessageType } from '@pbnjam/types'
-import { ConfigService } from '../services/config-service'
+import { ConfigService } from '../../services/config-service'
 
 // Test vectors directory (relative to workspace root)
 // __dirname is infra/node/__tests__, so we go up 3 levels to get to workspace root
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 describe('Fuzzer ImportBlock Decoding', () => {
   it('should decode ImportBlock message from binary file', () => {
     const configService = new ConfigService('tiny')
 
-    // Load ImportBlock message
-    const importBlockBinPath = path.join(
+    // Examples directory
+    const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
+
+    // Load ImportBlock message
+    const importBlockBinPath = path.join(examplesDir, '00000002_fuzzer_import_block.bin')
 
     let importBlockBin: Uint8Array
     try {
@@ -149,10 +152,7 @@ describe('Fuzzer ImportBlock Decoding', () => {
     }
 
     // Load corresponding JSON for comparison
-    const importBlockJsonPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.json',
-    )
+    const importBlockJsonPath = path.join(examplesDir, '00000002_fuzzer_import_block.json')
 
     let jsonData: any
     try {
@@ -437,7 +437,7 @@ describe('Fuzzer ImportBlock Decoding', () => {
     const configService = new ConfigService('tiny')
     const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
 
     // Dynamically discover all ImportBlock files

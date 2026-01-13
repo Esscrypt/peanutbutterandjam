@@ -39,7 +39,7 @@ describe('Genesis Parse Tests', () => {
     // Run with both TypeScript and WASM executors
     const executorTypes: Array<{ name: string; useWasm: boolean }> = [
       { name: 'TypeScript', useWasm: false },
-      { name: 'WASM', useWasm: true },
+      // { name: 'WASM', useWasm: true },
     ]
 
     for (const executorType of executorTypes) {
@@ -73,7 +73,7 @@ describe('Genesis Parse Tests', () => {
       // Initialize services using shared utility
       // Note: Currently only supports TypeScript executor (useWasm: false)
       // WASM executor testing would require adding useWasm parameter to initializeServices
-      const services = await initializeServices('tiny', 'preimages_light', genesisManager, initialValidators)
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder: 'preimages_light', genesisManager, initialValidators })
       const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service

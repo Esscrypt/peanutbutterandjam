@@ -97,6 +97,12 @@ export interface RAM {
   getPageDump(pageIndex: u32): Uint8Array
   // Reset RAM to initial state
   reset(): void
+  // JIP-6 trace support: Track last load/store for each instruction step
+  lastLoadAddress: u32
+  lastLoadValue: u64
+  lastStoreAddress: u32
+  lastStoreValue: u64
+  clearLastMemoryOp(): void
 }
 
 /**

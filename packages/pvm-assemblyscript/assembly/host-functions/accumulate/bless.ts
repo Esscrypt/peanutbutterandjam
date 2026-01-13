@@ -1,7 +1,6 @@
 import { RESULT_CODE_PANIC } from '../../config'
 import { AlwaysAccerEntry } from '../../codec'
 import {
-  ACCUMULATE_ERROR_WHAT,
   ACCUMULATE_ERROR_WHO,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
@@ -36,13 +35,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
   name: string = 'bless'
   gasCost: u64 = u64(10)
 
-  // Gray Paper constants
-  C_CORE_COUNT: u64 = u64(341) // Ccorecount (default)
-
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const registers = context.registers
     const ram = context.ram
     const implications = context.implications
+    const numCores = context.numCores // Get from config via context
+    
     // Extract parameters from registers
     const managerServiceId = u64(registers[7])
     const assignersOffset = u64(registers[8])
@@ -51,18 +49,17 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     const alwaysAccessorsOffset = u64(registers[11])
     const numberOfAlwaysAccessors = u64(registers[12])
 
-    // Read assigners array from memory (341 cores * 4 bytes each)
-    const assignersLength = this.C_CORE_COUNT * u64(4)
+    // Read assigners array from memory (Ccorecount * 4 bytes each)
+    // Gray Paper pvm_invocations.tex lines 696-699:
+    // a = decode[4]{memory[a:4*Ccorecount]} when Nrange(a,4*Ccorecount) ⊆ readable(memory), error otherwise
+    const assignersLength = u64(numCores) * u64(4)
     const readResult_assigners = ram.readOctets(
       u32(assignersOffset),
       u32(assignersLength),
     )
-    if (readResult_assigners.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_assigners.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Gray Paper: PANIC but registers[7] should remain UNCHANGED
+    // Do NOT call setAccumulateError - just return PANIC
+    if (readResult_assigners.faultAddress !== 0 || readResult_assigners.data === null) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const assignersData = readResult_assigners.data!
@@ -73,19 +70,15 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       u32(alwaysAccessorsOffset),
       u32(accessorsLength),
     )
-    if (readResult_accessors.faultAddress !== 0) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
-      return new HostFunctionResult(RESULT_CODE_PANIC)
-    }
-    if (readResult_accessors.data === null) {
-      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHAT)
+    // Gray Paper: PANIC but registers[7] should remain UNCHANGED
+    if (readResult_accessors.faultAddress !== 0 || readResult_accessors.data === null) {
       return new HostFunctionResult(RESULT_CODE_PANIC)
     }
     const accessorsData = readResult_accessors.data!
 
     // Parse assigners array (4 bytes per core ID, little-endian)
     const assigners: u32[] = []
-    for (let i: i32 = 0; i < i32(this.C_CORE_COUNT); i++) {
+    for (let i: i32 = 0; i < i32(numCores); i++) {
       const offset = i * 4
       // Read 4 bytes as little-endian u32
       let coreId: u32 = u32(0)

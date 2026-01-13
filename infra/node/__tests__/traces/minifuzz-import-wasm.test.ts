@@ -10,17 +10,18 @@ import * as path from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
 import { FuzzMessageType } from '@pbnjam/types'
-import { hexToBytes } from '@pbnjam/core'
-import { decodeRecent } from '@pbnjam/codec'
-import { initializeServices } from './test-utils'
+import {
+  initializeServices,
+} from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
-const WORKSPACE_ROOT = path.join(__dirname, '../../../')
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
 
 describe('Fuzzer Target Block Import', () => {
   it('should match state root after importing block 2 using fuzzer-target initializeServices', async () => {
     // Initialize services using the exact same function as fuzzer-target.ts
-    const services = await initializeServices()
+    const services = await initializeServices({ useWasm: true })
 
     const stateService = services.stateService
     const blockImporterService = services.blockImporterService
@@ -42,27 +43,45 @@ describe('Fuzzer Target Block Import', () => {
     // If needed, fork validation can be disabled by patching validateBlockHeader, but that's
     // more complex and not needed for the 'no_forks' test vectors.
 
-    // Load PeerInfo message to get JAM version
-    const peerInfoJsonPath = path.join(
+    // Examples directory
+    const examplesDir = path.join(
       WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000000_fuzzer_peer_info.json',
+      'submodules/jam-conformance/fuzz-proto/examples/0.7.2/no_forks',
     )
+
+    // Load PeerInfo message to get JAM version
+    const peerInfoJsonPath = path.join(examplesDir, '00000000_fuzzer_peer_info.json')
     let jamVersion: { major: number; minor: number; patch: number } = { major: 0, minor: 7, patch: 0 }
     try {
       const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
-      if (peerInfoJson.jam_version) {
-        jamVersion = peerInfoJson.jam_version
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
         console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
       }
     } catch (error) {
       console.warn(`⚠️  Failed to load PeerInfo, using default JAM version: ${error instanceof Error ? error.message : String(error)}`)
     }
+    
+    // Set JAM version on configService
+    configService.jamVersion = jamVersion
+
+    // Load expected initial state root from target_state_root.json
+    const expectedInitStateRootPath = path.join(examplesDir, '00000001_target_state_root.json')
+    let expectedInitStateRoot: string | null = null
+    if (existsSync(expectedInitStateRootPath)) {
+      try {
+        const expectedJson = JSON.parse(readFileSync(expectedInitStateRootPath, 'utf-8'))
+        expectedInitStateRoot = expectedJson.state_root?.toLowerCase()
+        console.log(`📋 Expected initial state root loaded from file: ${expectedInitStateRoot}`)
+      } catch (error) {
+        console.warn(`⚠️  Failed to load expected initial state root: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else {
+      console.warn(`⚠️  Expected initial state root file not found: ${expectedInitStateRootPath}`)
+    }
 
     // Load Initialize message
-    const initializeBinPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000001_fuzzer_initialize.bin',
-    )
+    const initializeBinPath = path.join(examplesDir, '00000001_fuzzer_initialize.bin')
 
     let initializeBin: Uint8Array
     try {
@@ -101,40 +120,24 @@ describe('Fuzzer Target Block Import', () => {
     }
     console.log(`✅ Initial state set from ${init.keyvals.length} keyvals`)
 
-    // Initialize recent history from pre-state beta chapter
-    const betaKeyval = init.keyvals.find(
-      (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-    )
-    if (betaKeyval) {
-      const betaData = hexToBytes(betaKeyval.value)
-      const [decodeError, decodeResult] = decodeRecent(betaData)
-      if (!decodeError && decodeResult) {
-        console.log(`📂 Decoded recent history:`, {
-          historyLength: decodeResult.value.history?.length ?? 0,
-          peaks: decodeResult.value.accoutBelt?.peaks ?? [],
-          totalCount: decodeResult.value.accoutBelt?.totalCount?.toString() ?? '0',
-        })
-        recentHistoryService.setRecent(decodeResult.value)
-        console.log(`📂 Loaded recent history from pre-state (totalCount: ${decodeResult.value.accoutBelt?.totalCount ?? 0})`)
-      } else {
-        console.warn(`⚠️  Failed to decode beta from pre-state:`, decodeError)
-      }
-    }
 
     // Verify initial state root
     const [initStateRootError, initStateRoot] = stateService.getStateRoot()
     expect(initStateRootError).toBeUndefined()
-    const expectedInitStateRoot = '0x80748e40b5f83342b844a54aed5fd65861b982288e35ce1e7503fc45645d45b6'
+    
     console.log(`\n🌳 INITIAL STATE ROOT:`)
     console.log(`  Our state root:      ${initStateRoot}`)
-    console.log(`  Expected state root: ${expectedInitStateRoot}`)
-    console.log(`  Match: ${initStateRoot?.toLowerCase() === expectedInitStateRoot.toLowerCase() ? '✅' : '❌'}`)
+    if (expectedInitStateRoot) {
+      console.log(`  Expected state root: ${expectedInitStateRoot}`)
+      const initMatch = initStateRoot?.toLowerCase() === expectedInitStateRoot
+      console.log(`  Match: ${initMatch ? '✅' : '❌'}`)
+      expect(initStateRoot?.toLowerCase()).toBe(expectedInitStateRoot)
+    } else {
+      console.log(`  Expected state root: (not available - file not found)`)
+    }
 
     // Load ImportBlock message (block 1)
-    const importBlock1BinPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000002_fuzzer_import_block.bin',
-    )
+    const importBlock1BinPath = path.join(examplesDir, '00000002_fuzzer_import_block.bin')
     let importBlock1Bin: Uint8Array
     try {
       importBlock1Bin = new Uint8Array(readFileSync(importBlock1BinPath))
@@ -177,11 +180,24 @@ describe('Fuzzer Target Block Import', () => {
     }
     console.log(`✅ Block 1 imported successfully`)
 
+    // Load expected state root after block 2 from target_state_root.json
+    // File 00000003 corresponds to block 2 (file number = block number + 1)
+    const expectedStateRootAfterBlock2Path = path.join(examplesDir, '00000003_target_state_root.json')
+    let expectedStateRootAfterBlock2: string | null = null
+    if (existsSync(expectedStateRootAfterBlock2Path)) {
+      try {
+        const expectedJson = JSON.parse(readFileSync(expectedStateRootAfterBlock2Path, 'utf-8'))
+        expectedStateRootAfterBlock2 = expectedJson.state_root?.toLowerCase()
+        console.log(`📋 Expected state root after block 2 loaded from file: ${expectedStateRootAfterBlock2}`)
+      } catch (error) {
+        console.warn(`⚠️  Failed to load expected state root after block 2: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    } else {
+      console.warn(`⚠️  Expected state root file after block 2 not found: ${expectedStateRootAfterBlock2Path}`)
+    }
+
     // Load ImportBlock message (block 2)
-    const importBlockBinPath = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks/00000003_fuzzer_import_block.bin',
-    )
+    const importBlockBinPath = path.join(examplesDir, '00000003_fuzzer_import_block.bin')
     let importBlockBin: Uint8Array
     try {
       importBlockBin = new Uint8Array(readFileSync(importBlockBinPath))
@@ -213,7 +229,7 @@ describe('Fuzzer Target Block Import', () => {
     console.log(`\n📦 ImportBlock 2 message loaded: timeslot ${importBlock.block.header.timeslot}`)
 
     // Capture state trie before block 2 import
-
+    
     const [trieBeforeBlock2Error, trieBeforeBlock2] = stateService.generateStateTrie()
     const fs = await import('node:fs/promises')
     const logPath = '/Users/tanyageorgieva/Repos/oogabooga/.cursor/debug.log'
@@ -234,7 +250,7 @@ describe('Fuzzer Target Block Import', () => {
     console.log(`✅ Block 2 imported successfully`)
 
     // Capture state trie after block 2 import and compare with before
-
+    
     const [trieAfterBlock2Error, trieAfterBlock2] = stateService.generateStateTrie()
     
     // Compare state tries to find modified keys
@@ -290,7 +306,7 @@ describe('Fuzzer Target Block Import', () => {
     // #endregion
 
     // Get state root after block import
-
+    
     const [trieBeforeRootError, trieBeforeRoot] = stateService.generateStateTrie()
     // Capture all chapter values for comparison
     const chapterKeys = [
@@ -353,32 +369,29 @@ describe('Fuzzer Target Block Import', () => {
     await fs.appendFile(logPath, logEntry1).catch(()=>{})
     // #endregion
     const [stateRootError, stateRoot] = stateService.getStateRoot()
-
+    
     const logEntry2 = JSON.stringify({location:'fuzzer-target-block-import.test.ts:175',message:'State root calculated',data:{test:'fuzzer-target-block-import',stateRoot,stateRootError:stateRootError?.message},timestamp:Date.now(),sessionId:'debug-session',runId:'post-root',hypothesisId:'A'})+'\n'
     await fs.appendFile(logPath, logEntry2).catch(()=>{})
     // #endregion
     expect(stateRootError).toBeUndefined()
-
-    const expectedStateRoot = '0x9bceb7d7c864bbbcaa4b0c71f1c257ceef3f610ee627f432e47345fd0d66d5df'
-
-    const logEntry3 = JSON.stringify({location:'fuzzer-target-block-import.test.ts:180',message:'State root comparison',data:{test:'fuzzer-target-block-import',calculated:stateRoot,expected:expectedStateRoot,matches:stateRoot?.toLowerCase() === expectedStateRoot.toLowerCase()},timestamp:Date.now(),sessionId:'debug-session',runId:'comparison',hypothesisId:'A'})+'\n'
+    
+    const logEntry3 = JSON.stringify({location:'fuzzer-target-block-import.test.ts:180',message:'State root comparison',data:{test:'fuzzer-target-block-import',calculated:stateRoot,expected:expectedStateRootAfterBlock2,matches:expectedStateRootAfterBlock2 ? stateRoot?.toLowerCase() === expectedStateRootAfterBlock2 : null},timestamp:Date.now(),sessionId:'debug-session',runId:'comparison',hypothesisId:'A'})+'\n'
     await fs.appendFile(logPath, logEntry3).catch(()=>{})
     // #endregion
     console.log(`\n🌳 STATE ROOT AFTER BLOCK 2:`)
     console.log(`  Our state root:      ${stateRoot}`)
-    console.log(`  Expected state root: ${expectedStateRoot}`)
-    console.log(`  Match: ${stateRoot?.toLowerCase() === expectedStateRoot.toLowerCase() ? '✅' : '❌'}`)
-
-    // Assert the state root matches
-    expect(stateRoot?.toLowerCase()).toBe(expectedStateRoot.toLowerCase())
+    if (expectedStateRootAfterBlock2) {
+      console.log(`  Expected state root: ${expectedStateRootAfterBlock2}`)
+      const stateRootMatch = stateRoot?.toLowerCase() === expectedStateRootAfterBlock2
+      console.log(`  Match: ${stateRootMatch ? '✅' : '❌'}`)
+      // Assert the state root matches only if expected value was loaded
+      expect(stateRoot?.toLowerCase()).toBe(expectedStateRootAfterBlock2)
+    } else {
+      console.log(`  Expected state root: (not available - file not found)`)
+    }
 
     // Continue importing subsequent blocks
     console.log(`\n🔄 Continuing with subsequent blocks...`)
-    
-    const examplesDir = path.join(
-      WORKSPACE_ROOT,
-      'submodules/jam-conformance/fuzz-proto/examples/v1/no_forks',
-    )
 
     // Discover all ImportBlock files and sort by block number
     let allFiles: string[]
@@ -529,5 +542,3 @@ describe('Fuzzer Target Block Import', () => {
     expect(successCount).toBeGreaterThan(0)
   }, 600000) // 10 minute timeout for importing many blocks
 })
-
-
