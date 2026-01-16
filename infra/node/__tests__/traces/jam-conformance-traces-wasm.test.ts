@@ -8,7 +8,7 @@
 import { config } from 'dotenv'
 config() // Load environment variables from .env file
 
-import { describe, it, expect } from 'bun:test'
+import { describe, it, expect, afterAll } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs'
 import { NodeGenesisManager } from '../../services/genesis-manager'
@@ -18,7 +18,7 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { decodeRecent } from '@pbnjam/codec'
+import { decodeRecent, decodeStateWorkReports } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
@@ -38,6 +38,14 @@ const TRACES_DIR = path.join(WORKSPACE_ROOT, 'submodules/jam-conformance/fuzz-re
 
 // Mismatch logs directory
 const MISMATCH_LOGS_DIR = path.join(WORKSPACE_ROOT, 'mismatch-logs/jam-conformance')
+
+// Track test results for summary at the end
+interface TraceResult {
+  trace: string
+  success: boolean
+  error?: string
+}
+const traceResults: TraceResult[] = []
 
 // Ensure mismatch logs directory exists
 function ensureMismatchLogsDir(): void {
@@ -116,6 +124,46 @@ describe('JAM Conformance Traces', () => {
     return
   }
 
+  // Print summary of all test results after all tests complete
+  afterAll(() => {
+    const passed = traceResults.filter(r => r.success)
+    const failed = traceResults.filter(r => !r.success)
+    
+    console.log('\n' + '='.repeat(80))
+    console.log('📊 JAM CONFORMANCE TRACES - FINAL SUMMARY')
+    console.log('='.repeat(80))
+    console.log(`✅ Passed: ${passed.length}`)
+    console.log(`❌ Failed: ${failed.length}`)
+    console.log(`📋 Total:  ${traceResults.length}`)
+    
+    if (failed.length > 0) {
+      console.log('\n❌ FAILED TRACES:')
+      console.log('-'.repeat(80))
+      for (const result of failed) {
+        console.log(`  • ${result.trace}`)
+        if (result.error) {
+          console.log(`    Error: ${result.error.slice(0, 200)}${result.error.length > 200 ? '...' : ''}`)
+        }
+      }
+      console.log('-'.repeat(80))
+      
+      // Write failed traces to file for easy reference
+      const failedTracesFile = path.join(MISMATCH_LOGS_DIR, 'failed-traces.json')
+      ensureMismatchLogsDir()
+      writeFileSync(failedTracesFile, JSON.stringify({
+        version: JAM_CONFORMANCE_VERSION,
+        timestamp: new Date().toISOString(),
+        passed: passed.length,
+        failed: failed.length,
+        total: traceResults.length,
+        failedTraces: failed,
+      }, null, 2))
+      console.log(`\n📝 Failed traces written to: ${failedTracesFile}`)
+    }
+    
+    console.log('='.repeat(80) + '\n')
+  })
+
   // Process each trace file individually
   for (const traceFilePath of traceFiles) {
     // Get relative path from TRACES_DIR to preserve directory structure
@@ -125,6 +173,8 @@ describe('JAM Conformance Traces', () => {
     
     it(`should process trace ${relativePathWithoutExt}`, async () => {
       console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
+      
+      try {
 
       // Create accumulation logs directory preserving the subdirectory structure
       // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
@@ -170,7 +220,7 @@ describe('JAM Conformance Traces', () => {
 
       // Initialize services using shared utility
       const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
-      const { stateService, blockImporterService, recentHistoryService } = services
+      const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Set pre-state from trace
       if (traceData.pre_state?.keyvals) {
@@ -188,8 +238,10 @@ describe('JAM Conformance Traces', () => {
         }
       }
 
-      // Initialize recent history from pre-state
+      // Initialize recent history from pre-state or genesis state
       const betaKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
+      ) || genesisJson?.state?.keyvals?.find(
         (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
       )
       if (betaKeyval) {
@@ -197,7 +249,42 @@ describe('JAM Conformance Traces', () => {
         const [decodeError, decodeResult] = decodeRecent(betaData)
         if (!decodeError && decodeResult) {
           recentHistoryService.setRecent(decodeResult.value)
+          
+          // Initialize chain manager ancestry from recent history header hashes
+          // Gray Paper Eq. 346: lookup anchors must exist in ancestors set
+          const ancestorHashes = decodeResult.value.history.map(entry => entry.headerHash)
+          chainManagerService.initializeAncestry(ancestorHashes)
         }
+      }
+
+      // Initialize pending work reports from pre-state
+      // Gray Paper Eq. 296-298: Core must not be engaged (no pending report)
+      // This is critical for CORE_ENGAGED validation to work correctly
+      const reportsKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x0a000000000000000000000000000000000000000000000000000000000000'
+      )
+      if (reportsKeyval) {
+        const reportsData = hexToBytes(reportsKeyval.value as Hex)
+        const [decodeError, decodeResult] = decodeStateWorkReports(reportsData, fullContext.configService)
+        if (!decodeError && decodeResult) {
+          fullContext.workReportService.setPendingReports(decodeResult.value)
+        }
+      }
+
+      // Store initial state snapshot in ChainManagerService for fork rollback
+      // This allows rolling back to initial state if block import fails
+      const [initTrieError, initTrie] = stateService.generateStateTrie()
+      if (!initTrieError && initTrie) {
+        const initKeyvals = Object.entries(initTrie).map(([k, v]) => ({
+          key: k as `0x${string}`,
+          value: v as `0x${string}`,
+        }))
+        chainManagerService.setInitialStateSnapshot({
+          keyvals: initKeyvals,
+          accumulationSlot: fullContext.accumulationService.getLastProcessedSlot(),
+          clockSlot: fullContext.clockService.getLatestReportedBlockTimeslot(),
+          entropy: { ...fullContext.entropyService.getEntropy() },
+        })
       }
 
       // Convert and import the block from trace
@@ -561,6 +648,22 @@ describe('JAM Conformance Traces', () => {
       expect(computedStateRoot).toBe(expectedStateRoot)
 
       console.log(`✅ Trace ${relativePathWithoutExt} processed successfully`)
+      
+      // Track success
+      traceResults.push({
+        trace: relativePathWithoutExt,
+        success: true,
+      })
+      } catch (error) {
+        // Track failure
+        traceResults.push({
+          trace: relativePathWithoutExt,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        // Re-throw to fail the test
+        throw error
+      }
     }, { timeout: 120000 }) // 2 minute timeout
   }
 })

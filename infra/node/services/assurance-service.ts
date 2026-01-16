@@ -32,6 +32,7 @@ import type {
   AssuranceDistributionRequest,
   IConfigService,
   Safe,
+  ValidatorPublicKeys,
   WorkReport,
 } from '@pbnjam/types'
 import {
@@ -199,6 +200,8 @@ export class AssuranceService extends BaseService {
    * @param currentSlot - Current block timeslot
    * @param parentHash - Parent block hash
    * @param configService - Configuration service
+   * @param isEpochTransition - Whether this is an epoch transition block
+   *                           (if true, use previous validator set for signature verification)
    * @returns Safe result with error if validation fails, or array of work reports that became available
    */
   processAssurances(
@@ -206,6 +209,7 @@ export class AssuranceService extends BaseService {
     currentSlot: number,
     parentHash: Hex,
     configService: IConfigService,
+    isEpochTransition = false,
   ): Safe<WorkReport[]> {
     // Get pending reports to check for engaged cores during validation
     // Gray Paper: justbecameavailable is built from reportspostjudgement (reports after disputes)
@@ -238,13 +242,31 @@ export class AssuranceService extends BaseService {
         return safeError(new Error(ASSURANCES_ERRORS.BAD_ATTESTATION_PARENT))
       }
 
-      const [validatorKeyError, validatorKey] =
-        this.validatorSetManager.getValidatorAtIndex(
-          assurances[i].validator_index,
-        )
-      if (validatorKeyError) {
-        return safeError(validatorKeyError)
+      // For epoch transition blocks, assurances were signed by validators in the OLD active set
+      // (which is now the previous set). Use previous validators for signature verification.
+      // Gray Paper: Assurances reference the parent block, which was in the previous epoch.
+      let validatorKey: ValidatorPublicKeys | undefined
+      if (isEpochTransition) {
+        const previousValidators =
+          this.validatorSetManager.getPreviousValidators()
+        if (
+          assurances[i].validator_index < 0 ||
+          assurances[i].validator_index >= previousValidators.length
+        ) {
+          return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
+        }
+        validatorKey = previousValidators[assurances[i].validator_index]
+      } else {
+        const [validatorKeyError, key] =
+          this.validatorSetManager.getValidatorAtIndex(
+            assurances[i].validator_index,
+          )
+        if (validatorKeyError) {
+          return safeError(validatorKeyError)
+        }
+        validatorKey = key
       }
+
       if (!validatorKey) {
         return safeError(new Error(ASSURANCES_ERRORS.BAD_VALIDATOR_INDEX))
       }

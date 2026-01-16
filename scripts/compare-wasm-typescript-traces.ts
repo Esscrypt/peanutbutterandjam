@@ -6,12 +6,14 @@
  * for the same block, identifying where they diverge and why.
  *
  * Usage: bun scripts/compare-wasm-typescript-traces.ts [block_number] [--jamduna-block N] [--jamduna-dir path]
+ *        bun scripts/compare-wasm-typescript-traces.ts --jam-conformance <trace_id> <slot> <ordered_index> <service_id>
  *
  * Examples:
  *   bun scripts/compare-wasm-typescript-traces.ts 2    # Compare block 2 traces (2-way)
  *   bun scripts/compare-wasm-typescript-traces.ts 2 --jamduna-block 4    # Compare our block 2 with jamduna trace 4
  *   bun scripts/compare-wasm-typescript-traces.ts 4    # Compare block 4 traces (3-way with jamduna, auto-detects)
  *   bun scripts/compare-wasm-typescript-traces.ts 4 --jamduna-dir submodules/jamduna/jam-test-vectors/0.7.1/preimages_light
+ *   bun scripts/compare-wasm-typescript-traces.ts --jam-conformance 1767871405_3616 110 0 759414909
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
@@ -706,6 +708,301 @@ function findMatchingTraces(
   return matches.sort((a, b) => a.block - b.block)
 }
 
+/**
+ * Compare jam-conformance traces (TypeScript vs WASM for a specific service)
+ */
+function compareJamConformanceTraces(
+  traceId: string,
+  slot: number,
+  orderedIndex: number,
+  serviceId: number,
+) {
+  const tracesDir = join(
+    process.cwd(),
+    'pvm-traces',
+    'jam-conformance',
+    '0.7.2',
+    traceId,
+  )
+
+  if (!existsSync(tracesDir)) {
+    console.error(
+      `${colors.red}Error: Trace directory not found: ${tracesDir}${colors.reset}`,
+    )
+    process.exit(1)
+  }
+
+  const tsFile = join(
+    tracesDir,
+    `typescript-${slot}-${orderedIndex}-${serviceId}.log`,
+  )
+  const wasmFile = join(
+    tracesDir,
+    `wasm-${slot}-${orderedIndex}-${serviceId}.log`,
+  )
+  const tsOutputFile = join(
+    tracesDir,
+    `typescript-${slot}-${orderedIndex}-${serviceId}-output.bin`,
+  )
+  const wasmOutputFile = join(
+    tracesDir,
+    `wasm-${slot}-${orderedIndex}-${serviceId}-output.bin`,
+  )
+  const tsErrFile = join(
+    tracesDir,
+    `typescript-${slot}-${orderedIndex}-${serviceId}-err.bin`,
+  )
+  const wasmErrFile = join(
+    tracesDir,
+    `wasm-${slot}-${orderedIndex}-${serviceId}-err.bin`,
+  )
+
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}📊 JAM Conformance Trace Comparison${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log()
+  console.log(`${colors.cyan}Trace ID:${colors.reset}       ${traceId}`)
+  console.log(`${colors.cyan}Slot:${colors.reset}           ${slot}`)
+  console.log(`${colors.cyan}Ordered Index:${colors.reset}  ${orderedIndex}`)
+  console.log(`${colors.cyan}Service ID:${colors.reset}     ${serviceId}`)
+  console.log()
+
+  // Check if files exist
+  const tsExists = existsSync(tsFile)
+  const wasmExists = existsSync(wasmFile)
+
+  if (!tsExists && !wasmExists) {
+    console.error(
+      `${colors.red}Error: Neither TypeScript nor WASM trace found${colors.reset}`,
+    )
+    console.error(`  TypeScript: ${tsFile}`)
+    console.error(`  WASM: ${wasmFile}`)
+    process.exit(1)
+  }
+
+  console.log(`${colors.cyan}TypeScript trace:${colors.reset} ${tsExists ? '✓' : '✗'} ${tsFile}`)
+  console.log(`${colors.cyan}WASM trace:${colors.reset}       ${wasmExists ? '✓' : '✗'} ${wasmFile}`)
+  console.log()
+
+  // Compare output files
+  console.log(`${colors.bold}📦 Output Comparison${colors.reset}`)
+  const tsOutputExists = existsSync(tsOutputFile)
+  const wasmOutputExists = existsSync(wasmOutputFile)
+  const tsErrExists = existsSync(tsErrFile)
+  const wasmErrExists = existsSync(wasmErrFile)
+
+  if (tsOutputExists && wasmOutputExists) {
+    const tsOutput = readFileSync(tsOutputFile)
+    const wasmOutput = readFileSync(wasmOutputFile)
+    const outputsMatch = tsOutput.equals(wasmOutput)
+    console.log(
+      `   Outputs: ${outputsMatch ? colors.green + '✓ IDENTICAL' : colors.red + '✗ DIFFERENT'}${colors.reset}`,
+    )
+    if (!outputsMatch) {
+      console.log(`   TS output:   ${tsOutput.toString('hex').substring(0, 64)}...`)
+      console.log(`   WASM output: ${wasmOutput.toString('hex').substring(0, 64)}...`)
+    } else {
+      console.log(`   Output (hex): ${tsOutput.toString('hex').substring(0, 64)}...`)
+    }
+  } else if (tsOutputExists || wasmOutputExists) {
+    console.log(
+      `   ${colors.yellow}⚠️  Only one output file exists${colors.reset}`,
+    )
+    if (tsOutputExists) console.log(`   TS output: ${tsOutputFile}`)
+    if (wasmOutputExists) console.log(`   WASM output: ${wasmOutputFile}`)
+  } else {
+    console.log(`   ${colors.dim}(no output files)${colors.reset}`)
+  }
+
+  // Compare error files
+  if (tsErrExists || wasmErrExists) {
+    const tsErr = tsErrExists ? readFileSync(tsErrFile) : null
+    const wasmErr = wasmErrExists ? readFileSync(wasmErrFile) : null
+
+    if (tsErr && wasmErr) {
+      const errsMatch = tsErr.equals(wasmErr)
+      console.log(
+        `   Errors:  ${errsMatch ? colors.green + '✓ IDENTICAL' : colors.red + '✗ DIFFERENT'}${colors.reset}`,
+      )
+      if (!errsMatch) {
+        console.log(`   TS error:   0x${tsErr.toString('hex')}`)
+        console.log(`   WASM error: 0x${wasmErr.toString('hex')}`)
+      } else {
+        console.log(`   Error code: 0x${tsErr.toString('hex')}`)
+      }
+    } else {
+      console.log(
+        `   ${colors.yellow}⚠️  Only one error file exists${colors.reset}`,
+      )
+      if (tsErr) console.log(`   TS error: 0x${tsErr.toString('hex')}`)
+      if (wasmErr) console.log(`   WASM error: 0x${wasmErr.toString('hex')}`)
+    }
+  }
+  console.log()
+
+  // If both trace files exist, compare them
+  if (tsExists && wasmExists) {
+    const typescriptLines = parseTraceFile(tsFile)
+    const wasmLines = parseTraceFile(wasmFile)
+
+    const result = compareTraces(
+      wasmLines,
+      typescriptLines,
+      slot,
+      basename(wasmFile),
+      basename(tsFile),
+    )
+
+    // Print summary
+    console.log(`${colors.bold}📈 Trace Comparison${colors.reset}`)
+    console.log(`   TypeScript instructions: ${result.typescriptInstructionCount}`)
+    console.log(`   WASM instructions:       ${result.wasmInstructionCount}`)
+    console.log(`   Matching:                ${result.matchingInstructions}`)
+    console.log(`   Differences:             ${result.differences.length}`)
+    console.log()
+
+    // Match percentage
+    const matchPercent =
+      result.typescriptInstructionCount > 0
+        ? (
+            (result.matchingInstructions /
+              Math.min(
+                result.wasmInstructionCount,
+                result.typescriptInstructionCount,
+              )) *
+            100
+          ).toFixed(2)
+        : '0'
+    const matchColor =
+      Number.parseFloat(matchPercent) >= 99
+        ? colors.green
+        : Number.parseFloat(matchPercent) >= 90
+          ? colors.yellow
+          : colors.red
+    console.log(`   ${matchColor}Match rate: ${matchPercent}%${colors.reset}`)
+    console.log()
+
+    if (result.differences.length === 0) {
+      console.log(
+        `${colors.green}✓ Traces are IDENTICAL - PVM execution matches between TypeScript and WASM${colors.reset}`,
+      )
+      console.log()
+      console.log(
+        `${colors.yellow}💡 If there's a state mismatch, it's in the POST-ACCUMULATION state application layer,${colors.reset}`,
+      )
+      console.log(
+        `${colors.yellow}   not in the PVM execution itself.${colors.reset}`,
+      )
+    } else {
+      // Show first divergence
+      if (result.firstDivergence) {
+        console.log(`${colors.bold}🔍 First Divergence${colors.reset}`)
+        console.log(`   Step: ${result.firstDivergence.step}`)
+        console.log(
+          `   Reason: ${colors.red}${result.firstDivergence.reason}${colors.reset}`,
+        )
+        console.log()
+      }
+
+      // Show first 20 differences
+      console.log(
+        `${colors.bold}📋 Differences (showing first 20 of ${result.differences.length})${colors.reset}`,
+      )
+      console.log()
+      for (const diff of result.differences.slice(0, 20)) {
+        const diffColor =
+          diff.type === 'missing_wasm' || diff.type === 'missing_typescript'
+            ? colors.red
+            : colors.yellow
+        console.log(
+          `   ${diffColor}Step ${diff.step}: ${diff.type}${colors.reset}`,
+        )
+        if (diff.wasmValue) console.log(`     WASM: ${diff.wasmValue}`)
+        if (diff.typescriptValue) console.log(`     TypeScript: ${diff.typescriptValue}`)
+        if (diff.details) console.log(`     ${colors.dim}${diff.details}${colors.reset}`)
+        console.log()
+      }
+    }
+  }
+
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+}
+
+/**
+ * List all available services in a jam-conformance trace directory
+ */
+function listJamConformanceServices(traceId: string) {
+  const tracesDir = join(
+    process.cwd(),
+    'pvm-traces',
+    'jam-conformance',
+    '0.7.2',
+    traceId,
+  )
+
+  if (!existsSync(tracesDir)) {
+    console.error(
+      `${colors.red}Error: Trace directory not found: ${tracesDir}${colors.reset}`,
+    )
+    process.exit(1)
+  }
+
+  const files = readdirSync(tracesDir).filter((f) => f.endsWith('.log'))
+
+  // Parse file names to extract slot-orderedIndex-serviceId
+  const services = new Map<
+    string,
+    { ts: boolean; wasm: boolean; slot: number; idx: number; service: number }
+  >()
+
+  for (const file of files) {
+    const match = file.match(/(typescript|wasm)-(\d+)-(\d+)-(\d+)\.log/)
+    if (match) {
+      const [, executor, slot, idx, service] = match
+      const key = `${slot}-${idx}-${service}`
+      if (!services.has(key)) {
+        services.set(key, {
+          ts: false,
+          wasm: false,
+          slot: Number.parseInt(slot, 10),
+          idx: Number.parseInt(idx, 10),
+          service: Number.parseInt(service, 10),
+        })
+      }
+      const entry = services.get(key)!
+      if (executor === 'typescript') entry.ts = true
+      if (executor === 'wasm') entry.wasm = true
+    }
+  }
+
+  console.log(
+    `${colors.bold}Available traces in ${traceId}:${colors.reset}`,
+  )
+  console.log()
+  console.log(`${'Slot'.padEnd(8)} ${'Idx'.padEnd(4)} ${'Service'.padEnd(12)} TS   WASM`)
+  console.log('-'.repeat(40))
+
+  const sortedEntries = Array.from(services.entries()).sort((a, b) => {
+    if (a[1].slot !== b[1].slot) return a[1].slot - b[1].slot
+    if (a[1].idx !== b[1].idx) return a[1].idx - b[1].idx
+    return a[1].service - b[1].service
+  })
+
+  for (const [, entry] of sortedEntries) {
+    console.log(
+      `${String(entry.slot).padEnd(8)} ${String(entry.idx).padEnd(4)} ${String(entry.service).padEnd(12)} ${entry.ts ? colors.green + '✓' : colors.red + '✗'}${colors.reset}    ${entry.wasm ? colors.green + '✓' : colors.red + '✗'}${colors.reset}`,
+    )
+  }
+}
+
 // Main execution
 const tracesDir = join(process.cwd(), 'pvm-traces')
 
@@ -713,6 +1010,48 @@ const tracesDir = join(process.cwd(), 'pvm-traces')
 let blockNumber: number | undefined
 let jamdunaDir: string | undefined
 let jamdunaBlockNumber: number | undefined
+
+// Check for --jam-conformance mode
+if (process.argv[2] === '--jam-conformance') {
+  const traceId = process.argv[3]
+  if (!traceId) {
+    console.error(
+      `${colors.red}Error: trace_id required for --jam-conformance${colors.reset}`,
+    )
+    console.log(
+      `\nUsage: bun scripts/compare-wasm-typescript-traces.ts --jam-conformance <trace_id> [slot] [ordered_index] [service_id]`,
+    )
+    console.log(
+      `       bun scripts/compare-wasm-typescript-traces.ts --jam-conformance <trace_id> --list`,
+    )
+    process.exit(1)
+  }
+
+  if (process.argv[4] === '--list') {
+    listJamConformanceServices(traceId)
+    process.exit(0)
+  }
+
+  const slot = process.argv[4] ? Number.parseInt(process.argv[4], 10) : undefined
+  const orderedIndex = process.argv[5]
+    ? Number.parseInt(process.argv[5], 10)
+    : undefined
+  const serviceId = process.argv[6]
+    ? Number.parseInt(process.argv[6], 10)
+    : undefined
+
+  if (slot === undefined || orderedIndex === undefined || serviceId === undefined) {
+    console.log(
+      `${colors.yellow}Listing available services (use --list or provide slot, ordered_index, service_id):${colors.reset}`,
+    )
+    console.log()
+    listJamConformanceServices(traceId)
+    process.exit(0)
+  }
+
+  compareJamConformanceTraces(traceId, slot, orderedIndex, serviceId)
+  process.exit(0)
+}
 
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i]

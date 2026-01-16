@@ -565,7 +565,7 @@ export interface BlockHeader {
   extrinsicHash: Hex // ✅ H_extrinsichash
   timeslot: bigint // ✅ H_timeslot
   epochMark: EpochMark | null // ✅ H_epochmark
-  winnersMark: SafroleTicketWithoutProof[] | null // ✅ H_winnersmark (Gray Paper: tuple{st_id, st_entryindex} - no proof)
+  winnersMark: SafroleTicketWithoutProof[] | null // ✅ H_winnersmark (Gray Paper Eq. 262-266: Z(ticketaccumulator) - JSON: tickets_mark)
   offendersMark: Hex[] // ✅ H_offendersmark
   authorIndex: bigint // ✅ H_authorindex
   vrfSig: Hex // ✅ H_vrfsig

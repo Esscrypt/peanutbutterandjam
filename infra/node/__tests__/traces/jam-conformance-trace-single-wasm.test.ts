@@ -21,7 +21,7 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { decodeRecent } from '@pbnjam/codec'
+import { decodeRecent, decodeStateWorkReports } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
@@ -171,7 +171,7 @@ describe('JAM Conformance Single Trace', () => {
     const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${traceId}`
     const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
 
-    const { stateService, blockImporterService, recentHistoryService } = services
+    const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
     // Helper function to parse state key using state service
     const parseStateKeyForDebug = (keyHex: Hex) => {
@@ -503,21 +503,60 @@ describe('JAM Conformance Single Trace', () => {
         }
       }
 
-      // Initialize recent history from pre-state (only for starting block)
-      if (blockNum === startBlock) {
-    const betaKeyval = traceData.pre_state?.keyvals?.find(
-          (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-        ) || genesisJson?.state?.keyvals?.find(
-      (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-    )
-    if (betaKeyval) {
-      const betaData = hexToBytes(betaKeyval.value as Hex)
-      const [decodeError, decodeResult] = decodeRecent(betaData)
-      if (!decodeError && decodeResult) {
-        recentHistoryService.setRecent(decodeResult.value)
-          }
+      // Initialize recent history from pre-state for EACH block
+      // This is important for sibling blocks which may have different pre_states
+      // even though they share the same parent (e.g., blocks 223, 224, 225 are siblings)
+      const betaKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
+      ) || (blockNum === startBlock ? genesisJson?.state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
+      ) : undefined)
+      if (betaKeyval) {
+        const betaData = hexToBytes(betaKeyval.value as Hex)
+        const [decodeError, decodeResult] = decodeRecent(betaData)
+        if (!decodeError && decodeResult) {
+          recentHistoryService.setRecent(decodeResult.value)
+          
+          // Initialize chain manager ancestry from recent history header hashes
+          // Gray Paper Eq. 346: lookup anchors must exist in ancestors set
+          const ancestorHashes = decodeResult.value.history.map(entry => entry.headerHash)
+          chainManagerService.initializeAncestry(ancestorHashes)
+        }
       }
-    }
+
+      // Initialize pending work reports from pre-state for EACH block
+      // Gray Paper Eq. 296-298: Core must not be engaged (no pending report)
+      // This is critical for CORE_ENGAGED validation to work correctly
+      const reportsKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x0a000000000000000000000000000000000000000000000000000000000000'
+      )
+      if (reportsKeyval) {
+        const reportsData = hexToBytes(reportsKeyval.value as Hex)
+        const [decodeError, decodeResult] = decodeStateWorkReports(reportsData, fullContext.configService)
+        if (!decodeError && decodeResult) {
+          fullContext.workReportService.setPendingReports(decodeResult.value)
+        }
+      }
+      
+      // Store initial state snapshot only for starting block
+      if (blockNum === startBlock) {
+
+        // Store initial state snapshot in ChainManagerService for fork rollback
+        // This allows rolling back to initial state if first block fails
+        const [initTrieError, initTrie] = stateService.generateStateTrie()
+        if (!initTrieError && initTrie) {
+          const initKeyvals = Object.entries(initTrie).map(([k, v]) => ({
+            key: k as `0x${string}`,
+            value: v as `0x${string}`,
+          }))
+          chainManagerService.setInitialStateSnapshot({
+            keyvals: initKeyvals,
+            accumulationSlot: fullContext.accumulationService.getLastProcessedSlot(),
+            clockSlot: fullContext.clockService.getLatestReportedBlockTimeslot(),
+            entropy: { ...fullContext.entropyService.getEntropy() },
+          })
+        }
+      }
 
     // Convert and import the block from trace
     const block = convertJsonBlockToBlock(traceData.block)

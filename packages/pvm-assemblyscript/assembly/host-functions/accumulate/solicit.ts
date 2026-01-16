@@ -13,6 +13,13 @@ const C_BASEDEPOSIT: u64 = u64(100) // Base deposit
 const C_ITEMDEPOSIT: u64 = u64(10) // Per-item deposit
 const C_BYTEDEPOSIT: u64 = u64(1) // Per-byte deposit
 
+// Helper to check for u64 addition overflow
+// Returns true if a + b would overflow
+@inline
+function wouldOverflowU64(a: u64, b: u64): bool {
+  return a > u64.MAX_VALUE - b
+}
+
 /**
  * SOLICIT accumulation host function (Ω_S)
  *
@@ -102,16 +109,37 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
     // Calculate new items and octets if this is a new request
     // Gray Paper: items += 2 for each new request (h, z)
     // Gray Paper: octets += (81 + z) for each new request
-    const newItems = isNewRequest
-      ? serviceAccount.items + u32(2)
-      : serviceAccount.items
-    const newOctets = isNewRequest
-      ? serviceAccount.octets + u64(81) + preimageLength
-      : serviceAccount.octets
+    let newItems = serviceAccount.items
+    let newOctets = serviceAccount.octets
+
+    if (isNewRequest) {
+      newItems = serviceAccount.items + u32(2)
+      
+      // Check for u64 overflow: octets + 81 + preimageLength
+      // TypeScript uses bigint (no overflow), so we must detect overflow and return FULL
+      const octetsIncrement = u64(81) + preimageLength
+      if (wouldOverflowU64(u64(81), preimageLength) || 
+          wouldOverflowU64(serviceAccount.octets, octetsIncrement)) {
+        // Overflow would occur - in TypeScript this results in minBalance > balance
+        this.setAccumulateError(registers, ACCUMULATE_ERROR_FULL)
+        return new HostFunctionResult(255) // continue execution
+      }
+      newOctets = serviceAccount.octets + octetsIncrement
+    }
 
     // Calculate new minimum balance
     // Gray Paper: a_minbalance = max(0, Cbasedeposit + Citemdeposit * a_items + Cbytedeposit * a_octets - a_gratis)
-    const totalDeposit = C_BASEDEPOSIT + C_ITEMDEPOSIT * u64(newItems) + C_BYTEDEPOSIT * newOctets
+    const itemDeposit = C_ITEMDEPOSIT * u64(newItems)
+    const byteDeposit = C_BYTEDEPOSIT * newOctets
+    
+    // Check for overflow in totalDeposit calculation
+    if (wouldOverflowU64(C_BASEDEPOSIT, itemDeposit) ||
+        wouldOverflowU64(C_BASEDEPOSIT + itemDeposit, byteDeposit)) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_FULL)
+      return new HostFunctionResult(255) // continue execution
+    }
+    
+    const totalDeposit = C_BASEDEPOSIT + itemDeposit + byteDeposit
     const newMinBalance = totalDeposit > serviceAccount.gratis ? totalDeposit - serviceAccount.gratis : u64(0)
 
     // Check if service has sufficient balance for the new request

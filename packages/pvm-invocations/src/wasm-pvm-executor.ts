@@ -328,7 +328,7 @@ export class WasmPVMExecutor {
       BigInt(this.configService.maxRefineGas),
       this.configService.maxTicketsPerExtrinsic,
       this.configService.ticketsPerValidator,
-      this.configService.slotDuration,
+      Math.floor(this.configService.slotDuration / 1000), // Convert from milliseconds to seconds
       this.configService.rotationPeriod,
       this.configService.numValidators,
       this.configService.numEcPiecesPerSegment,

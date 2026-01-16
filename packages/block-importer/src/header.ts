@@ -132,6 +132,10 @@ export async function validateBlockHeader(
       return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
     }
 
+    // Note: Epoch mark entropy1 validation is done in block-importer-service.ts
+    // BEFORE the epoch transition is emitted (which rotates entropy).
+    // We cannot validate it here because by this point entropy has already been rotated.
+
     // Verify epoch root matches the validators in the epoch mark
     // Convert ValidatorKeyPair[] to ValidatorPublicKeys[] for verification
     // Note: verifyEpochRoot only uses bandersnatch keys, so we can use zero-filled bls/metadata
@@ -282,6 +286,29 @@ export function validateSealSignature(
     // This ensures the seal key sequence was calculated correctly for this epoch
     const sealKeyHex = bytesToHex(sealKey as Uint8Array)
     if (sealKeyHex !== publicKeys.bandersnatch) {
+      // Get all active validators to show in log
+      const allActiveValidators =
+        validatorSetManagerService.getActiveValidators()
+      console.error(
+        '[validateSealSignature] UNEXPECTED_AUTHOR - seal key mismatch',
+        {
+          slot: header.timeslot.toString(),
+          authorIndex: header.authorIndex,
+          sealKeyFromService: sealKeyHex,
+          validatorBandersnatchKey: publicKeys.bandersnatch,
+          hasEpochMark: !!header.epochMark,
+          epochMarkValidatorCount: header.epochMark?.validators?.length ?? 0,
+          // Show the validator at authorIndex from epoch_mark if present
+          epochMarkValidatorAtIndex:
+            header.epochMark?.validators?.[Number(header.authorIndex)]
+              ?.bandersnatch ?? 'N/A',
+          // Show all active validators for comparison
+          activeValidatorSet: allActiveValidators.slice(0, 6).map((v, i) => ({
+            index: i,
+            bandersnatch: v.bandersnatch,
+          })),
+        },
+      )
       return safeError(new Error(BLOCK_HEADER_ERRORS.UNEXPECTED_AUTHOR))
     }
 
@@ -443,4 +470,127 @@ export function validatePreStateRoot(
   }
 
   return safeResult(undefined)
+}
+
+/**
+ * Validate winnersMark in block header (JSON: tickets_mark)
+ * Gray Paper Eq. 262-266:
+ * H_winnersmark = Z(ticketaccumulator) when e' = e ∧ m < C_epochtailstart ≤ m' ∧ |ticketaccumulator| = C_epochlen
+ * Otherwise H_winnersmark = ∅
+ *
+ * @param header - Block header to validate
+ * @param previousSlot - Previous block's slot (from parent)
+ * @param ticketAccumulator - Current ticket accumulator from state
+ * @param configService - Config service for epoch/contest duration
+ * @returns Safe<void> - success or error
+ */
+export function validateWinnersMark(
+  header: BlockHeader,
+  previousSlot: bigint,
+  ticketAccumulator: SafroleTicketWithoutProof[],
+  configService: IConfigService,
+): Safe<void> {
+  const epochDuration = BigInt(configService.epochDuration)
+  const contestDuration = BigInt(configService.contestDuration)
+
+  const currentSlot = header.timeslot
+  const previousPhase = previousSlot % epochDuration
+  const currentPhase = currentSlot % epochDuration
+  const previousEpoch = previousSlot / epochDuration
+  const currentEpoch = currentSlot / epochDuration
+
+  // Condition: e' = e (same epoch) ∧ m < C_epochtailstart ≤ m' (crossing into epoch tail)
+  const isSameEpoch = currentEpoch === previousEpoch
+  const wasBelowTail = previousPhase < contestDuration
+  const isAtOrAboveTail = currentPhase >= contestDuration
+
+  // Check if accumulator is full
+  const isAccumulatorFull =
+    ticketAccumulator.length === configService.epochDuration
+
+  // Determine if winnersMark should be present
+  const shouldHaveWinnersMark =
+    isSameEpoch && wasBelowTail && isAtOrAboveTail && isAccumulatorFull
+
+  if (shouldHaveWinnersMark) {
+    // winnersMark MUST be present and match Z(ticketAccumulator)
+    if (!header.winnersMark) {
+      return safeError(
+        new Error(
+          `${BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK}: Missing winnersMark when required. ` +
+            `slot=${currentSlot}, previousPhase=${previousPhase}, currentPhase=${currentPhase}, ` +
+            `contestDuration=${contestDuration}, accumulatorSize=${ticketAccumulator.length}`,
+        ),
+      )
+    }
+
+    // Compute Z(ticketAccumulator) - outside-in sequencer
+    const expectedTickets = applyOutsideInSequencer(ticketAccumulator)
+
+    // Compare with block header's winnersMark
+    if (expectedTickets.length !== header.winnersMark.length) {
+      return safeError(
+        new Error(
+          `${BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK}: winnersMark length mismatch. ` +
+            `expected=${expectedTickets.length}, actual=${header.winnersMark.length}`,
+        ),
+      )
+    }
+
+    for (let i = 0; i < expectedTickets.length; i++) {
+      const expected = expectedTickets[i]
+      const actual = header.winnersMark[i]
+
+      if (
+        expected.id !== actual.id ||
+        expected.entryIndex !== actual.entryIndex
+      ) {
+        return safeError(
+          new Error(
+            `${BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK}: winnersMark entry mismatch at index ${i}. ` +
+              `expectedId=${expected.id}, actualId=${actual.id}, ` +
+              `expectedEntryIndex=${expected.entryIndex}, actualEntryIndex=${actual.entryIndex}`,
+          ),
+        )
+      }
+    }
+  } else {
+    // winnersMark MUST be null/empty
+    if (header.winnersMark && header.winnersMark.length > 0) {
+      return safeError(
+        new Error(
+          `${BLOCK_HEADER_ERRORS.INVALID_TICKETS_MARK}: Unexpected winnersMark present. ` +
+            `slot=${currentSlot}, previousPhase=${previousPhase}, currentPhase=${currentPhase}, ` +
+            `contestDuration=${contestDuration}, accumulatorSize=${ticketAccumulator.length}, ` +
+            `isSameEpoch=${isSameEpoch}, wasBelowTail=${wasBelowTail}, isAtOrAboveTail=${isAtOrAboveTail}, ` +
+            `isAccumulatorFull=${isAccumulatorFull}`,
+        ),
+      )
+    }
+  }
+
+  return safeResult(undefined)
+}
+
+/**
+ * Apply outside-in sequencer (Z function) to ticket array
+ * Gray Paper Eq. 211-215: Z(s) = {s₀, s_{|s|-1}, s₁, s_{|s|-2}, ...}
+ */
+function applyOutsideInSequencer(
+  tickets: SafroleTicketWithoutProof[],
+): SafroleTicketWithoutProof[] {
+  const result: SafroleTicketWithoutProof[] = []
+  const n = tickets.length
+
+  for (let i = 0; i < n; i++) {
+    if (i % 2 === 0) {
+      // Even indices: take from start (0, 1, 2, ...)
+      result.push(tickets[i / 2])
+    } else {
+      // Odd indices: take from end (n-1, n-2, n-3, ...)
+      result.push(tickets[n - 1 - Math.floor(i / 2)])
+    }
+  }
+
+  return result
 }

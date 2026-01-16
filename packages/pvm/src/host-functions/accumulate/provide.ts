@@ -1,5 +1,5 @@
 import { getServiceRequestValue } from '@pbnjam/codec'
-import { blake2bHash } from '@pbnjam/core'
+import { blake2bHash, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -51,7 +51,7 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
       targetServiceId === 2n ** 64n - 1n ? implications[0].id : targetServiceId
 
     // Log all input parameters
-    context.log('PROVIDE host function invoked', {
+    logger.info('PROVIDE host function invoked', {
       targetServiceId: targetServiceId.toString(),
       resolvedServiceId: serviceId.toString(),
       preimageOffset: preimageOffset.toString(),

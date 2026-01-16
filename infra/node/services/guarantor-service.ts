@@ -1431,6 +1431,58 @@ export class GuarantorService extends BaseService {
         }
       }
 
+      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
+      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
+      const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
+      const maxLookupAnchorage = BigInt(this.configService.maxLookupAnchorage)
+      if (lookupAnchorSlot < currentSlot - maxLookupAnchorage) {
+        logger.error('[GuarantorService] Lookup anchor too old', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+          maxLookupAnchorage: maxLookupAnchorage.toString(),
+          minAllowed: (currentSlot - maxLookupAnchorage).toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+      }
+
+      // Validate lookup_anchor_slot is not in the future
+      // The lookup anchor must refer to a past block, not a future one
+      if (lookupAnchorSlot > currentSlot) {
+        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      // Gray Paper equation 346: Validate lookup_anchor exists in ancestors
+      // ∃h ∈ ancestors: h_timeslot = lookup_anchor_slot ∧ blake(h) = lookup_anchor_hash
+      // The lookup anchor must be a valid block in the recent history or ancestors
+      const lookupAnchorHash = guarantee.report.context.lookup_anchor
+      if (this.recentHistoryService) {
+        // Check if lookup_anchor is in recent history
+        if (!this.recentHistoryService.isValidAnchor(lookupAnchorHash)) {
+          // For now, log a warning but don't fail if lookup anchor is not in recent history
+          // The full validation requires checking the ancestor set which needs chainManagerService
+          // However, if lookup_anchor != anchor, and anchor is valid but lookup_anchor is not,
+          // this should fail
+          const anchorHash = guarantee.report.context.anchor
+          if (lookupAnchorHash !== anchorHash) {
+            // lookup_anchor is different from anchor and not in recent history
+            logger.error(
+              '[GuarantorService] Lookup anchor not in recent history',
+              {
+                lookupAnchorHash,
+                lookupAnchorSlot: lookupAnchorSlot.toString(),
+                anchorHash,
+                currentSlot: currentSlot.toString(),
+              },
+            )
+            return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+          }
+        }
+      }
+
       // Gray Paper equation 398: Validate code_hash for each work result
       // The codehash in the work report should match the service's codehash at the
       // lookup_anchor_slot (when refinement occurred), not necessarily current state.
@@ -1633,6 +1685,58 @@ export class GuarantorService extends BaseService {
         const contextBeefyRoot = guarantee.report.context.beefy_root
         if (contextBeefyRoot !== expectedBeefyRoot) {
           return safeError(new Error(REPORTS_ERRORS.BAD_BEEFY_MMR_ROOT))
+        }
+      }
+
+      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
+      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
+      const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
+      const maxLookupAnchorage = BigInt(this.configService.maxLookupAnchorage)
+      if (lookupAnchorSlot < currentSlot - maxLookupAnchorage) {
+        logger.error('[GuarantorService] Lookup anchor too old', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+          maxLookupAnchorage: maxLookupAnchorage.toString(),
+          minAllowed: (currentSlot - maxLookupAnchorage).toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+      }
+
+      // Validate lookup_anchor_slot is not in the future
+      // The lookup anchor must refer to a past block, not a future one
+      if (lookupAnchorSlot > currentSlot) {
+        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      // Gray Paper equation 346: Validate lookup_anchor exists in ancestors
+      // ∃h ∈ ancestors: h_timeslot = lookup_anchor_slot ∧ blake(h) = lookup_anchor_hash
+      // The lookup anchor must be a valid block in the recent history or ancestors
+      const lookupAnchorHash = guarantee.report.context.lookup_anchor
+      if (this.recentHistoryService) {
+        // Check if lookup_anchor is in recent history
+        if (!this.recentHistoryService.isValidAnchor(lookupAnchorHash)) {
+          // For now, log a warning but don't fail if lookup anchor is not in recent history
+          // The full validation requires checking the ancestor set which needs chainManagerService
+          // However, if lookup_anchor != anchor, and anchor is valid but lookup_anchor is not,
+          // this should fail
+          const anchorHash = guarantee.report.context.anchor
+          if (lookupAnchorHash !== anchorHash) {
+            // lookup_anchor is different from anchor and not in recent history
+            logger.error(
+              '[GuarantorService] Lookup anchor not in recent history',
+              {
+                lookupAnchorHash,
+                lookupAnchorSlot: lookupAnchorSlot.toString(),
+                anchorHash,
+                currentSlot: currentSlot.toString(),
+              },
+            )
+            return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+          }
         }
       }
 

@@ -43,6 +43,7 @@ import { AssuranceService } from './services/assurance-service'
 import { AuthPoolService } from './services/auth-pool-service'
 import { AuthQueueService } from './services/auth-queue-service'
 import { BlockImporterService } from './services/block-importer-service'
+import { ChainManagerService } from './services/chain-manager-service'
 import { ClockService } from './services/clock-service'
 import { ConfigService } from './services/config-service'
 import { DisputesService } from './services/disputes-service'
@@ -110,6 +111,10 @@ const APP_NAME = 'pbnj-fuzzer-target'
 let stateService: StateService
 let blockImporterService: BlockImporterService
 let recentHistoryService: RecentHistoryService
+let chainManagerService: ChainManagerService
+let accumulationService: AccumulationService
+let clockService: ClockService
+let entropyService: EntropyService
 let initialized = false
 let blockNumber = 0n // Track current block number for state root comparison
 
@@ -215,11 +220,11 @@ export async function initializeServices() {
 
   try {
     const eventBusService = new EventBusService()
-    const clockService = new ClockService({
+    clockService = new ClockService({
       configService: configService,
       eventBusService: eventBusService,
     })
-    const entropyService = new EntropyService(eventBusService)
+    entropyService = new EntropyService(eventBusService)
     const ticketService = new TicketService({
       configService: configService,
       eventBusService: eventBusService,
@@ -315,7 +320,7 @@ export async function initializeServices() {
       clockService: clockService,
     })
 
-    const accumulatedService = new AccumulationService({
+    accumulationService = new AccumulationService({
       configService: configService,
       clockService: clockService,
       serviceAccountsService: serviceAccountsService,
@@ -327,10 +332,13 @@ export async function initializeServices() {
       statisticsService: statisticsService,
     })
 
+    // Create chain manager service for fork handling
+    chainManagerService = new ChainManagerService(configService, sealKeyService)
+
     recentHistoryService = new RecentHistoryService({
       eventBusService: eventBusService,
       configService: configService,
-      accumulationService: accumulatedService,
+      accumulationService: accumulationService,
     })
     recentHistoryService.start()
 
@@ -358,7 +366,7 @@ export async function initializeServices() {
       statisticsService: statisticsService,
       disputesService: disputesService,
       readyService: readyService,
-      accumulationService: accumulatedService,
+      accumulationService: accumulationService,
       workReportService: workReportService,
       privilegesService: privilegesService,
       serviceAccountsService: serviceAccountsService,
@@ -380,7 +388,7 @@ export async function initializeServices() {
       configService: configService,
       clockService: clockService,
       entropyService: entropyService,
-      accumulationService: accumulatedService,
+      accumulationService: accumulationService,
       authPoolService: authPoolService,
       networkService: null,
       ce134WorkPackageSharingProtocol: null,
@@ -410,8 +418,9 @@ export async function initializeServices() {
       ticketService: ticketService,
       statisticsService: statisticsService,
       authPoolService: authPoolService,
-      accumulationService: accumulatedService,
+      accumulationService: accumulationService,
       workReportService: workReportService,
+      chainManagerService: chainManagerService,
     })
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
@@ -565,6 +574,22 @@ async function handleInitialize(
       }
       logger.info(
         `Initialize: Stored ${previousStateKeyvals.size} keyvals for comparison`,
+      )
+
+      // Store initial state snapshot in ChainManagerService for fork rollback
+      // This allows rolling back to initial state if first block fails
+      const initKeyvals = Object.entries(stateTrie).map(([k, v]) => ({
+        key: k as Hex,
+        value: v as Hex,
+      }))
+      chainManagerService.setInitialStateSnapshot({
+        keyvals: initKeyvals,
+        accumulationSlot: accumulationService.getLastProcessedSlot(),
+        clockSlot: clockService.getLatestReportedBlockTimeslot(),
+        entropy: { ...entropyService.getEntropy() },
+      })
+      logger.info(
+        `Initialize: Set initial state snapshot in ChainManagerService (${initKeyvals.length} keyvals)`,
       )
     }
 

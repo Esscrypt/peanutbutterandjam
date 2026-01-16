@@ -113,6 +113,21 @@ function encodeWorkExecutionResult(
     } else if ('panic' in result) {
       // Panic case: {"panic": null}
       return safeResult(new Uint8Array([2]))
+    } else if ('out_of_gas' in result) {
+      // Out of gas case: {"out_of_gas": null}
+      return safeResult(new Uint8Array([1]))
+    } else if ('bad_exports' in result) {
+      // Bad exports case: {"bad_exports": null}
+      return safeResult(new Uint8Array([3]))
+    } else if ('output_oversize' in result) {
+      // Output oversize case: {"output_oversize": null}
+      return safeResult(new Uint8Array([4]))
+    } else if ('bad_code' in result) {
+      // Bad code case: {"bad_code": null}
+      return safeResult(new Uint8Array([5]))
+    } else if ('code_oversize' in result) {
+      // Code oversize case: {"code_oversize": null}
+      return safeResult(new Uint8Array([6]))
     } else {
       return safeError(
         new Error(`Unknown result object structure: ${JSON.stringify(result)}`),

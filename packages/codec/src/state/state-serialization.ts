@@ -333,9 +333,11 @@ export function createServiceRequestKey(
 
   // Request hash is the full 32-byte hash - compute blake(encode[4]{l} || h)
   // Create the prefix: encode[4]{length}
+  // NOTE: Use bitwise AND to properly truncate to 32 bits, avoiding precision loss
+  // from Number() conversion of large bigints (e.g., 0xFFFFFFFFFFFFFFA3n)
   const prefix = new Uint8Array(4)
   const prefixView = new DataView(prefix.buffer)
-  prefixView.setUint32(0, Number(length), true) // little-endian
+  prefixView.setUint32(0, Number(length & 0xffffffffn), true) // little-endian, properly truncated
 
   // Concatenate prefix with request hash
   const combinedKey = new Uint8Array(prefix.length + requestHashBytes.length)
