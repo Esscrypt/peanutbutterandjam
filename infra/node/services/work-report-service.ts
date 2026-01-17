@@ -390,6 +390,23 @@ export class WorkReportService extends BaseService {
   }
 
   /**
+   * Clear all pending work reports
+   *
+   * Used during state rollback to ensure no stale pending reports persist
+   * from failed block import attempts.
+   */
+  clearPendingReports(): void {
+    this.pendingWorkReports.clear()
+    this.workReportHashByCore.clear()
+    this.workReportsByHash.clear()
+    this.workReportState.clear()
+    // Re-initialize with null values for each core
+    for (let i = 0; i < this.configService.numCores; i++) {
+      this.pendingWorkReports.set(BigInt(i), null)
+    }
+  }
+
+  /**
    * Clear work report core mapping to allow core reuse
    *
    * Gray Paper: When a work report is included in a guarantee, we need to allow

@@ -1,8 +1,14 @@
 import type { Hex } from 'viem'
+import type { Block } from './block-authoring'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
 import type { JamVersion } from './fuzz'
-import type { Activity, EntropyState, RecentHistoryEntry } from './global-state'
+import type {
+  Activity,
+  BlockHeader,
+  EntropyState,
+  RecentHistoryEntry,
+} from './global-state'
 import type { ValidatorCredentials } from './keys'
 import type { Safe, SafePromise } from './safe'
 import type {
@@ -145,6 +151,18 @@ export interface IConfigService extends BaseService {
   get ecPieceSize(): number
   get jamVersion(): JamVersion
   set jamVersion(version: JamVersion)
+  /**
+   * Whether ancestry feature is enabled
+   * jam-conformance: When disabled, lookup anchor validation is skipped
+   */
+  get ancestryEnabled(): boolean
+  set ancestryEnabled(enabled: boolean)
+  /**
+   * Whether forking feature is enabled
+   * jam-conformance: When enabled, mutations (sibling blocks) are tracked
+   */
+  get forkingEnabled(): boolean
+  set forkingEnabled(enabled: boolean)
 }
 
 export interface IClockService extends BaseService {
@@ -570,4 +588,142 @@ export interface IGuarantorService {
    * @returns Safe<boolean> - True if can sign another report
    */
   canSignWorkReport(timeslot: bigint): Safe<boolean>
+}
+
+/**
+ * Represents a chain fork with its head block and state
+ *
+ * Gray Paper Reference: Section "Grandpa and the Best Chain" (best_chain.tex)
+ */
+export interface ChainFork {
+  /** Block header hash of the fork head */
+  headHash: Hex
+  /** Block header of the fork head */
+  head: BlockHeader
+  /** State root at this fork head */
+  stateRoot: Hex
+  /** Number of ticketed blocks in this chain (for fork choice) */
+  ticketedCount: number
+  /** Whether this fork is audited */
+  isAudited: boolean
+  /** Ancestor hashes (for ancestor checks) - limited to maxLookupAnchorage */
+  ancestors: Set<Hex>
+  /** Ordered list of ancestor hashes (most recent first) for lookup anchor validation */
+  ancestorList: Hex[]
+}
+
+/**
+ * Chain reorganization event
+ *
+ * Used when switching between forks to track which blocks need to be
+ * reverted and which need to be applied.
+ */
+export interface ReorgEvent {
+  /** Old chain head before reorg */
+  oldHead: Hex
+  /** New chain head after reorg */
+  newHead: Hex
+  /** Blocks that were reverted */
+  revertedBlocks: Hex[]
+  /** Blocks that were applied */
+  appliedBlocks: Hex[]
+}
+
+/**
+ * Chain Manager Service Interface
+ *
+ * Handles block import, fork resolution, and chain reorganization according to
+ * Gray Paper specifications for GRANDPA and best chain selection.
+ *
+ * Gray Paper Reference: Section "Grandpa and the Best Chain" (best_chain.tex)
+ *
+ * Key responsibilities:
+ * 1. Track multiple fork heads (unfinalized chains)
+ * 2. Implement best chain selection (maximize ticketed blocks)
+ * 3. Handle GRANDPA finalization
+ * 4. Manage chain reorganization (reorgs)
+ * 5. Maintain state snapshots for each fork head
+ * 6. Support ancestry feature for lookup anchor validation (jam-conformance M1)
+ *
+ * Ancestry Feature (jam-conformance):
+ * - The lookup anchor of each report in guarantees extrinsic must be within last L headers
+ * - Full spec: L = 14,400 (~24 hours at 6s slots)
+ * - Tiny spec: L = 24 (~2.4 minutes at 6s slots)
+ *
+ * Forking Feature (jam-conformance):
+ * - Mutations are siblings of original block (same parent)
+ * - Mutations are never used as parents for subsequent blocks
+ * - Original block is always finalized after mutations
+ */
+export interface IChainManagerService extends BaseService {
+  /**
+   * Import a new block
+   *
+   * Gray Paper: Block must have timeslot > previous block's timeslot
+   * Handles fork creation if block's parent is not current best head
+   */
+  importBlock(block: Block): SafePromise<void>
+
+  /**
+   * Get the current best block head
+   *
+   * Gray Paper: Best block maximizes ticketed ancestors and is audited
+   */
+  getBestHead(): BlockHeader | null
+
+  /**
+   * Get the finalized block head
+   *
+   * Gray Paper: Finalized by GRANDPA consensus
+   */
+  getFinalizedHead(): BlockHeader | null
+
+  /**
+   * Finalize a block (called by GRANDPA)
+   *
+   * Gray Paper: Prunes all forks not containing this block
+   */
+  finalizeBlock(blockHash: Hex): Safe<void>
+
+  /**
+   * Check if a block is an ancestor of the best chain
+   */
+  isAncestorOfBest(blockHash: Hex): boolean
+
+  /**
+   * Check if a block hash is a valid lookup anchor
+   *
+   * Gray Paper: Lookup anchor must be within last L imported headers
+   * jam-conformance: Required for M1 compliance when ancestry feature enabled
+   */
+  isValidLookupAnchor(anchorHash: Hex): boolean
+
+  /**
+   * Get the list of valid lookup anchors (last L block hashes)
+   */
+  getValidLookupAnchors(): Hex[]
+
+  /**
+   * Initialize ancestry from external source (e.g., fuzzer Initialize message)
+   *
+   * jam-conformance: The Initialize message contains ancestor list for first block
+   */
+  initializeAncestry(ancestors: Hex[]): void
+
+  /**
+   * Get all active fork heads
+   */
+  getActiveForks(): ChainFork[]
+
+  /**
+   * Handle equivocation detection (two blocks at same slot)
+   *
+   * Gray Paper: Blocks with equivocations are not acceptable
+   */
+  reportEquivocation(blockA: Hex, blockB: Hex): void
+
+  /**
+   * Clear all state (for testing/fork switching)
+   */
+  clear(): void
 }

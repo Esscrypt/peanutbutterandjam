@@ -575,10 +575,17 @@ export class StateService extends BaseService implements IStateService {
    * According to Gray Paper, when switching between forks, the entire state
    * must be reset, not merged. This method clears all service accounts and
    * resets other stateful services to prevent state leakage between forks.
+   *
+   * Note: Most services are "replaced" by setState() which calls setters that
+   * overwrite their internal state. Only services with Map/Set collections that
+   * aren't fully replaced need explicit clearing here.
    */
   clearState(): void {
     // Clear service accounts - this is critical for fork switching
     this.serviceAccountsService.clearAllServiceAccounts()
+
+    // Clear pending work reports - these can accumulate from failed block attempts
+    this.workReportService.clearPendingReports()
   }
 
   /**
@@ -842,11 +849,18 @@ export class StateService extends BaseService implements IStateService {
     }
 
     if (firstByte === 0xff) {
-      // Chapter 255 - Service Accounts
+      // Could be C(255, s) or C(s, h) where s starts with 0xff
       // Gray Paper: C(255, s) = ⟨255, n₀, 0, n₁, 0, n₂, 0, n₃, 0, 0, ...⟩
       // where n = encode[4](s), service ID in bytes 1, 3, 5, 7
-      const serviceId = this.parseServiceId(keyBytes)
-      return safeResult({ chapterIndex: 255, serviceId })
+      // The distinguishing feature is that bytes 2, 4, 6 are zeros for C(255, s)
+      const isC255 = keyBytes[2] === 0 && keyBytes[4] === 0 && keyBytes[6] === 0
+
+      if (isC255) {
+        // Chapter 255 - Service Accounts
+        const serviceId = this.parseServiceId(keyBytes)
+        return safeResult({ chapterIndex: 255, serviceId })
+      }
+      // Otherwise, fall through to C(s, h) handling below
     }
 
     // This could be a C(s, h) key - extract service ID from bytes 0, 2, 4, 6

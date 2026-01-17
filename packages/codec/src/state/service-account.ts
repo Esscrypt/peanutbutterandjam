@@ -602,6 +602,7 @@ export function setServicePreimageValue(
 ): void {
   const preimageStateKey = createServicePreimageKey(serviceId, preimageHash)
   const stateKeyHex = bytesToHex(preimageStateKey)
+
   serviceAccount.rawCshKeyvals[stateKeyHex] = bytesToHex(preimageValue)
 }
 

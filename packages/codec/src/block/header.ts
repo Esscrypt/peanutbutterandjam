@@ -487,7 +487,7 @@ export function decodeUnsignedHeader(
   const epochMark = epochMarkResult.value
   currentData = epochMarkResult.remaining
 
-  // winners_mark (optional)
+  // winners_mark (optional) - Gray Paper: H_winnersmark, JSON: tickets_mark
   const [error3, winnersMarkResult] = decodeWinnersMark(currentData, config)
   if (error3) {
     return safeError(error3)

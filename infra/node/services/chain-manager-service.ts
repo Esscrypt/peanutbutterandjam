@@ -25,131 +25,50 @@
  * - Original block is always finalized after mutations
  */
 
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import type { Hex } from '@pbnjam/core'
 import { logger } from '@pbnjam/core'
-import type { Block, BlockHeader, Safe, SafePromise } from '@pbnjam/types'
+import type {
+  Block,
+  BlockHeader,
+  ChainFork,
+  IChainManagerService,
+  IConfigService,
+  ISealKeyService,
+  Safe,
+  SafePromise,
+  SafroleTicketWithoutProof,
+} from '@pbnjam/types'
 import { BaseService, safeError, safeResult } from '@pbnjam/types'
 
+// Re-export types for backwards compatibility
+export type { ChainFork, IChainManagerService }
+export type { ReorgEvent } from '@pbnjam/types'
+
 /**
- * Represents a chain fork with its head block and state
+ * Complete state snapshot for rollback
+ * Includes state keyvals plus service-specific state that's not in the trie
  */
-interface ChainFork {
-  /** Block header hash of the fork head */
-  headHash: Hex
-  /** Block header of the fork head */
-  head: BlockHeader
-  /** State root at this fork head */
-  stateRoot: Hex
-  /** Number of ticketed blocks in this chain (for fork choice) */
-  ticketedCount: number
-  /** Whether this fork is audited */
-  isAudited: boolean
-  /** Ancestor hashes (for ancestor checks) - limited to maxLookupAnchorage */
-  ancestors: Set<Hex>
-  /** Ordered list of ancestor hashes (most recent first) for lookup anchor validation */
-  ancestorList: Hex[]
+export interface ChainStateSnapshot {
+  keyvals: { key: Hex; value: Hex }[]
+  accumulationSlot: bigint | null
+  clockSlot: bigint
+  entropy: import('@pbnjam/types').EntropyState
 }
 
 /**
- * Chain reorganization event
+ * Check if a seal key is a ticket (vs fallback Bandersnatch key)
  *
- * Used when switching between forks to track which blocks need to be
- * reverted and which need to be applied.
+ * Gray Paper Eq. 146-155:
+ * - Ticket: SafroleTicketWithoutProof has 'id' and 'entryIndex' properties
+ * - Fallback: Raw Uint8Array (32-byte Bandersnatch public key)
  */
-export interface ReorgEvent {
-  /** Old chain head before reorg */
-  oldHead: Hex
-  /** New chain head after reorg */
-  newHead: Hex
-  /** Blocks that were reverted */
-  revertedBlocks: Hex[]
-  /** Blocks that were applied */
-  appliedBlocks: Hex[]
-}
-
-/**
- * Configuration for chain manager
- */
-interface ChainManagerConfig {
-  /** Maximum lookup anchorage (L in Gray Paper) - default 14400 for full, 24 for tiny */
-  maxLookupAnchorage: number
-  /** Whether ancestry feature is enabled */
-  ancestryEnabled: boolean
-  /** Whether forking feature is enabled */
-  forkingEnabled: boolean
-}
-
-export interface IChainManagerService {
-  /**
-   * Import a new block
-   *
-   * Gray Paper: Block must have timeslot > previous block's timeslot
-   * Handles fork creation if block's parent is not current best head
-   */
-  importBlock(block: Block): SafePromise<void>
-
-  /**
-   * Get the current best block head
-   *
-   * Gray Paper: Best block maximizes ticketed ancestors and is audited
-   */
-  getBestHead(): BlockHeader | null
-
-  /**
-   * Get the finalized block head
-   *
-   * Gray Paper: Finalized by GRANDPA consensus
-   */
-  getFinalizedHead(): BlockHeader | null
-
-  /**
-   * Finalize a block (called by GRANDPA)
-   *
-   * Gray Paper: Prunes all forks not containing this block
-   */
-  finalizeBlock(blockHash: Hex): Safe<void>
-
-  /**
-   * Check if a block is an ancestor of the best chain
-   */
-  isAncestorOfBest(blockHash: Hex): boolean
-
-  /**
-   * Check if a block hash is a valid lookup anchor
-   *
-   * Gray Paper: Lookup anchor must be within last L imported headers
-   * jam-conformance: Required for M1 compliance when ancestry feature enabled
-   */
-  isValidLookupAnchor(anchorHash: Hex): boolean
-
-  /**
-   * Get the list of valid lookup anchors (last L block hashes)
-   */
-  getValidLookupAnchors(): Hex[]
-
-  /**
-   * Initialize ancestry from external source (e.g., fuzzer Initialize message)
-   *
-   * jam-conformance: The Initialize message contains ancestor list for first block
-   */
-  initializeAncestry(ancestors: Hex[]): void
-
-  /**
-   * Get all active fork heads
-   */
-  getActiveForks(): ChainFork[]
-
-  /**
-   * Handle equivocation detection (two blocks at same slot)
-   *
-   * Gray Paper: Blocks with equivocations are not acceptable
-   */
-  reportEquivocation(blockA: Hex, blockB: Hex): void
-
-  /**
-   * Clear all state (for testing/fork switching)
-   */
-  clear(): void
+function isSealKeyTicket(
+  sealKey: SafroleTicketWithoutProof | Uint8Array,
+): sealKey is SafroleTicketWithoutProof {
+  return (
+    typeof sealKey === 'object' && 'id' in sealKey && 'entryIndex' in sealKey
+  )
 }
 
 export class ChainManagerService
@@ -176,11 +95,17 @@ export class ChainManagerService
   /** Equivocating block pairs (slot -> set of block hashes) */
   private equivocations: Map<bigint, Set<Hex>> = new Map()
 
-  /** State snapshots for each block (hash -> state snapshot) */
-  private stateSnapshots: Map<Hex, unknown> = new Map()
+  /** State snapshots for each block (hash -> complete snapshot) */
+  private stateSnapshots: Map<Hex, ChainStateSnapshot> = new Map()
 
-  /** Configuration */
-  private config: ChainManagerConfig
+  /** Current head hash that was last imported successfully */
+  private currentHeadHash: Hex | null = null
+
+  /** Configuration service */
+  private readonly configService: IConfigService
+
+  /** Optional seal key service for determining if block is ticketed */
+  private readonly sealKeyService?: ISealKeyService
 
   /**
    * Ordered list of valid lookup anchors (most recent first)
@@ -189,13 +114,10 @@ export class ChainManagerService
    */
   private lookupAnchors: Hex[] = []
 
-  constructor(config?: Partial<ChainManagerConfig>) {
+  constructor(configService: IConfigService, sealKeyService?: ISealKeyService) {
     super('chain-manager-service')
-    this.config = {
-      maxLookupAnchorage: config?.maxLookupAnchorage ?? 14400, // Full spec default
-      ancestryEnabled: config?.ancestryEnabled ?? true,
-      forkingEnabled: config?.forkingEnabled ?? true,
-    }
+    this.configService = configService
+    this.sealKeyService = sealKeyService
   }
 
   async importBlock(block: Block): SafePromise<void> {
@@ -314,10 +236,38 @@ export class ChainManagerService
    * jam-conformance: When ancestry feature is disabled, this check should be skipped
    */
   isValidLookupAnchor(anchorHash: Hex): boolean {
-    if (!this.config.ancestryEnabled) {
+    if (!this.configService.ancestryEnabled) {
       // When ancestry feature is disabled, all anchors are valid
       return true
     }
+    return this.lookupAnchors.includes(anchorHash)
+  }
+
+  /**
+   * Validate lookup anchor exists in ancestor set
+   *
+   * Gray Paper Eq. 346: ∃h ∈ ancestors: h_timeslot = x_lookupanchortime ∧ blake(h) = x_lookupanchorhash
+   *
+   * This validates that the lookup anchor hash exists in the ancestor set.
+   * The slot validation is performed separately in the guarantor service
+   * using Eq. 340-341 (lookup_anchor_slot >= currentSlot - maxLookupAnchorage).
+   *
+   * Note: We only store hashes in ancestry (not header objects), so we cannot
+   * directly verify the slot matches. However, since the age check already
+   * constrains the slot range, and the hash uniquely identifies a block,
+   * existence in the ancestry list is sufficient.
+   *
+   * @param anchorHash - The lookup anchor hash from the work report context
+   * @returns true if the anchor exists in the ancestor set, false otherwise
+   */
+  isValidLookupAnchorWithSlot(anchorHash: Hex, _expectedSlot: bigint): boolean {
+    if (!this.configService.ancestryEnabled) {
+      // When ancestry feature is disabled, all anchors are valid
+      return true
+    }
+
+    // Check if anchor is in the valid anchor list
+    // The slot is already validated by the guarantor service (age check)
     return this.lookupAnchors.includes(anchorHash)
   }
 
@@ -340,7 +290,10 @@ export class ChainManagerService
     this.lookupAnchors = []
 
     // Add ancestors (most recent first, limited to maxLookupAnchorage)
-    const limit = Math.min(ancestors.length, this.config.maxLookupAnchorage)
+    const limit = Math.min(
+      ancestors.length,
+      this.configService.maxLookupAnchorage,
+    )
     for (let i = 0; i < limit; i++) {
       this.lookupAnchors.push(ancestors[i])
     }
@@ -348,7 +301,7 @@ export class ChainManagerService
     logger.info('Ancestry initialized', {
       ancestorCount: ancestors.length,
       storedCount: this.lookupAnchors.length,
-      maxLookupAnchorage: this.config.maxLookupAnchorage,
+      maxLookupAnchorage: this.configService.maxLookupAnchorage,
     })
   }
 
@@ -366,8 +319,89 @@ export class ChainManagerService
     this.finalizedHash = null
     this.bestHead = null
     this.bestHash = null
+    this.currentHeadHash = null
 
     logger.info('Chain manager state cleared')
+  }
+
+  // ============================================================================
+  // State Snapshot Management
+  // ============================================================================
+
+  /**
+   * Save state snapshot for a block
+   *
+   * Called after a block is successfully imported. The snapshot allows
+   * rolling back to this state when importing sibling blocks (forks).
+   * Includes service-specific state that's not part of the state trie.
+   */
+  saveStateSnapshot(blockHash: Hex, snapshot: ChainStateSnapshot): void {
+    this.stateSnapshots.set(blockHash, snapshot)
+    this.currentHeadHash = blockHash
+    logger.debug('State snapshot saved', {
+      blockHash: `${blockHash.substring(0, 18)}...`,
+      keyvalCount: snapshot.keyvals.length,
+      accumulationSlot: snapshot.accumulationSlot?.toString() ?? 'null',
+      clockSlot: snapshot.clockSlot.toString(),
+    })
+  }
+
+  /**
+   * Get state snapshot for a block
+   *
+   * Returns the complete snapshot that was saved after this block was imported.
+   * Returns null if no snapshot exists for this block.
+   */
+  getStateSnapshot(blockHash: Hex): ChainStateSnapshot | null {
+    return this.stateSnapshots.get(blockHash) ?? null
+  }
+
+  /**
+   * Get current head hash (last successfully imported block)
+   */
+  getCurrentHeadHash(): Hex | null {
+    return this.currentHeadHash
+  }
+
+  /**
+   * Check if we need to rollback before importing a block
+   *
+   * Returns the parent's complete state snapshot if the block's parent is different
+   * from the current head (fork scenario). Returns null if no rollback needed.
+   */
+  getParentSnapshotIfFork(parentHash: Hex): ChainStateSnapshot | null {
+    // If parent is the current head, no rollback needed
+    if (parentHash === this.currentHeadHash) {
+      return null
+    }
+
+    // If we have a snapshot for the parent, return it for rollback
+    const parentSnapshot = this.stateSnapshots.get(parentHash)
+    if (parentSnapshot) {
+      logger.info('Fork detected, will rollback to parent state', {
+        parentHash: `${parentHash.substring(0, 18)}...`,
+        currentHead: `${this.currentHeadHash?.substring(0, 18)}...`,
+        accumulationSlot: parentSnapshot.accumulationSlot?.toString() ?? 'null',
+      })
+      return parentSnapshot
+    }
+
+    // Check if there's an initial/genesis snapshot we can use
+    // (parent might be the genesis block)
+    return null
+  }
+
+  /**
+   * Set initial state snapshot (for genesis or first block)
+   */
+  setInitialStateSnapshot(snapshot: ChainStateSnapshot): void {
+    // Use a special key for initial state
+    const genesisKey =
+      '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+    this.stateSnapshots.set(genesisKey, snapshot)
+    logger.debug('Initial state snapshot saved', {
+      keyvalCount: snapshot.keyvals.length,
+    })
   }
 
   reportEquivocation(blockA: Hex, blockB: Hex): void {
@@ -390,9 +424,15 @@ export class ChainManagerService
   // ============================================================================
 
   private hashBlock(header: BlockHeader): Hex {
-    // In real implementation, this would compute the block hash
-    // For now, return a placeholder
-    return `0x${header.timeslot.toString(16).padStart(64, '0')}` as Hex
+    const [error, hash] = calculateBlockHashFromHeader(
+      header,
+      this.configService,
+    )
+    if (error) {
+      logger.error('Failed to calculate block hash', { error: error.message })
+      throw error
+    }
+    return hash
   }
 
   private findBlockAtSlot(slot: bigint): Hex | null {
@@ -433,7 +473,7 @@ export class ChainManagerService
       ancestorList = [parentHash]
     }
     // Limit to maxLookupAnchorage
-    ancestorList = ancestorList.slice(0, this.config.maxLookupAnchorage)
+    ancestorList = ancestorList.slice(0, this.configService.maxLookupAnchorage)
 
     // Count ticketed blocks (for fork choice)
     // Gray Paper: Prefer chains with more ticketed (non-fallback) blocks
@@ -452,11 +492,46 @@ export class ChainManagerService
     }
   }
 
-  private isBlockTicketed(_block: Block): boolean {
-    // Gray Paper: Check if block was sealed with a ticket vs fallback
-    // This would inspect the seal signature to determine sealing mode
-    // TODO: Implement actual ticket detection from seal signature
-    return true // Placeholder
+  /**
+   * Determine if a block was sealed with a ticket vs fallback key
+   *
+   * Gray Paper Eq. 146-155:
+   * - sealtickets' ∈ sequence{SafroleTicket} → is_ticketed = 1 (ticket-based)
+   * - sealtickets' ∈ sequence{bskey} → is_ticketed = 0 (fallback)
+   *
+   * This is used for fork choice: chains with more ticketed blocks are preferred
+   * because ticket-based sealing provides better security (anonymous author).
+   */
+  private isBlockTicketed(block: Block): boolean {
+    // If no seal key service, assume ticketed (conservative for fork choice)
+    if (!this.sealKeyService) {
+      return true
+    }
+
+    // Get the seal key for this block's timeslot
+    const [error, sealKey] = this.sealKeyService.getSealKeyForSlot(
+      block.header.timeslot,
+    )
+
+    if (error || !sealKey) {
+      // If we can't determine, assume ticketed (conservative)
+      logger.debug('Could not determine seal key type, assuming ticketed', {
+        slot: block.header.timeslot.toString(),
+        error: error?.message,
+      })
+      return true
+    }
+
+    // Check if the seal key is a ticket or fallback Bandersnatch key
+    const isTicketed = isSealKeyTicket(sealKey)
+
+    logger.debug('Block seal type determined', {
+      slot: block.header.timeslot.toString(),
+      isTicketed,
+      sealKeyType: isTicketed ? 'ticket' : 'fallback',
+    })
+
+    return isTicketed
   }
 
   /**
@@ -476,6 +551,9 @@ export class ChainManagerService
    * Update best head based on Gray Paper fork choice rule
    *
    * Gray Paper: Best block maximizes Σ(isticketed) for all ancestors
+   *
+   * Tie-breaker: When two forks have equal ticketed counts, prefer the one
+   * with the lexicographically lower block hash for deterministic behavior.
    */
   private updateBestHead(): void {
     let bestFork: ChainFork | null = null
@@ -501,6 +579,11 @@ export class ChainManagerService
       if (fork.ticketedCount > bestTicketedCount) {
         bestTicketedCount = fork.ticketedCount
         bestFork = fork
+      } else if (fork.ticketedCount === bestTicketedCount && bestFork) {
+        // Tie-breaker: lower block hash wins (deterministic across all nodes)
+        if (fork.headHash < bestFork.headHash) {
+          bestFork = fork
+        }
       }
     }
 

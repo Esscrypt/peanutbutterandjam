@@ -148,7 +148,11 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
 
     // Check if current service has sufficient balance
     // Gray Paper line 786: CASH when s.balance < self.minbalance
+    // where s = imX_self exc s_sa_balance = (imX_self)_sa_balance - a_sa_minbalance
+    // So we check: (imX_self)_sa_balance - a_sa_minbalance < (imX_self)_sa_minbalance
     const balanceAfterDeduction = currentService.balance - minBalance
+
+    // Check for underflow (would result in negative balance)
     if (
       balanceAfterDeduction < currentService.balance &&
       balanceAfterDeduction < 0n
@@ -160,10 +164,20 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Also check that the remaining balance is at least the current service's minbalance
-    // (This is calculated from the current service's storage footprint)
-    // For simplicity, we check against the same formula for the current service
-    // but in practice, the current service's minbalance depends on its own storage
+    // Gray Paper line 786: Check if remaining balance is at least current service's minbalance
+    // Calculate current service's minbalance from its storage footprint
+    const currentServiceMinBalance = calculateMinBalance(
+      currentService.items,
+      currentService.octets,
+      currentService.gratis,
+    )
+
+    if (balanceAfterDeduction < currentServiceMinBalance) {
+      this.setAccumulateError(registers, 'CASH')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
 
     // Determine new service ID
     // Gray Paper lines 788-792:

@@ -69,16 +69,10 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     this.entropyService = options.entropyService
     this.ticketService = options.ticketService
     this.configService = options.configService
-    // Register epoch transition callback in constructor
-    // Note: Callback execution order depends on service construction order
-    // ValidatorSetManager should be constructed before SealKeyService to ensure
-    // its handleEpochTransition runs first (updating activeSet' before seal key calculation)
-    this.eventBusService.addEpochTransitionCallback(
-      this.handleEpochTransition.bind(this),
-    )
-    this.eventBusService.addRevertEpochTransitionCallback(
-      this.handleRevertEpochTransition.bind(this),
-    )
+    // NOTE: Epoch transition callbacks are registered in setValidatorSetManager(),
+    // NOT here in the constructor. This ensures they are registered AFTER
+    // ValidatorSetManager's callbacks, so ValidatorSetManager.handleEpochTransition
+    // runs first (updating activeSet' before seal key calculation).
   }
 
   /**
@@ -327,6 +321,17 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       )
     }
 
+    // Debug logging to verify we have the correct active validators
+    logger.debug('[SealKeyService] Calculating fallback keys with activeSet', {
+      activeValidatorCount: activeValidators.length,
+      entropy2: bytesToHex(entropy2),
+      // Show first 6 validators for debugging
+      activeValidators: activeValidators.slice(0, 6).map((v, i) => ({
+        index: i,
+        bandersnatch: v.bandersnatch,
+      })),
+    })
+
     // Use the standard generateFallbackKeySequence
     const [error, fallbackKeys] = generateFallbackKeySequence(
       entropy2,
@@ -497,10 +502,25 @@ export class SealKeyService extends BaseService implements ISealKeyService {
   }
 
   /**
-   * Initialize seal key service
+   * Initialize seal key service with the ValidatorSetManager
+   *
+   * IMPORTANT: This method also registers epoch transition callbacks.
+   * It MUST be called AFTER ValidatorSetManager is constructed and has registered
+   * its own callbacks. This ensures ValidatorSetManager.handleEpochTransition
+   * runs before SealKeyService.handleEpochTransition, so activeSet' is updated
+   * before seal key calculation.
    */
   setValidatorSetManager(validatorSetManager: ValidatorSetManager): void {
     this.validatorSetManager = validatorSetManager
+
+    // Register epoch transition callbacks AFTER ValidatorSetManager's callbacks
+    // This ensures ValidatorSetManager updates activeSet' before we calculate seal keys
+    this.eventBusService.addEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.addRevertEpochTransitionCallback(
+      this.handleRevertEpochTransition.bind(this),
+    )
   }
 
   setSealKeys(sealKeys: (SafroleTicketWithoutProof | Uint8Array)[]): void {

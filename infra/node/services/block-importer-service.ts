@@ -14,6 +14,7 @@
 import {
   validateBlockHeader,
   validatePreStateRoot,
+  validateWinnersMark,
 } from '@pbnjam/block-importer'
 import {
   calculateBlockHashFromHeader,
@@ -25,6 +26,9 @@ import type { Block } from '@pbnjam/types'
 import {
   BaseService,
   BLOCK_HEADER_ERRORS,
+  DISPUTES_ERRORS,
+  type EntropyState,
+  REPORTS_ERRORS,
   type SafePromise,
   safeError,
   safeResult,
@@ -33,6 +37,10 @@ import {
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
+import type {
+  ChainManagerService,
+  ChainStateSnapshot,
+} from './chain-manager-service'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { DisputesService } from './disputes-service'
@@ -71,9 +79,14 @@ export class BlockImporterService extends BaseService {
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
   private readonly workReportService: WorkReportService
+  private readonly chainManagerService?: ChainManagerService
 
   private previousStateRootForAnchorValidation: Hex | null = null
   private stateSnapshot: { key: Hex; value: Hex }[] | null = null
+  // Additional service state snapshots for complete rollback
+  private entropySnapshot: EntropyState | null = null
+  private clockSnapshot: bigint | null = null
+  private accumulationSlotSnapshot: bigint | null = null
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -92,6 +105,7 @@ export class BlockImporterService extends BaseService {
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
     workReportService: WorkReportService
+    chainManagerService?: ChainManagerService
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -111,6 +125,7 @@ export class BlockImporterService extends BaseService {
     this.authPoolService = options.authPoolService
     this.accumulationService = options.accumulationService
     this.workReportService = options.workReportService
+    this.chainManagerService = options.chainManagerService
 
     // Noop usage to satisfy linter (workReportService may be used in future)
     void this.workReportService
@@ -127,6 +142,46 @@ export class BlockImporterService extends BaseService {
     // )
     let epochTransitionEmitted = false
 
+    // Fork handling: Check if we need to rollback to parent state
+    // This handles sibling blocks (same parent, different blocks at same slot)
+    if (this.chainManagerService) {
+      const parentHash = block.header.parent
+      const parentSnapshot =
+        this.chainManagerService.getParentSnapshotIfFork(parentHash)
+      if (parentSnapshot) {
+        logger.info('[BlockImporter] Rolling back to parent state for fork', {
+          parentHash: `${parentHash.substring(0, 18)}...`,
+          snapshotSize: parentSnapshot.keyvals.length,
+          accumulationSlot:
+            parentSnapshot.accumulationSlot?.toString() ?? 'null',
+        })
+        // Restore state trie keyvals
+        this.stateService.clearState()
+        const [setStateError] = this.stateService.setState(
+          parentSnapshot.keyvals,
+        )
+        if (setStateError) {
+          logger.error(
+            '[BlockImporter] Failed to restore parent state during fork rollback',
+            { error: setStateError },
+          )
+          return safeError(
+            new Error(
+              `Failed to restore parent state during fork rollback: ${setStateError.message}`,
+            ),
+          )
+        }
+        // Restore service-specific state that's not in the trie
+        this.entropyService.setEntropy(parentSnapshot.entropy)
+        this.clockService.setLatestReportedBlockTimeslot(
+          parentSnapshot.clockSlot,
+        )
+        this.accumulationService.setLastProcessedSlot(
+          parentSnapshot.accumulationSlot,
+        )
+      }
+    }
+
     // Create state snapshot before processing block
     const [stateTrieError, stateTrie] = this.stateService.generateStateTrie()
     if (stateTrieError) {
@@ -140,6 +195,14 @@ export class BlockImporterService extends BaseService {
       key: key as Hex,
       value: value as Hex,
     }))
+
+    // Save additional service state that may be modified during importBlockInternal
+    // These states are modified before potential failure points (e.g., accumulation)
+    this.entropySnapshot = { ...this.entropyService.getEntropy() }
+    this.clockSnapshot = this.clockService.getLatestReportedBlockTimeslot()
+    this.accumulationSlotSnapshot =
+      this.accumulationService.getLastProcessedSlot()
+
     logger.debug('[BlockImporter] Created state snapshot', {
       snapshotSize: this.stateSnapshot.length,
       slot: block.header.timeslot.toString(),
@@ -147,6 +210,83 @@ export class BlockImporterService extends BaseService {
 
     try {
       validatePreStateRoot(block.header, this.stateService)
+
+      // Validate epoch mark BEFORE rotation
+      // This validation MUST happen BEFORE emitEpochTransition which rotates validator sets
+      if (block.header.epochMark) {
+        // Gray Paper: epoch mark's tickets_entropy (entropy1) must match the current entropy1 from state
+        const currentEntropy = this.entropyService.getEntropy()
+        if (block.header.epochMark.entropy1 !== currentEntropy.entropy1) {
+          logger.error(
+            '[BlockImporter] Epoch mark entropy1 mismatch (before rotation)',
+            {
+              epochMarkEntropy1: block.header.epochMark.entropy1,
+              stateEntropy1: currentEntropy.entropy1,
+            },
+          )
+          return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+        }
+
+        // Gray Paper Eq. 115: pendingSet' = Φ(stagingSet)
+        // The epoch mark validators must match the staging set
+        // Compare epoch mark validators with staging set validators
+        const stagingValidators =
+          this.validatorSetManagerService.getStagingValidators()
+        const epochMarkValidators = block.header.epochMark.validators
+
+        if (epochMarkValidators.length !== stagingValidators.length) {
+          logger.error('[BlockImporter] Epoch mark validators count mismatch', {
+            epochMarkCount: epochMarkValidators.length,
+            stagingCount: stagingValidators.length,
+          })
+          return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+        }
+
+        // Check each validator matches (order matters!)
+        for (let i = 0; i < epochMarkValidators.length; i++) {
+          const epochMarkValidator = epochMarkValidators[i]
+          const stagingValidator = stagingValidators[i]
+
+          if (
+            epochMarkValidator.bandersnatch !== stagingValidator.bandersnatch ||
+            epochMarkValidator.ed25519 !== stagingValidator.ed25519
+          ) {
+            logger.error(
+              '[BlockImporter] Epoch mark validator mismatch at index',
+              {
+                index: i,
+                epochMarkBandersnatch: epochMarkValidator.bandersnatch,
+                stagingBandersnatch: stagingValidator.bandersnatch,
+                epochMarkEd25519: epochMarkValidator.ed25519,
+                stagingEd25519: stagingValidator.ed25519,
+              },
+            )
+            return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+          }
+        }
+      }
+
+      // Validate winnersMark (Gray Paper Eq. 262-266)
+      // H_winnersmark = Z(ticketaccumulator) when e' = e ∧ m < C_epochtailstart ≤ m' ∧ |ticketaccumulator| = C_epochlen
+      const recentHistory = this.recentHistoryService.getRecentHistory()
+      const previousSlot =
+        recentHistory.length > 0 &&
+        recentHistory[recentHistory.length - 1].headerHash !== zeroHash
+          ? block.header.timeslot - 1n
+          : 0n
+      const [winnersMarkError] = validateWinnersMark(
+        block.header,
+        previousSlot,
+        this.ticketService.getTicketAccumulator(),
+        this.configService,
+      )
+      if (winnersMarkError) {
+        logger.error('[BlockImporter] winnersMark validation failed', {
+          error: winnersMarkError.message,
+        })
+        return safeError(winnersMarkError)
+      }
+
       // Emit epoch transition before processing if needed
       // if (isEpochTransition && block.header.epochMark) {
       if (block.header.epochMark) {
@@ -188,6 +328,38 @@ export class BlockImporterService extends BaseService {
       }
       // Clear snapshot on success
       this.stateSnapshot = null
+      this.entropySnapshot = null
+      this.clockSnapshot = null
+      this.accumulationSlotSnapshot = null
+
+      // Save state snapshot to ChainManagerService for fork handling
+      if (this.chainManagerService) {
+        const [stateTrieForSnapshot, stateTrieResult] =
+          this.stateService.generateStateTrie()
+        if (!stateTrieForSnapshot && stateTrieResult) {
+          const keyvals = Object.entries(stateTrieResult).map(
+            ([key, value]) => ({
+              key: key as Hex,
+              value: value as Hex,
+            }),
+          )
+          const [hashError, blockHash] = calculateBlockHashFromHeader(
+            block.header,
+            this.configService,
+          )
+          if (!hashError && blockHash) {
+            // Save complete snapshot including service-specific state
+            const snapshot: ChainStateSnapshot = {
+              keyvals,
+              accumulationSlot: this.accumulationService.getLastProcessedSlot(),
+              clockSlot: this.clockService.getLatestReportedBlockTimeslot(),
+              entropy: { ...this.entropyService.getEntropy() },
+            }
+            this.chainManagerService.saveStateSnapshot(blockHash, snapshot)
+          }
+        }
+      }
+
       return safeResult(true)
     } catch (error) {
       // Revert state to snapshot before returning error
@@ -268,12 +440,39 @@ export class BlockImporterService extends BaseService {
     }
 
     // Process disputes (validate and apply)
-    const [disputeError] = this.disputesService.processDisputes(
-      block.body.disputes,
-      block.header.timeslot,
-    )
+    const [disputeError, computedOffenders] =
+      this.disputesService.processDisputes(
+        block.body.disputes,
+        block.header.timeslot,
+      )
     if (disputeError) {
       return safeError(disputeError)
+    }
+
+    // Validate offenders_mark matches computed offenders
+    // Gray Paper: H_offendersmark must equal the new offenders from disputes processing
+    const headerOffendersMark = block.header.offendersMark ?? []
+    const computedOffendersArray = computedOffenders ?? []
+
+    // Sort both arrays for comparison (offenders should be sorted)
+    const sortedHeaderOffenders = [...headerOffendersMark].sort()
+    const sortedComputedOffenders = [...computedOffendersArray].sort()
+
+    // Check if arrays match
+    const offendersMatch =
+      sortedHeaderOffenders.length === sortedComputedOffenders.length &&
+      sortedHeaderOffenders.every(
+        (offender, index) => offender === sortedComputedOffenders[index],
+      )
+
+    if (!offendersMatch) {
+      logger.error('[BlockImporter] Bad offenders mark', {
+        headerOffendersMark: sortedHeaderOffenders,
+        computedOffenders: sortedComputedOffenders,
+        headerCount: sortedHeaderOffenders.length,
+        computedCount: sortedComputedOffenders.length,
+      })
+      return safeError(new Error(DISPUTES_ERRORS.BAD_OFFENDERS_MARK))
     }
 
     // Gray Paper: Process assurances FIRST, then guarantees
@@ -283,18 +482,85 @@ export class BlockImporterService extends BaseService {
     // for new guarantees to be processed.
     // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
     // passed to accumulation
+    // For epoch transition blocks, assurances need to be verified against the PREVIOUS
+    // validator set, since the assurances were signed before the epoch transition
+    const isEpochTransition = !!block.header.epochMark
     const [assuranceError, availableWorkReports] =
       this.assuranceService.processAssurances(
         block.body.assurances,
         Number(block.header.timeslot),
         block.header.parent,
         this.configService,
+        isEpochTransition,
       )
     if (assuranceError) {
       return safeError(assuranceError)
     }
     if (!availableWorkReports) {
       return safeError(new Error('Assurance processing failed'))
+    }
+
+    // Gray Paper Eq. 346: Validate lookup_anchor exists in ancestors with matching slot
+    // ∃h ∈ ancestors: h_timeslot = x_lookupanchortime ∧ blake(h) = x_lookupanchorhash
+    // This validation is only performed when:
+    // 1. chainManagerService is available
+    // 2. ancestryEnabled is true (controlled by config)
+    // 3. The ancestry list has been initialized (has entries)
+    // Note: The age check (Eq. 340-341) is always performed in GuarantorService
+    if (
+      this.chainManagerService &&
+      this.configService.ancestryEnabled &&
+      block.body.guarantees.length > 0
+    ) {
+      const validAnchors = this.chainManagerService.getValidLookupAnchors()
+      // Only validate if ancestry has been initialized
+      if (validAnchors.length > 0) {
+        for (const guarantee of block.body.guarantees) {
+          const lookupAnchorHash = guarantee.report.context.lookup_anchor
+          const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
+
+          if (
+            !this.chainManagerService.isValidLookupAnchorWithSlot(
+              lookupAnchorHash,
+              lookupAnchorSlot,
+            )
+          ) {
+            logger.error(
+              '[BlockImporter] Lookup anchor not found in ancestors',
+              {
+                lookupAnchorHash,
+                lookupAnchorSlot: lookupAnchorSlot.toString(),
+                coreIndex: guarantee.report.core_index.toString(),
+                blockSlot: block.header.timeslot.toString(),
+                ancestrySize: validAnchors.length,
+              },
+            )
+            return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+          }
+        }
+      }
+    }
+
+    // Validate pending reports don't have future timestamps
+    // Gray Paper: Pending reports must have timestamps < current block slot
+    // If a pending report has timestamp >= block_slot, it means the state is inconsistent
+    const currentSlot = block.header.timeslot
+    for (
+      let coreIndex = 0;
+      coreIndex < this.configService.numCores;
+      coreIndex++
+    ) {
+      const pendingReport = this.workReportService.getCoreReport(
+        BigInt(coreIndex),
+      )
+      if (pendingReport && pendingReport.timeslot >= currentSlot) {
+        logger.error('[BlockImporter] Pending report has future slot', {
+          coreIndex,
+          reportTimeslot: pendingReport.timeslot.toString(),
+          blockSlot: currentSlot.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
     }
 
     // Process guarantees AFTER assurances
@@ -454,6 +720,13 @@ export class BlockImporterService extends BaseService {
 
   /**
    * Revert state to the snapshot taken before block import
+   *
+   * Gray Paper: When reverting state, we must fully restore the previous state.
+   * This means clearing any new state entries created during the failed block
+   * import and restoring all values to their pre-import state.
+   *
+   * Also restores entropy and clock state that may have been modified during
+   * importBlockInternal before the failure point.
    */
   private async revertStateSnapshot(): Promise<void> {
     if (!this.stateSnapshot) {
@@ -465,6 +738,10 @@ export class BlockImporterService extends BaseService {
       snapshotSize: this.stateSnapshot.length,
     })
 
+    // Clear state first to remove any new entries created during failed block import
+    // This ensures complete state restoration, not just value updates
+    this.stateService.clearState()
+
     const [revertError] = this.stateService.setState(this.stateSnapshot)
     if (revertError) {
       logger.error('[BlockImporter] Failed to revert state snapshot', {
@@ -473,6 +750,24 @@ export class BlockImporterService extends BaseService {
     } else {
       logger.debug('[BlockImporter] State reverted successfully')
     }
+
+    // Restore entropy state (modified by emitBestBlockChanged during importBlockInternal)
+    if (this.entropySnapshot) {
+      this.entropyService.setEntropy(this.entropySnapshot)
+      this.entropySnapshot = null
+    }
+
+    // Restore clock state (modified by setLatestReportedBlockTimeslot during importBlockInternal)
+    if (this.clockSnapshot !== null) {
+      this.clockService.setLatestReportedBlockTimeslot(this.clockSnapshot)
+      this.clockSnapshot = null
+    }
+
+    // Restore accumulation slot state (determines shift behavior in AccumulationService)
+    // This is critical for fork handling - sibling blocks at the same slot need
+    // the AccumulationService to think it hasn't processed this slot yet
+    this.accumulationService.setLastProcessedSlot(this.accumulationSlotSnapshot)
+    this.accumulationSlotSnapshot = null
 
     // Clear snapshot after revert
     this.stateSnapshot = null

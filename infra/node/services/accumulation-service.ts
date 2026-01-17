@@ -19,6 +19,7 @@
 
 import {
   calculateWorkReportHash,
+  decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
   setServicePreimageValue,
   setServiceRequestValue,
@@ -36,6 +37,7 @@ import {
   type Ready,
   type ReadyItem,
   type ServiceAccount,
+  type ValidatorPublicKeys,
   WORK_REPORT_CONSTANTS,
   type WorkExecResultValue,
   type WorkExecutionResult,
@@ -281,9 +283,16 @@ export class AccumulationService extends BaseService {
   }
 
   /**
+   * Get last processed slot (the slot that the current accumulated/ready state represents)
+   */
+  getLastProcessedSlot(): bigint | null {
+    return this.lastProcessedSlot
+  }
+
+  /**
    * Set last processed slot (the slot that the current accumulated/ready state represents)
    */
-  setLastProcessedSlot(slot: bigint): void {
+  setLastProcessedSlot(slot: bigint | null): void {
     this.lastProcessedSlot = slot
   }
 
@@ -1239,6 +1248,15 @@ export class AccumulationService extends BaseService {
     ]
     this.accumulationStatistics.set(serviceId, newStats)
 
+    // DEBUG: Log accumulation statistics tracking
+    logger.debug('[AccumulationService] trackAccumulationStatistics', {
+      serviceId: serviceId.toString(),
+      workItemCount,
+      gasused: gasused.toString(),
+      prevStats: currentStats,
+      newStats,
+    })
+
     // Update serviceStats.accumulation in activity state
     if (this.statisticsService) {
       this.statisticsService.updateServiceAccumulationStats(serviceId, newStats)
@@ -1266,6 +1284,15 @@ export class AccumulationService extends BaseService {
       currentStats[1] + Number(gasUsed), // Total gas used processing transfers
     ]
     this.onTransfersStatistics.set(serviceId, newStats)
+
+    // DEBUG: Log onTransfers statistics tracking
+    logger.debug('[AccumulationService] trackOnTransfersStatistics', {
+      serviceId: serviceId.toString(),
+      transferCount,
+      gasUsed: gasUsed.toString(),
+      prevStats: currentStats,
+      newStats,
+    })
 
     // Update serviceStats.onTransfersCount and onTransfersGasUsed in activity state
     // Only for versions < 0.7.1 (checked inside updateServiceOnTransfersStats)
@@ -1722,17 +1749,14 @@ export class AccumulationService extends BaseService {
     //   where a' = a except a'.lastacc = time' when s ∈ keys(accumulationstatistics)
     // This MUST be done AFTER all accumulation iterations complete, not during each iteration,
     // to ensure partial state snapshots in subsequent iterations see the original lastacc values.
+    // NOTE: This applies to ALL accumulated services, including newly created ones.
+    // If a service is created AND accumulated in the same slot, lastacc should still be updated.
     for (const serviceId of this.accumulatedServicesForLastacc) {
       const [accountError, account] =
         this.serviceAccountsService.getServiceAccount(serviceId)
       if (!accountError && account) {
-        // Check if this is a newly created service (created field equals current slot)
-        // Newly created services keep lastacc = 0 (set by NEW host function)
-        const isNewlyCreated = account.created === slot
-        if (!isNewlyCreated) {
-          account.lastacc = slot
-          this.serviceAccountsService.setServiceAccount(serviceId, account)
-        }
+        account.lastacc = slot
+        this.serviceAccountsService.setServiceAccount(serviceId, account)
       }
     }
 
@@ -2299,6 +2323,49 @@ export class AccumulationService extends BaseService {
           registrar: poststate.registrar,
           alwaysaccers: new Map(poststate.alwaysaccers),
         })
+
+        // Gray Paper: Apply staging set update if the delegator service called DESIGNATE
+        // The DESIGNATE host function updates imX.state.stagingset, which becomes poststate.stagingset
+        // We need to apply this to the global ValidatorSetManager
+        // Only update if the current service is the delegator (DESIGNATE host function checks this)
+        // Gray Paper: Only apply staging set if the service was the delegator in the ORIGINAL
+        // snapshot (before any services ran). A service can only successfully call DESIGNATE
+        // if it is the delegator when it runs. If a service changes the delegator via BLESS,
+        // then later services that become delegator cannot call DESIGNATE successfully
+        // (they'll get HUH because they're not the delegator in their snapshot).
+        //
+        // Check against the ORIGINAL delegator (initialPrivileges.delegator), not poststate.delegator.
+        // This ensures we apply the staging set from the service that was ORIGINALLY the delegator
+        // and could have successfully called DESIGNATE.
+        if (
+          accumulatedServiceId === initialPrivileges.delegator &&
+          poststate.stagingset &&
+          poststate.stagingset.length > 0
+        ) {
+          // Convert Uint8Array[] back to ValidatorPublicKeys[]
+          const updatedStagingSet: ValidatorPublicKeys[] = []
+          for (const encoded of poststate.stagingset) {
+            const [decodeError, decoded] = decodeValidatorPublicKeys(encoded)
+            if (decodeError || !decoded) {
+              logger.warn(
+                '[AccumulationService] Failed to decode staging set validator',
+                { error: decodeError?.message },
+              )
+              continue
+            }
+            updatedStagingSet.push(decoded.value)
+          }
+          if (updatedStagingSet.length > 0) {
+            this.validatorSetManager.setStagingSet(updatedStagingSet)
+            logger.info(
+              '[AccumulationService] Applied staging set update from DESIGNATE',
+              {
+                serviceId: accumulatedServiceId.toString(),
+                validatorCount: updatedStagingSet.length,
+              },
+            )
+          }
+        }
       } else {
         logger.debug('[AccumulationService] Accumulation failed', {
           invocationIndex: i,

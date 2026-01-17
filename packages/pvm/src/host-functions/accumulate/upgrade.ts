@@ -1,4 +1,4 @@
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -37,7 +37,7 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
       registers.slice(7, 10)
 
     // Log all input parameters
-    context.log('UPGRADE host function invoked', {
+    logger.info('UPGRADE host function invoked', {
       codeHashOffset: codeHashOffset.toString(),
       newMinimumAccumulationGas: newMinimumAccumulationGas.toString(),
       newMinimumMemoryGas: newMinimumMemoryGas.toString(),

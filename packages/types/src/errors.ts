@@ -67,6 +67,7 @@ export const DISPUTES_ERRORS = {
   BAD_SIGNATURE: 'bad_signature',
   BAD_GUARANTOR_KEY: 'bad_guarantor_key',
   BAD_AUDITOR_KEY: 'bad_auditor_key',
+  BAD_OFFENDERS_MARK: 'bad_offenders_mark',
 } as const
 
 /**
