@@ -114,6 +114,8 @@ export interface ServiceFactoryOptions {
   nodeId?: string
   /** Initial validators for ValidatorSetManager */
   initialValidators?: ValidatorPublicKeys[]
+  /** Validator index (optional, for getting connection endpoint from staging set) */
+  validatorIndex?: number
   /** Networking protocols (optional, for advanced use) */
   protocols?: {
     ce131TicketDistributionProtocol?: CE131TicketDistributionProtocol | null
@@ -288,11 +290,6 @@ export async function createCoreServices(
         bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
       enableDevAccounts: options.keyPair?.enableDevAccounts ?? true,
       devAccountCount: options.keyPair?.devAccountCount ?? 6,
-      connectionEndpoint: {
-        host: options.networking?.listenAddress ?? '127.0.0.1',
-        port: options.networking?.listenPort ?? 9000,
-        publicKey: new Uint8Array(32), // Will be set after key generation
-      },
     }
     keyPairService = new KeyPairService(keyPairConfig)
   }
@@ -328,11 +325,11 @@ export async function createCoreServices(
     }
 
     networkingService = new NetworkingService({
-      listenAddress: options.networking.listenAddress,
-      listenPort: options.networking.listenPort,
+      configService,
       keyPairService,
       chainHash,
       protocolRegistry: options.protocolRegistry ?? new Map(),
+      validatorIndex: options.validatorIndex,
     })
   }
 

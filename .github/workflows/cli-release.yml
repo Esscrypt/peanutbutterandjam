@@ -1,0 +1,129 @@
+name: Build and Release CLI Binary
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize specific submodules
+        run: |
+          git submodule update --init --depth 1 packages/bandersnatch
+          git submodule update --init --depth 1 packages/bandersnatch-vrf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build dependencies
+        run: bun run build
+
+      - name: Build CLI binary
+        run: cd packages/cli && bun run build
+
+      - name: Create checksum
+        run: |
+          sha256sum packages/cli/bin/pbnj > packages/cli/bin/pbnj.sha256
+
+      - name: Compress binary
+        run: |
+          gzip -k -9 packages/cli/bin/pbnj
+          sha256sum packages/cli/bin/pbnj.gz > packages/cli/bin/pbnj.gz.sha256
+
+      - name: Checkout releases repository
+        uses: actions/checkout@v4
+        with:
+          repository: Esscrypt/pbnj-cli-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          path: releases-repo
+          fetch-depth: 0
+
+      - name: Copy binaries to releases repository
+        run: |
+          mkdir -p releases-repo/bin
+          cp packages/cli/bin/pbnj.gz releases-repo/bin/
+          cp packages/cli/bin/pbnj.gz.sha256 releases-repo/bin/
+          # Also include uncompressed version checksum for reference
+          cp packages/cli/bin/pbnj.sha256 releases-repo/bin/
+
+      - name: Commit and push to releases repository
+        run: |
+          cd releases-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add CLI binary from commit ${{ github.sha }}"
+            # Try to detect default branch, fallback to main/master
+            if git show-ref --verify --quiet refs/remotes/origin/HEAD; then
+              DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+            else
+              # Try to get default branch from remote
+              DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | awk '{print $3}' || echo "main")
+            fi
+            git push origin HEAD:$DEFAULT_BRANCH || git push origin HEAD:main || git push origin HEAD:master
+          fi
+
+      - name: Create release in releases repository
+        uses: softprops/action-gh-release@v1
+        with:
+          repository: Esscrypt/pbnj-cli-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          tag_name: cli-${{ github.sha }}
+          name: CLI Binary ${{ github.sha }}
+          body: |
+            CLI binary built from commit ${{ github.sha }}
+            
+            ## Usage
+            
+            ### Extract and run:
+            ```bash
+            gunzip pbnj.gz
+            chmod +x pbnj
+            ./pbnj --help
+            ```
+            
+            Or in one command:
+            ```bash
+            gunzip -c pbnj.gz > pbnj && chmod +x pbnj && ./pbnj --help
+            ```
+            
+            ## Available Commands
+            
+            - `pbnj gen-spec <input-file> <output-file> [--mode <mode>]` - Generate chain specification
+            - `pbnj gen-keys` - Generate validator keys
+            - `pbnj list-keys` - List generated keys
+            - `pbnj run [options]` - Run a JAM node
+          draft: false
+          prerelease: true
+          files: |
+            releases-repo/bin/pbnj.gz
+            releases-repo/bin/pbnj.gz.sha256
+            releases-repo/bin/pbnj.sha256
+

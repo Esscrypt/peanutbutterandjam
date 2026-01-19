@@ -17,6 +17,7 @@ import {
   decodeVariableSequence,
   AccumulateInput,
   decodeAccumulateInput,
+  WorkPackage,
 } from './codec'
 import { ImplicationsPair } from './codec'
 import {
@@ -55,7 +56,7 @@ import { ForgetHostFunction } from './host-functions/accumulate/forget'
 import { YieldHostFunction } from './host-functions/accumulate/yield'
 import { ProvideHostFunction } from './host-functions/accumulate/provide'
 import { HostFunctionRegistry } from './host-functions/general/registry'
-import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams, FetchParams } from './host-functions/general/base'
+import { HostFunctionContext, HostFunctionParams, ReadParams, WriteParams, LookupParams, InfoParams, LogParams, FetchParams, RefineInvocationContext } from './host-functions/general/base'
 import { ServiceAccount } from './pbnj-types-compat'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMParser } from './parser'
@@ -153,6 +154,14 @@ export class PVM {
   timeslot: u64 = u64(0) // Current timeslot for accumulation
   entropyAccumulator: Uint8Array | null = null // Entropy accumulator for FETCH host function
   accumulateInputs: Array<AccumulateInput> | null = null // Accumulate inputs for FETCH host function (selectors 14, 15)
+  refineContext: RefineInvocationContext | null = null // Refine context (m, e) for refine invocation
+  // Refine invocation parameters (needed by host functions)
+  refineWorkPackage: WorkPackage | null = null // Work package for FETCH host function
+  refineAuthorizerTrace: Uint8Array | null = null // Authorizer trace for FETCH host function
+  refineImportSegments: Array<Array<Uint8Array>> | null = null // Import segments for FETCH host function
+  refineExportSegmentOffset: u32 = 0 // Export segment offset for EXPORT host function
+  refineServiceAccount: CompleteServiceAccount | null = null // Service account for HISTORICAL_LOOKUP host function
+  refineLookupAnchorTimeslot: u64 = u64(0) // Lookup anchor timeslot for HISTORICAL_LOOKUP host function
   
   // Config parameters (set during setupAccumulateInvocation)
   configNumCores: i32 = 341
@@ -1471,6 +1480,89 @@ export class PVM {
    */
   public setAccumulateInputs(inputs: Array<AccumulateInput> | null): void {
     this.accumulateInputs = inputs
+  }
+
+  /**
+   * Set up refine invocation without executing
+   * Gray Paper equation 78-89: Ψ_R(coreIndex, workItemIndex, workPackage, authorizerTrace, importSegments, exportSegmentOffset)
+   * 
+   * This sets up the refine context and initializes the program for step-by-step execution.
+   * Host functions will access the refine context through this.refineContext.
+   * 
+   * @param gasLimit - Gas limit for execution (from work item refgaslimit)
+   * @param program - Service code blob (preimage format)
+   * @param args - Encoded refine arguments: encode{c, i, w.serviceindex, var{w.payload}, blake{p}}
+   * @param workPackage - Work package (for FETCH host function)
+   * @param authorizerTrace - Authorizer trace (for FETCH host function)
+   * @param importSegments - Import segments (for FETCH host function)
+   * @param exportSegmentOffset - Export segment offset (for EXPORT host function)
+   * @param serviceAccount - Service account (for HISTORICAL_LOOKUP host function)
+   * @param lookupAnchorTimeslot - Lookup anchor timeslot (for HISTORICAL_LOOKUP host function)
+   */
+  public setupRefineInvocation(
+    gasLimit: u32,
+    program: Uint8Array,
+    args: Uint8Array,
+    workPackage: WorkPackage | null,
+    authorizerTrace: Uint8Array | null,
+    importSegments: Array<Array<Uint8Array>> | null,
+    exportSegmentOffset: u32,
+    serviceAccount: CompleteServiceAccount | null,
+    lookupAnchorTimeslot: u64,
+  ): void {
+    // CRITICAL: Reset PVM state completely before each refine invocation
+    // This ensures no state leaks between invocations
+    this.reset()
+    
+    // Clear refine-specific state
+    this.refineContext = null
+    this.refineWorkPackage = null
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0
+    this.refineServiceAccount = null
+    this.refineLookupAnchorTimeslot = u64(0)
+    this.accumulationContext = null
+    this.entropyAccumulator = null
+    this.accumulateInputs = null
+    this.timeslot = u64(0)
+    
+    // Store refine invocation parameters for host functions
+    this.refineWorkPackage = workPackage
+    this.refineAuthorizerTrace = authorizerTrace
+    this.refineImportSegments = importSegments
+    this.refineExportSegmentOffset = exportSegmentOffset
+    this.refineServiceAccount = serviceAccount
+    this.refineLookupAnchorTimeslot = lookupAnchorTimeslot
+    
+    // Initialize refine context (Gray Paper: (∅, ∅) - empty machines dict and empty export segments)
+    this.refineContext = new RefineInvocationContext()
+    
+    // Set gas and program counter
+    // Gray Paper equation 86: Initial PC = 0 (not 5 like accumulate)
+    this.state.gasCounter = gasLimit
+    this.state.programCounter = 0
+    
+    // Initialize program using Gray Paper Y function
+    // This decodes the preimage blob and sets up code, bitmask, and jumpTable
+    const codeBlob = this.initializeProgram(program, args)
+    
+    if (!codeBlob) {
+      abort(
+        `setupRefineInvocation: initializeProgram failed: program length=${program.length}, args length=${args.length}`
+      )
+      unreachable()
+    }
+    
+    // Verify that state.code and state.bitmask were set by initializeProgram
+    if (this.state.code.length === 0 || this.state.bitmask.length === 0) {
+      abort(
+        `setupRefineInvocation: initializeProgram succeeded but state not set: code.length=${this.state.code.length}, bitmask.length=${this.state.bitmask.length}`
+      )
+      unreachable()
+    }
+    
+    // Don't call run() - caller will step through manually
   }
 
   /**

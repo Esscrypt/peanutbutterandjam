@@ -21,6 +21,7 @@ import { calculateWorkPackageHash } from '@pbnjam/codec'
 import {
   bytesToHex,
   type EventBusService,
+  getEd25519KeyPairWithFallback,
   hexToBytes,
   logger,
 } from '@pbnjam/core'
@@ -100,7 +101,7 @@ export class GuarantorService extends BaseService {
   private readonly statisticsService: StatisticsService | null
   private readonly stateService: StateService | null
   // private readonly shardService: ShardService | null
-  private validatorIndex = 0
+  private validatorIndex: number | null = null
 
   constructor(options: {
     configService: ConfigService
@@ -153,15 +154,29 @@ export class GuarantorService extends BaseService {
   }
 
   start(): Safe<boolean> | SafePromise<boolean> {
-    if (!this.keyPairService) {
-      return safeError(new Error('Key pair service not found'))
+    // Get Ed25519 public key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(keyPairError || new Error('Key pair service not found'))
     }
-    const publicKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
+    const publicKey = ed25519KeyPair.publicKey
     const [validatorIndexError, validatorIndex] =
       this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
     if (validatorIndexError) {
-      return safeError(validatorIndexError)
+      // If the local node is not a validator, log a warning and continue
+      // This allows non-validator nodes to run (e.g., for development/testing)
+      logger.warn(
+        'Local node is not a validator in the genesis state. Guarantor service will operate in non-validator mode.',
+        {
+          publicKey: bytesToHex(publicKey),
+          error: validatorIndexError.message,
+        },
+      )
+      this.validatorIndex = null
+      return safeResult(true)
     }
     this.validatorIndex = validatorIndex
     return safeResult(true)
@@ -317,6 +332,11 @@ export class GuarantorService extends BaseService {
     const entropy2 = this.entropyService.getEntropy2()
     const currentSlot = this.clockService.getCurrentSlot()
     // TODO: Step 1: Get co-guarantors for this core
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const [coGuarantorsError, coGuarantors] = getCoGuarantors(
       coreIndex,
       this.validatorIndex,
@@ -724,6 +744,11 @@ export class GuarantorService extends BaseService {
     // STEP 1: Verify Assignment & Anti-Spam
     // ═══════════════════════════════════════════════════════════════════
     const entropy2 = this.entropyService.getEntropy2()
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const currentSlot = this.clockService.getCurrentSlot()
     const [coreError, assignedCore] = getAssignedCore(
       this.validatorIndex,
@@ -745,9 +770,11 @@ export class GuarantorService extends BaseService {
 
     // Check anti-spam limit (max 2 signatures per timeslot)
     const validatorSignatures =
-      this.validatorSignaturesForTimeslot
-        .get(currentSlot)
-        ?.get(this.validatorIndex) ?? 0
+      this.validatorIndex === null
+        ? 0
+        : (this.validatorSignaturesForTimeslot
+            .get(currentSlot)
+            ?.get(this.validatorIndex) ?? 0)
     if (validatorSignatures && validatorSignatures > 2) {
       return safeError(
         new Error(
@@ -861,6 +888,11 @@ export class GuarantorService extends BaseService {
     // }
     //
     // Record signature in history (anti-spam tracking)
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const currentSignatures =
       this.validatorSignaturesForTimeslot.get(currentSlot) ?? new Map()
     const currentValidatorSignatures =
@@ -1010,6 +1042,11 @@ export class GuarantorService extends BaseService {
     // const workReportHash = blake2bHash(encode(workReport))
 
     // Step 5: Verify we can sign (anti-spam check - max 2 per timeslot)
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const validatorSignatures =
       this.validatorSignaturesForTimeslot.get(currentSlot) ?? new Map()
     const currentValidatorSignatures =
@@ -1028,6 +1065,11 @@ export class GuarantorService extends BaseService {
     // const signature = createGuaranteeSignature(workReportHash, edPrivateKey)
 
     // Step 7: Record that we signed this timeslot
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     currentValidatorSignatures.set(
       this.validatorIndex,
       currentValidatorSignatures + 1,
@@ -1203,11 +1245,26 @@ export class GuarantorService extends BaseService {
     }
 
     // Add our own signature to the collection
+    if (this.validatorIndex === null) {
+      return // Cannot sign if not a validator
+    }
     const localValidatorIndex = this.validatorIndex
+    // Get Ed25519 private key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      logger.error(
+        '[GuarantorService] Failed to get Ed25519 key pair for signing',
+        { error: keyPairError?.message },
+      )
+      return
+    }
     const [ourSignatureError, _ourSignature] = createGuaranteeSignature(
       pending.workReport,
       localValidatorIndex,
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.privateKey,
+      ed25519KeyPair.privateKey,
     )
     if (ourSignatureError) {
       return

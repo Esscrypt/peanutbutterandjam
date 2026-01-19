@@ -208,6 +208,25 @@ export async function instantiate(module, imports = {}) {
       inputs = __lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 51, 2, inputs);
       exports.setAccumulateInputs(inputs);
     },
+    setupRefineInvocation(gasLimit, program, args, workPackage, authorizerTrace, importSegments, exportSegmentOffset, serviceAccount, lookupAnchorTimeslot) {
+      // assembly/index/setupRefineInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null, ~lib/typedarray/Uint8Array | null, ~lib/array/Array<~lib/array/Array<~lib/typedarray/Uint8Array>> | null, u32, assembly/codec/CompleteServiceAccount | null, u64) => void
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      authorizerTrace = authorizerTrace ? __retain(__lowerTypedArray(Uint8Array, 15, 0, authorizerTrace) || __notnull()) : null;
+      importSegments = importSegments ? __retain(__lowerArray((pointer, value) => { __setU32(pointer, __retain(__lowerArray((pointer, value) => { __setU32(pointer, __retain(__lowerTypedArray(Uint8Array, 15, 0, value) || __notnull())); }, 11, 0, value) || __notnull())); }, 14, 2, value) || __notnull()) : null;
+      serviceAccount = serviceAccount ? __lowerInternref(serviceAccount) || __notnull() : null;
+      lookupAnchorTimeslot = lookupAnchorTimeslot || 0n;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupRefineInvocation(gasLimit, program, args, workPackage, authorizerTrace, importSegments, exportSegmentOffset, serviceAccount, lookupAnchorTimeslot);
+      } finally {
+        __release(program);
+        __release(args);
+        if (authorizerTrace) __release(authorizerTrace);
+        if (importSegments) __release(importSegments);
+      }
+    },
     runProgram() {
       // assembly/index/runProgram() => assembly/types/RunProgramResult
       return __liftInternref(exports.runProgram() >>> 0);

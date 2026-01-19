@@ -160,6 +160,9 @@ export class FetchHostFunction extends BaseHostFunction {
         // In accumulate invocation (line 189): n = entropyaccumulator' (entropy accumulator)
         // In refine invocation (line 96): n = zerohash (work package hash, but set to zero/none)
         // In is-authorized invocation (line 49): n = none (not available)
+        if (!params.entropyService) {
+          return null
+        }
         return params.entropyService.getEntropyAccumulator()
 
       case 2n: {

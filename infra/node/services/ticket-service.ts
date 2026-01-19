@@ -12,6 +12,7 @@ import {
   bytesToHex,
   type EpochTransitionEvent,
   type EventBusService,
+  getEd25519KeyPairWithFallback,
   type Hex,
   hexToBytes,
   logger,
@@ -76,6 +77,7 @@ export class TicketService extends BaseService implements ITicketService {
   private prover: RingVRFProverWasm
   private localValidatorIndex: number | null = null
   private ringVerifier: RingVRFVerifierWasm
+
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
@@ -121,20 +123,56 @@ export class TicketService extends BaseService implements ITicketService {
   }
 
   start(): Safe<boolean> {
-    if (!this.keyPairService) {
-      return safeError(new Error('Key pair service not set'))
-    }
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
-    const publicKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
+    // Get Ed25519 public key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      logger.error(
+        '[TicketService.start] Failed to get Ed25519 key pair with fallback',
+        {
+          keyPairError: keyPairError?.message,
+          hasEd25519KeyPair: !!ed25519KeyPair,
+          configServiceValidatorIndex: this.configService.validatorIndex,
+          hasKeyPairService: !!this.keyPairService,
+        },
+      )
+      return safeError(keyPairError || new Error('Key pair service not set'))
+    }
+    const publicKey = ed25519KeyPair.publicKey
+    const publicKeyHex = bytesToHex(publicKey)
+
+    logger.debug('[TicketService.start] Looking up validator index', {
+      publicKey: publicKeyHex,
+      configServiceValidatorIndex: this.configService.validatorIndex,
+      hasValidatorSetManager: !!this.validatorSetManager,
+    })
 
     const [validatorIndexError, validatorIndex] =
-      this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
+      this.validatorSetManager.getValidatorIndex(publicKeyHex)
     if (validatorIndexError) {
-      throw new Error('Failed to get validator index')
+      // If the local node is not a validator, log a warning and continue
+      // This allows non-validator nodes to run (e.g., for development/testing)
+      logger.warn(
+        'Local node is not a validator in the genesis state. Ticket service will operate in non-validator mode.',
+        {
+          publicKey: publicKeyHex,
+          error: validatorIndexError.message,
+          configServiceValidatorIndex: this.configService.validatorIndex,
+          hasValidatorSetManager: !!this.validatorSetManager,
+        },
+      )
+      this.localValidatorIndex = null
+      return safeResult(true)
     }
+    logger.debug('[TicketService.start] Found validator index', {
+      validatorIndex,
+      publicKey: publicKeyHex,
+    })
     this.localValidatorIndex = validatorIndex
 
     return safeResult(true)
@@ -197,13 +235,41 @@ export class TicketService extends BaseService implements ITicketService {
       this.validatorSetManager,
     )
 
-    // compare against our index
-    const ourPublicKey = bytesToHex(
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
-    )
-    const ourIndex = this.validatorSetManager.getValidatorIndex(ourPublicKey)
+    // Get our validator index using helper with fallback logic
+    let ourIndex: number | null = null
+    if (this.configService.validatorIndex !== undefined) {
+      const [ourIndexError] = this.validatorSetManager.getValidatorAtIndex(
+        this.configService.validatorIndex,
+      )
+      if (ourIndexError) {
+        return safeError(new Error('Local node is not a validator'))
+      }
+      ourIndex = this.configService.validatorIndex
+    } else {
+      // Get Ed25519 public key using helper with fallback logic
+      const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+        this.configService,
+        this.keyPairService || undefined,
+      )
+      if (keyPairError || !ed25519KeyPair) {
+        return safeError(keyPairError || new Error('Key pair service not set'))
+      }
+      const ourPublicKey = bytesToHex(ed25519KeyPair.publicKey)
+      const [ourIndexError, ourIndexResult] =
+        this.validatorSetManager.getValidatorIndex(ourPublicKey)
+      if (
+        ourIndexError ||
+        ourIndexResult === null ||
+        ourIndexResult === undefined
+      ) {
+        return safeError(new Error('Local node is not a validator'))
+      }
+      ourIndex = ourIndexResult
+    }
 
-    if (intendedProxyValidatorIndex !== Number(ourIndex)) {
+    // compare against our index
+
+    if (intendedProxyValidatorIndex !== ourIndex) {
       return safeError(new Error('Not the intended proxy validator'))
     }
 
@@ -733,7 +799,11 @@ export class TicketService extends BaseService implements ITicketService {
       //If the generating validator is chosen as the proxy validator,
       //  then the first step should effectively be skipped and the generating validator should
       //  distribute the ticket to the current validators itself
-      if (proxyValidatorIndex === Number(this.localValidatorIndex)) {
+      // Skip if local node is not a validator or if we are the proxy validator
+      if (
+        this.localValidatorIndex !== null &&
+        proxyValidatorIndex === Number(this.localValidatorIndex)
+      ) {
         continue
       }
 

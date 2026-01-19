@@ -105,7 +105,7 @@ export interface IServiceAccountService extends BaseService {
 }
 
 export interface IKeyPairService extends BaseService {
-  getLocalKeyPair(): ValidatorCredentials
+  getLocalKeyPair(): Safe<ValidatorCredentials>
 }
 
 export interface IEntropyService extends BaseService {
@@ -163,6 +163,12 @@ export interface IConfigService extends BaseService {
    */
   get forkingEnabled(): boolean
   set forkingEnabled(enabled: boolean)
+  /**
+   * Validator index for this node (optional)
+   * When set, the node will use the dev account key pair for this validator index
+   */
+  get validatorIndex(): number | undefined
+  set validatorIndex(index: number | undefined)
 }
 
 export interface IClockService extends BaseService {

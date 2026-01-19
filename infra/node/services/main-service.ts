@@ -34,7 +34,12 @@ import {
 } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 // import { TelemetryClient } from '@pbnjam/telemetry'
-import type { NodeType, StreamKind, TelemetryConfig } from '@pbnjam/types'
+import type {
+  NodeType,
+  StreamKind,
+  TelemetryConfig,
+  ValidatorPublicKeys,
+} from '@pbnjam/types'
 import {
   BaseService,
   type SafePromise,
@@ -51,13 +56,11 @@ import { BlockImporterService } from './block-importer-service'
 import { ClockService } from './clock-service'
 import { ConfigService } from './config-service'
 import { DisputesService } from './disputes-service'
-// import { ConnectionManagerService } from './connection-manager'
 import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
-// import { ExtrinsicValidator } from './extrinsic-validator'
 import { NodeGenesisManager } from './genesis-manager'
 import { GuarantorService } from './guarantor-service'
-import { HeaderConstructor } from './header-constructor'
+// import type { HeaderConstructor } from './header-constructor'
 import { KeyPairService } from './keypair-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
@@ -65,7 +68,6 @@ import { PrivilegesService } from './privileges-service'
 import { ReadyService } from './ready-service'
 import { RecentHistoryService } from './recent-history-service'
 import { ServiceRegistry } from './registry'
-// import { SafroleConsensusService } from './safrole-consensus-service'
 import { SealKeyService } from './seal-key'
 import { ServiceAccountService } from './service-account-service'
 import { ShardService } from './shard-service'
@@ -81,22 +83,22 @@ import { WorkReportService } from './work-report-service'
 export interface MainServiceConfig {
   /** Genesis configuration */
   genesis: {
-    /** Path to chain-spec.json file */
-    chainSpecPath: string
+    /** Path to chain-spec.json file (optional) */
+    chainSpecPath?: string
     genesisJsonPath?: string
     genesisHeaderPath?: string
   }
   /** Networking configuration */
   networking: {
     nodeType: NodeType
-    listenAddress: string
-    listenPort: bigint
     isBuilder?: boolean
   }
   /** Node ID for metrics */
   nodeId: string
-  /** Telemetry configuration */
-  telemetry: TelemetryConfig
+  /** Telemetry configuration (optional) */
+  telemetry?: TelemetryConfig
+  /** Validator index to use from chainspec (optional, uses dev account key generation) */
+  validatorIndex?: number
 }
 
 /**
@@ -109,23 +111,21 @@ export class MainService extends BaseService {
   // private blockAuthoringService: BlockAuthoringService
   private readonly networkingService: NetworkingService
   private readonly metricsCollector: MetricsCollector
-  // private readonly extrinsicValidatorService: ExtrinsicValidator
   private readonly genesisManagerService: NodeGenesisManager
-  private readonly headerConstructorService: HeaderConstructor
+  // private readonly headerConstructorService: HeaderConstructor
   private readonly statisticsService: StatisticsService
   private readonly recentHistoryService: RecentHistoryService
   private readonly disputesService: DisputesService
   private readonly authQueueService: AuthQueueService
   private readonly authPoolService: AuthPoolService
   private readonly guarantorService: GuarantorService
+  private isStopping = false
   private readonly readyService: ReadyService
   private readonly stateService: StateService
   private readonly blockImporterService: BlockImporterService
   // private readonly workPackageProcessorService: WorkPackageProcessor
   // private readonly telemetryService: TelemetryEventEmitterService
   private readonly keyPairService: KeyPairService
-  // private safroleConsensusService: SafroleConsensusService
-  // private connectionManagerService: ConnectionManagerService
   private readonly validatorSetManagerService: ValidatorSetManager
   private readonly clockService: ClockService
   private readonly sealKeyService: SealKeyService
@@ -210,6 +210,14 @@ export class MainService extends BaseService {
     return this.clockService
   }
 
+  /**
+   * Get the event bus service
+   * Exposed for RPC server event emission
+   */
+  getEventBusService(): EventBusService {
+    return this.eventBusService
+  }
+
   private readonly shardService: ShardService
   private readonly erasureCodingService: ErasureCodingService
   private readonly workReportService: WorkReportService
@@ -220,7 +228,7 @@ export class MainService extends BaseService {
     super('main-service')
     this.config = config
 
-    this.configService = new ConfigService('tiny')
+    this.configService = new ConfigService('tiny', this.config.validatorIndex)
 
     this.registry = new ServiceRegistry()
     const srsFilePath = path.join(
@@ -250,11 +258,6 @@ export class MainService extends BaseService {
         bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
       enableDevAccounts: true,
       devAccountCount: 6,
-      connectionEndpoint: {
-        host: this.config.networking.listenAddress,
-        port: Number(this.config.networking.listenPort),
-        publicKey: new Uint8Array(32), // Will be set after key generation
-      },
     })
 
     // const telemetryClient = new TelemetryClient(this.config.telemetry)
@@ -265,20 +268,30 @@ export class MainService extends BaseService {
 
     this.metricsCollector = new MetricsCollector(this.config.nodeId)
 
-    // this.extrinsicValidatorService = new ExtrinsicValidator(
-    //   'extrinsic-validator',
-    // )
-
     this.genesisManagerService = new NodeGenesisManager(this.configService, {
       chainSpecPath: this.config.genesis.chainSpecPath,
       genesisJsonPath: this.config.genesis.genesisJsonPath,
       genesisHeaderPath: this.config.genesis.genesisHeaderPath,
     })
 
-    const [chainHashError, chainHash] =
+    // Get chain hash if genesis files are provided, otherwise use default zero hash
+    let chainHash: Hex
+    const [chainHashError, chainHashResult] =
       this.genesisManagerService.getGenesisHeaderHash()
     if (chainHashError) {
-      throw new Error('Failed to get chain hash')
+      // If no genesis files provided, use default zero hash
+      if (
+        !this.config.genesis.chainSpecPath &&
+        !this.config.genesis.genesisJsonPath &&
+        !this.config.genesis.genesisHeaderPath
+      ) {
+        chainHash =
+          '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+      } else {
+        throw new Error(`Failed to get chain hash: ${chainHashError.message}`)
+      }
+    } else {
+      chainHash = chainHashResult
     }
 
     // Initialize statistics service
@@ -289,11 +302,11 @@ export class MainService extends BaseService {
     })
 
     this.networkingService = new NetworkingService({
-      listenAddress: this.config.networking.listenAddress,
-      listenPort: Number(this.config.networking.listenPort),
-      keyPairService: this.keyPairService,
       chainHash: chainHash,
       protocolRegistry: this.protocolRegistry,
+      configService: this.configService,
+      keyPairService: this.keyPairService,
+      validatorIndex: this.config.validatorIndex,
     })
 
     // this.workPackageProcessorService = new WorkPackageProcessor(
@@ -321,11 +334,37 @@ export class MainService extends BaseService {
       configService: this.configService,
     })
 
-    // const [initialValidatorsError, initialValidators] =
-    //   this.genesisManagerService.getInitialValidatorsFromChainSpec()
-    // if (initialValidatorsError) {
-    //   throw new Error('Failed to get initial validators')
-    // }
+    // Get initial validators from genesis (JIP-4 format: prefer full keys from genesis_state)
+    // Try to get full validator keys (including metadata) from genesis_state first
+    let initialValidators: ValidatorPublicKeys[] | null = null
+    const [fullValidatorsError, fullValidators] =
+      this.genesisManagerService.getInitialValidatorsFromChainSpec()
+    if (!fullValidatorsError && fullValidators) {
+      // Use full validator keys from genesis_state (includes metadata)
+      initialValidators = fullValidators.map((v) => ({
+        bandersnatch: v.bandersnatch,
+        ed25519: v.ed25519,
+        bls: `0x${'00'.repeat(144)}` as Hex, // 144 bytes for BLS
+        metadata: `0x${'00'.repeat(128)}` as Hex, // 128 bytes for metadata,
+      }))
+    } else {
+      // Fallback to epoch mark validators (only bandersnatch + ed25519, no metadata)
+      const [validatorsError, validators] =
+        this.genesisManagerService.getInitialValidatorsFromBlockHeader()
+      if (!validatorsError && validators) {
+        // Convert ValidatorKeyPair[] to ValidatorPublicKeys[] by adding zero BLS and metadata
+        // JIP-4 format epoch mark only contains bandersnatch + ed25519, not BLS/metadata
+        const zeroBLS = `0x${'00'.repeat(144)}` as Hex // 144 bytes for BLS
+        const zeroMetadata = `0x${'00'.repeat(128)}` as Hex // 128 bytes for metadata
+
+        initialValidators = validators.map((v) => ({
+          bandersnatch: v.bandersnatch,
+          ed25519: v.ed25519,
+          bls: zeroBLS,
+          metadata: zeroMetadata,
+        }))
+      }
+    }
 
     this.validatorSetManagerService = new ValidatorSetManager({
       eventBusService: this.eventBusService,
@@ -333,7 +372,7 @@ export class MainService extends BaseService {
       ringProver: this.ringProver,
       ticketService: this.ticketService,
       configService: this.configService,
-      initialValidators: null,
+      initialValidators,
     })
     // SealKeyService epoch transition callback is registered in constructor
     // ValidatorSetManager should be constructed before SealKeyService to ensure
@@ -405,11 +444,11 @@ export class MainService extends BaseService {
     this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.clockService.setValidatorSetManager(this.validatorSetManagerService)
 
-    this.headerConstructorService = new HeaderConstructor({
-      keyPairService: this.keyPairService,
-      validatorSetManagerService: this.validatorSetManagerService,
-      genesisManagerService: this.genesisManagerService,
-    })
+    // this.headerConstructorService = new HeaderConstructor({
+    //   keyPairService: this.keyPairService,
+    //   validatorSetManagerService: this.validatorSetManagerService,
+    //   genesisManagerService: this.genesisManagerService,
+    // })
 
     // this.blockAuthoringService = new BlockAuthoringService({
     //   config: this.config.blockAuthoring,
@@ -537,6 +576,8 @@ export class MainService extends BaseService {
     })
 
     // Register created services with the registry
+    // Note: KeyPairService must be registered before NetworkingService
+    // because NetworkingService.init() requires the key pair to be generated
     this.registry.register(this.eventBusService)
     this.registry.register(this.entropyService)
     this.registry.register(this.clockService)
@@ -546,14 +587,16 @@ export class MainService extends BaseService {
     this.registry.register(this.disputesService)
     this.registry.register(this.blockImporterService)
     // this.registry.register(this.workPackageProcessorService)
-    this.registry.register(this.headerConstructorService)
+    // this.registry.register(this.headerConstructorService)
     // this.registry.register(this.extrinsicValidatorService)
     this.registry.register(this.genesisManagerService)
     this.registry.register(this.sealKeyService)
     // this.registry.register(this.blockAuthoringService)
-    this.registry.register(this.networkingService)
     // this.registry.register(this.telemetryService)
+    // Note: KeyPairService must be registered before NetworkingService
+    // because NetworkingService.init() requires the key pair to be generated
     this.registry.register(this.keyPairService)
+    this.registry.register(this.networkingService)
     this.registry.register(this.ticketService)
     this.registry.register(this.shardService)
     this.registry.register(this.workReportService)
@@ -584,6 +627,61 @@ export class MainService extends BaseService {
       return safeError(successError)
     }
 
+    // Set genesis state in StateService before other services start
+    // This ensures all services have access to the correct genesis state
+    logger.debug('[MainService.init] Setting genesis state in StateService')
+    const [genesisStateError, genesisState] =
+      this.genesisManagerService.getState()
+    if (genesisStateError) {
+      logger.warn(
+        `[MainService.init] Failed to get genesis state: ${genesisStateError.message}. Starting with empty state.`,
+      )
+      const [setStateError] = this.stateService.setState([])
+      if (setStateError) {
+        logger.error(
+          `[MainService.init] Failed to set empty state: ${setStateError.message}`,
+        )
+      }
+    } else {
+      const [setStateError] = this.stateService.setState(genesisState.keyvals)
+      if (setStateError) {
+        logger.error(
+          `[MainService.init] Failed to set genesis state: ${setStateError.message}`,
+        )
+        return safeError(
+          new Error(
+            `Failed to set genesis state in StateService: ${setStateError.message}`,
+          ),
+        )
+      }
+      logger.info(
+        `[MainService.init] Successfully set genesis state with ${genesisState.keyvals.length} keyvals`,
+      )
+    }
+
+    // Get connection endpoint from staging set if validatorIndex is set
+    // Connection endpoints are parsed and set in ValidatorSetManager setters
+    if (this.config.validatorIndex !== undefined) {
+      const activeValidators =
+        this.validatorSetManagerService.getActiveValidators()
+      if (
+        activeValidators.length > this.config.validatorIndex &&
+        activeValidators[this.config.validatorIndex]?.connectionEndpoint
+      ) {
+        const endpoint =
+          activeValidators[this.config.validatorIndex].connectionEndpoint!
+        logger.info(
+          `[MainService.init] Using connection endpoint from staging set validator ${this.config.validatorIndex}: ${endpoint.host}:${endpoint.port}`,
+        )
+        // Note: NetworkingService would need to support updating listen address/port
+        // For now, we log the extracted endpoint
+      } else {
+        logger.debug(
+          `[MainService.init] Validator ${this.config.validatorIndex} in staging set does not have connection endpoint. Using defaults.`,
+        )
+      }
+    }
+
     this.setInitialized(true)
     logger.info('Main service initialized successfully')
 
@@ -594,12 +692,12 @@ export class MainService extends BaseService {
    * Start the main service
    */
   async start(): SafePromise<boolean> {
-    super.start()
     if (this.running) {
       logger.debug('Main service already running')
       return safeResult(true)
     }
 
+    super.start()
     logger.info('Starting main service...')
 
     // Start all services except this main service (to avoid circular dependency)
@@ -608,11 +706,7 @@ export class MainService extends BaseService {
       return safeError(successError)
     }
 
-    this.setRunning(true)
     logger.info('Main service started successfully')
-
-    // Keep the process alive
-    await this.keepAlive()
 
     return safeResult(true)
   }
@@ -694,39 +788,151 @@ export class MainService extends BaseService {
    * Stop the main service
    */
   async stop(): SafePromise<boolean> {
-    const [successError, _] = await this.registry.stopAll()
-    if (successError) {
-      return safeError(successError)
+    // Prevent re-entry to avoid infinite loop
+    if (this.isStopping) {
+      return safeResult(true)
+    }
+    this.isStopping = true
+
+    // Stop all services except the main service (to avoid recursion)
+    const errors: Error[] = []
+    for (const service of this.registry.getAll()) {
+      // Skip stopping ourselves to avoid recursion
+      if (service === this) {
+        continue
+      }
+      const [successError, _] = await service.stop()
+      if (successError) {
+        errors.push(successError)
+      }
+    }
+
+    for (const error of errors) {
+      logger.error('Error stopping service', {
+        name: error.name,
+        error: error.message,
+      })
     }
 
     super.stop()
     return safeResult(true)
   }
+}
 
-  /**
-   * Keep the service alive
-   */
-  private async keepAlive(): SafePromise<void> {
-    return new Promise((resolve) => {
-      // Set up signal handlers for graceful shutdown
-      const shutdown = async (signal: string) => {
-        logger.info(`Received ${signal}, shutting down gracefully...`)
-        await this.stop()
-        resolve(safeResult(undefined))
+// Main entry point when run directly
+if (import.meta.main) {
+  const main = async () => {
+    try {
+      // Helper function to parse argument (supports both --key=value and --key value formats)
+      const parseArg = (key: string): string | undefined => {
+        // Try --key=value format first
+        const equalsFormat = process.argv
+          .find((arg) => arg.startsWith(`${key}=`))
+          ?.split('=')[1]
+        if (equalsFormat) return equalsFormat
+
+        // Try --key value format
+        const keyIndex = process.argv.findIndex((arg) => arg === key)
+        if (keyIndex !== -1 && keyIndex + 1 < process.argv.length) {
+          return process.argv[keyIndex + 1]
+        }
+
+        return undefined
       }
 
-      process.on('SIGINT', () => shutdown('SIGINT'))
-      process.on('SIGTERM', () => shutdown('SIGTERM'))
+      // Parse command-line arguments or use environment variables
+      const chainSpecPath =
+        process.env['CHAIN_SPEC_PATH'] || parseArg('--chain')
+      const genesisJsonPathRaw =
+        process.env['GENESIS_JSON_PATH'] || parseArg('--genesis')
+      // Resolve relative paths relative to project root
+      const genesisJsonPath = genesisJsonPathRaw
+        ? path.isAbsolute(genesisJsonPathRaw)
+          ? genesisJsonPathRaw
+          : path.join(process.cwd(), genesisJsonPathRaw)
+        : undefined
+      // Parse validator index from environment or arguments
+      const validatorIndexArg = parseArg('--validator-index')
+      const validatorIndexEnv = process.env['VALIDATOR_INDEX']
+      const validatorIndex = validatorIndexArg
+        ? Number.parseInt(validatorIndexArg, 10)
+        : validatorIndexEnv
+          ? Number.parseInt(validatorIndexEnv, 10)
+          : undefined
 
-      // Keep the process alive
-      // In a real implementation, this might be replaced with actual work loops
-      setInterval(() => {
-        // Check if all services are still running
-        if (!this.registry.getAll().every((service) => service.running)) {
-          logger.error('Some services have stopped running')
-          shutdown('service-failure')
+      // Connection endpoint will be extracted from validator metadata in init()
+      // listenAddress and listenPort are no longer needed as they come from validators
+      const nodeId = process.env['NODE_ID'] || 'jam-node-direct'
+
+      logger.info('Starting JAM node directly...', {
+        chainSpecPath,
+        genesisJsonPath,
+        nodeId,
+        validatorIndex,
+      })
+
+      // Create MainService instance
+      const mainService = new MainService({
+        genesis: {
+          ...(chainSpecPath && { chainSpecPath }),
+          ...(genesisJsonPath && { genesisJsonPath }),
+        },
+        networking: {
+          nodeType: 'validator',
+          isBuilder: false,
+        },
+        nodeId,
+        ...(validatorIndex !== undefined && { validatorIndex }),
+      })
+
+      // Initialize and start the service
+      const [initError] = await mainService.init()
+      if (initError) {
+        logger.error('Failed to initialize main service:', initError)
+        process.exit(1)
+      }
+
+      const [startError] = await mainService.start()
+      if (startError) {
+        logger.error('Failed to start main service:', startError)
+        process.exit(1)
+      }
+
+      // Set up graceful shutdown handlers
+      let isShuttingDown = false
+      const gracefulShutdown = async (signal: string) => {
+        if (isShuttingDown) {
+          return
         }
-      }, 5000) // Check every 5 seconds
-    })
+        isShuttingDown = true
+        logger.info(`Received ${signal}, shutting down gracefully...`)
+        await mainService.stop()
+        process.exit(0)
+      }
+
+      process.on('SIGINT', () => gracefulShutdown('SIGINT'))
+      process.on('SIGTERM', () => gracefulShutdown('SIGTERM'))
+
+      // Keep the process alive (non-blocking)
+      // Use a minimal interval to keep the event loop alive
+      // The QUIC server should also keep handles alive, but this ensures the process stays running
+      setInterval(() => {
+        // Empty interval - just keeps the event loop alive
+      }, 1000)
+    } catch (error) {
+      logger.error(
+        'Failed to start node:',
+        error instanceof Error ? error.message : String(error),
+      )
+      if (error instanceof Error && error.stack) {
+        logger.error('Stack trace:', error.stack)
+      }
+      process.exit(1)
+    }
   }
+
+  main().catch((error) => {
+    logger.error('Unhandled error:', error)
+    process.exit(1)
+  })
 }

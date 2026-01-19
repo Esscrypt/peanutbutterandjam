@@ -1,13 +1,17 @@
 // JIP-2 Node RPC Types
 // Based on https://docs.jamcha.in/advanced/rpc/jip2-node-rpc
 
-import type { Hex } from '@pbnjam/core'
+// JIP-2: Hash is a Base64-encoded string (32 bytes when decoded)
+export type Hash = string
 
-// WebSocket types
+// JIP-2: Blob is a Base64-encoded string (arbitrary length when decoded)
+export type Blob = string
+
+// WebSocket types - compatible with Bun's native WebSocket
 export interface WebSocket {
-  send(data: string): void
-  ping(): void
-  close(): void
+  send(data: string | ArrayBuffer): void
+  ping?(): void
+  close?(): void
   readyState: number
 }
 
@@ -18,11 +22,15 @@ export interface Parameters {
   deposit_per_item: bigint // B_I
   deposit_per_byte: bigint // B_L
 
+  // Core count
+  core_count: number // C
+
   // Timing parameters
   min_turnaround_period: number // D
   epoch_period: number // E
   rotation_period: number // R
   availability_timeout: number // U
+  slot_period_sec: number // P
 
   // Gas limits
   max_accumulate_gas: number // G_A
@@ -47,24 +55,27 @@ export interface Parameters {
   val_count: number // V
 
   // Work package size limits
+  max_authorizer_code_size: number // W_A
   max_input: number // W_B
-  max_refine_code_size: number // W_C
+  max_service_code_size: number // W_C
   basic_piece_len: number // W_E
   max_imports: number // W_M
-
-  // Additional parameters (not in Gray Paper)
-  max_is_authorized_code_size: number // W_I
+  segment_piece_count: number // W_P
+  max_report_elective_data: number // W_R
+  transfer_memo_size: number // W_T
   max_exports: number // W_X
-  max_refine_memory: number // max_refine_memory
-  max_is_authorized_memory: number // max_is_authorized_memory
+
+  // Epoch tail
+  epoch_tail_start: number // Y
 }
 
 // RPC Result type - union of all possible return types
+// JIP-2: Hashes and Blobs are Base64-encoded strings
 export type RpcResult =
   | Parameters
-  | { hash: Hex; slot: bigint }
-  | Hex
-  | Uint8Array
+  | { hash: Hash; slot: bigint } // Block Descriptor
+  | Hash // stateRoot, beefyRoot
+  | Blob // statistics, serviceData, serviceValue, servicePreimage, workReport
   | number[]
   | bigint[]
   | string // subscription ID
@@ -72,20 +83,21 @@ export type RpcResult =
   | undefined
 
 // RPC method parameter types
+// JIP-2: Parameters are Base64-encoded strings
 export type RpcParams =
   | [] // no parameters
-  | [Hex] // parent, stateRoot, statistics, beefyRoot, listServices
-  | [Hex, number] // serviceData
-  | [Hex, number, Blob] // serviceValue
-  | [Hex, number, Hex] // servicePreimage
-  | [Hex, number, Hex, number] // serviceRequest
+  | [Hash] // parent, stateRoot, statistics, beefyRoot, listServices
+  | [Hash, number] // serviceData
+  | [Hash, number, Blob] // serviceValue
+  | [Hash, number, Hash] // servicePreimage
+  | [Hash, number, Hash, number] // serviceRequest
   | [number, Blob, Blob[]] // submitWorkPackage
-  | [number, Blob, Hex] // submitPreimage
+  | [number, Blob, Hash] // submitPreimage
   | [boolean] // subscribeStatistics
   | [number, boolean] // subscribeServiceData
   | [number, Blob, boolean] // subscribeServiceValue
-  | [number, Hex, boolean] // subscribeServicePreimage
-  | [number, Hex, number, boolean] // subscribeServiceRequest
+  | [number, Hash, boolean] // subscribeServicePreimage
+  | [number, Hash, number, boolean] // subscribeServiceRequest
 
 // Subscription types
 export interface Subscription {
@@ -169,15 +181,15 @@ export type RpcMethod =
 
 // Utility types for validation
 export interface HashValidator {
-  isValid(hash: unknown): hash is Hex
-  fromHex(hex: string): Hex
-  toHex(hash: Hex): string
+  isValid(hash: unknown): hash is Hash
+  fromBase64(base64: string): Hash
+  toBase64(hash: Hash): string
 }
 
 export interface BlobValidator {
-  isValid(blob: unknown): blob is Uint8Array
-  fromHex(hex: string): Uint8Array
-  toHex(blob: Uint8Array): string
+  isValid(blob: unknown): blob is Blob
+  fromBase64(base64: string): Blob
+  toBase64(blob: Blob): string
 }
 
 export interface SlotValidator {

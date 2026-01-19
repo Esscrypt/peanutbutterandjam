@@ -19,8 +19,6 @@ const defaultConfig: MainServiceConfig = {
   },
   networking: {
     nodeType: (process.env['NODE_TYPE'] as NodeType) || 'validator',
-    listenAddress: process.env['LISTEN_ADDRESS'] || '0.0.0.0',
-    listenPort: BigInt(process.env['LISTEN_PORT'] || '30333'),
     isBuilder: process.env['IS_BUILDER'] === 'true',
   },
   nodeId: process.env['NODE_ID'] || 'jam-node-1',
@@ -49,8 +47,6 @@ async function main(): Promise<void> {
     logger.info('Starting JAM node...', {
       nodeId: defaultConfig.nodeId,
       nodeType: defaultConfig.networking.nodeType,
-      listenAddress: defaultConfig.networking.listenAddress,
-      listenPort: defaultConfig.networking.listenPort,
     })
 
     // Create and run the main service

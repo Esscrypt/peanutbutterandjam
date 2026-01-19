@@ -190,23 +190,23 @@ export class StateService extends BaseService implements IStateService {
     this.sealKeyService = options.sealKeyService
     this.clockService = options.clockService
 
-    // Initialize state from genesis if available, otherwise start with empty state
-    // This allows StateService to work without genesis (e.g., when using trace pre_state)
-    if (this.genesisManagerService) {
-      const [genesisHeaderError, genesisHeader] =
-        this.genesisManagerService.getState()
-      if (genesisHeaderError) {
-        // Genesis not available - start with empty state
-        // The state will be set from trace pre_state or other sources
-        this.setState([])
-      } else {
-        this.setState(genesisHeader.keyvals)
-      }
-    } else {
-      // No genesis manager - start with empty state
-      // The state will be set from trace pre_state or Initialize message
-      this.setState([])
-    }
+    // // Initialize state from genesis if available, otherwise start with empty state
+    // // This allows StateService to work without genesis (e.g., when using trace pre_state)
+    // if (this.genesisManagerService) {
+    //   const [genesisHeaderError, genesisHeader] =
+    //     this.genesisManagerService.getState()
+    //   if (genesisHeaderError) {
+    //     // Genesis not available - start with empty state
+    //     // The state will be set from trace pre_state or other sources
+    //     this.setState([])
+    //   } else {
+    //     this.setState(genesisHeader.keyvals)
+    //   }
+    // } else {
+    //   // No genesis manager - start with empty state
+    //   // The state will be set from trace pre_state or Initialize message
+    //   this.setState([])
+    // }
   }
 
   /**

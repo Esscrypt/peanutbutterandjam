@@ -11,118 +11,162 @@
  * - WebSocket: port 19800 (as per JIP-2 spec)
  */
 
-import path from 'node:path'
-import { serve } from '@hono/node-server'
 import { logger } from '@pbnjam/core'
-import {
-  createCoreServices,
-  type ServiceContext,
-  startCoreServices,
-  stopCoreServices,
-} from '@pbnjam/node'
+import { MainService } from '@pbnjam/node'
 import { config } from './config'
-import { app } from './routes'
-import { setServiceContext } from './rpc-handler'
-import { setupWebSocket } from './ws-routes'
+import { handleRequest } from './routes'
+import { setMainService } from './rpc-handler'
+import { setupWebSocketForBun } from './ws-routes'
+
+// Initialize logger first before any logging
+logger.init()
+
+// Global main service - initialized asynchronously
+let mainService: MainService | null = null
+let servicesInitialized = false
+let server: ReturnType<typeof Bun.serve> | null = null
 
 /**
- * Initialize and start the JAM node services
+ * Initialize and start the JAM node services using MainService
  */
-async function initializeNodeServices(): Promise<ServiceContext> {
-  // Determine SRS file path
-  const srsFilePath =
-    process.env['SRS_FILE_PATH'] ||
-    path.join(
-      __dirname,
-      '../../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
-    )
+async function initializeNodeServices(): Promise<MainService> {
+  logger.info('Initializing JAM node services...')
 
-  logger.info(`Initializing JAM node services... ${srsFilePath}`)
+  // Parse command-line arguments or use environment variables
+  const chainSpecPath = process.env['CHAIN_SPEC_PATH']
+  const genesisJsonPath = process.env['GENESIS_JSON_PATH']
+  const validatorIndex = process.env['VALIDATOR_INDEX']
+    ? Number.parseInt(process.env['VALIDATOR_INDEX'], 10)
+    : undefined
+  const nodeId = process.env['NODE_ID'] || 'rpc-server'
 
-  // Create core services using the shared factory
-  const services = await createCoreServices({
-    configSize: (process.env['CONFIG_SIZE'] as 'tiny' | 'full') || 'tiny',
-    srsFilePath,
-    enableNetworking: false, // RPC server doesn't need full networking
+  // Create MainService instance
+  const service = new MainService({
     genesis: {
-      chainSpecPath: process.env['CHAIN_SPEC_PATH'],
+      ...(chainSpecPath && { chainSpecPath }),
+      ...(genesisJsonPath && { genesisJsonPath }),
     },
-    useWasm: process.env['USE_WASM'] === 'true',
-    nodeId: process.env['NODE_ID'] || 'rpc-server',
+    networking: {
+      nodeType: 'validator',
+      isBuilder: false,
+    },
+    nodeId,
+    ...(validatorIndex !== undefined && { validatorIndex }),
   })
 
-  // Start services
-  await startCoreServices(services)
+  // Initialize and start the service
+  const [initError] = await service.init()
+  if (initError) {
+    throw new Error(`Failed to initialize main service: ${initError.message}`)
+  }
 
-  // Set global service context for RPC handler
-  setServiceContext(services)
+  const [startError] = await service.start()
+  if (startError) {
+    throw new Error(`Failed to start main service: ${startError.message}`)
+  }
+
+  // Set global main service for RPC handler
+  setMainService(service)
 
   logger.info('Node services initialized successfully')
+  servicesInitialized = true
 
-  return services
+  return service
 }
 
-// Main server startup
-async function main(): Promise<void> {
-  let services: ServiceContext | null = null
+// Start HTTP server at top level - Bun.serve() keeps the process alive
+const port = config.port
+const wsHandlers = setupWebSocketForBun()
 
-  try {
-    // Initialize node services first
-    services = await initializeNodeServices()
-  } catch (error) {
-    logger.error(`Failed to initialize node services: ${error}`)
-    process.exit(1)
-  }
+server = Bun.serve({
+  fetch: async (req, server) => {
+    // Return 503 if services aren't initialized yet
+    if (!servicesInitialized) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: null,
+          error: {
+            code: -32000,
+            message: 'Server initializing',
+          },
+        }),
+        {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      )
+    }
 
-  // Setup WebSocket support on the app
-  const { injectWebSocket } = setupWebSocket(app)
-
-  // Start HTTP server with WebSocket support
-  const port = config.port
-  logger.info(
-    `JIP-2 RPC Server starting on http://${config.host}:${port} ${config.environment}`,
-  )
-
-  const server = serve({
-    fetch: app.fetch,
-    port,
-    hostname: config.host,
-  })
-
-  // Inject WebSocket handler into the server
-  injectWebSocket(server)
-
-  logger.info(`RPC Server is ready on port ${port}`)
-  logger.info(
-    `WebSocket subscriptions available at ws://${config.host}:${port}/ws`,
-  )
-
-  // Graceful shutdown
-  async function shutdown(): Promise<void> {
-    logger.info('Shutting down gracefully...')
-    if (services) {
-      try {
-        await stopCoreServices(services)
-        logger.info('Services stopped')
-      } catch (error) {
-        logger.error(`Error stopping services: ${error}`)
+    // Handle WebSocket upgrade requests
+    if (req.headers.get('upgrade') === 'websocket') {
+      const url = new URL(req.url)
+      if (url.pathname === '/ws') {
+        if (wsHandlers.upgrade(req)) {
+          // Upgrade the connection - Bun will handle the WebSocket
+          if (server.upgrade(req, { data: {} })) {
+            return // WebSocket upgrade handled
+          }
+        }
       }
     }
-    process.exit(0)
+    // Regular HTTP requests
+    return handleRequest(req)
+  },
+  websocket: wsHandlers.websocket,
+  port,
+  hostname: config.host,
+})
+
+console.log(`Server running at ${server.url}`)
+
+logger.info(
+  `JIP-2 RPC Server starting on http://${config.host}:${port} ${config.environment}`,
+)
+logger.info(`RPC Server is ready on port ${port}`)
+logger.info(`Server URL: ${server.url}`)
+logger.info(
+  `WebSocket subscriptions available at ws://${config.host}:${port}/ws`,
+)
+logger.info(`Server listening on http://${config.host}:${port}`)
+
+// Initialize services in the background
+initializeNodeServices()
+  .then((service) => {
+    mainService = service
+    logger.info('Node services initialized successfully')
+  })
+  .catch((error) => {
+    logger.error(`Failed to initialize node services: ${error}`)
+    if (error instanceof Error && error.stack) {
+      logger.error(`Stack trace: ${error.stack}`)
+    }
+    // Don't exit - let the server keep running
+  })
+
+// Graceful shutdown handler
+async function shutdown(): Promise<void> {
+  logger.info('Shutting down gracefully...')
+  if (mainService) {
+    try {
+      await mainService.stop()
+      logger.info('Services stopped')
+    } catch (error) {
+      logger.error(`Error stopping services: ${error}`)
+    }
   }
-
-  process.on('SIGTERM', () => {
-    logger.info('SIGTERM received, shutting down gracefully...')
-    shutdown()
-  })
-
-  process.on('SIGINT', () => {
-    logger.info('SIGINT received')
-    shutdown()
-  })
+  if (server) {
+    await server.stop()
+  }
+  process.exit(0)
 }
 
-main().catch((error) => {
-  logger.error(`Fatal error starting RPC server: ${error}`)
-  process.exit(1)
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down gracefully...')
+  shutdown()
+})
+
+process.on('SIGINT', () => {
+  logger.info('SIGINT received')
+  shutdown()
 })

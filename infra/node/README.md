@@ -2,6 +2,11 @@
 
 This directory contains the JAM node implementation with a standardized service architecture that provides polymorphic service management through a centralized registry.
 
+# Running Node:
+```
+bun run infra/node/services/main-service.ts --validator-index 0 --chain config/spec-tiny.json
+```
+
 ## Architecture Overview
 
 The JAM node uses a service-oriented architecture where all components implement a common `Service` interface and are managed through a `ServiceRegistry`. This provides:
@@ -90,13 +95,10 @@ const config: MainServiceConfig = {
   },
   genesis: {
     chainSpecPath: './chain-spec.json',
-    genesisStatePath: './genesis-state.json',
   },
   networking: {
     validatorIndex: 0,
     nodeType: 'validator',
-    listenAddress: '0.0.0.0',
-    listenPort: 30333,
     chainHash: '0x0000000000000000000000000000000000000000000000000000000000000000',
   },
   nodeId: 'jam-node-1',
@@ -105,52 +107,6 @@ const config: MainServiceConfig = {
 const mainService = new MainServiceImpl(config)
 await mainService.run()
 ```
-
-### Adding New Services
-
-To add a new service:
-
-1. Implement the `Service` interface or extend `BaseService`
-2. Register it with the service registry in `MainServiceImpl`
-3. The service will be automatically managed through the lifecycle
-
-```typescript
-class MyNewService extends BaseService {
-  constructor() {
-    super('my-new-service')
-  }
-
-  async init(): Promise<void> {
-    // Initialize your service
-    this.setInitialized(true)
-  }
-
-  async start(): Promise<boolean> {
-    // Start your service
-    this.setRunning(true)
-    return true
-  }
-
-  async stop(): Promise<void> {
-    // Stop your service
-    this.setRunning(false)
-  }
-}
-```
-
-## Configuration
-
-The node can be configured through environment variables:
-
-- `NODE_ID`: Unique identifier for the node
-- `VALIDATOR_INDEX`: Validator index in the network
-- `NODE_TYPE`: Type of node (validator, builder, etc.)
-- `LISTEN_ADDRESS`: Network listen address
-- `LISTEN_PORT`: Network listen port
-- `CHAIN_HASH`: Chain hash for network identification
-- `IS_BUILDER`: Whether this node is a builder
-- `CHAIN_SPEC_PATH`: Path to chain specification file
-- `GENESIS_STATE_PATH`: Path to genesis state file
 
 ## Service Health Monitoring
 

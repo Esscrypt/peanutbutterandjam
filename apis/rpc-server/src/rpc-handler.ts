@@ -13,53 +13,89 @@ import {
   encodeServiceAccount,
 } from '@pbnjam/codec'
 import type { Hex } from '@pbnjam/core'
-import { logger } from '@pbnjam/core'
-import type { ServiceContext } from '@pbnjam/node'
+import { decodeBase64, encodeBase64, logger } from '@pbnjam/core'
+import type { MainService } from '@pbnjam/node'
 import type { Activity, WorkPackage } from '@pbnjam/types'
 import {
   AUTHORIZATION_CONSTANTS,
   DEPOSIT_CONSTANTS,
   HISTORY_CONSTANTS,
-  PVM_CONSTANTS_GRAY_PAPER,
   SERVICE_CONSTANTS,
   TIME_CONSTANTS,
+  TRANSFER_CONSTANTS,
   WORK_PACKAGE_CONSTANTS,
   WORK_REPORT_CONSTANTS,
 } from '@pbnjam/types'
-import { bytesToHex, zeroHash } from 'viem'
+import { bytesToHex, hexToBytes, zeroHash } from 'viem'
 import type { SubscriptionManager } from './subscription-manager'
-import type { Parameters, WebSocket } from './types'
+import type { Blob, Hash, Parameters, WebSocket } from './types'
 
 /**
- * Global service context - set during server initialization
+ * Global main service - set during server initialization
  */
-let serviceContext: ServiceContext | null = null
+let mainService: MainService | null = null
 
 /**
- * Set the service context (called from index.ts during initialization)
+ * Set the main service (called from index.ts during initialization)
  */
-export function setServiceContext(context: ServiceContext): void {
-  serviceContext = context
-  logger.info('Service context set for RPC handler')
+export function setMainService(service: MainService): void {
+  mainService = service
+  logger.info('Main service set for RPC handler')
 }
 
 /**
- * Get services with null check
+ * Get main service with null check
  */
-function getServices(): ServiceContext {
-  if (!serviceContext) {
+function getMainService(): MainService {
+  if (!mainService) {
     throw new Error(
       'Node services not initialized. Server may still be starting.',
     )
   }
-  return serviceContext
+  return mainService
 }
 
 /**
  * Check if services are available
  */
 export function hasServices(): boolean {
-  return serviceContext !== null
+  return mainService !== null
+}
+
+/**
+ * Convert Hex to Base64 Hash (JIP-2: Hash is Base64-encoded 32-byte data)
+ */
+function hexToBase64Hash(hex: Hex): Hash {
+  const bytes = hexToBytes(hex)
+  if (bytes.length !== 32) {
+    throw new Error(`Hash must be 32 bytes, got ${bytes.length}`)
+  }
+  return encodeBase64(bytes)
+}
+
+/**
+ * Convert Base64 Hash to Hex
+ */
+function base64HashToHex(base64: Hash): Hex {
+  const bytes = decodeBase64(base64)
+  if (bytes.length !== 32) {
+    throw new Error(`Hash must be 32 bytes when decoded, got ${bytes.length}`)
+  }
+  return bytesToHex(bytes) as Hex
+}
+
+/**
+ * Convert Uint8Array to Base64 Blob (JIP-2: Blob is Base64-encoded arbitrary-length data)
+ */
+function bytesToBase64Blob(bytes: Uint8Array): Blob {
+  return encodeBase64(bytes)
+}
+
+/**
+ * Convert Base64 Blob to Uint8Array
+ */
+function base64BlobToBytes(blob: Blob): Uint8Array {
+  return decodeBase64(blob)
 }
 
 /**
@@ -83,53 +119,43 @@ export class RpcHandler {
    * Uses configService for node-specific values, constants for protocol values
    */
   async parameters(): Promise<Parameters> {
-    const { configService } = getServices()
+    const configService = getMainService().getConfigService()
 
     return {
-      // Deposit constants (Gray Paper: B_S, B_I, B_L)
-      deposit_per_account: BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), // C_basedeposit
-      deposit_per_item: BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), // C_itemdeposit
-      deposit_per_byte: BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), // C_bytedeposit
-
-      // Time constants
-      min_turnaround_period: TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, // D - min turnaround
-      epoch_period: configService.epochDuration, // E - C_epochlen
-      rotation_period: configService.rotationPeriod, // R - C_rotationperiod
-      availability_timeout: TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, // U - C_assurancetimeoutperiod
-
-      // Gas constants (Gray Paper: G_A, G_I, G_R, G_T)
-      max_accumulate_gas: WORK_REPORT_CONSTANTS.C_REPORTACCGAS, // G_A - C_reportaccgas
-      max_is_authorized_gas: AUTHORIZATION_CONSTANTS.C_PACKAGEAUTHGAS, // G_I - C_packageauthgas
-      max_refine_gas: configService.maxRefineGas, // G_R - C_packagerefgas
-      block_gas_limit: configService.maxBlockGas, // G_T - C_blockaccgas
-
-      // History and queue constants
-      recent_block_count: HISTORY_CONSTANTS.C_RECENTHISTORYLEN, // H - C_recenthistorylen
-      auth_window: AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, // O - C_authpoolsize
-      auth_queue_len: AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, // Q - C_authqueuesize
-      max_lookup_anchor_age: configService.maxLookupAnchorage, // L - C_maxlookupanchorage
-
-      // Work package constants (Gray Paper: I, J, K, N, T)
-      max_work_items: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, // I - C_maxpackageitems
-      max_dependencies: WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, // J - C_maxreportdeps
-      max_tickets_per_block: configService.maxTicketsPerExtrinsic, // K - C_maxblocktickets
-      tickets_attempts_number: configService.ticketsPerValidator, // N - C_ticketentries
-      max_extrinsics: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, // T - C_maxpackagexts
-
-      // Validator count
-      val_count: configService.numValidators, // V - C_valcount
-
-      // Size constants (Gray Paper: W_B, W_C, W_E, W_M, W_I, W_X)
-      max_input: WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, // W_B - C_maxbundlesize
-      max_refine_code_size: SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, // W_C - C_maxservicecodesize
-      basic_piece_len: configService.ecPieceSize, // W_E - C_ecpiecesize
-      max_imports: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, // W_M - C_maxpackageimports
-      max_is_authorized_code_size: AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, // W_I - C_maxauthcodesize
-      max_exports: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, // W_X - C_maxpackageexports
-
-      // PVM memory constants (Gray Paper: pvm.tex)
-      max_refine_memory: PVM_CONSTANTS_GRAY_PAPER.C_PVMINITINPUTSIZE, // PVM init input size (2^24)
-      max_is_authorized_memory: PVM_CONSTANTS_GRAY_PAPER.C_PVMINITZONESIZE, // PVM init zone size (2^16)
+      // Order matches desired response exactly
+      deposit_per_item: BigInt(DEPOSIT_CONSTANTS.C_ITEMDEPOSIT), // B_I
+      deposit_per_byte: BigInt(DEPOSIT_CONSTANTS.C_BYTEDEPOSIT), // B_L
+      deposit_per_account: BigInt(DEPOSIT_CONSTANTS.C_BASEDEPOSIT), // B_S
+      core_count: configService.numCores, // C
+      min_turnaround_period: configService.preimageExpungePeriod, // D - C_expungeperiod (period after which unreferenced preimage may be expunged)
+      epoch_period: configService.epochDuration, // E
+      max_accumulate_gas: WORK_REPORT_CONSTANTS.C_REPORTACCGAS, // G_A
+      max_is_authorized_gas: AUTHORIZATION_CONSTANTS.C_PACKAGEAUTHGAS, // G_I
+      max_refine_gas: configService.maxRefineGas, // G_R
+      block_gas_limit: configService.maxBlockGas, // G_T
+      recent_block_count: HISTORY_CONSTANTS.C_RECENTHISTORYLEN, // H
+      max_work_items: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEITEMS, // I
+      max_dependencies: WORK_REPORT_CONSTANTS.C_MAXREPORTDEPS, // J
+      max_tickets_per_block: configService.maxTicketsPerExtrinsic, // K
+      max_lookup_anchor_age: configService.maxLookupAnchorage, // L
+      tickets_attempts_number: configService.ticketsPerValidator, // N
+      auth_window: AUTHORIZATION_CONSTANTS.C_AUTHPOOLSIZE, // O
+      slot_period_sec: configService.slotDuration / 1000, // P (convert ms to seconds)
+      auth_queue_len: AUTHORIZATION_CONSTANTS.C_AUTHQUEUESIZE, // Q
+      rotation_period: configService.rotationPeriod, // R
+      max_extrinsics: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEXTS, // T
+      availability_timeout: TIME_CONSTANTS.C_ASSURANCETIMEOUTPERIOD, // U
+      val_count: configService.numValidators, // V
+      max_authorizer_code_size: AUTHORIZATION_CONSTANTS.C_MAXAUTHCODESIZE, // W_A
+      max_input: WORK_PACKAGE_CONSTANTS.C_MAXBUNDLESIZE, // W_B
+      max_service_code_size: SERVICE_CONSTANTS.C_MAXSERVICECODESIZE, // W_C
+      basic_piece_len: configService.ecPieceSize, // W_E
+      max_imports: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEIMPORTS, // W_M
+      segment_piece_count: configService.numEcPiecesPerSegment, // W_P
+      max_report_elective_data: WORK_REPORT_CONSTANTS.C_MAXREPORTVARSIZE, // W_R
+      transfer_memo_size: TRANSFER_CONSTANTS.C_MEMOSIZE, // W_T
+      max_exports: WORK_PACKAGE_CONSTANTS.C_MAXPACKAGEEXPORTS, // W_X
+      epoch_tail_start: configService.contestDuration, // Y
     }
   }
 
@@ -139,20 +165,23 @@ export class RpcHandler {
 
   /**
    * bestBlock - Returns the header hash and slot of the head of the "best" chain
+   * JIP-2: Returns Block Descriptor with Base64-encoded hash
    */
-  async bestBlock(): Promise<{ hash: Hex; slot: bigint }> {
-    const { recentHistoryService, clockService } = getServices()
+  async bestBlock(): Promise<{ hash: Hash; slot: bigint }> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const clockService = mainService.getClockService()
 
     const recentHistory = recentHistoryService.getRecentHistory()
     if (recentHistory.length === 0) {
-      return { hash: zeroHash, slot: 0n }
+      return { hash: hexToBase64Hash(zeroHash), slot: 0n }
     }
 
     const latestBlock = recentHistory[recentHistory.length - 1]
     const currentSlot = clockService.getCurrentSlot()
 
     return {
-      hash: latestBlock.headerHash,
+      hash: hexToBase64Hash(latestBlock.headerHash),
       slot: currentSlot,
     }
   }
@@ -167,13 +196,16 @@ export class RpcHandler {
   /**
    * finalizedBlock - Returns the header hash and slot of the latest finalized block
    * Note: JAM uses GRANDPA-like finality; approximated with oldest in recent history
+   * JIP-2: Returns Block Descriptor with Base64-encoded hash
    */
-  async finalizedBlock(): Promise<{ hash: Hex; slot: bigint }> {
-    const { recentHistoryService, clockService } = getServices()
+  async finalizedBlock(): Promise<{ hash: Hash; slot: bigint }> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const clockService = mainService.getClockService()
 
     const recentHistory = recentHistoryService.getRecentHistory()
     if (recentHistory.length === 0) {
-      return { hash: `0x${'0'.repeat(64)}` as Hex, slot: 0n }
+      return { hash: hexToBase64Hash(`0x${'0'.repeat(64)}` as Hex), slot: 0n }
     }
 
     // Oldest block in recent history is considered finalized
@@ -182,7 +214,7 @@ export class RpcHandler {
     const finalizedSlot = currentSlot - BigInt(recentHistory.length - 1)
 
     return {
-      hash: finalizedBlock.headerHash,
+      hash: hexToBase64Hash(finalizedBlock.headerHash),
       slot: finalizedSlot > 0n ? finalizedSlot : 0n,
     }
   }
@@ -196,13 +228,17 @@ export class RpcHandler {
 
   /**
    * parent - Returns the parent block hash and slot
+   * JIP-2: Accepts Base64-encoded hash, returns Block Descriptor with Base64-encoded hash
    */
-  async parent(blockHash: Hex): Promise<{ hash: Hex; slot: bigint } | null> {
-    const { recentHistoryService, clockService } = getServices()
+  async parent(blockHash: Hash): Promise<{ hash: Hash; slot: bigint } | null> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const clockService = mainService.getClockService()
 
+    const blockHashHex = base64HashToHex(blockHash)
     const recentHistory = recentHistoryService.getRecentHistory()
     const blockIndex = recentHistory.findIndex(
-      (entry) => entry.headerHash === blockHash,
+      (entry) => entry.headerHash === blockHashHex,
     )
 
     if (blockIndex === -1) {
@@ -223,24 +259,27 @@ export class RpcHandler {
     const parentSlot = currentSlot - BigInt(recentHistory.length - blockIndex)
 
     return {
-      hash: parentBlock.headerHash,
+      hash: hexToBase64Hash(parentBlock.headerHash),
       slot: parentSlot > 0n ? parentSlot : 0n,
     }
   }
 
   /**
    * stateRoot - Returns the posterior state root of the block
+   * JIP-2: Accepts Base64-encoded hash, returns Base64-encoded hash
    */
-  async stateRoot(blockHash: Hex): Promise<Hex | null> {
-    const { recentHistoryService } = getServices()
+  async stateRoot(blockHash: Hash): Promise<Hash | null> {
+    const recentHistoryService = getMainService().getRecentHistoryService()
 
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       logger.debug('Block not found in recent history', blockHash)
       return null
     }
 
-    return blockEntry.stateRoot
+    return hexToBase64Hash(blockEntry.stateRoot)
   }
 
   /**
@@ -248,17 +287,20 @@ export class RpcHandler {
    *
    * Gray Paper: The accoutLogSuperPeak is the Merkle mountain range commitment
    * that serves as the BEEFY finality commitment root.
+   * JIP-2: Accepts Base64-encoded hash, returns Base64-encoded hash
    */
-  async beefyRoot(blockHash: Hex): Promise<Hex | null> {
-    const { recentHistoryService } = getServices()
+  async beefyRoot(blockHash: Hash): Promise<Hash | null> {
+    const recentHistoryService = getMainService().getRecentHistoryService()
 
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
 
     // accoutLogSuperPeak is the BEEFY root (accumulation output log super-peak)
-    return blockEntry.accoutLogSuperPeak
+    return hexToBase64Hash(blockEntry.accoutLogSuperPeak)
   }
 
   // ============================================================================
@@ -267,13 +309,18 @@ export class RpcHandler {
 
   /**
    * statistics - Returns activity statistics encoded as per Gray Paper
+   * JIP-2: Accepts Base64-encoded hash, returns Base64-encoded blob
    */
-  async statistics(blockHash: Hex): Promise<Uint8Array | null> {
-    const { recentHistoryService, statisticsService, configService } =
-      getServices()
+  async statistics(blockHash: Hash): Promise<Blob | null> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const statisticsService = mainService.getStatisticsService()
+    const configService = mainService.getConfigService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
@@ -287,7 +334,7 @@ export class RpcHandler {
       return null
     }
 
-    return encoded
+    return bytesToBase64Blob(encoded)
   }
 
   /**
@@ -305,16 +352,18 @@ export class RpcHandler {
 
   /**
    * serviceData - Returns the service data for a service ID, encoded as per GP
+   * JIP-2: Accepts Base64-encoded hash, returns Base64-encoded blob
    */
-  async serviceData(
-    blockHash: Hex,
-    serviceId: number,
-  ): Promise<Uint8Array | null> {
-    const { recentHistoryService, serviceAccountService, configService } =
-      getServices()
+  async serviceData(blockHash: Hash, serviceId: number): Promise<Blob | null> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
+    const configService = mainService.getConfigService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
@@ -337,7 +386,7 @@ export class RpcHandler {
       return null
     }
 
-    return encoded
+    return bytesToBase64Blob(encoded)
   }
 
   /**
@@ -356,21 +405,27 @@ export class RpcHandler {
 
   /**
    * serviceValue - Returns a storage value for a service
+   * JIP-2: Accepts Base64-encoded hash and blob, returns Base64-encoded blob
    */
   async serviceValue(
-    blockHash: Hex,
+    blockHash: Hash,
     serviceId: number,
-    key: Uint8Array,
-  ): Promise<Uint8Array | null> {
-    const { recentHistoryService, serviceAccountService } = getServices()
+    key: Blob,
+  ): Promise<Blob | null> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
 
-    const keyHex = bytesToHex(key)
+    const keyBytes = base64BlobToBytes(key)
+    const keyHex = bytesToHex(keyBytes)
     const value = serviceAccountService.getStorageValue(
       BigInt(serviceId),
       keyHex,
@@ -381,38 +436,44 @@ export class RpcHandler {
       return null
     }
 
-    return value
+    return bytesToBase64Blob(value)
   }
 
   /**
    * subscribeServiceValue - Subscribe to service value updates
+   * JIP-2: Accepts Base64-encoded blob for key
    */
   subscribeServiceValue(
     serviceId: number,
-    key: Uint8Array,
+    key: Blob,
     finalized: boolean,
     ws: WebSocket,
   ): string {
     return this.subscriptionManager.addSubscription(ws, 'serviceValue', [
       serviceId,
-      bytesToHex(key),
+      key,
       finalized,
     ])
   }
 
   /**
    * servicePreimage - Returns preimage for a service by hash
+   * JIP-2: Accepts Base64-encoded hashes, returns Base64-encoded blob
    */
   async servicePreimage(
-    blockHash: Hex,
+    blockHash: Hash,
     serviceId: number,
-    hash: Hex,
-  ): Promise<Uint8Array | null> {
-    const { recentHistoryService, serviceAccountService, clockService } =
-      getServices()
+    hash: Hash,
+  ): Promise<Blob | null> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
+    const clockService = mainService.getClockService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
@@ -425,12 +486,13 @@ export class RpcHandler {
     }
 
     // Look up preimage using histLookup
+    const hashHex = base64HashToHex(hash)
     const currentSlot = clockService.getCurrentSlot()
     const [lookupError, preimage] =
       serviceAccountService.histLookupServiceAccount(
         BigInt(serviceId),
         serviceAccount,
-        hash,
+        hashHex,
         currentSlot,
       )
 
@@ -439,15 +501,16 @@ export class RpcHandler {
       return null
     }
 
-    return preimage
+    return bytesToBase64Blob(preimage)
   }
 
   /**
    * subscribeServicePreimage - Subscribe to service preimage updates
+   * JIP-2: Accepts Base64-encoded hash
    */
   subscribeServicePreimage(
     serviceId: number,
-    hash: Hex,
+    hash: Hash,
     finalized: boolean,
     ws: WebSocket,
   ): string {
@@ -467,25 +530,31 @@ export class RpcHandler {
    * - [t0] = available since timeslot t0
    * - [t0, t1] = was available from t0 until t1 (now unavailable)
    * - [t0, t1, t2] = was available t0-t1, now available again since t2
+   * JIP-2: Accepts Base64-encoded hashes
    */
   async serviceRequest(
-    blockHash: Hex,
+    blockHash: Hash,
     serviceId: number,
-    hash: Hex,
+    hash: Hash,
     length: number,
   ): Promise<bigint[] | null> {
-    const { recentHistoryService, serviceAccountService } = getServices()
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return null
     }
 
     // Get preimage request status using the new method
+    const hashHex = base64HashToHex(hash)
     const requestStatus = serviceAccountService.getPreimageRequestStatus(
       BigInt(serviceId),
-      hash,
+      hashHex,
       BigInt(length),
     )
 
@@ -499,10 +568,11 @@ export class RpcHandler {
 
   /**
    * subscribeServiceRequest - Subscribe to service request updates
+   * JIP-2: Accepts Base64-encoded hash
    */
   subscribeServiceRequest(
     serviceId: number,
-    hash: Hex,
+    hash: Hash,
     length: number,
     finalized: boolean,
     ws: WebSocket,
@@ -517,12 +587,17 @@ export class RpcHandler {
 
   /**
    * listServices - Returns all known service IDs
+   * JIP-2: Accepts Base64-encoded hash
    */
-  async listServices(blockHash: Hex): Promise<bigint[]> {
-    const { recentHistoryService, serviceAccountService } = getServices()
+  async listServices(blockHash: Hash): Promise<bigint[]> {
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
 
     // Verify block exists
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       return []
     }
@@ -539,26 +614,28 @@ export class RpcHandler {
    *
    * Decodes the work package from bytes using the codec and submits
    * via the event bus to the GuarantorService.
+   * JIP-2: Accepts Base64-encoded blobs
    *
    * @param coreIndex - Target core index for the work package
-   * @param workPackageBytes - Encoded work package (Gray Paper format)
-   * @param extrinsics - Array of extrinsic data blobs
+   * @param workPackageBlob - Base64-encoded work package (Gray Paper format)
+   * @param extrinsics - Array of Base64-encoded extrinsic data blobs
    */
   async submitWorkPackage(
     coreIndex: bigint,
-    workPackageBytes: Uint8Array,
-    extrinsics: Uint8Array[],
+    workPackageBlob: Blob,
+    extrinsics: Blob[],
   ): Promise<void> {
-    const { eventBusService } = getServices()
+    const eventBusService = getMainService().getEventBusService()
 
     logger.info(
       'Submitting work package via event bus',
       Number(coreIndex),
-      workPackageBytes.length,
+      workPackageBlob.length,
       extrinsics.length,
     )
 
-    // Decode work package from bytes
+    // Decode work package from Base64 blob
+    const workPackageBytes = base64BlobToBytes(workPackageBlob)
     const [decodeError, decodeResult] = decodeWorkPackage(workPackageBytes)
     if (decodeError) {
       logger.error('Failed to decode work package', decodeError)
@@ -567,11 +644,15 @@ export class RpcHandler {
 
     const workPackage: WorkPackage = decodeResult.value
 
-    // Concatenate all extrinsics into a single blob
-    const totalLength = extrinsics.reduce((sum, ext) => sum + ext.length, 0)
+    // Decode and concatenate all extrinsics into a single blob
+    const extrinsicsBytes = extrinsics.map((ext) => base64BlobToBytes(ext))
+    const totalLength = extrinsicsBytes.reduce(
+      (sum, ext) => sum + ext.length,
+      0,
+    )
     const extrinsicData = new Uint8Array(totalLength)
     let offset = 0
-    for (const ext of extrinsics) {
+    for (const ext of extrinsicsBytes) {
       extrinsicData.set(ext, offset)
       offset += ext.length
     }
@@ -592,23 +673,29 @@ export class RpcHandler {
 
   /**
    * submitPreimage - Submit a preimage for a service
+   * JIP-2: Accepts Base64-encoded blob and hash
    *
    * @param serviceId - Service ID requesting the preimage
-   * @param preimage - Raw preimage data
-   * @param blockHash - Block hash for best-chain validation
+   * @param preimage - Base64-encoded preimage data
+   * @param blockHash - Base64-encoded block hash for best-chain validation
    */
   async submitPreimage(
     serviceId: bigint,
-    preimage: Uint8Array,
-    blockHash: Hex,
+    preimage: Blob,
+    blockHash: Hash,
   ): Promise<void> {
-    const { recentHistoryService, serviceAccountService, clockService } =
-      getServices()
+    const mainService = getMainService()
+    const recentHistoryService = mainService.getRecentHistoryService()
+    const serviceAccountService = mainService.getServiceAccountService()
+    const clockService = mainService.getClockService()
 
-    logger.info('Submitting preimage', Number(serviceId), preimage.length)
+    const preimageBytes = base64BlobToBytes(preimage)
+    logger.info('Submitting preimage', Number(serviceId), preimageBytes.length)
 
     // Verify block exists (for best-chain validation)
-    const blockEntry = recentHistoryService.getRecentHistoryForBlock(blockHash)
+    const blockHashHex = base64HashToHex(blockHash)
+    const blockEntry =
+      recentHistoryService.getRecentHistoryForBlock(blockHashHex)
     if (!blockEntry) {
       throw new Error('Block not found in recent history')
     }
@@ -618,7 +705,7 @@ export class RpcHandler {
     const [error] = serviceAccountService.storePreimage(
       {
         requester: serviceId,
-        blob: bytesToHex(preimage) as Hex,
+        blob: bytesToHex(preimageBytes) as Hex,
       },
       currentSlot,
     )

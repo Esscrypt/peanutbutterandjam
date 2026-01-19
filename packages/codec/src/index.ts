@@ -12,6 +12,8 @@ export * from './block'
 export * from './core'
 // Fuzz codec
 export * from './fuzz'
+// Networking message codec
+export * from './networking'
 // PVM serialization
 export * from './pvm'
 // State serialization

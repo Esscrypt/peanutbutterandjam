@@ -39,14 +39,6 @@ export function createRunCommand(): Command {
       '100',
     )
     .option(
-      '--disable-service <services...>',
-      'Disable specific services (e.g., blockAuthoring,metrics)',
-    )
-    .option(
-      '--enable-service <services...>',
-      'Enable only specific services (e.g., networking,metrics)',
-    )
-    .option(
       '--keepalive-interval <ms>',
       'QUIC keepalive interval in milliseconds',
       '30000',
@@ -142,59 +134,6 @@ async function executeRunCommand(
       logger.info(`  Telemetry endpoint: ${options['telemetry']}`)
     }
 
-    // Configure services based on options
-    let services: Record<string, boolean>
-    if (options['networkingOnly']) {
-      // Networking-only mode: only enable networking and minimal required services
-      services = {
-        blockAuthoring: false,
-        networking: true,
-        metrics: true,
-        blockSubmitter: false,
-        extrinsicValidator: false,
-        genesisManager: false,
-        headerConstructor: false,
-        stateManager: false,
-        workPackageProcessor: false,
-      }
-    } else if (options['enableService']) {
-      // Enable only specified services
-      const enabledServices = options['enableService'].split(',')
-      services = {
-        blockAuthoring: enabledServices.includes('blockAuthoring'),
-        networking: enabledServices.includes('networking'),
-        metrics: enabledServices.includes('metrics'),
-        blockSubmitter: enabledServices.includes('blockSubmitter'),
-        extrinsicValidator: enabledServices.includes('extrinsicValidator'),
-        genesisManager: enabledServices.includes('genesisManager'),
-        headerConstructor: enabledServices.includes('headerConstructor'),
-        stateManager: enabledServices.includes('stateManager'),
-        workPackageProcessor: enabledServices.includes('workPackageProcessor'),
-      }
-    } else {
-      // Default: enable all services, then disable specified ones
-      services = {
-        blockAuthoring: true,
-        networking: true,
-        metrics: true,
-        blockSubmitter: true,
-        extrinsicValidator: true,
-        genesisManager: true,
-        headerConstructor: true,
-        stateManager: true,
-        workPackageProcessor: true,
-      }
-
-      if (options['disableService']) {
-        const disabledServices = options['disableService'].split(',')
-        for (const service of disabledServices) {
-          if (service in services) {
-            ;(services as Record<string, boolean>)[service] = false
-          }
-        }
-      }
-    }
-
     // Configure test mode
     const testMode = {
       enableTestMessages: options['testMessages'] || false,
@@ -208,8 +147,7 @@ async function executeRunCommand(
       interval: Number.parseInt(options['keepaliveInterval'] || '30000'),
     }
 
-    logger.info('Service configuration', {
-      services,
+    logger.info('Configuration', {
       testMode,
       keepalive: keepaliveConfig,
     })
@@ -247,10 +185,17 @@ async function executeRunCommand(
       }
     }
 
+    // Parse validator index if provided
+    const validatorIndex =
+      options['validatorIndex'] !== undefined
+        ? Number.parseInt(options['validatorIndex'], 10)
+        : undefined
+
     // Initialize and start the main service
     const mainService = new MainService({
       genesis: {
-        chainSpecPath: options['genesis'] || 'chainspec.json',
+        chainSpecPath: options['chain'] || 'chainspec.json',
+        genesisJsonPath: options['genesis'],
       },
       networking: {
         nodeType: 'validator',
@@ -259,25 +204,8 @@ async function executeRunCommand(
         isBuilder: false,
       },
       nodeId: 'jam-node-cli',
-      telemetry: telemetryConfig || {
-        enabled: false,
-        endpoint: '',
-        nodeInfo: {
-          protocolVersion: 0n,
-          jamParameters: new Uint8Array(0),
-          genesisHeaderHash: new Uint8Array(32),
-          grayPaperVersion: '0.7.2',
-          peerId: new Uint8Array(32),
-          peerAddress: {
-            address: new Uint8Array(16),
-            port: 0n,
-          },
-          nodeFlags: 0n,
-          implementationName: 'PeanutButterAndJam',
-          implementationVersion: '0.1.0',
-          additionalInfo: 'JAM node CLI implementation',
-        },
-      },
+      ...(telemetryConfig && { telemetry: telemetryConfig }),
+      ...(validatorIndex !== undefined && { validatorIndex }),
     })
 
     logger.info('Starting JAM node...')

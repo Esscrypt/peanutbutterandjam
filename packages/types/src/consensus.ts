@@ -6,6 +6,7 @@
  */
 
 import type { Hex } from 'viem'
+import type { ConnectionEndpoint } from './jamnp'
 import type { SafroleTicket, SafroleTicketWithoutProof } from './serialization'
 
 // Define ConsensusState interface
@@ -324,6 +325,8 @@ export interface ValidatorPublicKeys extends ValidatorKeyPair {
   bls: Hex
   /** Metadata (last 128 Uint8Array) */
   metadata: Hex
+  /** Connection endpoint parsed from metadata (optional, set when validator is assigned) */
+  connectionEndpoint?: ConnectionEndpoint
 }
 
 /**

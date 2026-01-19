@@ -1,7 +1,7 @@
 /**
  * WebSocket Routes for JIP-2 RPC Subscriptions
  *
- * Handles WebSocket connections for subscription-based RPC methods.
+ * Handles WebSocket connections for subscription-based RPC methods using Bun's native WebSocket.
  * JIP-2 specifies WebSocket on port 19800 for subscriptions.
  *
  * Subscription methods:
@@ -14,78 +14,69 @@
  * - subscribeServiceRequest
  */
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore - Module exists at runtime, types may not be available yet
-import { createNodeWebSocket } from '@hono/node-ws'
 import { logger } from '@pbnjam/core'
-import type { Context, Hono } from 'hono'
+import type { ServerWebSocket } from 'bun'
 import { rpcHandler, subscriptionManager } from './routes'
 import type { RpcRequest, WebSocket } from './types'
 
-// Types for @hono/node-ws (not fully typed)
-interface WSContext {
-  raw: unknown
-}
-
-interface WSEvent {
-  data: { toString(): string }
-}
-
 /**
- * Upgrade Hono app with WebSocket support
+ * Setup WebSocket handlers for Bun
  */
-export function setupWebSocket(app: Hono): {
-  injectWebSocket: (server: unknown) => void
-  upgradeWebSocket: unknown
-} {
-  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({
-    app,
-  }) as {
-    injectWebSocket: (server: unknown) => void
-    upgradeWebSocket: (handler: (c: Context) => object) => unknown
+export function setupWebSocketForBun(): {
+  upgrade: (req: Request) => boolean
+  websocket: {
+    message: (
+      ws: ServerWebSocket<unknown>,
+      message: string | Buffer,
+    ) => void | Promise<void>
+    open: (ws: ServerWebSocket<unknown>) => void | Promise<void>
+    close: (ws: ServerWebSocket<unknown>) => void | Promise<void>
+    error: (ws: ServerWebSocket<unknown>, error: Error) => void | Promise<void>
   }
-
-  // WebSocket endpoint for subscriptions
-  const wsHandler = upgradeWebSocket((_c: Context) => {
-    return {
-      onOpen(_evt: unknown, ws: WSContext) {
-        const rawWs = ws.raw as unknown as WebSocket
+} {
+  return {
+    upgrade: (req: Request): boolean => {
+      const url = new URL(req.url)
+      if (url.pathname === '/ws') {
+        return true // Allow upgrade
+      }
+      return false
+    },
+    websocket: {
+      open: (ws: ServerWebSocket<unknown>) => {
         logger.info('WebSocket connection opened')
-
-        // Track the connection
-        rawWs.readyState = 1 // OPEN
+        // Cast to our WebSocket interface for compatibility
+        const wsCompat = ws as unknown as WebSocket
+        wsCompat.readyState = 1 // OPEN
       },
 
-      onMessage(evt: WSEvent, ws: WSContext) {
-        const rawWs = ws.raw as unknown as WebSocket
-        handleWebSocketMessage(rawWs, evt.data.toString())
+      message: async (
+        ws: ServerWebSocket<unknown>,
+        message: string | Buffer,
+      ) => {
+        const data = typeof message === 'string' ? message : message.toString()
+        // Cast to our WebSocket interface for compatibility
+        const wsCompat = ws as unknown as WebSocket
+        await handleWebSocketMessage(wsCompat, data)
       },
 
-      onClose(_evt: unknown, ws: WSContext) {
-        const rawWs = ws.raw as unknown as WebSocket
+      close: (ws: ServerWebSocket<unknown>) => {
         logger.info('WebSocket connection closed')
-
+        // Cast to our WebSocket interface for compatibility
+        const wsCompat = ws as unknown as WebSocket
         // Clean up subscriptions for this connection
-        subscriptionManager.removeSubscriptions(rawWs)
+        subscriptionManager.removeSubscriptions(wsCompat)
       },
 
-      onError(evt: unknown, ws: WSContext) {
-        const rawWs = ws.raw as unknown as WebSocket
-        logger.error(`WebSocket error: ${evt}`)
-
+      error: (ws: ServerWebSocket<unknown>, error: Error) => {
+        logger.error(`WebSocket error: ${error.message}`)
+        // Cast to our WebSocket interface for compatibility
+        const wsCompat = ws as unknown as WebSocket
         // Clean up subscriptions on error
-        subscriptionManager.removeSubscriptions(rawWs)
+        subscriptionManager.removeSubscriptions(wsCompat)
       },
-    }
-  })
-
-  // Register the WebSocket route - cast needed due to dynamic middleware typing
-  ;(app as { get: (path: string, handler: unknown) => void }).get(
-    '/ws',
-    wsHandler,
-  )
-
-  return { injectWebSocket, upgradeWebSocket }
+    },
+  }
 }
 
 /**
@@ -233,7 +224,8 @@ async function handleSubscriptionMethod(
 
     // Regular RPC methods can also be called over WebSocket
     case 'parameters': {
-      return await rpcHandler.parameters()
+      const paramsResult = await rpcHandler.parameters()
+      return { V1: paramsResult }
     }
 
     case 'bestBlock': {

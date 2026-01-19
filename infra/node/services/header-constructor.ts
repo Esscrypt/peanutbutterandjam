@@ -10,9 +10,11 @@ import {
   blake2bHash,
   bytesToHex,
   concatBytes,
+  getEd25519KeyPairWithFallback,
   type Hex,
   hexToBytes,
   logger,
+  signEd25519,
   zeroHash,
 } from '@pbnjam/core'
 import type {
@@ -30,11 +32,11 @@ import type { ValidatorSetManager } from './validator-set'
  * Header Constructor
  */
 export class HeaderConstructor extends BaseService {
-  private keyPairService: KeyPairService
+  private keyPairService: KeyPairService | null
   private validatorSetManagerService: ValidatorSetManager
   private genesisManagerService: NodeGenesisManager
   constructor(options: {
-    keyPairService: KeyPairService
+    keyPairService: KeyPairService | null
     validatorSetManagerService: ValidatorSetManager
     genesisManagerService: NodeGenesisManager
   }) {
@@ -98,11 +100,21 @@ export class HeaderConstructor extends BaseService {
       BigInt(config.slotDuration),
     )
 
+    // Get Ed25519 public key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      config,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(
+        keyPairError ||
+          new Error('Failed to get Ed25519 key pair for author index lookup'),
+      )
+    }
+
     const [authorIndexError, authorIndex] =
       this.validatorSetManagerService.getValidatorIndex(
-        bytesToHex(
-          this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
-        ),
+        bytesToHex(ed25519KeyPair.publicKey),
       )
     if (authorIndexError) {
       return safeError(authorIndexError)
@@ -214,8 +226,21 @@ export class HeaderConstructor extends BaseService {
       return safeError(headerHashError)
     }
 
-    const [signError, signature] = this.keyPairService.signMessage(
+    // Get Ed25519 key pair using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      config,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(
+        keyPairError ||
+          new Error('Failed to get Ed25519 key pair for header signing'),
+      )
+    }
+
+    const [signError, signature] = signEd25519(
       hexToBytes(headerHash),
+      ed25519KeyPair.privateKey,
     )
     if (signError) {
       return safeError(signError)

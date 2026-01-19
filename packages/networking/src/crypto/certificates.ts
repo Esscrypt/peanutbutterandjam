@@ -39,12 +39,16 @@ export async function generateNetworkingCertificates(
   )
 
   // Generate certificate with 1 year duration and computed DNS alt name
+  const now = new Date()
+  const duration = 60 * 60 * 24 * 365 // 1 year in seconds
+
   const certEd25519 = await generateCertificate({
-    certId: '0',
+    certId: Buffer.from(new TextEncoder().encode('JAM Client Ed25519 Cert')),
     subjectKeyPair: keyPairWebcrypto,
     issuerPrivateKey: keyPairWebcrypto.privateKey,
-    duration: 60 * 60 * 24 * 365, // 1 year
+    duration,
     dnsAltNames: [alternativeName],
+    now, // Explicitly pass current time
   })
 
   // Generate real X.509 certificate using proper DER generation for QUIC/TLS transport

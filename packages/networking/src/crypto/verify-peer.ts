@@ -42,61 +42,99 @@ export async function verifyPeerCertificate(
   certs: Uint8Array[],
   _ca: Uint8Array[],
 ): Promise<CryptoError | undefined> {
-  logger.debug('Starting certificate verification...')
-
   // Validate certificate chain is present
   if (!certs || certs.length === 0) {
-    logger.debug('❌ Certificate validation failed: No certificates provided')
+    logger.error(
+      '[TLS Verification] ❌ Certificate validation failed: No certificates provided',
+      {
+        certs: certs,
+        certsLength: certs?.length,
+      },
+    )
     return CryptoError.BadCertificate
   }
 
-  logger.debug(`✅ Certificate chain present: ${certs.length} certificate(s)`)
-
   // Use the first certificate (end entity certificate) for validation
   const peerCertificate = certs[0]
-  logger.debug(`Certificate size: ${peerCertificate.length} bytes`)
 
   const [extractPublicKeyError, certificatePublicKey] =
     extractPublicKeyFromDERCertificate(peerCertificate)
   if (extractPublicKeyError) {
-    logger.debug(
-      `❌ Certificate validation failed: Failed to extract public key: ${extractPublicKeyError}`,
+    logger.error(
+      '[TLS Verification] ❌ Certificate validation failed: Failed to extract public key',
+      {
+        error:
+          extractPublicKeyError instanceof Error
+            ? extractPublicKeyError.message
+            : String(extractPublicKeyError),
+        certificateSize: peerCertificate.length,
+      },
     )
     return CryptoError.BadCertificate
   }
-  logger.debug(`✅ Public key extracted: ${bytesToHex(certificatePublicKey)}`)
+  logger.info('[TLS Verification] ✅ Public key extracted', {
+    publicKey: bytesToHex(certificatePublicKey),
+    publicKeyLength: certificatePublicKey.length,
+  })
 
   const [extractAlternativeNameError, certificateAlternativeName] =
     extractAlternativeNameFromDERCertificate(peerCertificate)
   if (extractAlternativeNameError) {
-    logger.debug(
-      `⚠️ Alternative name extraction failed (temporarily allowed): ${extractAlternativeNameError}`,
-    )
+    logger.error('[TLS Verification] ❌ Alternative name extraction failed', {
+      error:
+        extractAlternativeNameError instanceof Error
+          ? extractAlternativeNameError.message
+          : String(extractAlternativeNameError),
+      publicKey: bytesToHex(certificatePublicKey),
+    })
     return CryptoError.BadCertificate
-  } else {
-    logger.debug(`✅ Alternative name extracted: ${certificateAlternativeName}`)
   }
+  logger.info('[TLS Verification] ✅ Alternative name extracted', {
+    alternativeName: certificateAlternativeName,
+  })
 
   const [altNameError, altName] = generateAlternativeName(
     certificatePublicKey,
     decodeFixedLength,
   )
   if (altNameError) {
-    logger.debug(
-      `❌ Certificate validation failed: Failed to generate expected alternative name: ${altNameError}`,
+    logger.error(
+      '[TLS Verification] ❌ Certificate validation failed: Failed to generate expected alternative name',
+      {
+        error:
+          altNameError instanceof Error
+            ? altNameError.message
+            : String(altNameError),
+        publicKey: bytesToHex(certificatePublicKey),
+      },
     )
     return CryptoError.BadCertificate
   }
-  logger.debug(`✅ Expected alternative name: ${altName}`)
+  logger.info('[TLS Verification] ✅ Expected alternative name generated', {
+    expectedAltName: altName,
+    actualAltName: certificateAlternativeName,
+  })
 
   if (certificateAlternativeName !== altName) {
-    logger.debug(`❌ Certificate validation failed: Alternative name mismatch`)
-    logger.debug(`  Expected: ${altName}`)
-    logger.debug(`  Actual: ${certificateAlternativeName}`)
+    logger.error(
+      '[TLS Verification] ❌ Certificate validation failed: Alternative name mismatch',
+      {
+        expected: altName,
+        actual: certificateAlternativeName,
+        publicKey: bytesToHex(certificatePublicKey),
+        match: certificateAlternativeName === altName,
+      },
+    )
     return CryptoError.BadCertificate
   }
 
-  logger.debug('✅ Certificate validation passed successfully')
+  logger.info(
+    '[TLS Verification] ✅ Certificate validation passed successfully',
+    {
+      publicKey: bytesToHex(certificatePublicKey),
+      alternativeName: certificateAlternativeName,
+    },
+  )
   // Certificate validation passed
   return undefined // No error means success
 }
