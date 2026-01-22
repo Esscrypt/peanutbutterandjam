@@ -9,9 +9,12 @@ import type {
   EntropyState,
   RecentHistoryEntry,
 } from './global-state'
+import type { BlockRequest, StateRequest } from './jamnp'
 import type { ValidatorCredentials } from './keys'
+import type { StreamKind } from './network'
 import type { Safe, SafePromise } from './safe'
 import type {
+  Dispute,
   Guarantee,
   GuaranteeSignature,
   Judgment,
@@ -102,6 +105,29 @@ export interface IServiceAccountService extends BaseService {
     hash: Hex,
     length: bigint,
   ): bigint[] | undefined
+
+  /**
+   * Get pending preimages that have been received but not yet applied to service account through accumulation
+   *
+   * Pending preimages are preimages that have been received but not yet accumulated
+   * into the service account state. They remain pending until applied during accumulation.
+   *
+   * @returns Array of pending preimages
+   */
+  getPendingPreimages(): Preimage[]
+
+  /**
+   * Get pending preimages that are requested on-chain but not yet in state
+   *
+   * Returns pending preimages that:
+   * - Have been received (are in pending preimages)
+   * - Are requested on-chain (have a request status)
+   * - Are available at the given slot (using Gray Paper function I(l, t))
+   *
+   * @param slot - Current slot to check availability
+   * @returns Array of pending preimages that are requested and available
+   */
+  getRequestedPendingPreimages(slot: bigint): Preimage[]
 }
 
 export interface IKeyPairService extends BaseService {
@@ -401,7 +427,7 @@ export interface IGuarantorService {
   computeWorkReport(
     workPackage: WorkPackage,
     coreIndex: number,
-  ): Safe<WorkReport>
+  ): SafePromise<WorkReport>
 
   /**
    * Step 4: Sign Work-Report
@@ -550,28 +576,6 @@ export interface IGuarantorService {
   ): Safe<Guarantee>
 
   /**
-   * Step 9: Send to Block Author
-   *
-   * Gray Paper Reference: guaranteeing.tex (line 3, 33)
-   *
-   * Algorithm:
-   * 1. Get current block author (from Safrole state)
-   * 2. Package guarantee into network message
-   * 3. Send guarantee to block author
-   * 4. Track inclusion status
-   * 5. Resend if not included within timeout
-   *
-   * Notes:
-   * - Should send promptly to maximize inclusion chance
-   * - Block author will validate and include in XT_guarantees
-   * - Inclusion leads to reward for guarantors
-   *
-   * @param guarantee - Guarantee extrinsic to send
-   * @returns Safe<void> - Success when sent
-   */
-  sendToBlockAuthor(guarantee: Guarantee): Safe<void>
-
-  /**
    * Helper: Get Co-Guarantors
    *
    * Gets list of other validators assigned to the same core
@@ -594,6 +598,13 @@ export interface IGuarantorService {
    * @returns Safe<boolean> - True if can sign another report
    */
   canSignWorkReport(timeslot: bigint): Safe<boolean>
+
+  /**
+   * Get pending guarantees ready for block inclusion
+   *
+   * @returns Array of pending guarantees
+   */
+  getPendingGuarantees(): Guarantee[]
 }
 
 /**
@@ -662,6 +673,27 @@ export interface ReorgEvent {
  * - Original block is always finalized after mutations
  */
 export interface IChainManagerService extends BaseService {
+  /**
+   * Get finalized block hash and slot
+   * Used by UP0 for creating block announcements
+   */
+  getFinalizedBlockInfo(): { hash: Hex; slot: bigint } | null
+
+  /**
+   * Handle block announcement (header only)
+   *
+   * Called by UP0 when a block announcement is received.
+   * Determines if we should request the full block via CE128.
+   *
+   * @param header - Block header from announcement
+   * @param peerPublicKey - Public key of the peer that sent the announcement
+   * @returns true if block should be requested, false otherwise
+   */
+  handleBlockAnnouncement(
+    header: BlockHeader,
+    peerPublicKey: Hex,
+  ): SafePromise<boolean>
+
   /**
    * Import a new block
    *
@@ -732,4 +764,128 @@ export interface IChainManagerService extends BaseService {
    * Clear all state (for testing/fork switching)
    */
   clear(): void
+}
+
+/**
+ * Assurance Service Interface
+ *
+ * Manages assurance processing for the JAM protocol.
+ * Assurances are validator attestations that erasure-coded data is available.
+ *
+ * TODO: Add method to get pending assurances ready for block inclusion
+ * The method should return assurances that are:
+ * - Validated (signature, anchor matches parent hash)
+ * - Sorted by validator_index (ascending, unique)
+ * - Ready for inclusion (not expired, anchor matches current parent)
+ */
+export interface IAssuranceService extends BaseService {
+  // TODO: Add getPendingAssurances(parentHash: Hex): Assurance[] when implemented
+}
+
+/**
+ * Disputes Service Interface
+ *
+ * Manages dispute judgments on work-reports and validators.
+ *
+ * TODO: Add method to get pending disputes ready for block inclusion
+ * The method should return disputes that are:
+ * - Validated (signatures, verdicts, culprits, faults)
+ * - Ready for inclusion (not expired, valid work report hashes)
+ */
+export interface IDisputesService extends BaseService {
+  /**
+   * Get pending disputes ready for block inclusion
+   *
+   * TODO: Implement collection of pending disputes
+   * Disputes should be:
+   * - Validated (signatures, verdicts, culprits, faults)
+   * - Ready for inclusion (not expired, valid work report hashes)
+   *
+   * @returns Array of pending disputes ready for block inclusion
+   */
+  getPendingDisputes(): Dispute[]
+}
+
+/**
+ * Work Report Service Interface
+ *
+ * Unified service for managing all work reports throughout their lifecycle.
+ *
+ * TODO: Add method to get pending guarantees ready for block inclusion
+ * The method should return guarantees that are:
+ * - Created by guarantors when they sign work reports
+ * - Validated (signatures, work report validity)
+ * - Ready for inclusion (dependencies satisfied, not expired)
+ */
+export interface IWorkReportService extends BaseService {
+  /**
+   * Get pending guarantees ready for block inclusion
+   *
+   * Guarantees are:
+   * - Created by guarantors when they sign work reports
+   * - Validated (signatures, work report validity)
+   * - Ready for inclusion (dependencies satisfied, not expired)
+   *
+   * @returns Array of pending guarantees ready for block inclusion
+   */
+  getPendingGuarantees(): Guarantee[]
+
+  /**
+   * Add a guarantee to the pending guarantees list
+   * Called by GuarantorService when a guarantee is created and distributed
+   *
+   * @param guarantee - The guarantee to add
+   */
+  addPendingGuarantee(guarantee: Guarantee): void
+
+  /**
+   * Remove guarantees from the pending list
+   * Called by BlockImporterService when guarantees are included in a block
+   *
+   * @param guarantees - The guarantees to remove
+   */
+  removePendingGuarantees(guarantees: Guarantee[]): void
+}
+
+/**
+ * Block Request Protocol Interface
+ *
+ * Interface for requesting blocks via CE128 protocol
+ */
+export interface IBlockRequestProtocol {
+  serializeRequest(request: BlockRequest): Safe<Uint8Array>
+  deserializeRequest(data: Uint8Array): Safe<BlockRequest>
+}
+
+/**
+ * State Request Protocol Interface
+ *
+ * Interface for requesting state via CE129 protocol
+ */
+export interface IStateRequestProtocol {
+  serializeRequest(request: StateRequest): Safe<Uint8Array>
+  deserializeRequest(data: Uint8Array): Safe<StateRequest>
+}
+
+/**
+ * Networking Service Interface
+ *
+ * Interface for sending messages over the network
+ */
+export interface INetworkingService {
+  sendMessageByPublicKey(
+    peerPublicKey: Hex,
+    streamKind: StreamKind,
+    message: Uint8Array,
+  ): SafePromise<void>
+  closeStreamForPeer(publicKey: Hex): SafePromise<void>
+}
+
+/**
+ * State Service Interface (extended)
+ *
+ * Extended interface for setting state from key-value pairs
+ */
+export interface IStateServiceExtended extends IStateService {
+  setState(keyvals: Array<{ key: Hex; value: Hex }>): Safe<void>
 }

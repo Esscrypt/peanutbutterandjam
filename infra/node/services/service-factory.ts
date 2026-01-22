@@ -26,7 +26,7 @@ import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import { AccumulatePVM, RefinePVM } from '@pbnjam/pvm-invocations'
 import type { StreamKind, ValidatorPublicKeys } from '@pbnjam/types'
 import { safeResult } from '@pbnjam/types'
 
@@ -55,7 +55,6 @@ import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
 import { NodeGenesisManager } from './genesis-manager'
 import { GuarantorService } from './guarantor-service'
-import { HeaderConstructor } from './header-constructor'
 import {
   KeyPairService,
   type ValidatorKeyServiceConfig,
@@ -177,7 +176,6 @@ export interface ServiceContext {
   // Optional services (may be null depending on configuration)
   keyPairService: KeyPairService | null
   networkingService: NetworkingService | null
-  headerConstructorService: HeaderConstructor | null
   metricsCollector: MetricsCollector | null
 
   // Ring VRF
@@ -330,6 +328,7 @@ export async function createCoreServices(
       chainHash,
       protocolRegistry: options.protocolRegistry ?? new Map(),
       validatorIndex: options.validatorIndex,
+      eventBusService,
     })
   }
 
@@ -420,6 +419,16 @@ export async function createCoreServices(
     configService,
     entropyService,
     pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
+    useWasm: options.useWasm ?? false,
+    traceSubfolder: options.traceSubfolder,
+  })
+
+  // Create RefinePVM for work package processing
+  const refinePVM = new RefinePVM({
+    hostFunctionRegistry,
+    accumulateHostFunctionRegistry,
+    serviceAccountService,
+    configService,
     useWasm: options.useWasm ?? false,
     traceSubfolder: options.traceSubfolder,
   })
@@ -526,12 +535,15 @@ export async function createCoreServices(
     serviceAccountService,
     statisticsService,
     stateService,
+    refinePVM,
+    hostFunctionRegistry,
   })
 
   // ChainManagerService for fork handling and state snapshots
   const chainManagerService = new ChainManagerService(
     configService,
     sealKeyService,
+    eventBusService,
   )
 
   const blockImporterService = new BlockImporterService({
@@ -554,16 +566,6 @@ export async function createCoreServices(
     workReportService,
     chainManagerService,
   })
-
-  // Optional services
-  let headerConstructorService: HeaderConstructor | null = null
-  if (keyPairService) {
-    headerConstructorService = new HeaderConstructor({
-      keyPairService,
-      validatorSetManagerService: validatorSetManager,
-      genesisManagerService,
-    })
-  }
 
   let metricsCollector: MetricsCollector | null = null
   if (options.nodeId) {
@@ -598,7 +600,6 @@ export async function createCoreServices(
     shardService,
     keyPairService,
     networkingService,
-    headerConstructorService,
     metricsCollector,
     ringProver,
     ringVerifier,

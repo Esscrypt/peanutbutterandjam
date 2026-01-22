@@ -1566,6 +1566,102 @@ export class PVM {
   }
 
   /**
+   * Set up is-authorized invocation without executing
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   * 
+   * This sets up the is-authorized context and initializes the program for step-by-step execution.
+   * Host functions will access the work package through this.refineWorkPackage.
+   * 
+   * @param gasLimit - Gas limit for execution (from IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS)
+   * @param program - Auth code blob (preimage format)
+   * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+   * @param workPackage - Work package (for FETCH host function)
+   */
+  public setupIsAuthorizedInvocation(
+    gasLimit: u32,
+    program: Uint8Array,
+    args: Uint8Array,
+    workPackage: WorkPackage | null,
+  ): void {
+    // CRITICAL: Reset PVM state completely before each is-authorized invocation
+    // This ensures no state leaks between invocations
+    this.reset()
+    
+    // Clear is-authorized-specific state
+    this.refineContext = null
+    this.refineWorkPackage = workPackage
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0
+    this.refineServiceAccount = null
+    this.refineLookupAnchorTimeslot = workPackage ? u64(workPackage.context.lookup_anchor_slot) : u64(0)
+    this.accumulationContext = null
+    this.entropyAccumulator = null
+    this.accumulateInputs = null
+    this.timeslot = u64(0)
+    
+    // Initialize program with auth code and args
+    // Gray Paper equation 37-38: Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
+    // Initial PC = 0 for is-authorized invocation
+    const codeBlob = this.initializeProgram(program, args)
+    
+    if (!codeBlob) {
+      this.state.resultCode = RESULT_CODE_PANIC
+      return
+    }
+    
+    // Decode the code blob to get code, bitmask, and jumpTable
+    const decoded = decodeBlob(codeBlob)
+    if (!decoded) {
+      this.state.resultCode = RESULT_CODE_PANIC
+      return
+    }
+    
+    // Set decoded program state
+    this.state.code = decoded.code
+    this.state.bitmask = decoded.bitmask
+    this.state.jumpTable = decoded.jumpTable
+    
+    // Set gas and program counter
+    this.state.gasCounter = gasLimit
+    this.state.programCounter = 0
+    
+    // Verify state was set correctly
+    if (this.state.code.length === 0 || this.state.bitmask.length === 0) {
+      abort(
+        `setupIsAuthorizedInvocation: initializeProgram succeeded but state not set: code.length=${this.state.code.length}, bitmask.length=${this.state.bitmask.length}`
+      )
+    }
+    
+    // Don't call run() - caller will step through manually
+  }
+
+  /**
+   * Execute is-authorized invocation
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   * 
+   * This sets up and executes the is-authorized invocation in one call.
+   * 
+   * @param gasLimit - Gas limit for execution
+   * @param program - Auth code blob (preimage format)
+   * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+   * @param workPackage - Work package (for FETCH host function)
+   * @returns RunProgramResult with gas consumed and result
+   */
+  public isAuthorizedInvocation(
+    gasLimit: u32,
+    program: Uint8Array,
+    args: Uint8Array,
+    workPackage: WorkPackage | null,
+  ): RunProgramResult {
+    // Set up the invocation
+    this.setupIsAuthorizedInvocation(gasLimit, program, args, workPackage)
+    
+    // Run the program
+    return this.runProgram()
+  }
+
+  /**
    * Reset PVM with program, registers, and gas
    * 
    * Resets the PVM state and sets up a new program execution context.

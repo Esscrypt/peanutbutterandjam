@@ -28,7 +28,9 @@ import {
 import type { WorkReportRequestProtocol } from '@pbnjam/networking'
 import {
   BaseService,
+  type Guarantee,
   type GuaranteedWorkReport,
+  type IWorkReportService,
   type PendingReport,
   type Reports,
   type Safe,
@@ -62,7 +64,10 @@ export type WorkReportState =
 /**
  * Work Report Service Implementation
  */
-export class WorkReportService extends BaseService {
+export class WorkReportService
+  extends BaseService
+  implements IWorkReportService
+{
   // According to Gray Paper: For each guaranteed work report, we need to know
   // which core it belongs to and which authorizer was used
   private readonly authorizerHashByCore: Map<number, Hex> = new Map()
@@ -79,6 +84,10 @@ export class WorkReportService extends BaseService {
   // Gray Paper: only one report may be assigned to a core at any given time
   private readonly pendingWorkReports: Map<bigint, PendingReport | null> =
     new Map()
+
+  // Storage for pending guarantees ready for block inclusion
+  // Guarantees are created when work reports are guaranteed and distributed
+  private pendingGuarantees: Guarantee[] = []
 
   private readonly eventBus: EventBusService
   private readonly networkingService: NetworkingService | null
@@ -488,5 +497,46 @@ export class WorkReportService extends BaseService {
     })
 
     return safeResult(undefined)
+  }
+
+  /**
+   * Get pending guarantees ready for block inclusion
+   *
+   * TODO: Implement collection of pending guarantees
+   * Guarantees should be:
+   * - Created by guarantors when they sign work reports
+   * - Validated (signatures, work report validity)
+   * - Ready for inclusion (dependencies satisfied, not expired)
+   *
+   * @returns Array of pending guarantees ready for block inclusion
+   */
+  getPendingGuarantees(): Guarantee[] {
+    // Return pending guarantees that are ready for block inclusion
+    // Guarantees are added to this list when they are created and distributed
+    // They are removed when included in a block (handled by block importer)
+    return [...this.pendingGuarantees]
+  }
+
+  /**
+   * Add a guarantee to the pending guarantees list
+   * Called by GuarantorService when a guarantee is created and distributed
+   *
+   * @param guarantee - The guarantee to add
+   */
+  addPendingGuarantee(guarantee: Guarantee): void {
+    this.pendingGuarantees.push(guarantee)
+  }
+
+  /**
+   * Remove guarantees from the pending list
+   * Called by BlockImporterService when guarantees are included in a block
+   *
+   * @param guarantees - The guarantees to remove
+   */
+  removePendingGuarantees(guarantees: Guarantee[]): void {
+    const guaranteeSet = new Set(guarantees)
+    this.pendingGuarantees = this.pendingGuarantees.filter(
+      (g) => !guaranteeSet.has(g),
+    )
   }
 }

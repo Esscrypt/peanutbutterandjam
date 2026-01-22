@@ -302,6 +302,221 @@ export class TypeScriptPVMExecutor extends PVM {
   }
 
   /**
+   * Execute is-authorized invocation using executeMarshallingInvocation
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   *
+   * This is the public method that IsAuthorizedPVM should call directly for TypeScript execution.
+   * Host functions are handled via the context mutator.
+   */
+  async executeIsAuthorizedInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+  }> {
+    if (!this.serviceAccountService) {
+      return safeError(
+        new Error(
+          'ServiceAccountService required for is-authorized invocation',
+        ),
+      )
+    }
+
+    // Store work package for FETCH host function
+    this.refineWorkPackage = workPackage
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0n
+    this.refineServiceAccount = null
+    this.refineServiceId = null
+    this.refineAccounts = null
+    this.refineLookupAnchorTimeslot = workPackage.context.lookup_anchor_slot
+
+    // Create is-authorized context mutator F
+    // Gray Paper equation 46-54: F ∈ contextmutator{emptyset}
+    const isAuthorizedContextMutator =
+      this.createIsAuthorizedContextMutator(workPackage)
+
+    // Clear host function logs at the start of each execution run
+    this.traceHostFunctionLogs = []
+
+    // Execute Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
+    // Gray Paper equation 37-38: Initial PC = 0 for is-authorized invocation
+    const [error, marshallingResult] = await this.executeMarshallingInvocation(
+      preimageBlob,
+      0n, // Initial PC = 0 (Gray Paper)
+      gasLimit,
+      encodedArgs,
+      isAuthorizedContextMutator,
+      {
+        machines: new Map(),
+        exportSegments: [],
+      }, // Context is (∅, ∅) for Is-Authorized
+    )
+
+    // Clear is-authorized invocation parameters
+    this.refineWorkPackage = null
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0n
+    this.refineServiceAccount = null
+    this.refineServiceId = null
+    this.refineAccounts = null
+    this.refineLookupAnchorTimeslot = 0n
+
+    if (error || !marshallingResult) {
+      return safeError(
+        error || new Error('Marshalling invocation returned no result'),
+      )
+    }
+
+    return safeResult({
+      gasConsumed: marshallingResult.gasConsumed,
+      result: marshallingResult.result,
+    })
+  }
+
+  /**
+   * Create is-authorized context mutator F
+   * Gray Paper equation 46-54: F ∈ contextmutator{emptyset}
+   *
+   * Supports only:
+   * - gas (ID = 0): Ω_G
+   * - fetch (ID = 1): Ω_Y(..., wpX, none, none, none, none, none, none, none)
+   *
+   * For unknown host calls:
+   * - Set registers[7] = WHAT
+   * - Subtract 10 gas
+   * - If gas < 0: return oog
+   * - Otherwise: continue
+   */
+  private createIsAuthorizedContextMutator(
+    workPackage: WorkPackage,
+  ): ContextMutator {
+    return (hostCallId: bigint) => {
+      // Get current step and gas before host function call
+      const currentStep = this.executionStep
+      const gasBefore = this.state.gasCounter
+
+      const gasCost = 10n
+      const isOOG = this.state.gasCounter < gasCost
+
+      // Log host function call BEFORE execution
+      const hostLogEntry = {
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: isOOG
+          ? this.state.gasCounter
+          : this.state.gasCounter - gasCost,
+      }
+      this.traceHostFunctionLogs.push(hostLogEntry)
+
+      if (isOOG) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
+        return RESULT_CODES.OOG
+      }
+
+      // Deduct base gas cost
+      this.state.gasCounter -= gasCost
+      hostLogEntry.gasAfter = this.state.gasCounter
+
+      // Gray Paper eq 46-54: Only support gas (0) and fetch (1)
+      if (hostCallId === GENERAL_FUNCTIONS.GAS) {
+        // Ω_G(gascounter, registers, memory)
+        const result = this.handleGeneralHostFunctionForIsAuthorized(hostCallId)
+        hostLogEntry.gasAfter = this.state.gasCounter
+        return result
+      }
+
+      if (hostCallId === GENERAL_FUNCTIONS.FETCH) {
+        // Ω_Y(gascounter, registers, memory, wpX, none, none, none, none, none, none, none)
+        const result = this.handleFetchForIsAuthorized(workPackage)
+        hostLogEntry.gasAfter = this.state.gasCounter
+        return result
+      }
+
+      // Unknown host call: Gray Paper default behavior
+      // registers' = registers except registers'[7] = WHAT
+      // gascounter' = gascounter - 10 (already deducted)
+      this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+      // If gas < 0: return oog (already checked above)
+      // Otherwise: continue (Gray Paper: continue means execution continues)
+      return null
+    }
+  }
+
+  /**
+   * Handle GAS host function for is-authorized context
+   */
+  private handleGeneralHostFunctionForIsAuthorized(
+    hostCallId: bigint,
+  ): ResultCode | null {
+    const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+    if (!hostFunction) {
+      return null
+    }
+
+    const hostFunctionContext: HostFunctionContext = {
+      gasCounter: this.state.gasCounter,
+      registers: this.state.registerState,
+      ram: this.state.ram,
+      log: () => {
+        // Logging handled by PVM's host function logs
+      },
+    }
+
+    // GAS host function takes null context
+    const result = hostFunction.execute(hostFunctionContext, null)
+
+    return result?.resultCode ?? null
+  }
+
+  /**
+   * Handle FETCH host function for is-authorized context
+   * Gray Paper: Ω_Y(..., wpX, none, none, none, none, none, none, none)
+   */
+  private handleFetchForIsAuthorized(
+    workPackage: WorkPackage,
+  ): ResultCode | null {
+    const hostFunction = this.hostFunctionRegistry.get(GENERAL_FUNCTIONS.FETCH)
+    if (!hostFunction) {
+      return null
+    }
+
+    const hostFunctionContext: HostFunctionContext = {
+      gasCounter: this.state.gasCounter,
+      registers: this.state.registerState,
+      ram: this.state.ram,
+      log: () => {
+        // Logging handled by PVM's host function logs
+      },
+    }
+
+    // Create fetch params with work package and all other params as null/none
+    // Gray Paper: Ω_Y(..., wpX, none, none, none, none, none, none, none)
+    const fetchParams: FetchParams = {
+      workPackage,
+      workPackageHash: null,
+      authorizerTrace: null,
+      workItemIndex: null,
+      importSegments: null,
+      exportSegments: null,
+      accumulateInputs: null,
+      entropyService: null, // Not needed for is-authorized
+    }
+
+    const result = hostFunction.execute(hostFunctionContext, fetchParams)
+
+    return result?.resultCode ?? null
+  }
+
+  /**
    * Create accumulate context mutator F
    * Gray Paper equation 187-211: F ∈ contextmutator{implicationspair}
    */

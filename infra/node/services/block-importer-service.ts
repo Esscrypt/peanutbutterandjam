@@ -20,9 +20,15 @@ import {
   calculateBlockHashFromHeader,
   calculateExtrinsicHash,
 } from '@pbnjam/codec'
-import { type EventBusService, type Hex, logger, zeroHash } from '@pbnjam/core'
+import {
+  type EventBusService,
+  type Hex,
+  hexToBytes,
+  logger,
+  zeroHash,
+} from '@pbnjam/core'
 
-import type { Block } from '@pbnjam/types'
+import type { Block, ChainStateSnapshot } from '@pbnjam/types'
 import {
   BaseService,
   BLOCK_HEADER_ERRORS,
@@ -37,10 +43,7 @@ import {
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
-import type {
-  ChainManagerService,
-  ChainStateSnapshot,
-} from './chain-manager-service'
+import type { ChainManagerService } from './chain-manager-service'
 import type { ClockService } from './clock-service'
 import type { ConfigService } from './config-service'
 import type { DisputesService } from './disputes-service'
@@ -585,6 +588,14 @@ export class BlockImporterService extends BaseService {
       )
     }
 
+    // Remove guarantees from pending list after successful processing
+    // These guarantees have been included in the block and should no longer be pending
+    // this.workReportService.removePendingGuarantees(block.body.guarantees)
+    // Also remove from GuarantorService's pending guarantees
+    // Note: removeIncludedGuarantees is not in IGuarantorService interface, but we can call it
+    // directly since we have the concrete GuarantorService type
+    // this.guarantorService.removeIncludedGuarantees(block.body.guarantees)
+
     // Process winnersMark from block header if present (for non-epoch-transition blocks)
     // Gray Paper Eq. 262-266: H_winnersmark = Z(ticketaccumulator) when e' = e ∧ m < Cepochtailstart ≤ m' ∧ |ticketaccumulator| = Cepochlen
     // winnersMark appears at the first block after contest period ends (phase >= contestDuration)
@@ -620,8 +631,8 @@ export class BlockImporterService extends BaseService {
     // This MUST happen for EVERY block, even empty ones, as entropy is part of the state
     // Gray Paper pvm_invocations.tex Eq. 185: accumulation uses entropyaccumulator' (updated value)
     // MUST await to ensure entropy is updated before accumulation uses it
-    // Emit bestBlockChanged event to trigger entropy update (EntropyService listens to this)
-    await this.eventBusService.emitBestBlockChanged(block.header)
+    // Note: bestBlockChanged event is now emitted by ChainManagerService when best head changes
+    // (EntropyService listens to this event to update entropy accumulator)
 
     // Update thetime (C(11)) to the block's timeslot
     // Gray Paper merklization.tex C(11): thetime is the most recent block's timeslot index
@@ -714,6 +725,15 @@ export class BlockImporterService extends BaseService {
       Number(block.header.authorIndex),
       lastAccumulationOutputs,
     )
+
+    // Update entropy accumulator with VRF output from block
+    // Gray Paper: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
+    const [entropyUpdateError] = this.entropyService.updateEntropyAccumulator(
+      hexToBytes(block.header.vrfSig),
+    )
+    if (entropyUpdateError) {
+      return safeError(entropyUpdateError)
+    }
 
     return safeResult(undefined)
   }

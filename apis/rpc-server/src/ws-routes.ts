@@ -15,8 +15,28 @@
  */
 
 import { logger } from '@pbnjam/core'
-import type { ServerWebSocket } from 'bun'
 import { rpcHandler, subscriptionManager } from './routes'
+import {
+  beefyRootParamsSchema,
+  bestBlockParamsSchema,
+  finalizedBlockParamsSchema,
+  listServicesParamsSchema,
+  parentParamsSchema,
+  serviceDataParamsSchema,
+  servicePreimageParamsSchema,
+  serviceRequestParamsSchema,
+  serviceValueParamsWebSocketSchema,
+  stateRootParamsSchema,
+  statisticsParamsSchema,
+  submitPreimageParamsWebSocketSchema,
+  submitWorkPackageParamsWebSocketSchema,
+  subscribeServiceDataParamsSchema,
+  subscribeServicePreimageParamsSchema,
+  subscribeServiceRequestParamsSchema,
+  subscribeServiceValueParamsSchema,
+  subscribeStatisticsParamsSchema,
+  unsubscribeParamsSchema,
+} from './schemas'
 import type { RpcRequest, WebSocket } from './types'
 
 /**
@@ -25,55 +45,49 @@ import type { RpcRequest, WebSocket } from './types'
 export function setupWebSocketForBun(): {
   upgrade: (req: Request) => boolean
   websocket: {
-    message: (
-      ws: ServerWebSocket<unknown>,
-      message: string | Buffer,
-    ) => void | Promise<void>
-    open: (ws: ServerWebSocket<unknown>) => void | Promise<void>
-    close: (ws: ServerWebSocket<unknown>) => void | Promise<void>
-    error: (ws: ServerWebSocket<unknown>, error: Error) => void | Promise<void>
+    message: (ws: WebSocket, message: string | Buffer) => void | Promise<void>
+    open: (ws: WebSocket) => void | Promise<void>
+    close: (ws: WebSocket) => void | Promise<void>
+    error: (ws: WebSocket, error: Error) => void | Promise<void>
   }
 } {
   return {
     upgrade: (req: Request): boolean => {
+      logger.info('WebSocket upgrade requested')
       const url = new URL(req.url)
-      if (url.pathname === '/ws') {
-        return true // Allow upgrade
+      if (url.pathname === '/') {
+        return true // Allow upgrade at root path
       }
       return false
     },
     websocket: {
-      open: (ws: ServerWebSocket<unknown>) => {
+      open: (_ws: WebSocket) => {
         logger.info('WebSocket connection opened')
-        // Cast to our WebSocket interface for compatibility
-        const wsCompat = ws as unknown as WebSocket
-        wsCompat.readyState = 1 // OPEN
       },
 
-      message: async (
-        ws: ServerWebSocket<unknown>,
-        message: string | Buffer,
-      ) => {
+      message: async (ws: WebSocket, message: string | Buffer) => {
         const data = typeof message === 'string' ? message : message.toString()
-        // Cast to our WebSocket interface for compatibility
-        const wsCompat = ws as unknown as WebSocket
-        await handleWebSocketMessage(wsCompat, data)
+        await handleWebSocketMessage(ws, data)
       },
 
-      close: (ws: ServerWebSocket<unknown>) => {
-        logger.info('WebSocket connection closed')
-        // Cast to our WebSocket interface for compatibility
-        const wsCompat = ws as unknown as WebSocket
+      close: (ws: WebSocket, code?: number, message?: string) => {
+        logger.info(
+          `WebSocket connection closed${code !== undefined ? ` (code: ${code})` : ''}${message ? ` (message: ${message})` : ''}`,
+        )
         // Clean up subscriptions for this connection
-        subscriptionManager.removeSubscriptions(wsCompat)
+        subscriptionManager.removeSubscriptions(ws)
       },
 
-      error: (ws: ServerWebSocket<unknown>, error: Error) => {
-        logger.error(`WebSocket error: ${error.message}`)
-        // Cast to our WebSocket interface for compatibility
-        const wsCompat = ws as unknown as WebSocket
+      error: (ws: WebSocket, error: Error | unknown) => {
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : error
+              ? String(error)
+              : 'Unknown error'
+        logger.error(`WebSocket error: ${errorMessage}`)
         // Clean up subscriptions on error
-        subscriptionManager.removeSubscriptions(wsCompat)
+        subscriptionManager.removeSubscriptions(ws)
       },
     },
   }
@@ -104,7 +118,7 @@ async function handleWebSocketMessage(
     const result = await handleSubscriptionMethod(
       ws,
       request.method,
-      request.params,
+      request.params ?? [],
     )
 
     if (result !== undefined) {
@@ -117,38 +131,36 @@ async function handleWebSocketMessage(
 }
 
 /**
- * Handle subscription method calls
+ * Handle subscription method calls with type-safe Zod validation
+ * JIP-2: params should always be an array (mandatory per spec)
  */
 async function handleSubscriptionMethod(
   ws: WebSocket,
   method: string,
-  params?: unknown[],
+  params: unknown[],
 ): Promise<unknown> {
   switch (method) {
     // Subscription methods
     case 'subscribeBestBlock': {
-      const subscriptionId = rpcHandler.subscribeBestBlock(ws)
+      const subscriptionId = await rpcHandler.subscribeBestBlock(ws)
       return { subscriptionId }
     }
 
     case 'subscribeFinalizedBlock': {
-      const subscriptionId = rpcHandler.subscribeFinalizedBlock(ws)
+      const subscriptionId = await rpcHandler.subscribeFinalizedBlock(ws)
       return { subscriptionId }
     }
 
     case 'subscribeStatistics': {
-      const finalized = (params?.[0] as boolean) ?? false
-      const subscriptionId = rpcHandler.subscribeStatistics(finalized, ws)
+      const [finalized] = subscribeStatisticsParamsSchema.parse(params)
+      const subscriptionId = await rpcHandler.subscribeStatistics(finalized, ws)
       return { subscriptionId }
     }
 
     case 'subscribeServiceData': {
-      const serviceId = params?.[0] as number
-      const finalized = (params?.[1] as boolean) ?? false
-      if (serviceId === undefined) {
-        throw new Error('Missing serviceId parameter')
-      }
-      const subscriptionId = rpcHandler.subscribeServiceData(
+      const [serviceId, finalized] =
+        subscribeServiceDataParamsSchema.parse(params)
+      const subscriptionId = await rpcHandler.subscribeServiceData(
         serviceId,
         finalized,
         ws,
@@ -157,13 +169,9 @@ async function handleSubscriptionMethod(
     }
 
     case 'subscribeServiceValue': {
-      const serviceId = params?.[0] as number
-      const key = params?.[1] as Uint8Array
-      const finalized = (params?.[2] as boolean) ?? false
-      if (serviceId === undefined || !key) {
-        throw new Error('Missing required parameters')
-      }
-      const subscriptionId = rpcHandler.subscribeServiceValue(
+      const [serviceId, key, finalized] =
+        subscribeServiceValueParamsSchema.parse(params)
+      const subscriptionId = await rpcHandler.subscribeServiceValue(
         serviceId,
         key,
         finalized,
@@ -173,13 +181,9 @@ async function handleSubscriptionMethod(
     }
 
     case 'subscribeServicePreimage': {
-      const serviceId = params?.[0] as number
-      const hash = params?.[1] as `0x${string}`
-      const finalized = (params?.[2] as boolean) ?? false
-      if (serviceId === undefined || !hash) {
-        throw new Error('Missing required parameters')
-      }
-      const subscriptionId = rpcHandler.subscribeServicePreimage(
+      const [serviceId, hash, finalized] =
+        subscribeServicePreimageParamsSchema.parse(params)
+      const subscriptionId = await rpcHandler.subscribeServicePreimage(
         serviceId,
         hash,
         finalized,
@@ -189,14 +193,9 @@ async function handleSubscriptionMethod(
     }
 
     case 'subscribeServiceRequest': {
-      const serviceId = params?.[0] as number
-      const hash = params?.[1] as `0x${string}`
-      const length = params?.[2] as number
-      const finalized = (params?.[3] as boolean) ?? false
-      if (serviceId === undefined || !hash || length === undefined) {
-        throw new Error('Missing required parameters')
-      }
-      const subscriptionId = rpcHandler.subscribeServiceRequest(
+      const [serviceId, hash, length, finalized] =
+        subscribeServiceRequestParamsSchema.parse(params)
+      const subscriptionId = await rpcHandler.subscribeServiceRequest(
         serviceId,
         hash,
         length,
@@ -214,10 +213,7 @@ async function handleSubscriptionMethod(
     case 'unsubscribeServiceValue':
     case 'unsubscribeServicePreimage':
     case 'unsubscribeServiceRequest': {
-      const subscriptionId = params?.[0] as string
-      if (!subscriptionId) {
-        throw new Error('Missing subscriptionId parameter')
-      }
+      const [subscriptionId] = unsubscribeParamsSchema.parse(params)
       const removed = subscriptionManager.removeSubscription(subscriptionId)
       return { success: removed }
     }
@@ -229,109 +225,74 @@ async function handleSubscriptionMethod(
     }
 
     case 'bestBlock': {
+      bestBlockParamsSchema.parse(params)
       return await rpcHandler.bestBlock()
     }
 
     case 'finalizedBlock': {
+      finalizedBlockParamsSchema.parse(params)
       return await rpcHandler.finalizedBlock()
     }
 
     case 'parent': {
-      const blockHash = params?.[0] as `0x${string}`
-      if (!blockHash) throw new Error('Missing blockHash parameter')
+      const [blockHash] = parentParamsSchema.parse(params)
       return await rpcHandler.parent(blockHash)
     }
 
     case 'stateRoot': {
-      const blockHash = params?.[0] as `0x${string}`
-      if (!blockHash) throw new Error('Missing blockHash parameter')
+      const [blockHash] = stateRootParamsSchema.parse(params)
       return await rpcHandler.stateRoot(blockHash)
     }
 
     case 'statistics': {
-      const blockHash = params?.[0] as `0x${string}`
-      if (!blockHash) throw new Error('Missing blockHash parameter')
+      const [blockHash] = statisticsParamsSchema.parse(params)
       return await rpcHandler.statistics(blockHash)
     }
 
     case 'serviceData': {
-      const blockHash = params?.[0] as `0x${string}`
-      const serviceId = params?.[1] as number
-      if (!blockHash || serviceId === undefined) {
-        throw new Error('Missing required parameters')
-      }
+      const [blockHash, serviceId] = serviceDataParamsSchema.parse(params)
       return await rpcHandler.serviceData(blockHash, serviceId)
     }
 
     case 'serviceValue': {
-      const blockHash = params?.[0] as `0x${string}`
-      const serviceId = params?.[1] as number
-      const key = params?.[2] as Uint8Array
-      if (!blockHash || serviceId === undefined || !key) {
-        throw new Error('Missing required parameters')
-      }
+      const [blockHash, serviceId, key] =
+        serviceValueParamsWebSocketSchema.parse(params)
       return await rpcHandler.serviceValue(blockHash, serviceId, key)
     }
 
     case 'servicePreimage': {
-      const blockHash = params?.[0] as `0x${string}`
-      const serviceId = params?.[1] as number
-      const hash = params?.[2] as `0x${string}`
-      if (!blockHash || serviceId === undefined || !hash) {
-        throw new Error('Missing required parameters')
-      }
+      const [blockHash, serviceId, hash] =
+        servicePreimageParamsSchema.parse(params)
       return await rpcHandler.servicePreimage(blockHash, serviceId, hash)
     }
 
     case 'serviceRequest': {
-      const blockHash = params?.[0] as `0x${string}`
-      const serviceId = params?.[1] as number
-      const hash = params?.[2] as `0x${string}`
-      const length = params?.[3] as number
-      if (
-        !blockHash ||
-        serviceId === undefined ||
-        !hash ||
-        length === undefined
-      ) {
-        throw new Error('Missing required parameters')
-      }
+      const [blockHash, serviceId, hash, length] =
+        serviceRequestParamsSchema.parse(params)
       return await rpcHandler.serviceRequest(blockHash, serviceId, hash, length)
     }
 
     case 'beefyRoot': {
-      const blockHash = params?.[0] as `0x${string}`
-      if (!blockHash) throw new Error('Missing blockHash parameter')
+      const [blockHash] = beefyRootParamsSchema.parse(params)
       return await rpcHandler.beefyRoot(blockHash)
     }
 
     case 'submitWorkPackage': {
-      const coreIndexParam = params?.[0]
-      const workPackage = params?.[1] as Uint8Array
-      const extrinsics = params?.[2] as Uint8Array[]
-      if (coreIndexParam === undefined || !workPackage || !extrinsics) {
-        throw new Error('Missing required parameters')
-      }
-      const coreIndex = BigInt(coreIndexParam as number)
+      const [coreIndex, workPackage, extrinsics] =
+        submitWorkPackageParamsWebSocketSchema.parse(params)
       await rpcHandler.submitWorkPackage(coreIndex, workPackage, extrinsics)
       return { success: true }
     }
 
     case 'submitPreimage': {
-      const serviceIdParam = params?.[0]
-      const preimage = params?.[1] as Uint8Array
-      const blockHash = params?.[2] as `0x${string}`
-      if (serviceIdParam === undefined || !preimage || !blockHash) {
-        throw new Error('Missing required parameters')
-      }
-      const serviceId = BigInt(serviceIdParam as number)
+      const [serviceId, preimage, blockHash] =
+        submitPreimageParamsWebSocketSchema.parse(params)
       await rpcHandler.submitPreimage(serviceId, preimage, blockHash)
       return { success: true }
     }
 
     case 'listServices': {
-      const blockHash = params?.[0] as `0x${string}`
-      if (!blockHash) throw new Error('Missing blockHash parameter')
+      const [blockHash] = listServicesParamsSchema.parse(params)
       return await rpcHandler.listServices(blockHash)
     }
 

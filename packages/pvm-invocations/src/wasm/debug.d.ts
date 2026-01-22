@@ -137,6 +137,23 @@ export declare function setupRefineInvocation(gasLimit: number, program: Uint8Ar
  */
 export declare function runProgram(): __Internref283;
 /**
+ * assembly/index/setupIsAuthorizedInvocation
+ * @param gasLimit `u32`
+ * @param program `~lib/typedarray/Uint8Array`
+ * @param args `~lib/typedarray/Uint8Array`
+ * @param workPackage `assembly/codec/WorkPackage | null`
+ */
+export declare function setupIsAuthorizedInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, workPackage: __Internref48 | null): void;
+/**
+ * assembly/index/isAuthorizedInvocation
+ * @param gasLimit `u32`
+ * @param program `~lib/typedarray/Uint8Array`
+ * @param args `~lib/typedarray/Uint8Array`
+ * @param workPackage `assembly/codec/WorkPackage | null`
+ * @returns `assembly/types/RunProgramResult`
+ */
+export declare function isAuthorizedInvocation(gasLimit: number, program: Uint8Array, args: Uint8Array, workPackage: __Internref48 | null): __Internref283;
+/**
  * assembly/index/getProgramCounter
  * @returns `u32`
  */

@@ -30,6 +30,7 @@ import {
 import type {
   Assurance,
   AssuranceDistributionRequest,
+  IAssuranceService,
   IConfigService,
   Safe,
   ValidatorPublicKeys,
@@ -51,7 +52,7 @@ import type { WorkReportService } from './work-report-service'
 /**
  * Assurance Service Implementation
  */
-export class AssuranceService extends BaseService {
+export class AssuranceService extends BaseService implements IAssuranceService {
   private readonly configService: IConfigService
   private readonly workReportService: WorkReportService
   private readonly validatorSetManager: ValidatorSetManager
@@ -383,5 +384,28 @@ export class AssuranceService extends BaseService {
     })
 
     return safeResult(availableWorkReports)
+  }
+
+  /**
+   * Get pending assurances ready for block inclusion
+   *
+   * TODO: Implement collection of pending assurances
+   * Assurances should be:
+   * - Validated (signature, anchor matches parent hash)
+   * - Sorted by validator_index (ascending, unique)
+   * - Ready for inclusion (not expired, anchor matches current parent)
+   *
+   * @param parentHash - Parent block hash for anchor validation
+   * @returns Array of pending assurances ready for block inclusion
+   */
+  getPendingAssurances(_parentHash: Hex): Assurance[] {
+    // TODO: Implement pending assurances collection
+    // This should collect assurances that:
+    // 1. Have been received via handleAssuranceReceived
+    // 2. Have valid signatures (already validated)
+    // 3. Have anchor matching the parent hash
+    // 4. Are sorted by validator_index (ascending, unique)
+    // 5. Are not expired
+    return []
   }
 }

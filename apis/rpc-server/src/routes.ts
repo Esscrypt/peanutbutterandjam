@@ -148,7 +148,7 @@ async function handleRpcRequest(req: Request): Promise<Response> {
       )
     }
 
-    const { id, method, params = [] } = parseResult.data
+    const { id, method, params } = parseResult.data
 
     // Validate method-specific parameters and handle methods
     let result: unknown

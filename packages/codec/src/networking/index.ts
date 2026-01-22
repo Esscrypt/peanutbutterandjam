@@ -1,4 +1,2 @@
-/**
- * Networking message codec exports
- */
 export * from './message'
+export * from './up0'

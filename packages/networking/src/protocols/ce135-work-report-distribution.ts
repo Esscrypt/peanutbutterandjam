@@ -7,7 +7,6 @@
 
 // import { validateGuaranteeSignatures } from '@pbnjam/guarantor'
 import {
-  // calculateWorkReportHash,
   decodeFixedLength,
   decodeNatural,
   decodeWorkReport,
@@ -16,14 +15,17 @@ import {
   encodeWorkReport,
 } from '@pbnjam/codec'
 import {
+  blake2bHash,
   bytesToHex,
   concatBytes,
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type {
   GuaranteedWorkReport,
+  GuaranteeOutline,
   Safe,
   SafePromise,
   // ValidatorPublicKeys,
@@ -60,12 +62,7 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
   // private readonly coreAssignments: Map<number, number>
   private readonly eventBusService: EventBusService
 
-  constructor(
-    eventBusService: EventBusService,
-    // workReportService: IWorkReportService,
-    // validatorKeys: Map<number, ValidatorPublicKeys>,
-    // coreAssignments: Map<number, number>,
-  ) {
+  constructor(eventBusService: EventBusService) {
     super()
     this.eventBusService = eventBusService
     // this.validatorKeys = validatorKeys
@@ -90,7 +87,56 @@ export class WorkReportDistributionProtocol extends NetworkingProtocol<
     request: GuaranteedWorkReport,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    // const { workReport, signatures, slot } = request
+    logger.info('[CE135] Processing work report distribution request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      slot: request.slot.toString(),
+      signaturesCount: request.signatures.length,
+    })
+
+    // Emit JIP-3 receiving guarantee event (JIP-3: 110)
+    // This should be emitted by the recipient when a guarantor begins sending a work-report guarantee
+    const eventId = await this.eventBusService.emitReceivingGuarantee(
+      hexToBytes(peerPublicKey),
+    )
+
+    // Create GuaranteeOutline from GuaranteedWorkReport
+    // Calculate work report hash
+    const [encodeError, encodedWorkReport] = encodeWorkReport(
+      request.workReport,
+    )
+    if (encodeError) {
+      // If encoding fails, skip JIP-3 event but still process the request
+      this.eventBusService.emitWorkReportDistributionRequest(
+        request,
+        peerPublicKey,
+      )
+      return safeResult(undefined)
+    }
+
+    const [hashError, workReportHash] = blake2bHash(encodedWorkReport)
+    if (hashError) {
+      // If hashing fails, skip JIP-3 event but still process the request
+      this.eventBusService.emitWorkReportDistributionRequest(
+        request,
+        peerPublicKey,
+      )
+      return safeResult(undefined)
+    }
+
+    // Extract guarantor indices from signatures
+    const guarantors = request.signatures.map((sig) => sig.validatorIndex)
+
+    // Create guarantee outline
+    const guaranteeOutline: GuaranteeOutline = {
+      workReportHash: hexToBytes(workReportHash),
+      slot: request.slot,
+      guarantors,
+    }
+
+    // Emit JIP-3 guarantee received event (JIP-3: 112)
+    await this.eventBusService.emitGuaranteeReceived(eventId, guaranteeOutline)
+
+    // Legacy event for backwards compatibility
     this.eventBusService.emitWorkReportDistributionRequest(
       request,
       peerPublicKey,

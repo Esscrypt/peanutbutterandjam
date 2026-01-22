@@ -72,10 +72,6 @@ export async function verifyPeerCertificate(
     )
     return CryptoError.BadCertificate
   }
-  logger.info('[TLS Verification] ✅ Public key extracted', {
-    publicKey: bytesToHex(certificatePublicKey),
-    publicKeyLength: certificatePublicKey.length,
-  })
 
   const [extractAlternativeNameError, certificateAlternativeName] =
     extractAlternativeNameFromDERCertificate(peerCertificate)
@@ -89,9 +85,6 @@ export async function verifyPeerCertificate(
     })
     return CryptoError.BadCertificate
   }
-  logger.info('[TLS Verification] ✅ Alternative name extracted', {
-    alternativeName: certificateAlternativeName,
-  })
 
   const [altNameError, altName] = generateAlternativeName(
     certificatePublicKey,
@@ -110,10 +103,6 @@ export async function verifyPeerCertificate(
     )
     return CryptoError.BadCertificate
   }
-  logger.info('[TLS Verification] ✅ Expected alternative name generated', {
-    expectedAltName: altName,
-    actualAltName: certificateAlternativeName,
-  })
 
   if (certificateAlternativeName !== altName) {
     logger.error(
@@ -128,13 +117,6 @@ export async function verifyPeerCertificate(
     return CryptoError.BadCertificate
   }
 
-  logger.info(
-    '[TLS Verification] ✅ Certificate validation passed successfully',
-    {
-      publicKey: bytesToHex(certificatePublicKey),
-      alternativeName: certificateAlternativeName,
-    },
-  )
   // Certificate validation passed
   return undefined // No error means success
 }

@@ -10,6 +10,7 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type {
   AuditShardRequest,
@@ -28,11 +29,25 @@ export class AuditShardRequestProtocol extends NetworkingProtocol<
   AuditShardResponse
 > {
   private readonly eventBusService: EventBusService
+  // Track event IDs for request/response linking
+  private readonly requestEventIds: Map<string, bigint> = new Map()
+
   constructor(eventBus: EventBusService) {
     super()
     this.eventBusService = eventBus
 
     this.initializeEventHandlers()
+  }
+
+  /**
+   * Generate a unique key for tracking request event IDs
+   */
+  private getRequestKey(
+    peerPublicKey: Hex,
+    erasureRoot: Hex,
+    shardIndex: bigint,
+  ): string {
+    return `${peerPublicKey}:${erasureRoot}:${shardIndex.toString()}`
   }
 
   /**
@@ -42,6 +57,33 @@ export class AuditShardRequestProtocol extends NetworkingProtocol<
     request: AuditShardRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE138] Processing audit shard request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      erasureRoot: request.erasureRoot,
+      shardIndex: request.shardIndex.toString(),
+    })
+
+    // Emit JIP-3 receiving bundle shard request event (JIP-3: 141)
+    const eventId = await this.eventBusService.emitReceivingBundleShardRequest(
+      hexToBytes(peerPublicKey),
+    )
+
+    // Store event ID for linking with response
+    const requestKey = this.getRequestKey(
+      peerPublicKey,
+      request.erasureRoot,
+      request.shardIndex,
+    )
+    this.requestEventIds.set(requestKey, eventId)
+
+    // Emit JIP-3 bundle shard request received event (JIP-3: 144)
+    await this.eventBusService.emitBundleShardRequestReceived(
+      eventId,
+      hexToBytes(request.erasureRoot),
+      request.shardIndex,
+    )
+
+    // Legacy event for backwards compatibility
     this.eventBusService.emitAuditShardRequest(request, peerPublicKey)
     return safeResult(undefined)
   }
@@ -153,6 +195,26 @@ export class AuditShardRequestProtocol extends NetworkingProtocol<
     response: AuditShardResponse,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    // Look up event ID from the original request
+    // Since we don't have erasureRoot and shardIndex in the response, use the first available event ID for this peer
+    let eventId: bigint | undefined
+    for (const [key, id] of this.requestEventIds.entries()) {
+      if (key.startsWith(`${peerPublicKey}:`)) {
+        eventId = id
+        this.requestEventIds.delete(key)
+        break
+      }
+    }
+
+    // If no event ID found, generate a new one (fallback)
+    if (eventId === undefined) {
+      eventId = BigInt(Date.now())
+    }
+
+    // Emit JIP-3 bundle shard transferred event (JIP-3: 145)
+    await this.eventBusService.emitBundleShardTransferred(eventId)
+
+    // Legacy event for backwards compatibility
     this.eventBusService.emitAuditShardResponse(response, peerPublicKey)
     return safeResult(undefined)
   }

@@ -133,3 +133,105 @@ cat ../../config/chainspec-tiny.json | jq '.id, .genesis_header, (.genesis_state
 - The `genesis_header` will be JAM-serialized (not just a hash)
 - You may need to add `bootnodes` manually if you want to specify initial peer connections
 
+
+```bash
+# 1. Create config file
+cat > tiny-config.yaml << 'EOF'
+chain: tiny
+num_validators: 6
+num_cores: 2
+preimage_expunge_period: 32
+slot_duration: 6
+epoch_duration: 12
+contest_duration: 10
+tickets_per_validator: 3
+max_tickets_per_extrinsic: 3
+rotation_period: 4
+num_ec_pieces_per_segment: 1026
+max_block_gas: 20000000
+max_refine_gas: 1000000000
+EOF
+
+# 2. Generate chain-spec
+cd submodules/polkajam
+./polkajam gen-spec tiny-config.yaml ../../config/chainspec-tiny.json
+
+# 3. Verify the generated file
+cat ../../config/chainspec-tiny.json | jq '.id, .genesis_header, (.genesis_state | keys | length)'
+```
+
+## Notes
+
+- The generated chain-spec follows the [JIP-4 format](https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md)
+- The `genesis_state` will be in binary state trie format (62-char hex keys)
+- The `genesis_header` will be JAM-serialized (not just a hash)
+- You may need to add `bootnodes` manually if you want to specify initial peer connections
+
+
+```bash
+# 1. Create config file
+cat > tiny-config.yaml << 'EOF'
+chain: tiny
+num_validators: 6
+num_cores: 2
+preimage_expunge_period: 32
+slot_duration: 6
+epoch_duration: 12
+contest_duration: 10
+tickets_per_validator: 3
+max_tickets_per_extrinsic: 3
+rotation_period: 4
+num_ec_pieces_per_segment: 1026
+max_block_gas: 20000000
+max_refine_gas: 1000000000
+EOF
+
+# 2. Generate chain-spec
+cd submodules/polkajam
+./polkajam gen-spec tiny-config.yaml ../../config/chainspec-tiny.json
+
+# 3. Verify the generated file
+cat ../../config/chainspec-tiny.json | jq '.id, .genesis_header, (.genesis_state | keys | length)'
+```
+
+## Notes
+
+- The generated chain-spec follows the [JIP-4 format](https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md)
+- The `genesis_state` will be in binary state trie format (62-char hex keys)
+- The `genesis_header` will be JAM-serialized (not just a hash)
+- You may need to add `bootnodes` manually if you want to specify initial peer connections
+
+
+```bash
+# 1. Create config file
+cat > tiny-config.yaml << 'EOF'
+chain: tiny
+num_validators: 6
+num_cores: 2
+preimage_expunge_period: 32
+slot_duration: 6
+epoch_duration: 12
+contest_duration: 10
+tickets_per_validator: 3
+max_tickets_per_extrinsic: 3
+rotation_period: 4
+num_ec_pieces_per_segment: 1026
+max_block_gas: 20000000
+max_refine_gas: 1000000000
+EOF
+
+# 2. Generate chain-spec
+cd submodules/polkajam
+./polkajam gen-spec tiny-config.yaml ../../config/chainspec-tiny.json
+
+# 3. Verify the generated file
+cat ../../config/chainspec-tiny.json | jq '.id, .genesis_header, (.genesis_state | keys | length)'
+```
+
+## Notes
+
+- The generated chain-spec follows the [JIP-4 format](https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md)
+- The `genesis_state` will be in binary state trie format (62-char hex keys)
+- The `genesis_header` will be JAM-serialized (not just a hash)
+- You may need to add `bootnodes` manually if you want to specify initial peer connections
+

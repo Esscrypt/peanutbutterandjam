@@ -10,10 +10,18 @@ import {
   RingVRFProverWasm,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
-import { bytesToHex, EventBusService, type Hex, logger } from '@pbnjam/core'
+import {
+  bytesToHex,
+  EventBusService,
+  getEd25519KeyPairWithFallback,
+  type Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
 import {
   AuditAnnouncementProtocol,
   AuditShardRequestProtocol,
+  BlockAnnouncementProtocol,
   BlockRequestProtocol,
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
@@ -30,11 +38,13 @@ import {
 } from '@pbnjam/networking'
 import {
   AccumulateHostFunctionRegistry,
+  FetchHostFunction,
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
-// import { TelemetryClient } from '@pbnjam/telemetry'
+import { AccumulatePVM, RefinePVM } from '@pbnjam/pvm-invocations'
+import { TelemetryClient } from '@pbnjam/telemetry'
 import type {
+  NodeInfo,
   NodeType,
   StreamKind,
   TelemetryConfig,
@@ -46,13 +56,13 @@ import {
   safeError,
   safeResult,
 } from '@pbnjam/types'
-// import { WorkPackageProcessor } from './work-package-processor'
 import { AccumulationService } from './accumulation-service'
 import { AssuranceService } from './assurance-service'
 import { AuthPoolService } from './auth-pool-service'
 import { AuthQueueService } from './auth-queue-service'
+import { BlockAuthoringService } from './block-authoring'
 import { BlockImporterService } from './block-importer-service'
-// import { BlockAuthoringService } from './block-authoring'
+import { ChainManagerService } from './chain-manager-service'
 import { ClockService } from './clock-service'
 import { ConfigService } from './config-service'
 import { DisputesService } from './disputes-service'
@@ -60,7 +70,6 @@ import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
 import { NodeGenesisManager } from './genesis-manager'
 import { GuarantorService } from './guarantor-service'
-// import type { HeaderConstructor } from './header-constructor'
 import { KeyPairService } from './keypair-service'
 import { MetricsCollector } from './metrics-collector'
 import { NetworkingService } from './networking-service'
@@ -73,7 +82,8 @@ import { ServiceAccountService } from './service-account-service'
 import { ShardService } from './shard-service'
 import { StateService } from './state-service'
 import { StatisticsService } from './statistics-service'
-// import { TelemetryEventEmitterService } from './telemetry'
+import { StatusEmitterService } from './status-emitter-service'
+import { TelemetryEventEmitterService } from './telemetry'
 import { TicketService } from './ticket-service'
 import { ValidatorSetManager } from './validator-set'
 import { WorkReportService } from './work-report-service'
@@ -108,11 +118,10 @@ export class MainService extends BaseService {
   private config: MainServiceConfig
   private readonly registry: ServiceRegistry
   private readonly eventBusService: EventBusService
-  // private blockAuthoringService: BlockAuthoringService
+  private readonly blockAuthoringService: BlockAuthoringService
   private readonly networkingService: NetworkingService
   private readonly metricsCollector: MetricsCollector
   private readonly genesisManagerService: NodeGenesisManager
-  // private readonly headerConstructorService: HeaderConstructor
   private readonly statisticsService: StatisticsService
   private readonly recentHistoryService: RecentHistoryService
   private readonly disputesService: DisputesService
@@ -123,8 +132,8 @@ export class MainService extends BaseService {
   private readonly readyService: ReadyService
   private readonly stateService: StateService
   private readonly blockImporterService: BlockImporterService
-  // private readonly workPackageProcessorService: WorkPackageProcessor
-  // private readonly telemetryService: TelemetryEventEmitterService
+  private readonly chainManagerService: ChainManagerService
+  private telemetryService: TelemetryEventEmitterService | null = null
   private readonly keyPairService: KeyPairService
   private readonly validatorSetManagerService: ValidatorSetManager
   private readonly clockService: ClockService
@@ -133,10 +142,13 @@ export class MainService extends BaseService {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly hostFunctionRegistry: HostFunctionRegistry
   private readonly accumulatePVM: AccumulatePVM
+  private readonly refinePVM: RefinePVM
 
   private readonly ticketService: TicketService
   private readonly serviceAccountService: ServiceAccountService
-
+  private stateRequestProtocol: StateRequestProtocol | null = null
+  private blockAnnouncementProtocol: BlockAnnouncementProtocol | null = null
+  private blockRequestProtocol: BlockRequestProtocol | null = null
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null =
     null
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null =
@@ -157,6 +169,16 @@ export class MainService extends BaseService {
   > = new Map()
 
   private readonly configService: ConfigService
+
+  /**
+   * Get JAM parameters for telemetry using fetch host function (selector 0)
+   * Returns encoded system constants as per Gray Paper specification
+   */
+  private getJamParameters(): Uint8Array {
+    const fetchHostFunction = new FetchHostFunction(this.configService)
+    // Reuse the existing fetch host function implementation
+    return fetchHostFunction.getSystemConstants()
+  }
 
   // ============================================================================
   // Service Getters for RPC Server
@@ -224,6 +246,7 @@ export class MainService extends BaseService {
   private readonly assuranceService: AssuranceService
   private readonly accumulationService: AccumulationService
   private readonly privilegesService: PrivilegesService
+  private statusEmitterService: StatusEmitterService | null = null
   constructor(config: MainServiceConfig) {
     super('main-service')
     this.config = config
@@ -238,11 +261,11 @@ export class MainService extends BaseService {
     this.ringProver = new RingVRFProverWasm(srsFilePath)
     this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)
 
+    // Initialize event bus service first (required by networking protocols)
+    this.eventBusService = new EventBusService()
+
     this.initNetworkingProtocols()
     this.initProtocolRegistry()
-
-    // Initialize event bus service first
-    this.eventBusService = new EventBusService()
 
     this.clockService = new ClockService({
       eventBusService: this.eventBusService,
@@ -260,11 +283,7 @@ export class MainService extends BaseService {
       devAccountCount: 6,
     })
 
-    // const telemetryClient = new TelemetryClient(this.config.telemetry)
-    // this.telemetryService = new TelemetryEventEmitterService({
-    //   client: telemetryClient,
-    //   eventBusService: this.eventBusService,
-    // })
+    // Telemetry client and service will be initialized in init() after nodeInfo is populated
 
     this.metricsCollector = new MetricsCollector(this.config.nodeId)
 
@@ -307,6 +326,7 @@ export class MainService extends BaseService {
       configService: this.configService,
       keyPairService: this.keyPairService,
       validatorIndex: this.config.validatorIndex,
+      eventBusService: this.eventBusService,
     })
 
     // this.workPackageProcessorService = new WorkPackageProcessor(
@@ -411,6 +431,14 @@ export class MainService extends BaseService {
       pvmOptions: { gasCounter: BigInt(this.configService.maxBlockGas) },
       useWasm: false,
     })
+    this.refinePVM = new RefinePVM({
+      hostFunctionRegistry: this.hostFunctionRegistry,
+      accumulateHostFunctionRegistry: this.accumulateHostFunctionRegistry,
+      serviceAccountService: this.serviceAccountService,
+      configService: this.configService,
+      pvmOptions: { gasCounter: BigInt(this.configService.maxRefineGas) },
+      useWasm: false,
+    })
     this.privilegesService = new PrivilegesService({
       configService: this.configService,
     })
@@ -444,26 +472,18 @@ export class MainService extends BaseService {
     this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.clockService.setValidatorSetManager(this.validatorSetManagerService)
 
-    // this.headerConstructorService = new HeaderConstructor({
-    //   keyPairService: this.keyPairService,
-    //   validatorSetManagerService: this.validatorSetManagerService,
-    //   genesisManagerService: this.genesisManagerService,
-    // })
-
-    // this.blockAuthoringService = new BlockAuthoringService({
-    //   config: this.config.blockAuthoring,
-    //   eventBusService: this.eventBusService,
-    //   headerConstructor: this.headerConstructorService,
-    //   workPackageProcessor: this.workPackageProcessorService,
-    //   extrinsicValidator: this.extrinsicValidatorService,
-    //   stateManager: this.stateManagerService,
-    //   metricsCollector: this.metricsCollector,
-    //   entropyService: this.entropyService,
-    //   keyPairService: this.keyPairService,
-    // sealKeyService: this.sealKeyService,
-    // })
-
-    // const networkingStore = new NetworkingStore(db)
+    // Initialize chain manager service for fork handling and state snapshots
+    // Must be created before blockImporterService as it's used there
+    // Note: Protocols will be set after initProtocolRegistry is called
+    this.chainManagerService = new ChainManagerService(
+      this.configService,
+      this.sealKeyService,
+      this.eventBusService,
+      null, // stateRequestProtocol - will be set later
+      null, // blockRequestProtocol - will be set later
+      null, // stateService - will be set later
+      this.networkingService,
+    )
 
     // Initialize shard service with config service
     // Shard size is fixed at 2 octet pairs (4 octets) per Gray Paper
@@ -532,6 +552,8 @@ export class MainService extends BaseService {
       // erasureCodingService: this.erasureCodingService,
       // shardService: this.shardService,
       accumulationService: this.accumulationService,
+      refinePVM: this.refinePVM,
+      hostFunctionRegistry: this.hostFunctionRegistry,
     })
 
     this.stateService = new StateService({
@@ -554,6 +576,43 @@ export class MainService extends BaseService {
       clockService: this.clockService,
     })
 
+    // Now that stateService is created, set protocols and services for chain manager
+    if (
+      this.chainManagerService &&
+      this.stateRequestProtocol &&
+      this.blockRequestProtocol
+    ) {
+      this.chainManagerService.setProtocolsAndServices(
+        this.stateRequestProtocol,
+        this.blockRequestProtocol,
+        this.stateService,
+      )
+    }
+
+    // Initialize block authoring service (after all dependencies are created)
+    this.blockAuthoringService = new BlockAuthoringService({
+      eventBusService: this.eventBusService,
+      entropyService: this.entropyService,
+      keyPairService: this.keyPairService,
+      sealKeyService: this.sealKeyService,
+      clockService: this.clockService,
+      configService: this.configService,
+      validatorSetManagerService: this.validatorSetManagerService,
+      recentHistoryService: this.recentHistoryService,
+      stateService: this.stateService,
+      ticketService: this.ticketService,
+      serviceAccountService: this.serviceAccountService,
+      guarantorService: this.guarantorService,
+      workReportService: this.workReportService,
+      assuranceService: this.assuranceService,
+      disputesService: this.disputesService,
+      networkingService: this.networkingService,
+      genesisManagerService: this.genesisManagerService,
+      chainManagerService: this.chainManagerService,
+      blockAnnouncementProtocol: this.blockAnnouncementProtocol,
+      blockRequestProtocol: this.blockRequestProtocol,
+    })
+
     // Initialize block importer service
     this.blockImporterService = new BlockImporterService({
       eventBusService: this.eventBusService,
@@ -569,6 +628,7 @@ export class MainService extends BaseService {
       disputesService: this.disputesService,
       serviceAccountService: this.serviceAccountService,
       ticketService: this.ticketService,
+      chainManagerService: this.chainManagerService,
       statisticsService: this.statisticsService,
       authPoolService: this.authPoolService,
       accumulationService: this.accumulationService,
@@ -586,15 +646,9 @@ export class MainService extends BaseService {
     this.registry.register(this.recentHistoryService)
     this.registry.register(this.disputesService)
     this.registry.register(this.blockImporterService)
-    // this.registry.register(this.workPackageProcessorService)
-    // this.registry.register(this.headerConstructorService)
-    // this.registry.register(this.extrinsicValidatorService)
     this.registry.register(this.genesisManagerService)
     this.registry.register(this.sealKeyService)
-    // this.registry.register(this.blockAuthoringService)
-    // this.registry.register(this.telemetryService)
-    // Note: KeyPairService must be registered before NetworkingService
-    // because NetworkingService.init() requires the key pair to be generated
+    this.registry.register(this.blockAuthoringService)
     this.registry.register(this.keyPairService)
     this.registry.register(this.networkingService)
     this.registry.register(this.ticketService)
@@ -682,6 +736,94 @@ export class MainService extends BaseService {
       }
     }
 
+    // Populate telemetry nodeInfo with actual values if telemetry is enabled
+    if (this.config.telemetry?.enabled) {
+      // Get chain hash (genesis header hash)
+      const [chainHashError, chainHashResult] =
+        this.genesisManagerService.getGenesisHeaderHash()
+      const genesisHeaderHash = chainHashError
+        ? new Uint8Array(32) // Fallback to zero hash
+        : hexToBytes(chainHashResult)
+
+      // Get Ed25519 public key (peer ID) using helper function
+      const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+        this.configService,
+        this.keyPairService,
+      )
+      const peerId = keyPairError
+        ? new Uint8Array(32) // Fallback to zero
+        : ed25519KeyPair.publicKey
+
+      // Get JAM parameters using fetch host function (selector 0)
+      const jamParameters = this.getJamParameters()
+
+      // Parse peer address from telemetry endpoint (format: HOST:PORT)
+      if (!this.config.telemetry.endpoint) {
+        throw new Error(
+          'Telemetry endpoint is required when telemetry is enabled',
+        )
+      }
+      const [host, portStr] = this.config.telemetry.endpoint.split(':')
+      const port = Number.parseInt(portStr, 10)
+      if (!host || Number.isNaN(port)) {
+        throw new Error(
+          `Invalid telemetry endpoint format: ${this.config.telemetry.endpoint}. Expected HOST:PORT`,
+        )
+      }
+
+      // Create nodeInfo with actual values
+      const nodeInfo: NodeInfo = {
+        protocolVersion: 0n,
+        jamParameters: jamParameters,
+        genesisHeaderHash: genesisHeaderHash,
+        peerId: peerId,
+        peerAddress: { host, port },
+        nodeFlags: 0n,
+        implementationName: 'PeanutButterAndJam',
+        implementationVersion: '0.1.0',
+        grayPaperVersion: '0.7.2',
+        additionalInfo: 'PeanutButterAndJam node CLI implementation',
+      }
+
+      // Initialize telemetry client and service with nodeInfo
+      const telemetryClient = new TelemetryClient(
+        this.config.telemetry!,
+        nodeInfo,
+      )
+      this.telemetryService = new TelemetryEventEmitterService({
+        client: telemetryClient,
+        eventBusService: this.eventBusService,
+      })
+
+      // Register telemetry service with registry so it gets started
+      this.registry.register(this.telemetryService)
+
+      // Initialize status emitter service (emits JIP-3 status events every ~2 seconds)
+      this.statusEmitterService = new StatusEmitterService({
+        configService: this.configService,
+        networkingService: this.networkingService,
+        shardService: this.shardService,
+        serviceAccountService: this.serviceAccountService,
+        telemetryService: this.telemetryService,
+        validatorSetManager: this.validatorSetManagerService,
+        workReportService: this.workReportService,
+        eventBusService: this.eventBusService,
+      })
+
+      // Register status emitter service with registry so it gets started
+      this.registry.register(this.statusEmitterService)
+
+      logger.info(
+        '[MainService.init] Telemetry nodeInfo populated and service registered',
+        {
+          hasJamParameters: jamParameters.length > 0,
+          genesisHeaderHash: bytesToHex(genesisHeaderHash),
+          peerId: bytesToHex(peerId),
+          peerAddress: this.config.telemetry.endpoint,
+        },
+      )
+    }
+
     this.setInitialized(true)
     logger.info('Main service initialized successfully')
 
@@ -714,9 +856,11 @@ export class MainService extends BaseService {
   initNetworkingProtocols(): void {
     this.ce131TicketDistributionProtocol = new CE131TicketDistributionProtocol(
       this.eventBusService,
+      this.configService,
     )
     this.ce132TicketDistributionProtocol = new CE132TicketDistributionProtocol(
       this.eventBusService,
+      this.configService,
     )
     this.ce134WorkPackageSharingProtocol = new CE134WorkPackageSharingProtocol(
       this.eventBusService,
@@ -730,18 +874,25 @@ export class MainService extends BaseService {
     this.ce143PreimageRequestProtocol = new PreimageRequestProtocol(
       this.eventBusService,
     )
+    this.blockAnnouncementProtocol = new BlockAnnouncementProtocol(
+      this.configService,
+      this.eventBusService,
+    )
+    this.blockRequestProtocol = new BlockRequestProtocol(
+      this.eventBusService,
+      this.configService,
+      this.chainManagerService,
+    )
+    this.stateRequestProtocol = new StateRequestProtocol(this.eventBusService)
   }
 
   initProtocolRegistry(): void {
-    // this.protocolRegistry.set(0, new BlockAnnouncementProtocol(options.blockStore))
-    this.protocolRegistry.set(
-      128,
-      new BlockRequestProtocol(this.eventBusService, this.configService),
-    )
-    this.protocolRegistry.set(
-      129,
-      new StateRequestProtocol(this.eventBusService),
-    )
+    this.protocolRegistry.set(0, this.blockAnnouncementProtocol!)
+    this.protocolRegistry.set(128, this.blockRequestProtocol!)
+    this.protocolRegistry.set(129, this.stateRequestProtocol!)
+
+    // Note: Chain manager protocols and state service will be set after stateService is created
+    // See the setProtocolsAndServices call after StateService initialization
     this.protocolRegistry.set(131, this.ce131TicketDistributionProtocol!)
     this.protocolRegistry.set(132, this.ce132TicketDistributionProtocol!)
     this.protocolRegistry.set(
@@ -860,6 +1011,12 @@ if (import.meta.main) {
           ? Number.parseInt(validatorIndexEnv, 10)
           : undefined
 
+      // Parse telemetry endpoint from environment or arguments
+      const telemetryEndpoint =
+        process.env['TELEMETRY_ENDPOINT'] ||
+        parseArg('--telemetry') ||
+        'localhost:9000'
+
       // Connection endpoint will be extracted from validator metadata in init()
       // listenAddress and listenPort are no longer needed as they come from validators
       const nodeId = process.env['NODE_ID'] || 'jam-node-direct'
@@ -869,6 +1026,7 @@ if (import.meta.main) {
         genesisJsonPath,
         nodeId,
         validatorIndex,
+        telemetryEndpoint,
       })
 
       // Create MainService instance
@@ -883,6 +1041,10 @@ if (import.meta.main) {
         },
         nodeId,
         ...(validatorIndex !== undefined && { validatorIndex }),
+        telemetry: {
+          endpoint: telemetryEndpoint,
+          enabled: true,
+        },
       })
 
       // Initialize and start the service

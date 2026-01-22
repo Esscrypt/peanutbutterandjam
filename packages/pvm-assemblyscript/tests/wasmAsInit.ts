@@ -74,6 +74,10 @@ export async function instantiate(module, imports = {}) {
       'console.error'(message) {
         console.error(__liftString(message >>> 0));
       },
+      trace(message) {
+        // AssemblyScript trace function - logs debug messages
+        console.debug('[WASM trace]', __liftString(message >>> 0));
+      },
     }),
   };
   const result = await WebAssembly.instantiate(module, adaptedImports);
@@ -225,6 +229,32 @@ export async function instantiate(module, imports = {}) {
         __release(args);
         if (authorizerTrace) __release(authorizerTrace);
         if (importSegments) __release(importSegments);
+      }
+    },
+    setupIsAuthorizedInvocation(gasLimit, program, args, workPackage) {
+      // assembly/index/setupIsAuthorizedInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null) => void
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupIsAuthorizedInvocation(gasLimit, program, args, workPackage);
+      } finally {
+        __release(program);
+        __release(args);
+      }
+    },
+    isAuthorizedInvocation(gasLimit, program, args, workPackage) {
+      // assembly/index/isAuthorizedInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null) => assembly/types/RunProgramResult
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        return __liftInternref(exports.isAuthorizedInvocation(gasLimit, program, args, workPackage) >>> 0);
+      } finally {
+        __release(program);
+        __release(args);
       }
     },
     runProgram() {

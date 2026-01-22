@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -36,15 +37,13 @@ import { BaseHostFunction } from './base'
 export class PokeHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.POKE
   readonly name = 'poke'
-  readonly gasCost = 10n
-
   execute(
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Poke host function: No refine context available')
+      logger.error('Poke host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -64,7 +63,7 @@ export class PokeHostFunction extends BaseHostFunction {
       length,
     )
     if (!data) {
-      context.log('Poke host function: Source memory read fault', {
+      logger.error('Poke host function: Source memory read fault', {
         sourceOffset: sourceOffset.toString(),
         length: length.toString(),
         faultAddress: readFaultAddress?.toString() ?? 'null',
@@ -83,7 +82,7 @@ export class PokeHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Poke host function: Machine not found', {
+      logger.error('Poke host function: Machine not found', {
         machineId: machineId.toString(),
       })
       return {
@@ -99,6 +98,12 @@ export class PokeHostFunction extends BaseHostFunction {
     )
     if (writeFaultAddress) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      logger.error('Poke host function: Destination memory not writable', {
+        machineId: machineId.toString(),
+        destOffset: destOffset.toString(),
+        length: length.toString(),
+        faultAddress: writeFaultAddress.toString(),
+      })
       return {
         resultCode: null, // continue (not HALT)
       }

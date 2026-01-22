@@ -348,7 +348,7 @@ export class FetchHostFunction extends BaseHostFunction {
     }
   }
 
-  private getSystemConstants(): Uint8Array {
+  public getSystemConstants(): Uint8Array {
     // Gray Paper: System constants encoded as per specification
     // encode[8]{Citemdeposit}, encode[8]{Cbytedeposit}, encode[8]{Cbasedeposit},
     // encode[2]{Ccorecount}, encode[4]{Cexpungeperiod}, encode[4]{Cepochlen},

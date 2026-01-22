@@ -307,6 +307,21 @@ export function isSafroleTicket(key: SealKey): key is SafroleTicket {
   )
 }
 
+/**
+ * Check if a seal key is a ticket (vs fallback Bandersnatch key)
+ *
+ * Gray Paper Eq. 146-155:
+ * - Ticket: SafroleTicketWithoutProof has 'id' and 'entryIndex' properties
+ * - Fallback: Raw Uint8Array (32-byte Bandersnatch public key)
+ */
+export function isSealKeyTicket(
+  sealKey: SafroleTicketWithoutProof | Uint8Array,
+): sealKey is SafroleTicketWithoutProof {
+  return (
+    typeof sealKey === 'object' && 'id' in sealKey && 'entryIndex' in sealKey
+  )
+}
+
 export interface DecodingResult<T> {
   value: T
   remaining: Uint8Array

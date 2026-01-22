@@ -8,12 +8,13 @@
  */
 
 import {
+  calculateBlockHashFromHeader,
   decodeWorkPackage,
   encodeActivity,
   encodeServiceAccount,
 } from '@pbnjam/codec'
 import type { Hex } from '@pbnjam/core'
-import { decodeBase64, encodeBase64, logger } from '@pbnjam/core'
+import { blake2bHash, decodeBase64, encodeBase64, logger } from '@pbnjam/core'
 import type { MainService } from '@pbnjam/node'
 import type { Activity, WorkPackage } from '@pbnjam/types'
 import {
@@ -105,7 +106,171 @@ function base64BlobToBytes(blob: Blob): Uint8Array {
  * No additional abstraction layers.
  */
 export class RpcHandler {
-  constructor(private subscriptionManager: SubscriptionManager) {}
+  private eventListenersSetup = false
+
+  constructor(private subscriptionManager: SubscriptionManager) {
+    // Wire up event listeners after services are initialized
+    // This will be called from index.ts after setMainService
+  }
+
+  /**
+   * Setup event listeners for subscription updates
+   * Must be called after mainService is initialized
+   */
+  setupEventListeners(): void {
+    if (this.eventListenersSetup) {
+      return
+    }
+
+    const mainService = getMainService()
+    const eventBusService = mainService.getEventBusService()
+    const clockService = mainService.getClockService()
+    const configService = mainService.getConfigService()
+
+    // Listen to best block changes
+    eventBusService.addBestBlockChangedCallback(async (blockHeader) => {
+      try {
+        const currentSlot = clockService.getCurrentSlot()
+        const [hashError, blockHash] = calculateBlockHashFromHeader(
+          blockHeader,
+          configService,
+        )
+        if (hashError) {
+          logger.error(
+            'Failed to calculate block hash in best block callback',
+            hashError,
+          )
+          return
+        }
+        this.subscriptionManager.broadcastToType('subscribeBestBlock', {
+          hash: hexToBase64Hash(blockHash),
+          slot: currentSlot,
+        })
+      } catch (error) {
+        logger.error('Error in best block changed callback', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })
+
+    // Listen to finalized block changes
+    eventBusService.addFinalizedBlockChangedCallback(async (blockHeader) => {
+      try {
+        const recentHistoryService = mainService.getRecentHistoryService()
+        const clockService = mainService.getClockService()
+        const recentHistory = recentHistoryService.getRecentHistory()
+        const currentSlot = clockService.getCurrentSlot()
+        const finalizedSlot =
+          recentHistory.length > 0
+            ? currentSlot - BigInt(recentHistory.length - 1)
+            : 0n
+        const [hashError, blockHash] = calculateBlockHashFromHeader(
+          blockHeader,
+          configService,
+        )
+        if (hashError) {
+          logger.error(
+            'Failed to calculate block hash in finalized block callback',
+            hashError,
+          )
+          return
+        }
+        this.subscriptionManager.broadcastToType('subscribeFinalizedBlock', {
+          hash: hexToBase64Hash(blockHash),
+          slot: finalizedSlot > 0n ? finalizedSlot : 0n,
+        })
+      } catch (error) {
+        logger.error('Error in finalized block changed callback', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })
+
+    // Listen to preimage-related events
+    // When a preimage is received or stored, notify subscribers
+    eventBusService.addPreimageReceivedCallback(async (preimage) => {
+      try {
+        // Notify all servicePreimage subscriptions for this serviceId and hash
+        const [hashError, preimageHash] = blake2bHash(hexToBytes(preimage.blob))
+        if (hashError) {
+          logger.error('Failed to hash preimage in event callback', hashError)
+          return
+        }
+
+        const hashBase64 = hexToBase64Hash(preimageHash)
+        const subscriptions = this.subscriptionManager.getSubscriptionsByType(
+          'subscribeServicePreimage',
+        )
+
+        for (const subscription of subscriptions) {
+          const [subServiceId, subHash, finalized] = (subscription.params ||
+            []) as [number, Hash, boolean]
+          if (
+            subServiceId === Number(preimage.requester) &&
+            subHash === hashBase64
+          ) {
+            // Get current preimage value (may be null if not yet in state)
+            const blockHash = finalized
+              ? (await this.finalizedBlock()).hash
+              : (await this.bestBlock()).hash
+            const currentPreimage = await this.servicePreimage(
+              blockHash,
+              subServiceId,
+              subHash,
+            )
+            // Always send notification, even if null (per JIP-2 spec)
+            this.subscriptionManager.broadcastToSubscription(
+              subscription.id,
+              currentPreimage ?? null,
+            )
+          }
+        }
+      } catch (error) {
+        logger.error('Error in preimage received callback', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })
+
+    // Listen to preimage request changes
+    // When a request is added/removed, notify serviceRequest subscribers
+    eventBusService.addPreimageRequestedCallback(async (request) => {
+      try {
+        const subscriptions = this.subscriptionManager.getSubscriptionsByType(
+          'subscribeServiceRequest',
+        )
+
+        for (const subscription of subscriptions) {
+          const [subServiceId, subHash, subLength, finalized] =
+            (subscription.params || []) as [number, Hash, number, boolean]
+          if (subHash === hexToBase64Hash(request.hash)) {
+            const blockHash = finalized
+              ? (await this.finalizedBlock()).hash
+              : (await this.bestBlock()).hash
+            const currentRequest = await this.serviceRequest(
+              blockHash,
+              subServiceId,
+              subHash,
+              subLength,
+            )
+            if (currentRequest !== null) {
+              this.subscriptionManager.broadcastToSubscription(
+                subscription.id,
+                currentRequest,
+              )
+            }
+          }
+        }
+      } catch (error) {
+        logger.error('Error in preimage requested callback', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    })
+
+    this.eventListenersSetup = true
+    logger.info('RPC handler event listeners setup complete')
+  }
 
   // ============================================================================
   // Chain Information Methods
@@ -188,9 +353,21 @@ export class RpcHandler {
 
   /**
    * subscribeBestBlock - Subscribe to best block updates
+   * Sends initial notification with current best block value
    */
-  subscribeBestBlock(ws: WebSocket): string {
-    return this.subscriptionManager.addSubscription(ws, 'bestBlock', [])
+  async subscribeBestBlock(ws: WebSocket): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeBestBlock',
+      [],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const currentBlock = await this.bestBlock()
+    this.subscriptionManager.broadcastToSubscription(
+      subscriptionId,
+      currentBlock,
+    )
+    return subscriptionId
   }
 
   /**
@@ -221,9 +398,21 @@ export class RpcHandler {
 
   /**
    * subscribeFinalizedBlock - Subscribe to finalized block updates
+   * Sends initial notification with current finalized block value
    */
-  subscribeFinalizedBlock(ws: WebSocket): string {
-    return this.subscriptionManager.addSubscription(ws, 'finalizedBlock', [])
+  async subscribeFinalizedBlock(ws: WebSocket): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeFinalizedBlock',
+      [],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const currentBlock = await this.finalizedBlock()
+    this.subscriptionManager.broadcastToSubscription(
+      subscriptionId,
+      currentBlock,
+    )
+    return subscriptionId
   }
 
   /**
@@ -339,11 +528,29 @@ export class RpcHandler {
 
   /**
    * subscribeStatistics - Subscribe to statistics updates
+   * Sends initial notification with current statistics value
    */
-  subscribeStatistics(finalized: boolean, ws: WebSocket): string {
-    return this.subscriptionManager.addSubscription(ws, 'statistics', [
-      finalized,
-    ])
+  async subscribeStatistics(
+    finalized: boolean,
+    ws: WebSocket,
+  ): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeStatistics',
+      [finalized],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const blockHash = finalized
+      ? (await this.finalizedBlock()).hash
+      : (await this.bestBlock()).hash
+    const currentStats = await this.statistics(blockHash)
+    if (currentStats !== null) {
+      this.subscriptionManager.broadcastToSubscription(
+        subscriptionId,
+        currentStats,
+      )
+    }
+    return subscriptionId
   }
 
   // ============================================================================
@@ -391,16 +598,30 @@ export class RpcHandler {
 
   /**
    * subscribeServiceData - Subscribe to service data updates
+   * Sends initial notification with current service data value
    */
-  subscribeServiceData(
+  async subscribeServiceData(
     serviceId: number,
     finalized: boolean,
     ws: WebSocket,
-  ): string {
-    return this.subscriptionManager.addSubscription(ws, 'serviceData', [
-      serviceId,
-      finalized,
-    ])
+  ): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeServiceData',
+      [serviceId, finalized],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const blockHash = finalized
+      ? (await this.finalizedBlock()).hash
+      : (await this.bestBlock()).hash
+    const currentData = await this.serviceData(blockHash, serviceId)
+    if (currentData !== null) {
+      this.subscriptionManager.broadcastToSubscription(
+        subscriptionId,
+        currentData,
+      )
+    }
+    return subscriptionId
   }
 
   /**
@@ -442,18 +663,31 @@ export class RpcHandler {
   /**
    * subscribeServiceValue - Subscribe to service value updates
    * JIP-2: Accepts Base64-encoded blob for key
+   * Sends initial notification with current service value
    */
-  subscribeServiceValue(
+  async subscribeServiceValue(
     serviceId: number,
     key: Blob,
     finalized: boolean,
     ws: WebSocket,
-  ): string {
-    return this.subscriptionManager.addSubscription(ws, 'serviceValue', [
-      serviceId,
-      key,
-      finalized,
-    ])
+  ): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeServiceValue',
+      [serviceId, key, finalized],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const blockHash = finalized
+      ? (await this.finalizedBlock()).hash
+      : (await this.bestBlock()).hash
+    const currentValue = await this.serviceValue(blockHash, serviceId, key)
+    if (currentValue !== null) {
+      this.subscriptionManager.broadcastToSubscription(
+        subscriptionId,
+        currentValue,
+      )
+    }
+    return subscriptionId
   }
 
   /**
@@ -507,18 +741,35 @@ export class RpcHandler {
   /**
    * subscribeServicePreimage - Subscribe to service preimage updates
    * JIP-2: Accepts Base64-encoded hash
+   * Sends initial notification with current preimage value
    */
-  subscribeServicePreimage(
+  async subscribeServicePreimage(
     serviceId: number,
     hash: Hash,
     finalized: boolean,
     ws: WebSocket,
-  ): string {
-    return this.subscriptionManager.addSubscription(ws, 'servicePreimage', [
+  ): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeServicePreimage',
+      [serviceId, hash, finalized],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    // Note: preimage field is null when there is no preimage associated with the given service ID and hash
+    const blockHash = finalized
+      ? (await this.finalizedBlock()).hash
+      : (await this.bestBlock()).hash
+    const currentPreimage = await this.servicePreimage(
+      blockHash,
       serviceId,
       hash,
-      finalized,
-    ])
+    )
+    // Always send notification, even if null (per JIP-2 spec)
+    this.subscriptionManager.broadcastToSubscription(
+      subscriptionId,
+      currentPreimage ?? null,
+    )
+    return subscriptionId
   }
 
   /**
@@ -568,21 +819,38 @@ export class RpcHandler {
 
   /**
    * subscribeServiceRequest - Subscribe to service request updates
-   * JIP-2: Accepts Base64-encoded hash
+   * JIP-2: Accepts Base64-encoded hash and length
+   * Sends initial notification with current request value
    */
-  subscribeServiceRequest(
+  async subscribeServiceRequest(
     serviceId: number,
     hash: Hash,
     length: number,
     finalized: boolean,
     ws: WebSocket,
-  ): string {
-    return this.subscriptionManager.addSubscription(ws, 'serviceRequest', [
+  ): Promise<string> {
+    const subscriptionId = this.subscriptionManager.addSubscription(
+      ws,
+      'subscribeServiceRequest',
+      [serviceId, hash, length, finalized],
+    )
+    // Send initial notification with current value (JIP-2: immediate notification on subscription)
+    const blockHash = finalized
+      ? (await this.finalizedBlock()).hash
+      : (await this.bestBlock()).hash
+    const currentRequest = await this.serviceRequest(
+      blockHash,
       serviceId,
       hash,
       length,
-      finalized,
-    ])
+    )
+    if (currentRequest !== null) {
+      this.subscriptionManager.broadcastToSubscription(
+        subscriptionId,
+        currentRequest,
+      )
+    }
+    return subscriptionId
   }
 
   /**

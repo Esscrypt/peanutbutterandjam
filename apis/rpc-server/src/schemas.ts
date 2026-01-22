@@ -148,11 +148,13 @@ export const listServicesSchema = z.object({
 })
 
 // JSON-RPC 2.0 base request schema
+// JIP-2: "all method parameters are passed by-position, i.e. the 'params' member of Request objects should be an Array."
+// This means params should always be present as an array (even if empty for methods with no parameters)
 export const jsonRpcRequestSchema = z.object({
   jsonrpc: z.literal('2.0'),
   id: z.union([z.string(), z.number(), z.null()]),
   method: z.string(),
-  params: z.array(z.unknown()).optional(),
+  params: z.array(z.unknown()),
 })
 
 // Method-specific parameter validation schemas (for params array)
@@ -202,5 +204,83 @@ export const submitWorkPackageParamsSchema = z.tuple([
 export const submitPreimageParamsSchema = z.tuple([
   bigintStringSchema,
   blobSchema,
+  hashSchema,
+])
+
+// Helper to convert Uint8Array/string to Blob (Base64 string)
+// For WebSocket, params can come as Uint8Array, Buffer, or base64 string
+const blobFromWebSocketSchema = z
+  .instanceof(Uint8Array)
+  .or(z.instanceof(Buffer))
+  .or(blobSchema)
+  .transform((val) => {
+    if (typeof val === 'string') {
+      // Already a base64 string (validated by blobSchema)
+      return val as Blob
+    }
+    // Convert Uint8Array or Buffer to base64 string
+    const buffer = Buffer.from(val)
+    return buffer.toString('base64') as Blob
+  })
+
+// Subscription method parameter schemas (for WebSocket params array format)
+export const subscribeStatisticsParamsSchema = z
+  .tuple([z.boolean().optional()])
+  .transform(([finalized]) => [finalized ?? false] as const)
+
+export const subscribeServiceDataParamsSchema = z
+  .tuple([serviceIdSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, finalized]) => [serviceId, finalized ?? false] as const,
+  )
+
+export const subscribeServiceValueParamsSchema = z
+  .tuple([serviceIdSchema, blobFromWebSocketSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, key, finalized]) =>
+      [serviceId, key, finalized ?? false] as const,
+  )
+
+export const subscribeServicePreimageParamsSchema = z
+  .tuple([serviceIdSchema, hashSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, hash, finalized]) =>
+      [serviceId, hash, finalized ?? false] as const,
+  )
+
+export const subscribeServiceRequestParamsSchema = z
+  .tuple([
+    serviceIdSchema,
+    hashSchema,
+    z.number().int().positive(),
+    z.boolean().optional(),
+  ])
+  .transform(
+    ([serviceId, hash, length, finalized]) =>
+      [serviceId, hash, length, finalized ?? false] as const,
+  )
+
+export const unsubscribeParamsSchema = z.tuple([z.string()])
+
+// Schemas for methods that accept Uint8Array (for WebSocket, these come as base64 strings or Uint8Array)
+export const serviceValueParamsWebSocketSchema = z.tuple([
+  hashSchema,
+  serviceIdSchema,
+  blobFromWebSocketSchema,
+])
+
+export const submitWorkPackageParamsWebSocketSchema = z.tuple([
+  z
+    .union([z.number(), bigintStringSchema])
+    .transform((val) => (typeof val === 'number' ? BigInt(val) : val)),
+  blobFromWebSocketSchema,
+  z.array(blobFromWebSocketSchema),
+])
+
+export const submitPreimageParamsWebSocketSchema = z.tuple([
+  z
+    .union([z.number(), bigintStringSchema])
+    .transform((val) => (typeof val === 'number' ? BigInt(val) : val)),
+  blobFromWebSocketSchema,
   hashSchema,
 ])

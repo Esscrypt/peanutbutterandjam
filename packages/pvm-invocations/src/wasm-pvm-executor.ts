@@ -964,6 +964,97 @@ export class WasmPVMExecutor {
     })
   }
 
+  /**
+   * Execute is-authorized invocation using setupIsAuthorizedInvocation
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   *
+   * This is the public method that IsAuthorizedPVM should call directly for WASM execution.
+   * Host functions are handled internally in the WASM assembly code.
+   */
+  async executeIsAuthorizedInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+  }> {
+    // CRITICAL: Re-instantiate WASM module for each invocation to ensure completely fresh state
+    await this.reinitializeWasm()
+
+    if (!this.wasm) {
+      return safeError(new Error('Failed to initialize WASM module'))
+    }
+
+    if (!this.configService) {
+      return safeError(
+        new Error('ConfigService required for is-authorized invocation'),
+      )
+    }
+
+    if (!this.serviceAccountService) {
+      return safeError(
+        new Error(
+          'ServiceAccountService required for is-authorized invocation',
+        ),
+      )
+    }
+
+    // Check if setupIsAuthorizedInvocation is available (will be after WASM recompilation)
+    if (!this.wasm.setupIsAuthorizedInvocation) {
+      return safeError(
+        new Error(
+          'setupIsAuthorizedInvocation not available - WASM module needs to be recompiled with is-authorized invocation support',
+        ),
+      )
+    }
+
+    // Encode work package for WASM (WorkPackage is passed directly, WASM bindings handle conversion)
+    // Note: The WASM bindings will automatically convert TypeScript WorkPackage to AssemblyScript WorkPackage
+    const [workPackageError, encodedWorkPackage] =
+      encodeWorkPackage(workPackage)
+    if (workPackageError) {
+      return safeError(
+        new Error(`Failed to encode work package: ${workPackageError.message}`),
+      )
+    }
+
+    // Set up is-authorized invocation
+    this.wasm.setupIsAuthorizedInvocation(
+      Number(gasLimit),
+      preimageBlob,
+      encodedArgs,
+      encodedWorkPackage, // WASM bindings will handle conversion
+    )
+
+    // Run program
+    this.wasm.runProgram()
+
+    // Extract result
+    const resultCode = this.wasm.getResultCode()
+    const gasConsumed = BigInt(this.wasm.getGasLeft())
+      ? gasLimit - BigInt(this.wasm.getGasLeft())
+      : gasLimit
+
+    // Determine result based on result code
+    let result: Uint8Array | 'PANIC' | 'OOG'
+    if (resultCode === RESULT_CODES.PANIC) {
+      result = 'PANIC'
+    } else if (resultCode === RESULT_CODES.OOG) {
+      result = 'OOG'
+    } else {
+      // HALT - read result blob from memory
+      const resultBlob = this.wasm.getResult()
+      result = resultBlob.length > 0 ? resultBlob : new Uint8Array(0)
+    }
+
+    return safeResult({
+      gasConsumed,
+      result,
+    })
+  }
+
   getState(): PVMState {
     if (!this.currentState) {
       this.updateStateFromWasm()

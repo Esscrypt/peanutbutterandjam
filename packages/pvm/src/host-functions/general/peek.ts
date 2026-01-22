@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -38,7 +39,6 @@ import { BaseHostFunction } from './base'
 export class PeekHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.PEEK
   readonly name = 'peek'
-  readonly gasCost = 10n
 
   execute(
     context: HostFunctionContext,
@@ -46,7 +46,7 @@ export class PeekHostFunction extends BaseHostFunction {
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Peek host function: No refine context available')
+      logger.error('Peek host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -63,7 +63,7 @@ export class PeekHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Peek host function: Machine not found', {
+      logger.error('Peek host function: Machine not found', {
         machineId: machineId.toString(),
       })
       return {
@@ -74,7 +74,7 @@ export class PeekHostFunction extends BaseHostFunction {
     // 2. Check if source range is readable → OOB
     if (!this.isMachineMemoryReadable(machine, sourceOffset, length)) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
-      context.log('Peek host function: Source memory not readable', {
+      logger.error('Peek host function: Source memory not readable', {
         machineId: machineId.toString(),
         sourceOffset: sourceOffset.toString(),
         length: length.toString(),
@@ -92,6 +92,11 @@ export class PeekHostFunction extends BaseHostFunction {
     )
     if (error) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      logger.error('Peek host function: Source memory not readable', {
+        machineId: machineId.toString(),
+        sourceOffset: sourceOffset.toString(),
+        length: length.toString(),
+      })
       return {
         resultCode: null, // continue
       }
@@ -100,6 +105,12 @@ export class PeekHostFunction extends BaseHostFunction {
     // Gray Paper: mem'[o:z] = (m[n].ram)[s:z]
     const writeFaultAddress = context.ram.writeOctets(destOffset, data)
     if (writeFaultAddress) {
+      logger.error('Peek host function: Destination memory not writable', {
+        machineId: machineId.toString(),
+        destOffset: destOffset.toString(),
+        length: length.toString(),
+        faultAddress: writeFaultAddress.toString(),
+      })
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {

@@ -349,6 +349,57 @@ export function runProgram(
 }
 
 /**
+ * Set up is-authorized invocation without executing (for step-by-step execution)
+ * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+ * 
+ * @param gasLimit - Gas limit for execution (from IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS)
+ * @param program - Program preimage blob (auth code)
+ * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+ * @param workPackage - Work package (for FETCH host function)
+ */
+export function setupIsAuthorizedInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  workPackage: WorkPackage | null,
+): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.setupIsAuthorizedInvocation(
+    gasLimit,
+    program,
+    args,
+    workPackage,
+  )
+}
+
+/**
+ * Execute is-authorized invocation
+ * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+ * 
+ * @param gasLimit - Gas limit for execution
+ * @param program - Program preimage blob (auth code)
+ * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+ * @param workPackage - Work package (for FETCH host function)
+ * @returns RunProgramResult with gas consumed and result
+ */
+export function isAuthorizedInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  workPackage: WorkPackage | null,
+): RunProgramResult {
+  if (!pvmInstance) {
+    return new RunProgramResult(0, ExecutionResult.fromPanic())
+  }
+  return pvmInstance!.pvm.isAuthorizedInvocation(
+    gasLimit,
+    program,
+    args,
+    workPackage,
+  )
+}
+
+/**
  * Get current program counter
  * @returns Current PC value
  */

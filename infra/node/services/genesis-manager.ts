@@ -62,19 +62,24 @@ export class NodeGenesisManager extends BaseService {
     this.parsedBootnodes = []
     this.genesisBlockHeaderHash = null
 
-    // Load chain spec (required)
+    // Load chain spec (optional - if it fails, we can still use genesis.json)
     if (options?.chainSpecPath) {
       if (!existsSync(options.chainSpecPath)) {
-        throw new Error(`Chain spec file not found: ${options.chainSpecPath}`)
+        console.warn(
+          `Chain spec file not found: ${options.chainSpecPath}, will try other genesis sources`,
+        )
+      } else {
+        const [chainSpecError, chainSpecResult] = loadChainSpec(
+          options?.chainSpecPath,
+        )
+        if (chainSpecError) {
+          console.warn(
+            `Failed to load chain spec from ${options.chainSpecPath}: ${chainSpecError.message}. Will try other genesis sources.`,
+          )
+        } else {
+          this.chainSpecJson = chainSpecResult
+        }
       }
-
-      const [chainSpecError, chainSpecResult] = loadChainSpec(
-        options?.chainSpecPath,
-      )
-      if (chainSpecError) {
-        throw new Error('Failed to load chain spec')
-      }
-      this.chainSpecJson = chainSpecResult
     }
     if (options?.genesisJsonPath) {
       if (!existsSync(options.genesisJsonPath)) {

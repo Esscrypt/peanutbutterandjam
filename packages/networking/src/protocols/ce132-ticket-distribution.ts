@@ -6,8 +6,15 @@
  */
 
 import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
-import { concatBytes, type EventBusService, type Hex } from '@pbnjam/core'
+import {
+  concatBytes,
+  type EventBusService,
+  getTicketIdFromProof,
+  type Hex,
+  logger,
+} from '@pbnjam/core'
 import type {
+  IConfigService,
   Safe,
   SafePromise,
   TicketDistributionRequest,
@@ -32,9 +39,21 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
   void
 > {
   private readonly eventBusService: EventBusService
-  constructor(eventBusService: EventBusService) {
+  private readonly configService: IConfigService | null
+  constructor(
+    eventBusService: EventBusService,
+    configService: IConfigService | null = null,
+  ) {
     super()
+
+    if (!eventBusService) {
+      throw new Error(
+        'CE132TicketDistributionProtocol: eventBusService is required',
+      )
+    }
+
     this.eventBusService = eventBusService
+    this.configService = configService
 
     // Set up event handlers directly in the constructor
     this.initializeEventHandlers()
@@ -57,9 +76,53 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
     }
     parts.push(encodedEpochIndex)
 
-    // Encode entry index (single byte: 0 or 1)
+    // Encode entry index (single byte)
+    // Check against configService.maxTicketsPerExtrinsic to validate range
+    const entryIndexNum = Number(distribution.ticket.entryIndex)
+    const maxTickets = this.configService?.maxTicketsPerExtrinsic ?? 16 // Default to 16 if configService not available
+
+    // Validate entryIndex is within valid range (0 to maxTickets-1, but single byte limits to 0-255)
+    // However, we should check against maxTickets to ensure it's not exceeding configured limit
+    if (entryIndexNum < 0 || entryIndexNum > 255) {
+      logger.error(
+        '[CE132] Invalid entryIndex for network distribution (out of byte range)',
+        {
+          entryIndex: entryIndexNum,
+          entryIndexBigInt: distribution.ticket.entryIndex.toString(),
+          epochIndex: distribution.epochIndex.toString(),
+          error: 'entryIndex must be between 0 and 255 (single byte limit)',
+        },
+      )
+      return safeError(
+        new Error(
+          `Invalid entryIndex for network distribution: ${entryIndexNum}. Must be between 0 and 255.`,
+        ),
+      )
+    }
+
+    if (entryIndexNum >= maxTickets) {
+      const maxTicketsPerExtrinsic = this.configService?.maxTicketsPerExtrinsic
+      const ticketsPerValidator = this.configService?.ticketsPerValidator
+      logger.error(
+        '[CE132] Invalid entryIndex for network distribution (exceeds maxTickets)',
+        {
+          entryIndex: entryIndexNum,
+          entryIndexBigInt: distribution.ticket.entryIndex.toString(),
+          epochIndex: distribution.epochIndex.toString(),
+          maxTicketsPerExtrinsic: maxTicketsPerExtrinsic ?? 'unknown',
+          ticketsPerValidator: ticketsPerValidator ?? 'unknown',
+          error: `entryIndex ${entryIndexNum} exceeds maxTicketsPerExtrinsic (${maxTickets})`,
+          note: 'Tickets with entryIndex >= maxTicketsPerExtrinsic cannot be distributed via network protocols.',
+        },
+      )
+      return safeError(
+        new Error(
+          `Invalid entryIndex for network distribution: ${entryIndexNum}. Exceeds maxTicketsPerExtrinsic (${maxTickets}).`,
+        ),
+      )
+    }
     const entryIndexByte = new Uint8Array(1)
-    entryIndexByte[0] = Number(distribution.ticket.entryIndex)
+    entryIndexByte[0] = entryIndexNum
     parts.push(entryIndexByte)
 
     // Add proof (784 bytes)
@@ -82,13 +145,59 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
     currentData = epochResult.remaining
     const epochIndex = epochResult.value
 
-    // Decode attempt (single byte: 0 or 1)
+    // Decode attempt (single byte)
+    // Check against configService.maxTicketsPerExtrinsic to validate range
     if (currentData.length < 1) {
       return safeError(new Error('Insufficient data for attempt byte'))
     }
     const attemptByte = currentData[0]
-    if (attemptByte !== 0 && attemptByte !== 1) {
-      return safeError(new Error('Invalid attempt value: must be 0 or 1'))
+    const maxTickets = this.configService?.maxTicketsPerExtrinsic ?? 16 // Default to 16 if configService not available
+
+    // Validate attemptByte is within valid range (0 to maxTickets-1, but single byte limits to 0-255)
+    if (attemptByte < 0 || attemptByte > 255) {
+      logger.error(
+        '[CE132] Invalid attempt byte received (out of byte range)',
+        {
+          attemptByte,
+          attemptByteHex: `0x${attemptByte.toString(16).padStart(2, '0')}`,
+          epochIndex: epochIndex.toString(),
+          error: 'attemptByte must be between 0 and 255 (single byte limit)',
+        },
+      )
+      return safeError(
+        new Error(
+          `Invalid attempt value: must be between 0 and 255, received ${attemptByte} (0x${attemptByte.toString(16).padStart(2, '0')})`,
+        ),
+      )
+    }
+
+    // Only error if it exceeds maxTickets (allow values 0, 1, 2, ... up to maxTickets-1)
+    if (attemptByte >= maxTickets) {
+      const maxTicketsPerExtrinsic = this.configService?.maxTicketsPerExtrinsic
+      const ticketsPerValidator = this.configService?.ticketsPerValidator
+      logger.error(
+        '[CE132] Invalid attempt byte received (exceeds maxTickets)',
+        {
+          attemptByte,
+          attemptByteHex: `0x${attemptByte.toString(16).padStart(2, '0')}`,
+          epochIndex: epochIndex.toString(),
+          maxTicketsPerExtrinsic: maxTicketsPerExtrinsic ?? 'unknown',
+          ticketsPerValidator: ticketsPerValidator ?? 'unknown',
+          dataLength: currentData.length,
+          dataPreview: Array.from(
+            currentData.slice(0, Math.min(16, currentData.length)),
+          )
+            .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
+            .join(' '),
+          error: `attemptByte ${attemptByte} exceeds maxTicketsPerExtrinsic (${maxTickets})`,
+          note: 'This indicates a peer is sending tickets with entryIndex >= maxTicketsPerExtrinsic.',
+        },
+      )
+      return safeError(
+        new Error(
+          `Invalid attempt value: ${attemptByte} exceeds maxTicketsPerExtrinsic (${maxTickets})`,
+        ),
+      )
     }
     currentData = currentData.slice(1)
 
@@ -130,14 +239,138 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
     data: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    // Store the received ticket
-    await this.eventBusService.emitTicketDistributionRequest(
-      data,
-      peerPublicKey,
-    )
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'ce132-ticket-distribution.ts:222',
+          message: 'CE132 received ticket distribution request',
+          data: {
+            peerPublicKey: peerPublicKey.slice(0, 20) + '...',
+            epochIndex: data.epochIndex.toString(),
+            entryIndex: data.ticket.entryIndex.toString(),
+            proofLength: data.ticket.proof.length,
+            proofFirstBytes: Array.from(data.ticket.proof.slice(0, 16))
+              .map((b) => '0x' + b.toString(16).padStart(2, '0'))
+              .join(' '),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'A',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+    logger.info('[CE132] Processing ticket distribution request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      epochIndex: data.epochIndex.toString(),
+      entryIndex: data.ticket.entryIndex.toString(),
+    })
 
-    // For CE 131, we just acknowledge receipt
-    // The actual forwarding happens in CE 132
+    // Store the received ticket
+    if (!this.eventBusService) {
+      logger.error('[CE132] eventBusService is not initialized', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        hasEventBusService: !!this.eventBusService,
+      })
+      return safeError(
+        new Error(
+          'eventBusService is not initialized in CE132TicketDistributionProtocol',
+        ),
+      )
+    }
+
+    if (!this.eventBusService.emitTicketDistributionRequest) {
+      logger.error(
+        '[CE132] emitTicketDistributionRequest method not found on eventBusService',
+        {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          eventBusServiceType: typeof this.eventBusService,
+          eventBusServiceMethods: this.eventBusService
+            ? Object.getOwnPropertyNames(
+                Object.getPrototypeOf(this.eventBusService),
+              )
+            : [],
+        },
+      )
+      return safeError(
+        new Error(
+          'emitTicketDistributionRequest method not found on eventBusService',
+        ),
+      )
+    }
+
+    // #region agent log
+    const ticketId = getTicketIdFromProof(data.ticket.proof)
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'ce132-ticket-distribution.ts:254',
+          message: 'CE132 emitting ticket to event bus',
+          data: {
+            peerPublicKey: peerPublicKey.slice(0, 20) + '...',
+            epochIndex: data.epochIndex.toString(),
+            entryIndex: data.ticket.entryIndex.toString(),
+            ticketId: ticketId.slice(0, 20) + '...',
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'B',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+    try {
+      await this.eventBusService.emitTicketDistributionRequest(
+        data,
+        peerPublicKey,
+      )
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'ce132-ticket-distribution.ts:259',
+            message: 'CE132 successfully emitted ticket to event bus',
+            data: {
+              peerPublicKey: peerPublicKey.slice(0, 20) + '...',
+              epochIndex: data.epochIndex.toString(),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'B',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+    } catch (error) {
+      logger.error('[CE132] Error emitting ticket distribution request', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        error: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      })
+      return safeError(
+        error instanceof Error
+          ? error
+          : new Error(
+              `Failed to emit ticket distribution request: ${String(error)}`,
+            ),
+      )
+    }
+
+    // For CE 132, we just acknowledge receipt
+    // The actual processing happens in TicketService
     return safeResult(undefined)
   }
 

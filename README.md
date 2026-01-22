@@ -1,52 +1,18 @@
-# PeanutButterAndJAM Monorepo
+# Running the Node
 
-A TypeScript implementation of the JAM (Just Another Machine) protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper).
-
-## Specification Compliance
-
-This project strictly adheres to the [JAM Gray Paper](https://graypaper.com/) specification:
-
-- **Gray Paper**: `submodules/graypaper/` submodule - The authoritative JAM protocol specification
-- **Test Vectors**: `submodules/jamtestvectors/` submodule - Official test vectors for validation
-- **Bandersnatch VRF**: `submodules/ark-vrf/` and `submodules/bandersnatch-vrf-spec/` - VRF implementation and specification
-- **Implementation Guide**: [JAM Implementation Guide](.cursor/rules/jam-implementation-guide.mdc)
-- **Adherence Rules**: [Gray Paper Adherence Rules](.cursor/rules/graypaper-adherence.mdc)
-- **VRF Implementation**: [Bandersnatch VRF Implementation Guide](.cursor/rules/bandersnatch-vrf-implementation.mdc)
-
-## 📚 Documentation
-
-- **[Documentation Index](docs/README.md)** - Complete documentation overview
-- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and guidelines
-- **[Testing Guide](docs/TESTING.md)** - Testing against JAM test vectors
-- **[Release Guide](docs/RELEASE.md)** - Release procedures and CLI downloads
-
-## 🚀 Quick Start
-
-### Testnet Setup
-```bash
-# Run hybrid testnet (Polkajam + PBNJ)
-./scripts/hybrid-testnet.sh
-
-# Or run simple testnet
-./scripts/simple-testnet.sh
+```
+bun run ./infra/node/services/main-service.ts --validator-index 0 --telemetry 127.0.0.1:9000 --chain config/spec-tiny.json
 ```
 
-### Multi-Node Setup
-```bash
-# Start multiple nodes with observability
-./scripts/start-nodes.sh
-
-# Test single node
-./scripts/test-single-node.sh
+# Running with RPC server
+```
+bun run ./apis/rpc-server/src/index.ts --validator-index 0 --telemetry 127.0.0.1:9000 --chain config/spec-tiny.json | bunx pino-pretty
 ```
 
-See **[Testnet Documentation](docs/TESTNET_README.md)** for detailed setup instructions.
+## Running Polkajam
+```
+# if not there already
+cd submodules/polkajam
 
-## Packages
-
-- `@pbnjam/core` - Core types and utilities
-- `@pbnjam/cli` - Command-line interface
-- `@pbnjam/safrole` - Safrole consensus protocol implementation
-- `@pbnjam/bandersnatch-vrf` - Bandersnatch VRF implementation
-- `@pbnjam/pvm` - Polkadot Virtual Machine
-- `@pbnjam/rpc-server` - RPC server implementation
+./polkajam --chain dev run --telemetry tart-backend:9000 --dev-validator 0 --temp
+```

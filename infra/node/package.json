@@ -32,6 +32,7 @@
     "@pbnjam/guarantor": "workspace:*",
     "@pbnjam/assurance": "workspace:*",
     "@pbnjam/block-importer": "workspace:*",
+    "@pbnjam/chain-manager": "workspace:*",
     "@pbnjam/disputes": "workspace:*",
     "commander": "catalog:",
     "@pbnjam/types": "workspace:*",

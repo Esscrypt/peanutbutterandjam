@@ -7,13 +7,9 @@ export type Hash = string
 // JIP-2: Blob is a Base64-encoded string (arbitrary length when decoded)
 export type Blob = string
 
-// WebSocket types - compatible with Bun's native WebSocket
-export interface WebSocket {
-  send(data: string | ArrayBuffer): void
-  ping?(): void
-  close?(): void
-  readyState: number
-}
+// WebSocket type - use Bun's native ServerWebSocket
+import type { ServerWebSocket } from 'bun'
+export type WebSocket = ServerWebSocket<unknown>
 
 // Chain Parameters as defined in the specification
 export interface Parameters {
@@ -108,11 +104,13 @@ export interface Subscription {
 }
 
 // WebSocket message types
+// JIP-2: "all method parameters are passed by-position, i.e. the 'params' member of Request objects should be an Array."
+// This means params should always be present as an array (even if empty for methods with no parameters)
 export interface RpcRequest {
   jsonrpc: '2.0'
   id: string | number
   method: string
-  params?: RpcParams
+  params: RpcParams
 }
 
 export interface RpcResponse {
@@ -190,6 +188,24 @@ export interface BlobValidator {
   isValid(blob: unknown): blob is Blob
   fromBase64(base64: string): Blob
   toBase64(blob: Blob): string
+}
+
+export interface SlotValidator {
+  isValid(slot: unknown): slot is bigint
+  fromNumber(num: number): bigint
+  toNumber(slot: bigint): number
+}
+
+export interface SlotValidator {
+  isValid(slot: unknown): slot is bigint
+  fromNumber(num: number): bigint
+  toNumber(slot: bigint): number
+}
+
+export interface SlotValidator {
+  isValid(slot: unknown): slot is bigint
+  fromNumber(num: number): bigint
+  toNumber(slot: bigint): number
 }
 
 export interface SlotValidator {

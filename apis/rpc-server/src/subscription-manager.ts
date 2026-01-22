@@ -88,10 +88,15 @@ export class SubscriptionManager {
 
     for (const subscription of subscriptions) {
       try {
+        // JIP-2: Subscription updates are sent as Notifications (no "id" member)
+        // The "params" member should be an Object with "subscription" (ID) and "result" (data)
         const notification = {
-          jsonrpc: '2.0',
+          jsonrpc: '2.0' as const,
           method: type,
-          params: data,
+          params: {
+            subscription: subscription.id,
+            result: data,
+          },
         }
 
         subscription.ws.send(JSON.stringify(notification))
@@ -118,10 +123,15 @@ export class SubscriptionManager {
     }
 
     try {
+      // JIP-2: Subscription updates are sent as Notifications (no "id" member)
+      // The "params" member should be an Object with "subscription" (ID) and "result" (data)
       const notification = {
-        jsonrpc: '2.0',
+        jsonrpc: '2.0' as const,
         method: subscription.type,
-        params: data,
+        params: {
+          subscription: subscription.id,
+          result: data,
+        },
       }
 
       subscription.ws.send(JSON.stringify(notification))
@@ -158,8 +168,12 @@ export class SubscriptionManager {
 
     for (const [id, subscription] of this.subscriptions.entries()) {
       try {
-        // Try to send a ping to check if connection is still alive
-        subscription.ws.ping()
+        // Check if connection is still alive by checking readyState
+        // ServerWebSocket.readyState: 0 = CONNECTING, 1 = OPEN, 2 = CLOSING, 3 = CLOSED
+        if (subscription.ws.readyState !== 1) {
+          // Connection is not open, remove subscription
+          this.removeSubscription(id)
+        }
       } catch (_error) {
         // Connection is dead, remove subscription
         this.removeSubscription(id)

@@ -69,6 +69,7 @@
         "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/block-authoring": "workspace:*",
         "@pbnjam/block-importer": "workspace:*",
+        "@pbnjam/chain-manager": "workspace:*",
         "@pbnjam/codec": "workspace:*",
         "@pbnjam/core": "workspace:*",
         "@pbnjam/disputes": "workspace:*",
@@ -156,7 +157,9 @@
       "version": "0.0.1",
       "dependencies": {
         "@pbnjam/bandersnatch-vrf": "catalog:",
+        "@pbnjam/codec": "workspace:*",
         "@pbnjam/core": "workspace:*",
+        "@pbnjam/safrole": "workspace:*",
         "@pbnjam/types": "workspace:*",
       },
       "devDependencies": {
@@ -173,6 +176,21 @@
         "@pbnjam/bandersnatch-vrf": "catalog:",
         "@pbnjam/core": "workspace:*",
         "@pbnjam/safrole": "workspace:*",
+        "@pbnjam/types": "workspace:*",
+      },
+      "devDependencies": {
+        "@pbnjam/typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
+        "biome": "0.3.3",
+        "typescript": "5.8.2",
+      },
+    },
+    "packages/chain-manager": {
+      "name": "@pbnjam/chain-manager",
+      "version": "0.0.1",
+      "dependencies": {
+        "@pbnjam/core": "workspace:*",
+        "@pbnjam/networking": "workspace:*",
         "@pbnjam/types": "workspace:*",
       },
       "devDependencies": {
@@ -339,7 +357,6 @@
         "@types/node": "^20.0.0",
         "biome": "^0.3.3",
         "typescript": "^5.8.2",
-        "vitest": "^2.1.9",
       },
     },
     "packages/pvm": {
@@ -797,6 +814,8 @@
     "@pbnjam/block-authoring": ["@pbnjam/block-authoring@workspace:packages/block-authoring"],
 
     "@pbnjam/block-importer": ["@pbnjam/block-importer@workspace:packages/block-importer"],
+
+    "@pbnjam/chain-manager": ["@pbnjam/chain-manager@workspace:packages/chain-manager"],
 
     "@pbnjam/cli": ["@pbnjam/cli@workspace:packages/cli"],
 
@@ -2016,6 +2035,10 @@
 
     "@pbnjam/block-importer/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 
+    "@pbnjam/chain-manager/@types/bun": ["@types/bun@1.3.2", "", { "dependencies": { "bun-types": "1.3.2" } }, "sha512-t15P7k5UIgHKkxwnMNkJbWlh/617rkDGEdSsDbu+qNHTaz9SKf7aC8fiIlUdD5RPpH6GEkP0cK7WlvmrEBRtWg=="],
+
+    "@pbnjam/chain-manager/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
+
     "@pbnjam/cli/@types/node": ["@types/node@22.19.5", "", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-HfF8+mYcHPcPypui3w3mvzuIErlNOh2OAG+BCeBZCEwyiD5ls2SiCwEyT47OELtf7M3nHxBdu0FsmzdKxkN52Q=="],
 
     "@pbnjam/cli/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
@@ -2286,6 +2309,8 @@
 
     "@pbnjam/block-importer/@types/bun/bun-types": ["bun-types@1.3.2", "", { "dependencies": { "@types/node": "*" }, "peerDependencies": { "@types/react": "^19" } }, "sha512-i/Gln4tbzKNuxP70OWhJRZz1MRfvqExowP7U6JKoI8cntFrtxg7RJK3jvz7wQW54UuvNC8tbKHHri5fy74FVqg=="],
 
+    "@pbnjam/chain-manager/@types/bun/bun-types": ["bun-types@1.3.2", "", { "dependencies": { "@types/node": "*" }, "peerDependencies": { "@types/react": "^19" } }, "sha512-i/Gln4tbzKNuxP70OWhJRZz1MRfvqExowP7U6JKoI8cntFrtxg7RJK3jvz7wQW54UuvNC8tbKHHri5fy74FVqg=="],
+
     "@pbnjam/cli/@types/node/undici-types": ["undici-types@6.21.0", "", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
     "@pbnjam/core/bun-types/@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
@@ -2536,6 +2561,8 @@
 
     "@pbnjam/block-importer/@types/bun/bun-types/@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
 
+    "@pbnjam/chain-manager/@types/bun/bun-types/@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
+
     "@pbnjam/core/bun-types/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
     "@pbnjam/events/vitest/@vitest/spy/tinyspy": ["tinyspy@2.2.1", "", {}, "sha512-KYad6Vy5VDWV4GH3fjpseMQ/XU2BhIYP7Vzd0LG44qRWm/Yt2WCOTicFdvmgo6gWaqooMQCawTtILVQJupKu7A=="],
@@ -2571,5 +2598,7 @@
     "@pbnjam/block-authoring/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
     "@pbnjam/block-importer/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
+
+    "@pbnjam/chain-manager/@types/bun/bun-types/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
   }
 }

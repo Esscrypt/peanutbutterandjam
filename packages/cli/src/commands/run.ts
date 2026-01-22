@@ -155,27 +155,9 @@ async function executeRunCommand(
     // Configure telemetry if provided
     let telemetryConfig
     if (options['telemetry']) {
-      const [, portStr] = options['telemetry'].split(':')
-      const port = Number.parseInt(portStr, 10)
-
       telemetryConfig = {
         enabled: true,
         endpoint: options['telemetry'],
-        nodeInfo: {
-          protocolVersion: 0n,
-          jamParameters: new Uint8Array(0), // Will be populated from config service
-          genesisHeaderHash: new Uint8Array(32), // Will be populated from chain spec
-          peerId: new Uint8Array(32), // Placeholder, would be actual node peer ID
-          peerAddress: {
-            address: new Uint8Array(16), // IPv6 address, would be actual address
-            port: BigInt(port),
-          },
-          nodeFlags: 0n,
-          implementationName: 'PeanutButterAndJam',
-          implementationVersion: '0.1.0',
-          grayPaperVersion: '0.7.2', // Gray Paper version implemented
-          additionalInfo: 'JAM node CLI implementation',
-        },
         maxBufferSize: 1000n,
         retrySettings: {
           maxRetries: 10n,
@@ -199,8 +181,6 @@ async function executeRunCommand(
       },
       networking: {
         nodeType: 'validator',
-        listenAddress: options['listenAddress'] || '0.0.0.0',
-        listenPort: BigInt(options['listenPort'] || '30333'),
         isBuilder: false,
       },
       nodeId: 'jam-node-cli',
