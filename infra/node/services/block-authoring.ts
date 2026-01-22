@@ -235,8 +235,8 @@ export class BlockAuthoringService extends BaseService {
         authorIndex: completeHeader.authorIndex,
         parentHash: completeHeader.parent,
         extrinsicHash: completeHeader.extrinsicHash,
-        vrfSig: completeHeader.vrfSig.substring(0, 20) + '...',
-        sealSig: completeHeader.sealSig.substring(0, 20) + '...',
+        vrfSig: `${completeHeader.vrfSig.substring(0, 20)}...`,
+        sealSig: `${completeHeader.sealSig.substring(0, 20)}...`,
         duration: Date.now() - startTime,
       })
 
@@ -512,7 +512,6 @@ export class BlockAuthoringService extends BaseService {
       }
 
       // Send announcement to all neighbors via networking service (UP0, kind 0)
-      let successCount = 0
       for (const neighbor of neighbors) {
         try {
           const [sendError] = await this.networkingService.sendMessage(
@@ -523,14 +522,8 @@ export class BlockAuthoringService extends BaseService {
           if (sendError) {
             logger.warn('Failed to send block announcement to neighbor', {
               neighborIndex: neighbor.index,
-              neighborPublicKey: neighbor.publicKey.substring(0, 20) + '...',
+              neighborPublicKey: `${neighbor.publicKey.substring(0, 20)}...`,
               error: sendError.message,
-            })
-          } else {
-            successCount++
-            logger.debug('Block announcement sent to neighbor', {
-              neighborIndex: neighbor.index,
-              blockSlot: block.header.timeslot.toString(),
             })
           }
         } catch (error) {
@@ -540,14 +533,6 @@ export class BlockAuthoringService extends BaseService {
           })
         }
       }
-
-      logger.info('Block announcement completed', {
-        blockSlot: block.header.timeslot.toString(),
-        blockHash: blockHash.substring(0, 20) + '...',
-        neighborsTotal: neighbors.length,
-        neighborsSuccess: successCount,
-        neighborsFailed: neighbors.length - successCount,
-      })
     } catch (error) {
       logger.error('Failed to announce block', {
         error: error instanceof Error ? error.message : String(error),

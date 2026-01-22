@@ -2691,7 +2691,7 @@ export class GuarantorService extends BaseService implements IGuarantorService {
     }
 
     // TODO: Compute erasure root (requires erasure coding)
-    const erasureRoot = ('0x' + '00'.repeat(32)) as Hex
+    const erasureRoot = `0x${'00'.repeat(32)}` as Hex
 
     // TODO: Compute package length (encode work package)
     const packageLength = BigInt(0) // TODO: Calculate actual length

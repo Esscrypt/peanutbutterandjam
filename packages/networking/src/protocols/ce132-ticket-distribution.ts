@@ -9,7 +9,6 @@ import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
 import {
   concatBytes,
   type EventBusService,
-  getTicketIdFromProof,
   type Hex,
   logger,
 } from '@pbnjam/core'
@@ -239,32 +238,6 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
     data: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    // #region agent log
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'ce132-ticket-distribution.ts:222',
-          message: 'CE132 received ticket distribution request',
-          data: {
-            peerPublicKey: peerPublicKey.slice(0, 20) + '...',
-            epochIndex: data.epochIndex.toString(),
-            entryIndex: data.ticket.entryIndex.toString(),
-            proofLength: data.ticket.proof.length,
-            proofFirstBytes: Array.from(data.ticket.proof.slice(0, 16))
-              .map((b) => '0x' + b.toString(16).padStart(2, '0'))
-              .join(' '),
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run1',
-          hypothesisId: 'A',
-        }),
-      },
-    ).catch(() => {})
-    // #endregion
     logger.info('[CE132] Processing ticket distribution request', {
       peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
       epochIndex: data.epochIndex.toString(),
@@ -304,56 +277,11 @@ export class CE132TicketDistributionProtocol extends NetworkingProtocol<
       )
     }
 
-    // #region agent log
-    const ticketId = getTicketIdFromProof(data.ticket.proof)
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'ce132-ticket-distribution.ts:254',
-          message: 'CE132 emitting ticket to event bus',
-          data: {
-            peerPublicKey: peerPublicKey.slice(0, 20) + '...',
-            epochIndex: data.epochIndex.toString(),
-            entryIndex: data.ticket.entryIndex.toString(),
-            ticketId: ticketId.slice(0, 20) + '...',
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run1',
-          hypothesisId: 'B',
-        }),
-      },
-    ).catch(() => {})
-    // #endregion
     try {
       await this.eventBusService.emitTicketDistributionRequest(
         data,
         peerPublicKey,
       )
-      // #region agent log
-      fetch(
-        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'ce132-ticket-distribution.ts:259',
-            message: 'CE132 successfully emitted ticket to event bus',
-            data: {
-              peerPublicKey: peerPublicKey.slice(0, 20) + '...',
-              epochIndex: data.epochIndex.toString(),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            runId: 'run1',
-            hypothesisId: 'B',
-          }),
-        },
-      ).catch(() => {})
-      // #endregion
     } catch (error) {
       logger.error('[CE132] Error emitting ticket distribution request', {
         peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
