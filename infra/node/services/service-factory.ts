@@ -14,12 +14,14 @@ import {
 } from '@pbnjam/bandersnatch-vrf'
 import { bytesToHex, EventBusService, type Hex, logger } from '@pbnjam/core'
 import type {
+  BlockRequestProtocol,
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
   CE134WorkPackageSharingProtocol,
   NetworkingProtocol,
   PreimageRequestProtocol,
   ShardDistributionProtocol,
+  StateRequestProtocol,
   WorkReportRequestProtocol,
 } from '@pbnjam/networking'
 import {
@@ -126,6 +128,10 @@ export interface ServiceFactoryOptions {
   }
   /** Protocol registry for networking (optional, for advanced use) */
   protocolRegistry?: Map<StreamKind, NetworkingProtocol<unknown, unknown>>
+  /** Block request protocol (optional, for advanced use) */
+  blockRequestProtocol?: BlockRequestProtocol | null
+  /** State request protocol (optional, for advanced use) */
+  stateRequestProtocol?: StateRequestProtocol | null
 }
 
 /**
@@ -539,13 +545,6 @@ export async function createCoreServices(
     hostFunctionRegistry,
   })
 
-  // ChainManagerService for fork handling and state snapshots
-  const chainManagerService = new ChainManagerService(
-    configService,
-    sealKeyService,
-    eventBusService,
-  )
-
   const blockImporterService = new BlockImporterService({
     configService,
     eventBusService,
@@ -564,8 +563,34 @@ export async function createCoreServices(
     authPoolService,
     accumulationService,
     workReportService,
-    chainManagerService,
   })
+
+  // ChainManagerService for fork handling and state snapshots
+  // Chain manager always has block importer and coordinates imports
+  // Get protocols from options or protocol registry
+  const stateRequestProtocolFromRegistry = options.protocolRegistry?.get(129) as
+    | StateRequestProtocol
+    | undefined
+  const blockRequestProtocolFromRegistry = options.protocolRegistry?.get(128) as
+    | BlockRequestProtocol
+    | undefined
+
+  const stateRequestProtocol =
+    options.stateRequestProtocol ?? stateRequestProtocolFromRegistry ?? null
+  const blockRequestProtocol =
+    options.blockRequestProtocol ?? blockRequestProtocolFromRegistry ?? null
+
+  const chainManagerService = new ChainManagerService(
+    configService,
+    blockImporterService,
+    stateService,
+    accumulationService,
+    sealKeyService,
+    eventBusService,
+    stateRequestProtocol,
+    blockRequestProtocol,
+    networkingService,
+  )
 
   let metricsCollector: MetricsCollector | null = null
   if (options.nodeId) {
@@ -661,6 +686,12 @@ export async function startCoreServices(
     if (metricsStartError) {
       throw metricsStartError
     }
+  }
+
+  logger.info('Starting chain manager service...')
+  const [chainManagerStartError] = await context.chainManagerService.start()
+  if (chainManagerStartError) {
+    throw chainManagerStartError
   }
 
   logger.info('All core services started successfully')

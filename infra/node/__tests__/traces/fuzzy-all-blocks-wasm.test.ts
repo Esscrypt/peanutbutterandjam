@@ -38,6 +38,7 @@ const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
 
 describe('Genesis Parse Tests', () => {
   const configService = new ConfigService('tiny')
+  configService.ancestryEnabled = false
   
   // Set JAM version and trace subfolder from environment variables
   const { traceSubfolder } = setupJamVersionAndTraceSubfolder(configService, 'fuzzy')
@@ -74,7 +75,11 @@ describe('Genesis Parse Tests', () => {
 
       // Initialize services using shared utility
       const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
-      const { stateService, blockImporterService, recentHistoryService } = services
+      const { stateService,chainManagerService, recentHistoryService, configService: servicesConfigService } = services
+      
+      // Set ancestryEnabled = false on the actual configService used by chainManagerService
+      // (initializeServices creates a new ConfigService, so we need to set it on that instance)
+      servicesConfigService.ancestryEnabled = false
 
       // Helper function to parse state key using state service
       const parseStateKeyForDebug = (keyHex: Hex) => {
@@ -445,6 +450,15 @@ describe('Genesis Parse Tests', () => {
                 throw new Error(`Failed to set genesis state: ${setStateError.message}`)
               }
             }
+
+            const [initTrieError, initTrie] = stateService.generateStateTrie()
+            if (initTrieError) {
+              throw new Error(`Failed to generate initial state trie: ${initTrieError.message}`)
+            }
+            // Save snapshot using parent block hash (not state root) so it can be found during import
+            // The parent hash is what importBlock will use to look up the snapshot
+            const parentHash = blockJsonData.block.header.parent as Hex
+            chainManagerService.initializeGenesisHeader(convertJsonBlockToBlock(blockJsonData.block).header, initTrie)
             
             // Initialize recent history service from pre-state beta chapter (key 0x03)
             // This ensures the MMR state (accoutBelt) is properly initialized from the pre-state
@@ -612,8 +626,9 @@ describe('Genesis Parse Tests', () => {
           const postStateJson = JSON.stringify(blockJsonData.post_state)
           const expectBlockToFail = preStateJson === postStateJson
 
+  
           // Import the block
-          const [importError] = await blockImporterService.importBlock(block)
+          const [importError] = await chainManagerService.importBlock(block)
           
           if (expectBlockToFail) {
             // Block import should fail - this is expected behavior

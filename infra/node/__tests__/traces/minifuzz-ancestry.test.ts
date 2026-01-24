@@ -20,7 +20,7 @@ import { describe, it, expect } from 'bun:test'
 import * as path from 'node:path'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { decodeFuzzMessage } from '@pbnjam/codec'
-import { FuzzMessageType } from '@pbnjam/types'
+import { FuzzMessageType, formatFuzzerErrorAuto } from '@pbnjam/types'
 import { initializeServices, getStartBlock, getStopBlock } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
@@ -168,25 +168,39 @@ describe('Minifuzz Ancestry Test', () => {
 
     console.log(`\n📋 Initialize message loaded: ${init.keyvals?.length || 0} keyvals`)
 
-    // Handle ancestry from Initialize message
-    // jam-conformance: The Initialize message includes ancestors for lookup anchor validation
-    // AncestryItem contains { slot, header_hash } - services need just the header hashes
-    if (init.ancestry && init.ancestry.length > 0) {
-      console.log(`📋 Ancestors provided: ${init.ancestry.length} AncestryItems`)
-      // Extract header hashes from AncestryItem array
-      const ancestorHashes = init.ancestry.map((item: { slot: bigint; header_hash: string }) => item.header_hash)
-      // Initialize ancestry in both services for compatibility
-      recentHistoryService.initializeAncestry(ancestorHashes)
-      chainManagerService.initializeAncestry(ancestorHashes)
-      console.log(`✅ Ancestry initialized with ${init.ancestry.length} block hashes`)
-    }
-
-    // Set initial state
+    // Set initial state first (before initializing genesis header)
     const [setStateError] = stateService.setState(init.keyvals)
     if (setStateError) {
       console.log(`⚠️  Warning during setState: ${setStateError.message}`)
     }
     console.log(`✅ Initial state set from ${init.keyvals?.length || 0} keyvals`)
+
+    // Generate state trie for genesis header initialization
+    const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
+    if (genesisTrieError) {
+      throw new Error(`Failed to generate genesis state trie: ${genesisTrieError.message}`)
+    }
+
+    // Initialize genesis header from Initialize message
+    // jam-conformance: The Initialize message contains a "genesis-like" header
+    // The hash of this header is what subsequent blocks use as their parent
+    if (init.header) {
+      chainManagerService.initializeGenesisHeader(init.header, genesisTrie)
+      console.log(`✅ Genesis header initialized from Initialize message (slot ${init.header.timeslot})`)
+    }
+
+    // Handle ancestry from Initialize message
+    // jam-conformance: The Initialize message includes ancestors for lookup anchor validation
+    // AncestryItem contains { slot, header_hash } - chain manager needs both, recent history needs just hashes
+    if (init.ancestry && init.ancestry.length > 0) {
+      console.log(`📋 Ancestors provided: ${init.ancestry.length} AncestryItems`)
+      // Extract header hashes from AncestryItem array for recent history service
+      const ancestorHashes = init.ancestry.map((item: { slot: bigint; header_hash: string }) => item.header_hash)
+      // Initialize ancestry in both services
+      recentHistoryService.initializeAncestry(ancestorHashes)
+      chainManagerService.initializeAncestry(init.ancestry)
+      console.log(`✅ Ancestry initialized with ${init.ancestry.length} block hashes`)
+    }
 
     // Verify initial state root against expected
     const [initStateRootError, initStateRoot] = stateService.getStateRoot()
@@ -266,24 +280,7 @@ describe('Minifuzz Ancestry Test', () => {
     let unexpectedErrorCount = 0
     let stateRootMismatchCount = 0
 
-    // Store initial state snapshot in ChainManagerService for fork rollback
-    // This allows rolling back to initial state if first block fails
-    const [initTrieError, initTrie] = stateService.generateStateTrie()
-    if (!initTrieError && initTrie) {
-      const initKeyvals = Object.entries(initTrie).map(([k, v]) => ({
-        key: k as `0x${string}`,
-        value: v as `0x${string}`,
-      }))
-      // Get service-specific state for complete snapshot
-      const { fullContext } = services
-      chainManagerService.setInitialStateSnapshot({
-        keyvals: initKeyvals,
-        accumulationSlot: fullContext.accumulationService.getLastProcessedSlot(),
-        clockSlot: fullContext.clockService.getLatestReportedBlockTimeslot(),
-        entropy: { ...fullContext.entropyService.getEntropy() },
-      })
-    }
-
+    
     // Process each block
     for (const testFile of blocksToProcess) {
       const fileNumber = parseInt(testFile.substring(0, 8), 10)
@@ -333,7 +330,7 @@ describe('Minifuzz Ancestry Test', () => {
       // and automatically rolls back to parent state before importing sibling blocks
 
       // Import the block
-      const [importError] = await blockImporterService.importBlock(block)
+      const [importError] = await chainManagerService.importBlock(block)
 
       if (expected?.type === 'error') {
         // Expected to fail (mutation block)

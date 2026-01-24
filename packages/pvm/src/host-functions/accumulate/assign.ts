@@ -47,9 +47,10 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper constants
     const C_AUTH_QUEUE_SIZE = 80n // Cauthqueuesize
     const C_CORE_COUNT = this.configService.numCores // Ccorecount
+    const MAX_SERVICE_ID = 4294967296n // 2^32 = 4294967296
 
     // Log all input parameters
-    context.log('ASSIGN host function invoked', {
+    logger.info('ASSIGN host function invoked', {
       coreIndex: coreIndex.toString(),
       authQueueOffset: authQueueOffset.toString(),
       serviceIdToAssign: serviceIdToAssign.toString(),
@@ -57,6 +58,7 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
       manager: implications[0].state.manager.toString(),
       numCores: C_CORE_COUNT.toString(),
     })
+    const [imX] = implications
 
     // Read auth queue from memory (80 entries * 32 bytes each)
     // Gray Paper pvm_invocations.tex lines 717-720:
@@ -75,11 +77,15 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
         faultAddress: faultAddress?.toString() ?? 'null',
         hasData: (!!authQueueData).toString(),
       })
-      // Set OOB error to indicate memory access failure
-      //TODO: according to GP, registers[7] should be unchanged, we are setting it to OOB here to match jamduna behavior
-      this.setAccumulateError(registers, 'OOB')
       return {
         resultCode: RESULT_CODES.PANIC,
+      }
+    }
+
+    if (serviceIdToAssign > MAX_SERVICE_ID) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
       }
     }
 
@@ -92,13 +98,8 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
     // Check if core index is valid
     // Gray Paper: c >= Ccorecount
-    logger.debug('[ASSIGN] Checking core index', {
-      coreIndex: coreIndex.toString(),
-      numCores: C_CORE_COUNT.toString(),
-      isValidCore: (coreIndex < C_CORE_COUNT).toString(),
-    })
     if (coreIndex >= C_CORE_COUNT) {
-      logger.debug('[ASSIGN] CORE error: invalid core index')
+      logger.warn('[ASSIGN] CORE error: invalid core index')
       this.setAccumulateError(registers, 'CORE')
       return {
         resultCode: null, // continue execution
@@ -106,7 +107,6 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     }
 
     // Get the current implications context
-    const [imX] = implications
 
     // Check if current service is the assigner for this core
     // Gray Paper: imX.id !== imX.state.assigners[c]
@@ -128,7 +128,10 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
     // Update auth queue and assigner for the core
     // Gray Paper: imX.state.authqueue[c] = q, imX.state.assigners[c] = a
-    imX.state.authqueue[Number(coreIndex)] = authQueue
+    for (let i = 0; i < authQueue.length; i++) {
+      const authQueueEntry = authQueue[i]
+      imX.state.authqueue[Number(coreIndex)][i] = authQueueEntry
+    }
     imX.state.assigners[Number(coreIndex)] = serviceIdToAssign
 
     // Set success result

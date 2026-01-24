@@ -116,6 +116,7 @@ export const BLOCK_HEADER_ERRORS = {
   UNEXPECTED_AUTHOR: 'UnexpectedAuthor',
   BAD_SEAL_SIGNATURE: 'BadSealSignature',
   INVALID_EXTRINSIC_HASH: 'InvalidExtrinsicHash',
+  SAFROLE_INITIALIZATION_FAILED: 'SafroleInitializationFailed',
 } as const
 
 /**
@@ -136,6 +137,8 @@ export const ADDITIONAL_ERRORS = {
   FAILED_TO_DECODE_STATE_VALUE: 'Failed to decode state value',
   // Work report errors
   WORK_REPORT_FUTURE_TIMESTAMP: 'Work report with future timestamp detected',
+  // Generic batch signature errors (used without category prefix)
+  BAD_SIGNATURE_BATCH: 'bad signature batch',
 } as const
 
 /**
@@ -220,6 +223,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   [BLOCK_HEADER_ERRORS.UNEXPECTED_AUTHOR]: 'UnexpectedAuthor',
   [BLOCK_HEADER_ERRORS.BAD_SEAL_SIGNATURE]: 'BadSealSignature',
   [BLOCK_HEADER_ERRORS.INVALID_EXTRINSIC_HASH]: 'InvalidExtrinsicHash',
+  [BLOCK_HEADER_ERRORS.SAFROLE_INITIALIZATION_FAILED]:
+    'SafroleInitializationFailed',
   // Additional errors - use the error code as message if no mapping exists
   [ADDITIONAL_ERRORS.WORK_REPORT_FUTURE_TIMESTAMP]:
     'report refers to slot in the future',
@@ -363,6 +368,10 @@ export function formatFuzzerErrorAuto(error: Error | string): string {
   const errorString = extractErrorString(error)
   const message = error instanceof Error ? error.message : error
 
+  // Ensure message is always a string
+  const safeMessage =
+    message ?? (error instanceof Error ? String(error) : String(error))
+
   // Check if this is a block header verification error
   const headerErrors = Object.values(BLOCK_HEADER_ERRORS) as readonly string[]
   if (errorString && headerErrors.includes(errorString)) {
@@ -370,25 +379,52 @@ export function formatFuzzerErrorAuto(error: Error | string): string {
     return `Local chain error: block header verification failure: ${errorString}`
   }
 
+  // Special case: "bad signature batch" should be formatted without a category prefix
+  // Format: "Local chain error: block execution failure: bad signature batch"
+  // This also applies to REPORTS_ERRORS.BAD_SIGNATURE ('bad_signature') which is the
+  // error code for invalid guarantee signatures - jam-conformance expects "bad signature batch"
+  if (
+    errorString === ADDITIONAL_ERRORS.BAD_SIGNATURE_BATCH ||
+    safeMessage === 'bad signature batch' ||
+    errorString === REPORTS_ERRORS.BAD_SIGNATURE ||
+    safeMessage === 'Invalid report guarantee signature'
+  ) {
+    return `Local chain error: block execution failure: bad signature batch`
+  }
+
+  // Special case: Parent state root mismatch
+  // Format: "Local chain error: invalid parent state root (expected: 0x{16 chars}..., actual: 0x{16 chars}...)"
+  // Match: "Prior state root mismatch: computed 0x..., expected 0x..."
+  const priorStateRootMatch = safeMessage.match(
+    /Prior state root mismatch: computed (0x[a-fA-F0-9]+), expected (0x[a-fA-F0-9]+)/,
+  )
+  if (priorStateRootMatch) {
+    const actualHash = priorStateRootMatch[1] // "computed" is what we got (actual)
+    const expectedHash = priorStateRootMatch[2] // "expected" is what header claimed
+    const truncatedExpected = expectedHash.substring(0, 18) // 0x + 16 chars
+    const truncatedActual = actualHash.substring(0, 18)
+    return `Local chain error: invalid parent state root (expected: ${truncatedExpected}..., actual: ${truncatedActual}...)`
+  }
+
   if (!errorString) {
     // Check if message already contains "block header verification failure"
-    if (message.includes('block header verification failure')) {
+    if (safeMessage.includes('block header verification failure')) {
       // Ensure it uses "Local chain error:" prefix
-      if (message.startsWith('Chain error:')) {
-        return message.replace('Chain error:', 'Local chain error:')
+      if (safeMessage.startsWith('Chain error:')) {
+        return safeMessage.replace('Chain error:', 'Local chain error:')
       }
-      if (!message.startsWith('Local chain error:')) {
-        return `Local chain error: ${message}`
+      if (!safeMessage.startsWith('Local chain error:')) {
+        return `Local chain error: ${safeMessage}`
       }
-      return message
+      return safeMessage
     }
     // Check if message contains a block header error code
     for (const headerError of headerErrors) {
-      if (message.includes(headerError)) {
+      if (safeMessage.includes(headerError)) {
         return `Local chain error: block header verification failure: ${headerError}`
       }
     }
-    return message
+    return safeMessage
   }
 
   const category = getErrorCategory(errorString) || 'block'

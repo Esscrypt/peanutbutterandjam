@@ -219,7 +219,9 @@ function encodeState(state: FuzzerState): Uint8Array {
 }
 
 function encodeError(msg: ErrorMessage): Uint8Array {
-  const errorBytes = new TextEncoder().encode(msg.error)
+  // Ensure error is always a string
+  const errorString = msg.error ?? 'Unknown error'
+  const errorBytes = new TextEncoder().encode(errorString)
   const [err, lengthEncoded] = encodeNatural(BigInt(errorBytes.length))
   if (err) throw err
   return concatBytes([lengthEncoded, errorBytes])

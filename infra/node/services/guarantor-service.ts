@@ -1538,10 +1538,22 @@ export class GuarantorService extends BaseService implements IGuarantorService {
         }
       }
 
-      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
-      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
+      // Gray Paper: Validate lookup_anchor_slot
       const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
       const maxLookupAnchorage = BigInt(this.configService.maxLookupAnchorage)
+
+      // IMPORTANT: Check future slot FIRST (before checking if too old)
+      // The lookup anchor must refer to a past block, not a future one
+      if (lookupAnchorSlot > currentSlot) {
+        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
+      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
       if (lookupAnchorSlot < currentSlot - maxLookupAnchorage) {
         logger.error('[GuarantorService] Lookup anchor too old', {
           lookupAnchorSlot: lookupAnchorSlot.toString(),
@@ -1550,16 +1562,6 @@ export class GuarantorService extends BaseService implements IGuarantorService {
           minAllowed: (currentSlot - maxLookupAnchorage).toString(),
         })
         return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
-      }
-
-      // Validate lookup_anchor_slot is not in the future
-      // The lookup anchor must refer to a past block, not a future one
-      if (lookupAnchorSlot > currentSlot) {
-        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
-          lookupAnchorSlot: lookupAnchorSlot.toString(),
-          currentSlot: currentSlot.toString(),
-        })
-        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
       }
 
       // Gray Paper equation 346: Validate lookup_anchor exists in ancestors
@@ -1795,10 +1797,22 @@ export class GuarantorService extends BaseService implements IGuarantorService {
         }
       }
 
-      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
-      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
+      // Gray Paper: Validate lookup_anchor_slot
       const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
       const maxLookupAnchorage = BigInt(this.configService.maxLookupAnchorage)
+
+      // IMPORTANT: Check future slot FIRST (before checking if too old)
+      // The lookup anchor must refer to a past block, not a future one
+      if (lookupAnchorSlot > currentSlot) {
+        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      // Gray Paper equation 340-341: Validate lookup_anchor_slot is not too old
+      // lookup_anchor_slot >= H_timeslot - C_maxlookupanchorage
       if (lookupAnchorSlot < currentSlot - maxLookupAnchorage) {
         logger.error('[GuarantorService] Lookup anchor too old', {
           lookupAnchorSlot: lookupAnchorSlot.toString(),
@@ -1807,16 +1821,6 @@ export class GuarantorService extends BaseService implements IGuarantorService {
           minAllowed: (currentSlot - maxLookupAnchorage).toString(),
         })
         return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
-      }
-
-      // Validate lookup_anchor_slot is not in the future
-      // The lookup anchor must refer to a past block, not a future one
-      if (lookupAnchorSlot > currentSlot) {
-        logger.error('[GuarantorService] Lookup anchor slot is in the future', {
-          lookupAnchorSlot: lookupAnchorSlot.toString(),
-          currentSlot: currentSlot.toString(),
-        })
-        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
       }
 
       // Gray Paper equation 346: Validate lookup_anchor exists in ancestors

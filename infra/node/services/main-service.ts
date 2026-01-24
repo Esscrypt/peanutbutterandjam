@@ -472,19 +472,6 @@ export class MainService extends BaseService {
     this.sealKeyService.setValidatorSetManager(this.validatorSetManagerService)
     this.clockService.setValidatorSetManager(this.validatorSetManagerService)
 
-    // Initialize chain manager service for fork handling and state snapshots
-    // Must be created before blockImporterService as it's used there
-    // Note: Protocols will be set after initProtocolRegistry is called
-    this.chainManagerService = new ChainManagerService(
-      this.configService,
-      this.sealKeyService,
-      this.eventBusService,
-      null, // stateRequestProtocol - will be set later
-      null, // blockRequestProtocol - will be set later
-      null, // stateService - will be set later
-      this.networkingService,
-    )
-
     // Initialize shard service with config service
     // Shard size is fixed at 2 octet pairs (4 octets) per Gray Paper
     this.erasureCodingService = new ErasureCodingService({
@@ -576,18 +563,41 @@ export class MainService extends BaseService {
       clockService: this.clockService,
     })
 
-    // Now that stateService is created, set protocols and services for chain manager
-    if (
-      this.chainManagerService &&
-      this.stateRequestProtocol &&
-      this.blockRequestProtocol
-    ) {
-      this.chainManagerService.setProtocolsAndServices(
-        this.stateRequestProtocol,
-        this.blockRequestProtocol,
-        this.stateService,
-      )
-    }
+    // Initialize block importer service
+    this.blockImporterService = new BlockImporterService({
+      eventBusService: this.eventBusService,
+      clockService: this.clockService,
+      recentHistoryService: this.recentHistoryService,
+      stateService: this.stateService,
+      configService: this.configService,
+      validatorSetManagerService: this.validatorSetManagerService,
+      entropyService: this.entropyService,
+      sealKeyService: this.sealKeyService,
+      assuranceService: this.assuranceService,
+      guarantorService: this.guarantorService,
+      disputesService: this.disputesService,
+      serviceAccountService: this.serviceAccountService,
+      ticketService: this.ticketService,
+      statisticsService: this.statisticsService,
+      authPoolService: this.authPoolService,
+      accumulationService: this.accumulationService,
+      workReportService: this.workReportService,
+    })
+
+    // Initialize chain manager service for fork handling and state snapshots
+    // Now that stateService and blockImporterService are created, we can wire them up properly
+    // Protocols are already created in initNetworkingProtocols()
+    this.chainManagerService = new ChainManagerService(
+      this.configService,
+      this.blockImporterService,
+      this.stateService,
+      this.accumulationService,
+      this.sealKeyService,
+      this.eventBusService,
+      this.stateRequestProtocol, // Already created in initNetworkingProtocols()
+      this.blockRequestProtocol, // Already created in initNetworkingProtocols()
+      this.networkingService,
+    )
 
     // Initialize block authoring service (after all dependencies are created)
     this.blockAuthoringService = new BlockAuthoringService({
@@ -611,28 +621,6 @@ export class MainService extends BaseService {
       chainManagerService: this.chainManagerService,
       blockAnnouncementProtocol: this.blockAnnouncementProtocol,
       blockRequestProtocol: this.blockRequestProtocol,
-    })
-
-    // Initialize block importer service
-    this.blockImporterService = new BlockImporterService({
-      eventBusService: this.eventBusService,
-      clockService: this.clockService,
-      recentHistoryService: this.recentHistoryService,
-      stateService: this.stateService,
-      configService: this.configService,
-      validatorSetManagerService: this.validatorSetManagerService,
-      entropyService: this.entropyService,
-      sealKeyService: this.sealKeyService,
-      assuranceService: this.assuranceService,
-      guarantorService: this.guarantorService,
-      disputesService: this.disputesService,
-      serviceAccountService: this.serviceAccountService,
-      ticketService: this.ticketService,
-      chainManagerService: this.chainManagerService,
-      statisticsService: this.statisticsService,
-      authPoolService: this.authPoolService,
-      accumulationService: this.accumulationService,
-      workReportService: this.workReportService,
     })
 
     // Register created services with the registry

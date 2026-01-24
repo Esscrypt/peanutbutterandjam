@@ -31,6 +31,9 @@
 [submodule "submodules/jam-conformance"]
 	path = submodules/jam-conformance
 	url = https://github.com/davxy/jam-conformance.git
+[submodule "submodules/w3f-jam-conformance"]
+	path = submodules/w3f-jam-conformance
+	url = https://github.com/w3f/jam-conformance.git
 [submodule "submodules/pvm-test-vectors"]
 	path = submodules/pvm-test-vectors
 	url = https://github.com/koute/jamtestvectors.git

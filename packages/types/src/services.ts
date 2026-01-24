@@ -2,7 +2,7 @@ import type { Hex } from 'viem'
 import type { Block } from './block-authoring'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
-import type { JamVersion } from './fuzz'
+import type { AncestryItem, JamVersion } from './fuzz'
 import type {
   Activity,
   BlockHeader,
@@ -22,6 +22,7 @@ import type {
   SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
+  StateTrie,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
@@ -36,6 +37,8 @@ export interface IValidatorSetManager extends BaseService {
   getPreviousValidators(): ValidatorKeyTuple[]
   getValidatorAtIndex(validatorIndex: number): Safe<ValidatorKeyTuple>
   getPendingValidators(): ValidatorKeyTuple[]
+
+  getStagingValidators(): ValidatorPublicKeys[]
 
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
@@ -58,6 +61,9 @@ export interface IRecentHistoryService extends BaseService {
 export interface IStateService extends BaseService {
   getStateRoot(): Safe<Hex>
   getGenesisManager(): IGenesisManagerService | undefined
+  clearState(): void
+  setState(keyvals: { key: Hex; value: Hex }[]): Safe<void>
+  generateStateTrie(): Safe<Record<string, Hex>>
 }
 
 export interface IGenesisManagerService extends BaseService {
@@ -140,6 +146,7 @@ export interface IEntropyService extends BaseService {
   getEntropy3(): Uint8Array
   getEntropyAccumulator(): Uint8Array
   getEntropy(): EntropyState
+  setEntropy(entropy: EntropyState): void
 }
 
 export interface ITicketService extends BaseService {
@@ -203,6 +210,8 @@ export interface IClockService extends BaseService {
   getCurrentSlot(): bigint
   getCurrentEpoch(): bigint
   getCurrentPhase(): bigint
+
+  setLatestReportedBlockTimeslot(timeslot: bigint): void
 }
 
 /**
@@ -674,59 +683,12 @@ export interface ReorgEvent {
  */
 export interface IChainManagerService extends BaseService {
   /**
-   * Get finalized block hash and slot
-   * Used by UP0 for creating block announcements
-   */
-  getFinalizedBlockInfo(): { hash: Hex; slot: bigint } | null
-
-  /**
-   * Handle block announcement (header only)
-   *
-   * Called by UP0 when a block announcement is received.
-   * Determines if we should request the full block via CE128.
-   *
-   * @param header - Block header from announcement
-   * @param peerPublicKey - Public key of the peer that sent the announcement
-   * @returns true if block should be requested, false otherwise
-   */
-  handleBlockAnnouncement(
-    header: BlockHeader,
-    peerPublicKey: Hex,
-  ): SafePromise<boolean>
-
-  /**
    * Import a new block
    *
    * Gray Paper: Block must have timeslot > previous block's timeslot
    * Handles fork creation if block's parent is not current best head
    */
   importBlock(block: Block): SafePromise<void>
-
-  /**
-   * Get the current best block head
-   *
-   * Gray Paper: Best block maximizes ticketed ancestors and is audited
-   */
-  getBestHead(): BlockHeader | null
-
-  /**
-   * Get the finalized block head
-   *
-   * Gray Paper: Finalized by GRANDPA consensus
-   */
-  getFinalizedHead(): BlockHeader | null
-
-  /**
-   * Finalize a block (called by GRANDPA)
-   *
-   * Gray Paper: Prunes all forks not containing this block
-   */
-  finalizeBlock(blockHash: Hex): Safe<void>
-
-  /**
-   * Check if a block is an ancestor of the best chain
-   */
-  isAncestorOfBest(blockHash: Hex): boolean
 
   /**
    * Check if a block hash is a valid lookup anchor
@@ -737,33 +699,36 @@ export interface IChainManagerService extends BaseService {
   isValidLookupAnchor(anchorHash: Hex): boolean
 
   /**
-   * Get the list of valid lookup anchors (last L block hashes)
-   */
-  getValidLookupAnchors(): Hex[]
-
-  /**
    * Initialize ancestry from external source (e.g., fuzzer Initialize message)
    *
    * jam-conformance: The Initialize message contains ancestor list for first block
    */
-  initializeAncestry(ancestors: Hex[]): void
+  initializeAncestry(ancestors: AncestryItem[]): void
 
   /**
-   * Get all active fork heads
-   */
-  getActiveForks(): ChainFork[]
-
-  /**
-   * Handle equivocation detection (two blocks at same slot)
+   * Initialize the genesis block from an Initialize message header
    *
-   * Gray Paper: Blocks with equivocations are not acceptable
+   * jam-conformance: The Initialize message contains a "genesis-like" header.
+   * The hash of this header is what subsequent blocks use as their parent.
+   *
+   * @param header - The header from the Initialize message
+   * @param stateSnapshot - Optional state trie snapshot for the genesis state
    */
-  reportEquivocation(blockA: Hex, blockB: Hex): void
+  initializeGenesisHeader(header: BlockHeader, stateSnapshot?: StateTrie): void
 
   /**
    * Clear all state (for testing/fork switching)
    */
   clear(): void
+}
+
+export interface IAccumulationService extends BaseService {
+  setLastProcessedSlot(slot: bigint | null): void
+  getLastProcessedSlot(): bigint | null
+}
+
+export interface IBlockImporterService extends BaseService {
+  importBlock(block: Block): SafePromise<boolean>
 }
 
 /**
@@ -818,6 +783,14 @@ export interface IDisputesService extends BaseService {
  * - Ready for inclusion (dependencies satisfied, not expired)
  */
 export interface IWorkReportService extends BaseService {
+  /**
+   * Get work report for a core
+   *
+   * @param coreIndex - The core index
+   * @returns The work report for the core
+   */
+  getWorkReportForCore(coreIndex: bigint): WorkReport | null
+
   /**
    * Get pending guarantees ready for block inclusion
    *

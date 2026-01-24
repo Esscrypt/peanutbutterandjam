@@ -1,0 +1,488 @@
+/**
+ * Minifuzz Ancestry Test
+ *
+ * Tests block import with fork handling support as per jam-conformance.
+ * Supports both 'no_forks' and 'forks' test vectors.
+ *
+ * Fork handling (per jam-conformance fuzz-proto README):
+ * - Mutations are siblings of original block (same parent)
+ * - Mutations should fail import with an error
+ * - Original blocks should succeed and update state
+ * - Mutations are never used as parents for subsequent blocks
+ *
+ * Uses ChainManagerService for:
+ * - Tracking fork heads and ancestry
+ * - Validating lookup anchors (Gray Paper: must be within last L headers)
+ * - Detecting equivocations
+ */
+
+import { describe, it, expect } from 'bun:test'
+import * as path from 'node:path'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { decodeFuzzMessage } from '@pbnjam/codec'
+import { FuzzMessageType, formatFuzzerErrorAuto } from '@pbnjam/types'
+import { initializeServices, getStartBlock, getStopBlock } from '../test-utils'
+
+// Test vectors directory (relative to workspace root)
+const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
+// Test configuration via environment variables
+const TEST_MODE = process.env.TEST_MODE || 'forks' // 'forks' or 'no_forks'
+const JAM_VERSION = process.env.JAM_VERSION || '0.7.2'
+const ANCESTRY_ENABLED = process.env.ANCESTRY_ENABLED !== 'false' // Default: enabled
+const MAX_BLOCKS = parseInt(process.env.MAX_BLOCKS || '0', 10) // 0 = all blocks
+const FAIL_FAST = process.env.FAIL_FAST !== 'false' // Default: true - fail on first mismatch
+
+/**
+ * Represents the expected outcome for a block import
+ */
+interface ExpectedOutcome {
+  type: 'state_root' | 'error'
+  stateRoot?: string
+  errorMessage?: string
+}
+
+/**
+ * Load expected outcome for a given file number
+ */
+function loadExpectedOutcome(examplesDir: string, fileNumber: number): ExpectedOutcome | null {
+  const paddedNumber = String(fileNumber).padStart(8, '0')
+
+  // Check for state root response
+  const stateRootPath = path.join(examplesDir, `${paddedNumber}_target_state_root.json`)
+  if (existsSync(stateRootPath)) {
+    try {
+      const stateRootJson = JSON.parse(readFileSync(stateRootPath, 'utf-8'))
+      return {
+        type: 'state_root',
+        stateRoot: stateRootJson.state_root?.toLowerCase(),
+      }
+    } catch {
+      return null
+    }
+  }
+
+  // Check for error response
+  const errorPath = path.join(examplesDir, `${paddedNumber}_target_error.json`)
+  if (existsSync(errorPath)) {
+    try {
+      const errorJson = JSON.parse(readFileSync(errorPath, 'utf-8'))
+      return {
+        type: 'error',
+        errorMessage: errorJson.error,
+      }
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+/**
+ * Decode a fuzzer message from binary file with length prefix handling
+ */
+function decodeMessageFromFile(
+  filePath: string,
+  configService: any,
+): { type: FuzzMessageType; payload: any } {
+  const bin = new Uint8Array(readFileSync(filePath))
+
+  // Handle 4-byte length prefix if present
+  let messageData: Uint8Array
+  if (bin.length >= 4) {
+    const lengthPrefix = new DataView(bin.buffer, bin.byteOffset, 4).getUint32(0, true)
+    if (lengthPrefix === bin.length - 4) {
+      messageData = bin.subarray(4)
+    } else {
+      messageData = bin
+    }
+  } else {
+    messageData = bin
+  }
+
+  return decodeFuzzMessage(messageData, configService)
+}
+
+describe('Minifuzz Ancestry Test', () => {
+  it(`should handle block imports with ${TEST_MODE} test vectors`, async () => {
+    // Initialize services
+    // Note: useWasm: true ensures state trie calculation matches the fuzzer's expected state root
+    const services = await initializeServices({ useWasm: true })
+    const { stateService, chainManagerService, recentHistoryService, configService } = services
+
+    // Configure ancestry and forking via ConfigService
+    configService.ancestryEnabled = ANCESTRY_ENABLED
+    configService.forkingEnabled = TEST_MODE === 'forks'
+
+    // Log configuration
+    if (!ANCESTRY_ENABLED) {
+      console.log('🔓 Ancestry validation disabled (isValidAnchor always returns true)')
+      // Also patch recentHistoryService for backward compatibility
+      recentHistoryService.isValidAnchor = () => true
+    } else {
+      console.log('🔒 Ancestry validation enabled')
+    }
+
+    if (TEST_MODE === 'forks') {
+      console.log('🔀 Forking mode enabled - mutations will be tracked')
+    }
+
+    // Examples directory
+    const examplesDir = path.join(
+      WORKSPACE_ROOT,
+      `submodules/jam-conformance/fuzz-proto/examples/${JAM_VERSION}/${TEST_MODE}`,
+    )
+
+    if (!existsSync(examplesDir)) {
+      throw new Error(`Test vectors directory not found: ${examplesDir}`)
+    }
+
+    console.log(`\n📁 Using test vectors from: ${examplesDir}`)
+    console.log(`📋 Test mode: ${TEST_MODE}`)
+    console.log(`📋 JAM version: ${JAM_VERSION}`)
+    console.log(`📋 Ancestry enabled: ${ANCESTRY_ENABLED}`)
+    console.log(`📋 Fail fast: ${FAIL_FAST}`)
+
+    // Load PeerInfo message to get JAM version
+    const peerInfoJsonPath = path.join(examplesDir, '00000000_fuzzer_peer_info.json')
+    let jamVersion = { major: 0, minor: 7, patch: 0 }
+    try {
+      const peerInfoJson = JSON.parse(readFileSync(peerInfoJsonPath, 'utf-8'))
+      if (peerInfoJson.peer_info?.jam_version) {
+        jamVersion = peerInfoJson.peer_info.jam_version
+        console.log(`📋 JAM version from PeerInfo: ${jamVersion.major}.${jamVersion.minor}.${jamVersion.patch}`)
+      }
+    } catch (error) {
+      console.warn(`⚠️  Failed to load PeerInfo, using default JAM version`)
+    }
+    configService.jamVersion = jamVersion
+
+    // Load Initialize message
+    const initializeBinPath = path.join(examplesDir, '00000001_fuzzer_initialize.bin')
+    const initMessage = decodeMessageFromFile(initializeBinPath, configService)
+    if (initMessage.type !== FuzzMessageType.Initialize) {
+      throw new Error(`Expected Initialize message, got ${initMessage.type}`)
+    }
+    const init = initMessage.payload as any
+
+    console.log(`\n📋 Initialize message loaded: ${init.keyvals?.length || 0} keyvals`)
+
+    // Set initial state first (before initializing genesis header)
+    const [setStateError] = stateService.setState(init.keyvals)
+    if (setStateError) {
+      console.log(`⚠️  Warning during setState: ${setStateError.message}`)
+    }
+    console.log(`✅ Initial state set from ${init.keyvals?.length || 0} keyvals`)
+
+    // Generate state trie for genesis header initialization
+    const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
+    if (genesisTrieError) {
+      throw new Error(`Failed to generate genesis state trie: ${genesisTrieError.message}`)
+    }
+
+    // Initialize genesis header from Initialize message
+    // jam-conformance: The Initialize message contains a "genesis-like" header
+    // The hash of this header is what subsequent blocks use as their parent
+    if (init.header) {
+      chainManagerService.initializeGenesisHeader(init.header, genesisTrie)
+      console.log(`✅ Genesis header initialized from Initialize message (slot ${init.header.timeslot})`)
+    }
+
+    // Handle ancestry from Initialize message
+    // jam-conformance: The Initialize message includes ancestors for lookup anchor validation
+    // AncestryItem contains { slot, header_hash } - chain manager needs both, recent history needs just hashes
+    if (init.ancestry && init.ancestry.length > 0) {
+      console.log(`📋 Ancestors provided: ${init.ancestry.length} AncestryItems`)
+      // Extract header hashes from AncestryItem array for recent history service
+      const ancestorHashes = init.ancestry.map((item: { slot: bigint; header_hash: string }) => item.header_hash)
+      // Initialize ancestry in both services
+      recentHistoryService.initializeAncestry(ancestorHashes)
+      chainManagerService.initializeAncestry(init.ancestry)
+      console.log(`✅ Ancestry initialized with ${init.ancestry.length} block hashes`)
+    }
+
+    // Verify initial state root against expected
+    const [initStateRootError, initStateRoot] = stateService.getStateRoot()
+    expect(initStateRootError).toBeUndefined()
+    
+    // Load expected initial state root from target_state_root.json for Initialize message
+    const initExpectedStateRootPath = path.join(examplesDir, '00000001_target_state_root.json')
+    let expectedInitStateRoot: string | null = null
+    if (existsSync(initExpectedStateRootPath)) {
+      try {
+        const expectedJson = JSON.parse(readFileSync(initExpectedStateRootPath, 'utf-8'))
+        expectedInitStateRoot = expectedJson.state_root?.toLowerCase()
+      } catch {
+        // Ignore
+      }
+    }
+
+    console.log(`\n🌳 Initial State Root:`)
+    console.log(`   Our computed:  ${initStateRoot}`)
+    if (expectedInitStateRoot) {
+      console.log(`   Expected:      ${expectedInitStateRoot}`)
+      const initMatch = initStateRoot?.toLowerCase() === expectedInitStateRoot
+      console.log(`   Match: ${initMatch ? '✅' : '❌'}`)
+      
+      if (!initMatch && FAIL_FAST) {
+        throw new Error(
+          `Initial state root mismatch after Initialize!\n` +
+          `   Expected: ${expectedInitStateRoot}\n` +
+          `   Got:      ${initStateRoot?.toLowerCase()}\n` +
+          `This indicates the Initialize message's state keyvals are not being decoded/set correctly.`
+        )
+      }
+    }
+
+    // Discover all ImportBlock files
+    const allFiles = readdirSync(examplesDir)
+    const importBlockFiles = allFiles
+      .filter((file) => file.endsWith('_fuzzer_import_block.bin'))
+      .sort((a, b) => {
+        const numA = parseInt(a.substring(0, 8), 10)
+        const numB = parseInt(b.substring(0, 8), 10)
+        return numA - numB
+      })
+
+    // Get start and stop block from environment
+    const startBlock = getStartBlock()
+    const stopBlock = getStopBlock()
+
+    // Filter blocks based on start/stop and max blocks
+    let blocksToProcess = importBlockFiles.filter((file) => {
+      const fileNumber = parseInt(file.substring(0, 8), 10)
+      if (fileNumber < startBlock) return false
+      if (stopBlock !== undefined && fileNumber > stopBlock) return false
+      return true
+    })
+
+    // Apply max blocks limit if set (after start/stop filtering)
+    if (MAX_BLOCKS > 0) {
+      blocksToProcess = blocksToProcess.slice(0, MAX_BLOCKS)
+    }
+
+    console.log(`\n📦 Found ${importBlockFiles.length} blocks total`)
+    if (startBlock > 1) {
+      console.log(`🚀 Starting from block ${startBlock} (START_BLOCK=${startBlock})`)
+    }
+    if (stopBlock !== undefined) {
+      console.log(`🛑 Will stop at block ${stopBlock} (STOP_BLOCK=${stopBlock})`)
+    }
+    if (MAX_BLOCKS > 0) {
+      console.log(`📦 Processing max ${MAX_BLOCKS} blocks (MAX_BLOCKS=${MAX_BLOCKS})`)
+    }
+    console.log(`📦 Processing ${blocksToProcess.length} blocks`)
+
+    // Statistics
+    let successCount = 0
+    let expectedErrorCount = 0
+    let errorMessageMismatchCount = 0
+    let unexpectedErrorCount = 0
+    let stateRootMismatchCount = 0
+
+    // Store initial state snapshot in ChainManagerService for fork rollback
+    // This allows rolling back to initial state if first block fails
+    const [initTrieError, initTrie] = stateService.generateStateTrie()
+    if (!initTrieError && initTrie && initStateRoot) {
+      chainManagerService.initializeGenesisHeader(init.header, initTrie)
+    }
+
+    // Process each block
+    for (const testFile of blocksToProcess) {
+      const fileNumber = parseInt(testFile.substring(0, 8), 10)
+      const blockBinPath = path.join(examplesDir, testFile)
+
+      // Load expected outcome FIRST - we need to know if decode failures are expected
+      const expected = loadExpectedOutcome(examplesDir, fileNumber)
+
+      // Decode block
+      let blockMessage
+      try {
+        blockMessage = decodeMessageFromFile(blockBinPath, configService)
+        if (blockMessage.type !== FuzzMessageType.ImportBlock) {
+          console.error(`❌ Expected ImportBlock, got ${blockMessage.type} in ${testFile}`)
+          unexpectedErrorCount++
+          if (FAIL_FAST) {
+            throw new Error(`Unexpected message type in ${testFile}: expected ImportBlock, got ${blockMessage.type}`)
+          }
+          continue
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('Unexpected message type')) {
+          throw error // Re-throw fail-fast errors
+        }
+        // If this block was expected to fail anyway, count decode failure as expected error
+        // Some mutation test vectors have corrupted binary data that can't be decoded
+        if (expected?.type === 'error') {
+          console.log(`✅ Block ${fileNumber}: Expected error, got decode error (${error instanceof Error ? error.message.substring(0, 50) : 'unknown'}...)`)
+          expectedErrorCount++
+          continue
+        }
+        console.error(`❌ Failed to decode ${testFile}: ${error instanceof Error ? error.message : String(error)}`)
+        unexpectedErrorCount++
+        if (FAIL_FAST) {
+          throw new Error(`Failed to decode ${testFile}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+        continue
+      }
+
+      const block = (blockMessage.payload as any).block
+      const timeslot = block?.header?.timeslot
+      const parentHash = block?.header?.parent as string
+      const parentHashShort = parentHash?.substring(0, 18) + '...'
+
+      // #region agent log
+      fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'minifuzz-ancestry-exact-error.test.ts:importBlock',
+          message: 'About to import block',
+          data: {
+            fileNumber,
+            timeslot: timeslot.toString(),
+            parentHash: block.header.parent.substring(0, 20),
+            expectedError: expected?.type === 'error' ? expected.errorMessage : 'none',
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'block-4-analysis',
+          hypothesisId: 'C',
+        }),
+      }).catch(() => {})
+      // #endregion
+
+      // Import the block via chain manager (it coordinates the import and checks finalized chain)
+      const [importError] = await chainManagerService.importBlock(block)
+
+      // #region agent log
+      fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'minifuzz-ancestry-exact-error.test.ts:importBlock',
+          message: 'Block import result',
+          data: {
+            fileNumber,
+            timeslot: timeslot.toString(),
+            hasError: !!importError,
+            errorMessage: importError ? importError.message : 'none',
+            expectedError: expected?.type === 'error' ? expected.errorMessage : 'none',
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'block-4-analysis',
+          hypothesisId: 'C',
+        }),
+      }).catch(() => {})
+      // #endregion
+
+      if (expected?.type === 'error') {
+        // Expected to fail (mutation block)
+        if (importError) {
+          // Format the error using the same formatter as fuzzer-target
+          const formattedError = formatFuzzerErrorAuto(importError)
+          const expectedErrorMessage = expected.errorMessage || ''
+          
+          // Verify the formatted error message matches the expected error message
+          if (formattedError === expectedErrorMessage) {
+            console.log(`✅ Block ${fileNumber} (slot ${timeslot}): Expected error, got error with matching message`)
+            expectedErrorCount++
+          } else {
+            console.error(`❌ Block ${fileNumber} (slot ${timeslot}): Expected error but error message mismatch`)
+            console.error(`   Expected: "${expectedErrorMessage}"`)
+            console.error(`   Got:      "${formattedError}"`)
+            errorMessageMismatchCount++
+            if (FAIL_FAST) {
+              throw new Error(
+                `Block ${fileNumber} (slot ${timeslot}): Error message mismatch\n` +
+                `   Expected: "${expectedErrorMessage}"\n` +
+                `   Got:      "${formattedError}"`
+              )
+            }
+          }
+        } else {
+          console.error(`❌ Block ${fileNumber} (slot ${timeslot}): Expected error but import succeeded`)
+          console.error(`   Expected error: ${expected.errorMessage}`)
+          unexpectedErrorCount++
+          if (FAIL_FAST) {
+            throw new Error(`Block ${fileNumber} (slot ${timeslot}): Expected error "${expected.errorMessage}" but import succeeded`)
+          }
+        }
+      } else if (expected?.type === 'state_root') {
+        // Expected to succeed (original block)
+        if (importError) {
+          console.error(`❌ Block ${fileNumber} (slot ${timeslot}): Expected success but got error`)
+          console.error(`   Error: ${importError.message}`)
+          unexpectedErrorCount++
+          if (FAIL_FAST) {
+            throw new Error(`Block ${fileNumber} (slot ${timeslot}): Expected success but got error: ${importError.message}`)
+          }
+        } else {
+          // Verify state root
+          const [stateRootError, stateRoot] = stateService.getStateRoot()
+          if (stateRootError) {
+            console.error(`❌ Block ${fileNumber}: Failed to get state root: ${stateRootError.message}`)
+            unexpectedErrorCount++
+            if (FAIL_FAST) {
+              throw new Error(`Block ${fileNumber}: Failed to get state root: ${stateRootError.message}`)
+            }
+          } else if (stateRoot?.toLowerCase() !== expected.stateRoot) {
+            console.error(`❌ Block ${fileNumber} (slot ${timeslot}): State root mismatch`)
+            console.error(`   Expected: ${expected.stateRoot}`)
+            console.error(`   Got:      ${stateRoot?.toLowerCase()}`)
+            stateRootMismatchCount++
+            if (FAIL_FAST) {
+              throw new Error(`Block ${fileNumber} (slot ${timeslot}): State root mismatch\n   Expected: ${expected.stateRoot}\n   Got:      ${stateRoot?.toLowerCase()}`)
+            }
+          } else {
+            console.log(`✅ Block ${fileNumber} (slot ${timeslot}): Imported, state root matches`)
+            successCount++
+          }
+        }
+      } else {
+        // No expected outcome found - just try to import
+        if (importError) {
+          console.warn(`⚠️  Block ${fileNumber} (slot ${timeslot}): Import failed (no expected outcome)`)
+          console.warn(`   Error: ${importError.message}`)
+        } else {
+          console.log(`✅ Block ${fileNumber} (slot ${timeslot}): Imported (no expected outcome to verify)`)
+          successCount++
+        }
+      }
+
+      // Progress logging every 20 blocks
+      if ((successCount + expectedErrorCount + errorMessageMismatchCount + unexpectedErrorCount + stateRootMismatchCount) % 20 === 0) {
+        const total = successCount + expectedErrorCount + errorMessageMismatchCount + unexpectedErrorCount + stateRootMismatchCount
+        console.log(`\n📊 Progress: ${total}/${blocksToProcess.length} processed`)
+      }
+    }
+
+    // Final summary
+    console.log(`\n${'='.repeat(60)}`)
+    console.log(`📊 Final Summary for ${TEST_MODE}:`)
+    console.log(`   ✅ Successful imports with verified state root: ${successCount}`)
+    console.log(`   ✅ Expected errors with matching messages: ${expectedErrorCount}`)
+    console.log(`   ⚠️  Expected errors with message mismatches: ${errorMessageMismatchCount}`)
+    console.log(`   ❌ State root mismatches: ${stateRootMismatchCount}`)
+    console.log(`   ❌ Unexpected errors: ${unexpectedErrorCount}`)
+    console.log(`   📦 Total blocks processed: ${blocksToProcess.length}`)
+    console.log(`${'='.repeat(60)}`)
+
+    // Assertions
+    expect(unexpectedErrorCount).toBe(0)
+    expect(stateRootMismatchCount).toBe(0)
+    expect(errorMessageMismatchCount).toBe(0)
+
+    // In forks mode, we expect a mix of successes and expected errors
+    // In no_forks mode, all should succeed
+    if (TEST_MODE === 'no_forks') {
+      expect(expectedErrorCount).toBe(0)
+      expect(successCount).toBeGreaterThan(0)
+    } else {
+      // In forks mode, we should have both successes and expected errors
+      expect(successCount + expectedErrorCount).toBeGreaterThan(0)
+    }
+  }, 600000) // 10 minute timeout
+})

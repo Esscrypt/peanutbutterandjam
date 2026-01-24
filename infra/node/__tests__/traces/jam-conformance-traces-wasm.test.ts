@@ -3,6 +3,10 @@
  *
  * Tests processing of individual trace files from jam-conformance fuzz-reports
  * Each trace file is processed separately with its own accumulation logs directory
+ *
+ * Environment variables:
+ *   ANCESTRY_DISABLED - Optional. Set to 'true' or '1' to disable ancestry validation.
+ *                       Useful for trace files where blocks don't have full ancestry context.
  */
 
 import { config } from 'dotenv'
@@ -38,6 +42,7 @@ const TRACES_DIR = path.join(WORKSPACE_ROOT, 'submodules/jam-conformance/fuzz-re
 
 // Mismatch logs directory
 const MISMATCH_LOGS_DIR = path.join(WORKSPACE_ROOT, 'mismatch-logs/jam-conformance')
+
 
 // Track test results for summary at the end
 interface TraceResult {
@@ -75,19 +80,21 @@ function logMismatchesToFile(
   console.log(`📝 Mismatches logged to: ${logFile}`)
 }
 
-// Helper function to get all trace files from the traces directory
+// Helper function to get trace files grouped by directory
+// Returns a map of directory path -> array of trace file paths
 // Traces are organized in subdirectories, each containing numbered JSON files
-function getTraceFiles(): string[] {
+function getTraceFilesByDirectory(): Map<string, string[]> {
   if (!existsSync(TRACES_DIR)) {
     console.warn(`⚠️  Traces directory does not exist: ${TRACES_DIR}`)
-    return []
+    return new Map()
   }
   
-  const traceFiles: string[] = []
+  const traceFilesByDir = new Map<string, string[]>()
   
   // Recursively search for JSON files in subdirectories
   function searchDirectory(dir: string): void {
     const entries = readdirSync(dir, { withFileTypes: true })
+    const traceFilesInDir: string[] = []
     
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name)
@@ -95,15 +102,21 @@ function getTraceFiles(): string[] {
       if (entry.isDirectory()) {
         // Recursively search subdirectories
         searchDirectory(fullPath)
-      } else if (entry.isFile() && entry.name.endsWith('.json')) {
-        // Found a JSON file - add it to the list
-        traceFiles.push(fullPath)
+      } else if (entry.isFile() && entry.name.endsWith('.json') && entry.name !== 'genesis.json') {
+        // Found a JSON file - add it to the list (exclude genesis.json)
+        traceFilesInDir.push(fullPath)
       }
+    }
+    
+    // If this directory has trace files, add them to the map
+    if (traceFilesInDir.length > 0) {
+      traceFilesInDir.sort()
+      traceFilesByDir.set(dir, traceFilesInDir)
     }
   }
   
   searchDirectory(TRACES_DIR)
-  return traceFiles.sort()
+  return traceFilesByDir
 }
 
 
@@ -114,10 +127,10 @@ describe('JAM Conformance Traces', () => {
   console.log(`\n📦 JAM Conformance Version: ${JAM_CONFORMANCE_VERSION}`)
   console.log(`📁 Traces directory: ${TRACES_DIR}`)
 
-  // Get all trace files
-  const traceFiles = getTraceFiles()
+  // Get trace files grouped by directory
+  const traceFilesByDir = getTraceFilesByDirectory()
 
-  if (traceFiles.length === 0) {
+  if (traceFilesByDir.size === 0) {
     it.skip('No trace files found - skipping tests', () => {
       console.warn(`No trace files found in ${TRACES_DIR}`)
     })
@@ -164,63 +177,87 @@ describe('JAM Conformance Traces', () => {
     console.log('='.repeat(80) + '\n')
   })
 
-  // Process each trace file individually
-  for (const traceFilePath of traceFiles) {
-    // Get relative path from TRACES_DIR to preserve directory structure
-    const relativePath = path.relative(TRACES_DIR, traceFilePath)
-    const relativePathWithoutExt = relativePath.replace(/\.json$/, '')
-    const traceFileName = path.basename(traceFilePath, '.json')
-    
-    it(`should process trace ${relativePathWithoutExt}`, async () => {
-      console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
+  // Process each directory, loading genesis.json once per directory
+  for (const [traceDir, traceFiles] of traceFilesByDir.entries()) {
+    // Load genesis.json for this directory (if it exists)
+    // Check in the trace directory first, then parent TRACES_DIR
+    const traceDirGenesisJsonPath = path.join(traceDir, 'genesis.json')
+    const parentGenesisJsonPath = path.join(TRACES_DIR, 'genesis.json')
+    const genesisManager = new NodeGenesisManager(configService, {
+      genesisJsonPath: existsSync(traceDirGenesisJsonPath)
+        ? traceDirGenesisJsonPath
+        : existsSync(parentGenesisJsonPath)
+          ? parentGenesisJsonPath
+          : undefined,
+    })
+
+    // Verify genesis JSON was loaded
+    const [genesisError, genesisJson] = genesisManager.getGenesisJson()
+    if (genesisError) {
+      console.warn(`⚠️  Genesis JSON not found for directory ${path.relative(TRACES_DIR, traceDir)}, using defaults: ${genesisError.message}`)
+    } else {
+      console.log(`✅ Loaded genesis.json for directory: ${path.relative(TRACES_DIR, traceDir)}`)
+    }
+
+    // Extract validators from genesis.json (once per directory)
+    const initialValidators = (genesisJson?.header?.epoch_mark?.validators || []).map((validator: any) => ({
+      bandersnatch: validator.bandersnatch,
+      ed25519: validator.ed25519,
+      bls: bytesToHex(new Uint8Array(144)),
+      metadata: bytesToHex(new Uint8Array(128)),
+    }))
+
+    // Process each trace file in this directory
+    for (const traceFilePath of traceFiles) {
+      // Get relative path from TRACES_DIR to preserve directory structure
+      const relativePath = path.relative(TRACES_DIR, traceFilePath)
+      const relativePathWithoutExt = relativePath.replace(/\.json$/, '')
+      const traceFileName = path.basename(traceFilePath, '.json')
       
-      try {
+      it(`should process trace ${relativePathWithoutExt}`, async () => {
+        console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
+        
+        try {
 
-      // Create accumulation logs directory preserving the subdirectory structure
-      // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
-      const accumulationLogsDir = path.join(
-        WORKSPACE_ROOT,
-        'pvm-traces',
-        'jam-conformance',
-        JAM_CONFORMANCE_VERSION,
-        relativePathWithoutExt
-      )
-      if (!existsSync(accumulationLogsDir)) {
-        mkdirSync(accumulationLogsDir, { recursive: true })
-      }
+        // Create accumulation logs directory preserving the subdirectory structure
+        // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
+        const accumulationLogsDir = path.join(
+          WORKSPACE_ROOT,
+          'pvm-traces',
+          'jam-conformance',
+          JAM_CONFORMANCE_VERSION,
+          relativePathWithoutExt
+        )
+        if (!existsSync(accumulationLogsDir)) {
+          mkdirSync(accumulationLogsDir, { recursive: true })
+        }
 
-      // Read the trace file
-      const traceData: BlockTraceTestVector = JSON.parse(
-        readFileSync(traceFilePath, 'utf-8')
-      )
+        // Read the trace file
+        const traceData: BlockTraceTestVector = JSON.parse(
+          readFileSync(traceFilePath, 'utf-8')
+        )
 
-      // Find genesis.json - it should be in the same directory or parent
-      const genesisJsonPath = path.join(TRACES_DIR, 'genesis.json')
-      const genesisManager = new NodeGenesisManager(configService, {
-        genesisJsonPath: existsSync(genesisJsonPath) ? genesisJsonPath : undefined,
-      })
+        // Validate trace file structure - must have block property
+        if (!traceData.block || !traceData.block.header) {
+          throw new Error(
+            `Invalid trace file structure: missing 'block' or 'block.header' property. ` +
+            `File: ${relativePathWithoutExt}. This might be a genesis.json file that should have been filtered out.`
+          )
+        }
 
-      // Verify genesis JSON was loaded
-      const [error, genesisJson] = genesisManager.getGenesisJson()
-      if (error) {
-        console.warn(`⚠️  Genesis JSON not found, using defaults: ${error.message}`)
-      }
+        // Always dump traces to the trace-specific directory, preserving subdirectory structure
+        // Include version in the path: jam-conformance/{version}/{relative_path}
+        const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
-      // Extract validators from genesis.json or trace data
-      const initialValidators = (genesisJson?.header?.epoch_mark?.validators || []).map((validator: any) => ({
-        bandersnatch: validator.bandersnatch,
-        ed25519: validator.ed25519,
-        bls: bytesToHex(new Uint8Array(144)),
-        metadata: bytesToHex(new Uint8Array(128)),
-      }))
+        // Initialize services using shared utility (reuse genesisManager for this directory)
+        const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
+        const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
-      // Always dump traces to the trace-specific directory, preserving subdirectory structure
-      // Include version in the path: jam-conformance/{version}/{relative_path}
-      const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
+      // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
+      // This is needed for trace tests where blocks are processed independently
+      // without full ancestry context (each block has its own pre_state)
+        fullContext.configService.ancestryEnabled = false
 
-      // Initialize services using shared utility
-      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
-      const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Set pre-state from trace
       if (traceData.pre_state?.keyvals) {
@@ -235,25 +272,6 @@ describe('JAM Conformance Traces', () => {
           genesisJson.state.keyvals, )
         if (setStateError) {
           throw new Error(`Failed to set genesis state: ${setStateError.message}`)
-        }
-      }
-
-      // Initialize recent history from pre-state or genesis state
-      const betaKeyval = traceData.pre_state?.keyvals?.find(
-        (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-      ) || genesisJson?.state?.keyvals?.find(
-        (kv: { key: string }) => kv.key === '0x03000000000000000000000000000000000000000000000000000000000000'
-      )
-      if (betaKeyval) {
-        const betaData = hexToBytes(betaKeyval.value as Hex)
-        const [decodeError, decodeResult] = decodeRecent(betaData)
-        if (!decodeError && decodeResult) {
-          recentHistoryService.setRecent(decodeResult.value)
-          
-          // Initialize chain manager ancestry from recent history header hashes
-          // Gray Paper Eq. 346: lookup anchors must exist in ancestors set
-          const ancestorHashes = decodeResult.value.history.map(entry => entry.headerHash)
-          chainManagerService.initializeAncestry(ancestorHashes)
         }
       }
 
@@ -275,20 +293,8 @@ describe('JAM Conformance Traces', () => {
       // This allows rolling back to initial state if block import fails
       const [initTrieError, initTrie] = stateService.generateStateTrie()
       if (!initTrieError && initTrie) {
-        const initKeyvals = Object.entries(initTrie).map(([k, v]) => ({
-          key: k as `0x${string}`,
-          value: v as `0x${string}`,
-        }))
-        chainManagerService.setInitialStateSnapshot({
-          keyvals: initKeyvals,
-          accumulationSlot: fullContext.accumulationService.getLastProcessedSlot(),
-          clockSlot: fullContext.clockService.getLatestReportedBlockTimeslot(),
-          entropy: { ...fullContext.entropyService.getEntropy() },
-        })
+        chainManagerService.initializeGenesisHeader(convertJsonBlockToBlock(traceData.block).header, initTrie)
       }
-
-      // Convert and import the block from trace
-      const block = convertJsonBlockToBlock(traceData.block)
 
       // Check if block import is expected to fail (pre_state == post_state)
       const preStateJson = JSON.stringify(traceData.pre_state)
@@ -296,7 +302,7 @@ describe('JAM Conformance Traces', () => {
       const expectBlockToFail = preStateJson === postStateJson
 
       // Import the block
-      const [importError] = await blockImporterService.importBlock(block)
+      const [importError] = await chainManagerService.importBlock(convertJsonBlockToBlock(traceData.block))
       
       if (expectBlockToFail) {
         // Block import should fail - this is expected behavior
@@ -665,6 +671,7 @@ describe('JAM Conformance Traces', () => {
         throw error
       }
     }, { timeout: 120000 }) // 2 minute timeout
-  }
+    } // Close inner for loop (trace files)
+  } // Close outer for loop (directories)
 })
 

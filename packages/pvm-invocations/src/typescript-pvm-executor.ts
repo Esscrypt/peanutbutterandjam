@@ -641,10 +641,30 @@ export class TypeScriptPVMExecutor extends PVM {
 
       // Gray Paper pvm_invocations.tex lines 206-210:
       // Unknown host function in accumulation context:
-      // - Gas already deducted (10 gas at line 186)
-      // - Set registers[7] = WHAT
-      // - Continue execution (return null)
+      // - Gas already deducted (10 gas at line 244-246)
+      // - Check if gascounter' < 0 (after deduction)
+      // - If yes, return \oog (and set registers'_7 = WHAT)
+      // - If no, return \continue (and set registers'_7 = WHAT)
+      // - In BOTH cases, set registers'_7 = WHAT
       this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+      // Check for OOG AFTER deducting gas (Gray Paper: \otherwhen \gascounter' < 0)
+      if (this.state.gasCounter < 0n) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
+        hostLogEntry.gasAfter = this.state.gasCounter
+
+        // Log the unknown host function call
+        this.traceHostFunctionLogs.push({
+          step: currentStep,
+          hostCallId,
+          gasBefore,
+          gasAfter: this.state.gasCounter,
+          serviceId,
+        })
+
+        return RESULT_CODES.OOG
+      }
 
       // Log the unknown host function call
       this.traceHostFunctionLogs.push({

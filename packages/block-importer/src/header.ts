@@ -3,7 +3,7 @@ import {
   verifyEntropyVRFSignature,
   verifyEpochRoot,
 } from '@pbnjam/bandersnatch-vrf'
-import { bytesToHex, hexToBytes, zeroHash } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger, zeroHash } from '@pbnjam/core'
 import {
   isSafroleTicket,
   verifyFallbackSealSignature,
@@ -104,6 +104,9 @@ export async function validateBlockHeader(
     }
   }
 
+  // Note: Epoch mark presence validation (if epoch mark is required/unexpected) is done
+  // in block-importer-service.ts BEFORE this function is called, to ensure correct error ordering
+
   // validate that winners mark is present only at phase > contest duration and has correct number of tickets
   const currentPhase =
     (latestStateTimeslot + 1n) % BigInt(configService.epochDuration)
@@ -120,13 +123,6 @@ export async function validateBlockHeader(
 
   // validate that epoch mark is present only at first slot of an epoch
   if (header.epochMark) {
-    // if (currentPhase !== BigInt(0)) {
-    //   return safeError(
-    //     new Error(
-    //       `epoch mark is present at non-first slot, current phase: ${currentPhase}, header timeslot: ${header.timeslot}, latest state timeslot: ${latestStateTimeslot}`,
-    //     ),
-    //   )
-    // }
     // if the validators are not as many as in config, return an error
     if (header.epochMark.validators.length !== configService.numValidators) {
       return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
@@ -389,6 +385,75 @@ export function validateVRFSignature(
   }
 
   return safeResult(isValid)
+}
+
+export function validateEpochMark(
+  header: BlockHeader,
+  validatorSetManagerService: IValidatorSetManager,
+  entropyService: IEntropyService,
+): Safe<void> {
+  // Validate epoch mark BEFORE rotation
+  // This validation MUST happen BEFORE emitEpochTransition which rotates validator sets
+  if (header.epochMark) {
+    // Gray Paper: epoch mark's tickets_entropy (entropy1) must match the current entropy1 from state
+    const currentEntropy = entropyService.getEntropy()
+    if (header.epochMark.entropy1 !== currentEntropy.entropy1) {
+      logger.error(
+        '[BlockImporter] Epoch mark entropy1 mismatch (before rotation)',
+        {
+          epochMarkEntropy1: header.epochMark.entropy1,
+          stateEntropy1: currentEntropy.entropy1,
+        },
+      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+    }
+    //TODO: double check if needed
+    if (header.epochMark.entropyAccumulator !== currentEntropy.accumulator) {
+      logger.error(
+        '[BlockImporter] Epoch mark entropy accumulator mismatch (before rotation)',
+        {
+          epochMarkEntropyAccumulator: header.epochMark.entropyAccumulator,
+          stateEntropyAccumulator: currentEntropy.accumulator,
+        },
+      )
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+    }
+
+    // Gray Paper Eq. 115: pendingSet' = Φ(stagingSet)
+    // The epoch mark validators must match the staging set
+    // Compare epoch mark validators with staging set validators
+    const stagingValidators = validatorSetManagerService.getStagingValidators()
+    const epochMarkValidators = header.epochMark.validators
+
+    if (epochMarkValidators.length !== stagingValidators.length) {
+      logger.error('[BlockImporter] Epoch mark validators count mismatch', {
+        epochMarkCount: epochMarkValidators.length,
+        stagingCount: stagingValidators.length,
+      })
+      return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+    }
+
+    // Check each validator matches (order matters!)
+    for (let i = 0; i < epochMarkValidators.length; i++) {
+      const epochMarkValidator = epochMarkValidators[i]
+      const stagingValidator = stagingValidators[i]
+
+      if (
+        epochMarkValidator.bandersnatch !== stagingValidator.bandersnatch ||
+        epochMarkValidator.ed25519 !== stagingValidator.ed25519
+      ) {
+        logger.error('[BlockImporter] Epoch mark validator mismatch at index', {
+          index: i,
+          epochMarkBandersnatch: epochMarkValidator.bandersnatch,
+          stagingBandersnatch: stagingValidator.bandersnatch,
+          epochMarkEd25519: epochMarkValidator.ed25519,
+          stagingEd25519: stagingValidator.ed25519,
+        })
+        return safeError(new Error(BLOCK_HEADER_ERRORS.INVALID_EPOCH_MARK))
+      }
+    }
+  }
+  return safeResult(undefined)
 }
 
 export function validatePreStateRoot(

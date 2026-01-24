@@ -73,7 +73,7 @@ export class BlockAuthoringService extends BaseService {
   private readonly blockAnnouncementProtocol?: BlockAnnouncementProtocol | null
   private readonly blockRequestProtocol?: BlockRequestProtocol | null
   private readonly genesisManagerService: NodeGenesisManager | null
-  private readonly chainManagerService: ChainManagerService | null
+  // private readonly chainManagerService: ChainManagerService | null
   private readonly ticketService: TicketService
   private readonly serviceAccountService: ServiceAccountService | null
   private readonly guarantorService: GuarantorService | null
@@ -122,7 +122,7 @@ export class BlockAuthoringService extends BaseService {
     this.disputesService = options.disputesService ?? null
     this.networkingService = options.networkingService ?? null
     this.genesisManagerService = options.genesisManagerService ?? null
-    this.chainManagerService = options.chainManagerService ?? null
+    // this.chainManagerService = options.chainManagerService ?? null
 
     // Services stored for future use (see TODOs in constructBlockBody)
     void this.stateService
@@ -405,140 +405,96 @@ export class BlockAuthoringService extends BaseService {
       return
     }
 
-    try {
-      // Calculate block hash (finalized block hash for announcement)
-      const [blockHashError, blockHash] = calculateBlockHashFromHeader(
-        block.header,
+    // Calculate block hash (finalized block hash for announcement)
+    const [blockHashError, blockHash] = calculateBlockHashFromHeader(
+      block.header,
+      this.configService,
+    )
+    if (blockHashError || !blockHash) {
+      logger.error('Failed to calculate block hash for announcement', {
+        error: blockHashError?.message,
+      })
+      return
+    }
+
+    const currentSlot = this.clockService.getLatestReportedBlockTimeslot() + 1n
+
+    // Create block announcement message
+    const announcement: BlockAnnouncement = {
+      header: block.header,
+      finalBlockHash: blockHash,
+      finalBlockSlot: currentSlot,
+    }
+
+    // Serialize announcement using BlockAnnouncementProtocol
+    const [serializeError, announcementData] =
+      this.blockAnnouncementProtocol.serializeBlockAnnouncement(announcement)
+    if (serializeError || !announcementData) {
+      logger.error('Failed to serialize block announcement', {
+        error: serializeError?.message,
+      })
+      return
+    }
+
+    // Get current validator index for finding neighbors
+    const [credentialsError, validatorCredentials] =
+      getValidatorCredentialsWithFallback(
         this.configService,
+        this.keyPairService ?? undefined,
       )
-      if (blockHashError || !blockHash) {
-        logger.error('Failed to calculate block hash for announcement', {
-          error: blockHashError?.message,
-        })
-        return
-      }
+    if (credentialsError || !validatorCredentials) {
+      logger.error('Failed to get validator credentials for announcement', {
+        error: credentialsError?.message,
+      })
+      return
+    }
 
-      // Get finalized block info from chain manager (stateless UP0 protocol)
-      let finalBlockHash: string = blockHash
-      let finalBlockSlot: bigint = block.header.timeslot
-
-      if (this.chainManagerService) {
-        const finalizedInfo = this.chainManagerService.getFinalizedBlockInfo()
-        if (finalizedInfo) {
-          finalBlockHash = finalizedInfo.hash
-          finalBlockSlot = finalizedInfo.slot
-        } else {
-          // No finalized block yet, use genesis or current block
-          if (this.genesisManagerService) {
-            const [genesisHashError, genesisHash] =
-              this.genesisManagerService.getGenesisHeaderHash()
-            if (!genesisHashError && genesisHash) {
-              finalBlockHash = genesisHash
-              finalBlockSlot = 0n
-            }
-          }
-        }
-      } else {
-        // Fallback to recent history if chain manager not available
-        const recentHistory = this.recentHistoryService.getRecentHistory()
-        if (recentHistory.length > 0) {
-          const oldestEntry = recentHistory[0]
-          finalBlockHash = oldestEntry.headerHash
-          const currentSlot = this.clockService.getLatestReportedBlockTimeslot()
-          finalBlockSlot = currentSlot - BigInt(recentHistory.length - 1)
-        } else if (this.genesisManagerService) {
-          const [genesisHashError, genesisHash] =
-            this.genesisManagerService.getGenesisHeaderHash()
-          if (!genesisHashError && genesisHash) {
-            finalBlockHash = genesisHash
-            finalBlockSlot = 0n
-          }
-        }
-      }
-
-      // Create block announcement message
-      const announcement: BlockAnnouncement = {
-        header: block.header,
-        finalBlockHash: finalBlockHash as `0x${string}`,
-        finalBlockSlot: finalBlockSlot,
-      }
-
-      // Serialize announcement using BlockAnnouncementProtocol
-      const [serializeError, announcementData] =
-        this.blockAnnouncementProtocol.serializeBlockAnnouncement(announcement)
-      if (serializeError || !announcementData) {
-        logger.error('Failed to serialize block announcement', {
-          error: serializeError?.message,
-        })
-        return
-      }
-
-      // Get current validator index for finding neighbors
-      const [credentialsError, validatorCredentials] =
-        getValidatorCredentialsWithFallback(
-          this.configService,
-          this.keyPairService ?? undefined,
-        )
-      if (credentialsError || !validatorCredentials) {
-        logger.error('Failed to get validator credentials for announcement', {
-          error: credentialsError?.message,
-        })
-        return
-      }
-
-      // Get Ed25519 public key to find validator index
-      const ed25519PublicKey = bytesToHex(
-        validatorCredentials.ed25519KeyPair.publicKey,
+    // Get Ed25519 public key to find validator index
+    const ed25519PublicKey = bytesToHex(
+      validatorCredentials.ed25519KeyPair.publicKey,
+    )
+    const [validatorIndexError, validatorIndex] =
+      this.validatorSetManagerService.getValidatorIndex(ed25519PublicKey)
+    if (validatorIndexError) {
+      logger.debug(
+        'Local node is not a validator, skipping block announcement',
+        {
+          error: validatorIndexError.message,
+        },
       )
-      const [validatorIndexError, validatorIndex] =
-        this.validatorSetManagerService.getValidatorIndex(ed25519PublicKey)
-      if (validatorIndexError) {
-        logger.debug(
-          'Local node is not a validator, skipping block announcement',
-          {
-            error: validatorIndexError.message,
-          },
+      return
+    }
+
+    // Get neighbors from validator set manager
+    const neighbors =
+      this.validatorSetManagerService.getAllConnectedNeighbors(validatorIndex)
+
+    if (neighbors.length === 0) {
+      logger.debug('No neighbors found, skipping block announcement')
+      return
+    }
+
+    // Send announcement to all neighbors via networking service (UP0, kind 0)
+    for (const neighbor of neighbors) {
+      try {
+        const [sendError] = await this.networkingService.sendMessage(
+          BigInt(neighbor.index),
+          0 as StreamKind, // UP0 block announcement protocol
+          announcementData,
         )
-        return
-      }
-
-      // Get neighbors from validator set manager
-      const neighbors =
-        this.validatorSetManagerService.getAllConnectedNeighbors(validatorIndex)
-
-      if (neighbors.length === 0) {
-        logger.debug('No neighbors found, skipping block announcement')
-        return
-      }
-
-      // Send announcement to all neighbors via networking service (UP0, kind 0)
-      for (const neighbor of neighbors) {
-        try {
-          const [sendError] = await this.networkingService.sendMessage(
-            BigInt(neighbor.index),
-            0 as StreamKind, // UP0 block announcement protocol
-            announcementData,
-          )
-          if (sendError) {
-            logger.warn('Failed to send block announcement to neighbor', {
-              neighborIndex: neighbor.index,
-              neighborPublicKey: `${neighbor.publicKey.substring(0, 20)}...`,
-              error: sendError.message,
-            })
-          }
-        } catch (error) {
-          logger.error('Error sending block announcement to neighbor', {
+        if (sendError) {
+          logger.warn('Failed to send block announcement to neighbor', {
             neighborIndex: neighbor.index,
-            error: error instanceof Error ? error.message : String(error),
+            neighborPublicKey: `${neighbor.publicKey.substring(0, 20)}...`,
+            error: sendError.message,
           })
         }
+      } catch (error) {
+        logger.error('Error sending block announcement to neighbor', {
+          neighborIndex: neighbor.index,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
-    } catch (error) {
-      logger.error('Failed to announce block', {
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      })
-      // Don't fail block creation if announcement fails
     }
   }
 }
