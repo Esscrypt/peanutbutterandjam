@@ -39732,6 +39732,21 @@
      call $assembly/host-functions/accumulate/base/BaseAccumulateHostFunction#setAccumulateError
      br $folding-inner0
     end
+    local.get $4
+    i64.const 4294967296
+    i64.ge_u
+    if
+     global.get $~lib/memory/__stack_pointer
+     local.get $0
+     i32.store
+     global.get $~lib/memory/__stack_pointer
+     local.get $3
+     i32.store offset=24
+     local.get $3
+     i64.const -4
+     call $assembly/host-functions/accumulate/base/BaseAccumulateHostFunction#setAccumulateError
+     br $folding-inner0
+    end
     global.get $~lib/memory/__stack_pointer
     local.get $1
     i32.store offset=40

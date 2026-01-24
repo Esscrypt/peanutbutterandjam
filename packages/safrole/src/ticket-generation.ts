@@ -276,7 +276,8 @@ export function verifyTicket(
   )
 
   if (!isValid) {
-    return safeError(new Error('Ring VRF verification failed'))
+    // Use generic "bad signature batch" error message for conformance with jam-conformance
+    return safeError(new Error('bad signature batch'))
   }
 
   return safeResult(true)

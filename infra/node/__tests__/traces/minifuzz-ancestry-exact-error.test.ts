@@ -109,7 +109,7 @@ describe('Minifuzz Ancestry Test', () => {
     // Initialize services
     // Note: useWasm: true ensures state trie calculation matches the fuzzer's expected state root
     const services = await initializeServices({ useWasm: true })
-    const { stateService, blockImporterService, chainManagerService, recentHistoryService, configService } = services
+    const { stateService, chainManagerService, recentHistoryService, configService } = services
 
     // Configure ancestry and forking via ConfigService
     configService.ancestryEnabled = ANCESTRY_ENABLED
@@ -277,10 +277,17 @@ describe('Minifuzz Ancestry Test', () => {
     // Statistics
     let successCount = 0
     let expectedErrorCount = 0
+    let errorMessageMismatchCount = 0
     let unexpectedErrorCount = 0
     let stateRootMismatchCount = 0
 
-    
+    // Store initial state snapshot in ChainManagerService for fork rollback
+    // This allows rolling back to initial state if first block fails
+    const [initTrieError, initTrie] = stateService.generateStateTrie()
+    if (!initTrieError && initTrie && initStateRoot) {
+      chainManagerService.saveStateSnapshot(initStateRoot, initTrie)
+    }
+
     // Process each block
     for (const testFile of blocksToProcess) {
       const fileNumber = parseInt(testFile.substring(0, 8), 10)
@@ -325,18 +332,76 @@ describe('Minifuzz Ancestry Test', () => {
       const parentHash = block?.header?.parent as string
       const parentHashShort = parentHash?.substring(0, 18) + '...'
 
-      // Fork handling is now handled by BlockImporterService + ChainManagerService
-      // BlockImporterService checks ChainManagerService.getParentSnapshotIfFork()
-      // and automatically rolls back to parent state before importing sibling blocks
+      // #region agent log
+      fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'minifuzz-ancestry-exact-error.test.ts:importBlock',
+          message: 'About to import block',
+          data: {
+            fileNumber,
+            timeslot: timeslot.toString(),
+            parentHash: block.header.parent.substring(0, 20),
+            expectedError: expected?.type === 'error' ? expected.errorMessage : 'none',
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'block-4-analysis',
+          hypothesisId: 'C',
+        }),
+      }).catch(() => {})
+      // #endregion
 
-      // Import the block
+      // Import the block via chain manager (it coordinates the import and checks finalized chain)
       const [importError] = await chainManagerService.importBlock(block)
+
+      // #region agent log
+      fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'minifuzz-ancestry-exact-error.test.ts:importBlock',
+          message: 'Block import result',
+          data: {
+            fileNumber,
+            timeslot: timeslot.toString(),
+            hasError: !!importError,
+            errorMessage: importError ? importError.message : 'none',
+            expectedError: expected?.type === 'error' ? expected.errorMessage : 'none',
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'block-4-analysis',
+          hypothesisId: 'C',
+        }),
+      }).catch(() => {})
+      // #endregion
 
       if (expected?.type === 'error') {
         // Expected to fail (mutation block)
         if (importError) {
-          console.log(`✅ Block ${fileNumber} (slot ${timeslot}): Expected error, got error`)
-          expectedErrorCount++
+          // Format the error using the same formatter as fuzzer-target
+          const formattedError = formatFuzzerErrorAuto(importError)
+          const expectedErrorMessage = expected.errorMessage || ''
+          
+          // Verify the formatted error message matches the expected error message
+          if (formattedError === expectedErrorMessage) {
+            console.log(`✅ Block ${fileNumber} (slot ${timeslot}): Expected error, got error with matching message`)
+            expectedErrorCount++
+          } else {
+            console.error(`❌ Block ${fileNumber} (slot ${timeslot}): Expected error but error message mismatch`)
+            console.error(`   Expected: "${expectedErrorMessage}"`)
+            console.error(`   Got:      "${formattedError}"`)
+            errorMessageMismatchCount++
+            if (FAIL_FAST) {
+              throw new Error(
+                `Block ${fileNumber} (slot ${timeslot}): Error message mismatch\n` +
+                `   Expected: "${expectedErrorMessage}"\n` +
+                `   Got:      "${formattedError}"`
+              )
+            }
+          }
         } else {
           console.error(`❌ Block ${fileNumber} (slot ${timeslot}): Expected error but import succeeded`)
           console.error(`   Expected error: ${expected.errorMessage}`)
@@ -388,8 +453,8 @@ describe('Minifuzz Ancestry Test', () => {
       }
 
       // Progress logging every 20 blocks
-      if ((successCount + expectedErrorCount + unexpectedErrorCount + stateRootMismatchCount) % 20 === 0) {
-        const total = successCount + expectedErrorCount + unexpectedErrorCount + stateRootMismatchCount
+      if ((successCount + expectedErrorCount + errorMessageMismatchCount + unexpectedErrorCount + stateRootMismatchCount) % 20 === 0) {
+        const total = successCount + expectedErrorCount + errorMessageMismatchCount + unexpectedErrorCount + stateRootMismatchCount
         console.log(`\n📊 Progress: ${total}/${blocksToProcess.length} processed`)
       }
     }
@@ -398,7 +463,8 @@ describe('Minifuzz Ancestry Test', () => {
     console.log(`\n${'='.repeat(60)}`)
     console.log(`📊 Final Summary for ${TEST_MODE}:`)
     console.log(`   ✅ Successful imports with verified state root: ${successCount}`)
-    console.log(`   ✅ Expected errors (mutations correctly rejected): ${expectedErrorCount}`)
+    console.log(`   ✅ Expected errors with matching messages: ${expectedErrorCount}`)
+    console.log(`   ⚠️  Expected errors with message mismatches: ${errorMessageMismatchCount}`)
     console.log(`   ❌ State root mismatches: ${stateRootMismatchCount}`)
     console.log(`   ❌ Unexpected errors: ${unexpectedErrorCount}`)
     console.log(`   📦 Total blocks processed: ${blocksToProcess.length}`)
@@ -407,6 +473,7 @@ describe('Minifuzz Ancestry Test', () => {
     // Assertions
     expect(unexpectedErrorCount).toBe(0)
     expect(stateRootMismatchCount).toBe(0)
+    expect(errorMessageMismatchCount).toBe(0)
 
     // In forks mode, we expect a mix of successes and expected errors
     // In no_forks mode, all should succeed

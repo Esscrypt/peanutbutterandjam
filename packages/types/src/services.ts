@@ -2,7 +2,7 @@ import type { Hex } from 'viem'
 import type { Block } from './block-authoring'
 import type { ValidatorPublicKeys } from './consensus'
 import type { Extrinsic } from './core'
-import type { JamVersion } from './fuzz'
+import type { AncestryItem, JamVersion } from './fuzz'
 import type {
   Activity,
   BlockHeader,
@@ -19,6 +19,7 @@ import type {
   SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
+  StateTrie,
   ValidatorKeyTuple,
   WorkPackage,
   WorkReport,
@@ -33,6 +34,8 @@ export interface IValidatorSetManager extends BaseService {
   getPreviousValidators(): ValidatorKeyTuple[]
   getValidatorAtIndex(validatorIndex: number): Safe<ValidatorKeyTuple>
   getPendingValidators(): ValidatorKeyTuple[]
+
+  getStagingValidators(): ValidatorPublicKeys[]
 
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
@@ -55,6 +58,9 @@ export interface IRecentHistoryService extends BaseService {
 export interface IStateService extends BaseService {
   getStateRoot(): Safe<Hex>
   getGenesisManager(): IGenesisManagerService | undefined
+  clearState(): void
+  setState(keyvals: { key: Hex; value: Hex }[]): Safe<void>
+  generateStateTrie(): Safe<Record<string, Hex>>
 }
 
 export interface IGenesisManagerService extends BaseService {
@@ -114,6 +120,7 @@ export interface IEntropyService extends BaseService {
   getEntropy3(): Uint8Array
   getEntropyAccumulator(): Uint8Array
   getEntropy(): EntropyState
+  setEntropy(entropy: EntropyState): void
 }
 
 export interface ITicketService extends BaseService {
@@ -171,6 +178,8 @@ export interface IClockService extends BaseService {
   getCurrentSlot(): bigint
   getCurrentEpoch(): bigint
   getCurrentPhase(): bigint
+
+  setLatestReportedBlockTimeslot(timeslot: bigint): void
 }
 
 /**
@@ -665,32 +674,6 @@ export interface IChainManagerService extends BaseService {
   importBlock(block: Block): SafePromise<void>
 
   /**
-   * Get the current best block head
-   *
-   * Gray Paper: Best block maximizes ticketed ancestors and is audited
-   */
-  getBestHead(): BlockHeader | null
-
-  /**
-   * Get the finalized block head
-   *
-   * Gray Paper: Finalized by GRANDPA consensus
-   */
-  getFinalizedHead(): BlockHeader | null
-
-  /**
-   * Finalize a block (called by GRANDPA)
-   *
-   * Gray Paper: Prunes all forks not containing this block
-   */
-  finalizeBlock(blockHash: Hex): Safe<void>
-
-  /**
-   * Check if a block is an ancestor of the best chain
-   */
-  isAncestorOfBest(blockHash: Hex): boolean
-
-  /**
    * Check if a block hash is a valid lookup anchor
    *
    * Gray Paper: Lookup anchor must be within last L imported headers
@@ -699,31 +682,34 @@ export interface IChainManagerService extends BaseService {
   isValidLookupAnchor(anchorHash: Hex): boolean
 
   /**
-   * Get the list of valid lookup anchors (last L block hashes)
-   */
-  getValidLookupAnchors(): Hex[]
-
-  /**
    * Initialize ancestry from external source (e.g., fuzzer Initialize message)
    *
    * jam-conformance: The Initialize message contains ancestor list for first block
    */
-  initializeAncestry(ancestors: Hex[]): void
+  initializeAncestry(ancestors: AncestryItem[]): void
 
   /**
-   * Get all active fork heads
-   */
-  getActiveForks(): ChainFork[]
-
-  /**
-   * Handle equivocation detection (two blocks at same slot)
+   * Initialize the genesis block from an Initialize message header
    *
-   * Gray Paper: Blocks with equivocations are not acceptable
+   * jam-conformance: The Initialize message contains a "genesis-like" header.
+   * The hash of this header is what subsequent blocks use as their parent.
+   *
+   * @param header - The header from the Initialize message
+   * @param stateSnapshot - Optional state trie snapshot for the genesis state
    */
-  reportEquivocation(blockA: Hex, blockB: Hex): void
+  initializeGenesisHeader(header: BlockHeader, stateSnapshot?: StateTrie): void
 
   /**
    * Clear all state (for testing/fork switching)
    */
   clear(): void
+}
+
+export interface IAccumulationService extends BaseService {
+  setLastProcessedSlot(slot: bigint | null): void
+  getLastProcessedSlot(): bigint | null
+}
+
+export interface IBlockImporterService extends BaseService {
+  importBlock(block: Block): SafePromise<boolean>
 }

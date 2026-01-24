@@ -424,15 +424,6 @@ export class AccumulationService extends BaseService {
         // Prepend immediate items to ready queue items
         accumulatableItems = [...immediateItems, ...readyQueueAccumulatable]
         immediateItemsPrepended = true
-        logger.debug(
-          '[AccumulationService] Combined immediate items with ready queue (Gray Paper eq 88)',
-          {
-            slot: currentSlot.toString(),
-            immediateCount: immediateItems.length,
-            readyQueueCount: readyQueueAccumulatable.length,
-            totalAccumulatable: accumulatableItems.length,
-          },
-        )
       } else {
         accumulatableItems = readyQueueAccumulatable
       }
@@ -787,6 +778,7 @@ export class AccumulationService extends BaseService {
         allItems.push(item)
       }
     }
+
     const operandTuplesByService = this.createAccumulateInputs(
       allItems,
       [], // Start with empty defxfers - they'll be added dynamically
@@ -868,22 +860,6 @@ export class AccumulationService extends BaseService {
       // Each service sees the state from the start of the batch, only defxfers are shared.
       if (result.result.ok) {
         const newDefxfers = result.result.value.defxfers
-        logger.debug(
-          '[AccumulationService] Adding defxfers from service to iteration defxfers',
-          {
-            serviceId: serviceId.toString(),
-            batchInvocationIndex,
-            serviceIndexInBatch,
-            newDefxfersCount: newDefxfers.length,
-            newDefxfers: newDefxfers.map((d) => ({
-              source: d.source.toString(),
-              dest: d.dest.toString(),
-              amount: d.amount.toString(),
-              gasLimit: d.gasLimit.toString(),
-            })),
-            iterationDefxfersCountBefore: iterationDefxfers.length,
-          },
-        )
         iterationDefxfers.push(...newDefxfers)
       } else {
         logger.debug(
@@ -965,12 +941,6 @@ export class AccumulationService extends BaseService {
     result: AccumulateInvocationResult
     serviceWorkReports: WorkReport[]
   }> {
-    logger.debug('[AccumulationService] Processing service', {
-      slot: currentSlot.toString(),
-      serviceId: serviceId.toString(),
-      serviceItemsCount: serviceItems.length,
-    })
-
     // Get pre-computed operand tuples (i^U) for this service
     const operandTuples = operandTuplesByService.get(serviceId) || []
 
@@ -1191,13 +1161,30 @@ export class AccumulationService extends BaseService {
       clonedAccounts.set(serviceId, clonedAccount)
     }
 
-    // Clone alwaysaccers map
+    // Deep clone authqueue (2D array) - assign host function modifies this
+    const clonedAuthqueue: Uint8Array[][] = originalState.authqueue.map(
+      (coreQueue) => coreQueue.map((entry) => new Uint8Array(entry)),
+    )
+
+    // Deep clone assigners array - assign host function modifies this
+    const clonedAssigners = [...originalState.assigners]
+
+    // Clone alwaysaccers map - bless host function modifies this
     const clonedAlwaysaccers = new Map(originalState.alwaysaccers)
+
+    // Deep clone stagingset array (though it's not modified by host functions)
+    const clonedStagingset = originalState.stagingset.map(
+      (entry) => new Uint8Array(entry),
+    )
 
     return {
       ...originalState,
       accounts: clonedAccounts,
-      alwaysaccers: clonedAlwaysaccers,
+      authqueue: clonedAuthqueue, // Deep cloned - assign modifies this
+      assigners: clonedAssigners, // Deep cloned - assign modifies this
+      alwaysaccers: clonedAlwaysaccers, // Deep cloned - bless modifies this
+      stagingset: clonedStagingset, // Deep cloned for consistency
+      // manager, delegator, registrar are primitives (bigint), so they're copied by value
     }
   }
 
@@ -1247,15 +1234,6 @@ export class AccumulationService extends BaseService {
       currentStats[1] + Number(gasused), // G(s): always add gas used (even for panics/OOG)
     ]
     this.accumulationStatistics.set(serviceId, newStats)
-
-    // DEBUG: Log accumulation statistics tracking
-    logger.debug('[AccumulationService] trackAccumulationStatistics', {
-      serviceId: serviceId.toString(),
-      workItemCount,
-      gasused: gasused.toString(),
-      prevStats: currentStats,
-      newStats,
-    })
 
     // Update serviceStats.accumulation in activity state
     if (this.statisticsService) {
@@ -2344,7 +2322,8 @@ export class AccumulationService extends BaseService {
         ) {
           // Convert Uint8Array[] back to ValidatorPublicKeys[]
           const updatedStagingSet: ValidatorPublicKeys[] = []
-          for (const encoded of poststate.stagingset) {
+          for (let i = 0; i < poststate.stagingset.length; i++) {
+            const encoded = poststate.stagingset[i]
             const [decodeError, decoded] = decodeValidatorPublicKeys(encoded)
             if (decodeError || !decoded) {
               logger.warn(
