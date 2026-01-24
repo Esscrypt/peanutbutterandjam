@@ -531,12 +531,6 @@ export async function createCoreServices(
     stateService,
   })
 
-  // ChainManagerService for fork handling and state snapshots
-  const chainManagerService = new ChainManagerService(
-    configService,
-    sealKeyService,
-  )
-
   const blockImporterService = new BlockImporterService({
     configService,
     eventBusService,
@@ -555,8 +549,17 @@ export async function createCoreServices(
     authPoolService,
     accumulationService,
     workReportService,
-    chainManagerService,
   })
+
+  // ChainManagerService for fork handling and state snapshots
+  // Chain manager always has block importer and coordinates imports
+  // Pass accumulationService for fork rollback - resets lastProcessedSlot for sibling blocks
+  const chainManagerService = new ChainManagerService(
+    configService,
+    blockImporterService,
+    stateService,
+    accumulationService,
+  )
 
   // Optional services
   let headerConstructorService: HeaderConstructor | null = null
@@ -663,6 +666,12 @@ export async function startCoreServices(
     if (metricsStartError) {
       throw metricsStartError
     }
+  }
+
+  logger.info('Starting chain manager service...')
+  const [chainManagerStartError] = await context.chainManagerService.start()
+  if (chainManagerStartError) {
+    throw chainManagerStartError
   }
 
   logger.info('All core services started successfully')

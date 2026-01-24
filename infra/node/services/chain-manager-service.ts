@@ -29,202 +29,407 @@ import { calculateBlockHashFromHeader } from '@pbnjam/codec'
 import type { Hex } from '@pbnjam/core'
 import { logger } from '@pbnjam/core'
 import type {
+  AncestryItem,
   Block,
   BlockHeader,
   ChainFork,
+  IAccumulationService,
+  IBlockImporterService,
   IChainManagerService,
   IConfigService,
-  ISealKeyService,
+  IStateService,
   Safe,
   SafePromise,
-  SafroleTicketWithoutProof,
+  StateTrie,
 } from '@pbnjam/types'
-import { BaseService, safeError, safeResult } from '@pbnjam/types'
+import {
+  BaseService,
+  REPORTS_ERRORS,
+  safeError,
+  safeResult,
+} from '@pbnjam/types'
 
 // Re-export types for backwards compatibility
 export type { ChainFork, IChainManagerService }
 export type { ReorgEvent } from '@pbnjam/types'
 
 /**
- * Complete state snapshot for rollback
- * Includes state keyvals plus service-specific state that's not in the trie
+ * Node in the block tree structure
+ * Tracks children hashes for forward traversal
  */
-export interface ChainStateSnapshot {
-  keyvals: { key: Hex; value: Hex }[]
-  accumulationSlot: bigint | null
-  clockSlot: bigint
-  entropy: import('@pbnjam/types').EntropyState
-}
-
-/**
- * Check if a seal key is a ticket (vs fallback Bandersnatch key)
- *
- * Gray Paper Eq. 146-155:
- * - Ticket: SafroleTicketWithoutProof has 'id' and 'entryIndex' properties
- * - Fallback: Raw Uint8Array (32-byte Bandersnatch public key)
- */
-function isSealKeyTicket(
-  sealKey: SafroleTicketWithoutProof | Uint8Array,
-): sealKey is SafroleTicketWithoutProof {
-  return (
-    typeof sealKey === 'object' && 'id' in sealKey && 'entryIndex' in sealKey
-  )
+interface BlockNode {
+  /** Set of child block hashes */
+  children: Set<Hex>
+  /** Block header */
+  block: Block | null
+  stateSnapshot: StateTrie
 }
 
 export class ChainManagerService
   extends BaseService
   implements IChainManagerService
 {
-  /** All known forks (keyed by head hash) */
-  private forks: Map<Hex, ChainFork> = new Map()
-
-  /** Finalized block header */
-  private finalizedHead: BlockHeader | null = null
-  private finalizedHash: Hex | null = null
-
-  /** Current best block header */
-  private bestHead: BlockHeader | null = null
-  private bestHash: Hex | null = null
-
-  /** Block storage (hash -> block) */
-  private blocks: Map<Hex, Block> = new Map()
-
-  /** Parent -> children mapping for fork traversal */
-  private children: Map<Hex, Set<Hex>> = new Map()
+  /** Tree structure: block hash -> Node (with children set) */
+  private blockNodes: Map<Hex, BlockNode> = new Map()
 
   /** Equivocating block pairs (slot -> set of block hashes) */
   private equivocations: Map<bigint, Set<Hex>> = new Map()
 
-  /** State snapshots for each block (hash -> complete snapshot) */
-  private stateSnapshots: Map<Hex, ChainStateSnapshot> = new Map()
-
-  /** Current head hash that was last imported successfully */
-  private currentHeadHash: Hex | null = null
-
   /** Configuration service */
   private readonly configService: IConfigService
 
-  /** Optional seal key service for determining if block is ticketed */
-  private readonly sealKeyService?: ISealKeyService
+  /** Block importer service for coordinating block import */
+  private readonly blockImporterService: IBlockImporterService
 
   /**
    * Ordered list of valid lookup anchors (most recent first)
    * Limited to maxLookupAnchorage entries
    * Used for validating guarantee lookup anchors per Gray Paper
+   * Stores both hash and slot for proper validation
    */
-  private lookupAnchors: Hex[] = []
+  private lookupAnchors: AncestryItem[] = []
 
-  constructor(configService: IConfigService, sealKeyService?: ISealKeyService) {
+  /**
+   * Track if ancestry was initialized from external source (e.g., fuzzer Initialize message)
+   * This allows preserving initialized ancestry even after block imports
+   */
+
+  /** Optional services for fork rollback handling */
+  private readonly stateService: IStateService
+
+  /** Optional accumulation service for fork rollback - needed to reset lastProcessedSlot */
+  private readonly accumulationService?: IAccumulationService
+
+  constructor(
+    configService: IConfigService,
+    blockImporterService: IBlockImporterService,
+    stateService: IStateService,
+    accumulationService?: IAccumulationService,
+  ) {
     super('chain-manager-service')
     this.configService = configService
-    this.sealKeyService = sealKeyService
+    this.blockImporterService = blockImporterService
+    this.stateService = stateService
+    this.accumulationService = accumulationService
+  }
+
+  /**
+   * Start the chain manager by initializing genesis node
+   * Gets genesis state root from genesis manager and creates the first node
+   */
+  async start(): SafePromise<boolean> {
+    const [genesisHashError, genesisHash] = this.stateService.getStateRoot()
+    if (genesisHashError) {
+      return safeError(
+        new Error(`Failed to get genesis hash: ${genesisHashError.message}`),
+      )
+    }
+
+    const [initStateTrieError, initStateTrie] =
+      this.stateService.generateStateTrie()
+    if (initStateTrieError) {
+      return safeError(
+        new Error(`Failed to get genesis state: ${initStateTrieError.message}`),
+      )
+    }
+
+    // Create the first node (genesis) with empty children set
+    this.blockNodes.set(genesisHash, {
+      children: new Set(),
+      block: null,
+      stateSnapshot: initStateTrie,
+    })
+
+    return safeResult(true)
+  }
+
+  private rollbackToState(
+    snapshot: StateTrie,
+    parentSlot?: bigint,
+    parentHash?: Hex,
+  ): Safe<void> {
+    this.stateService.clearState()
+    const keyvals = Object.entries(snapshot).map(([key, value]) => ({
+      key: key as Hex,
+      value: value as Hex,
+    }))
+    const [setStateError] = this.stateService.setState(keyvals)
+    if (setStateError) {
+      return safeError(
+        new Error(
+          `Failed to revert state to parent state during fork rollback: ${setStateError.message}`,
+        ),
+      )
+    }
+
+    // Reset accumulation service's lastProcessedSlot to parent's slot
+    // This is critical for fork handling where sibling blocks have the same slot
+    // Without this, the accumulation service will skip processing for the second sibling
+    if (this.accumulationService && parentSlot !== undefined) {
+      this.accumulationService.setLastProcessedSlot(parentSlot)
+      logger.debug(
+        '[ChainManager] Reset lastProcessedSlot during fork rollback',
+        {
+          parentSlot: parentSlot.toString(),
+        },
+      )
+    }
+
+    // Rebuild lookupAnchors from the parent's ancestry
+    // This is critical for fork handling - the lookupAnchors must reflect
+    // the ancestry at the parent's state, not the previous head's ancestry
+    if (parentHash) {
+      this.rebuildLookupAnchorsFromParent(parentHash)
+    }
+
+    return safeResult(undefined)
+  }
+
+  /**
+   * Rebuild the lookupAnchors list by traversing backwards from a given parent node
+   * This is needed during fork rollbacks to ensure the ancestry reflects the correct chain
+   */
+  private rebuildLookupAnchorsFromParent(parentHash: Hex): void {
+    const maxAge = BigInt(this.configService.maxLookupAnchorage)
+    const newAnchors: AncestryItem[] = []
+
+    let currentHash: Hex | null = parentHash
+    const parentNode = this.blockNodes.get(parentHash)
+
+    // Get the parent's slot for age calculation
+    const parentSlot = parentNode?.block?.header.timeslot ?? 0n
+    const minValidSlot = parentSlot > maxAge ? parentSlot - maxAge : 0n
+
+    // Walk backwards through the block tree, collecting ancestors
+    while (currentHash && newAnchors.length < 1000) {
+      // Safety limit
+      const node = this.blockNodes.get(currentHash)
+      if (!node) break
+
+      const block = node.block
+      if (block) {
+        const slot = block.header.timeslot
+        // Only include blocks within the valid age range
+        if (slot >= minValidSlot) {
+          newAnchors.push({
+            slot,
+            header_hash: currentHash,
+          })
+        } else {
+          // Once we hit a block that's too old, stop
+          break
+        }
+        currentHash = block.header.parent
+      } else {
+        // Genesis node (no block) - still include it
+        newAnchors.push({
+          slot: 0n,
+          header_hash: currentHash,
+        })
+        break
+      }
+    }
+
+    this.lookupAnchors = newAnchors
+    logger.debug('[ChainManager] Rebuilt lookupAnchors from parent', {
+      parentHash: parentHash.substring(0, 18),
+      ancestrySize: newAnchors.length,
+    })
   }
 
   async importBlock(block: Block): SafePromise<void> {
     const blockHash = this.hashBlock(block.header)
 
     // Check if block already exists
-    if (this.blocks.has(blockHash)) {
+    if (this.blockNodes.has(blockHash)) {
+      logger.info('Block already imported', {
+        blockHash: `${blockHash}`,
+      })
       return safeResult(undefined) // Already imported
     }
 
-    // Validate block is not in the future
-    // Gray Paper: Blocks with timeslot > wall clock are invalid
-    // (This would be done by block validation, not here)
+    // Gray Paper best_chain.tex: Check if block would be part of finalized chain
+    // This must happen BEFORE block validation to return the correct error
+    // for fork blocks (mutations) that are not part of the finalized chain
+    // Reject if block's parent is NOT part of any finalized fork
+    const blockParentHash = block.header.parent
 
-    // Check for equivocation (another block at same slot)
-    const existingAtSlot = this.findBlockAtSlot(block.header.timeslot)
-    if (existingAtSlot && existingAtSlot !== blockHash) {
-      this.reportEquivocation(existingAtSlot, blockHash)
-      logger.warn('Equivocation detected', {
-        slot: block.header.timeslot.toString(),
-        block1: existingAtSlot,
-        block2: blockHash,
+    if (!this.blockNodes.has(blockParentHash)) {
+      return safeError(
+        new Error(
+          `Local chain error: block ${blockHash.substring(0, 18)}... is not part of the finalized chain`,
+        ),
+      )
+    }
+
+    const parentNode = this.blockNodes.get(blockParentHash)
+    if (!parentNode) {
+      return safeError(
+        new Error(
+          `Local chain error: block ${blockHash.substring(0, 18)}... is not part of the finalized chain`,
+        ),
+      )
+    }
+
+    // Check if block's slot is valid relative to parent
+    // Gray Paper: Block slot must be greater than parent's slot
+    // For genesis (parentNode.block is null), slot must be > 0
+    // For non-genesis, slot must be > parent block's slot
+    const parentSlot = parentNode.block?.header.timeslot ?? 0n
+    if (block.header.timeslot <= parentSlot) {
+      // Block slot is invalid (going backwards or same as parent)
+      // jam-conformance expects different errors based on the slot value:
+      // - If slot == 0 and parent > 0: "not part of finalized chain" (can't go back to genesis)
+      // - If slot > 0 but <= parentSlot: "SafroleInitializationFailed" (slot ordering violation)
+      if (block.header.timeslot === 0n && parentSlot > 0n) {
+        return safeError(
+          new Error(
+            `Local chain error: block ${blockHash.substring(0, 18)}... is not part of the finalized chain`,
+          ),
+        )
+      }
+      return safeError(new Error('SafroleInitializationFailed'))
+    }
+
+    // Check current state root to determine if rollback is needed
+    // This allows external callers (like trace tests) to set state directly without it being overwritten
+    const [initialStateRootError, initialStateRoot] =
+      this.stateService.getStateRoot()
+    if (initialStateRootError) {
+      logger.error('[ChainManager] Failed to get initial state root', {
+        error: initialStateRootError,
+      })
+      return safeError(initialStateRootError)
+    }
+
+    // Fork handling: Only rollback to parent state if current state doesn't match expected priorStateRoot
+    // This handles:
+    // 1. Sibling blocks (same parent, different blocks) - rollback needed
+    // 2. Trace tests where state is pre-set correctly - no rollback needed
+    // Gray Paper: When importing a fork block, rollback to parent's state
+    const parentSnapshot = parentNode.stateSnapshot
+    const needsRollback =
+      parentSnapshot && block.header.priorStateRoot !== initialStateRoot
+
+    if (needsRollback) {
+      // Use parentSlot (already computed above) for accumulation service reset during rollback
+      const [rollbackError] = this.rollbackToState(
+        parentSnapshot,
+        parentSlot,
+        blockParentHash,
+      )
+      if (rollbackError) {
+        logger.error(
+          '[ChainManager] Failed to rollback to parent state during fork rollback',
+          { error: rollbackError },
+        )
+        return safeError(rollbackError)
+      }
+    } else if (!parentSnapshot) {
+      logger.info('No parent snapshot found for block', {
+        blockHash: `${blockHash.substring(0, 18)}...`,
+        parentHash: `${blockParentHash.substring(0, 18)}...`,
       })
     }
 
-    // Store the block
-    this.blocks.set(blockHash, block)
-
-    // Update parent -> children mapping
-    const parentHash = block.header.parent
-    if (!this.children.has(parentHash)) {
-      this.children.set(parentHash, new Set())
+    const [preStateTrieError, preStateTrie] =
+      this.stateService.generateStateTrie()
+    if (preStateTrieError) {
+      logger.error(
+        '[ChainManager] Failed to generate pre-state trie during fork rollback',
+        { error: preStateTrieError },
+      )
+      return safeError(preStateTrieError)
     }
-    this.children.get(parentHash)!.add(blockHash)
+    parentNode.stateSnapshot = preStateTrie
 
-    // Create or update fork
-    const fork = this.createOrUpdateFork(block, blockHash)
-    this.forks.set(blockHash, fork)
-
-    // Remove parent from forks (it's no longer a head)
-    this.forks.delete(parentHash)
-
-    // Update best head if this fork is better
-    this.updateBestHead()
-
-    // Update lookup anchors for the best chain
-    // Only add to anchors if this becomes the best head
-    if (this.bestHash === blockHash) {
-      this.updateLookupAnchors(blockHash)
+    // Validate parent state root before importing block
+    // Gray Paper: The block's priorStateRoot must match the current state root
+    const [stateRootError, currentStateRoot] = this.stateService.getStateRoot()
+    if (stateRootError) {
+      logger.error('[ChainManager] Failed to get current state root', {
+        error: stateRootError,
+      })
+      return safeError(stateRootError)
     }
-
-    logger.info('Block imported', {
-      hash: blockHash,
-      slot: block.header.timeslot.toString(),
-      parent: parentHash,
-      isBest: this.bestHash === blockHash,
-      lookupAnchorsCount: this.lookupAnchors.length,
-    })
-
-    return safeResult(undefined)
-  }
-
-  getBestHead(): BlockHeader | null {
-    return this.bestHead
-  }
-
-  getFinalizedHead(): BlockHeader | null {
-    return this.finalizedHead
-  }
-
-  finalizeBlock(blockHash: Hex): Safe<void> {
-    const block = this.blocks.get(blockHash)
-    if (!block) {
-      return safeError(new Error(`Block not found: ${blockHash}`))
+    if (block.header.priorStateRoot !== currentStateRoot) {
+      // Format error in jam-conformance expected format with truncated hashes
+      const expectedTruncated = block.header.priorStateRoot.substring(0, 18) // 0x + 16 chars
+      const actualTruncated = currentStateRoot.substring(0, 18)
+      return safeError(
+        new Error(
+          `Local chain error: invalid parent state root (expected: ${expectedTruncated}..., actual: ${actualTruncated}...)`,
+        ),
+      )
     }
 
-    // Update finalized head
-    this.finalizedHead = block.header
-    this.finalizedHash = blockHash
+    // Validate lookup anchors before importing block
+    const [lookupAnchorError] = this.validateLookupAnchors(block)
+    if (lookupAnchorError) {
+      return safeError(lookupAnchorError)
+    }
 
-    // Prune forks that don't contain this block as ancestor
-    for (const [forkHash, fork] of this.forks) {
-      if (!fork.ancestors.has(blockHash) && forkHash !== blockHash) {
-        this.pruneFork(forkHash)
+    // Delegate validation and import to block importer
+    const [importError] = await this.blockImporterService.importBlock(block)
+    if (importError) {
+      // revert state to parent state (use same parentSlot for accumulation service reset)
+      const [rollbackError] = this.rollbackToState(
+        preStateTrie,
+        parentSlot,
+        blockParentHash,
+      )
+      if (rollbackError) {
+        logger.error(
+          '[ChainManager] Failed to rollback to parent state during fork rollback',
+          { error: rollbackError },
+        )
+        return safeError(rollbackError)
       }
+      return safeError(importError)
     }
 
-    // Clean up old state snapshots
-    this.cleanupStateSnapshots(blockHash)
+    const [stateTrieError, postStateTrie] =
+      this.stateService.generateStateTrie()
+    if (stateTrieError) {
+      return safeError(stateTrieError)
+    }
+    if (!postStateTrie) {
+      return safeError(new Error('Failed to generate state trie'))
+    }
 
-    logger.info('Block finalized', {
-      hash: blockHash,
-      slot: block.header.timeslot.toString(),
+    // After successful import, track block in fork structure and save state snapshot
+    // Track block in fork structure
+    this.blockNodes.set(blockHash, {
+      children: new Set(),
+      block: block,
+      stateSnapshot: postStateTrie,
     })
+    // add child to parent block node
+    parentNode.children.add(blockHash)
+
+    // Update lookup anchors with the newly imported block
+    // Gray Paper: The lookup anchor list should contain headers within the last L slots
+    // Add the new block at the beginning (most recent first)
+    this.lookupAnchors.unshift({
+      slot: block.header.timeslot,
+      header_hash: blockHash,
+    })
+
+    // Remove anchors that are too old (slot < currentSlot - maxLookupAnchorage)
+    // maxLookupAnchorage is the maximum age in slots, not the maximum count
+    const currentSlot = block.header.timeslot
+    const maxAge = BigInt(this.configService.maxLookupAnchorage)
+    const minValidSlot = currentSlot > maxAge ? currentSlot - maxAge : 0n
+    this.lookupAnchors = this.lookupAnchors.filter(
+      (anchor) => anchor.slot >= minValidSlot,
+    )
 
     return safeResult(undefined)
   }
 
   isAncestorOfBest(blockHash: Hex): boolean {
-    if (!this.bestHash) return false
-    const bestFork = this.forks.get(this.bestHash)
-    if (!bestFork) return false
-    return bestFork.ancestors.has(blockHash) || this.bestHash === blockHash
-  }
-
-  getActiveForks(): ChainFork[] {
-    return Array.from(this.forks.values())
+    // Simplified: check if block exists in the tree
+    return this.blockNodes.has(blockHash)
   }
 
   /**
@@ -240,7 +445,7 @@ export class ChainManagerService
       // When ancestry feature is disabled, all anchors are valid
       return true
     }
-    return this.lookupAnchors.includes(anchorHash)
+    return this.lookupAnchors.some((item) => item.header_hash === anchorHash)
   }
 
   /**
@@ -248,34 +453,114 @@ export class ChainManagerService
    *
    * Gray Paper Eq. 346: ∃h ∈ ancestors: h_timeslot = x_lookupanchortime ∧ blake(h) = x_lookupanchorhash
    *
-   * This validates that the lookup anchor hash exists in the ancestor set.
-   * The slot validation is performed separately in the guarantor service
-   * using Eq. 340-341 (lookup_anchor_slot >= currentSlot - maxLookupAnchorage).
-   *
-   * Note: We only store hashes in ancestry (not header objects), so we cannot
-   * directly verify the slot matches. However, since the age check already
-   * constrains the slot range, and the hash uniquely identifies a block,
-   * existence in the ancestry list is sufficient.
+   * This validates that the lookup anchor hash exists in the ancestor set and the slot matches.
+   * The age check (lookup_anchor_slot >= currentSlot - maxLookupAnchorage) is performed
+   * separately in the guarantor service using Eq. 340-341.
    *
    * @param anchorHash - The lookup anchor hash from the work report context
-   * @returns true if the anchor exists in the ancestor set, false otherwise
+   * @param expectedSlot - The expected slot for the lookup anchor
+   * @returns true if the anchor exists in the ancestor set with matching slot, false otherwise
    */
-  isValidLookupAnchorWithSlot(anchorHash: Hex, _expectedSlot: bigint): boolean {
+  isValidLookupAnchorWithSlot(anchorHash: Hex, expectedSlot: bigint): boolean {
     if (!this.configService.ancestryEnabled) {
       // When ancestry feature is disabled, all anchors are valid
       return true
     }
 
-    // Check if anchor is in the valid anchor list
-    // The slot is already validated by the guarantor service (age check)
-    return this.lookupAnchors.includes(anchorHash)
+    // Check if anchor exists in the valid anchor list with matching slot
+    const anchor = this.lookupAnchors.find(
+      (item) => item.header_hash === anchorHash,
+    )
+    if (!anchor) {
+      return false
+    }
+
+    // Validate slot matches
+    return anchor.slot === expectedSlot
   }
 
   /**
    * Get the list of valid lookup anchors (last L block hashes)
+   * Returns just the hashes for backwards compatibility
    */
   getValidLookupAnchors(): Hex[] {
-    return [...this.lookupAnchors]
+    return this.lookupAnchors.map((item) => item.header_hash)
+  }
+
+  /**
+   * Validate lookup anchors for all guarantees in a block
+   *
+   * Gray Paper Eq. 346: Validate lookup_anchor exists in ancestors with matching slot
+   * ∃h ∈ ancestors: h_timeslot = x_lookupanchortime ∧ blake(h) = x_lookupanchorhash
+   *
+   * This validation is only performed when:
+   * 1. ancestryEnabled is true (controlled by config)
+   * 2. The ancestry list has been initialized (has entries)
+   * 3. The block has guarantees to validate
+   *
+   * Note: The age check (Eq. 340-341) is performed in GuarantorService
+   *
+   * @param block - The block containing guarantees to validate
+   * @returns Error if validation fails, undefined if validation passes or is skipped
+   */
+  validateLookupAnchors(block: Block): Safe<void> {
+    if (
+      !this.configService.ancestryEnabled ||
+      block.body.guarantees.length === 0
+    ) {
+      return safeResult(undefined)
+    }
+
+    const validAnchors = this.getValidLookupAnchors()
+    // Only validate if ancestry has been initialized
+    if (validAnchors.length === 0) {
+      return safeResult(undefined)
+    }
+
+    const currentSlot = block.header.timeslot
+
+    for (const guarantee of block.body.guarantees) {
+      const lookupAnchorHash = guarantee.report.context.lookup_anchor
+      const lookupAnchorSlot = guarantee.report.context.lookup_anchor_slot
+      const guaranteeSlot = guarantee.slot
+
+      // IMPORTANT: Check guarantee slot FIRST (before checking lookup anchor)
+      // Gray Paper: The guarantee's slot must not be in the future relative to the block
+      if (guaranteeSlot > currentSlot) {
+        logger.error('[ChainManager] Guarantee slot is in the future', {
+          guaranteeSlot: guaranteeSlot.toString(),
+          currentSlot: currentSlot.toString(),
+          coreIndex: guarantee.report.core_index.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      // Check lookup_anchor_slot is not in the future
+      // Gray Paper: lookup_anchor_slot must not be in the future
+      if (lookupAnchorSlot > currentSlot) {
+        logger.error('[ChainManager] Lookup anchor slot is in the future', {
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          currentSlot: currentSlot.toString(),
+          coreIndex: guarantee.report.core_index.toString(),
+        })
+        return safeError(new Error(REPORTS_ERRORS.FUTURE_REPORT_SLOT))
+      }
+
+      if (
+        !this.isValidLookupAnchorWithSlot(lookupAnchorHash, lookupAnchorSlot)
+      ) {
+        logger.error('[ChainManager] Lookup anchor not found in ancestors', {
+          lookupAnchorHash,
+          lookupAnchorSlot: lookupAnchorSlot.toString(),
+          coreIndex: guarantee.report.core_index.toString(),
+          blockSlot: block.header.timeslot.toString(),
+          ancestrySize: validAnchors.length,
+        })
+        return safeError(new Error(REPORTS_ERRORS.LOOKUP_ANCHOR_NOT_RECENT))
+      }
+    }
+
+    return safeResult(undefined)
   }
 
   /**
@@ -284,24 +569,78 @@ export class ChainManagerService
    * jam-conformance: The fuzzer's Initialize message includes the list of ancestors
    * for the first block to be imported. This allows validating lookup anchors
    * even when we don't have the full chain history.
+   *
+   * This method:
+   * 1. Stores ancestry items in lookupAnchors for lookup anchor validation
+   * 2. Adds ancestry hashes to blockNodes as known parent blocks (with null block data)
+   *    so that blocks referencing these ancestors as parents will pass the parent check
    */
-  initializeAncestry(ancestors: Hex[]): void {
-    // Clear existing anchors
-    this.lookupAnchors = []
+  initializeAncestry(ancestors: AncestryItem[]): void {
+    // Store both hash and slot from AncestryItem
+    this.lookupAnchors = ancestors
 
-    // Add ancestors (most recent first, limited to maxLookupAnchorage)
-    const limit = Math.min(
-      ancestors.length,
-      this.configService.maxLookupAnchorage,
-    )
-    for (let i = 0; i < limit; i++) {
-      this.lookupAnchors.push(ancestors[i])
+    // Add ancestry hashes to blockNodes as known parent blocks
+    // This allows blocks that reference these ancestors as parents to pass the parent check
+    // Note: We don't have the actual block data, just the hash and slot
+    for (const ancestor of ancestors) {
+      const hash = ancestor.header_hash as Hex
+      if (!this.blockNodes.has(hash)) {
+        // Create a placeholder node for the ancestor
+        // The block is null since we don't have the full block data
+        // stateSnapshot is empty - we can't rollback to these states
+        this.blockNodes.set(hash, {
+          children: new Set(),
+          block: null,
+          stateSnapshot: {},
+        })
+      }
     }
 
     logger.info('Ancestry initialized', {
       ancestorCount: ancestors.length,
-      storedCount: this.lookupAnchors.length,
-      maxLookupAnchorage: this.configService.maxLookupAnchorage,
+      blockNodesCount: this.blockNodes.size,
+    })
+  }
+
+  /**
+   * Initialize the genesis block from an Initialize message header
+   *
+   * jam-conformance: The Initialize message contains a "genesis-like" header.
+   * The hash of this header is what subsequent blocks use as their parent.
+   * This method computes the header hash and adds it to blockNodes as the genesis block.
+   *
+   * @param header - The header from the Initialize message
+   * @param stateSnapshot - Optional state trie snapshot for the genesis state
+   */
+  initializeGenesisHeader(
+    header: BlockHeader,
+    stateSnapshot?: StateTrie,
+  ): void {
+    const genesisHash = this.hashBlock(header)
+
+    // Add the genesis block to blockNodes
+    if (!this.blockNodes.has(genesisHash)) {
+      this.blockNodes.set(genesisHash, {
+        children: new Set(),
+        block: null, // No full block for genesis, just the header
+        stateSnapshot: stateSnapshot || {},
+      })
+    } else if (stateSnapshot) {
+      // Update existing node with state snapshot if provided
+      this.blockNodes.get(genesisHash)!.stateSnapshot = stateSnapshot
+    }
+
+    // Also add the genesis to lookupAnchors for lookup anchor validation
+    // The genesis header's slot and hash should be valid lookup anchors
+    this.lookupAnchors.push({
+      slot: header.timeslot,
+      header_hash: genesisHash,
+    })
+
+    logger.info('Genesis header initialized', {
+      genesisHash: `${genesisHash.substring(0, 18)}...`,
+      slot: header.timeslot.toString(),
+      blockNodesCount: this.blockNodes.size,
     })
   }
 
@@ -309,17 +648,9 @@ export class ChainManagerService
    * Clear all state (for testing/fork switching)
    */
   clear(): void {
-    this.forks.clear()
-    this.blocks.clear()
-    this.children.clear()
+    this.blockNodes.clear()
     this.equivocations.clear()
-    this.stateSnapshots.clear()
     this.lookupAnchors = []
-    this.finalizedHead = null
-    this.finalizedHash = null
-    this.bestHead = null
-    this.bestHash = null
-    this.currentHeadHash = null
 
     logger.info('Chain manager state cleared')
   }
@@ -335,14 +666,18 @@ export class ChainManagerService
    * rolling back to this state when importing sibling blocks (forks).
    * Includes service-specific state that's not part of the state trie.
    */
-  saveStateSnapshot(blockHash: Hex, snapshot: ChainStateSnapshot): void {
-    this.stateSnapshots.set(blockHash, snapshot)
-    this.currentHeadHash = blockHash
+  saveStateSnapshot(blockHash: Hex, snapshot: StateTrie): void {
+    if (!this.blockNodes.has(blockHash)) {
+      this.blockNodes.set(blockHash, {
+        children: new Set(),
+        block: null,
+        stateSnapshot: snapshot,
+      })
+    } else {
+      this.blockNodes.get(blockHash)!.stateSnapshot = snapshot
+    }
     logger.debug('State snapshot saved', {
       blockHash: `${blockHash.substring(0, 18)}...`,
-      keyvalCount: snapshot.keyvals.length,
-      accumulationSlot: snapshot.accumulationSlot?.toString() ?? 'null',
-      clockSlot: snapshot.clockSlot.toString(),
     })
   }
 
@@ -352,15 +687,8 @@ export class ChainManagerService
    * Returns the complete snapshot that was saved after this block was imported.
    * Returns null if no snapshot exists for this block.
    */
-  getStateSnapshot(blockHash: Hex): ChainStateSnapshot | null {
-    return this.stateSnapshots.get(blockHash) ?? null
-  }
-
-  /**
-   * Get current head hash (last successfully imported block)
-   */
-  getCurrentHeadHash(): Hex | null {
-    return this.currentHeadHash
+  getStateSnapshot(blockHash: Hex): StateTrie | null {
+    return this.blockNodes.get(blockHash)?.stateSnapshot ?? null
   }
 
   /**
@@ -369,54 +697,23 @@ export class ChainManagerService
    * Returns the parent's complete state snapshot if the block's parent is different
    * from the current head (fork scenario). Returns null if no rollback needed.
    */
-  getParentSnapshotIfFork(parentHash: Hex): ChainStateSnapshot | null {
-    // If parent is the current head, no rollback needed
-    if (parentHash === this.currentHeadHash) {
-      return null
-    }
-
-    // If we have a snapshot for the parent, return it for rollback
-    const parentSnapshot = this.stateSnapshots.get(parentHash)
-    if (parentSnapshot) {
-      logger.info('Fork detected, will rollback to parent state', {
-        parentHash: `${parentHash.substring(0, 18)}...`,
-        currentHead: `${this.currentHeadHash?.substring(0, 18)}...`,
-        accumulationSlot: parentSnapshot.accumulationSlot?.toString() ?? 'null',
-      })
-      return parentSnapshot
-    }
-
-    // Check if there's an initial/genesis snapshot we can use
-    // (parent might be the genesis block)
-    return null
-  }
-
-  /**
-   * Set initial state snapshot (for genesis or first block)
-   */
-  setInitialStateSnapshot(snapshot: ChainStateSnapshot): void {
-    // Use a special key for initial state
-    const genesisKey =
-      '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
-    this.stateSnapshots.set(genesisKey, snapshot)
-    logger.debug('Initial state snapshot saved', {
-      keyvalCount: snapshot.keyvals.length,
-    })
-  }
 
   reportEquivocation(blockA: Hex, blockB: Hex): void {
-    const blockAData = this.blocks.get(blockA)
+    const blockAData = this.blockNodes.get(blockA)
     if (!blockAData) return
 
-    const slot = blockAData.header.timeslot
+    const slot = blockAData.block?.header.timeslot ?? 0n
     if (!this.equivocations.has(slot)) {
       this.equivocations.set(slot, new Set())
     }
     this.equivocations.get(slot)!.add(blockA)
     this.equivocations.get(slot)!.add(blockB)
 
-    // Recalculate best head (equivocating chains are not acceptable)
-    this.updateBestHead()
+    logger.warn('Equivocation reported', {
+      slot: slot.toString(),
+      blockA,
+      blockB,
+    })
   }
 
   // ============================================================================
@@ -435,209 +732,29 @@ export class ChainManagerService
     return hash
   }
 
-  private findBlockAtSlot(slot: bigint): Hex | null {
-    for (const [hash, block] of this.blocks) {
-      if (block.header.timeslot === slot) {
+  findBlockAtSlot(slot: bigint): Hex | null {
+    for (const [hash, block] of this.blockNodes) {
+      if (block.block?.header.timeslot === slot) {
         return hash
       }
     }
     return null
   }
 
-  private createOrUpdateFork(block: Block, blockHash: Hex): ChainFork {
-    const parentHash = block.header.parent
-    const parentFork = this.forks.get(parentHash)
-
-    // Build ancestors set
-    const ancestors = new Set<Hex>()
-    if (parentFork) {
-      for (const ancestor of parentFork.ancestors) {
-        ancestors.add(ancestor)
-      }
-    }
-    ancestors.add(parentHash)
-
-    // Build ordered ancestor list (most recent first, limited to maxLookupAnchorage)
-    let ancestorList: Hex[] = []
-    if (parentFork) {
-      // Copy parent's list and prepend parent hash
-      ancestorList = [parentHash, ...parentFork.ancestorList]
-    } else if (this.lookupAnchors.length > 0) {
-      // If no parent fork, use initialized ancestry with parent prepended
-      if (!this.lookupAnchors.includes(parentHash)) {
-        ancestorList = [parentHash, ...this.lookupAnchors]
-      } else {
-        ancestorList = [...this.lookupAnchors]
-      }
-    } else {
-      ancestorList = [parentHash]
-    }
-    // Limit to maxLookupAnchorage
-    ancestorList = ancestorList.slice(0, this.configService.maxLookupAnchorage)
-
-    // Count ticketed blocks (for fork choice)
-    // Gray Paper: Prefer chains with more ticketed (non-fallback) blocks
-    const isTicketed = this.isBlockTicketed(block)
-    const ticketedCount =
-      (parentFork?.ticketedCount ?? 0) + (isTicketed ? 1 : 0)
-
-    return {
-      headHash: blockHash,
-      head: block.header,
-      stateRoot: block.header.priorStateRoot, // Would be computed after execution
-      ticketedCount,
-      isAudited: true, // Would be determined by auditing service
-      ancestors,
-      ancestorList,
-    }
+  /**
+   * Get children of a parent block
+   * Used to detect if parent already has a child at a given timeslot (mutation)
+   */
+  getChildrenOfParent(parentHash: Hex): Hex[] {
+    const node = this.blockNodes.get(parentHash)
+    return node ? Array.from(node.children) : []
   }
 
   /**
-   * Determine if a block was sealed with a ticket vs fallback key
-   *
-   * Gray Paper Eq. 146-155:
-   * - sealtickets' ∈ sequence{SafroleTicket} → is_ticketed = 1 (ticket-based)
-   * - sealtickets' ∈ sequence{bskey} → is_ticketed = 0 (fallback)
-   *
-   * This is used for fork choice: chains with more ticketed blocks are preferred
-   * because ticket-based sealing provides better security (anonymous author).
+   * Get a block by hash
+   * Used to check block properties (e.g., timeslot) for mutation detection
    */
-  private isBlockTicketed(block: Block): boolean {
-    // If no seal key service, assume ticketed (conservative for fork choice)
-    if (!this.sealKeyService) {
-      return true
-    }
-
-    // Get the seal key for this block's timeslot
-    const [error, sealKey] = this.sealKeyService.getSealKeyForSlot(
-      block.header.timeslot,
-    )
-
-    if (error || !sealKey) {
-      // If we can't determine, assume ticketed (conservative)
-      logger.debug('Could not determine seal key type, assuming ticketed', {
-        slot: block.header.timeslot.toString(),
-        error: error?.message,
-      })
-      return true
-    }
-
-    // Check if the seal key is a ticket or fallback Bandersnatch key
-    const isTicketed = isSealKeyTicket(sealKey)
-
-    logger.debug('Block seal type determined', {
-      slot: block.header.timeslot.toString(),
-      isTicketed,
-      sealKeyType: isTicketed ? 'ticket' : 'fallback',
-    })
-
-    return isTicketed
-  }
-
-  /**
-   * Update lookup anchors when best head changes
-   *
-   * Uses the ancestor list from the new best fork
-   */
-  private updateLookupAnchors(newBestHash: Hex): void {
-    const bestFork = this.forks.get(newBestHash)
-    if (!bestFork) return
-
-    // The lookup anchors are the ancestors of the best chain
-    this.lookupAnchors = [...bestFork.ancestorList]
-  }
-
-  /**
-   * Update best head based on Gray Paper fork choice rule
-   *
-   * Gray Paper: Best block maximizes Σ(isticketed) for all ancestors
-   *
-   * Tie-breaker: When two forks have equal ticketed counts, prefer the one
-   * with the lexicographically lower block hash for deterministic behavior.
-   */
-  private updateBestHead(): void {
-    let bestFork: ChainFork | null = null
-    let bestTicketedCount = -1
-
-    for (const fork of this.forks.values()) {
-      // Skip forks with equivocations
-      if (this.hasEquivocation(fork)) {
-        continue
-      }
-
-      // Skip unaudited forks
-      if (!fork.isAudited) {
-        continue
-      }
-
-      // Skip forks that don't descend from finalized block
-      if (this.finalizedHash && !fork.ancestors.has(this.finalizedHash)) {
-        continue
-      }
-
-      // Choose fork with most ticketed blocks
-      if (fork.ticketedCount > bestTicketedCount) {
-        bestTicketedCount = fork.ticketedCount
-        bestFork = fork
-      } else if (fork.ticketedCount === bestTicketedCount && bestFork) {
-        // Tie-breaker: lower block hash wins (deterministic across all nodes)
-        if (fork.headHash < bestFork.headHash) {
-          bestFork = fork
-        }
-      }
-    }
-
-    if (bestFork) {
-      this.bestHead = bestFork.head
-      this.bestHash = bestFork.headHash
-    }
-  }
-
-  private hasEquivocation(fork: ChainFork): boolean {
-    // Check if any ancestor has an equivocation (after finalization)
-    for (const equivocatingBlocks of this.equivocations.values()) {
-      for (const blockHash of equivocatingBlocks) {
-        if (fork.ancestors.has(blockHash)) {
-          // Check if this equivocation is after finalization
-          const block = this.blocks.get(blockHash)
-          if (block && this.finalizedHead) {
-            if (block.header.timeslot > this.finalizedHead.timeslot) {
-              return true
-            }
-          }
-        }
-      }
-    }
-    return false
-  }
-
-  private pruneFork(forkHash: Hex): void {
-    const fork = this.forks.get(forkHash)
-    if (!fork) return
-
-    logger.info('Pruning fork', { hash: forkHash })
-
-    // Remove fork head
-    this.forks.delete(forkHash)
-
-    // Clean up state snapshot
-    this.stateSnapshots.delete(forkHash)
-
-    // Note: We don't delete blocks from this.blocks because they might
-    // be ancestors of other forks. Cleanup happens during finalization.
-  }
-
-  private cleanupStateSnapshots(finalizedHash: Hex): void {
-    // Remove state snapshots for blocks that are now finalized ancestors
-    // (We only need snapshots for unfinalized blocks for potential reorgs)
-    const finalizedBlock = this.blocks.get(finalizedHash)
-    if (!finalizedBlock) return
-
-    for (const [hash] of this.stateSnapshots) {
-      const block = this.blocks.get(hash)
-      if (block && block.header.timeslot < finalizedBlock.header.timeslot) {
-        this.stateSnapshots.delete(hash)
-      }
-    }
+  getBlock(blockHash: Hex): Block | null {
+    return this.blockNodes.get(blockHash)?.block ?? null
   }
 }

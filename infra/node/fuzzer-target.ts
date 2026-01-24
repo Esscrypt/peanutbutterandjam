@@ -100,6 +100,11 @@ logger.init()
 // Initialize services (similar to safrole-all-blocks.test.ts)
 const configService = new ConfigService(spec as 'tiny' | 'full')
 
+// Disable ancestry by default - will be enabled on-demand when Initialize message has ancestry
+// This prevents lookup anchor validation errors when no ancestry context is provided
+configService.ancestryEnabled = false
+configService.forkingEnabled = true
+
 // Default JAM version (will be updated from PeerInfo message)
 let JAM_VERSION: JamVersion = DEFAULT_JAM_VERSION
 
@@ -310,7 +315,7 @@ export async function initializeServices() {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: false,
+      useWasm: true,
       traceSubfolder: 'fuzzer-target',
     })
 
@@ -331,9 +336,6 @@ export async function initializeServices() {
       readyService: readyService,
       statisticsService: statisticsService,
     })
-
-    // Create chain manager service for fork handling
-    chainManagerService = new ChainManagerService(configService, sealKeyService)
 
     recentHistoryService = new RecentHistoryService({
       eventBusService: eventBusService,
@@ -420,8 +422,19 @@ export async function initializeServices() {
       authPoolService: authPoolService,
       accumulationService: accumulationService,
       workReportService: workReportService,
-      chainManagerService: chainManagerService,
     })
+
+    // Create chain manager service for fork handling
+    // Must be after blockImporterService and stateService are created
+    // NOTE: Do NOT call chainManagerService.start() here - the fuzzer protocol
+    // initializes genesis state via the Initialize message, not via start()
+    // The test file (minifuzz-ancestry-exact-error.test.ts) also doesn't call start()
+    chainManagerService = new ChainManagerService(
+      configService,
+      blockImporterService,
+      stateService,
+      accumulationService, // For fork rollback - resets lastProcessedSlot
+    )
 
     sealKeyService.setValidatorSetManager(validatorSetManager)
 
@@ -507,9 +520,28 @@ function readMessage(socket: UnixSocket): Promise<Uint8Array> {
 
 // Send message with length prefix
 function sendMessage(socket: UnixSocket, message: Uint8Array): void {
-  const lengthBytes = Buffer.alloc(4)
-  lengthBytes.writeUInt32LE(message.length, 0)
-  socket.write(Buffer.concat([lengthBytes, Buffer.from(message)]))
+  if (socket.destroyed || !socket.writable) {
+    logger.warn('Cannot send message: socket is destroyed or not writable')
+    return
+  }
+  try {
+    const lengthBytes = Buffer.alloc(4)
+    lengthBytes.writeUInt32LE(message.length, 0)
+    const success = socket.write(
+      Buffer.concat([lengthBytes, Buffer.from(message)]),
+    )
+    if (!success) {
+      logger.warn(
+        'Socket write returned false (backpressure), message may not be sent',
+      )
+    }
+  } catch (error) {
+    logger.error(
+      'Error sending message:',
+      error instanceof Error ? error.message : String(error),
+    )
+    // Don't throw - let the caller handle connection closure
+  }
 }
 
 // Handle PeerInfo request
@@ -543,9 +575,14 @@ async function handleInitialize(
   init: Initialize,
 ): Promise<void> {
   try {
-    logger.debug(
-      `Initialize: Setting state with ${init.keyvals.length} keyvals`,
+    logger.info(
+      `Initialize: Setting state with ${init.keyvals.length} keyvals, ${init.ancestry?.length || 0} ancestry items`,
     )
+    if (init.ancestry && init.ancestry.length > 0) {
+      logger.info(
+        `Initialize: Ancestry items: ${init.ancestry.map((item) => `slot=${item.slot}, hash=${item.header_hash.slice(0, 20)}...`).join(', ')}`,
+      )
+    }
     // Set state from keyvals with JAM version from PeerInfo
     // Note: setState decodes keyvals and sets them on services
     // Some keyvals may fail to decode (e.g., Chapter 12 with incomplete data)
@@ -555,43 +592,77 @@ async function handleInitialize(
     }
     logger.debug(`Initialize: State set successfully`)
 
+    // Generate state trie for genesis header initialization
+    const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
+    if (genesisTrieError) {
+      logger.error(
+        `Failed to generate genesis state trie: ${genesisTrieError.message}`,
+      )
+    }
+
+    // Initialize genesis header from Initialize message
+    // jam-conformance: The Initialize message contains a "genesis-like" header
+    // The hash of this header is what subsequent blocks use as their parent
+    if (init.header && genesisTrie) {
+      chainManagerService.initializeGenesisHeader(init.header, genesisTrie)
+      logger.info(
+        `Initialize: Genesis header initialized from Initialize message (slot ${init.header.timeslot})`,
+      )
+    }
+
+    // Initialize chain manager ancestry from Initialize message ancestry field
+    // Gray Paper Eq. 346: lookup anchors must exist in ancestors set
+    // The Initialize message provides the ancestry sequence explicitly
+    if (init.ancestry && init.ancestry.length > 0) {
+      // Enable ancestry validation since Initialize message provides ancestry context
+      configService.ancestryEnabled = true
+      // Extract header hashes from AncestryItem array for recent history service
+      const ancestorHashes = init.ancestry.map((item) => item.header_hash)
+      // Initialize ancestry in both services
+      recentHistoryService.initializeAncestry(ancestorHashes)
+      chainManagerService.initializeAncestry(init.ancestry)
+      logger.info(
+        `Initialize: Initialized ancestry with ${init.ancestry.length} ancestor hashes from Initialize message: ${init.ancestry.map((item) => `${item.header_hash.slice(0, 20)}...`).join(', ')}`,
+      )
+      logger.info(
+        'Initialize: Ancestry validation enabled (ancestry provided in Initialize message)',
+      )
+    } else {
+      // Disable ancestry validation since no ancestry context is available
+      configService.ancestryEnabled = false
+      logger.debug(
+        `Initialize: No ancestry provided in Initialize message, ancestry validation disabled`,
+      )
+    }
+
     initialized = true
 
     // Debug: Generate state trie to see what's in it
     const [trieError, stateTrie] = stateService.generateStateTrie()
-    if (!trieError && stateTrie) {
-      logger.debug(
-        `Initialize: State trie has ${Object.keys(stateTrie).length} keys`,
-      )
-      // Log first few keys for debugging
-      const keys = Object.keys(stateTrie).slice(0, 5)
-      logger.debug(`Initialize: First 5 state keys: ${keys.join(', ')}`)
-
-      // Store initial state for comparison
-      previousStateKeyvals.clear()
-      for (const [key, value] of Object.entries(stateTrie)) {
-        previousStateKeyvals.set(key, value)
-      }
-      logger.info(
-        `Initialize: Stored ${previousStateKeyvals.size} keyvals for comparison`,
-      )
-
-      // Store initial state snapshot in ChainManagerService for fork rollback
-      // This allows rolling back to initial state if first block fails
-      const initKeyvals = Object.entries(stateTrie).map(([k, v]) => ({
-        key: k as Hex,
-        value: v as Hex,
-      }))
-      chainManagerService.setInitialStateSnapshot({
-        keyvals: initKeyvals,
-        accumulationSlot: accumulationService.getLastProcessedSlot(),
-        clockSlot: clockService.getLatestReportedBlockTimeslot(),
-        entropy: { ...entropyService.getEntropy() },
-      })
-      logger.info(
-        `Initialize: Set initial state snapshot in ChainManagerService (${initKeyvals.length} keyvals)`,
-      )
+    if (trieError) {
+      logger.error(`Failed to generate state trie: ${trieError.message}`)
+      return
     }
+    if (!stateTrie) {
+      logger.error(`State trie is null`)
+      return
+    }
+
+    logger.debug(
+      `Initialize: State trie has ${Object.keys(stateTrie).length} keys`,
+    )
+    // Log first few keys for debugging
+    const keys = Object.keys(stateTrie).slice(0, 5)
+    logger.debug(`Initialize: First 5 state keys: ${keys.join(', ')}`)
+
+    // Store initial state for comparison
+    previousStateKeyvals.clear()
+    for (const [key, value] of Object.entries(stateTrie)) {
+      previousStateKeyvals.set(key, value)
+    }
+    logger.info(
+      `Initialize: Stored ${previousStateKeyvals.size} keyvals for comparison`,
+    )
 
     // Get state root
     logger.debug(`Initialize: Getting state root`)
@@ -601,6 +672,14 @@ async function handleInitialize(
       throw new Error(`Failed to get state root: ${stateRootError.message}`)
     }
     logger.debug(`Initialize: State root: ${stateRoot}`)
+
+    // Note: initializeGenesisHeader already creates the genesis BlockNode with
+    // the correct state snapshot, so we don't need to call saveStateSnapshot here.
+    // Calling saveStateSnapshot with stateRoot (instead of blockHash) would create
+    // an incorrect entry in blockNodes.
+    logger.info(
+      `Initialize: Genesis block node already has state snapshot (${Object.keys(stateTrie).length} keyvals)`,
+    )
 
     // Send StateRoot response
     const response: FuzzMessage = {
@@ -649,19 +728,75 @@ async function handleImportBlock(
   }
 
   try {
-    // Import the block
-    const [importError] = await blockImporterService.importBlock(
+    // Import the block via chain manager (it coordinates the import and checks finalized chain)
+    // This matches the test file behavior and ensures proper validation order
+    const [importError] = await chainManagerService.importBlock(
       importBlock.block,
     )
     if (importError) {
       // Format error according to fuzzer protocol expectations
-      const formattedError = formatFuzzerErrorAuto(importError)
+      // Log raw error details before formatting for debugging
+      logger.error(`Raw import error before formatting`, {
+        errorType: importError.constructor.name,
+        errorMessage:
+          importError instanceof Error
+            ? importError.message
+            : String(importError),
+        errorString:
+          importError instanceof Error
+            ? String(importError)
+            : String(importError),
+      })
+      let formattedError = formatFuzzerErrorAuto(importError)
+      logger.error(`Error sending ImportBlock response`, {
+        importError:
+          importError instanceof Error
+            ? importError.message
+            : String(importError),
+        formattedError,
+        formattedErrorType: typeof formattedError,
+        expectedForBlock26:
+          'Local chain error: block execution failure: reports error: bad validator index',
+        matchesExpected:
+          formattedError ===
+          'Local chain error: block execution failure: reports error: bad validator index',
+      })
+
+      // Ensure formattedError is a string
+      if (typeof formattedError !== 'string') {
+        logger.error(`formattedError is not a string!`, {
+          formattedError,
+          type: typeof formattedError,
+        })
+        // Fallback to a safe error string instead of throwing
+        formattedError = `formatFuzzerErrorAuto returned non-string: ${typeof formattedError}`
+      }
+
       const response: FuzzMessage = {
         type: FuzzMessageType.Error,
         payload: { error: formattedError },
       }
-      const encoded = encodeFuzzMessage(response, configService)
-      sendMessage(socket, encoded)
+
+      try {
+        const encoded = encodeFuzzMessage(response, configService)
+        logger.debug(`Sending error message over socket`, {
+          formattedError,
+          encodedLength: encoded.length,
+          discriminant: encoded[0],
+          messageFormat: `[4-byte length][0xff discriminant][natural-encoded error length][error string bytes]`,
+        })
+        sendMessage(socket, encoded)
+      } catch (encodeError) {
+        // Log but don't throw - we've already logged the original error
+        logger.error(`Failed to encode/send error response (non-fatal)`, {
+          encodeError:
+            encodeError instanceof Error
+              ? encodeError.message
+              : String(encodeError),
+          formattedError,
+        })
+        // Don't throw - let the process continue
+      }
       return
     }
 
@@ -673,7 +808,28 @@ async function handleImportBlock(
     // Get state root
     const [stateRootError, stateRoot] = stateService.getStateRoot()
     if (stateRootError) {
-      throw new Error(`Failed to get state root: ${stateRootError.message}`)
+      // Send error response instead of throwing
+      const errorResponse: FuzzMessage = {
+        type: FuzzMessageType.Error,
+        payload: {
+          error: `Failed to get state root: ${stateRootError.message}`,
+        },
+      }
+      try {
+        const encoded = encodeFuzzMessage(errorResponse, configService)
+        sendMessage(socket, encoded)
+      } catch (encodeErr) {
+        logger.error(
+          `Failed to encode/send state root error response (non-fatal)`,
+          {
+            encodeError:
+              encodeErr instanceof Error
+                ? encodeErr.message
+                : String(encodeErr),
+          },
+        )
+      }
+      return
     }
 
     // Try to load expected state root from test vectors for comparison
@@ -880,15 +1036,68 @@ async function handleImportBlock(
     }
 
     // Format error according to fuzzer protocol expectations
-    const formattedError = formatFuzzerErrorAuto(
-      error instanceof Error ? error : new Error(String(error)),
-    )
-    const response: FuzzMessage = {
-      type: FuzzMessageType.Error,
-      payload: { error: formattedError },
+    try {
+      const formattedError = formatFuzzerErrorAuto(
+        error instanceof Error ? error : new Error(String(error)),
+      )
+      // Ensure formattedError is a string
+      const safeFormattedError =
+        typeof formattedError === 'string'
+          ? formattedError
+          : `Error: ${error instanceof Error ? error.message : String(error)}`
+
+      const response: FuzzMessage = {
+        type: FuzzMessageType.Error,
+        payload: { error: safeFormattedError },
+      }
+      logger.error(
+        `Error sending ImportBlock response: ${safeFormattedError}`,
+        { error: error },
+      )
+
+      try {
+        const encoded = encodeFuzzMessage(response, configService)
+        sendMessage(socket, encoded)
+      } catch (encodeErr) {
+        // Log but don't throw - we've already logged the original error
+        logger.error(
+          `Failed to encode/send error response in catch block (non-fatal)`,
+          {
+            encodeError:
+              encodeErr instanceof Error
+                ? encodeErr.message
+                : String(encodeErr),
+            originalError:
+              error instanceof Error ? error.message : String(error),
+          },
+        )
+      }
+    } catch (formatError) {
+      // Even formatting the error failed - send a basic error message
+      logger.error(`Failed to format error message (non-fatal)`, {
+        formatError:
+          formatError instanceof Error
+            ? formatError.message
+            : String(formatError),
+        originalError: error instanceof Error ? error.message : String(error),
+      })
+      try {
+        const fallbackResponse: FuzzMessage = {
+          type: FuzzMessageType.Error,
+          payload: { error: `Internal error processing block import` },
+        }
+        const encoded = encodeFuzzMessage(fallbackResponse, configService)
+        sendMessage(socket, encoded)
+      } catch (fallbackErr) {
+        // Last resort - just log, don't throw
+        logger.error(`Failed to send fallback error response (non-fatal)`, {
+          fallbackError:
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : String(fallbackErr),
+        })
+      }
     }
-    const encoded = encodeFuzzMessage(response, configService)
-    sendMessage(socket, encoded)
   }
 }
 
@@ -1025,7 +1234,45 @@ async function handleConnection(socket: UnixSocket) {
             break
           case FuzzMessageType.ImportBlock:
             logger.debug(`Handling ImportBlock message`)
-            await handleImportBlock(socket, message.payload)
+            try {
+              await handleImportBlock(socket, message.payload)
+            } catch (importBlockError) {
+              // handleImportBlock should never throw, but catch just in case
+              logger.error(
+                `Unexpected error from handleImportBlock (should be caught internally)`,
+                {
+                  error:
+                    importBlockError instanceof Error
+                      ? importBlockError.message
+                      : String(importBlockError),
+                  stack:
+                    importBlockError instanceof Error
+                      ? importBlockError.stack
+                      : undefined,
+                },
+              )
+              // Try to send error response
+              try {
+                const errorResponse: FuzzMessage = {
+                  type: FuzzMessageType.Error,
+                  payload: {
+                    error: `Internal error in block import: ${importBlockError instanceof Error ? importBlockError.message : String(importBlockError)}`,
+                  },
+                }
+                const encoded = encodeFuzzMessage(errorResponse, configService)
+                sendMessage(socket, encoded)
+              } catch (sendErr) {
+                logger.error(
+                  `Failed to send error response for handleImportBlock exception (non-fatal)`,
+                  {
+                    sendError:
+                      sendErr instanceof Error
+                        ? sendErr.message
+                        : String(sendErr),
+                  },
+                )
+              }
+            }
             break
           case FuzzMessageType.GetState:
             logger.debug(`Handling GetState message`)

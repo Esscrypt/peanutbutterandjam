@@ -1,13 +1,5 @@
-import {
-  decodeValidatorPublicKeys,
-  encodeValidatorPublicKeys,
-} from '@pbnjam/codec'
-import { bytesToHex, logger } from '@pbnjam/core'
-import type {
-  HostFunctionResult,
-  IConfigService,
-  ValidatorPublicKeys,
-} from '@pbnjam/types'
+import { logger } from '@pbnjam/core'
+import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
   type AccumulateHostFunctionContext,
@@ -94,31 +86,15 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
       }
     }
 
-    // Parse validators array (336 bytes per validator)
-    // Gray Paper: v = sequence{Cvalcount}{valkey} where valkey is 336 bytes
-    const validators: ValidatorPublicKeys[] = []
+    // Gray Paper: v = sequence{memory[o+336i:336] for i in valindex}
+    // Split raw bytes into 336-byte chunks (one per validator)
+    const stagingSet: Uint8Array[] = []
     for (let i = 0; i < C_VALCOUNT; i++) {
       const validatorData = validatorsData.slice(
         i * VALIDATOR_SIZE,
         (i + 1) * VALIDATOR_SIZE,
       )
-      const [error, validator] = decodeValidatorPublicKeys(validatorData)
-      // If decoding fails, treat as invalid data and panic
-      // Gray Paper: (panic, registers_7, stagingset) when v = error
-      // DO NOT modify registers[7] - it must remain unchanged on panic
-      if (error) {
-        logger.error(
-          'DESIGNATE host function invoked but validator decoding failed',
-          {
-            error: error.message,
-            validatorData: bytesToHex(validatorData),
-          },
-        )
-        return {
-          resultCode: RESULT_CODES.PANIC,
-        }
-      }
-      validators.push(validator.value)
+      stagingSet.push(validatorData)
     }
 
     // Gray Paper: (continue, HUH, stagingset) otherwhen imX_id ≠ (imX_state)_ps_delegator
@@ -137,7 +113,8 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: (continue, OK, v) otherwise
     // Update staging set with new validators
     // Gray Paper: (imX'.state).ps_stagingset = v
-    imX.state.stagingset = validators.map(encodeValidatorPublicKeys)
+    // Assign raw bytes directly per Gray Paper specification
+    imX.state.stagingset = stagingSet
 
     // Set success result
     this.setAccumulateSuccess(registers)

@@ -1,3 +1,4 @@
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -34,7 +35,7 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     const hashOffset = registers[7]
 
     // Log all input parameters
-    context.log('YIELD host function invoked', {
+    logger.info('YIELD host function invoked', {
       hashOffset: hashOffset.toString(),
       currentServiceId: implications[0].id.toString(),
     })
@@ -54,6 +55,11 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
 
     // Get the current implications context
     const [imX] = implications
+
+    logger.info('YIELD host function set yield hash', {
+      yieldHash: bytesToHex(hashData),
+      currentServiceId: imX.id.toString(),
+    })
 
     // Set the yield hash in the accumulation context
     // Gray Paper: imX.yield = h

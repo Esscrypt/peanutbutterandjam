@@ -3,6 +3,7 @@ import {
   ACCUMULATE_ERROR_CORE,
   ACCUMULATE_ERROR_HUH,
   ACCUMULATE_ERROR_OOB,
+  ACCUMULATE_ERROR_WHO,
   AccumulateHostFunctionContext,
   BaseAccumulateHostFunction,
   HostFunctionResult,
@@ -91,6 +92,12 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     }
     if (imX.id !== u64(imX.state.assigners[coreIndexI32])) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_HUH)
+      return new HostFunctionResult(255) // continue execution
+    }
+
+    const MAX_SERVICE_ID: u64 = u64(4294967296) // 2^32
+    if (serviceIdToAssign >= MAX_SERVICE_ID) {
+      this.setAccumulateError(registers, ACCUMULATE_ERROR_WHO)
       return new HostFunctionResult(255) // continue execution
     }
 
