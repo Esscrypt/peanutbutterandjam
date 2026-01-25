@@ -444,6 +444,7 @@ export class TypeScriptPVMExecutor extends PVM {
       registers: this.state.registerState,
       ram: this.state.ram,
       log: generalHostFunctionLog,
+      serviceId: implicationsPair[0].id,
     }
 
     let result: HostFunctionResult | null = null

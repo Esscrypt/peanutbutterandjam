@@ -1,3 +1,4 @@
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   ExportParams,
   HostFunctionContext,
@@ -42,6 +43,8 @@ export class ExportHostFunction extends BaseHostFunction {
         ? rawLength
         : REFINE_CONFIG.SEGMENT_SIZE
 
+    const serviceId = context.serviceId ?? 0n
+
     // Gray Paper: Check if Nrange[p][z] ⊆ readable[memory]
     const [readable, readableFaultAddress] = context.ram.isReadableWithFault(
       memoryOffset,
@@ -50,6 +53,9 @@ export class ExportHostFunction extends BaseHostFunction {
     if (!readable) {
       // Gray Paper: Return PANIC if memory not readable
       context.registers[7] = 0n
+      logger.info(
+        `[host-calls] [${serviceId}] EXPORT(${memoryOffset}, ${cappedLength}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -67,6 +73,9 @@ export class ExportHostFunction extends BaseHostFunction {
     )
     if (data === null) {
       context.registers[7] = 0n
+      logger.info(
+        `[host-calls] [${serviceId}] EXPORT(${memoryOffset}, ${cappedLength}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -90,6 +99,17 @@ export class ExportHostFunction extends BaseHostFunction {
       // Gray Paper: Return segoff + len(𝐞)
       context.registers[7] = result
     }
+
+    // Log in the requested format: [host-calls] [serviceId] EXPORT(memoryOffset, length) <- result
+    const dataHex = bytesToHex(data)
+    const truncatedHex =
+      dataHex.length > 64
+        ? `${dataHex.slice(0, 32)}...${dataHex.slice(-32)}`
+        : dataHex
+    const resultStr = result === 'FULL' ? 'FULL' : result.toString()
+    logger.info(
+      `[host-calls] [${serviceId}] EXPORT(${memoryOffset}, ${cappedLength}, 0x${truncatedHex}) <- ${resultStr}`,
+    )
 
     return {
       resultCode: null, // Continue execution

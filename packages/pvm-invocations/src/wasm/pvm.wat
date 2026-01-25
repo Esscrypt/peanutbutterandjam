@@ -53860,7 +53860,7 @@
   local.get $0
   i32.store offset=4
   global.get $~lib/memory/__stack_pointer
-  i32.const 13794360
+  i32.const 13791360
   call $assembly/host-functions/general/fetch/FetchHostFunction#encodeU32
   local.tee $3
   i32.store offset=108
@@ -80379,7 +80379,7 @@
   i32.store offset=4
   local.get $14
   i32.const 98
-  i32.const 13794360
+  i32.const 13791360
   call $assembly/test-exports/encodeU32ToBuffer
   global.get $~lib/memory/__stack_pointer
   local.get $14

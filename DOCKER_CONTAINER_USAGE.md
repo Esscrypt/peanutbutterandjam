@@ -6,10 +6,7 @@
 
 ```bash
 # Run the container with a test socket
-docker run --rm \
-  -v /tmp:/tmp \
-  shimonchick/pbnjam-fuzzer-target:latest \
-  bun run infra/node/fuzzer-target.ts --socket /tmp/jam_test.sock --spec tiny
+docker run --rm -v /tmp:/tmp shimonchick/pbnjam-fuzzer-target:latest  --socket /tmp/jam_test.sock --spec tiny
 ```
 
 ### With Custom Socket Path

@@ -165,6 +165,13 @@ export class HistoricalLookupHostFunction extends BaseHostFunction {
     // Return length of preimage
     context.registers[7] = BigInt(preimageLength)
 
+    // Log in the requested format: [host-calls] [serviceId] HISTORICAL_LOOKUP(serviceId, 0xhash, timeslot) <- (length bytes)
+    const serviceId = context.serviceId ?? params.serviceId
+    const hashHex = bytesToHex(hashData)
+    logger.info(
+      `[host-calls] [${serviceId}] HISTORICAL_LOOKUP(${serviceId}, 0x${hashHex}, ${params.timeslot}) <- (${dataToWrite.length} bytes)`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

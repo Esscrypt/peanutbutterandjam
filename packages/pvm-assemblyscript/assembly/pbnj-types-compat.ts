@@ -153,8 +153,7 @@ export class WORK_PACKAGE_CONSTANTS {
   static readonly C_MAXPACKAGEXTS: i32 = 128
   static readonly C_MAXPACKAGEIMPORTS: i32 = 3072
   static readonly C_MAXPACKAGEEXPORTS: i32 = 3072
-  // Note: Gray Paper v0.7.2 says 13791360, but jamduna test vectors use 13794360
-  static readonly C_MAXBUNDLESIZE: i32 = 13794360
+  static readonly C_MAXBUNDLESIZE: i32 = 13791360
 }
 
 export class WORK_REPORT_CONSTANTS {

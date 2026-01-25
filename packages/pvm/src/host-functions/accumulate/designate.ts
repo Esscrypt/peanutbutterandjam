@@ -43,6 +43,7 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Get the current implications context
     const [imX] = implications
+    const logServiceId = imX.id
 
     // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
     // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
@@ -72,14 +73,8 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Check memory read FIRST (before delegator check) per Gray Paper order
     // DO NOT modify registers[7] - it must remain unchanged on panic
     if (faultAddress || !validatorsData) {
-      logger.error(
-        'DESIGNATE host function invoked but validators data read failed',
-        {
-          totalSize: totalSize.toString(),
-          validatorsOffset: validatorsOffset.toString(),
-          C_VALCOUNT: C_VALCOUNT.toString(),
-          VALIDATOR_SIZE: VALIDATOR_SIZE.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- PANIC`,
       )
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -101,10 +96,9 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Check delegator AFTER successful memory read per Gray Paper order
     if (imX.id !== imX.state.delegator) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn('DESIGNATE host function invoked but not the delegator', {
-        currentServiceId: imX.id.toString(),
-        delegator: imX.state.delegator.toString(),
-      })
+      logger.info(
+        `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- HUH`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -118,6 +112,12 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] DESIGNATE(validatorsOffset, validatorCount) <- OK
+    logger.info(
+      `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

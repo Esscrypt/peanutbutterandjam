@@ -44,8 +44,7 @@ export const WORK_PACKAGE_CONSTANTS = {
   C_MAXPACKAGEXTS: 128,
 
   /** The maximum size of the concatenated variable-size blobs, extrinsics and imported segments of a work-package, in octets */
-  // TODO: Gray Paper v0.7.2 says 13791360, but jamduna test vectors use 13794360 - temporarily adjusted to match test vectors
-  C_MAXBUNDLESIZE: 13794360,
+  C_MAXBUNDLESIZE: 13791360,
 } as const
 
 /**
@@ -56,7 +55,7 @@ export const WORK_REPORT_CONSTANTS = {
   C_MAXREPORTDEPS: 8,
 
   /** The maximum total size of all unbounded blobs in a work-report, in octets */
-  C_MAXREPORTVARSIZE: 48 * 1024, // 48 * 2^10
+  C_MAXREPORTVARSIZE: 49152, // 48 * 2^10
 
   /** The gas allocated to invoke a work-report's Accumulation logic */
   C_REPORTACCGAS: 10000000,

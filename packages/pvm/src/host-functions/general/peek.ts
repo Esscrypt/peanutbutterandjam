@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -71,14 +72,14 @@ export class PeekHostFunction extends BaseHostFunction {
       }
     }
 
+    const serviceId = context.serviceId ?? 0n
+
     // 2. Check if source range is readable → OOB
     if (!this.isMachineMemoryReadable(machine, sourceOffset, length)) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
-      context.log('Peek host function: Source memory not readable', {
-        machineId: machineId.toString(),
-        sourceOffset: sourceOffset.toString(),
-        length: length.toString(),
-      })
+      logger.info(
+        `[host-calls] [${serviceId}] PEEK(${machineId}, ${sourceOffset}, ${length}) <- OOB`,
+      )
       return {
         resultCode: null, // continue (not HALT)
       }
@@ -92,6 +93,9 @@ export class PeekHostFunction extends BaseHostFunction {
     )
     if (error) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      logger.info(
+        `[host-calls] [${serviceId}] PEEK(${machineId}, ${sourceOffset}, ${length}) <- OOB`,
+      )
       return {
         resultCode: null, // continue
       }
@@ -100,6 +104,9 @@ export class PeekHostFunction extends BaseHostFunction {
     // Gray Paper: mem'[o:z] = (m[n].ram)[s:z]
     const writeFaultAddress = context.ram.writeOctets(destOffset, data)
     if (writeFaultAddress) {
+      logger.info(
+        `[host-calls] [${serviceId}] PEEK(${machineId}, ${sourceOffset}, ${length}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -112,6 +119,12 @@ export class PeekHostFunction extends BaseHostFunction {
 
     // Return OK (0) for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
+
+    // Log in the requested format: [host-calls] [serviceId] PEEK(machineId, sourceOffset, length) <- OK: length
+    logger.info(
+      `[host-calls] [${serviceId}] PEEK(${machineId}, ${sourceOffset}, ${length}) <- OK: ${data.length}`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

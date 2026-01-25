@@ -136,6 +136,13 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] ASSIGN(coreIndex, serviceIdToAssign) <- OK
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] ASSIGN(${coreIndex}, ${serviceIdToAssign}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

@@ -23,13 +23,6 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     const { registers, implications, gasCounter } = context
     const [imX] = implications
 
-    // Log checkpoint invocation
-    logger.debug('CHECKPOINT host function invoked', {
-      currentServiceId: imX.id.toString(),
-      gasCounter: gasCounter.toString(),
-      accountsCount: imX.state.accounts.size,
-    })
-
     // Gray Paper line 752: imY' = imX
     // Deep copy imX to imY to create the checkpoint
     // This creates a rollback point for exceptional termination (OOG or panic)
@@ -60,6 +53,10 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     // Note: gasCounter passed here is already gascounter' (after gas cost deduction by the executor)
     // So we should return gasCounter directly, not gasCounter - gasCost
     this.setAccumulateSuccess(registers, gasCounter)
+
+    // Log in the requested format: [host-calls] [serviceId] CHECKPOINT()
+    const logServiceId = imX.id
+    logger.info(`[host-calls] [${logServiceId}] CHECKPOINT()`)
 
     return {
       resultCode: null, // continue execution
@@ -94,10 +91,64 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
    * Also recalculates items from actual state to ensure checkpoint has correct value
    */
   private deepCopyServiceAccount(account: ServiceAccount): ServiceAccount {
+    // #region agent log - track checkpoint deep copy
+    const TARGET_MISMATCH_KEY =
+      '0x31d788457fb79efec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
+    const mismatchKeyValue = account.rawCshKeyvals[TARGET_MISMATCH_KEY]
+    if (typeof fetch !== 'undefined') {
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'checkpoint.ts:98',
+            message: 'CHECKPOINT deep copy',
+            data: {
+              serviceId: account.codehash,
+              keyCount: Object.keys(account.rawCshKeyvals).length,
+              mismatchKeyExists: !!mismatchKeyValue,
+              mismatchKeyValue,
+              allKeys: Object.keys(account.rawCshKeyvals).slice(0, 10),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'pre-fix',
+            hypothesisId: 'A',
+          }),
+        },
+      ).catch(() => {})
+    }
+    // #endregion
     const copy = {
       ...account,
       rawCshKeyvals: JSON.parse(JSON.stringify(account.rawCshKeyvals)),
     }
+    // #region agent log - verify deep copy
+    const copiedMismatchValue = copy.rawCshKeyvals[TARGET_MISMATCH_KEY]
+    if (typeof fetch !== 'undefined') {
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'checkpoint.ts:102',
+            message: 'CHECKPOINT after copy',
+            data: {
+              mismatchKeyValue: copiedMismatchValue,
+              valuesMatch: copiedMismatchValue === mismatchKeyValue,
+              isSameReference: copy.rawCshKeyvals === account.rawCshKeyvals,
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'pre-fix',
+            hypothesisId: 'A',
+          }),
+        },
+      ).catch(() => {})
+    }
+    // #endregion
     return copy
   }
 }

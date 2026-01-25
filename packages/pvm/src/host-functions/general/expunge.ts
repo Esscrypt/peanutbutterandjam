@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   ExpungeParams,
   HostFunctionContext,
@@ -44,10 +45,13 @@ export class ExpungeHostFunction extends BaseHostFunction {
 
     const machines = params.refineContext.machines
 
+    const serviceId = context.serviceId ?? 0n
+
     // Check if machine exists
     if (!machines.has(machineId)) {
       // Return WHO (2^64 - 4) if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      logger.info(`[host-calls] [${serviceId}] EXPUNGE(${machineId}) <- WHO`)
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -62,6 +66,11 @@ export class ExpungeHostFunction extends BaseHostFunction {
 
     // Return machine's PC
     context.registers[7] = pc
+
+    // Log in the requested format: [host-calls] [serviceId] EXPUNGE(machineId) <- OK: pc
+    logger.info(
+      `[host-calls] [${serviceId}] EXPUNGE(${machineId}) <- OK: ${pc}`,
+    )
 
     return {
       resultCode: null,

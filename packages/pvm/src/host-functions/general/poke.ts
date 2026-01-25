@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -56,6 +57,8 @@ export class PokeHostFunction extends BaseHostFunction {
     const destOffset = context.registers[9] // o: destination
     const length = context.registers[10] // z: length
 
+    const serviceId = context.serviceId ?? 0n
+
     // Gray Paper error check order:
     // 1. Check if source range is readable in current memory → panic
     // Read data from current PVM's memory
@@ -64,11 +67,9 @@ export class PokeHostFunction extends BaseHostFunction {
       length,
     )
     if (!data) {
-      context.log('Poke host function: Source memory read fault', {
-        sourceOffset: sourceOffset.toString(),
-        length: length.toString(),
-        faultAddress: readFaultAddress?.toString() ?? 'null',
-      })
+      logger.info(
+        `[host-calls] [${serviceId}] POKE(${machineId}, ${destOffset}, ${length}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
         faultInfo: {
@@ -83,9 +84,9 @@ export class PokeHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Poke host function: Machine not found', {
-        machineId: machineId.toString(),
-      })
+      logger.info(
+        `[host-calls] [${serviceId}] POKE(${machineId}, ${destOffset}, ${length}) <- WHO`,
+      )
       return {
         resultCode: null, // continue
       }
@@ -99,6 +100,9 @@ export class PokeHostFunction extends BaseHostFunction {
     )
     if (writeFaultAddress) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.OOB
+      logger.info(
+        `[host-calls] [${serviceId}] POKE(${machineId}, ${destOffset}, ${length}) <- OOB`,
+      )
       return {
         resultCode: null, // continue (not HALT)
       }
@@ -106,6 +110,11 @@ export class PokeHostFunction extends BaseHostFunction {
 
     // Return OK (0) for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
+
+    // Log in the requested format: [host-calls] [serviceId] POKE(machineId, destOffset, length) <- OK: length
+    logger.info(
+      `[host-calls] [${serviceId}] POKE(${machineId}, ${destOffset}, ${length}) <- OK: ${data.length}`,
+    )
 
     return {
       resultCode: null, // continue execution

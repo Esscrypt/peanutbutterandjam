@@ -168,6 +168,13 @@ export class WriteHostFunction extends BaseHostFunction {
 
     context.registers[7] = previousLength
 
+    // Log in the requested format: TRACE [host-calls] [serviceId] WRITE(serviceId, 0xkey, 0xvalue (length bytes)) <- OK: previousLength
+    const logServiceId = context.serviceId ?? serviceId
+    const valueHex = bytesToHex(value)
+    logger.info(
+      `TRACE [host-calls] [${logServiceId}] WRITE(${logServiceId}, ${keyHex}, ${valueHex} (${value.length} bytes)) <- OK: ${previousLength}`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

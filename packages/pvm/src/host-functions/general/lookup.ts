@@ -162,9 +162,10 @@ export class LookupHostFunction extends BaseHostFunction {
       length < BigInt(remainingAfterF) ? Number(length) : remainingAfterF
 
     // Only write if there's data to write
+    let dataToWrite: Uint8Array | null = null
     if (l > 0) {
       // Extract data slice
-      const dataToWrite = foundPreimage.subarray(f, f + l)
+      dataToWrite = foundPreimage.subarray(f, f + l)
 
       // Write preimage slice to memory
       // Gray Paper: PANIC if N[o,l] ⊄ writable{memory}
@@ -192,13 +193,12 @@ export class LookupHostFunction extends BaseHostFunction {
     // Gray Paper: Return len{v} (full preimage length, not slice length)
     context.registers[7] = preimageLength
 
-    logger.info('Lookup host function: Success', {
-      queryServiceId: queryServiceId.toString(),
-      hashHex,
-      preimageLength: preimageLength.toString(),
-      f,
-      l,
-    })
+    // Log in the requested format: [host-calls] [serviceId] LOOKUP(serviceId, 0xhash) <- (length bytes)
+    const serviceId = context.serviceId ?? lookupParams.serviceId
+    const writtenLength = dataToWrite ? dataToWrite.length : 0
+    logger.info(
+      `[host-calls] [${serviceId}] LOOKUP(${serviceId}, 0x${hashHex}) <- (${writtenLength} bytes)`,
+    )
 
     return {
       resultCode: null, // continue execution

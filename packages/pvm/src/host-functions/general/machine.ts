@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -42,8 +43,16 @@ export class MachineHostFunction extends BaseHostFunction {
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
+    const serviceId = context.serviceId ?? 0n
+    const programOffset = context.registers[7]
+    const programLength = context.registers[8]
+    const initialPC = context.registers[9]
+
     // Validate execution
     if (context.gasCounter < this.gasCost) {
+      logger.info(
+        `[host-calls] [${serviceId}] MACHINE(${programLength}, ${initialPC}) <- OOG`,
+      )
       return {
         resultCode: RESULT_CODES.OOG,
       }
@@ -51,16 +60,15 @@ export class MachineHostFunction extends BaseHostFunction {
 
     context.gasCounter -= this.gasCost
 
-    const programOffset = context.registers[7]
-    const programLength = context.registers[8]
-    const initialPC = context.registers[9]
-
     // Read program from memory
     const [programData, _faultAddress] = context.ram.readOctets(
       programOffset,
       programLength,
     )
     if (!programData) {
+      logger.info(
+        `[host-calls] [${serviceId}] MACHINE(${programLength}, ${initialPC}) <- FAULT`,
+      )
       return {
         resultCode: RESULT_CODES.FAULT,
       }
@@ -70,7 +78,9 @@ export class MachineHostFunction extends BaseHostFunction {
     if (!refineContext) {
       // If no refine context available, return HUH
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
-      context.log('Machine host function: No refine context available')
+      logger.info(
+        `[host-calls] [${serviceId}] MACHINE(${programData.length}, ${initialPC}) <- HUH`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -84,11 +94,10 @@ export class MachineHostFunction extends BaseHostFunction {
     // Return machine ID
     context.registers[7] = machineId
 
-    context.log('Machine host function: PVM machine created', {
-      machineId: machineId.toString(),
-      programLength: programData.length.toString(),
-      initialPC: initialPC.toString(),
-    })
+    // Log in the requested format: [host-calls] [serviceId] MACHINE(programLength, initialPC) <- OK: machineId
+    logger.info(
+      `[host-calls] [${serviceId}] MACHINE(${programData.length}, ${initialPC}) <- OK: ${machineId}`,
+    )
 
     return {
       resultCode: null, // continue execution

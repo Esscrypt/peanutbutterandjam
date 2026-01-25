@@ -187,6 +187,14 @@ export class EjectHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] EJECT(serviceIdToEject, 0xhash) <- OK
+    // hashHex is already calculated above at line 118
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] EJECT(${serviceIdToEject}, 0x${hashHex}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }
