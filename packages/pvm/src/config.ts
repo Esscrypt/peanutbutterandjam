@@ -85,6 +85,7 @@ export const OPCODES = {
   // Instructions without Arguments
   TRAP: 0n, // Panic
   FALLTHROUGH: 1n, // No operation
+  UNLIKELY: 2n, // Unlikely execution path hint (adds 40 gas to block)
 
   // Instructions with Arguments of One Immediate
   ECALLI: 10n, // Host call with immediate value
@@ -367,6 +368,7 @@ export const TERMINATION_OPCODES = new Set<bigint>([
   // Trap and fallthrough
   OPCODES.TRAP,
   OPCODES.FALLTHROUGH,
+  OPCODES.UNLIKELY,
 
   // Jumps
   OPCODES.JUMP,

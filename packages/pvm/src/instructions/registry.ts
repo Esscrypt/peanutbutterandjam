@@ -80,6 +80,7 @@ import {
   LOAD_IMM_JUMP_INDInstruction,
   LOAD_IMM_JUMPInstruction,
   TRAPInstruction,
+  UNLIKELYInstruction,
 } from './control-flow'
 import {
   LOAD_I8Instruction,
@@ -207,6 +208,7 @@ export class InstructionRegistry {
     // Control flow instructions
     this.register(new TRAPInstruction())
     this.register(new FALLTHROUGHInstruction())
+    this.register(new UNLIKELYInstruction())
     this.register(new JUMPInstruction())
     this.register(new JUMP_INDInstruction())
     this.register(new LOAD_IMM_JUMPInstruction())

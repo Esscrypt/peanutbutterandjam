@@ -1,5 +1,7 @@
 import { decodeBlob } from '@pbnjam/codec'
 import type { PVMInstruction } from '@pbnjam/types'
+import { isTerminationInstruction } from './config'
+
 /**
  * PVM Parser implementation
  * Parses PVM instruction data and program blobs according to Gray Paper specification
@@ -149,5 +151,45 @@ export class PVMParser {
         codeLength: 0,
       }
     }
+  }
+
+  /**
+   * Identify basic block start positions in a program
+   *
+   * Gray Paper (pvm.tex §7.2): Basic blocks are defined by block-termination instructions.
+   * Basic blocks start at:
+   * - Index 0 (program start)
+   * - The instruction immediately following a termination instruction (n + 1 + Fskip(n))
+   *
+   * Gray Paper equation 124: basicblocks = {0} ∪ {n + 1 + Fskip(n) | n is termination instruction}
+   *
+   * @param instructions - Parsed instructions with their PCs
+   * @returns Set of PC values where basic blocks start
+   */
+  identifyBasicBlockStarts(
+    instructions: Array<{ instruction: PVMInstruction; pc: number }>,
+  ): Set<number> {
+    const basicBlockStarts = new Set<number>()
+
+    // Always start with PC 0
+    basicBlockStarts.add(0)
+
+    // Find all termination instructions and mark their successors as block starts
+    for (const { instruction, pc } of instructions) {
+      // Check if this instruction is a termination instruction (Gray Paper set T)
+      if (isTerminationInstruction(instruction.opcode)) {
+        // The next instruction after this termination instruction starts a new block
+        // Position of next instruction = n + 1 + Fskip(n)
+        const nextPc = pc + 1 + instruction.fskip
+
+        // Find the instruction at nextPc (if it exists)
+        const nextInstruction = instructions.find((inst) => inst.pc === nextPc)
+        if (nextInstruction) {
+          basicBlockStarts.add(nextPc)
+        }
+      }
+    }
+
+    return basicBlockStarts
   }
 }

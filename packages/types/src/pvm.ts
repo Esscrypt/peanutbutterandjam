@@ -676,6 +676,10 @@ export interface PVMOptions {
   gasCounter?: bigint
   /** Initial register state */
   registerState?: bigint[]
+  /** Use new gas cost model (gas charged at start of basic blocks) instead of old model (1 gas per instruction) */
+  useNewGasCostModel?: boolean
+  /** Expected block gas costs (map of PC to cost) - used when useNewGasCostModel is true */
+  expectedBlockGasCosts?: Map<number, number>
 }
 
 export type ContextMutator = (hostCallId: bigint) => ResultCode | null
