@@ -50,3 +50,9 @@
 [submodule "submodules/JIPs"]
 	path = submodules/JIPs
 	url = https://github.com/polkadot-fellows/JIPs.git
+[submodule "submodules/quic"]
+	path = submodules/quic
+	url = https://github.com/Infisical/js-quic.git
+[submodule "submodules/quiche"]
+	path = submodules/quiche
+	url = https://github.com/cloudflare/quiche.git

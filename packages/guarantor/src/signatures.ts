@@ -53,44 +53,36 @@ export function createGuaranteeSignature(
   validatorIndex: number,
   edPrivateKey: Uint8Array,
 ): Safe<GuaranteeSignature> {
-  try {
-    // Step 1: Serialize work-report
-    const [encodeError, encoded] = encodeWorkReport(workReport)
-    if (encodeError) {
-      return safeError(
-        new Error(`Failed to encode work-report: ${encodeError.message}`),
-      )
-    }
-
-    // Step 2: Hash serialized report with BLAKE2b
-    const [hashError, reportHash] = blake2bHash(encoded)
-    if (hashError) {
-      return safeError(
-        new Error(`Failed to hash work-report: ${hashError.message}`),
-      )
-    }
-
-    // Step 3: Sign hash with Ed25519
-    const messageBytes = hexToBytes(reportHash)
-    const [signatureError, signature] = signEd25519(messageBytes, edPrivateKey)
-    if (signatureError) {
-      return safeError(signatureError)
-    }
-
-    // Step 4: Create signature tuple
-    const guaranteeSignature: GuaranteeSignature = {
-      validator_index: validatorIndex,
-      signature: bytesToHex(signature),
-    }
-
-    return safeResult(guaranteeSignature)
-  } catch (error) {
+  // Step 1: Serialize work-report
+  const [encodeError, encoded] = encodeWorkReport(workReport)
+  if (encodeError) {
     return safeError(
-      new Error(
-        `Failed to create guarantee signature: ${(error as Error).message}`,
-      ),
+      new Error(`Failed to encode work-report: ${encodeError.message}`),
     )
   }
+
+  // Step 2: Hash serialized report with BLAKE2b
+  const [hashError, reportHash] = blake2bHash(encoded)
+  if (hashError) {
+    return safeError(
+      new Error(`Failed to hash work-report: ${hashError.message}`),
+    )
+  }
+
+  // Step 3: Sign hash with Ed25519
+  const messageBytes = hexToBytes(reportHash)
+  const [signatureError, signature] = signEd25519(messageBytes, edPrivateKey)
+  if (signatureError) {
+    return safeError(signatureError)
+  }
+
+  // Step 4: Create signature tuple
+  const guaranteeSignature: GuaranteeSignature = {
+    validator_index: validatorIndex,
+    signature: bytesToHex(signature),
+  }
+
+  return safeResult(guaranteeSignature)
 }
 
 /**

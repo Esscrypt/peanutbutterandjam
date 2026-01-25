@@ -6,12 +6,15 @@ import type {
   QUICStream,
 } from '@infisical/quic'
 import * as nobleEd25519 from '@noble/ed25519'
+import { bytesToHex } from '@pbnjam/core'
 import * as peculiarWebcrypto from '@peculiar/webcrypto'
 import type { X509Certificate } from '@peculiar/x509'
 import * as x509 from '@peculiar/x509'
 import { encodeBase64Url } from 'u8a-utils'
 
 type BufferSource = ArrayBuffer | ArrayBufferView
+
+// Code copied from https://github.com/MatrixAI/js-quic/blob/staging/tests/utils.ts#L16C9-L16C64
 
 /**
  * WebCrypto polyfill from @peculiar/webcrypto
@@ -238,7 +241,7 @@ async function generateCertificate({
   dnsAltNames = [],
   now = new Date(),
 }: {
-  certId: string
+  certId: Uint8Array
   subjectKeyPair: {
     publicKey: JsonWebKey
     privateKey: JsonWebKey
@@ -265,6 +268,7 @@ async function generateCertificate({
   const notAfterDate = new Date(now.getTime() - (now.getTime() % 1000))
   // If the duration is 0, then only the `now` is valid
   notAfterDate.setSeconds(notAfterDate.getSeconds() + duration)
+
   if (notBeforeDate < new Date(0)) {
     throw new RangeError(
       '`notBeforeDate` cannot be before 1970-01-01T00:00:00Z',
@@ -273,19 +277,19 @@ async function generateCertificate({
   if (notAfterDate > new Date(new Date('2050').getTime() - 1)) {
     throw new RangeError('`notAfterDate` cannot be after 2049-12-31T23:59:59Z')
   }
-  //   const subjectNodeId = await webcrypto.subtle.digest(
-  //     'SHA-256',
-  //     await webcrypto.subtle.exportKey('spki', subjectPublicCryptoKey),
-  //   )
-  //   const issuerPublicKey = await publicKeyFromPrivateKey(issuerPrivateKey)
-  //   const issuerPublicCryptoKey = await importPublicKey(issuerPublicKey)
-  //   const issuerNodeId = await webcrypto.subtle.digest(
-  //     'SHA-256',
-  //     await webcrypto.subtle.exportKey('spki', issuerPublicCryptoKey),
-  //   )
-  const serialNumber = certId
-  //   const subjectNodeIdEncoded = Buffer.from(subjectNodeId).toString('hex')
-  //   const _issuerNodeIdEncoded = Buffer.from(issuerNodeId).toString('hex')
+  const subjectNodeId = await webcrypto.subtle.digest(
+    'SHA-256',
+    await webcrypto.subtle.exportKey('spki', subjectPublicCryptoKey),
+  )
+  const issuerPublicKey = await publicKeyFromPrivateKey(issuerPrivateKey)
+  const issuerPublicCryptoKey = await importPublicKey(issuerPublicKey)
+  const issuerNodeId = await webcrypto.subtle.digest(
+    'SHA-256',
+    await webcrypto.subtle.exportKey('spki', issuerPublicCryptoKey),
+  )
+  const serialNumber = bytesToHex(certId).substring(2)
+  const subjectNodeIdEncoded = Buffer.from(subjectNodeId).toString('hex')
+  const issuerNodeIdEncoded = Buffer.from(issuerNodeId).toString('hex')
   // The entire subject attributes and issuer attributes
   // is constructed via `x509.Name` class
   // By default this supports on a limited set of names:
@@ -296,14 +300,16 @@ async function generateCertificate({
   // Because the OID is what is encoded into ASN.1
   const subjectAttrs = [
     {
-      CN: ['JAM Client Ed25519 Cert'],
+      // CN: ['JAM Client Ed25519 Cert'],
+      CN: [subjectNodeIdEncoded],
     },
     // Filter out conflicting CN attributes
     ...subjectAttrsExtra.filter((attr) => !('CN' in attr)),
   ]
   const issuerAttrs = [
     {
-      CN: ['JAM Client Ed25519 Cert'],
+      // CN: ['JAM Client Ed25519 Cert'],
+      CN: [issuerNodeIdEncoded],
     },
     // Filter out conflicting CN attributes
     ...issuerAttrsExtra.filter((attr) => !('CN' in attr)),
@@ -337,7 +343,7 @@ async function generateCertificate({
     publicKey: subjectPublicCryptoKey,
     signingKey: subjectPrivateCryptoKey,
     extensions: [
-      new x509.BasicConstraintsExtension(true, undefined, true), // ca: true, pathLength: undefined, critical: true
+      new x509.BasicConstraintsExtension(true, undefined, false), // ca: true, pathLength: undefined, critical: false (QUIC/TLS stacks may reject critical extensions)
       new x509.KeyUsagesExtension(
         x509.KeyUsageFlags.keyCertSign |
           x509.KeyUsageFlags.cRLSign |
@@ -591,13 +597,13 @@ async function generateTLSConfig(type: KeyTypes): Promise<TLSConfigs> {
     throw new Error(`Key type ${type} not implemented`)
   }
   const caCert = await generateCertificate({
-    certId: '0',
+    certId: Buffer.from(new TextEncoder().encode('JAM CA Ed25519 Cert')),
     issuerPrivateKey: caKeyPair.privateKey,
     subjectKeyPair: caKeyPair,
     duration: 60 * 60 * 24 * 365 * 10,
   })
   const leafCert = await generateCertificate({
-    certId: '1',
+    certId: Buffer.from(new TextEncoder().encode('JAM Client Ed25519 Cert')),
     issuerPrivateKey: caKeyPair.privateKey,
     subjectKeyPair: leafKeyPair,
     duration: 60 * 60 * 24 * 365 * 10,

@@ -1,0 +1,121 @@
+name: Build and Release Main Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize specific submodules
+        run: |
+          git submodule update --init --depth 1 packages/bandersnatch
+          git submodule update --init --depth 1 packages/bandersnatch-vrf
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.5
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build dependencies
+        run: bun run build
+
+      - name: Build main service binary
+        run: bun run build:main
+
+      - name: Create checksum
+        run: |
+          sha256sum bin/main-service > bin/main-service.sha256
+
+      - name: Compress binary
+        run: |
+          gzip -k -9 bin/main-service
+          sha256sum bin/main-service.gz > bin/main-service.gz.sha256
+
+      - name: Checkout releases repository
+        uses: actions/checkout@v4
+        with:
+          repository: Esscrypt/pbnj-main-service-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          path: releases-repo
+          fetch-depth: 0
+
+      - name: Copy binaries to releases repository
+        run: |
+          mkdir -p releases-repo/bin
+          cp bin/main-service.gz releases-repo/bin/
+          cp bin/main-service.gz.sha256 releases-repo/bin/
+          # Also include uncompressed version checksum for reference
+          cp bin/main-service.sha256 releases-repo/bin/
+
+      - name: Commit and push to releases repository
+        run: |
+          cd releases-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add main-service binary from commit ${{ github.sha }}"
+            # Try to detect default branch, fallback to main/master
+            if git show-ref --verify --quiet refs/remotes/origin/HEAD; then
+              DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@')
+            else
+              # Try to get default branch from remote
+              DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | awk '{print $3}' || echo "main")
+            fi
+            git push origin HEAD:$DEFAULT_BRANCH || git push origin HEAD:main || git push origin HEAD:master
+          fi
+
+      - name: Create release in releases repository
+        uses: softprops/action-gh-release@v1
+        with:
+          repository: Esscrypt/pbnj-main-service-releases
+          token: ${{ secrets.RELEASES_REPO_TOKEN }}
+          tag_name: main-service-${{ github.sha }}
+          name: Main Service ${{ github.sha }}
+          body: |
+            Main service binary built from commit ${{ github.sha }}
+            
+            ## Usage
+            
+            ### Extract and run:
+            ```bash
+            gunzip main-service.gz
+            chmod +x main-service
+            ./main-service --help
+            ```
+            
+            Or in one command:
+            ```bash
+            gunzip -c main-service.gz > main-service && chmod +x main-service && ./main-service --help
+            ```
+          draft: false
+          prerelease: true
+          files: |
+            releases-repo/bin/main-service.gz
+            releases-repo/bin/main-service.gz.sha256
+            releases-repo/bin/main-service.sha256

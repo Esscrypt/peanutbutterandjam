@@ -21,7 +21,12 @@ import {
   calculateBlockHashFromHeader,
   calculateExtrinsicHash,
 } from '@pbnjam/codec'
-import { type EventBusService, logger, zeroHash } from '@pbnjam/core'
+import {
+  type EventBusService,
+  hexToBytes,
+  logger,
+  zeroHash,
+} from '@pbnjam/core'
 
 import type {
   Block,
@@ -285,14 +290,6 @@ export class BlockImporterService
     }
 
     // Gray Paper: Process assurances FIRST, then guarantees
-    // From the perspective of a block's state-transition, the assurances are best processed first
-    // since each core may only have a single work-report pending its package becoming available at a time.
-    // This removes work reports that became available (super-majority) or timed out, freeing cores
-    // for new guarantees to be processed.
-    // Gray Paper accumulation.tex: Returns the "newly available work-reports" (ρ̂) that should be
-    // passed to accumulation
-    // For epoch transition blocks, assurances need to be verified against the PREVIOUS
-    // validator set, since the assurances were signed before the epoch transition
     const isEpochTransition = !!block.header.epochMark
     const [assuranceError, availableWorkReports] =
       this.assuranceService.processAssurances(
@@ -395,11 +392,12 @@ export class BlockImporterService
 
     // Update entropy accumulator with VRF signature from block header
     // Gray Paper Eq. 174: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
-    // This MUST happen for EVERY block, even empty ones, as entropy is part of the state
-    // Gray Paper pvm_invocations.tex Eq. 185: accumulation uses entropyaccumulator' (updated value)
-    // MUST await to ensure entropy is updated before accumulation uses it
-    // Emit bestBlockChanged event to trigger entropy update (EntropyService listens to this)
-    await this.eventBusService.emitBestBlockChanged(block.header)
+    const [entropyUpdateError] = this.entropyService.updateEntropyAccumulator(
+      hexToBytes(block.header.vrfSig),
+    )
+    if (entropyUpdateError) {
+      return safeError(entropyUpdateError)
+    }
 
     // Update thetime (C(11)) to the block's timeslot
     // Gray Paper merklization.tex C(11): thetime is the most recent block's timeslot index

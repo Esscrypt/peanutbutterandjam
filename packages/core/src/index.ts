@@ -12,9 +12,11 @@ export * from './event-bus'
 export * from './logger'
 // Export merklization implementation
 export * from './merklization'
+// Export service ID generation utilities
+// Export preimage utilities
+export * from './preimage-utils'
 export * from './schemas'
 export * from './service-id'
-// Export service ID generation utilities
 // Export shuffle functions
 export * from './shuffle'
 // Export all utilities

@@ -301,12 +301,102 @@ export function setAccumulateInputs(inputs: Array<AccumulateInput> | null): void
   pvmInstance!.pvm.setAccumulateInputs(inputs)
 }
 
+/**
+ * Set up refine invocation without executing (for step-by-step execution)
+ * Gray Paper equation 78-89: Ψ_R(coreIndex, workItemIndex, workPackage, authorizerTrace, importSegments, exportSegmentOffset)
+ * 
+ * @param gasLimit - Gas limit for execution (from work item refgaslimit)
+ * @param program - Program preimage blob
+ * @param args - Encoded refine arguments: encode{c, i, w.serviceindex, var{w.payload}, blake{p}}
+ * @param workPackage - Work package (for FETCH host function)
+ * @param authorizerTrace - Authorizer trace (for FETCH host function)
+ * @param importSegments - Import segments (for FETCH host function)
+ * @param exportSegmentOffset - Export segment offset (for EXPORT host function)
+ * @param serviceAccount - Service account (for HISTORICAL_LOOKUP host function)
+ * @param lookupAnchorTimeslot - Lookup anchor timeslot (for HISTORICAL_LOOKUP host function)
+ */
+export function setupRefineInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  workPackage: WorkPackage | null,
+  authorizerTrace: Uint8Array | null,
+  importSegments: Array<Array<Uint8Array>> | null,
+  exportSegmentOffset: u32,
+  serviceAccount: CompleteServiceAccount | null,
+  lookupAnchorTimeslot: u64,
+): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.setupRefineInvocation(
+    gasLimit,
+    program,
+    args,
+    workPackage,
+    authorizerTrace,
+    importSegments,
+    exportSegmentOffset,
+    serviceAccount,
+    lookupAnchorTimeslot,
+  )
+}
+
 export function runProgram(
 ): RunProgramResult {
   if (!pvmInstance) {
     return new RunProgramResult(0, ExecutionResult.fromPanic())
   }
   return pvmInstance!.pvm.runProgram()
+}
+
+/**
+ * Set up is-authorized invocation without executing (for step-by-step execution)
+ * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+ * 
+ * @param gasLimit - Gas limit for execution (from IS_AUTHORIZED_CONFIG.PACKAGE_AUTH_GAS)
+ * @param program - Program preimage blob (auth code)
+ * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+ * @param workPackage - Work package (for FETCH host function)
+ */
+export function setupIsAuthorizedInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  workPackage: WorkPackage | null,
+): void {
+  if (!pvmInstance) return
+  pvmInstance!.pvm.setupIsAuthorizedInvocation(
+    gasLimit,
+    program,
+    args,
+    workPackage,
+  )
+}
+
+/**
+ * Execute is-authorized invocation
+ * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+ * 
+ * @param gasLimit - Gas limit for execution
+ * @param program - Program preimage blob (auth code)
+ * @param args - Encoded arguments: encode[2]{c} where c is coreIndex
+ * @param workPackage - Work package (for FETCH host function)
+ * @returns RunProgramResult with gas consumed and result
+ */
+export function isAuthorizedInvocation(
+  gasLimit: u32,
+  program: Uint8Array,
+  args: Uint8Array,
+  workPackage: WorkPackage | null,
+): RunProgramResult {
+  if (!pvmInstance) {
+    return new RunProgramResult(0, ExecutionResult.fromPanic())
+  }
+  return pvmInstance!.pvm.isAuthorizedInvocation(
+    gasLimit,
+    program,
+    args,
+    workPackage,
+  )
 }
 
 /**
@@ -559,6 +649,17 @@ export function getAccumulationContext(
   // Encode the ImplicationsPair using the codec
   const encoded = encodeImplicationsPair(context, numCores, numValidators, authQueueSize)
   return encoded
+}
+
+/**
+ * Get refine context export segments
+ * Returns the export segments from the refine context
+ */
+export function getRefineContextExportSegments(): Array<Uint8Array> {
+  if (!pvmInstance || !pvmInstance!.pvm.refineContext) {
+    return []
+  }
+  return pvmInstance!.pvm.refineContext!.exportSegments
 }
 
 /**

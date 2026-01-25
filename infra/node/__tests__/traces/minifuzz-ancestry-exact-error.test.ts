@@ -285,7 +285,7 @@ describe('Minifuzz Ancestry Test', () => {
     // This allows rolling back to initial state if first block fails
     const [initTrieError, initTrie] = stateService.generateStateTrie()
     if (!initTrieError && initTrie && initStateRoot) {
-      chainManagerService.saveStateSnapshot(initStateRoot, initTrie)
+      chainManagerService.initializeGenesisHeader(init.header, initTrie)
     }
 
     // Process each block

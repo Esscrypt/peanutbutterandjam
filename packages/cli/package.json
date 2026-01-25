@@ -21,10 +21,10 @@
     ]
   },
   "scripts": {
-    "build": "tsc",
+    "build": "bun build ./src/index.ts --compile --outfile ./bin/pbnj --sourcemap --minify-whitespace --minify-syntax --target bun",
     "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --format=cjs",
-    "build:binary": "bun run build:bundle && npx pkg dist/bundle.js --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path dist/bin --public",
-    "build:all": "bun run build:binary",
+    "build:pkg": "bun run build:bundle && npx pkg dist/bundle.js --targets node18-linux-x64,node18-macos-x64,node18-win-x64 --out-path dist/bin --public",
+    "build:all": "bun run build:pkg",
     "check": "tsc --pretty --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
@@ -38,6 +38,7 @@
     "@pbnjam/node": "workspace:*",
     "@pbnjam/types": "workspace:*",
     "@pbnjam/codec": "workspace:*",
+    "@pbnjam/genesis": "workspace:*",
     "dotenv": "catalog:",
     "commander": "catalog:"
   },

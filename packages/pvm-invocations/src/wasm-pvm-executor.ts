@@ -16,8 +16,11 @@ import {
   decodeImplicationsPair,
   decodeProgramFromPreimage,
   encodeAccumulateInput,
+  encodeCompleteServiceAccount,
   encodeImplicationsPair,
+  encodeUint8Array,
   encodeVariableSequence,
+  encodeWorkPackage,
 } from '@pbnjam/codec'
 import { logger } from '@pbnjam/core'
 import { writeTraceDump } from '@pbnjam/pvm'
@@ -27,11 +30,14 @@ import type {
   IConfigService,
   IEntropyService,
   ImplicationsPair,
+  IServiceAccountService,
   PVMInstruction,
   PVMState,
   RAM,
   ResultCode,
   SafePromise,
+  ServiceAccount,
+  WorkPackage,
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import InstructionRegistry directly from registry file
@@ -46,7 +52,8 @@ export class WasmPVMExecutor {
   private wasm: WasmModule | null = null
   private readonly wasmModuleBytes: ArrayBuffer
   private readonly configService: IConfigService
-  private readonly entropyService: IEntropyService
+  private readonly entropyService: IEntropyService | null
+  private readonly serviceAccountService: IServiceAccountService | null
   private readonly workspaceRoot: string
   private readonly traceSubfolder?: string
 
@@ -85,12 +92,13 @@ export class WasmPVMExecutor {
    * Host function handling is now done internally in AssemblyScript, so no registries are needed.
    *
    * @param configService - Configuration service (required for accumulation invocations)
-   * @param entropyService - Entropy service (required for accumulation invocations)
+   * @param entropyService - Entropy service (required for accumulation invocations) or ServiceAccountService (for refine invocations)
    * @param traceSubfolder - Optional subfolder name for trace output (e.g., 'preimages_light', 'storage_light')
    */
   constructor(
     configService: IConfigService,
-    entropyService: IEntropyService,
+    entropyService: IEntropyService | null,
+    serviceAccountService: IServiceAccountService | null,
     traceSubfolder?: string,
   ) {
     // Resolve path to WASM file in pvm-assemblyscript package
@@ -173,34 +181,8 @@ export class WasmPVMExecutor {
 
     this.configService = configService
     this.entropyService = entropyService
+    this.serviceAccountService = serviceAccountService
   }
-
-  /**
-   * Ensure WASM module is initialized (lazy initialization)
-   */
-  // private async ensureInitialized(): Promise<void> {
-  //   if (this.wasm) {
-  //     return
-  //   }
-
-  //   // If initialization is already in progress, wait for it
-  //   if (this.initializationPromise) {
-  //     return this.initializationPromise
-  //   }
-
-  //   // Start initialization
-  //   this.initializationPromise = (async () => {
-  //     // Instantiate WASM module using wasmAsInit
-  //     const wasm = await instantiate(this.wasmModuleBytes, {})
-
-  //     // Initialize PVM with PVMRAM
-  //     wasm.init(wasm.RAMType.PVMRAM)
-
-  //     this.wasm = wasm
-  //   })()
-
-  //   await this.initializationPromise
-  // }
 
   /**
    * Force re-instantiation of WASM module
@@ -711,6 +693,391 @@ export class WasmPVMExecutor {
       gasConsumed,
       result,
       context: updatedContext,
+    })
+  }
+
+  /**
+   * Execute refine invocation using setupRefineInvocation
+   * Gray Paper equation 78-89: Ψ_R(coreIndex, workItemIndex, workPackage, authorizerTrace, importSegments, exportSegmentOffset)
+   *
+   * This is the public method that RefinePVM should call directly for WASM execution.
+   * Host functions are handled internally in the WASM assembly code.
+   */
+  async executeRefinementInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+    authorizerTrace: Uint8Array,
+    importSegments: Uint8Array[][],
+    exportSegmentOffset: bigint,
+    serviceAccount: ServiceAccount,
+    lookupAnchorTimeslot: bigint,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+    exportSegments: Uint8Array[]
+  }> {
+    // CRITICAL: Re-instantiate WASM module for each invocation to ensure completely fresh state
+    await this.reinitializeWasm()
+
+    if (!this.wasm) {
+      return safeError(new Error('Failed to initialize WASM module'))
+    }
+
+    if (!this.configService) {
+      return safeError(
+        new Error('ConfigService required for refine invocation'),
+      )
+    }
+
+    if (!this.serviceAccountService) {
+      return safeError(
+        new Error('ServiceAccountService required for refine invocation'),
+      )
+    }
+
+    // Check if setupRefineInvocation is available (will be after WASM recompilation)
+    if (!this.wasm.setupRefineInvocation) {
+      return safeError(
+        new Error(
+          'setupRefineInvocation not available - WASM module needs to be recompiled with refine invocation support',
+        ),
+      )
+    }
+
+    // Encode work package for WASM (WorkPackage is passed directly, WASM bindings handle conversion)
+    // Note: The WASM bindings will automatically convert TypeScript WorkPackage to AssemblyScript WorkPackage
+    const [workPackageError, encodedWorkPackage] =
+      encodeWorkPackage(workPackage)
+    if (workPackageError) {
+      return safeError(
+        new Error(`Failed to encode work package: ${workPackageError.message}`),
+      )
+    }
+
+    // Convert importSegments to the format expected by WASM
+    // importSegments is Uint8Array[][] (nested array)
+    // WASM expects Array<Array<Uint8Array>>
+    const [importSegmentsError, encodedImportSegments] = encodeVariableSequence(
+      importSegments,
+      encodeUint8Array,
+    )
+    if (importSegmentsError) {
+      return safeError(
+        new Error(
+          `Failed to encode import segments: ${importSegmentsError.message}`,
+        ),
+      )
+    }
+
+    // Convert serviceAccount to CompleteServiceAccount format for WASM
+    const [serviceAccountError, encodedServiceAccount] =
+      encodeCompleteServiceAccount(serviceAccount)
+    if (serviceAccountError) {
+      return safeError(
+        new Error(
+          `Failed to encode service account: ${serviceAccountError.message}`,
+        ),
+      )
+    }
+
+    // Set up refine invocation
+    this.wasm.setupRefineInvocation(
+      Number(gasLimit),
+      preimageBlob,
+      encodedArgs,
+      encodedWorkPackage, // WASM bindings will handle conversion
+      authorizerTrace,
+      encodedImportSegments, // WASM bindings will handle conversion
+      Number(exportSegmentOffset),
+      encodedServiceAccount,
+      Number(lookupAnchorTimeslot),
+    )
+
+    // Clear execution logs at the start of each execution run
+    this.executionLogs = []
+    this.traceHostFunctionLogs = []
+
+    // Get WASM's code and bitmask arrays after first step (they're extended in run())
+    let wasmCode: Uint8Array | null = null
+    let wasmBitmask: Uint8Array | null = null
+
+    // Execute step-by-step until completion
+    const initialGas = gasLimit
+    let steps = 0
+    const maxSteps = this.configService.maxBlockGas
+
+    while (steps < maxSteps) {
+      const pcBefore = BigInt(this.wasm.getProgramCounter())
+      const gasBefore = BigInt(this.wasm.getGasLeft())
+
+      // On first step, get WASM code/bitmask arrays (they're extended in run())
+      if (steps === 0 && this.wasm.getCode && this.wasm.getBitmask) {
+        wasmCode = this.wasm.getCode()
+        wasmBitmask = this.wasm.getBitmask()
+      }
+
+      // Decode instruction at PC BEFORE step to check if it's ECALLI
+      const codeArray = wasmCode || this.code
+      const bitmaskArray = wasmBitmask || this.bitmask
+      const pcIndex = Number(pcBefore)
+      let isEcalli = false
+      let hostCallId: bigint | null = null
+
+      if (
+        pcIndex >= 0 &&
+        pcIndex < codeArray.length &&
+        pcIndex < bitmaskArray.length
+      ) {
+        if (bitmaskArray[pcIndex] === 1) {
+          const instructionOpcode = codeArray[pcIndex]
+          // ECALLI opcode is 10 (0x0A)
+          if (instructionOpcode === 10) {
+            isEcalli = true
+            // Extract host call ID from instruction operands
+            let fskip = -1
+            for (
+              let j = 0;
+              j < 24 && pcIndex + 1 + j < bitmaskArray.length;
+              j++
+            ) {
+              if (bitmaskArray[pcIndex + 1 + j] === 1) {
+                fskip = j
+                break
+              }
+            }
+            if (fskip === -1 && pcIndex + 1 < codeArray.length) {
+              fskip = Math.min(24, codeArray.length - pcIndex - 1)
+            } else if (fskip === -1) {
+              fskip = 0
+            }
+            if (fskip > 0) {
+              const operandStart = pcIndex + 1
+              if (operandStart < codeArray.length) {
+                hostCallId = BigInt(codeArray[operandStart])
+              }
+            } else {
+              hostCallId = 0n
+            }
+          }
+        }
+      }
+
+      // Clear last memory operation tracking before step (JIP-6 trace support)
+      this.wasm.clearLastMemoryOp()
+
+      // Execute one step
+      const shouldContinue = this.wasm.nextStep()
+      steps++
+
+      // Capture load/store values after step (JIP-6 trace support)
+      const loadAddress = this.wasm.getLastLoadAddress()
+      const loadValue = this.wasm.getLastLoadValue()
+      const storeAddress = this.wasm.getLastStoreAddress()
+      const storeValue = this.wasm.getLastStoreValue()
+
+      // Get state after step
+      const gasAfter = BigInt(this.wasm.getGasLeft())
+      const registersAfter = this.wasm.getRegisters()
+      const registerStateAfter: bigint[] = []
+      const registerViewAfter = new DataView(registersAfter.buffer)
+      for (let i = 0; i < 13; i++) {
+        registerStateAfter[i] = registerViewAfter.getBigUint64(i * 8, true)
+      }
+
+      // Get status after step
+      const status = this.wasm.getStatus()
+
+      // If this was an ECALLI, log the host function call
+      if (isEcalli && hostCallId !== null) {
+        this.traceHostFunctionLogs.push({
+          step: steps,
+          hostCallId,
+          gasBefore: gasBefore - 1n, // Subtract 1 gas for instruction cost
+          gasAfter,
+        })
+      }
+
+      let instructionName = 'UNKNOWN'
+      let opcode = '0x00'
+
+      if (
+        pcIndex >= 0 &&
+        pcIndex < codeArray.length &&
+        pcIndex < bitmaskArray.length
+      ) {
+        if (bitmaskArray[pcIndex] === 1) {
+          const instructionOpcode = codeArray[pcIndex]
+          const handler = this.instructionRegistry.getHandler(
+            BigInt(instructionOpcode),
+          )
+          instructionName = handler?.name ?? 'UNKNOWN'
+          opcode = `0x${instructionOpcode.toString(16)}`
+        } else {
+          instructionName = 'INVALID_POSITION'
+          opcode = `0x${codeArray[pcIndex]?.toString(16) || 'undefined'}`
+        }
+      }
+
+      // Log execution step
+      this.executionLogs.push({
+        step: steps,
+        pc: pcBefore,
+        instructionName,
+        opcode,
+        gas: gasAfter,
+        registers: registerStateAfter.map((r) => r.toString()),
+        loadAddress,
+        loadValue,
+        storeAddress,
+        storeValue,
+      })
+
+      // Check if execution should stop
+      if (!shouldContinue) {
+        if (status === 4) {
+          // HOST status - continue execution
+          continue
+        }
+        break
+      }
+
+      if (status !== 0 && status !== 4) {
+        break
+      }
+    }
+
+    const finalGas = BigInt(this.wasm.getGasLeft())
+    const status = this.wasm.getStatus()
+
+    // Calculate gas consumed
+    let gasConsumed: bigint
+    if (status === 5) {
+      gasConsumed = initialGas
+    } else {
+      gasConsumed = initialGas - (finalGas > 0n ? finalGas : 0n)
+    }
+
+    // Determine result
+    let result: Uint8Array | 'PANIC' | 'OOG'
+    if (status === 5) {
+      result = 'OOG'
+    } else if (status === 2) {
+      result = 'PANIC'
+    } else {
+      const rawResult = this.wasm.getResult()
+      if (!rawResult || !(rawResult instanceof Uint8Array)) {
+        result = new Uint8Array(0)
+      } else {
+        result = rawResult
+      }
+    }
+
+    // Get export segments from refine context
+    let exportSegments: Uint8Array[] = []
+    if (this.wasm.getRefineContextExportSegments) {
+      const wasmExportSegments = this.wasm.getRefineContextExportSegments()
+      if (wasmExportSegments && Array.isArray(wasmExportSegments)) {
+        exportSegments = wasmExportSegments
+      }
+    }
+
+    return safeResult({
+      gasConsumed,
+      result,
+      exportSegments,
+    })
+  }
+
+  /**
+   * Execute is-authorized invocation using setupIsAuthorizedInvocation
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   *
+   * This is the public method that IsAuthorizedPVM should call directly for WASM execution.
+   * Host functions are handled internally in the WASM assembly code.
+   */
+  async executeIsAuthorizedInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+  }> {
+    // CRITICAL: Re-instantiate WASM module for each invocation to ensure completely fresh state
+    await this.reinitializeWasm()
+
+    if (!this.wasm) {
+      return safeError(new Error('Failed to initialize WASM module'))
+    }
+
+    if (!this.configService) {
+      return safeError(
+        new Error('ConfigService required for is-authorized invocation'),
+      )
+    }
+
+    if (!this.serviceAccountService) {
+      return safeError(
+        new Error(
+          'ServiceAccountService required for is-authorized invocation',
+        ),
+      )
+    }
+
+    // Check if setupIsAuthorizedInvocation is available (will be after WASM recompilation)
+    if (!this.wasm.setupIsAuthorizedInvocation) {
+      return safeError(
+        new Error(
+          'setupIsAuthorizedInvocation not available - WASM module needs to be recompiled with is-authorized invocation support',
+        ),
+      )
+    }
+
+    // Encode work package for WASM (WorkPackage is passed directly, WASM bindings handle conversion)
+    // Note: The WASM bindings will automatically convert TypeScript WorkPackage to AssemblyScript WorkPackage
+    const [workPackageError, encodedWorkPackage] =
+      encodeWorkPackage(workPackage)
+    if (workPackageError) {
+      return safeError(
+        new Error(`Failed to encode work package: ${workPackageError.message}`),
+      )
+    }
+
+    // Set up is-authorized invocation
+    this.wasm.setupIsAuthorizedInvocation(
+      Number(gasLimit),
+      preimageBlob,
+      encodedArgs,
+      encodedWorkPackage, // WASM bindings will handle conversion
+    )
+
+    // Run program
+    this.wasm.runProgram()
+
+    // Extract result
+    const resultCode = this.wasm.getResultCode()
+    const gasConsumed = BigInt(this.wasm.getGasLeft())
+      ? gasLimit - BigInt(this.wasm.getGasLeft())
+      : gasLimit
+
+    // Determine result based on result code
+    let result: Uint8Array | 'PANIC' | 'OOG'
+    if (resultCode === RESULT_CODES.PANIC) {
+      result = 'PANIC'
+    } else if (resultCode === RESULT_CODES.OOG) {
+      result = 'OOG'
+    } else {
+      // HALT - read result blob from memory
+      const resultBlob = this.wasm.getResult()
+      result = resultBlob.length > 0 ? resultBlob : new Uint8Array(0)
+    }
+
+    return safeResult({
+      gasConsumed,
+      result,
     })
   }
 

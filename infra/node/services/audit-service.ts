@@ -1,622 +1,837 @@
-// /**
-//  * Audit Service
-//  *
-//  * Implements audit announcement creation and management according to Gray Paper specifications.
-//  * Handles audit triggering based on work reports becoming available and tranche timing.
-//  *
-//  * Gray Paper Reference: auditing.tex
-//  * - Audits are triggered when work reports become available (justbecameavailable)
-//  * - New tranches begin every Ctrancheseconds = 8 seconds
-//  * - Additional audits triggered by negative judgments or insufficient judgments
-//  */
+/**
+ * Audit Service
+ *
+ * Implements audit announcement creation and management according to Gray Paper specifications.
+ * Handles audit triggering based on work reports becoming available and tranche timing.
+ *
+ * Gray Paper Reference: auditing.tex
+ * - Audits are triggered when work reports become available (justbecameavailable)
+ * - New tranches begin every Ctrancheseconds = 8 seconds
+ * - Additional audits triggered by negative judgments or insufficient judgments
+ */
 
-// import {
-//   generateAuditSignature,
-//   selectAuditTranche0,
-//   selectAuditTrancheN,
-//   verifyAnnouncementSignature,
-//   verifyBandersnatchVRFEvidence,
-//   verifyTranche0AuditSignature,
-//   verifyTrancheNAuditSignature,
-//   verifyWorkReportSelection,
-// } from '@pbnjam/audit'
-// import {
-//   type AuditTrancheEvent,
-//   type EventBusService,
-//   hexToBytes,
-//   logger,
-//   type Safe,
-//   type SafePromise,
-//   safeError,
-//   safeResult,
-// } from '@pbnjam/core'
-// import type { AuditAnnouncement, Judgment, WorkReport } from '@pbnjam/types'
-// import { BaseService } from '@pbnjam/types'
-// import type { Hex } from 'viem'
-// import type { ValidatorSetManager } from './validator-set'
-// import type { WorkReportService } from './work-report-service'
+import {
+  generateAnnouncementSignature,
+  generateAuditSignature,
+  selectAuditTranche0,
+  selectAuditTrancheN,
+  verifyAnnouncementSignature,
+  verifyBandersnatchVRFEvidence,
+  verifyTranche0AuditSignature,
+  verifyTrancheNAuditSignature,
+  verifyWorkReportSelection,
+} from '@pbnjam/audit'
+import {
+  type AuditTrancheEvent,
+  bytesToHex,
+  type EventBusService,
+  getValidatorCredentialsWithFallback,
+  type Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
+import type { AuditAnnouncementProtocol } from '@pbnjam/networking'
+import type {
+  AuditAnnouncement,
+  IConfigService,
+  Judgment,
+  Safe,
+  SafePromise,
+  StreamKind,
+  WorkReport,
+} from '@pbnjam/types'
+import { BaseService, safeError, safeResult } from '@pbnjam/types'
+import type { KeyPairService } from './keypair-service'
+import type { NetworkingService } from './networking-service'
+import type { ValidatorSetManager } from './validator-set'
+import type { WorkReportService } from './work-report-service'
 
-// /**
-//  * Audit Service
-//  *
-//  * Manages audit announcements and triggers audits according to Gray Paper specifications.
-//  *
-//  * Key responsibilities:
-//  * - Create audit announcements for tranche 0 (Fisher-Yates shuffle)
-//  * - Create audit announcements for tranche N (no-show based selection)
-//  * - Trigger audits when work reports become available
-//  * - Handle tranche timing (every 8 seconds)
-//  * - Process negative judgments and insufficient judgment scenarios
-//  */
-// export class AuditService extends BaseService {
-//   private readonly pendingAudits: Map<string, AuditAnnouncement> = new Map()
-//   private readonly workReportsAvailable: Map<string, WorkReport[]> = new Map()
-//   private readonly eventBusService: EventBusService
-//   private readonly validatorSetManager: ValidatorSetManager
-//   private readonly workReportService: WorkReportService
-//   constructor(options: {
-//     eventBusService: EventBusService
-//     validatorSetManager: ValidatorSetManager
-//     workReportService: WorkReportService
-//   }) {
-//     super('audit-service')
-//     this.eventBusService = options.eventBusService
-//     this.validatorSetManager = options.validatorSetManager
-//     this.workReportService = options.workReportService
-//     this.eventBusService.addAuditTrancheCallback(
-//       this.handleAuditTranche.bind(this),
-//     )
-//     this.eventBusService.addWorkReportAvailableCallback(
-//       this.handleWorkReportAvailable.bind(this),
-//     )
-//     this.eventBusService.addNegativeJudgmentReceivedCallback(
-//       this.handleNegativeJudgmentReceived.bind(this),
-//     )
-//     this.eventBusService.addAuditAnnouncementReceivedCallback(
-//       this.handleAuditAnnouncementReceived.bind(this),
-//     )
-//   }
+export class AuditService extends BaseService {
+  private readonly pendingAudits: Map<string, AuditAnnouncement> = new Map()
+  private readonly eventBusService: EventBusService
+  private readonly validatorSetManager: ValidatorSetManager
+  private readonly workReportService: WorkReportService
+  private readonly networkingService: NetworkingService | null
+  private readonly auditAnnouncementProtocol: AuditAnnouncementProtocol | null
+  private readonly configService: IConfigService
+  private readonly keyPairService: KeyPairService | null
+  private currentTranche = 0
 
-//   override stop(): Safe<boolean> {
-//     this.pendingAudits.clear()
-//     this.workReportsAvailable.clear()
+  constructor(options: {
+    eventBusService: EventBusService
+    validatorSetManager: ValidatorSetManager
+    workReportService: WorkReportService
+    networkingService?: NetworkingService | null
+    auditAnnouncementProtocol?: AuditAnnouncementProtocol | null
+    configService: IConfigService
+    keyPairService?: KeyPairService | null
+  }) {
+    super('audit-service')
+    this.eventBusService = options.eventBusService
+    this.validatorSetManager = options.validatorSetManager
+    this.workReportService = options.workReportService
+    this.networkingService = options.networkingService ?? null
+    this.auditAnnouncementProtocol = options.auditAnnouncementProtocol ?? null
+    this.configService = options.configService
+    this.keyPairService = options.keyPairService ?? null
+    this.eventBusService.addAuditTrancheCallback(
+      this.handleAuditTranche.bind(this),
+    )
+    this.eventBusService.addWorkReportAvailableCallback(
+      this.handleWorkReportAvailable.bind(this),
+    )
+    this.eventBusService.addNegativeJudgmentReceivedCallback(
+      this.handleNegativeJudgmentReceived.bind(this),
+    )
+    this.eventBusService.addAuditAnnouncementReceivedCallback(
+      this.handleAuditAnnouncementReceived.bind(this),
+    )
+  }
 
-//     this.eventBusService.removeAuditTrancheCallback(
-//       this.handleAuditTranche.bind(this),
-//     )
-//     this.eventBusService.removeWorkReportAvailableCallback(
-//       this.handleWorkReportAvailable.bind(this),
-//     )
-//     this.eventBusService.removeNegativeJudgmentReceivedCallback(
-//       this.handleNegativeJudgmentReceived.bind(this),
-//     )
-//     this.eventBusService.removeAuditAnnouncementReceivedCallback(
-//       this.handleAuditAnnouncementReceived.bind(this),
-//     )
-//     return safeResult(true)
-//   }
+  override stop(): Safe<boolean> {
+    this.pendingAudits.clear()
+    // this.workReportsAvailable.clear()
 
-//   /**
-//    * Handle work report available events
-//    * Gray Paper: Audits triggered when work reports become available (justbecameavailable)
-//    */
-//   private readonly handleWorkReportAvailable = async (
-//     workReport: WorkReport,
-//     coreIndex: bigint,
-//     blockHeaderHash: Hex,
-//   ): SafePromise<void> => {
-//     try {
-//       logger.debug('Work report became available, triggering tranche 0 audit', {
-//         coreIndex: coreIndex.toString(),
-//         blockHeaderHash,
-//         workReportHash: workReport.core_index.toString(),
-//       })
+    this.eventBusService.removeAuditTrancheCallback(
+      this.handleAuditTranche.bind(this),
+    )
+    this.eventBusService.removeWorkReportAvailableCallback(
+      this.handleWorkReportAvailable.bind(this),
+    )
+    this.eventBusService.removeNegativeJudgmentReceivedCallback(
+      this.handleNegativeJudgmentReceived.bind(this),
+    )
+    this.eventBusService.removeAuditAnnouncementReceivedCallback(
+      this.handleAuditAnnouncementReceived.bind(this),
+    )
+    return safeResult(true)
+  }
 
-//       // Store the work report for potential future tranches
-//       if (!this.workReportsAvailable.has(blockHeaderHash)) {
-//         this.workReportsAvailable.set(blockHeaderHash, [])
-//       }
-//       this.workReportsAvailable.get(blockHeaderHash)!.push(workReport)
+  /**
+   * Handle work report available events
+   * Gray Paper: Audits triggered when work reports become available (justbecameavailable)
+   */
+  private readonly handleWorkReportAvailable = async (
+    workReport: WorkReport,
+    coreIndex: bigint,
+    blockHeaderHash: Hex,
+  ): SafePromise<void> => {
+    logger.debug('Work report became available, triggering tranche 0 audit', {
+      coreIndex: coreIndex.toString(),
+      blockHeaderHash,
+      workReportHash: workReport.core_index.toString(),
+    })
 
-//       // TODO: Trigger tranche 0 audit announcement
-//       // This would involve:
-//       // 1. Getting core work reports for this block
-//       // 2. Getting bandersnatch VRF output from block header
-//       // 3. Creating audit announcement for tranche 0
-//       // 4. Publishing the announcement
+    // Store the work report for potential future tranches
+    //   if (!this.workReportsAvailable.has(blockHeaderHash)) {
+    //     this.workReportsAvailable.set(blockHeaderHash, [])
+    //   }
+    //   this.workReportsAvailable.get(blockHeaderHash)!.push(workReport)
 
-//       logger.debug('Tranche 0 audit announcement not yet implemented')
+    // TODO: Trigger tranche 0 audit announcement
+    // This would involve:
+    // 1. Getting core work reports for this block
+    // 2. Getting bandersnatch VRF output from block header
+    // 3. Creating audit announcement for tranche 0
+    // 4. Publishing the announcement
 
-//       return safeResult(undefined)
-//     } catch (error) {
-//       logger.error('Error handling work report available for audit service', {
-//         error: error instanceof Error ? error.message : String(error),
-//         coreIndex: coreIndex.toString(),
-//         blockHeaderHash,
-//       })
-//       return safeError(error as Error)
-//     }
-//   }
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Handle negative judgment received events
-//    * Gray Paper: Validator is always required to audit when negative judgment is received
-//    */
-//   private readonly handleNegativeJudgmentReceived = async (
-//     _judgment: Judgment,
-//     workReportHash: Hex,
-//     validatorIndex: bigint,
-//   ): SafePromise<void> => {
-//     try {
-//       logger.info('Negative judgment received, triggering immediate audit', {
-//         workReportHash,
-//         validatorIndex: validatorIndex.toString(),
-//       })
+  /**
+   * Handle negative judgment received events
+   * Gray Paper: Validator is always required to audit when negative judgment is received
+   */
+  private readonly handleNegativeJudgmentReceived = async (
+    _judgment: Judgment,
+    workReportHash: Hex,
+    validatorIndex: bigint,
+  ): SafePromise<void> => {
+    try {
+      logger.info('Negative judgment received, triggering immediate audit', {
+        workReportHash,
+        validatorIndex: validatorIndex.toString(),
+      })
 
-//       // TODO: Trigger immediate audit for this work report
-//       // This would involve:
-//       // 1. Finding the work report that was judged negatively
-//       // 2. Creating audit announcement for immediate audit
-//       // 3. Publishing the announcement
+      // TODO: Trigger immediate audit for this work report
+      // This would involve:
+      // 1. Finding the work report that was judged negatively
+      // 2. Creating audit announcement for immediate audit
+      // 3. Publishing the announcement
 
-//       logger.debug('Immediate audit for negative judgment not yet implemented')
+      logger.debug('Immediate audit for negative judgment not yet implemented')
 
-//       return safeResult(undefined)
-//     } catch (error) {
-//       logger.error('Error handling negative judgment for audit service', {
-//         error: error instanceof Error ? error.message : String(error),
-//         workReportHash,
-//         validatorIndex: validatorIndex.toString(),
-//       })
-//       return safeError(error as Error)
-//     }
-//   }
+      return safeResult(undefined)
+    } catch (error) {
+      logger.error('Error handling negative judgment for audit service', {
+        error: error instanceof Error ? error.message : String(error),
+        workReportHash,
+        validatorIndex: validatorIndex.toString(),
+      })
+      return safeError(error as Error)
+    }
+  }
 
-//   /**
-//    * Handle audit tranche events
-//   /**
-//    * Handle audit tranche events
-//    * Gray Paper: New tranches begin every Ctrancheseconds = 8 seconds
-//    */
-//   private readonly handleAuditTranche = async (
-//     event: AuditTrancheEvent,
-//   ): SafePromise<void> => {
-//     const trancheNumber = event.trancheNumber
+  /**
+   * Handle audit tranche events
+  /**
+   * Handle audit tranche events
+   * Gray Paper: New tranches begin every Ctrancheseconds = 8 seconds
+   */
+  private readonly handleAuditTranche = async (
+    event: AuditTrancheEvent,
+  ): SafePromise<void> => {
+    const trancheNumber = event.trancheNumber
 
-//     if (trancheNumber === 0) {
-//       this.createAuditAnnouncementTranche0(
-//         event.blockHeader.hash,
-//         event.coreWorkReports,
-//         event.blockHeader.bandersnatchVrfOutput,
-//       )
-//     } else {
-//       this.createAuditAnnouncementTrancheN(
-//         event.headerHash,
-//         event.coreWorkReports,
-//         event.bandersnatchVrfOutput,
-//         trancheNumber,
-//         event.previousTrancheAnnouncements,
-//         event.negativeJudgments,
-//       )
-//     }
-//   }
-//   /**
-//    * Handle audit announcement received events
-//    * Gray Paper: Monitor announcements to detect insufficient judgments
-//    */
-//   private readonly handleAuditAnnouncementReceived = async (
-//     announcement: AuditAnnouncement,
-//     peerPublicKey: Hex,
-//   ): SafePromise<void> => {
-//     // get the validator index from the peer public key
-//     const [announcerValidatorIndexError, announcerValidatorIndex] =
-//       this.validatorSetManager.getValidatorIndex(peerPublicKey)
-//     if (announcerValidatorIndexError) {
-//       logger.error('Failed to get announcer validator index', {
-//         error: announcerValidatorIndexError,
-//       })
-//       return safeError(announcerValidatorIndexError)
-//     }
+    // TODO: Get actual block header, core work reports, and VRF output from event or state
+    // For now, this is a placeholder - the actual implementation needs to get this data
+    // from the block importer or state service
+    logger.debug('Audit tranche event received', {
+      trancheNumber,
+      slot: event.slot.toString(),
+    })
 
-//     // Step 1: Verify the Ed25519 announcement signature
-//     const [signatureError, signatureValid] = verifyAnnouncementSignature(
-//       announcement,
-//       announcerValidatorIndex,
-//       this.validatorSetManager,
-//     )
-//     if (signatureError) {
-//       logger.error('Failed to verify announcement signature', {
-//         error: signatureError,
-//       })
-//       return safeError(signatureError)
-//     }
-//     if (!signatureValid) {
-//       logger.error('Invalid announcement signature')
-//       return safeError(new Error('Invalid announcement signature'))
-//     }
+    // TODO: Implement actual audit announcement creation when event data is available
+    // This requires:
+    // 1. Getting the current block header hash
+    // 2. Getting core work reports for the block
+    // 3. Getting bandersnatch VRF output from block header
+    // 4. For tranche N > 0: getting previous tranche announcements and negative judgments
 
-//     // for each work report in the announcement, get the work report from the work reports available map
-//     const workReports = announcement.announcement.workReports.map(
-//       (workReport) => {
-//         return this.workReportService.getWorkReportByHash(
-//           workReport.workReportHash,
-//         )
-//       },
-//     )
+    return safeResult(undefined)
+  }
+  /**
+   * Handle audit announcement received events
+   * Gray Paper: Monitor announcements to detect insufficient judgments
+   */
+  private readonly handleAuditAnnouncementReceived = async (
+    announcement: AuditAnnouncement,
+    peerPublicKey: Hex,
+  ): SafePromise<void> => {
+    // get the validator index from the peer public key
+    const [announcerValidatorIndexError, announcerValidatorIndex] =
+      this.validatorSetManager.getValidatorIndex(peerPublicKey)
+    if (announcerValidatorIndexError) {
+      logger.error('Failed to get announcer validator index', {
+        error: announcerValidatorIndexError,
+      })
+      return safeError(announcerValidatorIndexError)
+    }
 
-//     // if someone tries to audit an unavailable work report, return an error
+    // Step 1: Verify the Ed25519 announcement signature
+    const [signatureError, signatureValid] = verifyAnnouncementSignature(
+      announcement,
+      announcerValidatorIndex,
+      this.validatorSetManager,
+    )
+    if (signatureError) {
+      logger.error('Failed to verify announcement signature', {
+        error: signatureError,
+      })
+      return safeError(signatureError)
+    }
+    if (!signatureValid) {
+      logger.error('Invalid announcement signature')
+      return safeError(new Error('Invalid announcement signature'))
+    }
 
-//     // Step 2: Verify the Bandersnatch VRF evidence
-//     const [vrfError, vrfValid] = verifyBandersnatchVRFEvidence(
-//       announcement,
-//       hexToBytes(peerPublicKey),
-//       workReports.map((workReport) => workReport?.workReport),
-//     )
-//     if (vrfError) {
-//       logger.error('Failed to verify Bandersnatch VRF evidence', {
-//         error: vrfError,
-//       })
-//       return safeError(vrfError)
-//     }
-//     if (!vrfValid) {
-//       logger.error('Invalid Bandersnatch VRF evidence')
-//       return safeError(new Error('Invalid Bandersnatch VRF evidence'))
-//     }
+    // For each work report in the announcement, get the work report from the work report service
+    const workReports: (WorkReport | null)[] = []
+    const availableCoreWorkReports = new Map<bigint, WorkReport[]>()
 
-//     // Step 3: Verify work report selection is valid
-//     const [selectionError, selectionValid] = verifyWorkReportSelection(
-//       announcement,
-//       this.workReportsAvailable,
-//       announcement.announcement.banderoutResult,
-//       this.configService,
-//       announcement.previousTrancheAnnouncements,
-//     )
-//   }
+    for (const workReportRef of announcement.announcement.workReports) {
+      const workReport = this.workReportService.getWorkReportByHash(
+        workReportRef.workReportHash,
+      )
 
-//   /**
-//    * Create audit announcement for tranche 0
-//    *
-//    * Implements Gray Paper audit tranche selection with Fisher-Yates shuffle
-//    * Gray Paper Eq. 64-68: Initial audit tranche selection
-//    */
-//   createAuditAnnouncementTranche0(
-//     headerHash: Hex,
-//     coreWorkReports: WorkReport[],
-//     bandersnatchVrfOutput: Hex,
-//   ): Safe<AuditAnnouncement> {
-//     // get the core work reports from the work report service
-//     const coreWorkReports = this.workReportService.get(coreWorkReports)
-//     // Select cores for audit using Fisher-Yates shuffle
-//     const selection = selectAuditTranche0(
-//       coreWorkReports,
-//       bandersnatchVrfOutput,
-//     )
+      if (!workReport) {
+        logger.error('Work report not available for audit', {
+          workReportHash: workReportRef.workReportHash,
+          coreIndex: workReportRef.coreIndex.toString(),
+        })
+        return safeError(
+          new Error(
+            `Work report ${workReportRef.workReportHash} is not available`,
+          ),
+        )
+      }
 
-//     // Create work reports for selected cores
-//     const workReports = selection.selectedCores.flatMap((core: any) =>
-//       core.workReports.map((wr: any) => ({
-//         coreIndex: core.coreIndex,
-//         workReportHash: wr.workReportHash,
-//       })),
-//     )
+      workReports.push(workReport)
 
-//     // Generate audit signature evidence for tranche 0
-//     const blockHeaderVrfOutput = hexToBytes(bandersnatchVrfOutput)
-//     const [signatureError, auditSignature] = generateAuditSignature(
-//       this.config.validatorSecretKey,
-//       blockHeaderVrfOutput,
-//       0n, // Tranche 0
-//     )
+      // Build availableCoreWorkReports map for verification
+      const coreIndex = workReport.core_index
+      if (!availableCoreWorkReports.has(coreIndex)) {
+        availableCoreWorkReports.set(coreIndex, [])
+      }
+      availableCoreWorkReports.get(coreIndex)!.push(workReport)
+    }
 
-//     if (signatureError) {
-//       logger.error('Failed to generate audit signature for tranche 0', {
-//         error: signatureError,
-//       })
-//       return safeError(signatureError)
-//     }
+    // Step 2: Verify the Bandersnatch VRF evidence
+    // Note: verifyBandersnatchVRFEvidence takes a single work report, so we verify the first one
+    if (workReports.length === 0 || workReports[0] === null) {
+      return safeError(
+        new Error('No work reports available for VRF verification'),
+      )
+    }
 
-//     // Generate Ed25519 announcement signature
-//     const [signatureError, announcementSignature] =
-//       generateAnnouncementSignature(
-//         this.config.validatorSecretKey,
-//         workReports,
-//         0n,
-//         headerHash,
-//       )
+    const [vrfError, vrfValid] = verifyBandersnatchVRFEvidence(
+      announcement,
+      hexToBytes(peerPublicKey),
+      workReports[0],
+    )
+    if (vrfError) {
+      logger.error('Failed to verify Bandersnatch VRF evidence', {
+        error: vrfError,
+      })
+      return safeError(vrfError)
+    }
+    if (!vrfValid) {
+      logger.error('Invalid Bandersnatch VRF evidence')
+      return safeError(new Error('Invalid Bandersnatch VRF evidence'))
+    }
 
-//     if (signatureError) {
-//       logger.error('Failed to generate announcement signature for tranche 0', {
-//         error: signatureError,
-//       })
-//       return safeError(signatureError)
-//     }
+    // Step 3: Verify work report selection is valid
+    // Note: bandersnatchVrfOutput should come from block header
+    // TODO: Get actual bandersnatch VRF output from block header using headerHash
+    const bandersnatchVrfOutput =
+      '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+    const [selectionError, selectionValid] = verifyWorkReportSelection(
+      announcement,
+      availableCoreWorkReports,
+      bandersnatchVrfOutput,
+      this.configService,
+      [], // previousTrancheAnnouncements - TODO: get from state/event
+    )
 
-//     const announcement: AuditAnnouncement = {
-//       headerHash,
-//       tranche: 0n,
-//       announcement: {
-//         validatorIndex: this.config.validatorIndex,
-//         workReports,
-//         signature: announcementSignature,
-//       },
-//       evidence: auditSignature.signature,
-//     }
+    if (selectionError) {
+      logger.error('Failed to verify work report selection', {
+        error: selectionError,
+      })
+      return safeError(selectionError)
+    }
+    if (!selectionValid) {
+      logger.error('Invalid work report selection')
+      return safeError(new Error('Invalid work report selection'))
+    }
 
-//     // Store the announcement
-//     const announcementKey = `${headerHash}-0`
-//     this.pendingAudits.set(announcementKey, announcement)
+    logger.info('Audit announcement verified successfully', {
+      headerHash: announcement.headerHash,
+      tranche: announcement.tranche.toString(),
+      workReportsCount: workReports.length,
+    })
 
-//     return safeResult(announcement)
-//   }
+    return safeResult(undefined)
+  }
 
-//   /**
-//    * Create audit announcement for tranche N (N > 0)
-//    *
-//    * Implements Gray Paper tranche N selection logic
-//    * Gray Paper Eq. 105: Subsequent tranche evidence
-//    */
-//   createAuditAnnouncementTrancheN(
-//     headerHash: Hex,
-//     coreWorkReports: CoreWorkReport[],
-//     bandersnatchVrfOutput: Hex,
-//     tranche: number,
-//     previousTrancheAnnouncements: PreviousTrancheAnnouncement[],
-//     negativeJudgments: NegativeJudgment[],
-//   ): Safe<AuditAnnouncement> {
-//     try {
-//       logger.debug('Creating audit announcement for tranche N', {
-//         headerHash,
-//         tranche,
-//         coreWorkReportsCount: coreWorkReports.length,
-//         previousAnnouncementsCount: previousTrancheAnnouncements.length,
-//         negativeJudgmentsCount: negativeJudgments.length,
-//       })
+  /**
+   * Create audit announcement for tranche 0
+   *
+   * Implements Gray Paper audit tranche selection with Fisher-Yates shuffle
+   * Gray Paper Eq. 64-68: Initial audit tranche selection
+   */
+  createAuditAnnouncementTranche0(
+    headerHash: Hex,
+    _coreWorkReports: WorkReport[],
+    bandersnatchVrfOutput: Hex,
+  ): Safe<AuditAnnouncement> {
+    // Get validator credentials with fallback (needed for generating local_seed_0)
+    const [credentialsError, validatorCredentials] =
+      getValidatorCredentialsWithFallback(
+        this.configService,
+        this.keyPairService ?? undefined,
+      )
+    if (credentialsError || !validatorCredentials) {
+      return safeError(
+        credentialsError || new Error('Failed to get validator credentials'),
+      )
+    }
 
-//       // Select cores for audit using advanced selection logic
-//       const selection = selectAuditTrancheN(
-//         coreWorkReports,
-//         bandersnatchVrfOutput,
-//         tranche,
-//         previousTrancheAnnouncements,
-//         negativeJudgments,
-//       )
+    // Select cores for audit using Fisher-Yates shuffle
+    // Gray Paper: Uses banderout{local_seed_0} as entropy, which is generated from
+    // local_seed_0 = bssignature{validatorSecretKey}{Xaudit ∥ banderout{H_vrfsig}}{∅}
+    const selection = selectAuditTranche0(
+      this.workReportService,
+      validatorCredentials.bandersnatchKeyPair.privateKey,
+      hexToBytes(bandersnatchVrfOutput),
+      this.configService,
+    )
 
-//       // Create work reports for selected cores
-//       const workReports = selection.selectedCores.flatMap((core: any) =>
-//         core.workReports.map((wr: any) => ({
-//           coreIndex: core.coreIndex,
-//           workReportHash: wr.workReportHash,
-//         })),
-//       )
+    // Create work reports for selected cores
+    const workReports = selection.selectedCores.flatMap(
+      (core: {
+        coreIndex: bigint
+        workReports: Array<{ workReportHash: Hex }>
+      }) =>
+        core.workReports.map((wr: { workReportHash: Hex }) => ({
+          coreIndex: core.coreIndex,
+          workReportHash: wr.workReportHash,
+        })),
+    )
 
-//       // Generate Ed25519 announcement signature
-//       const [signatureError, announcementSignature] =
-//         generateAnnouncementSignature(
-//           this.config.validatorSecretKey,
-//           workReports,
-//           BigInt(tranche),
-//           headerHash,
-//         )
+    const ed25519KeyPair = validatorCredentials.ed25519KeyPair
+    const ed25519PublicKeyHex = bytesToHex(ed25519KeyPair.publicKey)
 
-//       if (signatureError) {
-//         logger.error(
-//           'Failed to generate announcement signature for tranche N',
-//           {
-//             error: signatureError,
-//             tranche,
-//           },
-//         )
-//         return safeError(signatureError)
-//       }
+    const [validatorIndexError] =
+      this.validatorSetManager.getValidatorIndex(ed25519PublicKeyHex)
+    if (validatorIndexError) {
+      return safeError(validatorIndexError)
+    }
 
-//       // Generate audit signature evidence for tranche N
-//       const blockHeaderVrfOutput = hexToBytes(bandersnatchVrfOutput)
+    // Generate audit signature evidence for tranche 0
+    const blockHeaderVrfOutput = hexToBytes(bandersnatchVrfOutput)
+    const [signatureError, auditSignature] = generateAuditSignature(
+      ed25519KeyPair.privateKey,
+      blockHeaderVrfOutput,
+      0n, // Tranche 0
+    )
 
-//       if (workReports.length === 0) {
-//         return safeError(new Error('No work reports selected for tranche N'))
-//       }
+    if (signatureError) {
+      logger.error('Failed to generate audit signature for tranche 0', {
+        error: signatureError,
+      })
+      return safeError(signatureError)
+    }
 
-//       // TODO: Get the actual work report from the core work reports
-//       // For now, we'll use a placeholder work report
-//       const mockWorkReport: WorkReport = {
-//         package_spec: {
-//           hash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           length: 0n,
-//           erasure_root:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           exports_root:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           exports_count: 0n,
-//         },
-//         context: {
-//           anchor:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           state_root:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           beefy_root:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           lookup_anchor:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           lookup_anchor_slot: 0n,
-//           prerequisites: [],
-//         },
-//         core_index: workReports[0].core_index,
-//         authorizer_hash:
-//           '0x0000000000000000000000000000000000000000000000000000000000000000',
-//         auth_output:
-//           '0x0000000000000000000000000000000000000000000000000000000000000000',
-//         segment_root_lookup: [],
-//         results: [],
-//         auth_gas_used: 0n,
-//       }
+    // Generate Ed25519 announcement signature
+    const [announcementSignatureError, announcementSignature] =
+      generateAnnouncementSignature(
+        ed25519KeyPair.privateKey,
+        workReports,
+        0n,
+        headerHash,
+      )
 
-//       const [signatureError, auditSignature] = generateAuditSignature(
-//         this.config.validatorSecretKey,
-//         blockHeaderVrfOutput,
-//         BigInt(tranche),
-//         mockWorkReport,
-//       )
+    if (announcementSignatureError) {
+      logger.error('Failed to generate announcement signature for tranche 0', {
+        error: announcementSignatureError,
+      })
+      return safeError(announcementSignatureError)
+    }
 
-//       if (signatureError) {
-//         logger.error('Failed to generate audit signature for tranche N', {
-//           error: signatureError,
-//           tranche,
-//         })
-//         return safeError(signatureError)
-//       }
+    const announcement: AuditAnnouncement = {
+      headerHash,
+      tranche: 0n,
+      announcement: {
+        workReports,
+        signature: announcementSignature,
+      },
+      evidence: auditSignature.signature,
+    }
 
-//       const announcement: AuditAnnouncement = {
-//         headerHash,
-//         tranche: BigInt(tranche),
-//         announcement: {
-//           validatorIndex: this.config.validatorIndex,
-//           workReports,
-//           signature: announcementSignature,
-//         },
-//         evidence: auditSignature.signature,
-//       }
+    // Store the announcement
+    const announcementKey = `${headerHash}-0`
+    this.pendingAudits.set(announcementKey, announcement)
 
-//       // Store the announcement
-//       const announcementKey = `${headerHash}-${tranche}`
-//       this.pendingAudits.set(announcementKey, announcement)
+    // Send announcement to other validators (async, don't await)
+    this.broadcastAuditAnnouncement(announcement).catch((error) => {
+      logger.warn('Failed to broadcast audit announcement', {
+        error: error instanceof Error ? error.message : String(error),
+        headerHash,
+      })
+    })
 
-//       logger.info('Created audit announcement for tranche N', {
-//         headerHash,
-//         tranche,
-//         workReportsCount: workReports.length,
-//         evidenceLength: auditSignature.signature.length,
-//       })
+    return safeResult(announcement)
+  }
 
-//       return safeResult(announcement)
-//     } catch (error) {
-//       logger.error('Failed to create audit announcement for tranche N', {
-//         error: error instanceof Error ? error.message : String(error),
-//         headerHash,
-//         tranche,
-//       })
-//       return safeError(
-//         new Error(`Failed to create audit announcement: ${error}`),
-//       )
-//     }
-//   }
+  /**
+   * Create audit announcement for tranche N (N > 0)
+   *
+   * Implements Gray Paper tranche N selection logic
+   * Gray Paper Eq. 105: Subsequent tranche evidence
+   */
+  createAuditAnnouncementTrancheN(
+    headerHash: Hex,
+    coreWorkReports: WorkReport[],
+    bandersnatchVrfOutput: Hex,
+    tranche: number,
+    previousTrancheAnnouncements: AuditAnnouncement[],
+    negativeJudgments: Judgment[],
+  ): Safe<AuditAnnouncement> {
+    logger.debug('Creating audit announcement for tranche N', {
+      headerHash,
+      tranche,
+      coreWorkReportsCount: coreWorkReports.length,
+      previousAnnouncementsCount: previousTrancheAnnouncements.length,
+      negativeJudgmentsCount: negativeJudgments.length,
+    })
 
-//   /**
-//    * Verify audit announcement
-//    *
-//    * Uses the audit signature verification functions from audit package
-//    */
-//   async verifyAuditAnnouncement(
-//     announcement: AuditAnnouncement,
-//     blockHeaderVrfOutput: Uint8Array,
-//   ): SafePromise<boolean> {
-//     try {
-//       logger.debug('Verifying audit announcement', {
-//         headerHash: announcement.headerHash,
-//         tranche: announcement.tranche.toString(),
-//         evidenceLength: announcement.evidence.length,
-//       })
+    // Get validator credentials with fallback (needed for generating local_seed_n)
+    const [credentialsError, validatorCredentials] =
+      getValidatorCredentialsWithFallback(
+        this.configService,
+        this.keyPairService ?? undefined,
+      )
+    if (credentialsError || !validatorCredentials) {
+      return safeError(
+        credentialsError || new Error('Failed to get validator credentials'),
+      )
+    }
 
-//       if (announcement.tranche === 0n) {
-//         // Verify tranche 0 evidence using our audit signature verification
-//         const [error, isValid] = verifyTranche0AuditSignature(
-//           this.config.validatorPublicKey,
-//           announcement.evidence,
-//           blockHeaderVrfOutput,
-//         )
+    // Convert AuditAnnouncement[] to format expected by selectAuditTrancheN
+    const previousAnnouncementsFormatted = previousTrancheAnnouncements.map(
+      (announcement) => ({
+        validatorIndex: undefined as bigint | undefined, // TODO: Extract from announcement if available
+        announcement: announcement.announcement,
+      }),
+    )
 
-//         if (error) {
-//           logger.error('Error verifying tranche 0 audit signature', { error })
-//           return safeError(error)
-//         }
+    // Convert Judgment[] to format expected by selectAuditTrancheN
+    // Note: Judgment doesn't have coreIndex, so we need to extract it from work reports
+    // For now, we'll create an empty array as negativeJudgments should come from a different source
+    const negativeJudgmentsFormatted: Array<{
+      coreIndex: bigint
+      workReportHash?: Hex
+    }> = []
+    // TODO: Convert Judgment[] to NegativeJudgment[] format if needed
 
-//         return safeResult(isValid)
-//       } else {
-//         // For tranche N, we need to verify against each work report
-//         // TODO: Get the actual work reports from the announcement
-//         // For now, we'll use a placeholder work report
-//         const mockWorkReport: WorkReport = {
-//           package_spec: {
-//             hash: '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             length: 0n,
-//             erasure_root:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             exports_root:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             exports_count: 0n,
-//           },
-//           context: {
-//             anchor:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             state_root:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             beefy_root:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             lookup_anchor:
-//               '0x0000000000000000000000000000000000000000000000000000000000000000',
-//             lookup_anchor_slot: 0n,
-//             prerequisites: [],
-//           },
-//           core_index: 0n,
-//           authorizer_hash:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           auth_output:
-//             '0x0000000000000000000000000000000000000000000000000000000000000000',
-//           segment_root_lookup: [],
-//           results: [],
-//           auth_gas_used: 0n,
-//         }
+    // Select cores for audit using advanced selection logic
+    // Gray Paper: Uses banderout{local_seed_n(wr)} for each work report
+    // local_seed_n(wr) = bssignature{validatorSecretKey}{Xaudit ∥ banderout{H_vrfsig} ∥ blake{w} ∥ n}{∅}
+    const selection = selectAuditTrancheN(
+      this.workReportService,
+      validatorCredentials.bandersnatchKeyPair.privateKey,
+      hexToBytes(bandersnatchVrfOutput),
+      this.configService,
+      tranche,
+      previousAnnouncementsFormatted,
+      negativeJudgmentsFormatted,
+    )
 
-//         // Verify tranche N evidence using our audit signature verification
-//         const [error, isValid] = verifyTrancheNAuditSignature(
-//           this.config.validatorPublicKey,
-//           announcement.evidence,
-//           blockHeaderVrfOutput,
-//           mockWorkReport,
-//           announcement.tranche,
-//         )
+    // Create work reports for selected cores
+    const workReports = selection.selectedCores.flatMap(
+      (core: {
+        coreIndex: bigint
+        workReports: Array<{ workReportHash: Hex }>
+      }) =>
+        core.workReports.map((wr: { workReportHash: Hex }) => ({
+          coreIndex: core.coreIndex,
+          workReportHash: wr.workReportHash,
+        })),
+    )
 
-//         if (error) {
-//           logger.error('Error verifying tranche N audit signature', { error })
-//           return safeError(error)
-//         }
+    const ed25519KeyPair = validatorCredentials.ed25519KeyPair
+    const ed25519PublicKeyHex = bytesToHex(ed25519KeyPair.publicKey)
 
-//         return safeResult(isValid)
-//       }
-//     } catch (error) {
-//       logger.error('Error verifying audit announcement', {
-//         error: error instanceof Error ? error.message : String(error),
-//         headerHash: announcement.headerHash,
-//         tranche: announcement.tranche.toString(),
-//       })
-//       return safeError(error as Error)
-//     }
-//   }
+    const [validatorIndexError] =
+      this.validatorSetManager.getValidatorIndex(ed25519PublicKeyHex)
+    if (validatorIndexError) {
+      return safeError(validatorIndexError)
+    }
 
-//   /**
-//    * Get current tranche number
-//    */
-//   getCurrentTranche(): number {
-//     return this.currentTranche
-//   }
+    // Generate Ed25519 announcement signature
+    const [announcementSignatureError, announcementSignature] =
+      generateAnnouncementSignature(
+        ed25519KeyPair.privateKey,
+        workReports,
+        BigInt(tranche),
+        headerHash,
+      )
 
-//   /**
-//    * Get pending audits
-//    */
-//   getPendingAudits(): Map<string, AuditAnnouncement> {
-//     return this.pendingAudits
-//   }
+    if (announcementSignatureError) {
+      logger.error('Failed to generate announcement signature for tranche N', {
+        error: announcementSignatureError,
+        tranche,
+      })
+      return safeError(announcementSignatureError)
+    }
 
-//   /**
-//    * Clear completed audits
-//    */
-//   clearCompletedAudits(completedKeys: string[]): void {
-//     for (const key of completedKeys) {
-//       this.pendingAudits.delete(key)
-//     }
+    // Generate audit signature evidence for tranche N
+    const blockHeaderVrfOutput = hexToBytes(bandersnatchVrfOutput)
 
-//     logger.debug('Cleared completed audits', {
-//       clearedCount: completedKeys.length,
-//       remainingCount: this.pendingAudits.size,
-//     })
-//   }
-// }
+    if (workReports.length === 0) {
+      return safeError(new Error('No work reports selected for tranche N'))
+    }
+
+    // Get the actual work report from the work report service
+    const firstWorkReportHash = workReports[0].workReportHash
+    const firstWorkReport =
+      this.workReportService.getWorkReportByHash(firstWorkReportHash)
+
+    if (!firstWorkReport) {
+      return safeError(
+        new Error(
+          `Work report ${firstWorkReportHash} not found for tranche N signature`,
+        ),
+      )
+    }
+
+    const [auditSignatureError, auditSignature] = generateAuditSignature(
+      ed25519KeyPair.privateKey,
+      blockHeaderVrfOutput,
+      BigInt(tranche),
+      firstWorkReport,
+    )
+
+    if (auditSignatureError) {
+      logger.error('Failed to generate audit signature for tranche N', {
+        error: auditSignatureError,
+        tranche,
+      })
+      return safeError(auditSignatureError)
+    }
+
+    const announcement: AuditAnnouncement = {
+      headerHash,
+      tranche: BigInt(tranche),
+      announcement: {
+        workReports,
+        signature: announcementSignature,
+      },
+      evidence: auditSignature.signature,
+    }
+
+    // Store the announcement
+    const announcementKey = `${headerHash}-${tranche}`
+    this.pendingAudits.set(announcementKey, announcement)
+
+    // Send announcement to other validators (async, don't await)
+    this.broadcastAuditAnnouncement(announcement).catch((error) => {
+      logger.warn('Failed to broadcast audit announcement', {
+        error: error instanceof Error ? error.message : String(error),
+        headerHash,
+        tranche,
+      })
+    })
+
+    logger.info('Created audit announcement for tranche N', {
+      headerHash,
+      tranche,
+      workReportsCount: workReports.length,
+      evidenceLength: auditSignature.signature.length,
+    })
+
+    return safeResult(announcement)
+  }
+
+  /**
+   * Verify audit announcement
+   *
+   * Uses the audit signature verification functions from audit package
+   */
+  async verifyAuditAnnouncement(
+    announcement: AuditAnnouncement,
+    blockHeaderVrfOutput: Uint8Array,
+    validatorIndex: number,
+  ): SafePromise<boolean> {
+    try {
+      logger.debug('Verifying audit announcement', {
+        headerHash: announcement.headerHash,
+        tranche: announcement.tranche.toString(),
+        evidenceLength: announcement.evidence.length,
+        validatorIndex,
+      })
+
+      // Get validator public key for verification
+      const [announcerKeyError, announcerKey] =
+        this.validatorSetManager.getValidatorAtIndex(validatorIndex)
+      if (announcerKeyError || !announcerKey) {
+        return safeError(
+          announcerKeyError ||
+            new Error('Failed to get announcer validator key'),
+        )
+      }
+
+      if (announcement.tranche === 0n) {
+        // Verify tranche 0 evidence using our audit signature verification
+        const [error, isValid] = verifyTranche0AuditSignature(
+          hexToBytes(announcerKey.ed25519),
+          announcement.evidence,
+          blockHeaderVrfOutput,
+        )
+
+        if (error) {
+          logger.error('Error verifying tranche 0 audit signature', { error })
+          return safeError(error)
+        }
+
+        return safeResult(isValid)
+      } else {
+        // For tranche N, we need to verify against the first work report
+        if (announcement.announcement.workReports.length === 0) {
+          return safeError(
+            new Error('No work reports in announcement for tranche N'),
+          )
+        }
+
+        const firstWorkReportHash =
+          announcement.announcement.workReports[0].workReportHash
+        const firstWorkReport =
+          this.workReportService.getWorkReportByHash(firstWorkReportHash)
+
+        if (!firstWorkReport) {
+          return safeError(
+            new Error(
+              `Work report ${firstWorkReportHash} not found for verification`,
+            ),
+          )
+        }
+
+        // Verify tranche N evidence using our audit signature verification
+        const [error, isValid] = verifyTrancheNAuditSignature(
+          hexToBytes(announcerKey.ed25519),
+          announcement.evidence,
+          blockHeaderVrfOutput,
+          firstWorkReport,
+          announcement.tranche,
+        )
+
+        if (error) {
+          logger.error('Error verifying tranche N audit signature', { error })
+          return safeError(error)
+        }
+
+        return safeResult(isValid)
+      }
+    } catch (error) {
+      logger.error('Error verifying audit announcement', {
+        error: error instanceof Error ? error.message : String(error),
+        headerHash: announcement.headerHash,
+        tranche: announcement.tranche.toString(),
+      })
+      return safeError(error as Error)
+    }
+  }
+
+  /**
+   * Get current tranche number
+   */
+  getCurrentTranche(): number {
+    return this.currentTranche
+  }
+
+  /**
+   * Get pending audits
+   */
+  getPendingAudits(): Map<string, AuditAnnouncement> {
+    return this.pendingAudits
+  }
+
+  /**
+   * Clear completed audits
+   */
+  clearCompletedAudits(completedKeys: string[]): void {
+    for (const key of completedKeys) {
+      this.pendingAudits.delete(key)
+    }
+
+    logger.debug('Cleared completed audits', {
+      clearedCount: completedKeys.length,
+      remainingCount: this.pendingAudits.size,
+    })
+  }
+
+  /**
+   * Send audit announcement to a specific validator
+   */
+  async sendAuditAnnouncement(
+    announcement: AuditAnnouncement,
+    peerPublicKey: Hex,
+  ): SafePromise<void> {
+    if (!this.networkingService || !this.auditAnnouncementProtocol) {
+      return safeError(
+        new Error(
+          'Networking service or audit announcement protocol not available',
+        ),
+      )
+    }
+
+    const [serializeError, serializedMessage] =
+      this.auditAnnouncementProtocol.serializeRequest(announcement)
+    if (serializeError) {
+      logger.error('Failed to serialize audit announcement', {
+        error: serializeError.message,
+      })
+      return safeError(serializeError)
+    }
+
+    const [sendError] = await this.networkingService.sendMessageByPublicKey(
+      peerPublicKey,
+      144 as StreamKind, // CE144: Audit Announcement
+      serializedMessage,
+    )
+
+    if (sendError) {
+      logger.error('Failed to send audit announcement', {
+        error: sendError.message,
+        peerPublicKey: `${peerPublicKey.substring(0, 20)}...`,
+      })
+      return safeError(sendError)
+    }
+
+    logger.debug('Sent audit announcement', {
+      headerHash: announcement.headerHash,
+      tranche: announcement.tranche.toString(),
+      peerPublicKey: `${peerPublicKey.substring(0, 20)}...`,
+    })
+
+    return safeResult(undefined)
+  }
+
+  /**
+   * Broadcast audit announcement to all validators
+   */
+  async broadcastAuditAnnouncement(
+    announcement: AuditAnnouncement,
+  ): SafePromise<void> {
+    if (!this.networkingService || !this.auditAnnouncementProtocol) {
+      return safeError(
+        new Error(
+          'Networking service or audit announcement protocol not available',
+        ),
+      )
+    }
+
+    // Get all active validators
+    const validators = this.validatorSetManager.getActiveValidators()
+    if (validators.length === 0) {
+      logger.warn('No active validators to broadcast to')
+      return safeResult(undefined)
+    }
+
+    // Send to all validators (excluding self)
+    let selfPublicKey: Hex | null = null
+    const [credentialsError, validatorCredentials] =
+      getValidatorCredentialsWithFallback(
+        this.configService,
+        this.keyPairService ?? undefined,
+      )
+    if (!credentialsError && validatorCredentials) {
+      selfPublicKey = bytesToHex(validatorCredentials.ed25519KeyPair.publicKey)
+    }
+
+    let successCount = 0
+    let errorCount = 0
+
+    for (const validator of validators) {
+      // Skip self
+      if (selfPublicKey && validator.ed25519 === selfPublicKey) {
+        continue
+      }
+
+      const [sendError] = await this.sendAuditAnnouncement(
+        announcement,
+        validator.ed25519,
+      )
+
+      if (sendError) {
+        errorCount++
+        logger.debug('Failed to send audit announcement to validator', {
+          error: sendError.message,
+        })
+      } else {
+        successCount++
+      }
+    }
+
+    logger.info('Broadcast audit announcement', {
+      headerHash: announcement.headerHash,
+      tranche: announcement.tranche.toString(),
+      totalValidators: validators.length,
+      successCount,
+      errorCount,
+    })
+
+    // Return success even if some sends failed (non-critical)
+    return safeResult(undefined)
+  }
+}

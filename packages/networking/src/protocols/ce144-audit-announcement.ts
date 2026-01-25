@@ -12,6 +12,7 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type { AuditAnnouncement, Safe, SafePromise } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
@@ -52,6 +53,13 @@ export class AuditAnnouncementProtocol extends NetworkingProtocol<
     announcement: AuditAnnouncement,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE144] Processing audit announcement request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      headerHash: announcement.headerHash,
+      tranche: announcement.tranche.toString(),
+      workReportsCount: announcement.announcement.workReports.length,
+    })
+
     this.eventBusService.emitAuditAnnouncementReceived(
       announcement,
       peerPublicKey,

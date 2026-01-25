@@ -674,8 +674,6 @@ async function handleInitialize(
     logger.debug(`Initialize: State root: ${stateRoot}`)
 
     // Note: initializeGenesisHeader already creates the genesis BlockNode with
-    // the correct state snapshot, so we don't need to call saveStateSnapshot here.
-    // Calling saveStateSnapshot with stateRoot (instead of blockHash) would create
     // an incorrect entry in blockNodes.
     logger.info(
       `Initialize: Genesis block node already has state snapshot (${Object.keys(stateTrie).length} keyvals)`,

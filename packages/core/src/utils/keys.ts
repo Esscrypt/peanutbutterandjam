@@ -11,10 +11,14 @@ import { sha512 } from '@noble/hashes/sha2.js'
 import { BandersnatchCurve } from '@pbnjam/bandersnatch'
 import type {
   ConnectionEndpoint,
+  IConfigService,
+  IKeyPairService,
   KeyPair,
   ValidatorCredentials,
+  ValidatorPublicKeys,
 } from '@pbnjam/types'
 import { type Safe, safeError, safeResult } from '@pbnjam/types'
+import { hexToBytes } from 'viem'
 import {
   deriveSecretSeeds,
   generateEd25519KeyPairFromSeed,
@@ -267,4 +271,174 @@ export function generateDevAccountValidatorKeyPair(
   }
 
   return generateValidatorKeyPairFromSeed(seed)
+}
+
+/**
+ * Get full validator credentials with fallback logic
+ *
+ * Priority order:
+ * 1. If validatorIndex is set in configService, generate dev account key pair for that index
+ * 2. Else use keyPairService.getLocalKeyPair()
+ *
+ * @param configService - Config service with optional validatorIndex
+ * @param keyPairService - Key pair service (required if validatorIndex is not set)
+ * @returns Safe result with full ValidatorCredentials (includes Bandersnatch, Ed25519, BLS keys)
+ */
+export function getValidatorCredentialsWithFallback(
+  configService: IConfigService,
+  keyPairService?: IKeyPairService,
+): Safe<ValidatorCredentials> {
+  if (configService.validatorIndex !== undefined) {
+    // Generate dev account key pair for the validator index
+    const validatorIndex = configService.validatorIndex
+    const [keyPairError, keyPairs] =
+      generateDevAccountValidatorKeyPair(validatorIndex)
+    if (keyPairError || !keyPairs) {
+      return safeError(
+        new Error(
+          `Failed to generate dev account key pair for validator index ${validatorIndex}: ${
+            keyPairError?.message || 'Key pair is undefined'
+          }`,
+        ),
+      )
+    }
+    return safeResult(keyPairs)
+  } else if (keyPairService) {
+    // Use KeyPairService
+    const [localKeyPairError, localKeyPair] = keyPairService.getLocalKeyPair()
+    if (localKeyPairError || !localKeyPair) {
+      return safeError(
+        new Error(
+          `No local key pair available from KeyPairService: ${
+            localKeyPairError?.message || 'Key pair is undefined'
+          }`,
+        ),
+      )
+    }
+    return safeResult(localKeyPair)
+  } else {
+    return safeError(
+      new Error(
+        'Either validatorIndex must be set in configService or keyPairService must be provided',
+      ),
+    )
+  }
+}
+
+/**
+ * Get Ed25519 key pair with fallback logic
+ *
+ * Reuses getValidatorCredentialsWithFallback and extracts Ed25519 keys
+ *
+ * Priority order:
+ * 1. If validatorIndex is set in configService, generate dev account key pair for that index
+ * 2. Else use keyPairService.getLocalKeyPair()
+ *
+ * @param configService - Config service with optional validatorIndex
+ * @param keyPairService - Key pair service (required if validatorIndex is not set)
+ * @returns Safe result with Ed25519 key pair (publicKey and privateKey)
+ */
+export function getEd25519KeyPairWithFallback(
+  configService: IConfigService,
+  keyPairService?: IKeyPairService,
+): Safe<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
+  const [credentialsError, credentials] = getValidatorCredentialsWithFallback(
+    configService,
+    keyPairService,
+  )
+  if (credentialsError || !credentials) {
+    return safeError(
+      credentialsError || new Error('Failed to get validator credentials'),
+    )
+  }
+  return safeResult({
+    publicKey: credentials.ed25519KeyPair.publicKey,
+    privateKey: credentials.ed25519KeyPair.privateKey,
+  })
+}
+
+/**
+ * Extract connection endpoint from validator metadata
+ *
+ * Parses validator metadata to extract IPv6 address and port.
+ * According to Gray Paper specification:
+ * - First 16 bytes of metadata: IPv6 address
+ * - Bytes 16-18: Port number in little-endian format
+ *
+ * @param validatorIndex - Validator index (for error messages)
+ * @param validatorKeys - Validator public keys containing metadata
+ * @returns Connection endpoint with host, port, and Ed25519 public key
+ */
+export function getConnectionEndpointFromMetadata(
+  validatorIndex: number,
+  validatorKeys: ValidatorPublicKeys,
+): Safe<ConnectionEndpoint> {
+  try {
+    // Convert metadata hex string to bytes
+    const metadataBytes = hexToBytes(validatorKeys.metadata)
+
+    // Validate metadata length (should be 128 bytes)
+    if (metadataBytes.length < 18) {
+      return safeError(
+        new Error(
+          `Invalid metadata length for validator ${validatorIndex}: expected at least 18 bytes, got ${metadataBytes.length}`,
+        ),
+      )
+    }
+
+    // First 16 bytes: IPv6 address
+    const ipv6Bytes = metadataBytes.slice(0, 16)
+
+    // Bytes 16-18: Port in little-endian format
+    const portBytes = metadataBytes.slice(16, 18)
+
+    // Parse port as little-endian uint16
+    const port = portBytes[0] | (portBytes[1] << 8)
+
+    // Convert IPv6 bytes to string format
+    // Handle IPv4-mapped IPv6 addresses (::ffff:x.x.x.x)
+    let host: string
+    if (
+      ipv6Bytes[0] === 0 &&
+      ipv6Bytes[1] === 0 &&
+      ipv6Bytes[2] === 0 &&
+      ipv6Bytes[3] === 0 &&
+      ipv6Bytes[4] === 0 &&
+      ipv6Bytes[5] === 0 &&
+      ipv6Bytes[6] === 0 &&
+      ipv6Bytes[7] === 0 &&
+      ipv6Bytes[8] === 0 &&
+      ipv6Bytes[9] === 0 &&
+      ipv6Bytes[10] === 0xff &&
+      ipv6Bytes[11] === 0xff
+    ) {
+      // IPv4-mapped IPv6: ::ffff:x.x.x.x -> extract IPv4
+      host = `${ipv6Bytes[12]}.${ipv6Bytes[13]}.${ipv6Bytes[14]}.${ipv6Bytes[15]}`
+    } else {
+      // Full IPv6 address - convert to standard format
+      const parts: string[] = []
+      for (let i = 0; i < 16; i += 2) {
+        const part = (ipv6Bytes[i] << 8) | ipv6Bytes[i + 1]
+        parts.push(part.toString(16).padStart(4, '0'))
+      }
+      host = parts.join(':').replace(/(^|:)(0+:)+/g, '::')
+    }
+
+    // Convert Ed25519 public key to bytes
+    const publicKey = hexToBytes(validatorKeys.ed25519)
+
+    return safeResult({
+      host,
+      port,
+      publicKey,
+    })
+  } catch (error) {
+    return safeError(
+      new Error(
+        `Failed to parse connection endpoint from metadata for validator ${validatorIndex}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      ),
+    )
+  }
 }

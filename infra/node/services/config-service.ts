@@ -30,6 +30,7 @@ export class ConfigService extends BaseService implements IConfigService {
   private _jamVersion: JamVersion = DEFAULT_JAM_VERSION
   private _ancestryEnabled = true
   private _forkingEnabled = true
+  private _validatorIndex: number | undefined = undefined
 
   constructor(
     private readonly mode:
@@ -41,8 +42,10 @@ export class ConfigService extends BaseService implements IConfigService {
       | '2xlarge'
       | '3xlarge'
       | 'full',
+    validatorIndex?: number,
   ) {
     super('safrole-config')
+    this._validatorIndex = validatorIndex
   }
 
   /**
@@ -345,5 +348,20 @@ export class ConfigService extends BaseService implements IConfigService {
 
   set forkingEnabled(enabled: boolean) {
     this._forkingEnabled = enabled
+  }
+
+  /**
+   * Get the validator index for this node
+   * Returns undefined if not set
+   */
+  get validatorIndex(): number | undefined {
+    return this._validatorIndex
+  }
+
+  /**
+   * Set the validator index for this node
+   */
+  set validatorIndex(index: number | undefined) {
+    this._validatorIndex = index
   }
 }

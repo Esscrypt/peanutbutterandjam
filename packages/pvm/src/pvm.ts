@@ -30,6 +30,11 @@ import {
   REGISTER_INIT,
   RESULT_CODES,
 } from './config'
+import { NewGasCostCalculator } from './gas-cost-calculator'
+import {
+  chargeGasForBasicBlock,
+  isBasicBlockTerminator,
+} from './gas-cost-helpers'
 import type { HostFunctionRegistry } from './host-functions/general/registry'
 import { InstructionRegistry } from './instructions/registry'
 import { PVMParser } from './parser'
@@ -48,6 +53,15 @@ export class PVM implements IPVM {
   protected contextMutator: ContextMutator = () => null
   /** Step counter for execution traces (per execution run) */
   protected executionStep = 0
+
+  // New gas cost model state
+  protected readonly useNewGasCostModel: boolean
+  protected currentBasicBlockPc: bigint | null = null
+  protected gasCostCalculator: NewGasCostCalculator | null = null
+  protected instructionsWithPc: Array<{
+    instruction: PVMInstruction
+    pc: number
+  }> | null = null
 
   /** Global log collection for instruction execution (per execution run) */
   protected executionLogs: Array<{
@@ -82,6 +96,9 @@ export class PVM implements IPVM {
     // Initialize instruction registry (singleton)
     this.hostFunctionRegistry = hostFunctionRegistry
     this.registry = new InstructionRegistry()
+
+    // Initialize new gas cost model options
+    this.useNewGasCostModel = options.useNewGasCostModel ?? false
 
     // Initialize state with options
     this.state = {
@@ -435,31 +452,123 @@ export class PVM implements IPVM {
    * Returns the result code and whether execution should continue
    */
   public async step(instruction: PVMInstruction): Promise<ResultCode | null> {
-    // Check for halt conditions
-    if (this.state.gasCounter <= 0n) {
-      this.state.resultCode = RESULT_CODES.OOG
-      return RESULT_CODES.OOG
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'pvm.ts:452',
+          message: 'step entry',
+          data: {
+            pc: Number(this.state.programCounter),
+            opcode: instruction.opcode.toString(),
+            gasBefore: this.state.gasCounter.toString(),
+            useNewGasCostModel: this.useNewGasCostModel,
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'E',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+    // Charge gas based on model
+    if (this.useNewGasCostModel) {
+      const charged = this.chargeGasForNewModel()
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'pvm.ts:456',
+            message: 'chargeGasForNewModel result',
+            data: { charged, gasAfter: this.state.gasCounter.toString() },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'E',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+      if (!charged) {
+        // #region agent log
+        fetch(
+          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              location: 'pvm.ts:458',
+              message: 'OOG from chargeGasForNewModel',
+              data: { gas: this.state.gasCounter.toString() },
+              timestamp: Date.now(),
+              sessionId: 'debug-session',
+              runId: 'run1',
+              hypothesisId: 'E',
+            }),
+          },
+        ).catch(() => {})
+        // #endregion
+        return RESULT_CODES.OOG
+      }
+    } else {
+      const charged = this.chargeGasForOldModel()
+      if (!charged) {
+        return RESULT_CODES.OOG
+      }
     }
 
-    // Consume 1 gas for each instruction
-    // Note: ECALLI instructions cost 1 gas just like any other instruction.
-    // The host function's gas cost (10+) is handled separately in the context mutator.
-    // The host function will OOG if there's not enough gas for its operation.
-    this.state.gasCounter -= 1n
-
-    // logger.debug('Step: Instruction', {
-    //   code: this.state.code,
-    //   bitmask: this.state.bitmask,
-    //   jumpTable: this.state.jumpTable,
-    //   opcode: instruction.opcode.toString(),
-    //   instructionName: this.registry.getHandler(instruction.opcode)?.name,
-    //   gas: this.state.gasCounter.toString(),
-    //   pc: this.state.programCounter.toString(),
-    //   registers: this.state.registerState,
-    // })
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'pvm.ts:468',
+          message: 'before executeInstruction',
+          data: { gas: this.state.gasCounter.toString() },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'E',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
 
     // Execute instruction (Ψ₁) - gas consumption handled by instruction itself
     const resultCode = this.executeInstruction(instruction)
+
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'pvm.ts:472',
+          message: 'after executeInstruction',
+          data: { resultCode, gas: this.state.gasCounter.toString() },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'E',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+
+    // Update basic block tracking for new gas cost model
+    if (this.useNewGasCostModel) {
+      this.updateBasicBlockTracking(instruction, resultCode)
+    }
 
     if (resultCode === RESULT_CODES.HOST) {
       // Extract host call ID from instruction operands (Gray Paper: immed_X from ECALLI)
@@ -590,6 +699,12 @@ export class PVM implements IPVM {
     this.executionLogs = []
     this.hostFunctionLogs = []
     this.executionStep = 0
+    this.currentBasicBlockPc = null
+
+    // Initialize new gas cost model if enabled
+    if (this.useNewGasCostModel) {
+      await this.initializeNewGasCostModel(programBlob)
+    }
 
     // Decode the program blob
     const [error, decoded] = decodeBlob(programBlob)
@@ -690,6 +805,9 @@ export class PVM implements IPVM {
 
       resultCode = await this.step(instruction)
 
+      // Note: Basic block tracking is updated in step() -> updateBasicBlockTracking()
+      // We only reset currentBasicBlockPc when we hit a terminator, not on every instruction
+
       // Only log if the instruction was actually executed
       // If gas was 0 before step(), step() returns OOG immediately without executing
       // In that case, we shouldn't log a "phantom" instruction
@@ -784,8 +902,60 @@ export class PVM implements IPVM {
         },
       }
 
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'pvm.ts:786',
+            message: 'executeInstruction before',
+            data: {
+              instructionName: handler.name,
+              opcode: instruction.opcode.toString(),
+              gasBefore: this.state.gasCounter.toString(),
+              pc: this.state.programCounter.toString(),
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'C',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+
       // Execute instruction (mutates context)
       const result = handler.execute(context)
+
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'pvm.ts:811',
+            message: 'executeInstruction after',
+            data: {
+              instructionName: handler.name,
+              contextGasAfter: context.gas.toString(),
+              stateGasAfter: this.state.gasCounter.toString(),
+              gasChanged: context.gas !== this.state.gasCounter,
+            },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'C',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+
+      // Sync gas from context back to state (instructions may modify context.gas)
+      this.state.gasCounter = context.gas
+
       if (result.faultInfo) {
         this.state.faultAddress = result.faultInfo.address ?? null
       }
@@ -911,6 +1081,183 @@ export class PVM implements IPVM {
       return safeError(
         error instanceof Error ? error : new Error(String(error)),
       )
+    }
+  }
+
+  // ============================================================================
+  // New Gas Cost Model Helpers
+  // ============================================================================
+
+  /**
+   * Initialize new gas cost model: parse program and set up calculator
+   */
+  private async initializeNewGasCostModel(
+    programBlob: Uint8Array,
+  ): Promise<void> {
+    this.gasCostCalculator = new NewGasCostCalculator()
+
+    // Parse program to get instructions with PCs
+    // parseProgram expects the full program blob (it will decode internally)
+    const parser = new PVMParser()
+    const parseResult = parser.parseProgram(programBlob)
+    if (parseResult.success && parseResult.instructions.length > 0) {
+      this.instructionsWithPc = parseResult.instructions.map((inst) => ({
+        instruction: inst,
+        pc: Number(inst.pc),
+      }))
+    } else {
+      logger.warn('New gas cost model: failed to parse program', {
+        success: parseResult.success,
+        errors: parseResult.errors,
+        programBlobLength: programBlob.length,
+      })
+    }
+  }
+
+  /**
+   * Charge gas for new gas cost model (at start of basic blocks)
+   */
+  private chargeGasForNewModel(): boolean {
+    if (!this.gasCostCalculator || !this.instructionsWithPc) {
+      // Fallback to old model if calculator not initialized
+      return this.chargeGasForOldModel()
+    }
+
+    const currentPc = Number(this.state.programCounter)
+
+    // Check if current PC is a block start
+    // We need to verify this is actually a block start, not just a different PC
+    const blocks = this.gasCostCalculator.identifyBasicBlocks(
+      this.instructionsWithPc,
+    )
+    const isBlockStart = blocks.some((block) => block.startPc === currentPc)
+
+    // Only charge if:
+    // 1. This is a block start, AND
+    // 2. We haven't charged for this block yet (currentBasicBlockPc is null or different)
+    if (!isBlockStart) {
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'pvm.ts:1006',
+            message: 'not a block start no charge',
+            data: { pc: currentPc, gas: this.state.gasCounter.toString() },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'E',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+      // Not a block start - we're in the middle of a block, no charge
+      return true
+    }
+
+    // Check if we've already charged for this block
+    if (
+      this.currentBasicBlockPc !== null &&
+      this.currentBasicBlockPc === BigInt(currentPc)
+    ) {
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'pvm.ts:1014',
+            message: 'already charged for this block',
+            data: { pc: currentPc, gas: this.state.gasCounter.toString() },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'E',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+      // Already charged for this block start
+      return true
+    }
+
+    // Charge gas for the new basic block
+    const { success, newGasCounter, blockCost } = chargeGasForBasicBlock(
+      this.gasCostCalculator,
+      this.instructionsWithPc,
+      currentPc,
+      this.state.gasCounter,
+    )
+
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'pvm.ts:997',
+          message: 'block gas charged',
+          data: {
+            pc: currentPc,
+            blockCost,
+            gasBefore: this.state.gasCounter.toString(),
+            gasAfter: newGasCounter.toString(),
+            success,
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'A',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+
+    if (!success) {
+      this.state.resultCode = RESULT_CODES.OOG
+      return false
+    }
+
+    this.state.gasCounter = newGasCounter
+    this.currentBasicBlockPc = BigInt(currentPc)
+    return true
+  }
+
+  /**
+   * Charge gas for old gas cost model (1 gas per instruction)
+   */
+  private chargeGasForOldModel(): boolean {
+    if (this.state.gasCounter <= 0n) {
+      this.state.resultCode = RESULT_CODES.OOG
+      return false
+    }
+
+    // Consume 1 gas for each instruction
+    // Note: ECALLI instructions cost 1 gas just like any other instruction.
+    // The host function's gas cost (10+) is handled separately in the context mutator.
+    // The host function will OOG if there's not enough gas for its operation.
+    this.state.gasCounter -= 1n
+    return true
+  }
+
+  /**
+   * Update basic block tracking after instruction execution
+   *
+   * Gray Paper (pvm.tex §7.2): Basic blocks are determined by termination instructions.
+   * After a termination instruction executes, the next instruction starts a new block.
+   */
+  private updateBasicBlockTracking(
+    instruction: PVMInstruction,
+    _resultCode: ResultCode | null,
+  ): void {
+    // Reset tracking if instruction terminates the block (based on opcode, not result)
+    if (isBasicBlockTerminator(instruction)) {
+      this.currentBasicBlockPc = null
     }
   }
 }

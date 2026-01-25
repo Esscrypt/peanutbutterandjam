@@ -3,7 +3,6 @@ import {
   generateEntropyVRFSignature,
 } from '@pbnjam/bandersnatch-vrf'
 import {
-  type BlockProcessedEvent,
   blake2bHash,
   type EpochTransitionEvent,
   type EventBusService,
@@ -43,9 +42,6 @@ export class EntropyService extends BaseService {
   constructor(eventBusService: EventBusService) {
     super('entropy-service')
     this.eventBusService = eventBusService
-    this.eventBusService.addBlockProcessedCallback(
-      this.handleBlockProcessing.bind(this),
-    )
     this.eventBusService.addEpochTransitionCallback(
       this.handleEpochTransition.bind(this),
     )
@@ -55,23 +51,6 @@ export class EntropyService extends BaseService {
     this.eventBusService.addBestBlockChangedCallback(
       this.handleBestBlockChanged.bind(this),
     )
-  }
-
-  /**
-   * Update entropy accumulator with VRF output from each block
-   * Gray Paper: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
-   *
-   * Note: This is a fallback handler for slot changes. The primary entropy updates
-   * should happen via handleBestBlockChanged when actual block headers are available.
-   */
-  private handleBlockProcessing(event: BlockProcessedEvent): Safe<void> {
-    const [updateError] = this.updateEntropyAccumulator(
-      hexToBytes(event.header.vrfSig),
-    )
-    if (updateError) {
-      return safeError(updateError)
-    }
-    return safeResult(undefined)
   }
 
   /**
@@ -130,7 +109,7 @@ export class EntropyService extends BaseService {
    * Update entropy accumulator with VRF output
    * Gray Paper: entropyaccumulator' = blake(entropyaccumulator || banderout(H_vrfsig))
    */
-  private updateEntropyAccumulator(vrfOutput: Uint8Array): Safe<Uint8Array> {
+  updateEntropyAccumulator(vrfOutput: Uint8Array): Safe<Uint8Array> {
     const [banderoutError, banderoutResult] = banderout(vrfOutput)
     if (banderoutError) {
       return safeError(banderoutError)

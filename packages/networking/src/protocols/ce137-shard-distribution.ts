@@ -10,6 +10,7 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type {
   Safe,
@@ -28,6 +29,8 @@ export class ShardDistributionProtocol extends NetworkingProtocol<
   ShardDistributionResponse
 > {
   private readonly eventBus: EventBusService
+  // Track event IDs for request/response linking
+  private readonly requestEventIds: Map<string, bigint> = new Map()
 
   constructor(eventBus: EventBusService) {
     super()
@@ -37,12 +40,50 @@ export class ShardDistributionProtocol extends NetworkingProtocol<
   }
 
   /**
+   * Generate a unique key for tracking request event IDs
+   */
+  private getRequestKey(
+    peerPublicKey: Hex,
+    erasureRoot: Hex,
+    shardIndex: bigint,
+  ): string {
+    return `${peerPublicKey}:${erasureRoot}:${shardIndex.toString()}`
+  }
+
+  /**
    * Process shard distribution request and generate response
    */
   async processRequest(
     request: ShardDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE137] Processing shard distribution request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      erasureRoot: request.erasureRoot,
+      shardIndex: request.shardIndex.toString(),
+    })
+
+    // Emit JIP-3 receiving shard request event
+    const eventId = await this.eventBus.emitReceivingShardRequest(
+      hexToBytes(peerPublicKey),
+    )
+
+    // Store event ID for linking with response
+    const requestKey = this.getRequestKey(
+      peerPublicKey,
+      request.erasureRoot,
+      request.shardIndex,
+    )
+    this.requestEventIds.set(requestKey, eventId)
+
+    // Emit JIP-3 shard request received event
+    await this.eventBus.emitShardRequestReceived(
+      eventId,
+      hexToBytes(request.erasureRoot),
+      request.shardIndex,
+    )
+
+    // Legacy event for backwards compatibility
     this.eventBus.emitShardDistributionRequest(request, peerPublicKey)
     return safeResult(undefined)
   }
@@ -54,6 +95,27 @@ export class ShardDistributionProtocol extends NetworkingProtocol<
     response: ShardDistributionResponse,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    // Note: We need the erasureRoot and shardIndex from the original request to look up the event ID
+    // Since we don't have that in the response, we'll use the first available event ID for this peer
+    // In a full implementation, the response would include request identifiers
+    let eventId: bigint | undefined
+    for (const [key, id] of this.requestEventIds.entries()) {
+      if (key.startsWith(`${peerPublicKey}:`)) {
+        eventId = id
+        this.requestEventIds.delete(key)
+        break
+      }
+    }
+
+    // If no event ID found, generate a new one (fallback)
+    if (eventId === undefined) {
+      eventId = BigInt(Date.now())
+    }
+
+    // Emit JIP-3 shards transferred event
+    await this.eventBus.emitShardsTransferred(eventId)
+
+    // Legacy event for backwards compatibility
     this.eventBus.emitShardDistributionResponse(response, peerPublicKey)
     return safeResult(undefined)
   }

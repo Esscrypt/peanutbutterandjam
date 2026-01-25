@@ -4,6 +4,9 @@
  * Types for state management and database operations
  */
 
+import type { Hex } from 'viem'
+import type { EntropyState } from './global-state'
+
 /**
  * Core account structure
  */
@@ -101,3 +104,14 @@ export type ParsedStateKey =
       chapterIndex: 0 // Special indicator for C(s, h) keys
       serviceId: bigint
     }
+
+/**
+ * Complete state snapshot for rollback
+ * Includes state keyvals plus service-specific state that's not in the trie
+ */
+export interface ChainStateSnapshot {
+  keyvals: { key: Hex; value: Hex }[]
+  accumulationSlot: bigint | null
+  clockSlot: bigint
+  entropy: EntropyState
+}

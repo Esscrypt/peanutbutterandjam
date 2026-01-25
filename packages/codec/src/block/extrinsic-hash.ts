@@ -20,7 +20,7 @@
  * }}}
  */
 
-import { blake2bHash, blakemany } from '@pbnjam/core'
+import { blake2bHash, blakemany, type Hex } from '@pbnjam/core'
 import type { BlockBody, IConfigService, Safe } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
 import { encodeUint8Array } from '../core/sequence'
@@ -118,41 +118,32 @@ export function createExtrinsicArray(
 export function calculateExtrinsicHash(
   extrinsic: BlockBody,
   config: IConfigService,
-): Safe<string> {
-  try {
-    // Step 1: Create array 'a' of encoded components
-    const [arrayError, encodedComponents] = createExtrinsicArray(
-      extrinsic,
-      config,
-    )
-    if (arrayError) {
-      return safeError(arrayError)
-    }
-
-    // Step 2: Apply blakemany{a} - create Merkle tree of components
-    const [blakemanyError, merkleTree] = blakemany(encodedComponents)
-    if (blakemanyError) {
-      return safeError(blakemanyError)
-    }
-
-    // Step 3: Apply encode{} - serialize the Merkle tree structure
-    // Gray Paper: encode([i₀, i₁, ...]) ≡ encode(i₀) ∥ encode(i₁) ∥ ...
-    // For fixed-length items like hashes (32 bytes), identity serialization applies:
-    // we simply concatenate the hashes directly
-    // Note: blakemany returns only leaf hashes, not all tree nodes
-    const [encodeError, encodedTree] = encodeUint8Array(merkleTree)
-    if (encodeError) {
-      return safeError(encodeError)
-    }
-
-    // Step 4: Apply blake{} - hash the encoded Merkle tree
-    const [hashError, hash] = blake2bHash(encodedTree)
-    if (hashError) {
-      return safeError(hashError)
-    }
-
-    return safeResult(hash)
-  } catch (error) {
-    return safeError(error as Error)
+): Safe<Hex> {
+  // Step 1: Create array 'a' of encoded components
+  const [arrayError, encodedComponents] = createExtrinsicArray(
+    extrinsic,
+    config,
+  )
+  if (arrayError) {
+    return safeError(arrayError)
   }
+
+  // Step 2: Apply blakemany{a} - create Merkle tree of components
+  const [blakemanyError, merkleTree] = blakemany(encodedComponents)
+  if (blakemanyError) {
+    return safeError(blakemanyError)
+  }
+
+  // Step 3: Apply encode{} - serialize the Merkle tree structure
+  // Gray Paper: encode([i₀, i₁, ...]) ≡ encode(i₀) ∥ encode(i₁) ∥ ...
+  // For fixed-length items like hashes (32 bytes), identity serialization applies:
+  // we simply concatenate the hashes directly
+  // Note: blakemany returns only leaf hashes, not all tree nodes
+  const [encodeError, encodedTree] = encodeUint8Array(merkleTree)
+  if (encodeError) {
+    return safeError(encodeError)
+  }
+
+  // Step 4: Apply blake{} - hash the encoded Merkle tree
+  return blake2bHash(encodedTree)
 }

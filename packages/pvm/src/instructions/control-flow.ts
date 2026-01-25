@@ -43,6 +43,101 @@ export class FALLTHROUGHInstruction extends BaseInstruction {
 }
 
 /**
+ * UNLIKELY instruction (opcode 0x03 / 3)
+ * Hints that this execution path is unlikely to be taken.
+ * Deducts 40 gas from the gas counter when executed.
+ *
+ * Gray Paper Reference: new-gas-cost-model/graypaper.pdf Appendix A.9
+ */
+export class UNLIKELYInstruction extends BaseInstruction {
+  readonly opcode = OPCODES.UNLIKELY
+  readonly name = 'UNLIKELY'
+  readonly description = 'Unlikely execution path hint'
+
+  execute(context: InstructionContext): InstructionResult {
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'control-flow.ts:57',
+          message: 'UNLIKELY execute entry',
+          data: {
+            gasBefore: context.gas.toString(),
+            pc: context.pc.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'A',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+    context.log('UNLIKELY: Unlikely execution path hint - deducting 40 gas')
+
+    // Deduct 40 gas for the unlikely instruction
+    const gasCost = 40n
+    if (context.gas < gasCost) {
+      // #region agent log
+      fetch(
+        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            location: 'control-flow.ts:65',
+            message: 'UNLIKELY OOG',
+            data: { gas: context.gas.toString(), required: gasCost.toString() },
+            timestamp: Date.now(),
+            sessionId: 'debug-session',
+            runId: 'run1',
+            hypothesisId: 'A',
+          }),
+        },
+      ).catch(() => {})
+      // #endregion
+      context.log('UNLIKELY: Out of gas', {
+        gas: context.gas,
+        required: gasCost,
+      })
+      return {
+        resultCode: RESULT_CODES.OOG,
+      }
+    }
+
+    context.gas -= gasCost
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'control-flow.ts:72',
+          message: 'UNLIKELY gas deducted',
+          data: {
+            gasAfter: context.gas.toString(),
+            deducted: gasCost.toString(),
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'A',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
+
+    return {
+      resultCode: null, // Continue execution
+    }
+  }
+}
+
+/**
  * JUMP instruction (opcode 0x40)
  * Unconditional jump with offset as specified in Gray Paper
  *

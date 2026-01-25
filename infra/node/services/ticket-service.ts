@@ -12,6 +12,7 @@ import {
   bytesToHex,
   type EpochTransitionEvent,
   type EventBusService,
+  getEd25519KeyPairWithFallback,
   type Hex,
   hexToBytes,
   logger,
@@ -76,6 +77,7 @@ export class TicketService extends BaseService implements ITicketService {
   private prover: RingVRFProverWasm
   private localValidatorIndex: number | null = null
   private ringVerifier: RingVRFVerifierWasm
+
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
@@ -121,19 +123,33 @@ export class TicketService extends BaseService implements ITicketService {
   }
 
   start(): Safe<boolean> {
-    if (!this.keyPairService) {
-      return safeError(new Error('Key pair service not set'))
-    }
     if (!this.validatorSetManager) {
       return safeError(new Error('Validator set manager not set'))
     }
-    const publicKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
+    // Get Ed25519 public key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(keyPairError || new Error('Key pair service not set'))
+    }
+    const publicKey = ed25519KeyPair.publicKey
 
     const [validatorIndexError, validatorIndex] =
       this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
     if (validatorIndexError) {
-      throw new Error('Failed to get validator index')
+      // If the local node is not a validator, log a warning and continue
+      // This allows non-validator nodes to run (e.g., for development/testing)
+      logger.warn(
+        'Local node is not a validator in the genesis state. Ticket service will operate in non-validator mode.',
+        {
+          publicKey: bytesToHex(publicKey),
+          error: validatorIndexError.message,
+        },
+      )
+      this.localValidatorIndex = null
+      return safeResult(true)
     }
     this.localValidatorIndex = validatorIndex
 
@@ -191,22 +207,104 @@ export class TicketService extends BaseService implements ITicketService {
       return safeError(new Error('Invalid ticket'))
     }
 
-    //check if we are the proxy validator for this epoch
-    const intendedProxyValidatorIndex = determineProxyValidator(
+    // Check if we are the proxy validator for this ticket
+    // Proxy validator is selected from the next epoch's validator list
+    const nextEpochValidators = this.validatorSetManager.getPendingValidators()
+    if (nextEpochValidators.length === 0) {
+      return safeError(
+        new Error(
+          'Next epoch validator list is empty - cannot verify proxy validator',
+        ),
+      )
+    }
+
+    const intendedProxyValidatorIndexInNextEpoch = determineProxyValidator(
       safroleTicket,
       this.validatorSetManager,
     )
 
-    // compare against our index
-    const ourPublicKey = bytesToHex(
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey,
-    )
-    const ourIndex = this.validatorSetManager.getValidatorIndex(ourPublicKey)
-
-    if (intendedProxyValidatorIndex !== Number(ourIndex)) {
-      return safeError(new Error('Not the intended proxy validator'))
+    // Find the proxy validator in the current epoch's validator set
+    const proxyValidator =
+      nextEpochValidators[intendedProxyValidatorIndexInNextEpoch]
+    if (!proxyValidator) {
+      return safeError(
+        new Error(
+          `Proxy validator not found at index ${intendedProxyValidatorIndexInNextEpoch}`,
+        ),
+      )
     }
 
+    const currentValidators = this.validatorSetManager.getActiveValidators()
+    let intendedProxyValidatorIndex: number | null = null
+    for (const [index, validator] of currentValidators.entries()) {
+      if (validator.ed25519 === proxyValidator.ed25519) {
+        intendedProxyValidatorIndex = index
+        break
+      }
+    }
+
+    if (intendedProxyValidatorIndex === null) {
+      return safeError(
+        new Error('Proxy validator not found in current epoch validator set'),
+      )
+    }
+
+    // Get our validator index using helper with fallback logic
+    let ourIndex: number | null = null
+    if (this.configService.validatorIndex !== undefined) {
+      const [ourIndexError] = this.validatorSetManager.getValidatorAtIndex(
+        this.configService.validatorIndex,
+      )
+      if (ourIndexError) {
+        return safeError(new Error('Local node is not a validator'))
+      }
+      ourIndex = this.configService.validatorIndex
+    } else {
+      // Get Ed25519 public key using helper with fallback logic
+      const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+        this.configService,
+        this.keyPairService || undefined,
+      )
+      if (keyPairError || !ed25519KeyPair) {
+        return safeError(keyPairError || new Error('Key pair service not set'))
+      }
+      const ourPublicKey = bytesToHex(ed25519KeyPair.publicKey)
+      const [ourIndexError, ourIndexResult] =
+        this.validatorSetManager.getValidatorIndex(ourPublicKey)
+      if (
+        ourIndexError ||
+        ourIndexResult === null ||
+        ourIndexResult === undefined
+      ) {
+        return safeError(new Error('Local node is not a validator'))
+      }
+      ourIndex = ourIndexResult
+    }
+
+    // Determine if this is CE 131 (Generator → Proxy Validator) or CE 132 (Proxy → All Validators)
+    // CE 131: We are the proxy validator receiving from generator → add to proxyValidatorTickets
+    // CE 132: We are any validator receiving from proxy → add to ticketAccumulator (for winnersMark)
+
+    if (intendedProxyValidatorIndex === ourIndex) {
+      // We are the proxy validator
+      // Check if we already have this ticket in proxyValidatorTickets
+      // If yes, this is CE 132 (we're receiving our own forwarded ticket)
+      // If no, this is CE 131 (we're receiving from generator)
+      const alreadyHaveTicket = this.proxyValidatorTickets.some(
+        (t) => t.id === safroleTicket.id,
+      )
+
+      if (!alreadyHaveTicket) {
+        // CE 131: First time receiving as proxy validator → add to proxyValidatorTickets for forwarding
+        this.addProxyValidatorTicket(safroleTicket)
+      }
+      // If alreadyHaveTicket is true, we'll fall through to add to accumulator (CE 132 case)
+    }
+
+    // CE 132: All validators (including proxy) should add to ticketAccumulator
+    // This includes:
+    // 1. Non-proxy validators receiving from proxy
+    // 2. Proxy validator receiving its own forwarded ticket (CE 132)
     this.addReceivedTicket(safroleTicket, peerPublicKey)
 
     return safeResult(undefined)
@@ -249,6 +347,23 @@ export class TicketService extends BaseService implements ITicketService {
   }
 
   addProxyValidatorTicket(ticket: SafroleTicket): void {
+    // Filter out tickets with entryIndex >= maxTicketsPerExtrinsic
+    // Only tickets with entryIndex < maxTicketsPerExtrinsic can be distributed via network
+    const entryIndexNum = Number(ticket.entryIndex)
+    const maxTickets = this.configService.maxTicketsPerExtrinsic
+    if (entryIndexNum >= maxTickets) {
+      logger.warn(
+        'Skipping ticket with entryIndex >= maxTicketsPerExtrinsic from proxy validator tickets',
+        {
+          entryIndex: entryIndexNum,
+          entryIndexBigInt: ticket.entryIndex.toString(),
+          ticketId: ticket.id,
+          maxTicketsPerExtrinsic: maxTickets,
+          ticketsPerValidator: this.configService.ticketsPerValidator,
+        },
+      )
+      return
+    }
     this.proxyValidatorTickets.push(ticket)
   }
 
@@ -720,20 +835,72 @@ export class TicketService extends BaseService implements ITicketService {
     if (!tickets) {
       return safeError(new Error('Failed to generate tickets'))
     }
+    // Get next epoch's validator list (pendingSet) for proxy selection
+    // JAMNP-S spec: "The proxy validator is selected from the next epoch's validator list"
+    const nextEpochValidators = this.validatorSetManager.getPendingValidators()
+    if (nextEpochValidators.length === 0) {
+      return safeError(
+        new Error(
+          'Next epoch validator list is empty - cannot determine proxy validators',
+        ),
+      )
+    }
+
+    // Get current epoch's validators for distribution
+    const currentValidators = this.validatorSetManager.getActiveValidators()
+
     for (const ticket of tickets) {
       // Determine proxy validator using JAMNP-S specification:
       // "The index of the proxy validator for a ticket is determined by interpreting
       // the last 4 bytes of the ticket's VRF output as a big-endian unsigned integer,
       // modulo the number of validators"
-      const proxyValidatorIndex = determineProxyValidator(
+      // Proxy validator is selected from the next epoch's validator list
+      const proxyValidatorIndexInNextEpoch = determineProxyValidator(
         ticket,
         this.validatorSetManager,
       )
 
-      //If the generating validator is chosen as the proxy validator,
-      //  then the first step should effectively be skipped and the generating validator should
-      //  distribute the ticket to the current validators itself
-      if (proxyValidatorIndex === Number(this.localValidatorIndex)) {
+      // Map proxy validator index from next epoch to current epoch validator index
+      // We need to find the proxy validator's index in the current epoch's validator set
+      const proxyValidator = nextEpochValidators[proxyValidatorIndexInNextEpoch]
+      if (!proxyValidator) {
+        logger.warn('Proxy validator not found in next epoch validator list', {
+          proxyIndex: proxyValidatorIndexInNextEpoch,
+          nextEpochValidatorsCount: nextEpochValidators.length,
+        })
+        continue
+      }
+
+      // Find the proxy validator's index in the current epoch's validator set
+      let proxyValidatorIndexInCurrentEpoch: number | null = null
+      for (const [index, validator] of currentValidators.entries()) {
+        if (validator.ed25519 === proxyValidator.ed25519) {
+          proxyValidatorIndexInCurrentEpoch = index
+          break
+        }
+      }
+
+      // If proxy validator is not in current epoch's validator set, skip
+      if (proxyValidatorIndexInCurrentEpoch === null) {
+        logger.warn(
+          'Proxy validator not found in current epoch validator set',
+          {
+            proxyEd25519: proxyValidator.ed25519,
+          },
+        )
+        continue
+      }
+
+      // If the generating validator is chosen as the proxy validator,
+      // then the first step should effectively be skipped and the generating validator should
+      // distribute the ticket to the current validators itself (CE 132)
+      if (
+        this.localValidatorIndex !== null &&
+        proxyValidatorIndexInCurrentEpoch === Number(this.localValidatorIndex)
+      ) {
+        // Skip CE 131 and perform CE 132 directly
+        // Add ticket to proxy validator tickets so it gets distributed in second phase
+        this.addProxyValidatorTicket(ticket)
         continue
       }
 
@@ -754,8 +921,8 @@ export class TicketService extends BaseService implements ITicketService {
       }
 
       this.networkingService.sendMessage(
-        BigInt(proxyValidatorIndex),
-        132 as StreamKind, // Proxy validator to all current validators
+        BigInt(proxyValidatorIndexInCurrentEpoch),
+        131 as StreamKind, // CE 131: Generating validator to proxy validator
         serializedRequest,
       )
     }
@@ -765,6 +932,13 @@ export class TicketService extends BaseService implements ITicketService {
 
   /**
    * Execute second step ticket distribution (CE 132)
+   *
+   * JAMNP-S spec: "Forwarding should be evenly spaced out from this point until
+   * half-way through the Safrole lottery period. Forwarding may be stopped if
+   * the ticket is included in a finalized block."
+   *
+   * Safrole lottery period: slots 0 to contestDuration (500)
+   * Halfway point: contestDuration / 2 (250)
    */
   private async handleSecondPhaseTicketDistribution(): SafePromise<void> {
     if (!this.validatorSetManager) {
@@ -781,8 +955,48 @@ export class TicketService extends BaseService implements ITicketService {
 
     const ticketsToForward = this.getProxyValidatorTickets()
     const currentEpoch = this.clockService.getCurrentEpoch()
+    const currentSlot = this.clockService.getCurrentSlot()
+    const currentPhase = currentSlot % BigInt(this.configService.epochDuration)
+
+    // Calculate forwarding window
+    // Start: max(⌊E/20⌋, 1) slots after connectivity changes (handled by clock service)
+    // End: halfway through Safrole lottery period (contestDuration / 2)
+    const forwardingEndPhase = Math.floor(
+      this.configService.contestDuration / 2,
+    )
+
+    // If we're past the forwarding window, don't forward
+    if (Number(currentPhase) >= forwardingEndPhase) {
+      logger.debug('Past forwarding window, skipping CE 132 distribution', {
+        currentPhase: currentPhase.toString(),
+        forwardingEndPhase,
+      })
+      return safeResult(undefined)
+    }
+
+    // Calculate number of forwarding intervals
+    // Space out forwarding evenly from current phase to halfway point
+    const remainingPhases = forwardingEndPhase - Number(currentPhase)
 
     for (const ticket of ticketsToForward) {
+      // Double-check before serialization (should already be filtered in addProxyValidatorTicket)
+      // Filter out tickets with entryIndex >= maxTicketsPerExtrinsic
+      const entryIndexNum = Number(ticket.entryIndex)
+      const maxTickets = this.configService.maxTicketsPerExtrinsic
+      if (entryIndexNum >= maxTickets) {
+        logger.warn(
+          'Skipping ticket with entryIndex >= maxTicketsPerExtrinsic during CE132 forwarding',
+          {
+            entryIndex: entryIndexNum,
+            entryIndexBigInt: ticket.entryIndex.toString(),
+            ticketId: ticket.id,
+            epochIndex: currentEpoch.toString(),
+            maxTicketsPerExtrinsic: maxTickets,
+          },
+        )
+        continue
+      }
+
       const ticketDistributionRequest: TicketDistributionRequest = {
         epochIndex: currentEpoch,
         ticket: {
@@ -795,23 +1009,54 @@ export class TicketService extends BaseService implements ITicketService {
           ticketDistributionRequest,
         )
       if (serializeError) {
+        logger.error('Failed to serialize ticket for CE132 distribution', {
+          error: serializeError.message,
+          entryIndex: entryIndexNum,
+          ticketId: ticket.id,
+        })
         return safeError(serializeError)
       }
-      for (const validatorIndex of validators.keys()) {
-        const [sendError, success] = await this.networkingService.sendMessage(
-          BigInt(validatorIndex),
-          132 as StreamKind, // Proxy validator to all current validators
-          serializedRequest,
-        )
-        if (sendError) {
-          logger.error('Failed to send ticket distribution request', {
-            error: sendError.message,
-          })
+
+      // Space out forwarding evenly across remaining phases
+      // Send to validators in batches to avoid overwhelming the network
+      // validators is a Map<number, ValidatorPublicKeys>
+      const validatorsArray = Array.from(validators.keys())
+      const batchSize = Math.max(
+        1,
+        Math.floor(validatorsArray.length / remainingPhases),
+      )
+
+      for (let i = 0; i < validatorsArray.length; i += batchSize) {
+        const batch = validatorsArray.slice(i, i + batchSize)
+        const batchIndex = Math.floor(i / batchSize)
+
+        // Calculate delay for this batch (evenly spaced)
+        const delayMs =
+          batchIndex * (this.configService.slotDuration / remainingPhases)
+
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
         }
-        if (!success) {
-          logger.error('Failed to send ticket distribution request', {
-            error: 'Failed to send ticket distribution request',
-          })
+
+        // Send to batch of validators
+        for (const validatorIndex of batch) {
+          const [sendError, success] = await this.networkingService.sendMessage(
+            BigInt(validatorIndex),
+            132 as StreamKind, // CE 132: Proxy validator to all current validators
+            serializedRequest,
+          )
+          if (sendError) {
+            logger.error('Failed to send ticket distribution request', {
+              error: sendError.message,
+              validatorIndex,
+            })
+          }
+          if (!success) {
+            logger.error('Failed to send ticket distribution request', {
+              error: 'Failed to send ticket distribution request',
+              validatorIndex,
+            })
+          }
         }
       }
     }

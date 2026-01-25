@@ -14,7 +14,7 @@
  */
 
 import type { EventBusService, Hex } from '@pbnjam/core'
-import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type { PreimageAnnouncement, Safe, SafePromise } from '@pbnjam/types'
 import { safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
@@ -38,11 +38,31 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
    */
   async processRequest(
     announcement: PreimageAnnouncement,
-    _peerPublicKey: Hex,
+    peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE142] Processing preimage announcement request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      serviceId: announcement.serviceId.toString(),
+      hash: announcement.hash,
+      preimageLength: announcement.preimageLength.toString(),
+    })
+
+    // Emit JIP-3 preimage announced event
+    await this.eventBusService.emitPreimageAnnounced(
+      hexToBytes(peerPublicKey),
+      'remote', // Received from peer
+      announcement.serviceId,
+      hexToBytes(announcement.hash),
+      announcement.preimageLength,
+    )
+
+    // The event bus will trigger handlePreimageAnnouncement which checks if we need to request
+    // Preimages are added to pending state when received via handlePreimageReceived
+
+    // Legacy event for backwards compatibility
     this.eventBusService.emitPreimageAnnouncementReceived(
       announcement,
-      _peerPublicKey,
+      peerPublicKey,
     )
 
     return safeResult(undefined)
@@ -96,12 +116,18 @@ export class PreimageAnnouncementProtocol extends NetworkingProtocol<
     })
   }
 
-  //TODO: double check if this is correct
+  /**
+   * Serialize preimage announcement response
+   * JAMNP-S CE 142: Response is FIN (empty)
+   */
   serializeResponse(_response: undefined): Safe<Uint8Array> {
     return safeResult(new Uint8Array())
   }
 
-  //TODO: double check if this is correct
+  /**
+   * Deserialize preimage announcement response
+   * JAMNP-S CE 142: Response is FIN (empty)
+   */
   deserializeResponse(_data: Uint8Array): Safe<void> {
     return safeResult(undefined)
   }

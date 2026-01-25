@@ -74,6 +74,10 @@ export async function instantiate(module, imports = {}) {
       'console.error'(message) {
         console.error(__liftString(message >>> 0));
       },
+      trace(message) {
+        // AssemblyScript trace function - logs debug messages
+        console.debug('[WASM trace]', __liftString(message >>> 0));
+      },
     }),
   };
   const result = await WebAssembly.instantiate(module, adaptedImports);
@@ -207,6 +211,51 @@ export async function instantiate(module, imports = {}) {
       // assembly/index/setAccumulateInputs(~lib/array/Array<assembly/codec/AccumulateInput> | null) => void
       inputs = __lowerArray((pointer, value) => { __setU32(pointer, __lowerInternref(value) || __notnull()); }, 51, 2, inputs);
       exports.setAccumulateInputs(inputs);
+    },
+    setupRefineInvocation(gasLimit, program, args, workPackage, authorizerTrace, importSegments, exportSegmentOffset, serviceAccount, lookupAnchorTimeslot) {
+      // assembly/index/setupRefineInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null, ~lib/typedarray/Uint8Array | null, ~lib/array/Array<~lib/array/Array<~lib/typedarray/Uint8Array>> | null, u32, assembly/codec/CompleteServiceAccount | null, u64) => void
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      authorizerTrace = authorizerTrace ? __retain(__lowerTypedArray(Uint8Array, 15, 0, authorizerTrace) || __notnull()) : null;
+      importSegments = importSegments ? __retain(__lowerArray((pointer, value) => { __setU32(pointer, __retain(__lowerArray((pointer, value) => { __setU32(pointer, __retain(__lowerTypedArray(Uint8Array, 15, 0, value) || __notnull())); }, 11, 0, value) || __notnull())); }, 14, 2, value) || __notnull()) : null;
+      serviceAccount = serviceAccount ? __lowerInternref(serviceAccount) || __notnull() : null;
+      lookupAnchorTimeslot = lookupAnchorTimeslot || 0n;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupRefineInvocation(gasLimit, program, args, workPackage, authorizerTrace, importSegments, exportSegmentOffset, serviceAccount, lookupAnchorTimeslot);
+      } finally {
+        __release(program);
+        __release(args);
+        if (authorizerTrace) __release(authorizerTrace);
+        if (importSegments) __release(importSegments);
+      }
+    },
+    setupIsAuthorizedInvocation(gasLimit, program, args, workPackage) {
+      // assembly/index/setupIsAuthorizedInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null) => void
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        exports.setupIsAuthorizedInvocation(gasLimit, program, args, workPackage);
+      } finally {
+        __release(program);
+        __release(args);
+      }
+    },
+    isAuthorizedInvocation(gasLimit, program, args, workPackage) {
+      // assembly/index/isAuthorizedInvocation(u32, ~lib/typedarray/Uint8Array, ~lib/typedarray/Uint8Array, assembly/codec/WorkPackage | null) => assembly/types/RunProgramResult
+      program = __retain(__lowerTypedArray(Uint8Array, 15, 0, program) || __notnull());
+      args = __retain(__lowerTypedArray(Uint8Array, 15, 0, args) || __notnull());
+      workPackage = workPackage ? __lowerInternref(workPackage) || __notnull() : null;
+      try {
+        exports.__setArgumentsLength(arguments.length);
+        return __liftInternref(exports.isAuthorizedInvocation(gasLimit, program, args, workPackage) >>> 0);
+      } finally {
+        __release(program);
+        __release(args);
+      }
     },
     runProgram() {
       // assembly/index/runProgram() => assembly/types/RunProgramResult

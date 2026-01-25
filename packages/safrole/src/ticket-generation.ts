@@ -3,7 +3,12 @@ import {
   type RingVRFProverWasm,
   type RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
-import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
+import {
+  bytesToHex,
+  getValidatorCredentialsWithFallback,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
 import type {
   IConfigService,
   IEntropyService,
@@ -158,14 +163,22 @@ export function generateTicketsForEpoch(
   configService: IConfigService,
 ): Safe<SafroleTicket[]> {
   // 1. Get validator secret key
-  const localKeyPair = keyPairService.getLocalKeyPair()
-  const localValidatorSecretKey = localKeyPair.bandersnatchKeyPair.privateKey
+  const [credentialsError, validatorCredentials] =
+    getValidatorCredentialsWithFallback(configService, keyPairService)
+  if (credentialsError || !validatorCredentials) {
+    return safeError(
+      credentialsError ||
+        new Error('No validator credentials available for ticket generation'),
+    )
+  }
+  const localValidatorSecretKey =
+    validatorCredentials.bandersnatchKeyPair.privateKey
 
   const ringKeys = validatorSetManager.getActiveValidatorKeys()
 
   // 3. Get prover index (this validator's index in the ring)
   const [proverIndexError, proverIndex] = validatorSetManager.getValidatorIndex(
-    bytesToHex(localKeyPair.ed25519KeyPair.publicKey),
+    bytesToHex(validatorCredentials.ed25519KeyPair.publicKey),
   )
   if (proverIndexError) {
     return safeError(proverIndexError)

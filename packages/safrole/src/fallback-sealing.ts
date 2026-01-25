@@ -109,11 +109,12 @@ export function generateFallbackSealSignature(
   // Gray Paper equation 154: bssignature{k}{c}{m} where:
   // k = validatorSecretKey, c = context, m = unsignedHeader
   // NOTE: IETFVRFProver.prove parameter order is (secretKey, input, auxData)
-  // where input = message and auxData = context per IETF VRF specification
+  // Must match verification: IETFVRFVerifier.verify(publicKey, context, proof, encodedUnsignedHeader)
+  // where input = context and auxData = message per IETF VRF specification
   const vrfResult = IETFVRFProver.prove(
     validatorSecretKey,
-    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
-    context, // Xfallback ∥ entropy'_3 (context) - goes to _auxData parameter
+    context, // Xfallback ∥ entropy'_3 (context) - goes to _input parameter
+    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _auxData parameter
   )
 
   // Verify the signature is the correct length (96 bytes per Gray Paper)

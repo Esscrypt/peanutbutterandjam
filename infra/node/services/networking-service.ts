@@ -7,14 +7,25 @@
 import type { QUICConnection } from '@infisical/quic'
 import { type events, QUICClient, QUICServer } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
-// import type { EventAll } from '@matrixai/events'
 import * as ed from '@noble/ed25519'
 import { sha512 } from '@noble/hashes/sha2.js'
-import { bytesToHex, type Hex, logger } from '@pbnjam/core'
+import {
+  bytesToHex,
+  type EventBusService,
+  getEd25519KeyPairWithFallback,
+  type Hex,
+  logger,
+} from '@pbnjam/core'
 
 // Configure Ed25519 with SHA-512
 ed.hashes.sha512 = (...m) => sha512(ed.etc.concatBytes(...m))
 
+import {
+  type DecodedNetworkingMessage,
+  decodeNetworkingMessage,
+  decodeNetworkingMessageWithKind,
+  encodeFixedLength,
+} from '@pbnjam/codec'
 import type { NetworkingProtocol } from '@pbnjam/networking'
 import {
   extractPublicKeyFromDERCertificate,
@@ -22,12 +33,21 @@ import {
   getClientCrypto,
   getServerCrypto,
   getTlsConfig,
+  Peer,
   shouldLocalInitiate,
   verifyPeerCertificate,
 } from '@pbnjam/networking'
-import type { ConnectionEndpoint, SafePromise, StreamKind } from '@pbnjam/types'
+import type {
+  ConnectionEndpoint,
+  EpochMark,
+  SafePromise,
+  StreamKind,
+} from '@pbnjam/types'
 import { BaseService, safeError, safeResult } from '@pbnjam/types'
+import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
 import type { KeyPairService } from './keypair-service'
+import type { RecentHistoryService } from './recent-history-service'
 import type { ValidatorSetManager } from './validator-set'
 
 /**
@@ -39,60 +59,127 @@ export class NetworkingService extends BaseService {
     NetworkingProtocol<unknown, unknown>
   > = new Map()
 
-  // Track QUIC connections directly
-  private readonly listenAddress: string
-  private readonly listenPort: number
-  /** public key of the validator to the connection */
-  private readonly connections: Map<
-    string,
-    { connection: QUICConnection; publicKey: Hex }
-  > = new Map()
+  // Track peers - 1 peer per connection, 1 stream per peer
+  /** Map of peer public key to Peer object */
+  private readonly peers: Map<Hex, Peer> = new Map()
+  /** Map of connection ID to peer public key (for reverse lookup) */
+  private readonly connectionIdToPeer: Map<string, Hex> = new Map()
+  /** Public key to connection map (for backward compatibility) */
   publicKeyToConnection: Map<Hex, QUICConnection> = new Map()
-  /** public key of the validator to the stream */
-  private readonly streams: Map<Hex, QUICStream> = new Map()
+  /** Track which streams have sent their first message (to know if we need to send kind byte) */
+  private readonly streamsWithFirstMessage: WeakSet<QUICStream> = new WeakSet()
+
+  /**
+   * Get peer by public key
+   */
+  private getPeer(publicKey: Hex): Peer | undefined {
+    return this.peers.get(publicKey)
+  }
+
+  /**
+   * Get peer by connection ID
+   */
+  private getPeerByConnectionId(connectionId: string): Peer | undefined {
+    const publicKey = this.connectionIdToPeer.get(connectionId)
+    return publicKey ? this.peers.get(publicKey) : undefined
+  }
+
+  /**
+   * Add or update a peer
+   */
+  private setPeer(peer: Peer): void {
+    this.peers.set(peer.publicKey, peer)
+    this.connectionIdToPeer.set(peer.connectionId, peer.publicKey)
+    this.publicKeyToConnection.set(peer.publicKey, peer.connection)
+  }
+
+  /**
+   * Remove a peer and clean up all its streams
+   */
+  private removePeer(publicKey: Hex): void {
+    const peer = this.peers.get(publicKey)
+    if (peer) {
+      // Clean up all streams
+      for (const stream of peer.streams) {
+        peer.removeStream(stream)
+      }
+      this.connectionIdToPeer.delete(peer.connectionId)
+      this.publicKeyToConnection.delete(publicKey)
+      this.peers.delete(publicKey)
+    }
+  }
 
   private server: QUICServer | null = null
 
   private validatorSetManagerService: ValidatorSetManager | null = null
-  private readonly keyPairService: KeyPairService
+  private clockService: ClockService | null = null
+  private recentHistoryService: RecentHistoryService | null = null
+  private readonly eventBusService: EventBusService
+  private readonly keyPairService: KeyPairService | null
   private readonly chainHash: string
+  private configService: ConfigService
+  private validatorIndex: number | undefined
+  private statusInterval: NodeJS.Timeout | null = null
+  private epochStartSlot: bigint | null = null
+  private hasConnectedThisEpoch = false
 
   constructor(options: {
-    listenAddress: string
-    listenPort: number
     protocolRegistry: Map<StreamKind, NetworkingProtocol<unknown, unknown>>
-    keyPairService: KeyPairService
+    keyPairService?: KeyPairService
     chainHash: string
+    configService: ConfigService
+    validatorIndex?: number
+    eventBusService: EventBusService
   }) {
     super('networking-service')
-    this.listenAddress = options.listenAddress
-    this.listenPort = options.listenPort
-    this.keyPairService = options.keyPairService
+    this.keyPairService = options.keyPairService || null
     this.chainHash = options.chainHash
     this.protocolRegistry = options.protocolRegistry
-    // Convert PEM to raw private key bytes
+    this.configService = options.configService
+    this.validatorIndex = options.validatorIndex
+    this.eventBusService = options.eventBusService
   }
 
   setValidatorSetManager(validatorSetManager: ValidatorSetManager): void {
     this.validatorSetManagerService = validatorSetManager
   }
 
+  setClockService(clockService: ClockService): void {
+    this.clockService = clockService
+  }
+
+  setRecentHistoryService(recentHistoryService: RecentHistoryService): void {
+    this.recentHistoryService = recentHistoryService
+  }
+
   async init(): SafePromise<boolean> {
     if (this.server) {
       return safeResult(true)
     }
-    const privateKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.privateKey
-    const localKeyPair = this.keyPairService.getLocalKeyPair()
+
+    // Get the private key for signing using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(
+        keyPairError ||
+          new Error('Failed to get Ed25519 key pair with fallback'),
+      )
+    }
+    const privateKey = ed25519KeyPair.privateKey
+
     const serverCrypto = getServerCrypto(privateKey)
 
     const [certificateDataError, certificateData] =
-      await generateNetworkingCertificates(
-        localKeyPair.ed25519KeyPair,
-        this.chainHash.slice(0, 8),
-      )
+      await generateNetworkingCertificates(ed25519KeyPair, this.chainHash)
     if (certificateDataError) {
-      throw new Error('Failed to generate certificate data')
+      return safeError(
+        new Error(
+          `Failed to generate certificate data: ${certificateDataError.message}`,
+        ),
+      )
     }
 
     const tlsConfig = getTlsConfig(certificateData)
@@ -116,20 +203,286 @@ export class NetworkingService extends BaseService {
     if (!this.server) {
       return safeError(new Error('Server not initialized'))
     }
+    if (!this.validatorSetManagerService) {
+      return safeError(new Error('Validator set manager not set'))
+    }
+
+    // Get connection endpoint from validator set manager
+    if (this.validatorIndex === undefined) {
+      logger.error(
+        '[NetworkingService.start] No validator index configured. Cannot determine connection endpoint.',
+      )
+      return safeError(
+        new Error(
+          'No validator index configured. Cannot determine connection endpoint.',
+        ),
+      )
+    }
+
+    const activeValidators =
+      this.validatorSetManagerService.getActiveValidators()
+    if (
+      activeValidators.length <= this.validatorIndex ||
+      !activeValidators[this.validatorIndex]?.connectionEndpoint
+    ) {
+      logger.error(
+        `[NetworkingService.start] Validator ${this.validatorIndex} in staging set does not have connection endpoint. Cannot start networking service.`,
+        {
+          validatorIndex: this.validatorIndex,
+          activeSetLength: activeValidators.length,
+          hasValidator: activeValidators.length > this.validatorIndex,
+          hasEndpoint:
+            activeValidators.length > this.validatorIndex &&
+            !!activeValidators[this.validatorIndex]?.connectionEndpoint,
+        },
+      )
+      return safeError(
+        new Error(
+          `Validator ${this.validatorIndex} in staging set does not have connection endpoint. Cannot start networking service.`,
+        ),
+      )
+    }
+
+    const endpoint = activeValidators[this.validatorIndex].connectionEndpoint!
+    const listenAddress = endpoint.host
+    const listenPort = endpoint.port
+
+    logger.info(
+      `[NetworkingService.start] Using connection endpoint from staging set validator ${this.validatorIndex}: ${listenAddress}:${listenPort}`,
+    )
+
     this.setupServerConnectionOverride()
 
-    await this.server.start({ host: this.listenAddress, port: this.listenPort })
+    await this.server.start({ host: listenAddress, port: listenPort })
+
+    // Start periodic status logging every 2 seconds
+    this.startStatusLogging()
+
+    // Register event handlers
+    // Track epoch transitions to know when epoch starts
+    this.eventBusService.addEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
+    // Listen to conectivityChange event from clock-service (after delay)
+    // TODO: this causes us to initiate connections. double check
+    // this.eventBusService.addConectivityChangeCallback(
+    //   this.handleConectivityChange.bind(this),
+    // )
 
     return safeResult(true)
   }
 
+  /**
+   * Start periodic status logging
+   */
+  private startStatusLogging(): void {
+    // Clear any existing interval
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval)
+    }
+
+    // Log status every 2 seconds
+    this.statusInterval = setInterval(() => {
+      this.logNetworkStatus()
+    }, 2000)
+  }
+
+  /**
+   * Log network status (peers and validators)
+   */
+  private logNetworkStatus(): void {
+    // const peerCount = this.publicKeyToConnection.size
+    // let validatorCount = 0
+
+    // Count validators by checking if peer public keys are in the validator set
+    if (this.validatorSetManagerService) {
+      const activeValidators =
+        this.validatorSetManagerService.getActiveValidators()
+      const pendingValidators =
+        this.validatorSetManagerService.getPendingValidators()
+      const previousValidators =
+        this.validatorSetManagerService.getPreviousValidators()
+
+      const validatorPublicKeys = new Set<Hex>()
+      for (const validator of activeValidators) {
+        validatorPublicKeys.add(validator.ed25519)
+      }
+      for (const validator of pendingValidators) {
+        validatorPublicKeys.add(validator.ed25519)
+      }
+      for (const validator of previousValidators) {
+        validatorPublicKeys.add(validator.ed25519)
+      }
+
+      // Count how many connected peers are validators
+      // let validatorCount = 0
+      // for (const peerPublicKey of this.publicKeyToConnection.keys()) {
+      //   if (validatorPublicKeys.has(peerPublicKey)) {
+      //     validatorCount++
+      //   }
+      // }
+    }
+
+    // Log in the format: "Net status: X peers (Y vals)"
+    // logger.info(`Net status: ${peerCount} peers (${validatorCount} vals)`)
+  }
+
   async stop(): SafePromise<boolean> {
     super.stop()
+
+    // Clear status logging interval
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval)
+      this.statusInterval = null
+    }
+
+    // Remove event listeners
+    this.eventBusService.removeEpochTransitionCallback(
+      this.handleEpochTransition.bind(this),
+    )
+    this.eventBusService.removeConectivityChangeCallback(
+      this.handleConectivityChange.bind(this),
+    )
+
     if (!this.server) {
       return safeError(new Error('Server not initialized'))
     }
     await this.server.stop({ isApp: true })
     return safeResult(true)
+  }
+
+  /**
+   * Handle epoch transition events to track epoch start
+   */
+  private async handleEpochTransition(event: {
+    slot: bigint
+    epochMark: EpochMark | null
+  }): Promise<void> {
+    this.epochStartSlot = event.slot
+    this.hasConnectedThisEpoch = false
+  }
+
+  /**
+   * Handle conectivityChange event from clock-service
+   * This event is emitted after max(⌊E/30⌋,1) slots have elapsed since epoch transition
+   * We still need to check if the first block in epoch has been finalized before connecting
+   */
+  private async handleConectivityChange(_event: {
+    slot: bigint
+  }): Promise<void> {
+    if (
+      !this.recentHistoryService ||
+      !this.validatorSetManagerService ||
+      !this.clockService
+    ) {
+      return
+    }
+
+    // Skip if we've already connected this epoch
+    if (this.hasConnectedThisEpoch) {
+      return
+    }
+
+    // Skip if we don't have an epoch start slot yet
+    if (this.epochStartSlot === null) {
+      const currentEpoch = this.clockService.getCurrentEpoch()
+      const epochDuration = BigInt(this.configService.epochDuration)
+      this.epochStartSlot = currentEpoch * epochDuration
+    }
+
+    // Check condition: First block in epoch has been finalized
+    const recentHistory = this.recentHistoryService.getRecentHistory()
+    if (recentHistory.length === 0) {
+      return
+    }
+
+    // The oldest block in recent history is considered finalized
+    const currentSlot = this.clockService.getCurrentSlot()
+    const oldestBlockSlot = currentSlot - BigInt(recentHistory.length - 1)
+
+    // Check if the first block in epoch (epochStartSlot) has been finalized
+    const firstBlockInEpochFinalized = oldestBlockSlot <= this.epochStartSlot
+
+    if (!firstBlockInEpochFinalized) {
+      return
+    }
+
+    // Condition met - connect to peers from active set
+    await this.connectToActiveSetPeers()
+    this.hasConnectedThisEpoch = true
+  }
+
+  /**
+   * Connect to peers from the active validator set
+   */
+  private async connectToActiveSetPeers(): Promise<void> {
+    if (!this.validatorSetManagerService) {
+      logger.error('[NetworkingService] Validator set manager not set')
+      return
+    }
+
+    const activeValidators =
+      this.validatorSetManagerService.getActiveValidators()
+
+    // Get local public key to avoid connecting to ourselves
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      logger.error('[NetworkingService] Failed to get local Ed25519 key pair')
+      return
+    }
+    const localPublicKey = bytesToHex(ed25519KeyPair.publicKey)
+
+    logger.info('[NetworkingService] Connecting to active set peers', {
+      activeSetSize: activeValidators.length,
+      localPublicKey: `${localPublicKey.slice(0, 20)}...`,
+    })
+
+    // Connect to each validator in the active set (except ourselves)
+    for (const validator of activeValidators) {
+      // Skip if this is our own validator
+      if (validator.ed25519 === localPublicKey) {
+        continue
+      }
+
+      // Skip if we're already connected
+      if (this.isConnectedToPeer(validator.ed25519)) {
+        continue
+      }
+
+      // Skip if validator doesn't have connection endpoint
+      if (!validator.connectionEndpoint) {
+        logger.debug(
+          '[NetworkingService] Validator missing connection endpoint',
+          {
+            validatorKey: `${validator.ed25519.slice(0, 20)}...`,
+          },
+        )
+        continue
+      }
+
+      // Attempt to connect
+      logger.info('[NetworkingService] Attempting to connect to peer', {
+        validatorKey: `${validator.ed25519.slice(0, 20)}...`,
+        endpoint: `${validator.connectionEndpoint.host}:${validator.connectionEndpoint.port}`,
+      })
+
+      const [connectError] = await this.connectToPeer(
+        validator.connectionEndpoint,
+      )
+      if (connectError) {
+        logger.debug('[NetworkingService] Failed to connect to peer', {
+          validatorKey: `${validator.ed25519.slice(0, 20)}...`,
+          error: connectError.message,
+        })
+      } else {
+        logger.info('[NetworkingService] Successfully connected to peer', {
+          validatorKey: `${validator.ed25519.slice(0, 20)}...`,
+        })
+      }
+    }
   }
 
   /**
@@ -179,63 +532,55 @@ export class NetworkingService extends BaseService {
     kindByte: StreamKind,
     message: Uint8Array,
   ): SafePromise<void> {
-    // Add kind byte to message content
-    const messageWithKind = new Uint8Array(1 + message.length)
-    messageWithKind[0] = kindByte
-    messageWithKind.set(message, 1)
-
-    // Create size buffer (32-bit little-endian) for the complete message
-    const sizeBuffer = new ArrayBuffer(4)
-    const sizeView = new DataView(sizeBuffer)
-    sizeView.setUint32(0, messageWithKind.length, true) // little-endian
-
-    logger.info('📦 Created size buffer for message', {
-      originalMessageSize: message.length,
-      messageWithKindSize: messageWithKind.length,
-      sizeBufferHex: bytesToHex(new Uint8Array(sizeBuffer)),
-    })
-
-    const stream = this.streams.get(publicKey)
-    if (!stream) {
-      logger.error('❌ No stream found for validator', {
+    const peer = this.getPeer(publicKey)
+    if (!peer) {
+      logger.error('❌ No peer found for validator', {
         publicKey: publicKey,
-        streamsCount: this.streams.size,
-        availableStreams: Array.from(this.streams.keys()),
+        peersCount: this.peers.size,
+        availablePeers: Array.from(this.peers.keys()),
       })
-      return safeError(
-        new Error(`Validator ${publicKey} not found in streams map`),
-      )
+      return safeError(new Error(`Validator ${publicKey} not found`))
     }
 
-    logger.info('🔄 Found stream for validator', {
-      publicKey: publicKey,
-      streamReadable: !!stream.readable,
-      streamWritable: !!stream.writable,
-    })
+    // Use primary stream for sending (first stream created/received)
+    if (!peer.primaryStream) {
+      logger.error('❌ No stream available for peer', {
+        publicKey: publicKey,
+        totalStreams: peer.streams.size,
+      })
+      return safeError(new Error(`No stream available for peer ${publicKey}`))
+    }
 
+    const stream = peer.primaryStream
     const writer = stream.writable.getWriter()
     try {
-      // Combine size buffer and message content into a single write
-      const combinedMessage = new Uint8Array(
-        sizeBuffer.byteLength + messageWithKind.length,
+      // Check if this is the first message on this stream
+      const isFirstMessage = !this.streamsWithFirstMessage.has(stream)
+
+      if (isFirstMessage) {
+        // First message: send kind byte, then size+content
+        this.streamsWithFirstMessage.add(stream)
+
+        // Send kind byte first
+        const kindByteBuffer = new Uint8Array([kindByte])
+        await writer.write(kindByteBuffer)
+      }
+
+      // Send message: [4-byte size (little-endian)][message content]
+      const [encodeSizeError, sizeBytes] = encodeFixedLength(
+        BigInt(message.length),
+        4n,
       )
-      combinedMessage.set(new Uint8Array(sizeBuffer), 0)
-      combinedMessage.set(messageWithKind, sizeBuffer.byteLength)
+      if (encodeSizeError) {
+        return safeError(encodeSizeError)
+      }
 
-      logger.info('📝 Writing combined message to stream...', {
-        sizeBuffer: bytesToHex(new Uint8Array(sizeBuffer)),
-        kindByte,
-        originalMessageSize: message.length,
-        messageWithKindSize: messageWithKind.length,
-        messagePreview: `${bytesToHex(message.slice(0, Math.min(16, message.length)))}...`,
-        combinedSize: combinedMessage.length,
-      })
-      await writer.write(combinedMessage)
+      // Combine size + message content
+      const messageBuffer = new Uint8Array(4 + message.length)
+      messageBuffer.set(sizeBytes, 0)
+      messageBuffer.set(message, 4)
 
-      logger.info('✅ Message successfully written to stream', {
-        publicKey: publicKey,
-        messageSize: message.length,
-      })
+      await writer.write(messageBuffer)
     } finally {
       writer.releaseLock()
     }
@@ -243,378 +588,255 @@ export class NetworkingService extends BaseService {
   }
 
   /**
-   * Handle incoming QUIC stream - reads complete message
+   * Close the writable side of a stream for a peer
+   *
+   * This sends FIN to indicate we're done sending data on this stream.
+   * Used after sending requests (e.g., CE129 state requests) to signal completion.
+   *
+   * @param publicKey - Public key of the peer
+   * @returns Safe result indicating success or failure
    */
-  async handleIncomingData(quicStream: QUICStream): SafePromise<number> {
-    // Access connection ID safely from the stream
-    const connectionId =
-      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream types don't expose connection property
-      (quicStream as any).connection?.connectionIdShared?.toString() ||
-      'unknown'
-    logger.info('📨 Handling incoming QUIC stream data...', {
-      connectionId: `${connectionId.slice(0, 20)}...`,
-    })
+  async closeStreamForPeer(publicKey: Hex): SafePromise<void> {
+    const peer = this.getPeer(publicKey)
+    if (!peer) {
+      logger.warn('No peer found to close stream', {
+        publicKey: `${publicKey.substring(0, 20)}...`,
+      })
+      return safeError(
+        new Error(`Peer ${publicKey.substring(0, 20)}... not found`),
+      )
+    }
 
-    let messageData: Uint8Array
-    let kindByte: StreamKind
+    // Close primary stream
+    if (!peer.primaryStream) {
+      logger.warn('No primary stream found to close', {
+        publicKey: `${publicKey.substring(0, 20)}...`,
+        totalStreams: peer.streams.size,
+      })
+      return safeError(
+        new Error(
+          `No primary stream for peer ${publicKey.substring(0, 20)}...`,
+        ),
+      )
+    }
 
+    const stream = peer.primaryStream
+    const writer = stream.writable.getWriter()
     try {
-      // Check if the stream is locked
-      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream readable property type is incomplete
-      const isLocked = (quicStream.readable as any).locked
-      if (isLocked) {
-        logger.warn('⚠️ Stream is locked, cannot read data directly', {
-          connectionId: `${connectionId.slice(0, 20)}...`,
-        })
-        // Return early - the data will be processed in setupStreamDataReading
-        return safeResult(0)
-      }
-
-      const reader = quicStream.readable.getReader()
-      const chunks: Uint8Array[] = []
-      let totalBytes = 0
-
-      try {
-        // Read all chunks until the stream is done
-        while (true) {
-          const { value, done } = await reader.read()
-
-          if (done) {
-            logger.info('📖 Stream reading completed', {
-              connectionId: `${connectionId.slice(0, 20)}...`,
-              totalChunks: chunks.length,
-              totalBytes,
-            })
-            break
-          }
-
-          if (value) {
-            chunks.push(value)
-            totalBytes += value.length
-            logger.debug('📖 Read chunk from stream', {
-              connectionId: `${connectionId.slice(0, 20)}...`,
-              chunkSize: value.length,
-              totalBytes,
-            })
-          }
-        }
-      } finally {
-        reader.releaseLock()
-      }
-
-      if (chunks.length === 0) {
-        logger.error('❌ No data received from stream', {
-          connectionId: `${connectionId.slice(0, 20)}...`,
-        })
-        return safeError(new Error('No data received from stream'))
-      }
-
-      // Combine all chunks into a single message
-      const completeMessage = new Uint8Array(totalBytes)
-      let offset = 0
-      for (const chunk of chunks) {
-        completeMessage.set(chunk, offset)
-        offset += chunk.length
-      }
-
-      logger.info('✅ Complete message assembled from chunks', {
-        connectionId: `${connectionId.slice(0, 20)}...`,
-        totalChunks: chunks.length,
-        totalBytes,
-        messagePreview: bytesToHex(
-          completeMessage.slice(0, Math.min(32, completeMessage.length)),
-        ),
-      })
-
-      // Extract kind byte and message data
-      if (completeMessage.length < 1) {
-        logger.error('❌ Message too short - no kind byte', {
-          connectionId: `${connectionId.slice(0, 20)}...`,
-          messageLength: completeMessage.length,
-        })
-        return safeError(new Error('Message too short - no kind byte'))
-      }
-
-      kindByte = completeMessage[0] as StreamKind
-      messageData = completeMessage.slice(1)
-
-      logger.info('✅ Message parsed successfully', {
-        connectionId: `${connectionId.slice(0, 20)}...`,
-        kindByte,
-        messageDataLength: messageData.length,
-        messageDataPreview: bytesToHex(
-          messageData.slice(0, Math.min(16, messageData.length)),
-        ),
-      })
+      await writer.close()
     } catch (error) {
-      logger.error('❌ Error reading from stream:', {
+      logger.error('Failed to close stream', {
+        publicKey: `${publicKey.substring(0, 20)}...`,
         error: error instanceof Error ? error.message : String(error),
-        connectionId: `${connectionId.slice(0, 20)}...`,
       })
-      return safeError(new Error(`Error reading from stream: ${error}`))
+      return safeError(
+        error instanceof Error ? error : new Error('Failed to close stream'),
+      )
+    } finally {
+      writer.releaseLock()
     }
 
-    // Get sender context
-    const senderPublicKey = this.connections.get(connectionId)?.publicKey
-    if (!senderPublicKey) {
-      logger.error('❌ Failed to get sender public key', {
-        connectionId: `${connectionId.slice(0, 20)}...`,
-      })
-      return safeError(new Error('Failed to get sender public key'))
-    }
-
-    const protocol = this.protocolRegistry.get(kindByte)
-    if (!protocol) {
-      logger.error('❌ Failed to get protocol', {
-        connectionId: `${connectionId.slice(0, 20)}...`,
-        kindByte,
-      })
-      return safeError(new Error('Failed to get protocol'))
-    }
-
-    logger.info('🔄 Processing message with protocol', {
-      connectionId: `${connectionId.slice(0, 20)}...`,
-      kindByte,
-      protocolName: protocol.constructor.name,
-      messageDataLength: messageData.length,
-    })
-
-    // Use event-driven approach - non-blocking
-    // This is a RESPONSE to our request
-    const [parseError, event] = protocol.handleStreamData(
-      messageData,
-      senderPublicKey,
-      'response', // Explicitly mark as response
-    )
-    if (parseError) {
-      logger.error('❌ Failed to parse response message', {
-        connectionId: `${connectionId.slice(0, 20)}...`,
-        kindByte,
-        error: parseError.message,
-      })
-      return safeError(parseError)
-    }
-
-    logger.info('✅ Response message parsed and event emitted', {
-      connectionId: `${connectionId.slice(0, 20)}...`,
-      kindByte,
-      messageId: event.messageId,
-      timestamp: event.timestamp,
-      messageType: event.messageType,
-    })
-
-    return safeResult(kindByte)
+    return safeResult(undefined)
   }
 
   /**
    * Set up data listener on a stream to handle incoming messages
+   * Called once per stream when the stream is created
+   * Processes messages continuously until the stream ends
    */
   private setupStreamDataListener(
     stream: QUICStream,
     peerPublicKey: Hex,
   ): void {
-    logger.info('🔗 Setting up data listener on stream', {
-      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-    })
-
-    // Set up a reader to continuously read data from the stream
-    const startReading = async () => {
-      try {
-        const reader = stream.readable.getReader()
-
-        while (true) {
-          const { value, done } = await reader.read()
-
-          if (done) {
-            logger.debug('📖 Stream reading completed', {
-              peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-            })
-            break
-          }
-
-          if (value) {
-            logger.info('📨 Data received on stream', {
-              peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-              dataSize: value.length,
-              dataPreview: bytesToHex(
-                value.slice(0, Math.min(16, value.length)),
-              ),
-            })
-
-            // Process the incoming data directly
-            await this.processIncomingStreamData(value, peerPublicKey)
-          }
-        }
-      } catch (error) {
-        // Only log errors that aren't expected during cleanup
-        const errorMessage =
-          error instanceof Error ? error.message : String(error)
-        if (
-          !errorMessage.includes('null') &&
-          !errorMessage.includes('Peer closed')
-        ) {
-          logger.error('❌ Unexpected error reading from stream:', {
-            error: errorMessage,
-            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          })
-        } else {
-          logger.debug('🔌 Stream closed (expected during cleanup)', {
-            error: errorMessage,
-            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          })
-        }
-      }
-    }
-
-    // Start reading in the background
-    startReading().catch((error) => {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error)
-      if (
-        !errorMessage.includes('null') &&
-        !errorMessage.includes('Peer closed')
-      ) {
-        logger.error('❌ Stream reading failed:', {
-          error: errorMessage,
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        })
-      }
+    this.readStreamData(stream, peerPublicKey).catch((error) => {
+      this.handleStreamReadError(error, stream, peerPublicKey)
     })
   }
 
   /**
-   * Process incoming stream data according to JAMNP-S format
-   * Format: [4-byte size buffer][message content with kind byte]
+   * Read and process stream data using codec for message parsing
+   * JAMNP-S: First message is [1-byte kind][4-byte size][message content]
+   * Subsequent messages are [4-byte size][message content] (kind is known from first message)
+   * Reads entire stream, parses all messages, then processes them
    */
-  private async processIncomingStreamData(
-    data: Uint8Array,
+  private async readStreamData(
+    stream: QUICStream,
     peerPublicKey: Hex,
   ): Promise<void> {
-    logger.info('🔄 Processing incoming stream data', {
-      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-      dataSize: data.length,
-      dataPreview: bytesToHex(data.slice(0, Math.min(32, data.length))),
+    if (!stream.readable) {
+      logger.warn('[NetworkingService] Stream has no readable side', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      })
+      return
+    }
+
+    const peer = this.getPeer(peerPublicKey)
+    if (!peer) {
+      logger.error('[NetworkingService] Peer not found for stream data', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      })
+      return
+    }
+
+    const reader = stream.readable.getReader()
+    const { value } = await reader.read()
+    if (!value) {
+      logger.error('[NetworkingService] No value read from stream', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      })
+      return
+    }
+    let kindByte: StreamKind | undefined
+    if (value.length === 1) {
+      kindByte = value[0] as StreamKind
+    } else {
+      const [decodeError, networkingMessage] =
+        decodeNetworkingMessageWithKind(value)
+      if (decodeError) {
+        logger.error(
+          '[NetworkingService] Failed to decode networking message',
+          {
+            error: decodeError.message,
+          },
+        )
+        return
+      }
+      kindByte = networkingMessage.value.kindByte
+    }
+    const { value: messageData } = await reader.read()
+    if (!messageData) {
+      logger.error('[NetworkingService] No message data read from stream', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        messageData: messageData,
+      })
+      return
+    }
+
+    const [decodeError, networkingMessage] =
+      decodeNetworkingMessage(messageData)
+    if (decodeError) {
+      logger.error('[NetworkingService] Failed to decode networking message', {
+        error: decodeError.message,
+      })
+      return
+    }
+    logger.debug('[NetworkingService] Decoded networking message', {
+      kindByte: kindByte,
+      messageContentLength: networkingMessage.value.messageContent.length,
+      messageContentHex: bytesToHex(networkingMessage.value.messageContent),
     })
 
-    try {
-      // JAMNP-S format: [4-byte size buffer][message content]
-      if (data.length < 5) {
-        logger.error('❌ Data too short for JAMNP-S format', {
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          dataLength: data.length,
-          expectedMinLength: 5,
-        })
-        return
+    await this.processCompleteMessage(
+      kindByte,
+      networkingMessage.value,
+      peerPublicKey,
+    )
+  }
+
+  /**
+   * Handle stream read errors
+   * Only logs unexpected errors
+   */
+  private handleStreamReadError(
+    error: unknown,
+    stream: QUICStream,
+    peerPublicKey: Hex,
+  ): void {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+
+    // Expected errors during cleanup (stream closed/reset)
+    const isExpectedError =
+      errorMessage.includes('null') ||
+      errorMessage.includes('Peer closed') ||
+      errorMessage === 'read 1' ||
+      errorMessage.includes('read 1')
+
+    const peer = this.getPeer(peerPublicKey)
+    if (isExpectedError) {
+      if (peer) {
+        peer.readers.delete(stream)
       }
-
-      // Extract size buffer (first 4 bytes, little-endian)
-      const sizeBuffer = data.slice(0, 4)
-      const messageSize = new DataView(
-        sizeBuffer.buffer,
-        sizeBuffer.byteOffset,
-      ).getUint32(0, true)
-
-      // Extract message content (remaining bytes)
-      const messageContent = data.slice(4)
-
-      logger.info('✅ JAMNP-S message parsed', {
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        sizeBuffer: bytesToHex(sizeBuffer),
-        expectedMessageSize: messageSize,
-        actualMessageSize: messageContent.length,
-        messageContentPreview: bytesToHex(
-          messageContent.slice(0, Math.min(16, messageContent.length)),
-        ),
-      })
-
-      // Verify message size matches
-      if (messageContent.length !== messageSize) {
-        logger.error('❌ Message size mismatch', {
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          expectedSize: messageSize,
-          actualSize: messageContent.length,
-        })
-        return
-      }
-
-      // Extract kind byte from message content (not from size buffer)
-      if (messageContent.length < 1) {
-        logger.error('❌ Message content too short - no kind byte', {
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          messageContentLength: messageContent.length,
-        })
-        return
-      }
-
-      const kindByte = messageContent[0] as StreamKind
-      const messageData = messageContent.slice(1)
-
-      logger.info('✅ Message parsed from stream data', {
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        kindByte,
-        messageDataLength: messageData.length,
-        messageDataPreview: bytesToHex(
-          messageData.slice(0, Math.min(16, messageData.length)),
-        ),
-      })
-
-      // Get the protocol handler
-      const protocol = this.protocolRegistry.get(kindByte)
-      if (!protocol) {
-        logger.error('❌ No protocol found for kind byte', {
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          kindByte,
-        })
-        return
-      }
-
-      logger.info('🔄 Processing message with protocol', {
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        kindByte,
-        protocolName: protocol.constructor.name,
-        messageDataLength: messageData.length,
-      })
-
-      // Use event-driven approach - non-blocking
-      // This is a REQUEST coming from a peer
-      const [parseError, event] = protocol.handleStreamData(
-        messageData,
-        peerPublicKey,
-        'request', // Explicitly mark as request
-      )
-      if (parseError) {
-        logger.error('❌ Failed to parse request message', {
-          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-          kindByte,
-          error: parseError.message,
-        })
-        return
-      }
-
-      logger.info('✅ Request message parsed and event emitted', {
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-        kindByte,
-        messageId: event.messageId,
-        timestamp: event.timestamp,
-        messageType: event.messageType,
-      })
-    } catch (error) {
-      logger.error('❌ Error processing stream data:', {
-        error: error instanceof Error ? error.message : String(error),
-        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
-      })
+      return
     }
+
+    // Log unexpected errors
+    const streamState = {
+      readable: !!stream.readable,
+      writable: !!stream.writable,
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream types don't expose all properties
+      closed: (stream as any).closed,
+      // biome-ignore lint/suspicious/noExplicitAny: QUIC stream types don't expose all properties
+      errored: (stream as any).errored,
+    }
+
+    logger.error('[NetworkingService] Unexpected error reading from stream', {
+      error: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined,
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      streamState,
+      totalStreams: peer?.streams.size || 0,
+    })
+
+    if (peer) {
+      peer.readers.delete(stream)
+    }
+  }
+
+  /**
+   * Process a complete decoded message
+   */
+  private async processCompleteMessage(
+    kindByte: StreamKind,
+    decoded: DecodedNetworkingMessage,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    const { messageContent: messageData } = decoded
+
+    // Get the protocol handler
+    const protocol = this.protocolRegistry.get(kindByte)
+    if (protocol === undefined) {
+      logger.error('❌ No protocol found for kind byte', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        kindByte,
+      })
+      return
+    }
+
+    logger.info('[NetworkingService] Processing message with protocol', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      kindByte,
+      protocolName: protocol.constructor.name,
+      messageSize: messageData.length,
+    })
+
+    // Use event-driven approach - non-blocking
+    // This is a REQUEST coming from a peer
+    const [parseError, event] = protocol.handleStreamData(
+      messageData,
+      peerPublicKey,
+      'request', // Explicitly mark as request
+    )
+    if (parseError) {
+      logger.error('[NetworkingService] Failed to parse request message', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        kindByte,
+        error: parseError.message,
+      })
+      return
+    }
+
+    logger.info('[NetworkingService] Successfully processed message', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      kindByte,
+      protocolName: protocol.constructor.name,
+      messageId: event?.messageId,
+      messageType: event?.messageType,
+    })
   }
 
   async serverConnectionHandler(
     event: events.EventQUICServerConnection,
   ): Promise<void> {
-    logger.info('🎯 EVENT: EventQUICServerConnection received:', {
-      eventType: event.type,
-      hasDetail: !!event.detail,
-      detailKeys: event.detail ? Object.keys(event.detail) : [],
-      timestamp: new Date().toISOString(),
-    })
     if (!event.detail) {
       logger.error('❌ EventQUICServerConnection received with no detail')
       return
@@ -627,14 +849,9 @@ export class NetworkingService extends BaseService {
     }
     const connection = event.detail
     const connectionId = connection.connectionIdShared.toString()
-    logger.info('🎯 EventQUICServerConnection received:', {
-      eventType: event.type,
-      hasDetail: !!event.detail,
-      detailKeys: event.detail ? Object.keys(event.detail) : [],
-      connectionId: `${connectionId.slice(0, 32)}...`,
-    })
 
-    if (this.connections.has(connectionId)) {
+    // Check if peer already exists for this connection
+    if (this.connectionIdToPeer.has(connectionId)) {
       logger.warn('❌ Connection already exists', {
         connectionId: `${connectionId.slice(0, 20)}...`,
       })
@@ -644,6 +861,7 @@ export class NetworkingService extends BaseService {
     // Extract certificate to get peer public key for server role validation
     // biome-ignore lint/suspicious/noExplicitAny: QUIC connection type doesn't expose certDERs property
     const certDERs = (connection as any).certDERs
+
     if (certDERs && certDERs.length > 0) {
       const [extractError, peerPublicKey] = extractPublicKeyFromDERCertificate(
         certDERs[0],
@@ -651,52 +869,67 @@ export class NetworkingService extends BaseService {
 
       if (!extractError && peerPublicKey) {
         const publicKeyHex = bytesToHex(peerPublicKey)
-        logger.info('✅ Successfully extracted public key:', {
-          connectionId: `${connectionId.slice(0, 20)}...`,
-          extractedKey: publicKeyHex,
-          keyLength: peerPublicKey.length,
-        })
 
-        this.connections.set(connectionId, {
-          connection,
-          publicKey: publicKeyHex,
-        })
-
-        // Create a bidirectional stream for server-to-client communication
-        try {
-          const serverStream = connection.newStream('bidi')
-          this.streams.set(publicKeyHex, serverStream)
-
-          // Set up data listener on the server stream
-          this.setupStreamDataListener(serverStream, publicKeyHex)
-
-          logger.info('✅ Created server stream for peer communication', {
-            connectionId: `${connectionId.slice(0, 20)}...`,
-            peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
-            // biome-ignore lint/suspicious/noExplicitAny: QUIC stream type doesn't expose id property
-            streamId: (serverStream as any).id || 'unknown',
-          })
-        } catch (error) {
-          logger.error('❌ Failed to create server stream:', {
-            error: error instanceof Error ? error.message : String(error),
-            connectionId: `${connectionId.slice(0, 20)}...`,
-            peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
-          })
+        // Create endpoint from connection info
+        // Note: We don't have the endpoint info at server connection time,
+        // so we'll create a placeholder and update it later if needed
+        const endpoint: ConnectionEndpoint = {
+          host: '', // Will be set when we have connection info
+          port: 0,
+          publicKey: peerPublicKey,
         }
+
+        // Check if we already have a peer for this public key (enforce 1 connection per peer)
+        if (this.peers.has(publicKeyHex)) {
+          logger.warn(
+            '[NetworkingService] Rejecting additional connection - already have 1 connection per peer',
+            {
+              peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
+              connectionId: `${connectionId.slice(0, 20)}...`,
+              reason: 'Only 1 connection per peer is allowed',
+            },
+          )
+          return
+        }
+
+        // Create peer object (as server, we don't create streams - wait for remote)
+        const peer = new Peer(
+          connectionId,
+          publicKeyHex,
+          connection,
+          endpoint,
+          false,
+        )
+        this.setPeer(peer)
+
+        logger.info(
+          '[NetworkingService] Server connection established, waiting for EventQUICConnectionStream',
+          {
+            connectionId: `${connectionId.slice(0, 20)}...`,
+            peerPublicKey: `${publicKeyHex.slice(0, 20)}...`,
+          },
+        )
       } else {
         logger.error(
-          '❌ Failed to extract peer public key for server role assignment:',
+          '[NetworkingService] ❌ Failed to extract peer public key from certificate',
           {
-            error: extractError,
+            error:
+              extractError instanceof Error
+                ? extractError.message
+                : String(extractError),
             connectionId: `${connectionId.slice(0, 20)}...`,
+            certificateSize: certDERs[0]?.length,
+            hasCertificate: !!certDERs[0],
           },
         )
       }
     } else {
       logger.warn(
-        '⚠️ No peer certificates available for server role assignment:',
+        '[NetworkingService] ⚠️ No peer certificates available for connection',
         {
           connectionId: `${connectionId.slice(0, 20)}...`,
+          certDERs: certDERs,
+          certDERsType: typeof certDERs,
         },
       )
     }
@@ -706,44 +939,50 @@ export class NetworkingService extends BaseService {
     // Set up connection events for streams and cleanup
     connection.addEventListener(
       'EventQUICConnectionStream',
-      // biome-ignore lint/suspicious/noExplicitAny: QUIC event types are not fully typed
-      async (streamEvent: any) => {
-        if (!streamEvent?.detail) {
+      async (streamEvent: events.EventQUICConnectionStream) => {
+        if (!streamEvent.detail) {
           logger.warn('⚠️ Stream event has no detail property')
           return
         }
 
         const stream = streamEvent.detail
-        logger.info('📡 New stream received in connection:', {
-          connectionId: `${connectionId.slice(0, 20)}...`,
-          streamId: stream?.id,
-          streamReadable: !!stream?.readable,
-          streamWritable: !!stream?.writable,
-        })
 
-        // Set up data listener on the stream to handle incoming messages
-        const peerPublicKey = this.connections.get(connectionId)?.publicKey
-        if (peerPublicKey) {
-          this.setupStreamDataListener(stream, peerPublicKey)
-        } else {
-          logger.warn(
-            '⚠️ No peer public key found for stream data listener setup',
-            {
-              connectionId: `${connectionId.slice(0, 20)}...`,
-            },
-          )
+        // Get peer for this connection
+        const peer = this.getPeerByConnectionId(connectionId)
+        if (!peer) {
+          logger.warn('⚠️ No peer found for stream data listener setup', {
+            connectionId: `${connectionId.slice(0, 20)}...`,
+          })
+          return
         }
+
+        // Accept all streams from remote (server side - we don't create streams)
+        peer.addStream(stream)
+        logger.info(
+          '[NetworkingService] Stream received from EventQUICConnectionStream, setting up listener',
+          {
+            peerPublicKey: `${peer.publicKey.slice(0, 20)}...`,
+            connectionId: `${connectionId.slice(0, 20)}...`,
+            totalStreams: peer.streams.size,
+          },
+        )
+        this.setupStreamDataListener(stream, peer.publicKey)
       },
     )
 
-    connection.addEventListener('EventQUICConnectionClose', async () => {
-      logger.debug('🧹 Cleaning up connection mappings', {
-        connectionId: `${connectionId.slice(0, 32)}...`,
-      })
-      // Clean up all connection mappings
-      this.connections.delete(connectionId)
-      // Clean up connection context
-    })
+    connection.addEventListener(
+      'EventQUICConnectionClose',
+      async (_closeEvent: events.EventQUICConnectionClose) => {
+        const closeConnectionId =
+          connection.connectionIdShared?.toString() || connectionId
+
+        // Clean up peer (which includes connection, stream, streamKind, etc.)
+        const peer = this.getPeerByConnectionId(closeConnectionId)
+        if (peer) {
+          this.removePeer(peer.publicKey)
+        }
+      },
+    )
   }
 
   /**
@@ -762,49 +1001,19 @@ export class NetworkingService extends BaseService {
     )
 
     // Also listen for the raw connection events from the library for debugging
-    const serverEvents = [
-      'EventQUICServerConnection',
-      'EventQUICServerError',
-      'EventQUICSocketStarted',
-      'EventQUICSocketStopped',
-      'EventQUICSocketError',
-      'EventQUICConnectionStart',
-      'EventQUICConnectionStarted',
-      'EventQUICConnectionStop',
-      'EventQUICConnectionStopped',
-      'EventQUICConnectionError',
-      'EventQUICConnectionClose',
-      'EventQUICServerStart',
-    ]
-
-    // Add debug listeners for all server events
-    for (const eventName of serverEvents) {
-      // biome-ignore lint/suspicious/noExplicitAny: QUIC server event types are not fully typed
-      this.server?.addEventListener(eventName, (event: any) => {
-        logger.debug(`🔔 Server event received: ${eventName}`, {
-          hasDetail: !!event?.detail,
-          detailType: typeof event?.detail,
-          detailKeys: event?.detail ? Object.keys(event?.detail) : [],
-        })
-      })
-    }
-
     logger.info('✅ Server connection event listeners set up successfully')
   }
 
   private async serverConnectionCloseHandler(
     event: events.EventQUICConnectionStopped,
   ): Promise<void> {
-    logger.info('🎯 EventQUICServerConnectionClose received!', {
-      eventType: event.type,
-      hasDetail: !!event.detail,
-      detailType: typeof event.detail,
-      detailKeys: event.detail ? Object.keys(event.detail) : [],
-      event: JSON.stringify(event),
-    })
     if (!event.detail) {
       logger.error(
-        '❌[serverConnectionCloseHandler] EventQUICServerConnectionClose received with no detail',
+        '[NetworkingService] ❌ EventQUICServerConnectionClose received with no detail',
+        {
+          eventType: event.type,
+          eventKeys: Object.keys(event),
+        },
       )
       return
     }
@@ -813,26 +1022,55 @@ export class NetworkingService extends BaseService {
     const connectionId = connection.connectionIdShared?.toString()
     if (!connectionId) {
       logger.error(
-        '❌[serverConnectionCloseHandler] Connection has no connectionIdShared',
+        '[NetworkingService] ❌ Connection has no connectionIdShared',
+        {
+          connectionType: typeof connection,
+          connectionKeys: connection ? Object.keys(connection) : [],
+          hasConnectionIdShared: !!connection?.connectionIdShared,
+        },
       )
       return
     }
-    const connectionData = this.connections.get(connectionId)
-    if (!connectionData) {
-      logger.error('❌[serverConnectionCloseHandler] Connection not found')
+    const peer = this.getPeerByConnectionId(connectionId)
+    if (!peer) {
+      logger.warn('[NetworkingService] ⚠️ Connection not found in peers map', {
+        connectionId: `${connectionId.slice(0, 32)}...`,
+        totalPeers: this.peers.size,
+        connectionIds: Array.from(this.connectionIdToPeer.keys()).map(
+          (id) => `${id.slice(0, 20)}...`,
+        ),
+      })
       return
     }
-    this.publicKeyToConnection.delete(connectionData.publicKey)
 
-    // Clean up connection mappings
-    this.connections.delete(
-      connectionData.connection.connectionIdShared.toString(),
-    )
+    logger.info('[NetworkingService] 🧹 Cleaning up connection', {
+      connectionId: `${connectionId.slice(0, 32)}...`,
+      peerPublicKey: `${peer.publicKey.slice(0, 20)}...`,
+      wasInPublicKeyMap: this.publicKeyToConnection.has(peer.publicKey),
+      totalPeersBefore: this.peers.size,
+      totalPublicKeyConnectionsBefore: this.publicKeyToConnection.size,
+    })
+
+    // Clean up peer (which includes connection, stream, streamKind, etc.)
+    this.removePeer(peer.publicKey)
+
+    logger.debug('[NetworkingService] ✅ Connection cleanup completed', {
+      connectionId: `${connectionId.slice(0, 32)}...`,
+      totalPeersAfter: this.peers.size,
+      totalPublicKeyConnectionsAfter: this.publicKeyToConnection.size,
+    })
   }
 
   // biome-ignore lint/suspicious/noExplicitAny: QUIC error event type is not fully typed
   async serverErrorHandler(event: any): Promise<void> {
-    logger.error('❌ Server error:', event.detail)
+    logger.error('[NetworkingService] ❌ Server error received', {
+      eventType: event?.type,
+      eventDetail: event?.detail,
+      errorMessage: event?.detail?.message,
+      errorCode: event?.detail?.code,
+      errorCause: event?.detail?.cause,
+      fullEvent: JSON.stringify(event, null, 2),
+    })
   }
 
   /**
@@ -843,11 +1081,20 @@ export class NetworkingService extends BaseService {
       logger.debug('Starting connectToPeer...')
 
       // 1. Check preferred initiator logic
-      const localKeyPair = this.keyPairService.getLocalKeyPair()
-      if (!localKeyPair) {
-        throw new Error('No local key pair available')
+      // Get the local Ed25519 public key using helper with fallback logic
+      const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+        this.configService,
+        this.keyPairService || undefined,
+      )
+      if (keyPairError || !ed25519KeyPair) {
+        return safeError(
+          keyPairError ||
+            new Error(
+              'No validatorIndex set in configService and no KeyPairService available, cannot determine local Ed25519 key',
+            ),
+        )
       }
-      const localEd25519Key = localKeyPair.ed25519KeyPair.publicKey
+      const localEd25519Key = ed25519KeyPair.publicKey
 
       const shouldInitiate = shouldLocalInitiate(
         localEd25519Key,
@@ -874,7 +1121,7 @@ export class NetworkingService extends BaseService {
         // Skip client connection - peer should connect to us instead
         // TODO: wait for 5 seconds and then try to connect to the peer if it is not connected
         await new Promise((resolve) => setTimeout(resolve, 5000))
-        if (this.publicKeyToConnection.has(bytesToHex(endpoint.publicKey))) {
+        if (this.isConnectedToPeer(bytesToHex(endpoint.publicKey))) {
           return safeResult(true)
         }
         return safeError(new Error('Not preferred initiator'))
@@ -882,17 +1129,44 @@ export class NetworkingService extends BaseService {
 
       logger.info('✅ Acting as CLIENT - preferred initiator confirmed')
 
+      // Get the key pair for certificate generation
+      const [clientKeyPairError, clientEd25519KeyPair] =
+        getEd25519KeyPairWithFallback(
+          this.configService,
+          this.keyPairService || undefined,
+        )
+      if (clientKeyPairError || !clientEd25519KeyPair) {
+        return safeError(
+          clientKeyPairError ||
+            new Error(
+              'No validatorIndex set in configService and no KeyPairService available, cannot generate certificates',
+            ),
+        )
+      }
+
       const clientCrypto = getClientCrypto()
 
       const [certificateDataError, certificateData] =
         await generateNetworkingCertificates(
-          localKeyPair.ed25519KeyPair,
-          this.chainHash.slice(0, 8),
+          clientEd25519KeyPair,
+          this.chainHash,
         )
       if (certificateDataError) {
-        throw new Error('Failed to generate certificate data')
+        return safeError(
+          new Error(
+            `Failed to generate certificate data: ${certificateDataError.message}`,
+          ),
+        )
       }
       const tlsConfig = getTlsConfig(certificateData)
+
+      logger.info('[NetworkingService] Client TLS configuration', {
+        alpnProtocol: certificateData.alpnProtocol,
+        applicationProtos: tlsConfig.applicationProtos,
+        hasApplicationProtos: !!tlsConfig.applicationProtos,
+        applicationProtosLength: tlsConfig.applicationProtos?.length ?? 0,
+        endpoint: `${endpoint.host}:${endpoint.port}`,
+      })
 
       // Use matching TLS config with certificates for mutual TLS
       const clientConfig = {
@@ -905,6 +1179,15 @@ export class NetworkingService extends BaseService {
           verifyCallback: verifyPeerCertificate,
         },
       }
+
+      logger.info('[NetworkingService] Client config created', {
+        host: clientConfig.host,
+        port: clientConfig.port,
+        hasConfig: !!clientConfig.config,
+        configApplicationProtos: clientConfig.config.applicationProtos,
+        configApplicationProtosLength:
+          clientConfig.config.applicationProtos?.length ?? 0,
+      })
 
       // Add timeout and debugging for QUICClient.createQUICClient
       const client = await QUICClient.createQUICClient(clientConfig)
@@ -962,20 +1245,71 @@ export class NetworkingService extends BaseService {
         logger.debug('✅ Connection established successfully!')
       }
 
-      // 9. Create bidirectional stream for communication
+      // 9. Create peer and stream (1 connection per peer, 1 stream per connection)
+      const peerPublicKey = bytesToHex(endpoint.publicKey)
+      const connectionId = quicConnection.connectionIdShared.toString()
+
+      // Check if peer already exists (enforce 1 connection per peer)
+      if (this.peers.has(peerPublicKey)) {
+        logger.warn(
+          '[NetworkingService] Rejecting additional connection - already have 1 connection per peer',
+          {
+            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+            connectionId: `${connectionId.slice(0, 20)}...`,
+            reason: 'Only 1 connection per peer is allowed',
+          },
+        )
+        return safeResult(true)
+      }
+
+      // Create peer object (as client/initiator)
+      const peer = new Peer(
+        connectionId,
+        peerPublicKey,
+        quicConnection,
+        endpoint,
+        true,
+      )
+      this.setPeer(peer)
+
+      // As client (initiator), create the first stream
       const stream = quicConnection.newStream('bidi')
-      this.streams.set(bytesToHex(endpoint.publicKey), stream)
+      peer.addStream(stream)
 
-      // Set up data listener on the stream to handle incoming messages
-      this.setupStreamDataListener(stream, bytesToHex(endpoint.publicKey))
+      logger.info(
+        '[NetworkingService] New peer created (client/initiator, stream created)',
+        {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          connectionId: `${connectionId.slice(0, 20)}...`,
+        },
+      )
 
-      logger.debug('✅ Bidirectional stream created and stored')
+      // Set up data listener on the stream
+      this.setupStreamDataListener(stream, peerPublicKey)
 
-      // 10. Store connection
-      this.connections.set(quicConnection.connectionIdShared.toString(), {
-        connection: quicConnection,
-        publicKey: bytesToHex(endpoint.publicKey),
-      })
+      // Listen for EventQUICConnectionStream in case remote creates additional streams
+      quicConnection.addEventListener(
+        'EventQUICConnectionStream',
+        async (streamEvent: events.EventQUICConnectionStream) => {
+          if (!streamEvent.detail) {
+            return
+          }
+
+          const remoteStream = streamEvent.detail
+
+          // Accept all streams from remote
+          peer.addStream(remoteStream)
+          logger.info(
+            '[NetworkingService] Additional stream received from remote on client connection',
+            {
+              peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+              connectionId: `${connectionId.slice(0, 20)}...`,
+              totalStreams: peer.streams.size,
+            },
+          )
+          this.setupStreamDataListener(remoteStream, peerPublicKey)
+        },
+      )
 
       return safeResult(true)
     } catch (error) {
@@ -992,28 +1326,26 @@ export class NetworkingService extends BaseService {
   }
 
   public isConnectedToPeer(publicKey: Hex): boolean {
-    return this.publicKeyToConnection.has(publicKey)
+    return this.peers.has(publicKey)
   }
 
   /**
    * Close a connection
    */
   async closeConnection(publicKey: Hex): SafePromise<boolean> {
-    const connection = this.publicKeyToConnection.get(publicKey)
-    if (!connection) {
+    const peer = this.getPeer(publicKey)
+    if (!peer) {
       return safeError(new Error(`Connection ${publicKey} not found`))
     }
 
     try {
-      // Close the QUIC connection if available
-      if (connection) {
-        await connection.stop({ isApp: true })
-      }
+      // Close the QUIC connection
+      await peer.connection.stop({ isApp: true })
     } catch (error) {
       logger.error(`Failed to close connection ${publicKey}:`, error)
     } finally {
-      this.publicKeyToConnection.delete(publicKey)
-      this.connections.delete(connection.connectionIdShared.toString())
+      // Clean up peer (which includes connection, stream, streamKind, etc.)
+      this.removePeer(publicKey)
     }
 
     return safeResult(true)

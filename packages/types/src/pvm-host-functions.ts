@@ -44,7 +44,7 @@ export interface FetchParams {
   // Used by selectors 14 and 15 in accumulation context
   accumulateInputs: AccumulateInput[] | null
   // entropyService: IEntropyService
-  entropyService: IEntropyService
+  entropyService: IEntropyService | null
 }
 
 /**

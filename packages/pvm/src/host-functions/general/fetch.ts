@@ -160,6 +160,9 @@ export class FetchHostFunction extends BaseHostFunction {
         // In accumulate invocation (line 189): n = entropyaccumulator' (entropy accumulator)
         // In refine invocation (line 96): n = zerohash (work package hash, but set to zero/none)
         // In is-authorized invocation (line 49): n = none (not available)
+        if (!params.entropyService) {
+          return null
+        }
         return params.entropyService.getEntropyAccumulator()
 
       case 2n: {
@@ -345,7 +348,7 @@ export class FetchHostFunction extends BaseHostFunction {
     }
   }
 
-  private getSystemConstants(): Uint8Array {
+  public getSystemConstants(): Uint8Array {
     // Gray Paper: System constants encoded as per specification
     // encode[8]{Citemdeposit}, encode[8]{Cbytedeposit}, encode[8]{Cbasedeposit},
     // encode[2]{Ccorecount}, encode[4]{Cexpungeperiod}, encode[4]{Cepochlen},

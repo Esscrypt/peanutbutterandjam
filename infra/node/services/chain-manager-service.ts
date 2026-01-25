@@ -25,29 +25,43 @@
  * - Original block is always finalized after mutations
  */
 
+import {
+  // handleStateResponseAndRequestBlock,
+  requestBlock,
+  requestStateForBlock,
+} from '@pbnjam/chain-manager'
 import { calculateBlockHashFromHeader } from '@pbnjam/codec'
-import type { Hex } from '@pbnjam/core'
-import { logger } from '@pbnjam/core'
+import type { EventBusService, Hex } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
+import type {
+  BlockRequestProtocol,
+  StateRequestProtocol,
+} from '@pbnjam/networking'
 import type {
   AncestryItem,
   Block,
+  BlockAnnouncementHandshake,
   BlockHeader,
   ChainFork,
   IAccumulationService,
   IBlockImporterService,
   IChainManagerService,
   IConfigService,
+  ISealKeyService,
   IStateService,
   Safe,
   SafePromise,
+  StateResponse,
   StateTrie,
 } from '@pbnjam/types'
 import {
   BaseService,
+  isSafroleTicket,
   REPORTS_ERRORS,
   safeError,
   safeResult,
 } from '@pbnjam/types'
+import type { NetworkingService } from './networking-service'
 
 // Re-export types for backwards compatibility
 export type { ChainFork, IChainManagerService }
@@ -58,6 +72,8 @@ export type { ReorgEvent } from '@pbnjam/types'
  * Tracks children hashes for forward traversal
  */
 interface BlockNode {
+  /** Slot of the block */
+  slot: bigint
   /** Set of child block hashes */
   children: Set<Hex>
   /** Block header */
@@ -100,17 +116,247 @@ export class ChainManagerService
   /** Optional accumulation service for fork rollback - needed to reset lastProcessedSlot */
   private readonly accumulationService?: IAccumulationService
 
+  /** Networking service for sending messages */
+  private readonly networkingService: NetworkingService | null
+
+  /** Event bus service for sending events */
+  private readonly eventBusService: EventBusService
+
+  /** State request protocol for requesting state */
+  private readonly stateRequestProtocol: StateRequestProtocol | null
+
+  /** Block request protocol for requesting blocks */
+  private readonly blockRequestProtocol: BlockRequestProtocol | null
+
+  /** Seal key service for getting seal keys */
+  private readonly sealKeyService: ISealKeyService
+
+  /** Pending block requests: blockHash -> peerPublicKey */
+  private readonly pendingBlockRequests: Map<Hex, Hex> = new Map()
+
+  /** Pending state requests: peer -> peerPublicKey */
+  private readonly publicKeyToPendingStateRequest: Map<Hex, Hex> = new Map()
+
   constructor(
     configService: IConfigService,
     blockImporterService: IBlockImporterService,
     stateService: IStateService,
-    accumulationService?: IAccumulationService,
+    accumulationService: IAccumulationService,
+    sealKeyService: ISealKeyService,
+    eventBusService: EventBusService,
+    stateRequestProtocol: StateRequestProtocol | null,
+    blockRequestProtocol: BlockRequestProtocol | null,
+    networkingService: NetworkingService | null,
   ) {
     super('chain-manager-service')
     this.configService = configService
+    this.sealKeyService = sealKeyService
+    this.eventBusService = eventBusService
+    this.stateService = stateService
     this.blockImporterService = blockImporterService
     this.stateService = stateService
     this.accumulationService = accumulationService
+
+    this.networkingService = networkingService || null
+    this.stateRequestProtocol = stateRequestProtocol || null
+    this.blockRequestProtocol = blockRequestProtocol || null
+
+    // Set up event handlers for state and block responses
+    if (this.eventBusService) {
+      this.eventBusService.addStateResponseCallback(
+        this.handleStateResponse.bind(this),
+      )
+      this.eventBusService.addBlocksReceivedCallback(
+        this.handleBlockResponse.bind(this),
+      )
+      this.eventBusService.addBlockAnnouncementWithHeaderCallback(
+        this.handleBlockAnnouncementEvent.bind(this),
+      )
+      this.eventBusService.addBlockAnnouncementHandshakeCallback(
+        this.handleBlockAnnouncementHandshake.bind(this),
+      )
+      // Subscribe to error events to clean up pending requests
+      this.eventBusService.addBlockRequestFailedCallback(
+        this.handleBlockRequestFailed.bind(this),
+      )
+    }
+  }
+
+  /**
+   * Handle block announcement handshake from event bus
+   *
+   * Called when UP0 emits a handshake event.
+   * Processes peer's finalized block info and known leaves.
+   */
+  private async handleBlockAnnouncementHandshake(
+    _peerId: Uint8Array,
+    handshake: BlockAnnouncementHandshake,
+  ): Promise<void> {
+    if (!this.networkingService || !this.stateRequestProtocol) {
+      return
+    }
+    const peerFinalBlockHash = bytesToHex(handshake.finalBlockHash)
+    const peerFinalBlockSlot = handshake.finalBlockSlot
+
+    const knownNode = this.blockNodes.get(peerFinalBlockHash)
+    if (knownNode?.block) {
+      logger.debug('Peer has known final block', {
+        peerSlot: peerFinalBlockSlot.toString(),
+        peerHash: `${peerFinalBlockHash.substring(0, 18)}...`,
+      })
+      return
+    }
+
+    for (const leaf of handshake.leaves) {
+      if (!this.blockNodes.has(bytesToHex(leaf.hash))) {
+        this.blockNodes.set(bytesToHex(leaf.hash), {
+          slot: leaf.slot,
+          children: new Set(),
+          block: null,
+          stateSnapshot: {},
+        })
+      }
+    }
+  }
+
+  /**
+   * Handle block announcement event from event bus
+   *
+   * Called when UP0 emits a block announcement event.
+   * Converts event parameters and delegates to handleBlockAnnouncement.
+   */
+  private async handleBlockAnnouncementEvent(
+    peerId: Uint8Array,
+    header: BlockHeader,
+  ): Promise<void> {
+    const peerPublicKey = bytesToHex(peerId)
+    await this.handleBlockAnnouncement(header, peerPublicKey)
+  }
+
+  /**
+   * Handle block announcement (header only)
+   *
+   * Determines if we should request the full block via CE128.
+   *
+   * @param header - Block header from announcement
+   * @param peerPublicKey - Public key of the peer that sent the announcement
+   * @returns true if block should be requested, false otherwise
+   */
+  async handleBlockAnnouncement(
+    header: BlockHeader,
+    peerPublicKey: Hex,
+  ): SafePromise<boolean> {
+    if (!this.stateRequestProtocol || !this.networkingService) {
+      return safeError(
+        new Error('State request protocol or networking service not available'),
+      )
+    }
+    if (!this.blockRequestProtocol) {
+      return safeError(new Error('Block request protocol not available'))
+    }
+    const blockHash = this.hashBlock(header)
+    const blockNode = this.blockNodes.get(blockHash)
+
+    // If we already have the full block, no need to request
+    if (blockNode?.block) {
+      return safeResult(false)
+    }
+
+    // Store the header for future reference
+    this.blockNodes.set(blockHash, {
+      slot: header.timeslot,
+      children: new Set(),
+      block: null,
+      stateSnapshot: {},
+    })
+
+    // Check if this block is relevant:
+    // 1. Is the parent known? (either we have it or it's in known headers)
+    const parentHash = header.parent
+    const parentNode = this.blockNodes.get(parentHash)
+    const hasParent = parentNode?.block !== null
+
+    if (hasParent) {
+      // Track this pending request
+      this.pendingBlockRequests.set(blockHash, peerPublicKey)
+      this.publicKeyToPendingStateRequest.set(peerPublicKey, blockHash)
+
+      // Use the extracted helper from chain-manager package
+      const promiseStateRequest = requestStateForBlock(
+        blockHash,
+        peerPublicKey,
+        this.stateRequestProtocol,
+        this.networkingService,
+      )
+
+      const promiseBlockRequest = requestBlock(
+        blockHash,
+        peerPublicKey,
+        this.blockRequestProtocol,
+        this.networkingService,
+      )
+
+      const [stateRequestResult, blockRequestResult] = await Promise.allSettled(
+        [promiseStateRequest, promiseBlockRequest],
+      )
+      const [stateRequestError] =
+        stateRequestResult.status === 'fulfilled'
+          ? stateRequestResult.value
+          : [stateRequestResult.reason as Error, undefined]
+      const [blockRequestError] =
+        blockRequestResult.status === 'fulfilled'
+          ? blockRequestResult.value
+          : [blockRequestResult.reason as Error, undefined]
+      if (stateRequestError || blockRequestError) {
+        logger.error('Failed to request state or block', {
+          blockHash: `${blockHash.substring(0, 18)}...`,
+          error: stateRequestError?.message || blockRequestError?.message,
+        })
+        this.pendingBlockRequests.delete(blockHash)
+        this.publicKeyToPendingStateRequest.delete(peerPublicKey)
+        return safeError(new Error('Failed to request state or block'))
+      }
+    }
+
+    return safeResult(true)
+  }
+
+  /**
+   * Handle state response from CE129
+   */
+  private async handleStateResponse(
+    response: StateResponse,
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    const requestedBlockHash =
+      this.publicKeyToPendingStateRequest.get(peerPublicKey)
+    if (!requestedBlockHash) {
+      logger.error('No pending state request found', {
+        peerPublicKey: `${peerPublicKey.substring(0, 20)}...`,
+      })
+      return
+    }
+
+    const blockNode = this.blockNodes.get(requestedBlockHash)
+    if (!blockNode) {
+      logger.error('No block node found', {
+        blockHash: `${requestedBlockHash.substring(0, 18)}...`,
+      })
+      return
+    }
+
+    // Convert keyValuePairs to StateTrie format: Record<Hex, Hex>
+    const stateSnapshot: StateTrie = {}
+    for (const pair of response.keyValuePairs) {
+      const key = bytesToHex(pair.key)
+      const value = bytesToHex(pair.value)
+      stateSnapshot[key] = value
+    }
+
+    blockNode.stateSnapshot = stateSnapshot
+
+    this.blockNodes.set(requestedBlockHash, blockNode)
+    this.publicKeyToPendingStateRequest.delete(peerPublicKey)
   }
 
   /**
@@ -135,10 +381,26 @@ export class ChainManagerService
 
     // Create the first node (genesis) with empty children set
     this.blockNodes.set(genesisHash, {
+      slot: 0n,
       children: new Set(),
       block: null,
       stateSnapshot: initStateTrie,
     })
+
+    if (this.networkingService && this.stateRequestProtocol) {
+      // Request state for the latest block, then request up to 100 blocks
+      // Note: The state response will be handled by handleStateResponse,
+      // which will then trigger the block request via handleStateResponseAndRequestBlock
+      // const [requestError] = await requestStateForBlock(
+      //   genesisHash,
+      //   this.sealKeyService.getPublicKey(),
+      //   this.stateRequestProtocol,
+      //   this.networkingService,
+      // )
+      // if (requestError) {
+      //   return safeError(requestError)
+      // }
+    }
 
     return safeResult(true)
   }
@@ -235,6 +497,67 @@ export class ChainManagerService
       parentHash: parentHash.substring(0, 18),
       ancestrySize: newAnchors.length,
     })
+  }
+
+  /**
+   * Handle block request failed event
+   * Cleans up pending requests when a block request fails
+   */
+  private handleBlockRequestFailed(_eventId: bigint, reason: string): void {
+    logger.warn('Block request failed, cleaning up pending requests', {
+      reason,
+      pendingBlockRequestsCount: this.pendingBlockRequests.size,
+      pendingStateRequestsCount: this.publicKeyToPendingStateRequest.size,
+    })
+  }
+
+  /**
+   * Handle block response from CE128
+   */
+  private async handleBlockResponse(
+    blocks: Block[],
+    peerPublicKey: Hex,
+  ): Promise<void> {
+    if (blocks.length === 0) {
+      logger.warn('Received empty block response', {
+        peerPublicKey: `${peerPublicKey.substring(0, 20)}...`,
+      })
+      return
+    }
+
+    // Process each block in the response
+    for (const block of blocks) {
+      const blockHash = this.hashBlock(block.header)
+
+      // Check if this is a pending request
+      const pending = this.pendingBlockRequests.get(blockHash)
+      if (!pending) {
+        // This might be a block we requested earlier or a different flow
+        // Try to import it anyway
+        logger.debug('Received block response for non-pending request', {
+          blockHash: `${blockHash.substring(0, 18)}...`,
+          peerPublicKey: `${peerPublicKey.substring(0, 20)}...`,
+        })
+      } else {
+        // Remove from pending requests
+        this.pendingBlockRequests.delete(blockHash)
+      }
+
+      // Step 4: Import block
+      const [importError] = await this.importBlock(block)
+      if (importError) {
+        logger.error('Failed to import block from block response', {
+          blockHash: `${blockHash.substring(0, 18)}...`,
+          error: importError.message,
+          slot: block.header.timeslot.toString(),
+        })
+      } else {
+        logger.info('Block imported successfully from block response', {
+          blockHash: `${blockHash.substring(0, 18)}...`,
+          slot: block.header.timeslot.toString(),
+        })
+      }
+    }
   }
 
   async importBlock(block: Block): SafePromise<void> {
@@ -400,6 +723,7 @@ export class ChainManagerService
     // After successful import, track block in fork structure and save state snapshot
     // Track block in fork structure
     this.blockNodes.set(blockHash, {
+      slot: block.header.timeslot,
       children: new Set(),
       block: block,
       stateSnapshot: postStateTrie,
@@ -589,6 +913,7 @@ export class ChainManagerService
         // The block is null since we don't have the full block data
         // stateSnapshot is empty - we can't rollback to these states
         this.blockNodes.set(hash, {
+          slot: ancestor.slot,
           children: new Set(),
           block: null,
           stateSnapshot: {},
@@ -621,6 +946,7 @@ export class ChainManagerService
     // Add the genesis block to blockNodes
     if (!this.blockNodes.has(genesisHash)) {
       this.blockNodes.set(genesisHash, {
+        slot: 0n,
         children: new Set(),
         block: null, // No full block for genesis, just the header
         stateSnapshot: stateSnapshot || {},
@@ -658,28 +984,6 @@ export class ChainManagerService
   // ============================================================================
   // State Snapshot Management
   // ============================================================================
-
-  /**
-   * Save state snapshot for a block
-   *
-   * Called after a block is successfully imported. The snapshot allows
-   * rolling back to this state when importing sibling blocks (forks).
-   * Includes service-specific state that's not part of the state trie.
-   */
-  saveStateSnapshot(blockHash: Hex, snapshot: StateTrie): void {
-    if (!this.blockNodes.has(blockHash)) {
-      this.blockNodes.set(blockHash, {
-        children: new Set(),
-        block: null,
-        stateSnapshot: snapshot,
-      })
-    } else {
-      this.blockNodes.get(blockHash)!.stateSnapshot = snapshot
-    }
-    logger.debug('State snapshot saved', {
-      blockHash: `${blockHash.substring(0, 18)}...`,
-    })
-  }
 
   /**
    * Get state snapshot for a block
@@ -748,6 +1052,48 @@ export class ChainManagerService
   getChildrenOfParent(parentHash: Hex): Hex[] {
     const node = this.blockNodes.get(parentHash)
     return node ? Array.from(node.children) : []
+  }
+
+  /**
+   * Determine if a block was sealed with a ticket vs fallback key
+   *
+   * Gray Paper Eq. 146-155:
+   * - sealtickets' ∈ sequence{SafroleTicket} → is_ticketed = 1 (ticket-based)
+   * - sealtickets' ∈ sequence{bskey} → is_ticketed = 0 (fallback)
+   *
+   * This is used for fork choice: chains with more ticketed blocks are preferred
+   * because ticket-based sealing provides better security (anonymous author).
+   */
+  isBlockTicketed(block: Block): boolean {
+    // If no seal key service, assume ticketed (conservative for fork choice)
+    if (!this.sealKeyService) {
+      return false
+    }
+
+    // Get the seal key for this block's timeslot
+    const [error, sealKey] = this.sealKeyService.getSealKeyForSlot(
+      block.header.timeslot,
+    )
+
+    if (error || !sealKey) {
+      // If we can't determine, assume ticketed (conservative)
+      logger.debug('Could not determine seal key type, assuming ticketed', {
+        slot: block.header.timeslot.toString(),
+        error: error?.message,
+      })
+      return false
+    }
+
+    // Check if the seal key is a ticket or fallback Bandersnatch key
+    const isTicketed = isSafroleTicket(sealKey)
+
+    logger.debug('Block seal type determined', {
+      slot: block.header.timeslot.toString(),
+      isTicketed,
+      sealKeyType: isTicketed ? 'ticket' : 'fallback',
+    })
+
+    return isTicketed
   }
 
   /**

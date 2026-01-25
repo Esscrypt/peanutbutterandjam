@@ -9,19 +9,26 @@
  * implementation in the future.
  */
 
-import { decodeFixedLength, decodeHeader, encodeHeader } from '@pbnjam/codec'
+import {
+  calculateBlockHashFromHeader,
+  decodeAnnouncementFinal,
+  decodeHandshake,
+  decodeHeader,
+  encodeAnnouncementFinal,
+  encodeHandshake,
+  encodeHeader,
+} from '@pbnjam/codec'
 import {
   bytesToHex,
   concatBytes,
+  type EventBusService,
   type Hex,
   hexToBytes,
   logger,
-  numberToBytes,
 } from '@pbnjam/core'
 import type {
   BlockAnnouncement,
   BlockAnnouncementHandshake,
-  BlockHeader,
   IConfigService,
   Safe,
   SafePromise,
@@ -30,26 +37,40 @@ import { safeError, safeResult } from '@pbnjam/types'
 import { NetworkingProtocol } from './protocol'
 
 /**
+ * Type guard for BlockAnnouncementHandshake
+ */
+function isBlockAnnouncementHandshake(
+  data: BlockAnnouncement | BlockAnnouncementHandshake,
+): data is BlockAnnouncementHandshake {
+  return 'leaves' in data && !('header' in data)
+}
+
+/**
+ * Type guard for BlockAnnouncement
+ */
+function isBlockAnnouncement(
+  data: BlockAnnouncement | BlockAnnouncementHandshake,
+): data is BlockAnnouncement {
+  return 'header' in data && !('leaves' in data)
+}
+
+/**
  * Block announcement protocol handler
  */
 export class BlockAnnouncementProtocol extends NetworkingProtocol<
   BlockAnnouncement | BlockAnnouncementHandshake,
   void
 > {
-  private readonly knownLeaves: Map<
-    string,
-    { hash: Uint8Array; slot: bigint }
-  > = new Map()
-
-  private readonly finalizedBlock: { hash: Uint8Array; slot: bigint } = {
-    hash: new Uint8Array(32),
-    slot: 0n,
-  }
   private readonly configService: IConfigService
+  private readonly eventBusService: EventBusService
 
-  constructor(configService: IConfigService) {
+  /**
+   * Consumer: ChainManagerService handles block announcements via event subscription
+   */
+  constructor(configService: IConfigService, eventBusService: EventBusService) {
     super()
     this.configService = configService
+    this.eventBusService = eventBusService
 
     // Initialize event handlers using the base class method
     this.initializeEventHandlers()
@@ -62,14 +83,29 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
     data: BlockAnnouncement | BlockAnnouncementHandshake,
   ): Safe<Uint8Array> {
     try {
-      if ('finalizedBlockHash' in data) {
+      if (isBlockAnnouncementHandshake(data)) {
         // It's a handshake
-        return this.serializeHandshake(data as BlockAnnouncementHandshake)
-      } else {
+        logger.debug('[UP0] Serializing handshake request', {
+          finalBlockSlot: data.finalBlockSlot.toString(),
+          leavesCount: data.leaves.length,
+        })
+        return this.serializeHandshake(data)
+      } else if (isBlockAnnouncement(data)) {
         // It's a block announcement
-        return this.serializeBlockAnnouncement(data as BlockAnnouncement)
+        logger.debug('[UP0] Serializing block announcement request', {
+          finalBlockSlot: data.finalBlockSlot.toString(),
+          headerParent: `${data.header.parent.slice(0, 20)}...`,
+        })
+        return this.serializeBlockAnnouncement(data)
+      } else {
+        return safeError(
+          new Error('Unknown message type: neither handshake nor announcement'),
+        )
       }
     } catch (error) {
+      logger.error('[UP0] Failed to serialize request', {
+        error: error instanceof Error ? error.message : String(error),
+      })
       return safeError(
         error instanceof Error ? error : new Error(String(error)),
       )
@@ -82,23 +118,44 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   deserializeRequest(
     data: Uint8Array,
   ): Safe<BlockAnnouncement | BlockAnnouncementHandshake> {
-    try {
-      // Check the first byte to determine the message type
-      // 0 = handshake, 1 = announcement
-      const messageType = data[0]
+    // Try to decode as handshake first (Final ++ len++[Leaf])
+    // Handshake starts with Final which is 36 bytes (32 hash + 4 slot)
+    // Then has variable-length sequence
+    const [handshakeError, handshakeResult] = this.deserializeHandshake(data)
+    if (!handshakeError && handshakeResult) {
+      logger.info('[UP0] Successfully decoded as handshake', {
+        finalBlockSlot: handshakeResult.finalBlockSlot.toString(),
+        leavesCount: handshakeResult.leaves.length,
+      })
+      return safeResult(handshakeResult)
+    }
 
-      if (messageType === 0) {
-        return safeResult(this.deserializeHandshake(data.slice(1)))
-      } else if (messageType === 1) {
-        return safeResult(this.deserializeBlockAnnouncement(data.slice(1)))
-      } else {
-        return safeError(new Error(`Unknown message type: ${messageType}`))
-      }
-    } catch (error) {
+    logger.debug('[UP0] Handshake decode failed, trying as announcement', {
+      handshakeError: handshakeError?.message,
+    })
+
+    // If handshake fails, try as announcement (Header ++ Final)
+    const [announcementError, announcementResult] =
+      this.deserializeBlockAnnouncement(data)
+    if (announcementError) {
+      logger.error('[UP0] Failed to decode as handshake or announcement', {
+        handshakeError: handshakeError?.message,
+        announcementError: announcementError.message,
+        dataLength: data.length,
+      })
       return safeError(
-        error instanceof Error ? error : new Error(String(error)),
+        new Error(
+          `Failed to decode as handshake or announcement: handshake=${handshakeError?.message}, announcement=${announcementError.message}`,
+        ),
       )
     }
+
+    logger.info('[UP0] Successfully decoded as block announcement', {
+      finalBlockSlot: announcementResult.finalBlockSlot.toString(),
+      headerParent: `${announcementResult.header.parent.slice(0, 20)}...`,
+    })
+
+    return safeResult(announcementResult)
   }
 
   /**
@@ -120,18 +177,65 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
    */
   async processRequest(
     data: BlockAnnouncement | BlockAnnouncementHandshake,
-    _peerPublicKey: Hex,
+    peerPublicKey: Hex,
   ): SafePromise<void> {
     try {
-      if ('finalizedBlockHash' in data) {
-        // It's a handshake
-        await this.processHandshake(data as BlockAnnouncementHandshake)
-      } else {
+      if (isBlockAnnouncementHandshake(data)) {
+        // // It's a handshake
+        logger.info('[UP0] Processing handshake request', {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          finalBlockSlot: data.finalBlockSlot.toString(),
+          leavesCount: data.leaves.length,
+        })
+
+        // Emit handshake event for chain manager consumption
+        await this.eventBusService.emitBlockAnnouncementHandshake(
+          hexToBytes(peerPublicKey),
+          data,
+        )
+      } else if (isBlockAnnouncement(data)) {
         // It's a block announcement
-        await this.processBlockAnnouncement(data as BlockAnnouncement)
+        logger.info('[UP0] Processing block announcement request', {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          finalBlockSlot: data.finalBlockSlot.toString(),
+          headerParent: `${data.header.parent.slice(0, 20)}...`,
+          headerSlot: data.header.timeslot.toString(),
+        })
+
+        // Emit JIP-3 block announced event (for telemetry)
+        const [hashError, headerHash] = calculateBlockHashFromHeader(
+          data.header,
+          this.configService,
+        )
+        if (!hashError) {
+          await this.eventBusService.emitBlockAnnounced(
+            hexToBytes(peerPublicKey),
+            'remote', // Received from peer
+            data.header.timeslot,
+            hexToBytes(headerHash),
+          )
+        }
+
+        // Emit block announcement with header for chain manager consumption
+        await this.eventBusService.emitBlockAnnouncementWithHeader(
+          hexToBytes(peerPublicKey),
+          data.header,
+        )
+      } else {
+        logger.error('[UP0] Unknown message type', {
+          peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          dataKeys: Object.keys(data),
+        })
+        return safeError(
+          new Error('Unknown message type: neither handshake nor announcement'),
+        )
       }
       return safeResult(undefined)
     } catch (error) {
+      logger.error('[UP0] Error processing request', {
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+        error: error instanceof Error ? error.message : String(error),
+      })
       return safeError(
         error instanceof Error ? error : new Error(String(error)),
       )
@@ -149,319 +253,169 @@ export class BlockAnnouncementProtocol extends NetworkingProtocol<
   }
 
   /**
-   * Update finalized block
-   */
-  async updateFinalizedBlock(_hash: Uint8Array, _slot: bigint): Promise<void> {
-    // Persist to database
-    // not implemented
-    // TODO: implement
-  }
-
-  /**
-   * Add known leaf (descendant of finalized block with no children)
-   */
-  //   async addKnownLeaf(hash: Uint8Array, slot: bigint): Promise<void> {
-  //     this.knownLeaves.set(hash.toString(), { hash, slot })
-
-  //     // Persist to database
-  //     if (this.blockStore) {
-  //       try {
-  //         await this.blockStore.storeKnownLeaf(hash, slot)
-  //       } catch (error) {
-  //         console.error('Failed to persist known leaf:', error)
-  //       }
-  //     }
-  //   }
-
-  /**
-   * Remove known leaf (when it becomes a parent)
-   */
-  //   async removeKnownLeaf(hash: Uint8Array): Promise<void> {
-  //     this.knownLeaves.delete(hash.toString())
-
-  //     // Remove from database
-  //     if (this.blockStore) {
-  //       try {
-  //         await this.blockStore.removeKnownLeaf(hash)
-  //       } catch (error) {
-  //         console.error('Failed to remove known leaf from database:', error)
-  //       }
-  //     }
-  //   }
-
-  /**
-   * Create handshake message
-   */
-  //   createHandshake(): BlockAnnouncementHandshake {
-  //     return {
-  //       finalBlockHash: this.finalizedBlock.hash,
-  //       finalBlockSlot: BigInt(this.finalizedBlock.slot),
-  //       leaves: Array.from(this.knownLeaves.values()),
-  //     }
-  //   }
-
-  /**
-   * Process handshake message from peer
-   */
-  async processHandshake(handshake: BlockAnnouncementHandshake): Promise<void> {
-    // Update our finalized block if peer has a newer one
-    if (handshake.finalBlockSlot > this.finalizedBlock.slot) {
-      await this.updateFinalizedBlock(
-        handshake.finalBlockHash,
-        handshake.finalBlockSlot,
-      )
-    }
-
-    // Add any new leaves from peer
-    for (const leaf of handshake.leaves) {
-      if (!this.knownLeaves.has(leaf.hash.toString())) {
-        // await this.addKnownLeaf(leaf.hash, leaf.slot)
-      }
-    }
-  }
-
-  /**
-   * Create block announcement message
-   */
-  createBlockAnnouncement(blockHeader: Uint8Array): BlockAnnouncement {
-    const [error, blockHeaderResult] = decodeHeader(
-      blockHeader,
-      this.configService,
-    )
-    if (error) {
-      throw error
-    }
-
-    return {
-      header: blockHeaderResult.value,
-      finalBlockHash: bytesToHex(this.finalizedBlock.hash),
-      finalBlockSlot: blockHeaderResult.value.timeslot,
-    }
-  }
-
-  /**
-   * Process block announcement from peer
-   */
-  async processBlockAnnouncement(
-    announcement: BlockAnnouncement,
-  ): Promise<void> {
-    // Update finalized block if peer has a newer one
-    if (
-      !this.finalizedBlock ||
-      announcement.finalBlockSlot > this.finalizedBlock.slot
-    ) {
-      await this.updateFinalizedBlock(
-        hexToBytes(announcement.finalBlockHash),
-        announcement.finalBlockSlot,
-      )
-    }
-
-    // Process the block header
-    await this.processBlockHeader(announcement.header)
-  }
-
-  /**
-   * Process block header
-   */
-  private async processBlockHeader(header: BlockHeader): Promise<void> {
-    try {
-      const slot = header.timeslot
-
-      // Add as known leaf
-      //   await this.addKnownLeaf(blockHash, slot)
-
-      logger.info('Processed block header', {
-        parentHash: `${header.parent.slice(0, 20)}...`,
-        slot: slot.toString(),
-      })
-    } catch (error) {
-      logger.error('Failed to process block header:', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-  }
-
-  /**
-   * Check if we should announce a block to neighbors
-   */
-  shouldAnnounceBlock(blockHash: Uint8Array): boolean {
-    // Announce if we have the block and it's not already known to all neighbors
-    if (!this.knownLeaves.has(blockHash.toString())) {
-      return false
-    }
-
-    // Additional logic could be added here to check if neighbors need this block
-    return true
-  }
-
-  /**
    * Serialize handshake message
+   * Format: Final ++ len++[Leaf]
+   * Where Final = Header Hash ++ Slot, Leaf = Header Hash ++ Slot
    */
   serializeHandshake(handshake: BlockAnnouncementHandshake): Safe<Uint8Array> {
-    // Serialize according to JAMNP-S specification
-    const buffer = new ArrayBuffer(
-      4 + 32 + 4 + handshake.leaves.length * (32 + 4),
-    )
-    const view = new DataView(buffer)
-    let offset = 0
+    logger.debug('[UP0] Serializing handshake', {
+      finalBlockSlot: handshake.finalBlockSlot.toString(),
+      finalBlockHash: bytesToHex(handshake.finalBlockHash),
+      leavesCount: handshake.leaves.length,
+    })
 
-    // Write final block hash (32 bytes)
-    new Uint8Array(buffer).set(handshake.finalBlockHash, offset)
-    offset += 32
-
-    // Write final block slot (4 bytes, little-endian)
-    view.setUint32(offset, Number(handshake.finalBlockSlot), true)
-    offset += 4
-
-    // Write number of leaves (4 bytes, little-endian)
-    view.setUint32(offset, handshake.leaves.length, true)
-    offset += 4
-
-    // Write each leaf
-    for (const leaf of handshake.leaves) {
-      // Write leaf hash (32 bytes)
-      new Uint8Array(buffer).set(leaf.hash, offset)
-      offset += 32
-
-      // Write leaf slot (4 bytes, little-endian)
-      view.setUint32(offset, Number(leaf.slot), true)
-      offset += 4
+    // Convert to codec format
+    const handshakeData = {
+      final: {
+        headerHash: handshake.finalBlockHash,
+        slot: handshake.finalBlockSlot,
+      },
+      leaves: handshake.leaves.map((leaf) => ({
+        headerHash: leaf.hash,
+        slot: leaf.slot,
+      })),
     }
 
-    return safeResult(new Uint8Array(buffer))
+    const [error, encoded] = encodeHandshake(handshakeData)
+    if (error) {
+      logger.error('[UP0] Failed to encode handshake', {
+        error: error.message,
+      })
+      return safeError(error)
+    }
+
+    logger.debug('[UP0] Handshake encoded successfully', {
+      encodedLength: encoded.length,
+    })
+
+    return safeResult(encoded)
   }
 
   /**
    * Deserialize handshake message
+   * Format: Final ++ len++[Leaf]
+   * Where Final = Header Hash ++ Slot, Leaf = Header Hash ++ Slot
    */
-  deserializeHandshake(data: Uint8Array): BlockAnnouncementHandshake {
-    const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-    let offset = 0
+  deserializeHandshake(data: Uint8Array): Safe<BlockAnnouncementHandshake> {
+    logger.debug('[UP0] Deserializing handshake', {
+      dataLength: data.length,
+      dataPreview: bytesToHex(data.slice(0, Math.min(36, data.length))),
+    })
 
-    // Read final block hash (32 bytes)
-    const finalBlockHash = data.slice(offset, offset + 32)
-    offset += 32
-
-    // Read final block slot (4 bytes, little-endian)
-    const finalBlockSlot = view.getUint32(offset, true)
-    offset += 4
-
-    // Read number of leaves (4 bytes, little-endian)
-    const numLeaves = view.getUint32(offset, true)
-    offset += 4
-
-    // Read each leaf
-    const leaves: Array<{ hash: Uint8Array; slot: bigint }> = []
-    for (let i = 0; i < numLeaves; i++) {
-      // Read leaf hash (32 bytes)
-      const hash = data.slice(offset, offset + 32)
-      offset += 32
-
-      // Read leaf slot (4 bytes, little-endian)
-      const slot = BigInt(view.getUint32(offset, true))
-      offset += 4
-
-      leaves.push({ hash, slot })
+    const [error, result] = decodeHandshake(data)
+    if (error) {
+      logger.debug('[UP0] Failed to decode handshake', {
+        error: error.message,
+        dataLength: data.length,
+      })
+      return safeError(error)
     }
 
-    return {
-      finalBlockHash,
-      finalBlockSlot: BigInt(finalBlockSlot),
-      leaves,
+    // Convert from codec format
+    const handshake = {
+      finalBlockHash: result.value.final.headerHash,
+      finalBlockSlot: result.value.final.slot,
+      leaves: result.value.leaves.map((leaf) => ({
+        hash: leaf.headerHash,
+        slot: leaf.slot,
+      })),
     }
+
+    logger.debug('[UP0] Handshake decoded successfully', {
+      finalBlockSlot: handshake.finalBlockSlot.toString(),
+      finalBlockHash: bytesToHex(handshake.finalBlockHash),
+      leavesCount: handshake.leaves.length,
+      consumed: result.consumed,
+    })
+
+    return safeResult(handshake)
   }
 
   /**
    * Serialize block announcement message
+   * Format: Header ++ Final
+   * Where Final = Header Hash ++ Slot
    */
   serializeBlockAnnouncement(
     announcement: BlockAnnouncement,
   ): Safe<Uint8Array> {
-    // Serialize according to JAMNP-S specification
-    const parts: Uint8Array[] = []
-
-    // Write block header
-    // new Uint8Array(buffer).set(announcement.header, offset)
-    // offset += announcement.header.length
-    const [error, encodedHeader] = encodeHeader(
+    // Encode header (Gray Paper format)
+    const [headerError, encodedHeader] = encodeHeader(
       announcement.header,
       this.configService,
     )
-    if (error) {
-      return safeError(error)
+    if (headerError) {
+      logger.error('[UP0] Failed to encode header', {
+        error: headerError.message,
+      })
+      return safeError(headerError)
     }
-    parts.push(encodedHeader)
 
-    const finalBlockHash = hexToBytes(announcement.finalBlockHash)
-    // Write final block hash (32 bytes)
-    parts.push(finalBlockHash)
+    // Encode Final
+    const final = {
+      headerHash: hexToBytes(announcement.finalBlockHash),
+      slot: announcement.finalBlockSlot,
+    }
+    const [finalError, encodedFinal] = encodeAnnouncementFinal(final)
+    if (finalError) {
+      logger.error('[UP0] Failed to encode final', {
+        error: finalError.message,
+      })
+      return safeError(finalError)
+    }
 
-    // Write final block slot (4 bytes, little-endian)
-    parts.push(numberToBytes(announcement.finalBlockSlot))
+    // Combine: [Header][Final]
+    const encoded = concatBytes([encodedHeader, encodedFinal])
+    logger.debug('[UP0] Block announcement encoded successfully', {
+      headerLength: encodedHeader.length,
+      finalLength: encodedFinal.length,
+      totalLength: encoded.length,
+    })
 
-    return safeResult(concatBytes(parts))
+    return safeResult(encoded)
   }
 
   /**
    * Deserialize block announcement message
+   * Format: Header ++ Final
+   * Where Final = Header Hash ++ Slot
    */
-  deserializeBlockAnnouncement(data: Uint8Array): BlockAnnouncement {
-    let currentData = data
-    // Read block header
-    const [error, decodedHeader] = decodeHeader(currentData, this.configService)
-    if (error) {
-      throw error
+  deserializeBlockAnnouncement(data: Uint8Array): Safe<BlockAnnouncement> {
+    // Decode header (Gray Paper format)
+    const [headerError, decodedHeader] = decodeHeader(data, this.configService)
+    if (headerError) {
+      logger.debug('[UP0] Failed to decode header', {
+        error: headerError.message,
+        dataLength: data.length,
+      })
+      return safeError(headerError)
     }
     const header = decodedHeader.value
 
-    currentData = decodedHeader.remaining
-
-    // Read final block hash (32 bytes)
-    const finalBlockHash = bytesToHex(currentData.slice(0, 32))
-    currentData = currentData.slice(32)
-
-    const [finalBlockSlotError, finalBlockSlotResult] = decodeFixedLength(
-      currentData,
-      32n,
+    // Decode Final
+    const [finalError, finalResult] = decodeAnnouncementFinal(
+      decodedHeader.remaining,
     )
-    if (finalBlockSlotError) {
-      throw finalBlockSlotError
+    if (finalError) {
+      logger.debug('[UP0] Failed to decode final', {
+        error: finalError.message,
+        remainingLength: decodedHeader.remaining.length,
+      })
+      return safeError(finalError)
     }
 
-    return {
+    const announcement = {
       header,
-      finalBlockHash,
-      finalBlockSlot: finalBlockSlotResult.value,
+      finalBlockHash: bytesToHex(finalResult.value.headerHash),
+      finalBlockSlot: finalResult.value.slot,
     }
+
+    logger.debug('[UP0] Block announcement decoded successfully', {
+      finalBlockSlot: announcement.finalBlockSlot.toString(),
+      finalBlockHash: announcement.finalBlockHash,
+      headerSlot: announcement.header.timeslot.toString(),
+    })
+
+    return safeResult(announcement)
   }
-
-  /**
-   * Handle incoming stream data
-   */
-  // async handleStreamData(_stream: StreamInfo, data: Uint8Array): Promise<void> {
-  //   if (data.length === 0) {
-  //     // Initial handshake
-  //     // const _handshake = this.createHandshake()
-  //     // Send handshake response would be handled by the stream manager
-  //     return
-  //   }
-
-  //   // Try to parse as handshake first
-  //   try {
-  //     const handshake = this.deserializeHandshake(data)
-  //     await this.processHandshake(handshake)
-  //     return
-  //   } catch (_error) {
-  //     // Not a handshake, try as block announcement
-  //   }
-
-  //   // Try to parse as block announcement
-  //   try {
-  //     // Assume header length is 128 bytes (placeholder)
-  //     const announcement = this.deserializeBlockAnnouncement(data)
-  //     await this.processBlockAnnouncement(announcement)
-  //   } catch (error) {
-  //     console.error('Failed to parse block announcement data:', error)
-  //   }
-  // }
 }

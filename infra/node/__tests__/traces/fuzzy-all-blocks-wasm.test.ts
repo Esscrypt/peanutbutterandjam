@@ -458,7 +458,7 @@ describe('Genesis Parse Tests', () => {
             // Save snapshot using parent block hash (not state root) so it can be found during import
             // The parent hash is what importBlock will use to look up the snapshot
             const parentHash = blockJsonData.block.header.parent as Hex
-            chainManagerService.saveStateSnapshot(parentHash, initTrie)
+            chainManagerService.initializeGenesisHeader(convertJsonBlockToBlock(blockJsonData.block).header, initTrie)
             
             // Initialize recent history service from pre-state beta chapter (key 0x03)
             // This ensures the MMR state (accoutBelt) is properly initialized from the pre-state

@@ -8,6 +8,7 @@
 import { createConnection, type Socket } from 'node:net'
 import { logger } from '@pbnjam/core'
 import type {
+  NodeInfo,
   SafePromise,
   TelemetryConfig,
   TelemetryEvent,
@@ -39,8 +40,15 @@ export class TelemetryClient {
   private currentRetryCount = 0
   private eventListeners: Partial<TelemetryClientEvents> = {}
   private isRunning = false
+  private readonly nodeInfo: NodeInfo | null
+  private nodeInfoSent = false // Track if NodeInfo has been sent (only send once on startup)
 
-  constructor(private config: TelemetryConfig) {}
+  constructor(
+    private config: TelemetryConfig,
+    nodeInfo?: NodeInfo,
+  ) {
+    this.nodeInfo = nodeInfo || null
+  }
 
   async start(): Promise<boolean> {
     try {
@@ -141,21 +149,48 @@ export class TelemetryClient {
       const socket = createConnection({ host, port })
 
       socket.on('connect', async () => {
-        logger.info('Connected to telemetry server', {
+        logger.info('[TelemetryClient.connect] Connected to telemetry server', {
           endpoint: this.config.endpoint,
+          hasNodeInfo: !!this.nodeInfo,
         })
 
         this.socket = socket
         this.isConnected = true
         this.currentRetryCount = 0
 
-        // Send node information message first
-        await this.sendNodeInfo()
+        // Send node information message only once on initial connection
+        if (!this.nodeInfoSent) {
+          logger.debug(
+            '[TelemetryClient.connect] Sending node info message (first connection)',
+          )
+          const [nodeInfoError] = await this.sendNodeInfo()
+          if (nodeInfoError) {
+            logger.error('[TelemetryClient.connect] Failed to send node info', {
+              error: nodeInfoError.message,
+            })
+            socket.destroy()
+            reject(nodeInfoError)
+            return
+          }
+          this.nodeInfoSent = true
+          logger.debug(
+            '[TelemetryClient.connect] Node info message sent successfully',
+          )
+        } else {
+          logger.debug(
+            '[TelemetryClient.connect] Reconnected - skipping node info (already sent)',
+          )
+        }
 
         // Send any buffered events
         const [error] = await this.flushEventBuffer()
         if (error) {
-          logger.error('Failed to send buffered events', { error })
+          logger.error(
+            '[TelemetryClient.connect] Failed to send buffered events',
+            {
+              error: error.message,
+            },
+          )
           socket.destroy()
           reject(error)
           return
@@ -166,9 +201,12 @@ export class TelemetryClient {
       })
 
       socket.on('error', (error) => {
-        logger.error('Telemetry connection error', {
+        logger.error('[TelemetryClient.connect] Connection error', {
           endpoint: this.config.endpoint,
           error: error.message,
+          errorCode:
+            'code' in error ? (error as { code: string }).code : undefined,
+          errorStack: error.stack,
         })
 
         this.isConnected = false
@@ -182,9 +220,12 @@ export class TelemetryClient {
         }
       })
 
-      socket.on('close', () => {
-        logger.warn('Telemetry connection closed', {
+      socket.on('close', (hadError) => {
+        logger.warn('[TelemetryClient.connect] Connection closed', {
           endpoint: this.config.endpoint,
+          hadError,
+          wasConnected: this.isConnected,
+          retryCount: this.currentRetryCount,
         })
 
         this.isConnected = false
@@ -195,14 +236,15 @@ export class TelemetryClient {
       })
 
       socket.on('timeout', () => {
-        logger.warn('Telemetry connection timeout', {
+        logger.warn('[TelemetryClient.connect] Connection timeout', {
           endpoint: this.config.endpoint,
+          timeoutMs: 60000,
         })
         socket.destroy()
       })
 
-      // Set connection timeout
-      socket.setTimeout(30000) // 30 seconds
+      // Set connection timeout (increased to 60 seconds)
+      socket.setTimeout(60000) // 60 seconds
     })
   }
 
@@ -257,16 +299,70 @@ export class TelemetryClient {
       return safeError(new Error('Not connected to telemetry server'))
     }
 
-    const [error, nodeInfoContent] = encodeNodeInfo(this.config.nodeInfo)
+    if (!this.nodeInfo) {
+      return safeError(new Error('NodeInfo not provided'))
+    }
+
+    logger.debug('[TelemetryClient.sendNodeInfo] Encoding node info', {
+      protocolVersion: this.nodeInfo.protocolVersion,
+      jamParametersLength: this.nodeInfo.jamParameters.length,
+      genesisHeaderHashLength: this.nodeInfo.genesisHeaderHash.length,
+      peerIdLength: this.nodeInfo.peerId.length,
+      peerAddressHost: this.nodeInfo.peerAddress.host,
+      peerPort: this.nodeInfo.peerAddress.port,
+    })
+
+    const [error, nodeInfoContent] = encodeNodeInfo(this.nodeInfo)
     if (error) {
+      logger.error(
+        '[TelemetryClient.sendNodeInfo] Failed to encode node info',
+        {
+          error: error.message,
+        },
+      )
       return safeError(error)
     }
+
+    logger.debug('[TelemetryClient.sendNodeInfo] Node info content encoded', {
+      contentLength: nodeInfoContent.length,
+      contentHex: Array.from(nodeInfoContent.slice(0, 64))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join(''),
+    })
+
     const [error2, message] = createTelemetryMessage(nodeInfoContent)
     if (error2) {
+      logger.error('[TelemetryClient.sendNodeInfo] Failed to create message', {
+        error: error2.message,
+      })
       return safeError(error2)
     }
 
-    return safeResult(this.socket.write(message))
+    // Log the size prefix bytes to verify encoding
+    const sizePrefix = message.slice(0, 4)
+    const sizeValue =
+      sizePrefix[0] |
+      (sizePrefix[1] << 8) |
+      (sizePrefix[2] << 16) |
+      (sizePrefix[3] << 24)
+    logger.info('[TelemetryClient.sendNodeInfo] Sending node info message', {
+      messageLength: message.length,
+      contentLength: nodeInfoContent.length,
+      sizePrefixBytes: Array.from(sizePrefix)
+        .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
+        .join(' '),
+      sizePrefixValue: sizeValue,
+      sizePrefixValueHex: `0x${sizeValue.toString(16)}`,
+    })
+
+    const writeResult = this.socket.write(message)
+    if (!writeResult) {
+      logger.warn(
+        '[TelemetryClient.sendNodeInfo] Socket write returned false (buffer full)',
+      )
+    }
+
+    return safeResult(writeResult)
   }
 
   /**
@@ -351,10 +447,13 @@ export class TelemetryClient {
    * Flush buffered events
    */
   private async flushEventBuffer(): SafePromise<void> {
-    if (!this.isConnected || this.eventBuffer.length === 0) {
-      return safeError(
-        new Error('Not connected to telemetry server or no events to flush'),
-      )
+    if (!this.isConnected) {
+      return safeError(new Error('Not connected to telemetry server'))
+    }
+
+    // If there are no events to flush, that's fine - just return success
+    if (this.eventBuffer.length === 0) {
+      return safeResult(undefined)
     }
 
     const events = [...this.eventBuffer]

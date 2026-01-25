@@ -5,9 +5,21 @@
  * Generator validator sends ticket to deterministically-selected proxy validator
  */
 
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import { decodeFixedLength, encodeFixedLength } from '@pbnjam/codec'
-import { concatBytes, type EventBusService, type Hex } from '@pbnjam/core'
+import {
+  bytesToHex,
+  concatBytes,
+  type EventBusService,
+  getTicketIdFromProof,
+  type Hex,
+  logger,
+} from '@pbnjam/core'
 import type {
+  IConfigService,
+  IEntropyService,
+  IValidatorSetManager,
   Safe,
   SafePromise,
   TicketDistributionRequest,
@@ -35,10 +47,21 @@ export class CE131TicketDistributionProtocol extends NetworkingProtocol<
   void
 > {
   private readonly eventBusService: EventBusService
-  constructor(eventBusService: EventBusService) {
+  private readonly configService: IConfigService | null
+  private readonly entropyService: IEntropyService | null
+  private readonly validatorSetManager: IValidatorSetManager | null
+  constructor(
+    eventBusService: EventBusService,
+    configService: IConfigService | null = null,
+    entropyService: IEntropyService | null = null,
+    validatorSetManager: IValidatorSetManager | null = null,
+  ) {
     super()
 
     this.eventBusService = eventBusService
+    this.configService = configService
+    this.entropyService = entropyService
+    this.validatorSetManager = validatorSetManager
 
     this.initializeEventHandlers()
   }
@@ -61,8 +84,30 @@ export class CE131TicketDistributionProtocol extends NetworkingProtocol<
     parts.push(encodedEpochIndex)
 
     // Encode entry index (single byte: 0 or 1)
+    // JAMNP-S spec: "Attempt = 0 OR 1 (Single byte)"
+    // Only tickets with entryIndex 0 or 1 can be distributed via network protocol
+    const entryIndexNum = Number(distribution.ticket.entryIndex)
+    if (entryIndexNum !== 0 && entryIndexNum !== 1) {
+      const maxTicketsPerExtrinsic = this.configService?.maxTicketsPerExtrinsic
+      const ticketsPerValidator = this.configService?.ticketsPerValidator
+      logger.error('[CE131] Invalid entryIndex for network distribution', {
+        entryIndex: entryIndexNum,
+        entryIndexBigInt: distribution.ticket.entryIndex.toString(),
+        epochIndex: distribution.epochIndex.toString(),
+        maxTicketsPerExtrinsic: maxTicketsPerExtrinsic ?? 'unknown',
+        ticketsPerValidator: ticketsPerValidator ?? 'unknown',
+        error:
+          'JAMNP-S protocol only supports entryIndex 0 or 1. Tickets with higher entryIndex values cannot be distributed via CE131/CE132.',
+        note: 'Only the first two tickets (entryIndex 0 and 1) can be distributed via network protocols.',
+      })
+      return safeError(
+        new Error(
+          `Invalid entryIndex for network distribution: ${entryIndexNum}. JAMNP-S protocol only supports entryIndex 0 or 1.`,
+        ),
+      )
+    }
     const entryIndexByte = new Uint8Array(1)
-    entryIndexByte[0] = Number(distribution.ticket.entryIndex)
+    entryIndexByte[0] = entryIndexNum
     parts.push(entryIndexByte)
 
     // Add proof (784 bytes)
@@ -133,6 +178,122 @@ export class CE131TicketDistributionProtocol extends NetworkingProtocol<
     data: TicketDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE131] Processing ticket distribution request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      epochIndex: data.epochIndex.toString(),
+      entryIndex: data.ticket.entryIndex.toString(),
+    })
+
+    // Log ticket to JSON file
+    try {
+      const ticketId = getTicketIdFromProof(data.ticket.proof)
+
+      // Get entropy values if available
+      let entropy2: Hex | null = null
+      let entropy3: Hex | null = null
+      if (this.entropyService) {
+        try {
+          const entropy2Bytes = this.entropyService.getEntropy2()
+          entropy2 = bytesToHex(entropy2Bytes)
+        } catch (error) {
+          logger.debug('[CE131] Failed to get entropy2', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        try {
+          const entropy3Bytes = this.entropyService.getEntropy3()
+          entropy3 = bytesToHex(entropy3Bytes)
+        } catch (error) {
+          logger.debug('[CE131] Failed to get entropy3', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      // Get validator set info if available
+      let activeValidators: Array<{ ed25519: Hex; bandersnatch: Hex }> | null =
+        null
+      let epochRoot: Hex | null = null
+      if (this.validatorSetManager) {
+        try {
+          const validators = this.validatorSetManager.getActiveValidators()
+          activeValidators = validators.map((v) => ({
+            ed25519: v.ed25519,
+            bandersnatch: v.bandersnatch,
+          }))
+        } catch (error) {
+          logger.debug('[CE131] Failed to get active validators', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+        try {
+          epochRoot = this.validatorSetManager.getEpochRoot()
+        } catch (error) {
+          logger.debug('[CE131] Failed to get epoch root', {
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      }
+
+      const logEntry = {
+        timestamp: new Date().toISOString(),
+        protocol: 'CE131',
+        peerPublicKey: peerPublicKey,
+        epochIndex: data.epochIndex.toString(),
+        entryIndex: data.ticket.entryIndex.toString(),
+        ticketId: ticketId,
+        proofLength: data.ticket.proof.length,
+        proof: bytesToHex(data.ticket.proof), // Store full proof as hex for verification
+        proofFirstBytes: Array.from(data.ticket.proof.slice(0, 16))
+          .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
+          .join(' '),
+        entropy2: entropy2,
+        entropy3: entropy3,
+        activeValidators: activeValidators,
+        epochRoot: epochRoot,
+      }
+
+      // Write to JSON file (append mode)
+      const logDir = path.join(process.cwd(), 'logs')
+      if (!fs.existsSync(logDir)) {
+        fs.mkdirSync(logDir, { recursive: true })
+      }
+
+      const logFile = path.join(logDir, 'ce131-tickets-received.json')
+      let logEntries: unknown[] = []
+
+      // Read existing entries if file exists
+      if (fs.existsSync(logFile)) {
+        try {
+          const existingContent = fs.readFileSync(logFile, 'utf-8')
+          logEntries = JSON.parse(existingContent)
+        } catch (error) {
+          logger.warn(
+            '[CE131] Failed to parse existing log file, starting fresh',
+            {
+              error: error instanceof Error ? error.message : String(error),
+            },
+          )
+        }
+      }
+
+      // Append new entry
+      logEntries.push(logEntry)
+
+      // Write back to file
+      fs.writeFileSync(logFile, JSON.stringify(logEntries, null, 2), 'utf-8')
+
+      logger.debug('[CE131] Logged ticket to JSON file', {
+        logFile,
+        ticketId,
+      })
+    } catch (error) {
+      logger.error('[CE131] Failed to log ticket to JSON file', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      // Don't fail the request if logging fails
+    }
+
     this.eventBusService.emitTicketDistributionRequest(data, peerPublicKey)
 
     // For CE 131, we just acknowledge receipt

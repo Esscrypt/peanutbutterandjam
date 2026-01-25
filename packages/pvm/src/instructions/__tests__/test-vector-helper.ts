@@ -8,7 +8,7 @@ import { PVM } from '../../pvm'
 import { EventBusService, logger } from '@pbnjam/core'
 import { PVMParser } from '../../parser'
 import { InstructionRegistry } from '../registry'
-import type { PVMOptions } from '@pbnjam/types'
+import type { PVMOptions, PVMInstruction } from '@pbnjam/types'
 import { PVMRAM } from '../../ram'
 import { MEMORY_CONFIG } from '../../config'
 import { HostFunctionRegistry } from '../../host-functions/general/registry'
@@ -115,7 +115,13 @@ export function loadTestVectorsByPrefix(prefix: string): PVMTestVector[] {
 /**
  * Execute a test vector and return the resulting state
  */
-export async function executeTestVector(testVector: PVMTestVector): Promise<{
+export async function executeTestVector(
+  testVector: PVMTestVector,
+  options?: {
+    useNewGasCostModel?: boolean
+    expectedBlockGasCosts?: Map<number, number>
+  },
+): Promise<{
   registers: bigint[]
   pc: number
   gas: number
@@ -123,7 +129,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   faultAddress: bigint | null
   memory: Map<bigint, number>
   pvm: PVM
-  parseResult: { instructions: Array<{ opcode: bigint; operands: Uint8Array; pc: bigint }>; jumpTable: bigint[]; bitmask: Uint8Array; success: boolean }
+  parseResult: { instructions: PVMInstruction[]; jumpTable: bigint[]; bitmask: Uint8Array; success: boolean; errors?: string[] }
 }> {
     // Create PVM instance
   const registry = new InstructionRegistry()
@@ -177,12 +183,14 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
   }
 
 
-  const options: PVMOptions = {
+  const pvmOptions: PVMOptions = {
     pc: BigInt(testVector['initial-pc']),
     gasCounter: BigInt(testVector['initial-gas']),
     // gasCounter: 10n,
     registerState: testVector['initial-regs'].map(v => BigInt(String(v))),
     ram: ram,
+    useNewGasCostModel: options?.useNewGasCostModel ?? false,
+    expectedBlockGasCosts: options?.expectedBlockGasCosts,
   }
   const configService = new ConfigService('tiny')
   const eventBusService = new EventBusService()
@@ -197,7 +205,7 @@ export async function executeTestVector(testVector: PVMTestVector): Promise<{
     preimageRequestProtocol: null,
   })
   const hostFunctionRegistry = new HostFunctionRegistry(serviceAccountService, new ConfigService('tiny'))
-  const pvm = new PVM(hostFunctionRegistry, options);
+  const pvm = new PVM(hostFunctionRegistry, pvmOptions);
   // Load parsed instructions (RISC-V test vectors don't have jump tables)
 
   // Run program

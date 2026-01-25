@@ -75,7 +75,7 @@ LOG_LEVEL=info                   # Log level (trace/debug/info/warn/error)
 
 ### WebSocket Endpoints
 
-- `WS /ws` - WebSocket endpoint for subscriptions
+- `WS /` - WebSocket endpoint for subscriptions (ws://localhost:19800)
 
 ## Supported RPC Methods
 
@@ -130,7 +130,7 @@ curl -X POST http://localhost:19800/rpc \
 ### WebSocket Subscription
 
 ```javascript
-const ws = new WebSocket('ws://localhost:19800/ws');
+const ws = new WebSocket('ws://localhost:19800');
 
 ws.onopen = () => {
   ws.send(JSON.stringify({

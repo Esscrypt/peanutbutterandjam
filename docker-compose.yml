@@ -141,6 +141,8 @@ volumes:
   node2_data:
   node3_data:
   node4_data:
+  postgres_data:
+  jamtart_data:
 
 networks:
   pbnj-network:

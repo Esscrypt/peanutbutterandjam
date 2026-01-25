@@ -36,6 +36,7 @@ import {
   DISPUTES_ERRORS,
   type Dispute,
   type Disputes,
+  type IDisputesService,
   type Safe,
   safeError,
   safeResult,
@@ -54,7 +55,7 @@ import type { ValidatorSetManager } from './validator-set'
  * Uses in-memory sets for efficient dispute tracking with optional
  * database persistence.
  */
-export class DisputesService extends BaseService {
+export class DisputesService extends BaseService implements IDisputesService {
   private readonly eventBusService: EventBusService
 
   // Four sets as specified in Gray Paper
@@ -653,5 +654,26 @@ export class DisputesService extends BaseService {
     this.badSet.delete(workReportHash)
     this.wonkySet.delete(workReportHash)
     logger.debug('Removed work-report from all sets', { workReportHash })
+  }
+
+  /**
+   * Get pending disputes ready for block inclusion
+   *
+   * TODO: Implement collection of pending disputes
+   * Disputes should be:
+   * - Validated (signatures, verdicts, culprits, faults)
+   * - Ready for inclusion (not expired, valid work report hashes)
+   *
+   * @returns Array of pending disputes ready for block inclusion
+   */
+  getPendingDisputes(): Dispute[] {
+    // TODO: Implement pending disputes collection
+    // This should collect disputes that:
+    // 1. Have been created by validators when they detect issues
+    // 2. Have valid signatures (already validated)
+    // 3. Have valid verdicts, culprits, and faults
+    // 4. Are not expired
+    // 5. Reference valid work report hashes
+    return []
   }
 }

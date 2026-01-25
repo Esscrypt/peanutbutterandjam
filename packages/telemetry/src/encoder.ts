@@ -136,18 +136,100 @@ function encodeArray<T>(
 }
 
 /**
+ * Convert string address (IPv4 or IPv6) to 16-byte IPv6 Uint8Array
+ */
+function stringToIPv6Bytes(host: string): Safe<Uint8Array> {
+  const ipv6 = new Uint8Array(16)
+
+  // Check if it's IPv4 (format: x.x.x.x)
+  const ipv4Parts = host.split('.')
+  if (ipv4Parts.length === 4) {
+    // IPv4-mapped IPv6: ::ffff:x.x.x.x
+    const parts = ipv4Parts.map(Number)
+    if (parts.some((p) => p < 0 || p > 255 || Number.isNaN(p))) {
+      return safeError(new Error(`Invalid IPv4 address: ${host}`))
+    }
+    ipv6[10] = 0xff
+    ipv6[11] = 0xff
+    ipv6.set(parts, 12)
+    return safeResult(ipv6)
+  }
+
+  // Check if it's IPv6 (format: xxxx:xxxx:... or ::ffff:x.x.x.x)
+  const ipv6Parts = host.split(':')
+  if (ipv6Parts.length > 1) {
+    // Handle IPv6 address
+    // Expand :: shorthand
+    const expanded: string[] = []
+    let foundEmpty = false
+    for (const part of ipv6Parts) {
+      if (part === '') {
+        if (foundEmpty) {
+          return safeError(new Error(`Invalid IPv6 address: ${host}`))
+        }
+        foundEmpty = true
+        const beforeEmpty = ipv6Parts.indexOf('')
+        const afterEmpty = ipv6Parts.length - beforeEmpty - 1
+        const zerosNeeded = 8 - (beforeEmpty + afterEmpty)
+        for (let i = 0; i < zerosNeeded; i++) {
+          expanded.push('0000')
+        }
+      } else {
+        expanded.push(part)
+      }
+    }
+
+    if (expanded.length !== 8) {
+      return safeError(new Error(`Invalid IPv6 address: ${host}`))
+    }
+
+    // Convert each part to bytes
+    let offset = 0
+    for (const part of expanded) {
+      const value = Number.parseInt(part, 16)
+      if (Number.isNaN(value) || value < 0 || value > 0xffff) {
+        return safeError(new Error(`Invalid IPv6 address part: ${part}`))
+      }
+      ipv6[offset] = (value >> 8) & 0xff
+      ipv6[offset + 1] = value & 0xff
+      offset += 2
+    }
+    return safeResult(ipv6)
+  }
+
+  return safeError(new Error(`Invalid address format: ${host}`))
+}
+
+/**
  * Encode peer address (IPv6 + port)
+ * Accepts either { address: Uint8Array, port: bigint } or { host: string, port: number | bigint }
  */
 function encodePeerAddress(address: {
-  address: Uint8Array
-  port: bigint
+  address?: Uint8Array
+  host?: string
+  port: number | bigint
 }): Safe<Uint8Array> {
-  if (address.address.length !== 16) {
-    return safeError(new Error('IPv6 address must be 16 bytes'))
+  let ipv6Bytes: Uint8Array
+
+  if (address.address) {
+    // Already in Uint8Array format
+    if (address.address.length !== 16) {
+      return safeError(new Error('IPv6 address must be 16 bytes'))
+    }
+    ipv6Bytes = address.address
+  } else if (address.host) {
+    // Convert string to IPv6 bytes
+    const [error, bytes] = stringToIPv6Bytes(address.host)
+    if (error) {
+      return safeError(error)
+    }
+    ipv6Bytes = bytes
+  } else {
+    return safeError(new Error('Peer address must have either address or host'))
   }
 
   return encodeParts(
-    () => safeResult(address.address),
+    () => safeResult(ipv6Bytes),
     () => encodeFixedLength(BigInt(address.port), 2n),
   )
 }
@@ -300,15 +382,40 @@ function encodeBlockOutline(outline: BlockOutline): Safe<Uint8Array> {
 
 /**
  * Encode node information message
+ *
+ * JIP-3 specification format:
+ * 0 (Single byte, telemetry protocol version)
+ * JAM Parameters
+ * Header Hash (Genesis header hash)
+ * Peer ID
+ * Peer Address
+ * u32 (Node flags)
+ * String<32> (Name of node implementation)
+ * String<32> (Version of node implementation)
+ * String<16> (Gray Paper version)
+ * String<512> (Freeform note with additional information)
  */
 export function encodeNodeInfo(nodeInfo: NodeInfo): Safe<Uint8Array> {
   return encodeParts(
-    () => safeResult(numberToBytes(nodeInfo.protocolVersion)),
-    () => safeResult(nodeInfo.peerId), // 32 bytes
+    // 0 (Single byte, telemetry protocol version)
+    () => encodeFixedLength(nodeInfo.protocolVersion, 1n),
+    // JAM Parameters
+    () => safeResult(nodeInfo.jamParameters),
+    // Header Hash (Genesis header hash) - 32 bytes
+    () => safeResult(nodeInfo.genesisHeaderHash),
+    // Peer ID - 32 bytes
+    () => safeResult(nodeInfo.peerId),
+    // Peer Address
     () => encodePeerAddress(nodeInfo.peerAddress),
+    // u32 (Node flags)
     () => encodeFixedLength(nodeInfo.nodeFlags, 4n),
+    // String<32> (Name of node implementation)
     () => encodeString(nodeInfo.implementationName, 32n),
+    // String<32> (Version of node implementation)
     () => encodeString(nodeInfo.implementationVersion, 32n),
+    // String<16> (Gray Paper version)
+    () => encodeString(nodeInfo.grayPaperVersion, 16n),
+    // String<512> (Freeform note with additional information)
     () => encodeString(nodeInfo.additionalInfo, 512n),
   )
 }
@@ -1062,15 +1169,27 @@ export function encodeTelemetryEvent(event: TelemetryEvent): Safe<Uint8Array> {
 export function createTelemetryMessage(
   messageContent: Uint8Array,
 ): Safe<Uint8Array> {
-  const [error, sizeBytes] = encodeFixedLength(
-    BigInt(messageContent.length),
-    4n,
-  )
+  const contentLength = messageContent.length
+  const [error, sizeBytes] = encodeFixedLength(BigInt(contentLength), 4n)
   if (error) {
     return safeError(error)
   }
-  const result = new Uint8Array(sizeBytes.length + messageContent.length)
 
+  // Verify size encoding
+  const decodedSize =
+    sizeBytes[0] |
+    (sizeBytes[1] << 8) |
+    (sizeBytes[2] << 16) |
+    (sizeBytes[3] << 24)
+  if (decodedSize !== contentLength) {
+    return safeError(
+      new Error(
+        `Size encoding mismatch: encoded ${decodedSize} but content is ${contentLength} bytes`,
+      ),
+    )
+  }
+
+  const result = new Uint8Array(sizeBytes.length + messageContent.length)
   result.set(sizeBytes, 0)
   result.set(messageContent, sizeBytes.length)
 

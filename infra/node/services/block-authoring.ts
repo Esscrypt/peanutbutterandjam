@@ -1,353 +1,500 @@
-// /**
-//  * Block Authoring Service Implementation
-//  *
-//  * Implements block creation, validation, and submission according to JAM Protocol
-//  * Reference: Gray Paper block authoring specifications
-//  */
+/**
+ * Block Authoring Service Implementation
+ *
+ * Implements block creation, validation, and submission according to JAM Protocol
+ * Reference: Gray Paper block authoring specifications
+ */
 
-// import { generateVRFSignature } from '@pbnjam/block-authoring'
-// import {
-//   bytesToHex,
-//   type EventBusService,
-//   logger,
-//   type SlotChangeEvent,
-// } from '@pbnjam/core'
-// import {
-//   generateFallbackSealSignature,
-//   generateTicketBasedSealSignature,
-//   isSafroleTicket,
-// } from '@pbnjam/safrole'
-// import type {
-//   Block,
-//   BlockHeader,
-//   Extrinsic,
-//   UnsignedBlockHeader,
-// } from '@pbnjam/types'
-// import {
-//   BaseService,
-//   type Safe,
-//   type SafePromise,
-//   safeError,
-//   safeResult,
-// } from '@pbnjam/types'
-// // import type { WorkPackageProcessor } from './work-package-processor'
-// import type { ClockService } from './clock-service'
-// import type { ConfigService } from './config-service'
-// import type { EntropyService } from './entropy'
-// // import type { ExtrinsicValidatorService } from './extrinsic-validator'
-// import type { HeaderConstructor } from './header-constructor'
-// import type { KeyPairService } from './keypair-service'
-// import type { SealKeyService } from './seal-key'
-// import type { ValidatorSetManager } from './validator-set'
+import {
+  constructBlockBody,
+  constructHeader,
+  handleBlockRequest,
+} from '@pbnjam/block-authoring'
+import { calculateBlockHashFromHeader } from '@pbnjam/codec'
+import type { EventBusService } from '@pbnjam/core'
+import {
+  bytesToHex,
+  getValidatorCredentialsWithFallback,
+  type Hex,
+  logger,
+  type SlotChangeEvent,
+} from '@pbnjam/core'
+import type {
+  BlockAnnouncementProtocol,
+  BlockRequestProtocol,
+} from '@pbnjam/networking'
+import type {
+  Block,
+  BlockAnnouncement,
+  BlockRequest,
+  StreamKind,
+} from '@pbnjam/types'
+import {
+  BaseService,
+  type Safe,
+  type SafePromise,
+  safeError,
+  safeResult,
+} from '@pbnjam/types'
+import type { AssuranceService } from './assurance-service'
+import type { ChainManagerService } from './chain-manager-service'
+import type { ClockService } from './clock-service'
+import type { ConfigService } from './config-service'
+import type { DisputesService } from './disputes-service'
+import type { EntropyService } from './entropy'
+import type { NodeGenesisManager } from './genesis-manager'
+import type { GuarantorService } from './guarantor-service'
+import type { KeyPairService } from './keypair-service'
+import type { NetworkingService } from './networking-service'
+import type { RecentHistoryService } from './recent-history-service'
+import type { SealKeyService } from './seal-key'
+import type { ServiceAccountService } from './service-account-service'
+import type { StateService } from './state-service'
+import type { TicketService } from './ticket-service'
+import type { ValidatorSetManager } from './validator-set'
+import type { WorkReportService } from './work-report-service'
+/** Block Authoring Service
+ * Block Authoring Service Implementation
+ *
+ * Implements block creation, validation, and submission according to JAM Protocol
+ * Reference: Gray Paper block authoring specifications
+ */
+export class BlockAuthoringService extends BaseService {
+  private readonly eventBusService: EventBusService
+  private readonly entropyService: EntropyService
+  private readonly keyPairService: KeyPairService | null
+  private readonly sealKeyService: SealKeyService
+  private readonly clockService: ClockService
+  private readonly configService: ConfigService
+  private readonly validatorSetManagerService: ValidatorSetManager
+  private readonly recentHistoryService: RecentHistoryService
+  private readonly stateService: StateService
+  private readonly networkingService: NetworkingService | null
+  private readonly blockAnnouncementProtocol?: BlockAnnouncementProtocol | null
+  private readonly blockRequestProtocol?: BlockRequestProtocol | null
+  private readonly genesisManagerService: NodeGenesisManager | null
+  // private readonly chainManagerService: ChainManagerService | null
+  private readonly ticketService: TicketService
+  private readonly serviceAccountService: ServiceAccountService | null
+  private readonly guarantorService: GuarantorService | null
+  private readonly workReportService: WorkReportService | null
+  private readonly assuranceService: AssuranceService | null
+  private readonly disputesService: DisputesService | null
 
-// /**
-//  * Block Authoring Service Implementation
-//  */
-// export class BlockAuthoringService extends BaseService {
-//   private readonly headerConstructor: HeaderConstructor
-//   // private workPackageProcessor: WorkPackageProcessor
-//   // private extrinsicValidator: ExtrinsicValidatorService
-//   private readonly eventBusService: EventBusService
-//   private readonly entropyService: EntropyService
-//   private readonly keyPairService: KeyPairService
-//   private readonly sealKeyService: SealKeyService
-//   private readonly clockService: ClockService
-//   private readonly configService: ConfigService
-//   private readonly validatorSetManagerService: ValidatorSetManager
+  constructor(options: {
+    eventBusService: EventBusService
+    // workPackageProcessor: WorkPackageProcessor
+    entropyService: EntropyService
+    keyPairService?: KeyPairService | null
+    sealKeyService: SealKeyService
+    clockService: ClockService
+    configService: ConfigService
+    validatorSetManagerService: ValidatorSetManager
+    recentHistoryService: RecentHistoryService
+    stateService: StateService
+    ticketService: TicketService
+    serviceAccountService?: ServiceAccountService | null
+    guarantorService?: GuarantorService | null
+    workReportService?: WorkReportService | null
+    assuranceService?: AssuranceService | null
+    disputesService?: DisputesService | null
+    networkingService?: NetworkingService | null
+    genesisManagerService?: NodeGenesisManager | null
+    chainManagerService?: ChainManagerService | null
+    blockRequestProtocol?: BlockRequestProtocol | null
+    blockAnnouncementProtocol?: BlockAnnouncementProtocol | null
+  }) {
+    super('block-authoring-service')
+    this.eventBusService = options.eventBusService
+    this.entropyService = options.entropyService
+    this.keyPairService = options.keyPairService ?? null
+    this.sealKeyService = options.sealKeyService
+    this.clockService = options.clockService
+    this.configService = options.configService
+    this.validatorSetManagerService = options.validatorSetManagerService
+    this.recentHistoryService = options.recentHistoryService
+    this.stateService = options.stateService
+    this.ticketService = options.ticketService
+    this.serviceAccountService = options.serviceAccountService ?? null
+    this.guarantorService = options.guarantorService ?? null
+    this.workReportService = options.workReportService ?? null
+    this.assuranceService = options.assuranceService ?? null
+    this.disputesService = options.disputesService ?? null
+    this.networkingService = options.networkingService ?? null
+    this.genesisManagerService = options.genesisManagerService ?? null
+    // this.chainManagerService = options.chainManagerService ?? null
 
-//   constructor(options: {
-//     eventBusService: EventBusService
-//     headerConstructor: HeaderConstructor
-//     // workPackageProcessor: WorkPackageProcessor
-//     entropyService: EntropyService
-//     keyPairService: KeyPairService
-//     sealKeyService: SealKeyService
-//     clockService: ClockService
-//     configService: ConfigService
-//     validatorSetManagerService: ValidatorSetManager
-//   }) {
-//     super('block-authoring-service')
-//     this.headerConstructor = options.headerConstructor
-//     // this.workPackageProcessor = options.workPackageProcessor
-//     this.eventBusService = options.eventBusService
-//     this.entropyService = options.entropyService
-//     this.keyPairService = options.keyPairService
-//     this.sealKeyService = options.sealKeyService
-//     this.clockService = options.clockService
-//     this.configService = options.configService
-//     this.validatorSetManagerService = options.validatorSetManagerService
+    // Services stored for future use (see TODOs in constructBlockBody)
+    void this.stateService
+    void this.guarantorService
+    void this.workReportService
+    void this.assuranceService
+    void this.disputesService
 
-//     // Register slot change handler to check if current validator is elected to author blocks
-//     this.eventBusService.addSlotChangeCallback(this.handleSlotChange.bind(this))
-//   }
+    // Initialize block announcement protocol for serializing announcements
+    this.blockAnnouncementProtocol = options.blockAnnouncementProtocol ?? null
 
-//   /**
-//    * Create a new block according to Gray Paper specifications
-//    *
-//    * Gray Paper Block Authoring Process:
-//    * 1. Validate extrinsics and process work packages
-//    * 2. Construct unsigned block header
-//    * 3. Generate seal signature (H_sealsig)
-//    * 4. Generate VRF signature (H_vrfsig) using seal output
-//    * 5. Complete block header with both signatures
-//    * 6. Update state and emit block
-//    */
-//   async createBlock(slot: bigint): SafePromise<Block> {
-//     const startTime = Date.now()
+    // Initialize block request protocol (required for handling block requests)
+    this.blockRequestProtocol = options.blockRequestProtocol ?? undefined
+    // Register slot change handler to check if current validator is elected to author blocks
+    this.eventBusService.addSlotChangeCallback(this.handleSlotChange.bind(this))
 
-//     try {
-//       // logger.info('Starting Gray Paper compliant block creation', {
-//       //   parentBlock: context.parentHeader.timeslot,
-//       //   extrinsicsCount: context.extrinsics.length,
-//       //   workPackagesCount: context.workPackages.length,
-//       // })
+    // Handle block requests: when chain manager determines we need a block,
+    // send the request via networking service
+    this.eventBusService.addBlocksRequestedCallback(
+      async (request: BlockRequest, peerPublicKey: Hex) => {
+        // Skip if networking service is not available
+        if (!this.networkingService || !this.blockRequestProtocol) {
+          logger.debug(
+            'Networking service or block request protocol not available, skipping block request',
+          )
+          return
+        }
 
-//       // Step 1: Validate extrinsics
-//       // const [validationResultError, validationResult] =
-//       //   await this.validateExtrinsics(context.extrinsics)
-//       // if (validationResultError) {
-//       //   return safeError(validationResultError)
-//       // }
+        await handleBlockRequest(
+          request,
+          peerPublicKey,
+          this.blockRequestProtocol,
+          this.networkingService,
+        )
+      },
+    )
+  }
 
-//       // Step 2: Process work packages
-//       // const [workPackagesError, _workPackages] = await this.processWorkPackages(
-//       //   context.workPackages,
-//       // )
-//       // if (workPackagesError) {
-//       //   return safeError(workPackagesError)
-//       // }
+  /**
+   * Create a new block according to Gray Paper specifications
+   *
+   * Gray Paper Block Authoring Process:
+   * 1. Get parent header from recent history (or genesis)
+   * 2. Construct block body (tickets, preimages, guarantees, assurances, disputes)
+   * 3. Calculate extrinsic hash from block body
+   * 4. Construct unsigned block header with correct extrinsic hash
+   * 5. Generate seal signature (H_sealsig)
+   * 6. Generate VRF signature (H_vrfsig) using seal output
+   * 7. Complete block header with both signatures
+   * 8. Update state and emit block
+   */
+  async createBlock(slot: bigint): SafePromise<Block> {
+    const startTime = Date.now()
 
-//       // TODO: get parent header from recent history
+    try {
+      // Step 1: Construct block body
+      // Collect tickets, preimages, guarantees, assurances, and disputes from services
+      const [blockBodyError, blockBody] = constructBlockBody(
+        slot,
+        this.configService,
+        this.serviceAccountService!,
+        this.ticketService,
+        this.guarantorService!,
+        this.workReportService!,
+        this.assuranceService!,
+        this.disputesService!,
+        this.recentHistoryService,
+        this.clockService,
+      )
+      if (blockBodyError) {
+        return safeError(blockBodyError)
+      }
+      if (!blockBody) {
+        return safeError(
+          new Error('Block body construction returned undefined'),
+        )
+      }
 
-//       // Step 3: Construct unsigned block header (without signatures)
-//       const [headerError, unsignedHeader] = this.constructUnsignedHeader(
-//         // parentHeader,
-//         null,
-//         [],
-//       )
-//       if (headerError) {
-//         return safeError(headerError)
-//       }
+      // Step 2: Construct complete block header with signatures
+      // constructHeader now generates both seal and VRF signatures internally
+      const [headerError, completeHeader] = await constructHeader(
+        slot,
+        blockBody,
+        this.configService,
+        this.recentHistoryService,
+        this.genesisManagerService ?? null,
+        this.stateService,
+        this.clockService,
+        this.entropyService,
+        this.validatorSetManagerService,
+        this.ticketService,
+        this.keyPairService,
+        this.sealKeyService,
+      )
+      if (headerError) {
+        return safeError(headerError)
+      }
+      if (!completeHeader) {
+        return safeError(new Error('Header construction returned undefined'))
+      }
 
-//       // Step 4: Generate seal signature (H_sealsig) first
-//       const [sealSigError, sealSignature] = await this.generateSealSignature(
-//         unsignedHeader,
-//         slot,
-//       )
-//       if (sealSigError) {
-//         return safeError(sealSigError)
-//       }
+      // Step 3: Create complete block
+      const block: Block = {
+        header: completeHeader,
+        body: blockBody,
+      }
 
-//       // Step 5: Generate VRF signature (H_vrfsig) using seal output
-//       const [vrfSigError, vrfSignature] = await generateVRFSignature(
-//         sealSignature,
-//         this.keyPairService,
-//       )
-//       if (vrfSigError) {
-//         return safeError(vrfSigError)
-//       }
+      logger.info('Block created successfully', {
+        slot: completeHeader.timeslot,
+        authorIndex: completeHeader.authorIndex,
+        parentHash: completeHeader.parent,
+        extrinsicHash: completeHeader.extrinsicHash,
+        vrfSig: `${completeHeader.vrfSig.substring(0, 20)}...`,
+        sealSig: `${completeHeader.sealSig.substring(0, 20)}...`,
+        duration: Date.now() - startTime,
+      })
 
-//       // Step 6: Complete block header with both signatures
-//       const completeHeader: BlockHeader = {
-//         ...unsignedHeader,
-//         vrfSig: bytesToHex(vrfSignature),
-//         sealSig: bytesToHex(sealSignature),
-//       }
+      // Step 4: Announce block to neighbors via networking service
+      await this.announceBlock(block)
 
-//       // const [ticketError, ticketsToInclude] = await getTicketsForExtrinsic(
-//       //   this.clockService,
-//       //   this.configService,
-//       //   this.ticketHolderService,
-//       // )
-//       // if (ticketError) {
-//       //   logger.warn('Failed to get tickets for extrinsic', {
-//       //     error: ticketError,
-//       //   })
-//       // }
+      return safeResult(block)
+    } catch (error) {
+      logger.error('Block creation failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      })
 
-//       // Step 7: Create complete block
-//       const block: Block = {
-//         header: completeHeader,
-//         body: {
-//           tickets: [],
-//           preimages: [],
-//           guarantees: [],
-//           assurances: [],
-//           disputes: [],
-//         },
-//       }
+      return safeError(
+        new Error(
+          `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        ),
+      )
+    }
+  }
 
-//       logger.info('Block created successfully', {
-//         slot: completeHeader.timeslot,
-//         authorIndex: completeHeader.authorIndex,
-//         vrfSig: completeHeader.vrfSig,
-//         sealSig: completeHeader.sealSig,
-//         duration: Date.now() - startTime,
-//       })
+  /**
+   * Check if this node should author a block for the given slot
+   *
+   * Gray Paper Logic:
+   * - Get seal key for the slot from seal key sequence
+   * - Find the validator index that matches the seal key
+   * - Compare with config.validatorIndex
+   * - If match: This node should author the block
+   * - If no match: This node should not author the block
+   *
+   * @param slot - Slot to check
+   * @returns true if this node should author the block, false otherwise
+   */
+  private shouldAuthorBlock(slot: bigint): Safe<boolean> {
+    // If validatorIndex is not set, we cannot determine if we should author
+    if (this.configService.validatorIndex === undefined) {
+      return safeResult(false)
+    }
 
-//       return safeResult(block)
-//     } catch (error) {
-//       logger.error('Block creation failed', {
-//         error: error instanceof Error ? error.message : 'Unknown error',
-//       })
+    // Get the seal key for this slot
+    const [sealKeyError, sealKey] = this.sealKeyService.getSealKeyForSlot(slot)
+    if (sealKeyError || !sealKey) {
+      return safeError(
+        sealKeyError ||
+          new Error(
+            'Failed to get seal key for slot to determine block author',
+          ),
+      )
+    }
 
-//       return safeError(
-//         new Error(
-//           `Block creation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-//         ),
-//       )
-//     }
-//   }
+    // If seal key is a ticket, we need to check if our validator owns it
+    if (typeof sealKey === 'object' && 'id' in sealKey) {
+      // Ticket-based sealing - check if our validator owns the ticket
+      const [credentialsError, validatorCredentials] =
+        getValidatorCredentialsWithFallback(
+          this.configService,
+          this.keyPairService ?? undefined,
+        )
+      if (credentialsError || !validatorCredentials) {
+        return safeError(
+          credentialsError ||
+            new Error('Failed to get validator credentials for ticket check'),
+        )
+      }
+      const currentValidatorBandersnatchKey =
+        validatorCredentials.bandersnatchKeyPair.publicKey
 
-//   /**
-//    * Construct unsigned block header (without signatures)
-//    * This creates the header structure before adding H_sealsig and H_vrfsig
-//    */
-//   constructUnsignedHeader(
-//     parent: BlockHeader,
-//     extrinsics: Extrinsic[],
-//   ): Safe<UnsignedBlockHeader> {
-//     // Use header constructor but without signatures
-//     const [error, header] = this.headerConstructor.construct(
-//       parent,
-//       extrinsics,
-//       this.configService,
-//     )
-//     if (error) {
-//       return safeError(error)
-//     }
+      // Check if current validator is elected to author this block
+      const [electedError, isElected] =
+        this.validatorSetManagerService.isValidatorElectedForSlot(
+          bytesToHex(currentValidatorBandersnatchKey),
+          slot,
+        )
+      if (electedError) {
+        return safeError(electedError)
+      }
+      return safeResult(isElected)
+    }
 
-//     // Return header without signatures (they'll be added later)
-//     const unsignedHeader: UnsignedBlockHeader = {
-//       ...header,
-//       vrfSig:
-//         '0x0000000000000000000000000000000000000000000000000000000000000000',
-//     }
+    // Fallback sealing - seal key is a Bandersnatch public key
+    // Find the validator index that matches the seal key
+    const sealKeyHex = bytesToHex(sealKey as Uint8Array)
+    const activeValidators =
+      this.validatorSetManagerService.getActiveValidators()
+    for (let i = 0; i < activeValidators.length; i++) {
+      if (activeValidators[i]?.bandersnatch === sealKeyHex) {
+        // Check if this matches our validator index
+        return safeResult(i === this.configService.validatorIndex)
+      }
+    }
 
-//     return safeResult(unsignedHeader)
-//   }
+    // Seal key not found in active validator set
+    return safeResult(false)
+  }
 
-//   /**
-//    * Generate seal signature for block header
-//    *
-//    * Implements Gray Paper safrole.tex equations 144-156:
-//    *
-//    * Two modes based on sealtickets type:
-//    * 1. Ticket-based sealing (Eq. 148): sealtickets' ∈ sequence{SafroleTicket}
-//    *    - Uses Ring VRF with ticket context: Xticket ∥ entropy'_3 ∥ i_st_entryindex
-//    *    - Validates: i_st_id = banderout{H_sealsig}
-//    *    - Sets: isticketed = 1
-//    *
-//    * 2. Fallback sealing (Eq. 154): sealtickets' ∈ sequence{bskey}
-//    *    - Uses direct VRF with fallback context: Xfallback ∥ entropy'_3
-//    *    - Sets: isticketed = 0
-//    *
-//    * Gray Paper Eq. 144: i = cyclic{sealtickets'[H_timeslot]}
-//    * Gray Paper Eq. 147-148: Ticket-based sealing
-//    * Gray Paper Eq. 152-154: Fallback sealing
-//    */
-//   async generateSealSignature(
-//     unsignedHeader: UnsignedBlockHeader,
-//     slot: bigint,
-//   ): SafePromise<Uint8Array> {
-//     try {
-//       // Get author's Bandersnatch key
-//       const authorPrivateKey =
-//         this.keyPairService.getLocalKeyPair().bandersnatchKeyPair.privateKey
+  /**
+   * Handle slot change events to check if current validator is elected to author blocks
+   *
+   * Gray Paper Logic:
+   * - Get seal key for current slot from seal key sequence
+   * - Compare with current validator's Bandersnatch public key
+   * - If match: Current validator is elected to author block for this slot
+   * - If no match: Current validator is not elected for this slot
+   *
+   * @param event - Slot change event containing slot, epoch, and phase information
+   */
+  private readonly handleSlotChange = async (
+    event: SlotChangeEvent,
+  ): SafePromise<void> => {
+    try {
+      // Check if this node should author a block for this slot
+      const [shouldAuthorError, shouldAuthor] = this.shouldAuthorBlock(
+        BigInt(event.slot),
+      )
+      if (shouldAuthorError) {
+        return safeError(shouldAuthorError)
+      }
+      if (!shouldAuthor) {
+        return safeResult(undefined)
+      }
 
-//       // Get entropy_3 for seal generation (Gray Paper line 166)
-//       const entropy3 = this.entropyService.getEntropy3()
+      const [blockError, block] = await this.createBlock(event.slot)
+      if (blockError) {
+        logger.error('Failed to create block', { error: blockError })
+        return safeError(blockError)
+      }
 
-//       // Gray Paper Eq. 144: i = cyclic{sealtickets'[H_timeslot]}
-//       // Get the seal key for this specific slot from the seal key sequence
-//       const [sealKeyError, sealKey] =
-//         this.sealKeyService.getSealKeyForSlot(slot)
-//       if (sealKeyError) {
-//         return safeError(sealKeyError)
-//       }
+      // Step 9: Emit block authored event
+      this.eventBusService.emitAuthored(block)
 
-//       // Determine sealing mode based on seal key type
-//       if (isSafroleTicket(sealKey)) {
-//         // Gray Paper Eq. 147-148: Ticket-based sealing
-//         // sealtickets' ∈ sequence{SafroleTicket} ⟹ ticket-based sealing
-//         return generateTicketBasedSealSignature(
-//           authorPrivateKey,
-//           entropy3,
-//           unsignedHeader,
-//           sealKey,
-//           slot,
-//           this.configService,
-//         )
-//       } else {
-//         // Gray Paper Eq. 152-154: Fallback sealing
-//         // sealtickets' ∈ sequence{bskey} ⟹ fallback sealing
-//         const [sealError, sealResult] = generateFallbackSealSignature(
-//           authorPrivateKey,
-//           entropy3,
-//           unsignedHeader,
-//           this.configService,
-//         )
-//         if (sealError) {
-//           return safeError(sealError)
-//         }
-//         return safeResult(sealResult.signature)
-//       }
-//     } catch (error) {
-//       logger.error('Failed to generate seal signature', { error, slot })
-//       return safeError(error as Error)
-//     }
-//   }
+      return safeResult(undefined)
+    } catch (error) {
+      logger.error('Error handling slot change event', {
+        slot: event.slot.toString(),
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return safeError(error as Error)
+    }
+  }
 
-//   /**
-//    * Handle slot change events to check if current validator is elected to author blocks
-//    *
-//    * Gray Paper Logic:
-//    * - Get seal key for current slot from seal key sequence
-//    * - Compare with current validator's Bandersnatch public key
-//    * - If match: Current validator is elected to author block for this slot
-//    * - If no match: Current validator is not elected for this slot
-//    *
-//    * @param event - Slot change event containing slot, epoch, and phase information
-//    */
-//   private readonly handleSlotChange = async (
-//     event: SlotChangeEvent,
-//   ): SafePromise<void> => {
-//     try {
-//       // Get current validator's Bandersnatch public key
-//       const localKeyPair = this.keyPairService.getLocalKeyPair()
-//       const currentValidatorBandersnatchKey =
-//         localKeyPair.bandersnatchKeyPair.publicKey
+  /**
+   * Announce block to connected neighbors via networking service
+   *
+   * Implements block announcement logic from block-announcement.ts:
+   * - Calculate block hash
+   * - Create BlockAnnouncement message
+   * - Serialize announcement using BlockAnnouncementProtocol
+   * - Get neighbors from validator set manager
+   * - Send to each neighbor via networking service (UP0, kind 0)
+   */
+  private async announceBlock(block: Block): Promise<void> {
+    // Skip announcement if networking service is not available
+    if (!this.networkingService) {
+      logger.debug(
+        'Networking service not available, skipping block announcement',
+      )
+      return
+    }
 
-//       // Check if current validator is elected to author this block
-//       const [electedError, isElected] =
-//         this.validatorSetManagerService.isValidatorElectedForSlot(
-//           bytesToHex(currentValidatorBandersnatchKey),
-//           BigInt(event.slot),
-//         )
+    // Skip announcement if block announcement protocol is not available
+    if (!this.blockAnnouncementProtocol) {
+      logger.debug(
+        'Block announcement protocol not available, skipping block announcement',
+      )
+      return
+    }
 
-//       if (electedError) {
-//         return safeError(electedError)
-//       }
-//       if (!isElected) {
-//         return safeResult(undefined)
-//       }
+    // Calculate block hash (finalized block hash for announcement)
+    const [blockHashError, blockHash] = calculateBlockHashFromHeader(
+      block.header,
+      this.configService,
+    )
+    if (blockHashError || !blockHash) {
+      logger.error('Failed to calculate block hash for announcement', {
+        error: blockHashError?.message,
+      })
+      return
+    }
 
-//       const [blockError, block] = await this.createBlock(event.slot)
-//       if (blockError) {
-//         logger.error('Failed to create block', { error: blockError })
-//         return safeError(blockError)
-//       }
+    const currentSlot = this.clockService.getLatestReportedBlockTimeslot() + 1n
 
-//       // Step 9: Emit block authored event
-//       this.eventBusService.emitAuthored(block)
+    // Create block announcement message
+    const announcement: BlockAnnouncement = {
+      header: block.header,
+      finalBlockHash: blockHash,
+      finalBlockSlot: currentSlot,
+    }
 
-//       return safeResult(undefined)
-//     } catch (error) {
-//       logger.error('Error handling slot change event', {
-//         slot: event.slot.toString(),
-//         error: error instanceof Error ? error.message : String(error),
-//       })
-//       return safeError(error as Error)
-//     }
-//   }
-// }
+    // Serialize announcement using BlockAnnouncementProtocol
+    const [serializeError, announcementData] =
+      this.blockAnnouncementProtocol.serializeBlockAnnouncement(announcement)
+    if (serializeError || !announcementData) {
+      logger.error('Failed to serialize block announcement', {
+        error: serializeError?.message,
+      })
+      return
+    }
+
+    // Get current validator index for finding neighbors
+    const [credentialsError, validatorCredentials] =
+      getValidatorCredentialsWithFallback(
+        this.configService,
+        this.keyPairService ?? undefined,
+      )
+    if (credentialsError || !validatorCredentials) {
+      logger.error('Failed to get validator credentials for announcement', {
+        error: credentialsError?.message,
+      })
+      return
+    }
+
+    // Get Ed25519 public key to find validator index
+    const ed25519PublicKey = bytesToHex(
+      validatorCredentials.ed25519KeyPair.publicKey,
+    )
+    const [validatorIndexError, validatorIndex] =
+      this.validatorSetManagerService.getValidatorIndex(ed25519PublicKey)
+    if (validatorIndexError) {
+      logger.debug(
+        'Local node is not a validator, skipping block announcement',
+        {
+          error: validatorIndexError.message,
+        },
+      )
+      return
+    }
+
+    // Get neighbors from validator set manager
+    const neighbors =
+      this.validatorSetManagerService.getAllConnectedNeighbors(validatorIndex)
+
+    if (neighbors.length === 0) {
+      logger.debug('No neighbors found, skipping block announcement')
+      return
+    }
+
+    // Send announcement to all neighbors via networking service (UP0, kind 0)
+    for (const neighbor of neighbors) {
+      try {
+        const [sendError] = await this.networkingService.sendMessage(
+          BigInt(neighbor.index),
+          0 as StreamKind, // UP0 block announcement protocol
+          announcementData,
+        )
+        if (sendError) {
+          logger.warn('Failed to send block announcement to neighbor', {
+            neighborIndex: neighbor.index,
+            neighborPublicKey: `${neighbor.publicKey.substring(0, 20)}...`,
+            error: sendError.message,
+          })
+        }
+      } catch (error) {
+        logger.error('Error sending block announcement to neighbor', {
+          neighborIndex: neighbor.index,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+  }
+}

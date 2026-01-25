@@ -17,18 +17,25 @@ import {
 import type {
   AccumulateInput,
   ContextMutator,
+  ExportParams,
+  ExpungeParams,
   FetchParams,
+  HistoricalLookupParams,
   HostFunctionContext,
   HostFunctionResult,
   IConfigService,
   IEntropyService,
   ImplicationsPair,
   InfoParams,
+  InvokeParams,
+  IServiceAccountService,
   LookupParams,
   PVMOptions,
+  RefineInvocationContext,
   ResultCode,
   SafePromise,
   ServiceAccount,
+  WorkPackage,
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 // Import types that aren't exported from main index - use relative path to source
@@ -47,10 +54,20 @@ import type { AccumulateHostFunctionContext } from '../../pvm/src/host-functions
 export class TypeScriptPVMExecutor extends PVM {
   private readonly accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
   private readonly configService: IConfigService
-  private readonly entropyService: IEntropyService
+  private readonly entropyService: IEntropyService | null
+  private readonly serviceAccountService: IServiceAccountService | null
   private readonly workspaceRoot: string
   private readonly traceSubfolder?: string
   private accumulateInputs: AccumulateInput[] | null = null // Accumulate inputs for FETCH selectors 14 and 15
+  private refineContext: RefineInvocationContext | null = null
+  private refineWorkPackage: WorkPackage | null = null
+  private refineAuthorizerTrace: Uint8Array | null = null
+  private refineImportSegments: Uint8Array[][] | null = null
+  private refineExportSegmentOffset = 0n
+  private refineServiceAccount: ServiceAccount | null = null
+  private refineServiceId: bigint | null = null
+  private refineAccounts: Map<bigint, ServiceAccount> | null = null
+  private refineLookupAnchorTimeslot = 0n
   private traceHostFunctionLogs: Array<{
     step: number
     hostCallId: bigint
@@ -62,7 +79,8 @@ export class TypeScriptPVMExecutor extends PVM {
     hostFunctionRegistry: HostFunctionRegistry,
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry,
     configService: IConfigService,
-    entropyService: IEntropyService,
+    entropyService: IEntropyService | null,
+    serviceAccountService: IServiceAccountService | null,
     pvmOptions?: PVMOptions,
     traceSubfolder?: string,
   ) {
@@ -70,6 +88,7 @@ export class TypeScriptPVMExecutor extends PVM {
     this.accumulateHostFunctionRegistry = accumulateHostFunctionRegistry
     this.configService = configService
     this.entropyService = entropyService
+    this.serviceAccountService = serviceAccountService
     // Calculate workspace root (same logic as WasmPVMExecutor)
     const currentDir =
       typeof __dirname !== 'undefined'
@@ -192,6 +211,309 @@ export class TypeScriptPVMExecutor extends PVM {
       result: marshallingResult.result,
       context: marshallingResult.context as ImplicationsPair,
     })
+  }
+
+  async executeRefinementInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+    authorizerTrace: Uint8Array,
+    importSegments: Uint8Array[][],
+    exportSegmentOffset: bigint,
+    serviceAccount: ServiceAccount,
+    lookupAnchorTimeslot: bigint,
+    serviceId?: bigint,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+    exportSegments: Uint8Array[]
+  }> {
+    if (!this.configService || !this.serviceAccountService) {
+      return safeError(
+        new Error(
+          'ConfigService and ServiceAccountService required for refine invocation',
+        ),
+      )
+    }
+
+    // Store refine invocation parameters for host functions
+    this.refineWorkPackage = workPackage
+    this.refineAuthorizerTrace = authorizerTrace
+    this.refineImportSegments = importSegments
+    this.refineExportSegmentOffset = exportSegmentOffset
+    this.refineServiceAccount = serviceAccount
+    this.refineServiceId = serviceId ?? null
+    this.refineAccounts = new Map()
+    if (serviceId !== undefined && serviceAccount) {
+      this.refineAccounts.set(serviceId, serviceAccount)
+    }
+    this.refineLookupAnchorTimeslot = lookupAnchorTimeslot
+
+    // Initialize refine context: (∅, ∅) - empty machines dict and empty export segments
+    // Gray Paper equation 86: Initialize refine context as empty
+    this.refineContext = {
+      machines: new Map(),
+      exportSegments: [],
+    }
+
+    // Create refine context mutator F
+    const refineContextMutator = this.createRefineContextMutator()
+
+    // Clear host function logs at the start of each execution run
+    this.traceHostFunctionLogs = []
+
+    // Execute Ψ_M(c, 0, w.refgaslimit, encodedArgs, F, (∅, ∅))
+    // Gray Paper equation 86: Initial PC = 0 for refine invocation
+    const [error, marshallingResult] = await this.executeMarshallingInvocation(
+      preimageBlob,
+      0n, // Initial PC = 0 (Gray Paper)
+      gasLimit,
+      encodedArgs,
+      refineContextMutator,
+      this.refineContext,
+    )
+
+    // Extract export segments from updated refine context
+    const exportSegments =
+      (marshallingResult?.context as RefineInvocationContext | undefined)
+        ?.exportSegments ?? []
+
+    // Clear refine invocation parameters
+    this.refineWorkPackage = null
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0n
+    this.refineServiceAccount = null
+    this.refineLookupAnchorTimeslot = 0n
+    this.refineContext = null
+
+    if (error || !marshallingResult) {
+      return safeError(
+        error || new Error('Marshalling invocation returned no result'),
+      )
+    }
+
+    return safeResult({
+      gasConsumed: marshallingResult.gasConsumed,
+      result: marshallingResult.result,
+      exportSegments,
+    })
+  }
+
+  /**
+   * Execute is-authorized invocation using executeMarshallingInvocation
+   * Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   *
+   * This is the public method that IsAuthorizedPVM should call directly for TypeScript execution.
+   * Host functions are handled via the context mutator.
+   */
+  async executeIsAuthorizedInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+  }> {
+    if (!this.serviceAccountService) {
+      return safeError(
+        new Error(
+          'ServiceAccountService required for is-authorized invocation',
+        ),
+      )
+    }
+
+    // Store work package for FETCH host function
+    this.refineWorkPackage = workPackage
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0n
+    this.refineServiceAccount = null
+    this.refineServiceId = null
+    this.refineAccounts = null
+    this.refineLookupAnchorTimeslot = workPackage.context.lookup_anchor_slot
+
+    // Create is-authorized context mutator F
+    // Gray Paper equation 46-54: F ∈ contextmutator{emptyset}
+    const isAuthorizedContextMutator =
+      this.createIsAuthorizedContextMutator(workPackage)
+
+    // Clear host function logs at the start of each execution run
+    this.traceHostFunctionLogs = []
+
+    // Execute Ψ_M(authCode, 0, Cpackageauthgas, encode[2]{c}, F, none)
+    // Gray Paper equation 37-38: Initial PC = 0 for is-authorized invocation
+    const [error, marshallingResult] = await this.executeMarshallingInvocation(
+      preimageBlob,
+      0n, // Initial PC = 0 (Gray Paper)
+      gasLimit,
+      encodedArgs,
+      isAuthorizedContextMutator,
+      {
+        machines: new Map(),
+        exportSegments: [],
+      }, // Context is (∅, ∅) for Is-Authorized
+    )
+
+    // Clear is-authorized invocation parameters
+    this.refineWorkPackage = null
+    this.refineAuthorizerTrace = null
+    this.refineImportSegments = null
+    this.refineExportSegmentOffset = 0n
+    this.refineServiceAccount = null
+    this.refineServiceId = null
+    this.refineAccounts = null
+    this.refineLookupAnchorTimeslot = 0n
+
+    if (error || !marshallingResult) {
+      return safeError(
+        error || new Error('Marshalling invocation returned no result'),
+      )
+    }
+
+    return safeResult({
+      gasConsumed: marshallingResult.gasConsumed,
+      result: marshallingResult.result,
+    })
+  }
+
+  /**
+   * Create is-authorized context mutator F
+   * Gray Paper equation 46-54: F ∈ contextmutator{emptyset}
+   *
+   * Supports only:
+   * - gas (ID = 0): Ω_G
+   * - fetch (ID = 1): Ω_Y(..., wpX, none, none, none, none, none, none, none)
+   *
+   * For unknown host calls:
+   * - Set registers[7] = WHAT
+   * - Subtract 10 gas
+   * - If gas < 0: return oog
+   * - Otherwise: continue
+   */
+  private createIsAuthorizedContextMutator(
+    workPackage: WorkPackage,
+  ): ContextMutator {
+    return (hostCallId: bigint) => {
+      // Get current step and gas before host function call
+      const currentStep = this.executionStep
+      const gasBefore = this.state.gasCounter
+
+      const gasCost = 10n
+      const isOOG = this.state.gasCounter < gasCost
+
+      // Log host function call BEFORE execution
+      const hostLogEntry = {
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: isOOG
+          ? this.state.gasCounter
+          : this.state.gasCounter - gasCost,
+      }
+      this.traceHostFunctionLogs.push(hostLogEntry)
+
+      if (isOOG) {
+        // Gray Paper: On OOG, all remaining gas is consumed
+        this.state.gasCounter = 0n
+        return RESULT_CODES.OOG
+      }
+
+      // Deduct base gas cost
+      this.state.gasCounter -= gasCost
+      hostLogEntry.gasAfter = this.state.gasCounter
+
+      // Gray Paper eq 46-54: Only support gas (0) and fetch (1)
+      if (hostCallId === GENERAL_FUNCTIONS.GAS) {
+        // Ω_G(gascounter, registers, memory)
+        const result = this.handleGeneralHostFunctionForIsAuthorized(hostCallId)
+        hostLogEntry.gasAfter = this.state.gasCounter
+        return result
+      }
+
+      if (hostCallId === GENERAL_FUNCTIONS.FETCH) {
+        // Ω_Y(gascounter, registers, memory, wpX, none, none, none, none, none, none, none)
+        const result = this.handleFetchForIsAuthorized(workPackage)
+        hostLogEntry.gasAfter = this.state.gasCounter
+        return result
+      }
+
+      // Unknown host call: Gray Paper default behavior
+      // registers' = registers except registers'[7] = WHAT
+      // gascounter' = gascounter - 10 (already deducted)
+      this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+      // If gas < 0: return oog (already checked above)
+      // Otherwise: continue (Gray Paper: continue means execution continues)
+      return null
+    }
+  }
+
+  /**
+   * Handle GAS host function for is-authorized context
+   */
+  private handleGeneralHostFunctionForIsAuthorized(
+    hostCallId: bigint,
+  ): ResultCode | null {
+    const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+    if (!hostFunction) {
+      return null
+    }
+
+    const hostFunctionContext: HostFunctionContext = {
+      gasCounter: this.state.gasCounter,
+      registers: this.state.registerState,
+      ram: this.state.ram,
+      log: () => {
+        // Logging handled by PVM's host function logs
+      },
+    }
+
+    // GAS host function takes null context
+    const result = hostFunction.execute(hostFunctionContext, null)
+
+    return result?.resultCode ?? null
+  }
+
+  /**
+   * Handle FETCH host function for is-authorized context
+   * Gray Paper: Ω_Y(..., wpX, none, none, none, none, none, none, none)
+   */
+  private handleFetchForIsAuthorized(
+    workPackage: WorkPackage,
+  ): ResultCode | null {
+    const hostFunction = this.hostFunctionRegistry.get(GENERAL_FUNCTIONS.FETCH)
+    if (!hostFunction) {
+      return null
+    }
+
+    const hostFunctionContext: HostFunctionContext = {
+      gasCounter: this.state.gasCounter,
+      registers: this.state.registerState,
+      ram: this.state.ram,
+      log: () => {
+        // Logging handled by PVM's host function logs
+      },
+    }
+
+    // Create fetch params with work package and all other params as null/none
+    // Gray Paper: Ω_Y(..., wpX, none, none, none, none, none, none, none)
+    const fetchParams: FetchParams = {
+      workPackage,
+      workPackageHash: null,
+      authorizerTrace: null,
+      workItemIndex: null,
+      importSegments: null,
+      exportSegments: null,
+      accumulateInputs: null,
+      entropyService: null, // Not needed for is-authorized
+    }
+
+    const result = hostFunction.execute(hostFunctionContext, fetchParams)
+
+    return result?.resultCode ?? null
   }
 
   /**
@@ -354,6 +676,343 @@ export class TypeScriptPVMExecutor extends PVM {
       })
 
       return null
+    }
+  }
+
+  /**
+   * Create refine context mutator F
+   * Gray Paper equation 92-118: F ∈ contextmutator{refineinvocationcontext}
+   */
+  private createRefineContextMutator(): ContextMutator {
+    return (hostCallId: bigint) => {
+      // Get current step and gas before host function call
+      const currentStep = this.executionStep
+      const gasBefore = this.state.gasCounter
+
+      // JIP-1: LOG host function (100) costs 0 gas for JAM version 0.7.1
+      const jamVersion = this.configService.jamVersion
+      const isLogFunction = hostCallId === GENERAL_FUNCTIONS.LOG
+      const isJamVersion071 =
+        jamVersion.major === 0 &&
+        jamVersion.minor === 7 &&
+        jamVersion.patch === 1
+      const gasCost = isLogFunction && isJamVersion071 ? 0n : 10n
+      const isOOG = gasCost > 0n && this.state.gasCounter < gasCost
+
+      // Log host function call BEFORE execution
+      const hostLogEntry = {
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: isOOG
+          ? this.state.gasCounter
+          : gasCost > 0n
+            ? this.state.gasCounter - gasCost
+            : this.state.gasCounter,
+      }
+      this.traceHostFunctionLogs.push(hostLogEntry)
+
+      if (isOOG) {
+        this.state.gasCounter = 0n
+        return RESULT_CODES.OOG
+      }
+
+      // Only deduct gas if gasCost > 0
+      if (gasCost > 0n) {
+        this.state.gasCounter -= gasCost
+      }
+      hostLogEntry.gasAfter = this.state.gasCounter
+
+      // Handle refine-specific host functions
+      // Gray Paper pvm_invocations.tex lines 92-118:
+      // 0=gas, 1=fetch, 2=lookup, 3=read, 4=write, 5=info,
+      // 6=historical_lookup, 7=export, 8=machine, 9=peek, 10=poke, 11=pages, 12=invoke, 13=expunge
+      // Also include log (100) - JIP-1 debug/monitoring function
+      if ((hostCallId >= 0n && hostCallId <= 13n) || hostCallId === 100n) {
+        const result = this.handleRefineHostFunction(hostCallId)
+
+        // Update gasAfter after host function execution
+        hostLogEntry.gasAfter = this.state.gasCounter
+
+        // Log panic for debugging
+        if (result === RESULT_CODES.PANIC) {
+          const hostFunctionName = this.getHostFunctionName(hostCallId)
+          logger.error('[TypeScriptPVMExecutor] Refine host function PANIC', {
+            hostFunctionId: hostCallId.toString(),
+            hostFunctionName,
+            step: currentStep,
+            pc: this.state.programCounter.toString(),
+            gasBefore: gasBefore.toString(),
+            gasAfter: this.state.gasCounter.toString(),
+            registers: this.state.registerState.map((r) => r.toString()),
+            faultAddress: this.state.faultAddress?.toString() ?? null,
+          })
+        }
+
+        return result
+      }
+
+      // Unknown host function in refine context
+      this.state.registerState[7] = ACCUMULATE_ERROR_CODES.WHAT
+
+      // Log the unknown host function call
+      this.traceHostFunctionLogs.push({
+        step: currentStep,
+        hostCallId,
+        gasBefore,
+        gasAfter: this.state.gasCounter,
+      })
+
+      return null
+    }
+  }
+
+  private handleRefineHostFunction(hostCallId: bigint): ResultCode | null {
+    const hostFunction = this.hostFunctionRegistry.get(hostCallId)
+    if (!hostFunction) {
+      return null
+    }
+
+    const hostFunctionContext: HostFunctionContext = {
+      gasCounter: this.state.gasCounter,
+      registers: this.state.registerState,
+      ram: this.state.ram,
+      log: () => {
+        // Logging handled by PVM's host function logs
+      },
+    }
+
+    let result: HostFunctionResult | null = null
+    switch (hostCallId) {
+      case 0n: {
+        // gas
+        result = hostFunction.execute(hostFunctionContext, null)
+        break
+      }
+      case 1n: {
+        // fetch
+        const fetchParams = this.buildRefineFetchParams()
+        result = hostFunction.execute(hostFunctionContext, fetchParams)
+        break
+      }
+      case 2n: {
+        // lookup
+        const lookupParams = this.buildRefineLookupParams()
+        result = hostFunction.execute(hostFunctionContext, lookupParams)
+        break
+      }
+      case 3n: {
+        // read
+        const readParams = this.buildRefineReadParams()
+        result = hostFunction.execute(hostFunctionContext, readParams)
+        break
+      }
+      case 4n: {
+        // write
+        const writeParams = this.buildRefineWriteParams()
+        result = hostFunction.execute(hostFunctionContext, writeParams)
+        break
+      }
+      case 5n: {
+        // info
+        const infoParams = this.buildRefineInfoParams()
+        result = hostFunction.execute(hostFunctionContext, infoParams)
+        break
+      }
+      case 6n: {
+        // historical_lookup
+        const historicalLookupParams = this.buildHistoricalLookupParams()
+        result = hostFunction.execute(
+          hostFunctionContext,
+          historicalLookupParams,
+        )
+        break
+      }
+      case 7n: {
+        // export
+        const exportParams = this.buildExportParams()
+        result = hostFunction.execute(hostFunctionContext, exportParams)
+        break
+      }
+      case 8n: {
+        // machine
+        // TODO: Implement machine host function
+        return null
+      }
+      case 9n: {
+        // peek
+        // TODO: Implement peek host function
+        return null
+      }
+      case 10n: {
+        // poke
+        // TODO: Implement poke host function
+        return null
+      }
+      case 11n: {
+        // pages
+        // TODO: Implement pages host function
+        return null
+      }
+      case 12n: {
+        // invoke
+        const invokeParams = this.buildInvokeParams()
+        result = hostFunction.execute(hostFunctionContext, invokeParams)
+        break
+      }
+      case 13n: {
+        // expunge
+        const expungeParams = this.buildExpungeParams()
+        result = hostFunction.execute(hostFunctionContext, expungeParams)
+        break
+      }
+      case 100n: {
+        // log (JIP-1)
+        const logParams = {
+          serviceId: null,
+          coreIndex: null,
+        }
+        result = hostFunction.execute(hostFunctionContext, logParams)
+        break
+      }
+      default: {
+        return null
+      }
+    }
+
+    // Log panic for debugging
+    if (result?.resultCode === RESULT_CODES.PANIC) {
+      const hostFunctionName = this.getHostFunctionName(hostCallId)
+      logger.error(
+        '[TypeScriptPVMExecutor] Refine host function PANIC in handler',
+        {
+          hostFunctionId: hostCallId.toString(),
+          hostFunctionName,
+          step: this.executionStep,
+          pc: this.state.programCounter.toString(),
+          gasCounter: this.state.gasCounter.toString(),
+          registers: this.state.registerState.map((r) => r.toString()),
+          faultAddress: this.state.faultAddress?.toString() ?? null,
+          faultInfo: result.faultInfo,
+        },
+      )
+    }
+
+    return result?.resultCode ?? null
+  }
+
+  private buildRefineFetchParams(): FetchParams {
+    if (!this.entropyService) {
+      throw new Error('EntropyService not available for fetch')
+    }
+    return {
+      workPackage: this.refineWorkPackage,
+      workPackageHash: null,
+      authorizerTrace: this.refineAuthorizerTrace
+        ? (`0x${Buffer.from(this.refineAuthorizerTrace).toString('hex')}` as `0x${string}`)
+        : null,
+      workItemIndex: null,
+      importSegments: this.refineImportSegments,
+      exportSegments: null,
+      accumulateInputs: null,
+      entropyService: this.entropyService,
+    }
+  }
+
+  private buildRefineLookupParams(): LookupParams {
+    if (!this.refineServiceAccount || this.refineServiceId === null) {
+      throw new Error('Service account and service ID not available for lookup')
+    }
+    return {
+      serviceAccount: this.refineServiceAccount,
+      serviceId: this.refineServiceId,
+      accounts: this.refineAccounts ?? new Map(),
+    }
+  }
+
+  private buildRefineReadParams(): {
+    serviceAccount: ServiceAccount
+    serviceId: bigint
+    accounts: Map<bigint, ServiceAccount>
+  } {
+    if (!this.refineServiceAccount || this.refineServiceId === null) {
+      throw new Error('Service account and service ID not available for read')
+    }
+    return {
+      serviceAccount: this.refineServiceAccount,
+      serviceId: this.refineServiceId,
+      accounts: this.refineAccounts ?? new Map(),
+    }
+  }
+
+  private buildRefineWriteParams(): {
+    serviceAccount: ServiceAccount
+    serviceId: bigint
+  } {
+    if (!this.refineServiceAccount || this.refineServiceId === null) {
+      throw new Error('Service account and service ID not available for write')
+    }
+    return {
+      serviceAccount: this.refineServiceAccount,
+      serviceId: this.refineServiceId,
+    }
+  }
+
+  private buildRefineInfoParams(): InfoParams {
+    if (this.refineServiceId === null) {
+      throw new Error('Service ID not available for info')
+    }
+    return {
+      serviceId: this.refineServiceId,
+      accounts: this.refineAccounts ?? new Map(),
+      currentTimeslot: this.refineLookupAnchorTimeslot,
+    }
+  }
+
+  private buildHistoricalLookupParams(): HistoricalLookupParams {
+    if (
+      !this.refineContext ||
+      this.refineServiceId === null ||
+      !this.refineAccounts
+    ) {
+      throw new Error(
+        'Refine context, service ID, and accounts not available for historical lookup',
+      )
+    }
+    return {
+      refineContext: this.refineContext,
+      serviceId: this.refineServiceId,
+      accounts: this.refineAccounts,
+      timeslot: this.refineLookupAnchorTimeslot,
+    }
+  }
+
+  private buildExportParams(): ExportParams {
+    if (!this.refineContext) {
+      throw new Error('Refine context not available for export')
+    }
+    return {
+      refineContext: this.refineContext,
+      segmentOffset: this.refineExportSegmentOffset,
+    }
+  }
+
+  private buildInvokeParams(): InvokeParams {
+    if (!this.refineContext) {
+      throw new Error('Refine context not available for invoke')
+    }
+    return {
+      refineContext: this.refineContext,
+    }
+  }
+
+  private buildExpungeParams(): ExpungeParams {
+    if (!this.refineContext || this.refineServiceId === null) {
+      throw new Error('Refine context and service ID not available for expunge')
+    }
+    return {
+      refineContext: this.refineContext,
+      machineId: this.refineServiceId,
     }
   }
 
