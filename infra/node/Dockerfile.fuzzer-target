@@ -29,8 +29,16 @@ ENV PINO_LEVEL=debug
 # Ensure /tmp exists and is writable for Unix domain sockets
 RUN mkdir -p /tmp && chmod 1777 /tmp
 
+# Copy workspace marker files for path resolution
+COPY --from=build /app/package.json /app/package.json
+COPY --from=build /app/turbo.json /app/turbo.json
+
 # Copy the compiled binary
 COPY --from=build /app/bin/fuzzer-target /app/bin/fuzzer-target
+
+# Copy PVM WASM file (needed at runtime, not bundled in binary)
+# COPY automatically creates the directory structure
+COPY --from=build /app/packages/pvm-assemblyscript/build/pvm.wasm /app/packages/pvm-assemblyscript/build/pvm.wasm
 
 # Copy WASM file (needed at runtime, not bundled in binary)
 COPY --from=build /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm
