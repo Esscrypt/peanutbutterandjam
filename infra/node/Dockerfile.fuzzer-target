@@ -15,6 +15,11 @@ COPY . .
 
 RUN bun install --ignore-scripts
 
+# Build the pvm-assemblyscript package to generate pvm.wasm
+# This is needed at runtime by the fuzzer target
+# Note: Using npm since the build scripts use npm internally
+RUN cd packages/pvm-assemblyscript && bun run build
+
 # Build the fuzzer target binary
 # Note: This compiles TypeScript and needs all workspace dependencies to be available and built
 RUN bun run build:fuzzer
