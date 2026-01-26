@@ -26,6 +26,7 @@ import {
   createPartialStateSnapshot,
   filterReadyItemDependencies,
   findItemsWithinGasLimit,
+  getAccumulatableItemsQ,
   groupItemsByServiceId,
   shiftStateForBlockTransition,
   validateWorkReportGasConstraints,
@@ -317,7 +318,7 @@ export class AccumulationService extends BaseService {
       )
 
       // Step 2: Use Q function to get all currently accumulatable items from ready queue
-      const readyQueueAccumulatable = this.getAccumulatableItemsQ(
+      const readyQueueAccumulatable = getAccumulatableItemsQ(
         allReadyItems,
         this.accumulated,
       )
@@ -860,100 +861,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Accumulation priority queue function Q
-   *
-   * Gray Paper equation 63-73: Q provides the sequence of work-reports which are able
-   * to be accumulated given a set of not-yet-accumulated work-reports and their dependencies.
-   *
-   * Formally: Q(𝐫) = {
-   *   [] if g = []
-   *   g concat Q(E(𝐫, P(g))) otherwise
-   *   where g = items with empty dependencies
-   * }
-   *
-   * This is implemented iteratively (not recursively) for efficiency.
-   * The function processes all items with satisfied dependencies in one conceptual pass.
-   *
-   * @param items - Sequence of ready items (work report, dependency set) pairs
-   * @param accumulated - Current accumulated packages history
-   * @returns Sequence of work-reports that can be accumulated (items with empty dependencies)
-   */
-  private getAccumulatableItemsQ(
-    items: ReadyItem[],
-    accumulated: Accumulated,
-    accumulatedSoFar?: Set<Hex>,
-  ): ReadyItem[] {
-    // Build set of all accumulated packages from history
-    const allAccumulatedPackages = new Set<Hex>()
-    for (const packageSet of accumulated.packages) {
-      if (packageSet) {
-        for (const hash of packageSet) {
-          allAccumulatedPackages.add(hash)
-        }
-      }
-    }
-
-    // Include packages accumulated in previous recursive calls
-    if (accumulatedSoFar) {
-      for (const hash of accumulatedSoFar) {
-        allAccumulatedPackages.add(hash)
-      }
-    }
-
-    // Find items with empty dependencies (g in Gray Paper)
-    // Gray Paper: Self-referential items (depending on themselves) will never have empty dependencies
-    const itemsWithEmptyDeps = items.filter(
-      (item) => item.dependencies.size === 0,
-    )
-
-    // Debug: Check for self-referential items
-    for (const item of items) {
-      const packageHash = item.workReport.package_spec.hash
-      if (item.dependencies.has(packageHash)) {
-        logger.debug('[AccumulationService] Self-referential item detected', {
-          packageHash: packageHash.slice(0, 40),
-          dependenciesCount: item.dependencies.size,
-          willNeverBeAccumulated: true,
-        })
-      }
-    }
-
-    if (itemsWithEmptyDeps.length === 0) {
-      logger.debug('[AccumulationService] No items with empty dependencies', {
-        totalItems: items.length,
-      })
-      return []
-    }
-
-    // Extract package hashes from items with empty deps (P(g) in Gray Paper)
-    const packageHashes = this.extractPackageHashesP(itemsWithEmptyDeps)
-
-    // Union with all accumulated packages for E function
-    // E should remove dependencies that are in accumulatedcup ∪ P(g)
-    const accumulatedcup = new Set<Hex>([
-      ...allAccumulatedPackages,
-      ...packageHashes,
-    ])
-
-    // Apply queue editing E(𝐫, accumulatedcup ∪ P(g)) to get remaining items
-    const remainingItems = this.applyQueueEditingFunctionE(
-      items,
-      accumulatedcup,
-    )
-
-    // Recursively process remaining items: Q(E(𝐫, accumulatedcup ∪ P(g)))
-    // Pass accumulatedcup to include all packages found so far
-    const recursivelyAccumulatable = this.getAccumulatableItemsQ(
-      remainingItems,
-      accumulated,
-      accumulatedcup,
-    )
-
-    // Return g concat Q(E(𝐫, accumulatedcup ∪ P(g)))
-    return [...itemsWithEmptyDeps, ...recursivelyAccumulatable]
-  }
-
-  /**
    * Resolve dependencies for ready work-reports
    *
    * This method checks if work-reports have fulfilled dependencies by comparing
@@ -1429,7 +1336,6 @@ export class AccumulationService extends BaseService {
     )
 
     // Add edited queued items to slot m
-    // Items with empty dependencies will be picked up by getAccumulatableItemsQ in processAccumulation
     // Note: Old items in slot m are preserved for now - they'll be collected by processAccumulation
     // After processing, finalizeSlotM will ensure only new queued items remain
     for (const item of editedQueuedItems) {
