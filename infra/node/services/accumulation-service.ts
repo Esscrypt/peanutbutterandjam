@@ -18,6 +18,9 @@
  */
 
 import {
+  calculateServiceGasLimit,
+  clonePartialState,
+  createPartialStateSnapshot,
   filterReadyItemDependencies,
   findItemsWithinGasLimit,
   groupItemsByServiceId,
@@ -26,7 +29,6 @@ import {
 import {
   calculateWorkReportHash,
   decodeValidatorPublicKeys,
-  encodeValidatorPublicKeys,
   setServicePreimageValue,
   setServiceRequestValue,
 } from '@pbnjam/codec'
@@ -42,7 +44,6 @@ import {
   type PartialState,
   type Ready,
   type ReadyItem,
-  type ServiceAccount,
   type ValidatorPublicKeys,
   WORK_REPORT_CONSTANTS,
   type WorkExecResultValue,
@@ -261,18 +262,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Calculate total gas limit for accumulation
-   * Uses configService.maxBlockGas as the total gas limit for accumulation
-   *
-   * @returns Total gas limit for accumulation
-   */
-  private calculateTotalGasLimit(): bigint {
-    const totalGasLimit = BigInt(this.configService.maxBlockGas)
-
-    return totalGasLimit
-  }
-
-  /**
    * Main accumulation processing method
    *
    * This method implements the complete accumulation flow as observed in the test vector:
@@ -302,7 +291,7 @@ export class AccumulationService extends BaseService {
     )
 
     // Gray Paper equation 350-353: Calculate total gas limit
-    const totalGasLimit = this.calculateTotalGasLimit()
+    const totalGasLimit = this.configService.maxBlockGas
 
     // Convert absolute slot to epoch slot index
     const epochSlotIndex = BigInt(
@@ -321,18 +310,6 @@ export class AccumulationService extends BaseService {
     // Track defxfers across iterations (Gray Paper equation 166: accseq recursively passes 𝐭*)
     // Start with defxfers from immediate accumulation
     let pendingDefxfers: DeferredTransfer[] = [...initialDefxfers]
-    logger.debug(
-      '[AccumulationService] Starting processAccumulation with initial defxfers',
-      {
-        slot: currentSlot.toString(),
-        initialDefxfersCount: initialDefxfers.length,
-        defxfers: initialDefxfers.map((d) => ({
-          source: d.source.toString(),
-          dest: d.dest.toString(),
-          amount: d.amount.toString(),
-        })),
-      },
-    )
 
     // Track total gas used across all accumulations (Gray Paper: accseq tracks gas consumption)
     // Gray Paper equation 163: i = max prefix such that sum(gaslimit) ≤ g
@@ -388,7 +365,7 @@ export class AccumulationService extends BaseService {
         (sum, d) => sum + d.gasLimit,
         0n,
       )
-      const availableGas = totalGasLimit + defxferGas - totalGasUsed
+      const availableGas = BigInt(totalGasLimit) + defxferGas - totalGasUsed
 
       // Gray Paper equation 163: i = max prefix such that sum_{r in r[:i], d in r.digests}(d.gaslimit) ≤ g*
       // Note: Prefix calculation only considers work-digest gas limits, not defxfer gas
@@ -556,36 +533,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Group items by service ID
-   * Gray Paper: accumulate each service once with all its inputs
-   * NOTE: A work report can have multiple results with different service_ids
-   */
-  private groupItemsByServiceId(items: ReadyItem[]): Map<bigint, ReadyItem[]> {
-    const serviceToItems = new Map<bigint, ReadyItem[]>()
-    const serviceIdsInItems = new Set<bigint>()
-
-    // First pass: collect all unique service IDs from all results
-    for (const item of items) {
-      for (const result of item.workReport.results) {
-        serviceIdsInItems.add(result.service_id)
-      }
-    }
-
-    // Second pass: group items by service ID
-    for (const serviceId of serviceIdsInItems) {
-      serviceToItems.set(serviceId, [])
-      for (const item of items) {
-        // Include this item if it has at least one result for this service
-        if (item.workReport.results.some((r) => r.service_id === serviceId)) {
-          serviceToItems.get(serviceId)!.push(item)
-        }
-      }
-    }
-
-    return serviceToItems
-  }
-
-  /**
    * Execute PVM accumulate invocations sequentially for all services
    * Gray Paper: process services sequentially, defxfers from earlier services
    * are available to later ones in the same iteration
@@ -648,7 +595,13 @@ export class AccumulationService extends BaseService {
     // Take a snapshot of the partial state BEFORE processing any services in this batch.
     // Each service will receive a deep clone of this snapshot to prevent modifications
     // from one service affecting another service in the same batch.
-    const batchPartialStateSnapshot = this.createPartialStateSnapshot()
+    const batchPartialStateSnapshot = createPartialStateSnapshot(
+      this.validatorSetManager,
+      this.configService,
+      this.serviceAccountsService,
+      this.authQueueService,
+      this.privilegesService,
+    )
 
     // Gray Paper accumulation.tex equation 199-200:
     // s = {d.serviceindex for r in r, d in r.digests} ∪ keys(f) ∪ {t.dest for t in t}
@@ -737,46 +690,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Calculate gas limit for a single service accumulation
-   * Gray Paper equation 315-317:
-   * g = subifnone(f[s], 0) + sum_{t in t, t.dest = s}(t.gas) + sum_{r in r, d in r.digests, d.serviceindex = s}(d.gaslimit)
-   *
-   * @param serviceId - Service ID
-   * @param serviceItems - Work reports for this service
-   * @param pendingDefxfers - Deferred transfers
-   * @returns Gas limit for this service accumulation
-   */
-  private calculateServiceGasLimit(
-    serviceId: bigint,
-    serviceItems: ReadyItem[],
-    pendingDefxfers: DeferredTransfer[],
-  ): bigint {
-    // Get free gas from alwaysaccers (if privileged)
-    const alwaysaccers = this.privilegesService.getAlwaysAccers()
-    const freeGas = alwaysaccers.get(serviceId) ?? 0n
-
-    // Sum gas from deferred transfers to this service
-    const defxferGas = pendingDefxfers
-      .filter((d) => d.dest === serviceId)
-      .reduce((sum, d) => sum + d.gasLimit, 0n)
-
-    // Sum gas limits from work digests for this service
-    const workDigestGas = serviceItems.reduce((sum, item) => {
-      return (
-        sum +
-        item.workReport.results
-          .filter((result) => result.service_id === serviceId)
-          .reduce((s, r) => s + BigInt(r.accumulate_gas), 0n)
-      )
-    }, 0n)
-
-    // Gray Paper: g = freeGas + defxferGas + workDigestGas
-    const totalGasLimit = freeGas + defxferGas + workDigestGas
-
-    return totalGasLimit
-  }
-
-  /**
    * Execute accumulation for a single service
    */
   private async executeSingleServiceAccumulation(
@@ -819,7 +732,7 @@ export class AccumulationService extends BaseService {
     // Gray Paper accpar: Each service gets a DEEP CLONE of the batch snapshot.
     // This ensures modifications from one service don't affect other services in the same batch.
     // Only defxfers are shared between services in the same batch.
-    const partialState = this.clonePartialState(batchPartialStateSnapshot)
+    const partialState = clonePartialState(batchPartialStateSnapshot)
 
     // Track which services were in partial state before this invocation
     const partialStateServiceIds = new Set<bigint>()
@@ -833,10 +746,11 @@ export class AccumulationService extends BaseService {
 
     // Calculate gas limit for this service (Gray Paper equation 315-317)
     // Use batchStartDefxfers - gas calculation uses ONLY defxfers from the start of the batch
-    const gasLimit = this.calculateServiceGasLimit(
+    const gasLimit = calculateServiceGasLimit(
       serviceId,
       serviceItems,
       batchStartDefxfers,
+      this.privilegesService,
     )
 
     // Execute accumulate invocation
@@ -909,134 +823,6 @@ export class AccumulationService extends BaseService {
     }
 
     return { result, serviceWorkReports }
-  }
-
-  /**
-   * Create partial state for PVM invocation
-   */
-  /**
-   * Create partial state for PVM invocation
-   *
-   * Gray Paper accumulation.tex equation 134 (eq:partialstate):
-   * partialstate ≡ tuple{
-   *   ps_accounts: dictionary{serviceid}{serviceaccount},
-   *   ps_stagingset: sequence[Cvalcount]{valkey},  // MUST have exactly Cvalcount validators
-   *   ps_authqueue: sequence[Ccorecount]{sequence[Cauthqueuesize]{hash}},
-   *   ps_manager: serviceid,
-   *   ps_assigners: sequence[Ccorecount]{serviceid},
-   *   ps_delegator: serviceid,
-   *   ps_registrar: serviceid,
-   *   ps_alwaysaccers: dictionary{serviceid}{gas}
-   * }
-   *
-   * The staging set MUST be a fixed-length sequence of exactly Cvalcount validators.
-   * If not initialized, we pad with null validators (all zeros) to meet the requirement.
-   */
-  private createPartialState(): PartialState {
-    // Get staging validators - MUST have exactly Cvalcount elements
-    let stagingset: Uint8Array[] = []
-
-    const stagingValidatorsMap = this.validatorSetManager.getStagingValidators()
-    const stagingValidatorsArray = Array.from(stagingValidatorsMap.values())
-
-    // Convert to Uint8Array format
-    stagingset = stagingValidatorsArray.map(encodeValidatorPublicKeys)
-
-    // Gray Paper requires exactly Cvalcount validators in the staging set
-    // If we have fewer (or zero), pad with null validators
-    const requiredCount = this.configService.numValidators
-    if (stagingset.length < requiredCount) {
-      // Create null validators using ValidatorSetManager's method
-      // Gray Paper: null keys replace blacklisted validators (equation 122-123)
-      const nullValidators = this.validatorSetManager.createNullValidatorSet(
-        requiredCount - stagingset.length,
-      )
-
-      // Encode null validators to Uint8Array format and append
-      const nullValidatorsEncoded = nullValidators.map(
-        encodeValidatorPublicKeys,
-      )
-      stagingset = [...stagingset, ...nullValidatorsEncoded]
-    } else if (stagingset.length > requiredCount) {
-      // Truncate if somehow we have more than required (shouldn't happen, but be safe)
-      logger.warn(
-        '[AccumulationService] Staging set has more than Cvalcount validators, truncating',
-        {
-          currentCount: stagingset.length,
-          requiredCount,
-        },
-      )
-      stagingset = stagingset.slice(0, requiredCount)
-    }
-
-    const accounts = this.serviceAccountsService.getServiceAccounts().accounts
-
-    return {
-      accounts,
-      stagingset,
-      authqueue: this.authQueueService
-        ? this.authQueueService
-            .getAuthQueue()
-            .map((queue) => queue.map((item) => hexToBytes(item)))
-        : new Array(this.configService.numCores).fill([]),
-      manager: this.privilegesService.getManager(),
-      assigners: this.privilegesService.getAssigners(),
-      delegator: this.privilegesService.getDelegator(),
-      registrar: this.privilegesService.getRegistrar(),
-      alwaysaccers: this.privilegesService.getAlwaysAccers(),
-    }
-  }
-
-  /**
-   * Create a SNAPSHOT of the partial state with deep-cloned accounts.
-   * Gray Paper accpar: All services in the same batch see the state from the START of the batch.
-   * This method clones all storage/preimages/requests maps to prevent modifications
-   * from one service affecting another service in the same batch.
-   */
-  private createPartialStateSnapshot(): PartialState {
-    return this.clonePartialState(this.createPartialState())
-  }
-
-  /**
-   * Deep clone a partial state to prevent modifications from affecting the original.
-   * Used to give each invocation in a batch its own copy of the state.
-   */
-  private clonePartialState(originalState: PartialState): PartialState {
-    // Deep clone accounts to prevent modifications from affecting other services
-    const clonedAccounts = new Map<bigint, ServiceAccount>()
-    for (const [serviceId, account] of originalState.accounts) {
-      const clonedAccount: ServiceAccount = {
-        ...account,
-        rawCshKeyvals: JSON.parse(JSON.stringify(account.rawCshKeyvals)),
-      }
-      clonedAccounts.set(serviceId, clonedAccount)
-    }
-
-    // Deep clone authqueue (2D array) - assign host function modifies this
-    const clonedAuthqueue: Uint8Array[][] = originalState.authqueue.map(
-      (coreQueue) => coreQueue.map((entry) => new Uint8Array(entry)),
-    )
-
-    // Deep clone assigners array - assign host function modifies this
-    const clonedAssigners = [...originalState.assigners]
-
-    // Clone alwaysaccers map - bless host function modifies this
-    const clonedAlwaysaccers = new Map(originalState.alwaysaccers)
-
-    // Deep clone stagingset array (though it's not modified by host functions)
-    const clonedStagingset = originalState.stagingset.map(
-      (entry) => new Uint8Array(entry),
-    )
-
-    return {
-      ...originalState,
-      accounts: clonedAccounts,
-      authqueue: clonedAuthqueue, // Deep cloned - assign modifies this
-      assigners: clonedAssigners, // Deep cloned - assign modifies this
-      alwaysaccers: clonedAlwaysaccers, // Deep cloned - bless modifies this
-      stagingset: clonedStagingset, // Deep cloned for consistency
-      // manager, delegator, registrar are primitives (bigint), so they're copied by value
-    }
   }
 
   /**

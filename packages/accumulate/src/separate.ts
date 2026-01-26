@@ -76,7 +76,7 @@ export function separateReportsIntoImmediateAndQueued(
         immediateItems.push({
           workReport: report,
           dependencies: new Set<Hex>(),
-        } as ReadyItem)
+        })
       } else {
         // Queue items that still have unsatisfied dependencies
         queuedItems.push({
