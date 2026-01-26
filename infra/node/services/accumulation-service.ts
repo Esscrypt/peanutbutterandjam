@@ -19,8 +19,10 @@
 
 import {
   calculateServiceGasLimit,
+  calculateTotalGasUsed,
   clonePartialState,
   collectAllReadyItems,
+  collectDefxfersFromResults,
   createPartialStateSnapshot,
   filterReadyItemDependencies,
   findItemsWithinGasLimit,
@@ -178,9 +180,6 @@ export class AccumulationService extends BaseService {
    * Get current ready state
    */
   getReady(): Ready {
-    if (!this.readyService) {
-      throw new Error('Ready service not initialized')
-    }
     return this.readyService.getReady()
   }
 
@@ -188,9 +187,6 @@ export class AccumulationService extends BaseService {
    * Set ready state
    */
   setReady(ready: Ready): void {
-    if (!this.readyService) {
-      throw new Error('Ready service not initialized')
-    }
     this.readyService.setReady(ready)
   }
 
@@ -236,9 +232,6 @@ export class AccumulationService extends BaseService {
   }
 
   getReadyItem(workReportHash: Hex): ReadyItem | undefined {
-    if (!this.readyService) {
-      throw new Error('Ready service not initialized')
-    }
     return this.readyService.getReadyItem(workReportHash)
   }
 
@@ -246,9 +239,6 @@ export class AccumulationService extends BaseService {
    * Remove a specific dependency from a ready item
    */
   removeDependency(workReportHash: Hex, dependencyHash: Hex): void {
-    if (!this.readyService) {
-      throw new Error('Ready service not initialized')
-    }
     this.readyService.removeDependency(workReportHash, dependencyHash)
   }
 
@@ -256,9 +246,6 @@ export class AccumulationService extends BaseService {
    * Add a dependency to a ready item
    */
   addDependency(workReportHash: Hex, dependencyHash: Hex): void {
-    if (!this.readyService) {
-      throw new Error('Ready service not initialized')
-    }
     this.readyService.addDependency(workReportHash, dependencyHash)
   }
 
@@ -421,21 +408,11 @@ export class AccumulationService extends BaseService {
       )
 
       // Step 7: Track actual gas used from results (Gray Paper: accseq tracks actual gas consumed)
-      const iterationGasUsed = results.reduce((sum, result) => {
-        if (result.ok) {
-          return sum + result.value.gasused
-        }
-        return sum
-      }, 0n)
+      const iterationGasUsed = calculateTotalGasUsed(results)
       totalGasUsed += iterationGasUsed
 
       // Collect defxfers from this iteration for next iteration
-      const collectedDefxfers = this.collectDefxfersFromResults(
-        results,
-        pendingDefxfers,
-      )
-
-      pendingDefxfers = collectedDefxfers
+      pendingDefxfers = collectDefxfersFromResults(results)
 
       // Step 6: Update global state with results
       this.updateGlobalState(
@@ -714,7 +691,7 @@ export class AccumulationService extends BaseService {
     }
 
     if (result.ok) {
-      this.trackAccumulationOutput(serviceId, result.value, currentSlot)
+      this.trackAccumulationOutput(serviceId, result.value)
 
       // Gray Paper accumulation.tex equation 390-393:
       // accumulationstatistics ≡ { kv{s}{tup{G(s), N(s)}} | G(s) + N(s) ≠ 0 }
@@ -737,12 +714,7 @@ export class AccumulationService extends BaseService {
       // (e.g., transfer destinations without code that just receive balance)
       const gasUsed = result.value.gasused
       if (workItemCount > 0 || gasUsed > 0n) {
-        this.trackAccumulationStatistics(
-          serviceId,
-          result.value,
-          currentSlot,
-          workItemCount,
-        )
+        this.trackAccumulationStatistics(serviceId, result.value, workItemCount)
       }
 
       // NOTE: Privileges are NOT applied immediately after each invocation.
@@ -762,7 +734,6 @@ export class AccumulationService extends BaseService {
   private trackAccumulationOutput(
     serviceId: bigint,
     output: AccumulateOutput,
-    _currentSlot: bigint,
   ): void {
     const { yield: yieldHash } = output
 
@@ -784,7 +755,6 @@ export class AccumulationService extends BaseService {
   private trackAccumulationStatistics(
     serviceId: bigint,
     output: AccumulateOutput,
-    _currentSlot: bigint,
     workItemCount: number,
   ): void {
     const { gasused } = output
@@ -830,38 +800,9 @@ export class AccumulationService extends BaseService {
     ]
     this.onTransfersStatistics.set(serviceId, newStats)
 
-    // DEBUG: Log onTransfers statistics tracking
-    logger.debug('[AccumulationService] trackOnTransfersStatistics', {
-      serviceId: serviceId.toString(),
-      transferCount,
-      gasUsed: gasUsed.toString(),
-      prevStats: currentStats,
-      newStats,
-    })
-
     // Update serviceStats.onTransfersCount and onTransfersGasUsed in activity state
     // Only for versions < 0.7.1 (checked inside updateServiceOnTransfersStats)
-    if (this.statisticsService) {
-      this.statisticsService.updateServiceOnTransfersStats(serviceId, newStats)
-    }
-  }
-
-  /**
-   * Collect defxfers from accumulation results
-   * Gray Paper equation 206: t' = concat(accone(s).defxfers for s in s)
-   * Only includes NEW defxfers generated in this iteration, NOT existing ones (which were consumed)
-   */
-  private collectDefxfersFromResults(
-    results: AccumulateInvocationResult[],
-    _existingDefxfers: DeferredTransfer[], // Existing defxfers are consumed, not carried forward
-  ): DeferredTransfer[] {
-    const defxfers: DeferredTransfer[] = []
-    for (const result of results) {
-      if (result.ok) {
-        defxfers.push(...result.value.defxfers)
-      }
-    }
-    return defxfers
+    this.statisticsService.updateServiceOnTransfersStats(serviceId, newStats)
   }
 
   /**
