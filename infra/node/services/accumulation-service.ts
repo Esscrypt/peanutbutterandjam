@@ -20,11 +20,13 @@
 import {
   calculateServiceGasLimit,
   clonePartialState,
+  collectAllReadyItems,
   createPartialStateSnapshot,
   filterReadyItemDependencies,
   findItemsWithinGasLimit,
   groupItemsByServiceId,
   shiftStateForBlockTransition,
+  validateWorkReportGasConstraints,
 } from '@pbnjam/accumulate'
 import {
   calculateWorkReportHash,
@@ -45,7 +47,6 @@ import {
   type Ready,
   type ReadyItem,
   type ValidatorPublicKeys,
-  WORK_REPORT_CONSTANTS,
   type WorkExecResultValue,
   type WorkExecutionResult,
   type WorkReport,
@@ -322,7 +323,11 @@ export class AccumulationService extends BaseService {
       iterationCount++
 
       // Step 1: Collect all ready items from ALL slots (in rotated order: [m:] then [:m])
-      const allReadyItems = this.collectAllReadyItems(epochLength, currentSlot)
+      const allReadyItems = collectAllReadyItems(
+        epochLength,
+        currentSlot,
+        this.readyService,
+      )
 
       // Step 2: Use Q function to get all currently accumulatable items from ready queue
       const readyQueueAccumulatable = this.getAccumulatableItemsQ(
@@ -356,7 +361,10 @@ export class AccumulationService extends BaseService {
       }
 
       // Step 3: Validate work-report gas constraints
-      this.validateWorkReportGasConstraints(accumulatableItems)
+      validateWorkReportGasConstraints(
+        accumulatableItems,
+        this.serviceAccountsService,
+      )
 
       // Step 4: Find maximum prefix that fits within gas limit (Gray Paper equation 163, 167)
       // Gray Paper equation 167: g* = g + sum_{t in t}(t.gas)
@@ -451,84 +459,6 @@ export class AccumulationService extends BaseService {
       this.accumulated.packages = new Array(this.configService.epochDuration)
         .fill(null)
         .map(() => new Set<Hex>())
-    }
-  }
-
-  /**
-   * Collect all ready items from all epoch slots
-   *
-   * Gray Paper equation 89: q = E(concatall{ready[m:]} concat concatall{ready[:m]} ...)
-   * This processes items from ALL slots, but only those with satisfied dependencies (via Q function).
-   *
-   * However, according to equation 419-423, items expire when their slot is cleared after time advancement.
-   * Items should only be processed when their slot comes around again (after a full epoch rotation).
-   *
-   * According to jamduna reference implementation, accumulation only happens when items have been in the queue
-   * for a full epoch (when their slot comes around again). So we should only process items from the current slot.
-   *
-   * FIX: Only process items from the current epoch slot to match jamduna behavior.
-   */
-  private collectAllReadyItems(
-    epochLength: number,
-    currentSlot: bigint,
-  ): ReadyItem[] {
-    const allReadyItems: ReadyItem[] = []
-    const m = Number(currentSlot) % epochLength
-
-    // Gray Paper equation 89: q = E(concat{ready[m:]} concat concat{ready[:m]} concat justbecameavailable^Q, ...)
-    // We must collect items from ALL slots in rotated order: [m:] then [:m]
-    // This ensures items that have been waiting get processed in the correct order
-    // Use a single loop with modulo arithmetic to iterate through slots in rotated order
-    for (let i = 0; i < epochLength; i++) {
-      const slotIdx = (m + i) % epochLength
-      const slotItems = this.readyService.getReadyItemsForSlot(BigInt(slotIdx))
-      allReadyItems.push(...slotItems)
-    }
-
-    return allReadyItems
-  }
-
-  /**
-   * Validate work-report gas constraints
-   * Gray Paper reporting_assurance.tex lines 303-306:
-   * ∀ wrX ∈ incomingreports:
-   *   sum(work-digest gaslimit) ≤ Creportaccgas
-   *   ∧ each work-digest gaslimit ≥ service minaccgas
-   */
-  private validateWorkReportGasConstraints(items: ReadyItem[]): void {
-    for (const item of items) {
-      const workReport = item.workReport
-      let totalGasLimit = 0n
-
-      for (const result of workReport.results) {
-        const gasLimit = BigInt(result.accumulate_gas)
-        totalGasLimit += gasLimit
-
-        // Verify each work-digest gaslimit ≥ service minaccgas
-        const serviceId = result.service_id
-        const [serviceAccountError, serviceAccount] =
-          this.serviceAccountsService.getServiceAccount(serviceId)
-
-        // Skip validation for ejected services (service account not found)
-        // Gray Paper: Work reports for ejected services are processed but don't affect state
-        if (serviceAccountError || !serviceAccount) {
-          continue
-        }
-
-        const minAccGas = BigInt(serviceAccount.minaccgas)
-        if (gasLimit < minAccGas) {
-          throw new Error(
-            `Work-report gas limit ${gasLimit} for service ${serviceId} is less than minimum ${minAccGas}`,
-          )
-        }
-      }
-
-      // Verify sum ≤ Creportaccgas
-      if (totalGasLimit > WORK_REPORT_CONSTANTS.C_REPORTACCGAS) {
-        throw new Error(
-          `Work-report total gas limit ${totalGasLimit} exceeds Creportaccgas ${WORK_REPORT_CONSTANTS.C_REPORTACCGAS}`,
-        )
-      }
     }
   }
 

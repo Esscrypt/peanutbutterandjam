@@ -21,6 +21,7 @@ import type {
   GuaranteeSignature,
   Judgment,
   Preimage,
+  PreimageRequestStatus,
   SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
@@ -86,6 +87,12 @@ export interface IServiceAccountService extends BaseService {
   clearAllServiceAccounts(): void
 
   getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined
+
+  getServiceAccountRequest(
+    serviceId: bigint,
+    hash: Hex,
+    blobLength: bigint,
+  ): PreimageRequestStatus | undefined
   histLookupServiceAccount(
     serviceId: bigint,
     serviceAccount: ServiceAccount,
