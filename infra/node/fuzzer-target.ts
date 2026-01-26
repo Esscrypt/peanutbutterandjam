@@ -327,7 +327,6 @@ export async function initializeServices() {
 
     accumulationService = new AccumulationService({
       configService: configService,
-      clockService: clockService,
       serviceAccountsService: serviceAccountsService,
       privilegesService: privilegesService,
       validatorSetManager: validatorSetManager,

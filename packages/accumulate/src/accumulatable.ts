@@ -19,18 +19,26 @@ export function applyQueueEditingFunctionE(
   items: ReadyItem[],
   accumulatedPackages: Set<Hex>,
 ): ReadyItem[] {
-  return items
-    .filter(
-      (item) => !accumulatedPackages.has(item.workReport.package_spec.hash),
-    )
-    .map((item) => ({
+  const edited: ReadyItem[] = []
+  for (const item of items) {
+    const packageHash = item.workReport.package_spec.hash
+    // Remove if package was already accumulated
+    if (accumulatedPackages.has(packageHash)) {
+      continue
+    }
+    // Remove satisfied dependencies
+    const remainingDeps = new Set<Hex>()
+    for (const dep of item.dependencies) {
+      if (!accumulatedPackages.has(dep)) {
+        remainingDeps.add(dep)
+      }
+    }
+    edited.push({
       workReport: item.workReport,
-      dependencies: new Set(
-        Array.from(item.dependencies).filter(
-          (dep) => !accumulatedPackages.has(dep),
-        ),
-      ),
-    }))
+      dependencies: remainingDeps,
+    })
+  }
+  return edited
 }
 
 /**

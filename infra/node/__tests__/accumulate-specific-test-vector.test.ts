@@ -173,7 +173,6 @@ describe('Accumulate Test Vector Execution', () => {
             })
             const accumulationService = new AccumulationService({
               configService: configService,
-              clockService: clockService,
               serviceAccountsService: serviceAccountService,
               privilegesService: privilegesService,
               validatorSetManager: validatorSetManager,

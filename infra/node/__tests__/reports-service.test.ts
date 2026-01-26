@@ -277,7 +277,6 @@ describe('Reports - JAM Test Vectors', () => {
 
           const accumulatedService = new AccumulationService({
             configService: configService,
-            clockService: clockService,
             serviceAccountsService: serviceAccountService,
             privilegesService: new PrivilegesService({
               configService: configService,

@@ -208,6 +208,16 @@ export interface IStatisticsService extends BaseService {
    * Get the current activity (statistics) data
    */
   getActivity(): Activity
+
+  updateServiceAccumulationStats(
+    serviceId: bigint,
+    accumulationStats: [number, number],
+  ): void
+
+  updateServiceOnTransfersStats(
+    serviceId: bigint,
+    onTransfersStats: [number, number],
+  ): void
 }
 
 /**

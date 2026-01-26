@@ -210,7 +210,6 @@ describe('Fuzzer Initialize Test', () => {
 
     const accumulatedService = new AccumulationService({
       configService: configService,
-      clockService: clockService,
       serviceAccountsService: serviceAccountsService,
       privilegesService: privilegesService,
       validatorSetManager: validatorSetManager,

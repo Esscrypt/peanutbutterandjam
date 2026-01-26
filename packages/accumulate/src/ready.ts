@@ -226,3 +226,38 @@ export function findItemsWithinGasLimit(
 
   return { prefixItems, prefixGasLimit: cumulativeGasLimit }
 }
+
+/**
+ * Finalize slot m after accumulation processing
+ * Gray Paper equation 420: ready'[m] = E(justbecameavailable^Q, accumulated'[E-1]) when i = 0
+ * Slot m should ONLY contain items that came from justbecameavailable^Q (new queued items)
+ */
+export function finalizeSlot(
+  slot: bigint,
+  readyService: IReadyService,
+  configService: IConfigService,
+  newQueuedItemsForSlotM: Set<Hex>,
+): void {
+  const epochDuration = configService.epochDuration
+  const m = Number(slot) % epochDuration
+
+  const slotItems = readyService.getReadyItemsForSlot(BigInt(m))
+  const itemsToKeep: ReadyItem[] = []
+
+  for (const item of slotItems) {
+    const packageHash = item.workReport.package_spec.hash
+    // Only keep items that came from justbecameavailable^Q (new queued items)
+    if (newQueuedItemsForSlotM.has(packageHash)) {
+      itemsToKeep.push(item)
+    }
+  }
+
+  // Replace slot m with only the items from justbecameavailable^Q
+  readyService.clearSlot(BigInt(m))
+  for (const item of itemsToKeep) {
+    readyService.addReadyItemToSlot(BigInt(m), item)
+  }
+
+  // Clear the tracking set
+  newQueuedItemsForSlotM.clear()
+}

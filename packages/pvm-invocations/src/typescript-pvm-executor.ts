@@ -94,7 +94,7 @@ export class TypeScriptPVMExecutor extends PVM {
     timeslot: bigint,
     inputs: AccumulateInput[],
     _serviceId: bigint,
-    invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    invocationIndex: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'

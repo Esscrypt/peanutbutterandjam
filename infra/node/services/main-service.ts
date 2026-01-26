@@ -377,7 +377,6 @@ export class MainService extends BaseService {
     })
     this.accumulationService = new AccumulationService({
       configService: this.configService,
-      clockService: this.clockService,
       serviceAccountsService: this.serviceAccountService,
       privilegesService: this.privilegesService,
       validatorSetManager: this.validatorSetManagerService,

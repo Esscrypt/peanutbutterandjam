@@ -67,3 +67,28 @@ export function calculateServiceGasLimit(
   // Gray Paper: g = freeGas + defxferGas + workDigestGas
   return freeGas + defxferGas + workDigestGas
 }
+
+/**
+ * Calculate available gas for accumulation
+ * Gray Paper equation 167: g* = g + sum_{t in t}(t.gas)
+ * Available gas = totalGasLimit + defxferGas - totalGasUsed
+ *
+ * @param totalGasLimit - Total gas limit for the block
+ * @param pendingDefxfers - Deferred transfers
+ * @param totalGasUsed - Total gas already used
+ * @returns Available gas and defxfer gas
+ */
+export function calculateAvailableGas(
+  totalGasLimit: bigint,
+  pendingDefxfers: DeferredTransfer[],
+  totalGasUsed: bigint,
+): { availableGas: bigint; defxferGas: bigint } {
+  // Calculate total gas from deferred transfers
+  const defxferGas = pendingDefxfers.reduce((sum, d) => sum + d.gasLimit, 0n)
+
+  // Gray Paper equation 167: g* = g + sum_{t in t}(t.gas)
+  // Available gas = totalGasLimit + defxferGas - totalGasUsed
+  const availableGas = totalGasLimit + defxferGas - totalGasUsed
+
+  return { availableGas, defxferGas }
+}

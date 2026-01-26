@@ -123,7 +123,7 @@ export class AccumulatePVM {
     serviceId: bigint,
     gas: bigint,
     inputs: AccumulateInput[],
-    orderedIndex?: number, // Ordered index for trace file naming
+    orderedIndex: number, // Ordered index for trace file naming
   ): Promise<AccumulateInvocationResult> {
     // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
     const serviceAccount = partialState.accounts.get(serviceId)
@@ -341,17 +341,6 @@ export class AccumulatePVM {
       resultCode = RESULT_CODES.HALT
     }
 
-    // Collapse result based on termination type using updated context from Ψ_M
-    logger.debug('[AccumulatePVM] Collapsing accumulate result', {
-      serviceId: serviceId.toString(),
-      resultCode: marshallingResultValue.toString(),
-      gasConsumed: gasConsumed.toString(),
-      resultIsBlob: marshallingResultValue instanceof Uint8Array,
-      resultLength:
-        marshallingResultValue instanceof Uint8Array
-          ? marshallingResultValue.length
-          : 0,
-    })
     // In accumulate context, the context is always ImplicationsPair
     // Gray Paper equation 217: C takes (gas, blob ∪ {oog, panic}, implicationspair)
     const collapsedResult = this.collapseAccumulateResult(

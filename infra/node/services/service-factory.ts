@@ -435,7 +435,6 @@ export async function createCoreServices(
 
   const accumulationService = new AccumulationService({
     configService,
-    clockService,
     serviceAccountsService: serviceAccountService,
     privilegesService,
     validatorSetManager,

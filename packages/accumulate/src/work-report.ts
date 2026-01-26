@@ -1,5 +1,12 @@
-import type { IServiceAccountService, ReadyItem } from '@pbnjam/types'
+import { hexToBytes } from '@pbnjam/core'
+import type {
+  IServiceAccountService,
+  ReadyItem,
+  WorkExecResultValue,
+  WorkExecutionResult,
+} from '@pbnjam/types'
 import { WORK_REPORT_CONSTANTS } from '@pbnjam/types'
+import type { Hex } from 'viem'
 /**
  * Validate work-report gas constraints
  * Gray Paper reporting_assurance.tex lines 303-306:
@@ -45,4 +52,47 @@ export function validateWorkReportGasConstraints(
       )
     }
   }
+}
+
+/**
+ * Convert WorkExecResultValue to WorkExecutionResult
+ *
+ * WorkExecResultValue can be:
+ * - Hex string or { ok: Hex } → Uint8Array
+ * - { panic: null } → 'PANIC'
+ * - Error strings → WorkError
+ */
+export function convertWorkResultToExecutionResult(
+  value: WorkExecResultValue,
+): WorkExecutionResult {
+  if (typeof value === 'string') {
+    if (value.startsWith('0x')) {
+      // Hex string: convert to Uint8Array
+      return hexToBytes(value as Hex)
+    } else {
+      // Error string: map to WorkExecutionResult string literals
+      const errorMap: Record<string, WorkExecutionResult> = {
+        out_of_gas: 'OOG',
+        bad_exports: 'BADEXPORTS',
+        oversize: 'OVERSIZE',
+        bad_code: 'BAD',
+        code_oversize: 'BIG',
+      }
+      return errorMap[value] || 'BAD'
+    }
+  } else if (typeof value === 'object' && value !== null) {
+    if (
+      'ok' in value &&
+      typeof value.ok === 'string' &&
+      value.ok.startsWith('0x')
+    ) {
+      // { ok: Hex } → Uint8Array
+      return hexToBytes(value.ok)
+    } else if ('panic' in value) {
+      // { panic: null } → 'PANIC'
+      return 'PANIC'
+    }
+  }
+  // Fallback to BAD error
+  return 'BAD'
 }
