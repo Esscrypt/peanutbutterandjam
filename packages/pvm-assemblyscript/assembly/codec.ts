@@ -729,11 +729,49 @@ export function decodeServiceAccount(
  * @returns Encoded bytes
  */
 export function encodeFixedLength(value: u64, length: i32): Uint8Array {
+  // Validate length to prevent issues with negative or zero lengths
+  if (length <= 0) {
+    return new Uint8Array(0)
+  }
+  
   const result = new Uint8Array(length)
+  
+  // Wrap value to fit in the encoding space (Gray Paper uses modulo operations)
+  // This matches the mathematical definition: encode[l](x) uses x mod 256, x mod 2^8, etc.
+  let wrappedValue: u64 = value
+  
+  // Calculate modulus: 2^(8*length)
+  // For lengths >= 8, 2^(8*length) would overflow u64 (2^64 wraps to 0), causing division by zero
+  // So we handle standard lengths explicitly and use loop for others, but cap at 63 bits
+  if (length === 1) {
+    wrappedValue = value % 256
+  } else if (length === 2) {
+    wrappedValue = value % 65536
+  } else if (length === 4) {
+    wrappedValue = value % 4294967296
+  } else if (length === 8) {
+    // For 8 bytes, u64 naturally wraps at 2^64, so value is already wrapped
+    wrappedValue = value
+  } else {
+    // For other lengths, calculate modulus: 2^(8*length)
+    // Prevent overflow: if length * 8 >= 64, modulus would overflow u64 to 0
+    const bitsToShift = length * 8
+    if (bitsToShift >= 64) {
+      // For lengths >= 8, value is already wrapped by u64 type
+      wrappedValue = value
+    } else {
+      // Calculate 2^(8*length) safely - modulus starts at 1, so it can never be 0
+      let modulus: u64 = 1
+      for (let i = 0; i < bitsToShift; i++) {
+        modulus = modulus * 2
+      }
+      wrappedValue = value % modulus
+    }
+  }
   
   // Little-endian encoding
   for (let i = 0; i < length; i++) {
-    result[i] = u8((value >> (i * 8)) & 0xff)
+    result[i] = u8((wrappedValue >> (i * 8)) & 0xff)
   }
   
   return result

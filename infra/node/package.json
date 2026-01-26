@@ -33,6 +33,7 @@
     "@pbnjam/assurance": "workspace:*",
     "@pbnjam/block-importer": "workspace:*",
     "@pbnjam/disputes": "workspace:*",
+    "@pbnjam/accumulate": "workspace:*",
     "commander": "catalog:",
     "@pbnjam/types": "workspace:*",
     "@opentelemetry/api": "^1.7.0",

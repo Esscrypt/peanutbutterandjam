@@ -18,6 +18,12 @@
  */
 
 import {
+  filterReadyItemDependencies,
+  findItemsWithinGasLimit,
+  groupItemsByServiceId,
+  shiftStateForBlockTransition,
+} from '@pbnjam/accumulate'
+import {
   calculateWorkReportHash,
   decodeValidatorPublicKeys,
   encodeValidatorPublicKeys,
@@ -99,7 +105,6 @@ export class AccumulationService extends BaseService {
   // This set tracks services that were accumulated and need lastacc update at the end
   // We defer this update to avoid affecting partial state snapshots in subsequent iterations
   private accumulatedServicesForLastacc: Set<bigint> = new Set()
-  // private readonly entropyService: EntropyService | null
   constructor(options: {
     configService: ConfigService
     clockService: ClockService
@@ -110,7 +115,6 @@ export class AccumulationService extends BaseService {
     accumulatePVM: AccumulatePVM
     readyService: ReadyService
     statisticsService: StatisticsService
-    // entropyService: EntropyService | null
   }) {
     super('accumulation-service')
     this.accumulatePVM = options.accumulatePVM
@@ -127,7 +131,6 @@ export class AccumulationService extends BaseService {
     this.authQueueService = options.authQueueService
     this.readyService = options.readyService
     this.statisticsService = options.statisticsService
-    // this.entropyService = options.entropyService
   }
 
   /**
@@ -213,76 +216,6 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Check if ready queue is empty
-   */
-  isReadyQueueEmpty(): boolean {
-    if (!this.readyService) {
-      return true // If service not initialized, consider queue empty
-    }
-    const ready = this.readyService.getReady()
-    // Check if any slot has items
-    // ready.epochSlots is ReadyItem[][] - array of arrays
-    for (const slotItems of ready.epochSlots) {
-      if (slotItems && slotItems.length > 0) {
-        return false
-      }
-    }
-    return true
-  }
-
-  /**
-   * Shift accumulated packages history and ready queue for state transition
-   * Gray Paper equations 417-418: Shift is part of the state transition from τ to τ'
-   * This must be called for every block, even when accumulation is skipped
-   *
-   * @param slot - Current block timeslot
-   */
-  shiftStateForBlockTransition(slot: bigint): void {
-    const epochDuration = this.configService.epochDuration
-
-    // Determine slot delta: if lastProcessedSlot is set, calculate delta; otherwise assume delta=1
-    let slotDelta = 1
-    if (this.lastProcessedSlot !== null) {
-      slotDelta = Number(slot - this.lastProcessedSlot)
-    }
-
-    // Handle edge cases
-    if (slotDelta < 0) {
-      // Error condition: earlier slot processed after later one
-      logger.error(
-        '[AccumulationService] Invalid slot delta: earlier slot processed after later one',
-        {
-          slot: slot.toString(),
-          lastProcessedSlot: this.lastProcessedSlot?.toString() ?? 'null',
-          slotDelta,
-        },
-      )
-      // Don't shift on error - state should remain unchanged
-      return
-    } else if (slotDelta === 0) {
-      // Same slot processed twice - no time advancement, no shift needed
-      logger.debug(
-        '[AccumulationService] Same slot processed twice, skipping shift',
-        {
-          slot: slot.toString(),
-        },
-      )
-      return
-    } else if (slotDelta > 0) {
-      // Normal case: slot advanced, shift accumulated history and ready queue
-      // Shift accumulated packages history (equation 417-418)
-      // Gray Paper equation 418: accumulated'[i] = accumulated[i + 1] for i < Cepochlen - 1
-      // This is ALWAYS a shift by 1, regardless of slotDelta
-      // The accumulated history shifts once per block, not once per slot advanced
-      this.shiftAccumulatedPackagesHistory(1, epochDuration)
-
-      // Shift ready queue - clear old slots (equation 419-424)
-      const currentEpochSlot = Number(slot) % epochDuration
-      this.shiftReadyQueue(slotDelta, epochDuration, currentEpochSlot)
-    }
-  }
-
-  /**
    * Get last processed slot (the slot that the current accumulated/ready state represents)
    */
   getLastProcessedSlot(): bigint | null {
@@ -362,7 +295,11 @@ export class AccumulationService extends BaseService {
     // CRITICAL: Filter dependencies for all ready items against the accumulated set
     // When loading from pre_state, ready items may have stale dependencies that have since been accumulated
     // Gray Paper: E function removes dependencies that are in accumulatedcup
-    this.filterReadyItemDependencies()
+    filterReadyItemDependencies(
+      this.readyService,
+      this.accumulated,
+      this.configService,
+    )
 
     // Gray Paper equation 350-353: Calculate total gas limit
     const totalGasLimit = this.calculateTotalGasLimit()
@@ -456,7 +393,7 @@ export class AccumulationService extends BaseService {
       // Gray Paper equation 163: i = max prefix such that sum_{r in r[:i], d in r.digests}(d.gaslimit) ≤ g*
       // Note: Prefix calculation only considers work-digest gas limits, not defxfer gas
       // Defxfer gas is added to each service's gas limit when executing
-      const { prefixItems } = this.findMaxPrefixWithinGasLimit(
+      const { prefixItems } = findItemsWithinGasLimit(
         accumulatableItems,
         availableGas,
       )
@@ -479,7 +416,7 @@ export class AccumulationService extends BaseService {
       }
 
       // Step 5: Group prefix items by service ID
-      const serviceToItems = this.groupItemsByServiceId(prefixItems)
+      const serviceToItems = groupItemsByServiceId(prefixItems)
 
       // Step 6: Execute PVM accumulate invocations sequentially
       // Gray Paper: The invocation index corresponds to accseq iteration (0-based)
@@ -525,92 +462,6 @@ export class AccumulationService extends BaseService {
         partialStateAccountsPerInvocation,
         this.currentImmediateItems, // Pass immediate items to ensure their packages are added
         accumulatedServiceIds, // Pass service IDs for transfer-only invocations
-      )
-    }
-  }
-
-  /**
-   * Find maximum prefix of work reports that fits within gas limit
-   * Gray Paper equation 163: i = max prefix such that sum_{r in r[:i], d in r.digests}(d.gaslimit) ≤ g
-   *
-   * @param items - Ready items to process
-   * @param remainingGas - Remaining gas available
-   * @returns Prefix items and their total gas limit
-   */
-  private findMaxPrefixWithinGasLimit(
-    items: ReadyItem[],
-    remainingGas: bigint,
-  ): { prefixItems: ReadyItem[]; prefixGasLimit: bigint } {
-    const prefixItems: ReadyItem[] = []
-    let cumulativeGasLimit = 0n
-
-    for (const item of items) {
-      // Calculate gas limit for this work report: sum of all work-digest gas limits
-      const workReportGasLimit = item.workReport.results.reduce(
-        (sum, result) => sum + BigInt(result.accumulate_gas),
-        0n,
-      )
-
-      // Check if adding this item would exceed remaining gas
-      if (cumulativeGasLimit + workReportGasLimit > remainingGas) {
-        break
-      }
-
-      prefixItems.push(item)
-      cumulativeGasLimit += workReportGasLimit
-    }
-
-    return { prefixItems, prefixGasLimit: cumulativeGasLimit }
-  }
-
-  /**
-   * Filter dependencies for all ready items against the accumulated set
-   *
-   * This is critical when loading from pre_state - the ready items may have stale dependencies
-   * that have been accumulated in prior blocks but weren't filtered when serialized.
-   *
-   * Gray Paper: The E function removes dependencies that are in accumulatedcup
-   */
-  private filterReadyItemDependencies(): void {
-    // Build accumulatedcup from all accumulated packages
-    const accumulatedcup = new Set<Hex>()
-    for (const packageSet of this.accumulated.packages) {
-      if (packageSet) {
-        for (const hash of packageSet) {
-          accumulatedcup.add(hash)
-        }
-      }
-    }
-
-    if (accumulatedcup.size === 0) {
-      return // Nothing accumulated, no filtering needed
-    }
-
-    let totalFiltered = 0
-    const epochLength = this.configService.epochDuration
-
-    // Filter dependencies in all ready slots
-    for (let slotIdx = 0; slotIdx < epochLength; slotIdx++) {
-      const slotItems = this.readyService.getReadyItemsForSlot(BigInt(slotIdx))
-
-      for (const item of slotItems) {
-        // Remove dependencies that are already accumulated
-        for (const dep of Array.from(item.dependencies)) {
-          if (accumulatedcup.has(dep)) {
-            item.dependencies.delete(dep)
-            totalFiltered++
-          }
-        }
-      }
-    }
-
-    if (totalFiltered > 0) {
-      logger.debug(
-        '[AccumulationService] Filtered stale dependencies from ready queue',
-        {
-          totalFiltered,
-          accumulatedPackages: accumulatedcup.size,
-        },
       )
     }
   }
@@ -1705,7 +1556,13 @@ export class AccumulationService extends BaseService {
 
     // Step 2: Shift accumulated packages history and ready queue if slot advanced
     // Gray Paper equations 417-418: Shift is part of the state transition from τ to τ'
-    this.shiftStateForBlockTransition(slot)
+    shiftStateForBlockTransition(
+      slot,
+      this.readyService,
+      this.configService,
+      this.lastProcessedSlot,
+      this.accumulated,
+    )
 
     // Step 3: Build and edit queue
     // Gray Paper equation 89: q = E(ready[m:] concat ready[:m] concat justbecameavailable^Q, P(justbecameavailable^!))
@@ -1951,61 +1808,6 @@ export class AccumulationService extends BaseService {
 
     // Clear the tracking set
     this.newQueuedItemsForSlotM.clear()
-  }
-
-  /**
-   * Shift accumulated packages history by slotDelta (non-wrapping left shift)
-   * Gray Paper equations 417-418: accumulated'[i] = accumulated[i + slotDelta]
-   * This is a LINEAR shift, not cyclic - old data falls off the left, empty slots appear on the right
-   */
-  private shiftAccumulatedPackagesHistory(
-    slotDelta: number,
-    epochDuration: number,
-  ): void {
-    const newAccumulatedPackages: Set<Hex>[] = new Array(epochDuration)
-      .fill(null)
-      .map(() => new Set<Hex>())
-
-    // Non-wrapping left shift: accumulated'[i] = accumulated[i + slotDelta]
-    for (let i = 0; i < epochDuration; i++) {
-      const oldIndex = i + slotDelta
-      if (oldIndex < epochDuration) {
-        // Copy from old position
-        newAccumulatedPackages[i] = this.accumulated.packages[oldIndex]
-      }
-      // else: newAccumulatedPackages[i] remains empty (data fell off)
-    }
-
-    this.accumulated.packages = newAccumulatedPackages
-  }
-
-  /**
-   * Shift ready queue according to Gray Paper equations 419-424
-   * Simpler approach: clear slots that should be empty due to time advancement
-   */
-  private shiftReadyQueue(
-    slotDelta: number,
-    epochDuration: number,
-    currentEpochSlot: number,
-  ): void {
-    // Gray Paper equation 419-423: ready'[m - i] = [] when 1 ≤ i < thetime' - thetime
-    // This clears slots that are "slotDelta - 1" slots behind the current slot m
-    // The condition is on i (not the slot index), then we compute the slot using cyclic indexing
-    // For example, if m=49 and slotDelta=6, we clear slots for i=1,2,3,4,5
-    // Which gives us: slots (49-1)%600=48, (49-2)%600=47, (49-3)%600=46, (49-4)%600=45, (49-5)%600=44
-
-    const currentReady = this.readyService.getReady()
-    const newReadySlots = [...currentReady.epochSlots]
-
-    // Gray Paper equation 421: ready'[m - i] = [] when 1 ≤ i < thetime' - thetime
-    // Clear slots that should be empty according to this equation
-    for (let i = 1; i < Math.min(slotDelta, epochDuration); i++) {
-      // Compute slot index using cyclic indexing: (m - i) mod epochDuration
-      const slotToClear = (currentEpochSlot - i + epochDuration) % epochDuration
-      newReadySlots[slotToClear] = []
-    }
-
-    this.readyService.setReady({ epochSlots: newReadySlots })
   }
 
   /**

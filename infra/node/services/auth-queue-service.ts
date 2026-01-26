@@ -21,6 +21,7 @@ import {
   AUTHORIZATION_CONSTANTS,
   type AuthQueue,
   BaseService,
+  type IAuthQueueService,
   type Safe,
   safeError,
   safeResult,
@@ -30,7 +31,7 @@ import type { ConfigService } from './config-service'
 /**
  * AuthQueue Service Implementation
  */
-export class AuthQueueService extends BaseService {
+export class AuthQueueService extends BaseService implements IAuthQueueService {
   private authQueue: AuthQueue
   private readonly configService: ConfigService
 

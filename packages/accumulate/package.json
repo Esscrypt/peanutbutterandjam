@@ -1,0 +1,32 @@
+{
+  "name": "@pbnjam/accumulate",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:coverage": "bun test --coverage",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@pbnjam/types": "workspace:*",
+    "@pbnjam/core": "workspace:*",
+    "@pbnjam/codec": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2",
+    "biome": "0.3.3",
+    "@pbnjam/typescript-config": "workspace:*",
+    "@types/bun": "catalog:"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "private": true
+}
