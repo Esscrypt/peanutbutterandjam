@@ -2,7 +2,7 @@ import { cpus } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Worker } from 'node:worker_threads'
-import { blake2bHash, logger } from '@pbnjam/core'
+import { logger } from '@pbnjam/core'
 import type {
   AccumulateInput,
   AccumulateInvocationResult,
@@ -38,21 +38,14 @@ export class PVMWorkerPool {
     task: WorkerTask
     resolve: (result: AccumulateInvocationResult) => void
     reject: (error: Error) => void
+    taskBuildMs?: number
   }> = []
   private readonly maxWorkers: number
   private readonly workerData: WorkerData
   private isShuttingDown = false
   private isInitialized = false
 
-  // Performance metrics
   private taskStartTimes = new Map<string, number>()
-  private totalTasksCompleted = 0
-  private totalTasksFailed = 0
-  private totalExecutionTimeMs = 0
-  private lastMetricsLogTime = Date.now()
-  private tasksCompletedSinceLastLog = 0
-  private tasksFailedSinceLastLog = 0
-  private readonly metricsLogIntervalMs = 10000 // Log aggregate metrics every 10 seconds
 
   /**
    * Create and initialize a new worker pool
@@ -70,7 +63,7 @@ export class PVMWorkerPool {
   private constructor(workerData: WorkerData, maxWorkers = 4) {
     this.maxWorkers = Math.max(1, Math.min(maxWorkers, cpus().length))
     this.workerData = workerData
-    logger.info('[PVMWorkerPool] Initializing worker pool', {
+    logger.debug('[PVMWorkerPool] Initializing worker pool', {
       maxWorkers: this.maxWorkers,
     })
   }
@@ -80,7 +73,7 @@ export class PVMWorkerPool {
    */
   private async initializeWorkers(): Promise<void> {
     const initStart = Date.now()
-    logger.info('[PVMWorkerPool] Starting worker initialization', {
+    logger.debug('[PVMWorkerPool] Starting worker initialization', {
       maxWorkers: this.maxWorkers,
     })
     const workerPromises: Promise<Worker>[] = []
@@ -89,7 +82,7 @@ export class PVMWorkerPool {
     }
     await Promise.all(workerPromises)
     const initTime = Date.now() - initStart
-    logger.info('[PVMWorkerPool] All workers initialized', {
+    logger.debug('[PVMWorkerPool] All workers initialized', {
       workerCount: this.workers.length,
       initializationTimeMs: initTime,
     })
@@ -125,6 +118,7 @@ export class PVMWorkerPool {
     }
 
     return new Promise((resolve, reject) => {
+      const taskBuildStart = Date.now()
       const task: WorkerTask = {
         partialState: serializePartialState(partialState),
         currentSlot: currentSlot.toString(),
@@ -136,12 +130,13 @@ export class PVMWorkerPool {
           ? { data: Array.from(options.entropyAccumulator) }
           : undefined,
       }
+      const taskBuildMs = Date.now() - taskBuildStart
 
       // If we have available workers, execute immediately
       if (this.availableWorkers.length > 0) {
         const worker = this.availableWorkers.pop()
         if (worker) {
-          this.executeTask(worker, task, resolve, reject)
+          this.executeTask(worker, task, resolve, reject, taskBuildMs)
         }
       } else {
         // All workers are busy, queue the task
@@ -151,7 +146,7 @@ export class PVMWorkerPool {
           queueDepth: this.taskQueue.length + 1,
           activeWorkers: this.workers.length - this.availableWorkers.length,
         })
-        this.taskQueue.push({ task, resolve, reject })
+        this.taskQueue.push({ task, resolve, reject, taskBuildMs })
       }
     })
   }
@@ -226,7 +221,7 @@ export class PVMWorkerPool {
 
     worker.on('exit', (code) => {
       if (code !== 0) {
-        logger.warn('[PVMWorkerPool] Worker exited with code', { code })
+        logger.debug('[PVMWorkerPool] Worker exited with code', { code })
       }
       this.removeWorker(worker)
     })
@@ -240,6 +235,7 @@ export class PVMWorkerPool {
     task: WorkerTask,
     resolve: (result: AccumulateInvocationResult) => void,
     reject: (error: Error) => void,
+    taskBuildMs = 0,
   ): void {
     const messageId = `${Date.now()}-${Math.random()}`
     const startTime = Date.now()
@@ -258,13 +254,22 @@ export class PVMWorkerPool {
     const messageHandler = (message: WorkerMessage) => {
       if (message.type === 'result' && message.messageId === messageId) {
         worker.removeListener('message', messageHandler)
+        const wallTimeBeforeDeserialize = Date.now() - startTime
+        let resultDeserializeMs = 0
+        let deserialized: AccumulateInvocationResult | null = null
+        if (message.result) {
+          const resultDeserializeStart = Date.now()
+          deserialized = deserializeResult(message.result)
+          resultDeserializeMs = Date.now() - resultDeserializeStart
+        }
         const executionTime = Date.now() - startTime
         this.taskStartTimes.delete(messageId)
-        this.totalExecutionTimeMs += executionTime
 
         // Log detailed metrics for each task
         if (message.metrics) {
-          logger.info('[PVMWorkerPool] Task completed', {
+          const workerTotalMs = message.metrics.totalTimeMs
+          const overheadNotInWorker = wallTimeBeforeDeserialize - workerTotalMs
+          logger.debug('[PVMWorkerPool] Task completed', {
             serviceId: message.metrics.serviceId,
             invocationIndex: message.metrics.invocationIndex,
             inputsCount: message.metrics.inputsCount,
@@ -272,39 +277,32 @@ export class PVMWorkerPool {
             deserializeTimeMs: message.metrics.deserializeTimeMs,
             executeTimeMs: message.metrics.executeTimeMs,
             serializeTimeMs: message.metrics.serializeTimeMs,
-            workerTotalTimeMs: message.metrics.totalTimeMs,
-            poolOverheadMs: executionTime - message.metrics.totalTimeMs,
+            workerTotalTimeMs: workerTotalMs,
+            poolOverheadMs: executionTime - workerTotalMs,
             totalTimeMs: executionTime,
+            taskBuildMs,
+            resultDeserializeMs,
+            transferOutAndBackMs: overheadNotInWorker,
           })
         } else {
           // Fallback if metrics not available
-          logger.info('[PVMWorkerPool] Task completed (no metrics)', {
+          logger.debug('[PVMWorkerPool] Task completed (no metrics)', {
             executionTimeMs: executionTime,
+            taskBuildMs,
+            resultDeserializeMs,
           })
         }
 
         if (message.error) {
-          this.totalTasksFailed++
-          this.tasksFailedSinceLastLog++
           reject(new Error(message.error))
-        } else if (message.result) {
-          this.totalTasksCompleted++
-          this.tasksCompletedSinceLastLog++
-          this.logMetricsIfNeeded()
-          resolve(deserializeResult(message.result))
+        } else if (deserialized !== null) {
+          resolve(deserialized)
         } else {
-          this.totalTasksFailed++
-          this.tasksFailedSinceLastLog++
           reject(new Error('Worker returned result without data'))
         }
       } else if (message.type === 'error' && message.messageId === messageId) {
         worker.removeListener('message', messageHandler)
-        const executionTime = Date.now() - startTime
         this.taskStartTimes.delete(messageId)
-        this.totalTasksFailed++
-        this.tasksFailedSinceLastLog++
-        this.totalExecutionTimeMs += executionTime
-        this.logMetricsIfNeeded()
         reject(new Error(message.error || 'Unknown worker error'))
       }
     }
@@ -317,52 +315,6 @@ export class PVMWorkerPool {
     })
   }
 
-  /**
-   * Log performance metrics periodically
-   */
-  private logMetricsIfNeeded(): void {
-    const now = Date.now()
-    const timeSinceLastLog = now - this.lastMetricsLogTime
-
-    if (timeSinceLastLog >= this.metricsLogIntervalMs) {
-      const totalTasks = this.totalTasksCompleted + this.totalTasksFailed
-      const tasksInInterval =
-        this.tasksCompletedSinceLastLog + this.tasksFailedSinceLastLog
-      const avgExecutionTime =
-        totalTasks > 0 ? this.totalExecutionTimeMs / totalTasks : 0
-      const activeWorkers = this.workers.length - this.availableWorkers.length
-      const utilization =
-        this.workers.length > 0
-          ? (activeWorkers / this.workers.length) * 100
-          : 0
-      const tasksPerSecond =
-        timeSinceLastLog > 0 ? tasksInInterval / (timeSinceLastLog / 1000) : 0
-
-      logger.info('[PVMWorkerPool] Aggregate performance metrics', {
-        totalTasksCompleted: this.totalTasksCompleted,
-        totalTasksFailed: this.totalTasksFailed,
-        totalTasks: totalTasks,
-        tasksCompletedInInterval: this.tasksCompletedSinceLastLog,
-        tasksFailedInInterval: this.tasksFailedSinceLastLog,
-        tasksInInterval,
-        averageExecutionTimeMs: Math.round(avgExecutionTime),
-        queueDepth: this.taskQueue.length,
-        activeWorkers,
-        availableWorkers: this.availableWorkers.length,
-        totalWorkers: this.workers.length,
-        utilizationPercent: Math.round(utilization * 100) / 100,
-        tasksPerSecond: Math.round(tasksPerSecond * 100) / 100,
-        pendingTasks: this.taskStartTimes.size,
-        intervalDurationMs: timeSinceLastLog,
-      })
-
-      // Reset interval counters
-      this.tasksCompletedSinceLastLog = 0
-      this.tasksFailedSinceLastLog = 0
-      this.lastMetricsLogTime = now
-    }
-  }
-
   private processQueue(): void {
     if (this.taskQueue.length === 0 || this.availableWorkers.length === 0) {
       return
@@ -371,7 +323,13 @@ export class PVMWorkerPool {
     const taskItem = this.taskQueue.shift()
     const worker = this.availableWorkers.pop()
     if (taskItem && worker) {
-      this.executeTask(worker, taskItem.task, taskItem.resolve, taskItem.reject)
+      this.executeTask(
+        worker,
+        taskItem.task,
+        taskItem.resolve,
+        taskItem.reject,
+        taskItem.taskBuildMs,
+      )
     }
   }
 
@@ -385,7 +343,7 @@ export class PVMWorkerPool {
       this.availableWorkers.splice(availableIndex, 1)
     }
     worker.terminate().catch((err) => {
-      logger.warn('[PVMWorkerPool] Error terminating worker', {
+      logger.debug('[PVMWorkerPool] Error terminating worker', {
         error: err.message,
       })
     })
@@ -397,7 +355,7 @@ export class PVMWorkerPool {
   async shutdown(): Promise<void> {
     this.ensureInitialized()
     this.isShuttingDown = true
-    logger.info('[PVMWorkerPool] Shutting down worker pool', {
+    logger.debug('[PVMWorkerPool] Shutting down worker pool', {
       activeWorkers: this.workers.length,
       queuedTasks: this.taskQueue.length,
     })
@@ -543,56 +501,6 @@ export function serializePartialState(
       id.toString(),
       gas.toString(),
     ]),
-  }
-}
-
-/**
- * Hash inputs for round-trip comparison (main vs worker). Same formula as accumulation-service mismatch log.
- */
-export function computeInputsHash(inputs: AccumulateInput[]): string {
-  if (inputs.length === 0) return 'no-inputs'
-  const payload = inputs.map((i) =>
-    i.type === 0
-      ? [
-          i.type,
-          i.value.packageHash,
-          i.value.gasLimit.toString(),
-          (i.value as { result?: Uint8Array }).result?.length ?? 0,
-        ]
-      : [
-          i.type,
-          i.value.source.toString(),
-          i.value.dest.toString(),
-          i.value.amount.toString(),
-        ],
-  )
-  const [err, hash] = blake2bHash(
-    new TextEncoder().encode(JSON.stringify(payload)),
-  )
-  return err ? 'hash-failed' : (hash as string)
-}
-
-/**
- * Round-trip summary for first type-0 input: result and authTrace byte lengths.
- */
-export function computeInputsRoundTripSummary(
-  inputs: AccumulateInput[],
-): InputsRoundTripSummary {
-  const firstType0 = inputs.find((i) => i.type === 0)
-  const resultByteLength =
-    firstType0 && firstType0.type === 0
-      ? ((firstType0.value as { result?: Uint8Array }).result?.length ??
-        undefined)
-      : undefined
-  const authTraceByteLength =
-    firstType0 && firstType0.type === 0
-      ? ((firstType0.value as { authTrace: Uint8Array }).authTrace?.length ??
-        undefined)
-      : undefined
-  return {
-    inputsHash: computeInputsHash(inputs),
-    resultByteLength,
-    authTraceByteLength,
   }
 }
 

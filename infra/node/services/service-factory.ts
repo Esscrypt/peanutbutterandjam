@@ -708,6 +708,7 @@ export async function stopCoreServices(context: ServiceContext): Promise<void> {
   }
 
   await context.blockImporterService.stop()
+  await context.accumulationService.stop()
   context.recentHistoryService.stop()
   await context.validatorSetManager.stop()
   await context.entropyService.stop()

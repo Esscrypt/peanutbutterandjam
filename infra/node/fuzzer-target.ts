@@ -334,7 +334,7 @@ export async function initializeServices() {
       accumulatePVM: accumulatePVM,
       readyService: readyService,
       statisticsService: statisticsService,
-      useWorkerPool: true,
+      useWorkerPool: false,
     })
 
     recentHistoryService = new RecentHistoryService({

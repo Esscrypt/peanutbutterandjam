@@ -7,13 +7,6 @@ import type { IPrivilegesService } from '@pbnjam/types'
  * - R(o, a, b) = b when a = o (manager didn't change), else a (manager changed)
  */
 export function applyPrivilegesWithRFunction(
-  initialPrivileges: {
-    manager: bigint
-    assigners: bigint[]
-    delegator: bigint
-    registrar: bigint
-    alwaysaccers: Map<bigint, bigint>
-  },
   servicePoststates: Map<
     bigint,
     {
@@ -26,6 +19,16 @@ export function applyPrivilegesWithRFunction(
   >,
   privilegesService: IPrivilegesService,
 ): void {
+  // Capture initial privileges state before processing any results
+  // Gray Paper accpar: privileges are computed using R function based on manager and current holder
+  const initialPrivileges = {
+    manager: privilegesService.getManager(),
+    assigners: [...privilegesService.getAssigners()],
+    delegator: privilegesService.getDelegator(),
+    registrar: privilegesService.getRegistrar(),
+    alwaysaccers: new Map(privilegesService.getAlwaysAccers()),
+  }
+
   // Get current (initial) privilege holders
   const currentManager = initialPrivileges.manager
   const currentDelegator = initialPrivileges.delegator

@@ -26,9 +26,11 @@ import { decodeRecent, decodeStateWorkReports } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
+import { stopCoreServices } from '../../services/service-factory'
 import {
   convertJsonBlockToBlock,
   initializeServices,
+  type FuzzerTargetServices,
 } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
@@ -216,9 +218,8 @@ describe('JAM Conformance Traces', () => {
       
       it(`should process trace ${relativePathWithoutExt}`, async () => {
         console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
-        
+        let services: FuzzerTargetServices | null = null
         try {
-
         // Create accumulation logs directory preserving the subdirectory structure
         // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
         const accumulationLogsDir = path.join(
@@ -250,7 +251,7 @@ describe('JAM Conformance Traces', () => {
         const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
         // Initialize services using shared utility (reuse genesisManager for this directory)
-        const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false })
         const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
@@ -669,6 +670,8 @@ describe('JAM Conformance Traces', () => {
         })
         // Re-throw to fail the test
         throw error
+      } finally {
+        if (services) await stopCoreServices(services.fullContext)
       }
     }, { timeout: 120000 }) // 2 minute timeout
     } // Close inner for loop (trace files)

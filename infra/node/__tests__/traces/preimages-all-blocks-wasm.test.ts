@@ -87,7 +87,7 @@ describe('Genesis Parse Tests', () => {
         console.log(`\n🔍 [${executorType.name}] Trace dumping enabled - traces will be written to pvm-traces/${traceSubfolder}/`)
       }
       const services = await initializeServices(
-        { spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: executorType.useWasm })
+        { spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: executorType.useWasm, useWorkerPool: true })
       const { stateService, blockImporterService } = services
 
       // Helper function to parse state key using state service

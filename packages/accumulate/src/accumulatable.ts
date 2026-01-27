@@ -67,19 +67,19 @@ export function getAccumulatableItemsQ(
 ): ReadyItem[] {
   // Build set of all accumulated packages from history
   const allAccumulatedPackages = new Set<Hex>()
-  for (const packageSet of accumulated.packages) {
+  accumulated.packages.forEach((packageSet) => {
     if (packageSet) {
-      for (const hash of packageSet) {
+      packageSet.forEach((hash) => {
         allAccumulatedPackages.add(hash)
-      }
+      })
     }
-  }
+  })
 
   // Include packages accumulated in previous recursive calls
   if (accumulatedSoFar) {
-    for (const hash of accumulatedSoFar) {
+    accumulatedSoFar.forEach((hash) => {
       allAccumulatedPackages.add(hash)
-    }
+    })
   }
 
   // Find items with empty dependencies (g in Gray Paper)
