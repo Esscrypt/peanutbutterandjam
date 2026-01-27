@@ -384,7 +384,8 @@ export class MainService extends BaseService {
       accumulatePVM: this.accumulatePVM,
       readyService: this.readyService,
       statisticsService: this.statisticsService,
-      // entropyService: this.entropyService,
+      useWorkerPool: true,
+      entropyService: this.entropyService,
     })
 
     // Initialize recent history service

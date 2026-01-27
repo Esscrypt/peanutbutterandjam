@@ -53,8 +53,8 @@ export class AccumulatePVM {
   private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
   private readonly useWasm: boolean
   constructor(options: {
-    hostFunctionRegistry: HostFunctionRegistry
-    accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry
+    hostFunctionRegistry: HostFunctionRegistry | null
+    accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry | null
     configService: IConfigService
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
@@ -72,6 +72,14 @@ export class AccumulatePVM {
         options.traceSubfolder,
       )
     } else {
+      if (
+        !options.hostFunctionRegistry ||
+        !options.accumulateHostFunctionRegistry
+      ) {
+        throw new Error(
+          'Host function registry and accumulate host function registry are required when useWasm is false',
+        )
+      }
       this.pvmExecutor = new TypeScriptPVMExecutor(
         options.hostFunctionRegistry,
         options.accumulateHostFunctionRegistry,
@@ -124,6 +132,7 @@ export class AccumulatePVM {
     gas: bigint,
     inputs: AccumulateInput[],
     orderedIndex: number, // Ordered index for trace file naming
+    entropyOverride?: Uint8Array, // When provided (e.g. by worker), use instead of entropyService.getEntropyAccumulator()
   ): Promise<AccumulateInvocationResult> {
     // Gray Paper equation 166: c = local¬basestate_ps¬accounts[s]_sa¬code
     const serviceAccount = partialState.accounts.get(serviceId)
@@ -235,6 +244,7 @@ export class AccumulatePVM {
       serviceId,
       timeslot,
       jamVersion,
+      entropyOverride,
     )
     if (initError) {
       logger.error(
@@ -293,6 +303,7 @@ export class AccumulatePVM {
           inputs,
           serviceId,
           orderedIndex, // Pass ordered index for trace file naming
+          entropyOverride, // So worker's WASM sees same entropy as in-process (WASM reads entropy in setupAccumulateInvocation)
         )
       error = wasmError
       marshallingResult = wasmResult
@@ -308,6 +319,7 @@ export class AccumulatePVM {
           inputs,
           serviceId,
           orderedIndex, // Pass ordered index for trace file naming
+          entropyOverride, // Signature compatibility; TS path uses implicationsPair built with override
         )
       error = tsError
       marshallingResult = tsResult
@@ -512,17 +524,20 @@ export class AccumulatePVM {
     serviceId: bigint,
     timeslot: bigint,
     jamVersion?: JamVersion,
+    entropyOverride?: Uint8Array,
   ): Safe<ImplicationsPair> {
     const version = jamVersion ?? DEFAULT_JAM_VERSION
-    // Step 1: Get entropy accumulator from entropy service
-    if (!this.entropyService) {
+    // Step 1: Get entropy accumulator from override (worker) or entropy service (in-process)
+    const entropyAccumulator =
+      entropyOverride ??
+      (this.entropyService ? this.entropyService.getEntropyAccumulator() : null)
+    if (!entropyAccumulator) {
       return safeError(
         new Error(
-          'Entropy service required for implications context initialization',
+          'Entropy required for implications context: provide entropyOverride or entropyService',
         ),
       )
     }
-    const entropyAccumulator = this.entropyService.getEntropyAccumulator()
     if (entropyAccumulator.length !== 32) {
       return safeError(
         new Error(
@@ -686,15 +701,6 @@ export class AccumulatePVM {
       }
     } else {
       // Case 3: Otherwise → Use imX with yield = imX.yield
-      // DEBUG: Log poststate accounts after accumulation
-      logger.debug('[AccumulatePVM] Poststate accounts after accumulation', {
-        serviceId: imX.id.toString(),
-        accountsCount: imX.state.accounts.size,
-        accountIds: Array.from(imX.state.accounts.keys()).map((id) =>
-          id.toString(),
-        ),
-        service0Balance: imX.state.accounts.get(0n)?.balance.toString(),
-      })
       return {
         ok: true,
         value: {

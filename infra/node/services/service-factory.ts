@@ -108,6 +108,8 @@ export interface ServiceFactoryOptions {
   }
   /** Use WASM for PVM */
   useWasm?: boolean
+  /** Use worker pool for accumulation service */
+  useWorkerPool?: boolean
   /** Trace subfolder for debugging */
   traceSubfolder?: string
   /** Node ID for metrics (defaults to random) */
@@ -442,6 +444,10 @@ export async function createCoreServices(
     accumulatePVM,
     readyService,
     statisticsService,
+    useWorkerPool: options.useWorkerPool ?? false,
+    traceSubfolder: options.traceSubfolder,
+    // When useWorkerPool, worker must receive main-process entropy so gas matches. Always pass when we have it.
+    entropyService,
   })
 
   const recentHistoryService = new RecentHistoryService({
@@ -665,6 +671,12 @@ export async function startCoreServices(
     if (metricsStartError) {
       throw metricsStartError
     }
+  }
+
+  logger.info('Starting accumulation service...')
+  const [accumulationStartError] = await context.accumulationService.start()
+  if (accumulationStartError) {
+    throw accumulationStartError
   }
 
   logger.info('Starting chain manager service...')

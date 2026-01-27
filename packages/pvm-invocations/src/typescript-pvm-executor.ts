@@ -95,6 +95,7 @@ export class TypeScriptPVMExecutor extends PVM {
     inputs: AccumulateInput[],
     _serviceId: bigint,
     invocationIndex: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    _entropyOverride?: Uint8Array, // Unused; TS path uses implicationsPair built with override. Kept for executor signature compatibility.
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'

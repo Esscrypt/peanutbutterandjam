@@ -179,9 +179,15 @@ describe('Accumulate Test Vector Execution', () => {
               authQueueService: authQueueService,
               accumulatePVM: pvm,
               readyService: readyService,
-              statisticsService: statisticsService,
-              // entropyService: entropyService,
+              statisticsService: statisticsService, 
+              useWorkerPool: true,
             })
+
+            const [accumulationStartError] = await accumulationService.start()
+            if (accumulationStartError) {
+              console.error('Failed to start accumulation service:', accumulationStartError)
+              throw accumulationStartError
+            }
 
 
             const servicesEndTime = performance.now()

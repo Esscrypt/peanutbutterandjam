@@ -217,7 +217,14 @@ describe('Fuzzer Initialize Test', () => {
       accumulatePVM: accumulatePVM,
       readyService: readyService,
       statisticsService: statisticsService,
+      useWorkerPool: true,
     })
+
+    const [accumulationStartError] = await accumulatedService.start()
+    if (accumulationStartError) {
+      console.error('Failed to start accumulation service:', accumulationStartError)
+      throw accumulationStartError
+    }
 
     const recentHistoryService = new RecentHistoryService({
       eventBusService: eventBusService,

@@ -17,6 +17,7 @@
  * - Service account updated with new storage and metadata
  */
 
+import { cpus } from 'node:os'
 import {
   buildAndEditQueue,
   calculateAvailableGas,
@@ -48,6 +49,7 @@ import {
 } from '@pbnjam/codec'
 import { blake2bHash, hexToBytes, logger } from '@pbnjam/core'
 import type { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import type { IEntropyService } from '@pbnjam/types'
 import {
   type Accumulated,
   type AccumulateInput,
@@ -57,10 +59,11 @@ import {
   type PartialState,
   type Ready,
   type ReadyItem,
+  type SafePromise,
+  safeResult,
   type ValidatorPublicKeys,
   type WorkReport,
 } from '@pbnjam/types'
-
 import type { Hex } from 'viem'
 import type { AuthQueueService } from './auth-queue-service'
 import type { ConfigService } from './config-service'
@@ -69,6 +72,7 @@ import type { ReadyService } from './ready-service'
 import type { ServiceAccountService as ServiceAccountsService } from './service-account-service'
 import type { StatisticsService } from './statistics-service'
 import type { ValidatorSetManager } from './validator-set'
+import { PVMWorkerPool } from './workers/pvm-worker-pool'
 
 /**
  * Accumulation Service Implementation
@@ -83,6 +87,11 @@ export class AccumulationService extends BaseService {
   private readonly authQueueService: AuthQueueService
   private readonly readyService: ReadyService
   private readonly statisticsService: StatisticsService
+  private readonly useWorkerPool: boolean
+  private readonly traceSubfolder: string | undefined
+  /** When useWorkerPool, required so worker receives main-process entropy and gas matches in-process. */
+  private readonly entropyService: IEntropyService | undefined
+  private workerPool: PVMWorkerPool | null = null
   // Track the last processed slot (for determining shift delta)
   private lastProcessedSlot: bigint | null = null
   // Track local_fnservouts (accumulation output pairings) for the latest accumulation
@@ -112,9 +121,13 @@ export class AccumulationService extends BaseService {
     accumulatePVM: AccumulatePVM
     readyService: ReadyService
     statisticsService: StatisticsService
+    useWorkerPool: boolean
+    traceSubfolder?: string
+    entropyService?: IEntropyService
   }) {
     super('accumulation-service')
     this.accumulatePVM = options.accumulatePVM
+    this.traceSubfolder = options.traceSubfolder
     this.accumulated = {
       packages: new Array(options.configService.epochDuration).fill(
         new Set<Hex>(),
@@ -127,6 +140,42 @@ export class AccumulationService extends BaseService {
     this.authQueueService = options.authQueueService
     this.readyService = options.readyService
     this.statisticsService = options.statisticsService
+    this.useWorkerPool = options.useWorkerPool
+    this.entropyService = options.entropyService
+    // Worker pool will be initialized in start() method if useWorkerPool is enabled
+    if (this.useWorkerPool) {
+      if (!this.entropyService) {
+        throw new Error('entropyService is required when useWorkerPool is true')
+      }
+      logger.info(
+        '[AccumulationService] constructed with useWorkerPool and entropyService',
+      )
+    }
+  }
+
+  /**
+   * Start the accumulation service
+   * Initializes the worker pool if useWorkerPool is enabled
+   */
+  async start(): SafePromise<boolean> {
+    super.start()
+
+    // Initialize worker pool if enabled
+    if (this.useWorkerPool) {
+      const workerPoolMaxWorkers = Math.min(8, cpus().length)
+      this.workerPool = await PVMWorkerPool.create(
+        {
+          configMode: this.configService._mode,
+          traceSubfolder: this.traceSubfolder,
+        },
+        workerPoolMaxWorkers,
+      )
+      logger.info('[AccumulationService] Worker pool initialized', {
+        workerPoolMaxWorkers,
+      })
+    }
+
+    return safeResult(true)
   }
 
   /**
@@ -348,7 +397,6 @@ export class AccumulationService extends BaseService {
       const serviceToItems = groupItemsByServiceId(batchItems)
 
       // Step 6: Execute PVM accumulate invocations
-      // TODO: parallelize this
       const results: AccumulateInvocationResult[] = []
       const processedWorkReports: WorkReport[] = []
       const workReportsByService: Map<number, WorkReport[]> = new Map()
@@ -402,102 +450,138 @@ export class AccumulationService extends BaseService {
       })
 
       // Gray Paper: All services in the same accpar batch share the same invocation index
-      // The invocation index corresponds to accseq iterations, not individual services
-      let serviceIndexInBatch = 0
-      for (const serviceId of sortedServiceIds) {
+      // Build batch invocations once and run in parallel via Promise.all.
+      // When useWorkerPool is true, use pvm-worker-pool for all except first invocation of first batch (in-process).
+      const batchInvocations: Array<{
+        serviceId: bigint
+        partialState: PartialState
+        inputs: AccumulateInput[]
+        gasLimit: bigint
+        defxfersForService: DeferredTransfer[]
+        operandTuples: AccumulateInput[]
+        serviceWorkReports: WorkReport[]
+        serviceIndexInBatch: number
+        partialStateServiceIds: Set<bigint>
+      }> = []
+      for (
+        let serviceIndexInBatch = 0;
+        serviceIndexInBatch < sortedServiceIds.length;
+        serviceIndexInBatch++
+      ) {
+        const serviceId = sortedServiceIds[serviceIndexInBatch]!
         const serviceItems = serviceToItems.get(serviceId) || []
-        // Get pre-computed operand tuples (i^U) for this service
         const operandTuples = operandTuplesByService.get(serviceId) || []
-
-        // Add defxfers (i^T) from batch start defxfers ONLY
-        // Gray Paper accumulation.tex equation 318-322: i^T = sequence of defxfers from t where dest = s
-        // Gray Paper accpar line 192: all services use the same t (defxfers from start of batch)
-        // Defxfers created DURING the batch are NOT included in iT - they're for the NEXT iteration
         const defxfersForService = batchStartDefxfers.filter(
           (d) => d.dest === serviceId,
         )
-
-        // Combine inputs: i^T concat i^U (defxfers first, then operand tuples)
-        // Gray Paper accumulation.tex equation 311: i = i^T concat i^U
-        // IMPORTANT: Defxfers (i^T) come FIRST, then operand tuples (i^U)
         const inputs: AccumulateInput[] = [
           ...defxfersForService.map((d) => ({
-            type: 1 as const, // DeferredTransfer type
+            type: 1 as const,
             value: d,
           })),
-          ...operandTuples, // OperandTuple type (type 0)
+          ...operandTuples,
         ]
-
         const serviceWorkReports = serviceItems.map((item) => item.workReport)
-
-        // Gray Paper accpar: Each service gets a DEEP CLONE of the batch snapshot.
-        // This ensures modifications from one service don't affect other services in the same batch.
-        // Only defxfers are shared between services in the same batch.
         const partialState = clonePartialState(batchPartialStateSnapshot)
-
-        // Track which services were in partial state before this invocation
         const partialStateServiceIds = new Set<bigint>()
         for (const [sid] of partialState.accounts) {
           partialStateServiceIds.add(sid)
         }
-        partialStateAccountsPerInvocation.set(
-          batchInvocationIndex,
-          partialStateServiceIds,
-        )
-
-        // Calculate gas limit for this service (Gray Paper equation 315-317)
-        // Use batchStartDefxfers - gas calculation uses ONLY defxfers from the start of the batch
         const gasLimit = calculateServiceGasLimit(
           serviceId,
           serviceItems,
           batchStartDefxfers,
           this.privilegesService,
         )
-
-        // Execute accumulate invocation
-        // AccumulateInputs (inputs) contain all the data needed for FETCH selectors 14/15
-        // Gray Paper pvm_invocations.tex: selector 14 returns encode(i) where i is the AccumulateInput sequence
-        // TODO: parallelize this with web workers
-        const result = await this.executeAccumulateInvocation(
-          partialState,
-          currentSlot,
+        batchInvocations.push({
           serviceId,
-          gasLimit,
+          partialState,
           inputs,
-          batchInvocationIndex, // Pass the batch invocation index (accseq iteration) for trace naming
-        )
+          gasLimit,
+          defxfersForService,
+          operandTuples,
+          serviceWorkReports,
+          serviceIndexInBatch,
+          partialStateServiceIds,
+        })
+      }
 
-        // Track accumulation output and statistics
-        // Gray Paper equation 399-403: N(s) counts the number of work-digests (operand tuples) accumulated
-        const workItemCount = operandTuples.filter(
+      // When useWorkerPool is true, run all invocations via workers. Otherwise in-process.
+      const batchResults = await Promise.all(
+        batchInvocations.map(async (inv, idx) => {
+          const isFirstInvocationOfBatch = idx === 0
+          const useWorker =
+            this.useWorkerPool &&
+            this.workerPool !== null &&
+            !isFirstInvocationOfBatch
+
+          if (!useWorker) {
+            return this.executeAccumulateInvocation(
+              inv.partialState,
+              currentSlot,
+              inv.serviceId,
+              inv.gasLimit,
+              inv.inputs,
+              batchInvocationIndex,
+            )
+          }
+
+          if (!this.entropyService && this.useWorkerPool) {
+            logger.warn(
+              '[AccumulationService] useWorkerPool but no entropyService – worker gas may diverge',
+              {
+                serviceId: inv.serviceId.toString(),
+                batchInvocationIndex,
+              },
+            )
+          }
+          const entropySnapshot = this.entropyService
+            ?.getEntropyAccumulator()
+            ?.slice(0)
+
+          return this.workerPool!.execute(
+            inv.partialState,
+            currentSlot,
+            inv.serviceId,
+            inv.gasLimit,
+            inv.inputs,
+            batchInvocationIndex,
+            entropySnapshot
+              ? { entropyAccumulator: entropySnapshot }
+              : undefined,
+          )
+        }),
+      )
+      for (let i = 0; i < batchInvocations.length; i++) {
+        const inv = batchInvocations[i]!
+        const result = batchResults[i]!
+        partialStateAccountsPerInvocation.set(
+          batchInvocationIndex,
+          inv.partialStateServiceIds,
+        )
+        const workItemCount = inv.operandTuples.filter(
           (input) => input.type === 0,
         ).length
-
-        // Track onTransfers statistics if service received deferred transfers
-        // Track even if result failed, since transfers were still received
-        // onTransfersCount and onTransfersGasUsed are only tracked for versions < 0.7.1
-        if (defxfersForService.length > 0) {
+        if (inv.defxfersForService.length > 0) {
           const gasUsed = result.ok ? result.value.gasused : 0n
           trackOnTransfersStatistics(
-            serviceId,
-            defxfersForService.length,
+            inv.serviceId,
+            inv.defxfersForService.length,
             gasUsed,
             this.onTransfersStatistics,
             this.statisticsService,
           )
         }
-
         if (result.ok) {
           trackAccumulationOutput(
-            serviceId,
+            inv.serviceId,
             result.value,
             this.accumulationOutputs,
           )
-
           const gasUsed = result.value.gasused
           if (workItemCount > 0 || gasUsed > 0n) {
             trackAccumulationStatistics(
-              serviceId,
+              inv.serviceId,
               result.value,
               workItemCount,
               this.accumulationStatistics,
@@ -505,13 +589,13 @@ export class AccumulationService extends BaseService {
             )
           }
         }
-
         results.push(result)
-        processedWorkReports.push(...serviceWorkReports)
-        workReportsByService.set(serviceIndexInBatch, serviceWorkReports)
-        accumulatedServiceIds.push(serviceId)
-
-        serviceIndexInBatch++
+        processedWorkReports.push(...inv.serviceWorkReports)
+        workReportsByService.set(
+          inv.serviceIndexInBatch,
+          inv.serviceWorkReports,
+        )
+        accumulatedServiceIds.push(inv.serviceId)
       }
 
       // Increment batch invocation index for next iteration
@@ -653,6 +737,7 @@ export class AccumulationService extends BaseService {
     gas: bigint,
     inputs: AccumulateInput[],
     invocationIndex: number, // The batch invocation index (accseq iteration) - same for all services in a batch
+    entropyOverride?: Uint8Array, // When provided (e.g. dual-run with worker), use so in-process and worker see same entropy
   ): Promise<AccumulateInvocationResult> {
     const result = await this.accumulatePVM.executeAccumulate(
       partialState,
@@ -661,6 +746,7 @@ export class AccumulationService extends BaseService {
       gas,
       inputs,
       invocationIndex,
+      entropyOverride,
     )
 
     return result

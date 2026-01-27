@@ -260,6 +260,7 @@ export async function initializeServices(options?: {
   genesisManager?: NodeGenesisManager
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
+  useWorkerPool?: boolean
 }): Promise<FuzzerTargetServices> {
   const {
     spec = 'tiny',
@@ -267,6 +268,7 @@ export async function initializeServices(options?: {
     genesisManager,
     initialValidators = [],
     useWasm = false,
+    useWorkerPool = false,
   } = options || {}
 
   // Create services using the factory
@@ -279,6 +281,7 @@ export async function initializeServices(options?: {
     enableNetworking: false,
     // If a genesis manager is provided, we'll override it after creation
     genesis: genesisManager ? undefined : undefined,
+    useWorkerPool,
   })
 
   // If a custom genesis manager is provided, use it in the state service
