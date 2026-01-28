@@ -27,7 +27,7 @@
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",
     "biome": "0.3.3",
-    "bun-types": "^1.3.1",
+    "bun-types": "1.3.7",
     "typescript": "5.8.2",
     "vitest": "2.1.9"
   },

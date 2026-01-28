@@ -99,6 +99,14 @@ export class AccumulatePVM {
   }
 
   /**
+   * Release internal memory (executor WASM instance and mutable state).
+   * Call before dropping the PVM so worker/process can free memory on shutdown.
+   */
+  dispose(): void {
+    this.pvmExecutor.dispose()
+  }
+
+  /**
    * Execute accumulate invocation (Ψ_A)
    *
    * Gray Paper Equation 148: Ψ_A: (partialstate, timeslot, serviceid, gas, sequence{accinput}) → acconeout

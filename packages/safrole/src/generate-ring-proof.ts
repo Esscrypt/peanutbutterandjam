@@ -1,6 +1,7 @@
 import {
   getBanderoutFromGamma,
   RingVRFProver,
+  type RingVRFProverW3F,
   type RingVRFProverWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import type { Safe } from '@pbnjam/types'
@@ -68,7 +69,7 @@ export function generateTicketProof(
   message: Uint8Array,
   ringKeys: Uint8Array[],
   proverIndex: number,
-  prover: RingVRFProverWasm,
+  prover: RingVRFProverWasm | RingVRFProverW3F,
 ): Safe<{
   proof: Uint8Array
   banderoutResult: Uint8Array

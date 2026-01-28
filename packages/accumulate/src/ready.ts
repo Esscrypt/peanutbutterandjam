@@ -194,11 +194,18 @@ export function filterReadyItemDependencies(
 }
 
 /**
- * Find maximum prefix of work reports that fits within gas limit
- * Gray Paper equation 163: i = max prefix such that sum_{r in r[:i], d in r.digests}(d.gaslimit) ≤ g
+ * Find maximum prefix of work reports that fits within gas limit.
  *
- * @param items - Ready items to process
- * @param remainingGas - Remaining gas available
+ * Gray Paper: accumulation.tex eq:accseq (accseq \where clause):
+ *   i = max(0..len(r)) such that
+ *   sum_{r ∈ r[:i], d ∈ r.digests}(d.gaslimit) ≤ g
+ *
+ * Here r = work report, r.digests = work-report digests (one per work-item),
+ * d.gaslimit = wd¬gaslimit = wi¬accgaslimit (work_packages_and_reports.tex itemtodigest).
+ * We map: r ↔ item.workReport, r.digests ↔ workReport.results, d.gaslimit ↔ result.accumulate_gas.
+ *
+ * @param items - Ready items to process (each wraps a work report)
+ * @param remainingGas - Remaining gas g
  * @returns Prefix items and their total gas limit
  */
 export function findItemsWithinGasLimit(
@@ -209,15 +216,15 @@ export function findItemsWithinGasLimit(
   let cumulativeGasLimit = 0n
 
   for (const item of items) {
-    // Calculate gas limit for this work report: sum of all work-digest gas limits
-    const workReportGasLimit = item.workReport.results.reduce(
+    // sum_{d ∈ r.digests}(d.gaslimit) for this work report r
+    const results = item.workReport.results ?? []
+    const workReportGasLimit = results.reduce(
       (sum, result) => sum + BigInt(result.accumulate_gas),
       0n,
     )
 
-    // Check if adding this item would exceed remaining gas
     if (cumulativeGasLimit + workReportGasLimit > remainingGas) {
-      break
+      continue
     }
 
     prefixItems.push(item)

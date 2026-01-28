@@ -253,6 +253,7 @@ export interface FuzzerTargetServices {
  * @param options.genesisManager - Optional genesis manager (if not provided, uses empty state)
  * @param options.initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
  * @param options.useWasm - Whether to use WebAssembly PVM implementation (default: false)
+ * @param options.useRingVrfWasm - Use WASM Ring VRF (true) or W3F (false) (default: true)
  */
 export async function initializeServices(options?: {
   spec?: ConfigServiceSizeType
@@ -261,6 +262,7 @@ export async function initializeServices(options?: {
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
   useWorkerPool?: boolean
+  useRingVrfWasm?: boolean
 }): Promise<FuzzerTargetServices> {
   const {
     spec = 'tiny',
@@ -269,6 +271,7 @@ export async function initializeServices(options?: {
     initialValidators = [],
     useWasm = false,
     useWorkerPool = false,
+    useRingVrfWasm = true,
   } = options || {}
 
   // Create services using the factory
@@ -276,6 +279,7 @@ export async function initializeServices(options?: {
     configSize: spec,
     traceSubfolder,
     useWasm,
+    useRingVrfWasm,
     initialValidators,
     // Don't enable networking for tests
     enableNetworking: false,

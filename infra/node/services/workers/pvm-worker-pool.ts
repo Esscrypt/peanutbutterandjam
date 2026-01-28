@@ -46,6 +46,16 @@ export class PVMWorkerPool {
   private isInitialized = false
 
   private taskStartTimes = new Map<string, number>()
+  /** In-flight task per worker so we can reject and remove listener when worker exits. */
+  private currentTaskByWorker = new Map<
+    Worker,
+    {
+      resolve: (result: AccumulateInvocationResult) => void
+      reject: (error: Error) => void
+      messageHandler: (message: WorkerMessage) => void
+      messageId: string
+    }
+  >()
 
   /**
    * Create and initialize a new worker pool
@@ -254,6 +264,7 @@ export class PVMWorkerPool {
     const messageHandler = (message: WorkerMessage) => {
       if (message.type === 'result' && message.messageId === messageId) {
         worker.removeListener('message', messageHandler)
+        this.currentTaskByWorker.delete(worker)
         const wallTimeBeforeDeserialize = Date.now() - startTime
         let resultDeserializeMs = 0
         let deserialized: AccumulateInvocationResult | null = null
@@ -302,11 +313,18 @@ export class PVMWorkerPool {
         }
       } else if (message.type === 'error' && message.messageId === messageId) {
         worker.removeListener('message', messageHandler)
+        this.currentTaskByWorker.delete(worker)
         this.taskStartTimes.delete(messageId)
         reject(new Error(message.error || 'Unknown worker error'))
       }
     }
 
+    this.currentTaskByWorker.set(worker, {
+      resolve,
+      reject,
+      messageHandler,
+      messageId,
+    })
     worker.on('message', messageHandler)
     worker.postMessage({
       type: 'execute',
@@ -334,6 +352,15 @@ export class PVMWorkerPool {
   }
 
   private removeWorker(worker: Worker): void {
+    const current = this.currentTaskByWorker.get(worker)
+    if (current) {
+      worker.removeListener('message', current.messageHandler)
+      this.currentTaskByWorker.delete(worker)
+      this.taskStartTimes.delete(current.messageId)
+      current.reject(new Error('Worker terminated'))
+    }
+    worker.removeAllListeners()
+
     const index = this.workers.indexOf(worker)
     if (index !== -1) {
       this.workers.splice(index, 1)
@@ -366,10 +393,35 @@ export class PVMWorkerPool {
     }
     this.taskQueue = []
 
-    // Terminate all workers
-    await Promise.all(
-      this.workers.map((worker) => worker.terminate().catch(() => {})),
-    )
+    // Reject in-flight tasks and remove listeners so workers can be GC'd
+    const shutdownError = new Error('Worker pool is shutting down')
+    for (const [worker, current] of this.currentTaskByWorker) {
+      worker.removeListener('message', current.messageHandler)
+      current.reject(shutdownError)
+    }
+    this.currentTaskByWorker.clear()
+    this.taskStartTimes.clear()
+
+    const SHUTDOWN_EXIT_TIMEOUT_MS = 5000
+    const exitPromises = this.workers.map((worker) => {
+      return new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          worker
+            .terminate()
+            .catch(() => {})
+            .finally(() => resolve())
+        }, SHUTDOWN_EXIT_TIMEOUT_MS)
+        worker.once('exit', () => {
+          clearTimeout(timeout)
+          resolve()
+        })
+        worker.postMessage({ type: 'shutdown' })
+      })
+    })
+    await Promise.all(exitPromises)
+    for (const worker of this.workers) {
+      worker.removeAllListeners()
+    }
     this.workers = []
     this.availableWorkers = []
   }
@@ -418,7 +470,7 @@ interface SerializedAccumulateInput {
 }
 
 interface WorkerMessage {
-  type: 'ready' | 'result' | 'error' | 'execute'
+  type: 'ready' | 'result' | 'error' | 'execute' | 'shutdown'
   messageId?: string
   task?: WorkerTask
   result?: SerializedAccumulateInvocationResult

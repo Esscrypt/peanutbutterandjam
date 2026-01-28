@@ -5,7 +5,11 @@
  * Handles epoch transitions and validator metadata
  */
 
-import { getRingRoot, type RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
+import {
+  getRingRoot,
+  type RingVRFProverW3F,
+  type RingVRFProverWasm,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   bytesToHex,
   type EpochTransitionEvent,
@@ -42,7 +46,7 @@ export class ValidatorSetManager
   private readonly eventBusService: EventBusService
   private readonly sealKeyService: SealKeyService | null
   private ticketService: TicketService | null
-  private readonly ringProver: RingVRFProverWasm
+  private readonly ringProver: RingVRFProverWasm | RingVRFProverW3F
   private readonly configService: ConfigService
   // private entropyService: EntropyService | null
   // private clockService: ClockService | null
@@ -76,7 +80,7 @@ export class ValidatorSetManager
   constructor(options: {
     eventBusService: EventBusService
     sealKeyService: SealKeyService | null
-    ringProver: RingVRFProverWasm
+    ringProver: RingVRFProverWasm | RingVRFProverW3F
     ticketService: TicketService | null
     configService: ConfigService
     initialValidators: ValidatorPublicKeys[] | null

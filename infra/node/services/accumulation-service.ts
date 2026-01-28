@@ -69,7 +69,7 @@ type AccumulationIterationResult =
   | { done: true }
   | {
       done: false
-      immediateItemsPrepended: boolean
+      processedImmediateHashes: Set<Hex>
       pendingDefxfers: DeferredTransfer[]
       totalGasUsed: bigint
       batchInvocationIndex: number
@@ -346,10 +346,6 @@ export class AccumulationService extends BaseService {
     // Ensure accumulated.packages array is initialized
     this.ensureAccumulatedPackagesInitialized()
 
-    // Use Q function iteratively to process all accumulatable items
-    // Gray Paper equation 63-73: Q recursively finds all items with satisfied dependencies
-    const epochLength = this.configService.epochDuration
-
     // Track defxfers across iterations (Gray Paper equation 166: accseq recursively passes 𝐭*)
     // Start with defxfers from immediate accumulation
     let pendingDefxfers: DeferredTransfer[] = []
@@ -358,23 +354,23 @@ export class AccumulationService extends BaseService {
     // Gray Paper equation 163: i = max prefix such that sum(gaslimit) ≤ g
     let totalGasUsed = 0n
 
-    // Track if we've already prepended immediate items (only on first iteration)
-    let immediateItemsPrepended = false
+    // Track which immediate items have been accumulated (prepend only unprocessed on each iteration).
+    // Updated each iteration and passed into the next run.
+    let processedImmediateHashes = new Set<Hex>()
     let batchInvocationIndex = 0
 
     // IMPORTANT: MAIN ACCUMULATION LOOP - DO NOT REMOVE THIS LOOP
     while (true) {
       const outcome = await this.runAccumulationIteration(
-        epochLength,
         currentSlot,
         immediateItems,
-        immediateItemsPrepended,
+        processedImmediateHashes,
         pendingDefxfers,
         totalGasUsed,
         batchInvocationIndex,
       )
       if (outcome.done) break
-      immediateItemsPrepended = outcome.immediateItemsPrepended
+      processedImmediateHashes = outcome.processedImmediateHashes
       pendingDefxfers = outcome.pendingDefxfers
       totalGasUsed = outcome.totalGasUsed
       batchInvocationIndex = outcome.batchInvocationIndex
@@ -387,17 +383,16 @@ export class AccumulationService extends BaseService {
    * (loop should break); otherwise returns updated loop state for next iteration.
    */
   private async runAccumulationIteration(
-    epochLength: number,
     currentSlot: bigint,
     immediateItems: readonly ReadyItem[],
-    immediateItemsPrepended: boolean,
+    processedImmediateHashes: Set<Hex>,
     pendingDefxfers: DeferredTransfer[],
     totalGasUsed: bigint,
     batchInvocationIndex: number,
   ): Promise<AccumulationIterationResult> {
     // Step 1: Collect all ready items from ALL slots (in rotated order: [m:] then [:m])
     const allReadyItems = collectAllReadyItems(
-      epochLength,
+      this.configService.epochDuration,
       currentSlot,
       this.readyService,
     )
@@ -408,17 +403,21 @@ export class AccumulationService extends BaseService {
       this.accumulated,
     )
 
-    // Step 3: Build justbecameavailable^* = justbecameavailable^! concat Q(q)
-    // Gray Paper equation 88: Immediate items are prepended to ready queue items
-    // Only prepend on the FIRST iteration (immediate items don't go through Q)
-    let nextImmediateItemsPrepended = immediateItemsPrepended
-    let accumulatableItems: ReadyItem[]
-    if (!immediateItemsPrepended && immediateItems.length > 0) {
-      accumulatableItems = [...immediateItems, ...readyQueueAccumulatable]
-      nextImmediateItemsPrepended = true
-    } else {
-      accumulatableItems = readyQueueAccumulatable
-    }
+    // Step 3: Build justbecameavailable^* = unprocessed immediate^! concat Q(q)
+    // Gray Paper equation 88: Immediate items are prepended to ready queue items.
+    // Prepend only immediate items not yet accumulated, so each iteration gets [remaining immediate, ...ready].
+    const unprocessedImmediate = immediateItems.filter((ii) => {
+      const [hashErr, workReportHash] = calculateWorkReportHash(ii.workReport)
+      return (
+        !hashErr &&
+        workReportHash &&
+        !processedImmediateHashes.has(workReportHash)
+      )
+    })
+    const accumulatableItems: ReadyItem[] = [
+      ...unprocessedImmediate,
+      ...readyQueueAccumulatable,
+    ]
 
     if (accumulatableItems.length === 0 && pendingDefxfers.length === 0) {
       return { done: true }
@@ -505,19 +504,40 @@ export class AccumulationService extends BaseService {
 
     const iterationGasUsed = calculateTotalGasUsed(results)
 
+    // Mark immediate items that were in this batch as processed (for next iteration's unprocessedImmediate)
+    for (const wr of processedWorkReports) {
+      const [hashErr, workReportHash] = calculateWorkReportHash(wr)
+      if (hashErr || !workReportHash) continue
+      const wasImmediate = immediateItems.some((ii) => {
+        const [e, h] = calculateWorkReportHash(ii.workReport)
+        return !e && h === workReportHash
+      })
+      if (wasImmediate) {
+        processedImmediateHashes.add(workReportHash)
+      }
+    }
+
+    // Pass only immediate items that were in this batch (for fullyProcessedPackageHashes)
+    const immediateInBatch = immediateItems.filter((ii) =>
+      batchItems.some((bi) => {
+        const [e1, h1] = calculateWorkReportHash(ii.workReport)
+        const [e2, h2] = calculateWorkReportHash(bi.workReport)
+        return !e1 && !e2 && h1 === h2
+      }),
+    )
     this.updateGlobalState(
       results,
       processedWorkReports,
       workReportsByService,
       currentSlot,
       partialStateAccountsPerInvocation,
-      immediateItems,
+      immediateInBatch,
       accumulatedServiceIds,
     )
 
     return {
       done: false,
-      immediateItemsPrepended: nextImmediateItemsPrepended,
+      processedImmediateHashes,
       pendingDefxfers: collectDefxfersFromResults(results),
       totalGasUsed: totalGasUsed + iterationGasUsed,
       batchInvocationIndex: batchInvocationIndex + 1,
@@ -556,6 +576,12 @@ export class AccumulationService extends BaseService {
   }> {
     const batchResults = await Promise.all(
       batchInvocations.map(async (inv, idx) => {
+        const transfers = this.filterDefxfersFromInputs(inv.inputs).length
+        const operands = inv.inputs.filter((inp) => inp.type === 0).length
+        logger.info(
+          `[accumulate] Accumulating service ${inv.serviceId}, transfers: ${transfers} operands: ${operands} at slot: ${currentSlot}`,
+        )
+
         const isFirstInvocationOfBatch = idx === 0
         const useWorker =
           this.useWorkerPool &&
@@ -919,9 +945,6 @@ export class AccumulationService extends BaseService {
       }
     >()
 
-    // Get the epoch duration (C_epochlen)
-    const epochLength = this.configService.epochDuration
-
     // means that all work reports containing work items with this package hash have been processed
     const fullyProcessedPackageHashes = new Set<Hex>()
 
@@ -942,7 +965,7 @@ export class AccumulationService extends BaseService {
     // Add new packages to the rightmost slot (Gray Paper equation 417)
     // The shift happens in applyTransition, so we just add packages here
     // Multiple iterations add to the same slot
-    const rightmostSlot = epochLength - 1
+    const rightmostSlot = this.configService.epochDuration - 1
     for (const pkg of fullyProcessedPackageHashes) {
       this.accumulated.packages[rightmostSlot].add(pkg)
     }
@@ -997,7 +1020,11 @@ export class AccumulationService extends BaseService {
     // Gray Paper equation 48-61: E(r, x) removes dependencies that appear in x
     // Note: Items whose dependencies become satisfied will be processed in the next
     // iteration of processAccumulation - we just remove the dependencies here
-    for (let slotIdx = 0; slotIdx < epochLength; slotIdx++) {
+    for (
+      let slotIdx = 0;
+      slotIdx < this.configService.epochDuration;
+      slotIdx++
+    ) {
       const slotItems = this.readyService.getReadyItemsForSlot(BigInt(slotIdx))
       for (const item of slotItems) {
         const [hashError, workReportHash] = calculateWorkReportHash(

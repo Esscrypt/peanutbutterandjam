@@ -757,4 +757,17 @@ export class WasmPVMExecutor {
       hostCallId: null,
     }
   }
+
+  /**
+   * Release internal memory (WASM instance and mutable state).
+   * Call before dropping the executor so WASM linear memory can be GC'd.
+   */
+  dispose(): void {
+    this.wasm = null
+    this.currentState = null
+    this.executionLogs = []
+    this.traceHostFunctionLogs = []
+    this.code = new Uint8Array(0)
+    this.bitmask = new Uint8Array(0)
+  }
 }

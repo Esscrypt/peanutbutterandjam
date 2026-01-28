@@ -225,7 +225,7 @@ export class MainService extends BaseService {
     this.registry = new ServiceRegistry()
     const srsFilePath = path.join(
       __dirname,
-      '../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-compressed.bin',
+      '../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
     )
     this.ringProver = new RingVRFProverWasm(srsFilePath)
     this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)

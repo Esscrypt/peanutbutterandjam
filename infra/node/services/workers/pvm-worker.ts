@@ -32,7 +32,7 @@ interface WorkerTask {
 }
 
 interface WorkerMessage {
-  type: 'execute' | 'ready' | 'result' | 'error'
+  type: 'execute' | 'ready' | 'result' | 'error' | 'shutdown'
   messageId?: string
   task?: WorkerTask
   result?: SerializedAccumulateInvocationResult
@@ -289,6 +289,12 @@ if (parentPort) {
   // Lazy initialization - create PVM on first use
   parentPort.on('message', async (message: WorkerMessage) => {
     try {
+      if (message.type === 'shutdown') {
+        accumulatePVM?.dispose()
+        accumulatePVM = null
+        process.exit(0)
+        return
+      }
       if (message.type === 'execute' && message.task) {
         // Initialize PVM if not already done
         if (!accumulatePVM) {

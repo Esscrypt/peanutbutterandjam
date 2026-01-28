@@ -686,4 +686,12 @@ export class TypeScriptPVMExecutor extends PVM {
       )
     }
   }
+
+  /**
+   * Release internal mutable state. Call before dropping the executor.
+   */
+  dispose(): void {
+    this.accumulateInputs = null
+    this.traceHostFunctionLogs = []
+  }
 }
