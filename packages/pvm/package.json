@@ -9,7 +9,8 @@
     "build:wasm": "bun run build.wasm.ts",
     "build:all": "bun run build && bun run build:wasm",
     "check": "tsc --pretty --noEmit",
-    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
+    "test": "echo 'No tests in CI'"
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",
