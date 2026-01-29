@@ -9,8 +9,9 @@
     "build:wasm": "bun run build.wasm.ts",
     "build:all": "bun run build && bun run build:wasm",
     "check": "tsc --pretty --noEmit",
-    "test": "bun test --pass-with-no-tests",
+    "test": "bun test src/instructions/__tests__/riscv.test.ts",
     "test:wasm": "bun test src/__tests__/wasm-wrapper.test.ts",
+    "test:all-programs": "bun test src/instructions/__tests__/all-programs.test.ts",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
   "dependencies": {

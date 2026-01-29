@@ -6,7 +6,9 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc",
-    "test": "bun test --pass-with-no-tests"
+    "test": "bun test --pass-with-no-tests",
+    "clean": "rm -rf dist && rm -rf node_modules",
+    "check": "tsc --pretty --noEmit"
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",

@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc",
     "test": "bun test --pass-with-no-tests",
-    "clean": "rm -rf dist && rm -rf node_modules"
+    "clean": "rm -rf dist && rm -rf node_modules",
+    "check": "tsc --pretty --noEmit"
   },
   "exports": {
     ".": "./src/index.ts"

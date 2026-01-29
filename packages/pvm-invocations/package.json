@@ -9,8 +9,7 @@
     "build:wasm": "bun run build.wasm.ts",
     "build:all": "bun run build && bun run build:wasm",
     "check": "tsc --pretty --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest run --watch",
+    "test": "bun test --pass-with-no-tests",
     "test:wasm": "bun test src/__tests__/wasm-wrapper.test.ts",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
@@ -23,8 +22,7 @@
   },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",
-    "bun-types": "1.3.7",
-    "vitest": "^2.1.9"
+    "bun-types": "1.3.7"
   },
   "exports": {
     ".": "./src/index.ts"
