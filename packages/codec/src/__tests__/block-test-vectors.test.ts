@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeBlock } from '../block/body'
 import { ConfigService } from '../../../../infra/node/services/config-service'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Block Test Vectors - Structure Validation', () => {
   // Create configs for different test vector sizes
@@ -10,7 +11,7 @@ describe('Block Test Vectors - Structure Validation', () => {
   const fullConfigService = new ConfigService('full')
 
   it('should decode full block structure correctly', () => {
-    const fullTestVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+    const fullTestVectorsDir = getCodecTestVectorsDir('full')
     const binaryPath = join(fullTestVectorsDir, 'block.bin')
     const binaryData = readFileSync(binaryPath)
     
@@ -72,7 +73,7 @@ describe('Block Test Vectors - Structure Validation', () => {
   })
 
   it('should verify full block structure consistency', () => {
-    const fullTestVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+    const fullTestVectorsDir = getCodecTestVectorsDir('full')
     const binaryPath = join(fullTestVectorsDir, 'block.bin')
     const binaryData = readFileSync(binaryPath)
     
@@ -105,7 +106,7 @@ describe('Block Test Vectors - Structure Validation', () => {
   // error in decodeWinnersMark. The issue affects both the original test and this
   // separate test file. The full block test vectors work correctly.
   it.skip('should decode tiny block structure correctly (currently failing due to header decoding bug)', () => {
-    const tinyTestVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/tiny')
+    const tinyTestVectorsDir = getCodecTestVectorsDir('tiny')
     const binaryPath = join(tinyTestVectorsDir, 'block.bin')
     const binaryData = readFileSync(binaryPath)
     

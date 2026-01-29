@@ -121,15 +121,14 @@ describe('Privileges Serialization', () => {
   })
 
   it('should handle invalid alwaysaccers entry gracefully', () => {
-    // Create data with valid header but invalid alwaysaccers entry
+    // Create data with valid header but invalid alwaysaccers entry (insufficient bytes)
     const header = new Uint8Array(16) // Valid 16-byte header
-    const invalidEntry = new Uint8Array([1, 2, 3]) // Only 3 bytes, need at least 8
+    const invalidEntry = new Uint8Array([1, 2, 3]) // Only 3 bytes, need at least 8 per entry
     const data = new Uint8Array([...header, ...invalidEntry])
 
     const [decodeError, decoded] = decodePrivileges(data, configService)
-    expect(decodeError).toBeUndefined()
-    expect(decoded).toBeDefined()
-    expect(decoded!.value.alwaysaccers.size).toBe(0) // Empty dictionary for invalid data
+    expect(decodeError).toBeDefined()
+    expect(decoded).toBeUndefined()
   })
 
   it('should preserve remaining data after decoding', () => {

@@ -6,9 +6,10 @@ import { decodeGuarantees, encodeGuarantees } from '../block/guarantee'
 import { decodePreimages, encodePreimages } from '../block/preimage'
 import { decodeSafroleTickets, encodeSafroleTickets } from '../block/ticket'
 import type { IConfigService } from '@pbnjam/types'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Extrinsic Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
   
   // Create a config that matches the jamtestvectors
   const jamtestvectorsConfig = {

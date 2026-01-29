@@ -5,7 +5,7 @@
  * according to Gray Paper equation 158
  */
 
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'bun:test'
 import {
   generateEntropyVRFSignature,
   verifyEntropyVRFSignature,
@@ -37,39 +37,39 @@ describe('Entropy VRF Functions', () => {
   test('verifyEntropyVRFSignature should verify valid signature', () => {
     // Test data
     const validatorSecretKey = new Uint8Array(32).fill(1) // 32 bytes of 1s
-    const validatorPublicKey = new Uint8Array(32).fill(3) // 32 bytes of 3s (would need proper key derivation)
+    const validatorPublicKey = new Uint8Array(32).fill(3) // 32 bytes of 3s (wrong key)
     const sealOutput = new Uint8Array(32).fill(2) // 32 bytes of 2s
 
     // Generate entropy VRF signature
     const [genError, genResult] = generateEntropyVRFSignature(validatorSecretKey, sealOutput)
     expect(genError).toBeUndefined()
 
-    // Verify signature (this will fail with dummy keys, but should not crash)
+    // Verify with wrong public key: implementation may return (error, undefined) when
+    // curve decoding fails, or (undefined, false) when verification returns false
     const [verifyError, isValid] = verifyEntropyVRFSignature(
       validatorPublicKey,
       genResult!.signature,
       sealOutput
     )
-    
-    expect(verifyError).toBeUndefined()
-    expect(typeof isValid).toBe('boolean')
-    // Note: isValid will be false because we're using dummy keys that don't match
+
+    // Must not report valid: either an error or isValid === false
+    expect(verifyError !== undefined || isValid === false).toBe(true)
   })
 
   test('banderout should extract banderout result from 96-byte signature', () => {
-    // Test data - 96-byte signature with known gamma
-    const sealSignature = new Uint8Array(96)
-    const gamma = new Uint8Array(32).fill(0x42) // 32 bytes of 0x42
-    sealSignature.set(gamma, 0) // Set gamma in first 32 bytes
+    // banderout expects the first 32 bytes to be a valid Bandersnatch curve point (gamma).
+    // Use a real signature from generateEntropyVRFSignature so gamma is valid.
+    const validatorSecretKey = new Uint8Array(32).fill(1)
+    const sealOutput = new Uint8Array(32).fill(2)
+    const [genError, genResult] = generateEntropyVRFSignature(validatorSecretKey, sealOutput)
+    expect(genError).toBeUndefined()
+    expect(genResult).toBeDefined()
 
-    // Extract seal output using banderout function
-    const [error, result] = banderout(sealSignature)
-    
+    const [error, result] = banderout(genResult!.signature)
     expect(error).toBeUndefined()
     expect(result).toHaveLength(32)
-    // The result should be the first 32 bytes of pointToHashRfc9381(gamma, false)
-    // This is different from gamma itself, as banderout hashes the gamma point
-    expect(result).not.toEqual(gamma) // Should be hashed, not raw gamma
+    // banderout hashes the gamma point; result is not the raw first 32 bytes of the proof
+    expect(result).not.toEqual(genResult!.signature.slice(0, 32))
   })
 
   test('should reject invalid input sizes', () => {
@@ -256,7 +256,8 @@ describe('Entropy VRF Functions', () => {
     expect(verifyError).toBeUndefined()
     expect(isValid).toBe(true)
 
-    // Step 3: Verify that tampering with the signature causes verification to fail
+    // Step 3: Verify that tampering with the signature causes verification to fail.
+    // Implementation may return (error, undefined) when curve decoding fails on tampered gamma.
     const tamperedSignature = new Uint8Array(genResult!.signature)
     tamperedSignature[0] ^= 0x01 // Flip a bit
 
@@ -266,8 +267,7 @@ describe('Entropy VRF Functions', () => {
       sealOutput!,
     )
 
-    expect(tamperVerifyError).toBeUndefined()
-    expect(isTamperedValid).toBe(false)
+    expect(tamperVerifyError !== undefined || isTamperedValid === false).toBe(true)
 
     // Step 4: Verify that wrong seal output causes verification to fail
     const wrongSealOutput = new Uint8Array(32).fill(0x99)

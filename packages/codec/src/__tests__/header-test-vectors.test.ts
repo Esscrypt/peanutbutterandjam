@@ -3,9 +3,10 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeHeader, encodeHeader } from '../block/header'
 import { ConfigService } from '../../../../infra/node/services/config-service'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Header Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
   
   // jamtestvectors were generated with full config (1023 validators)
   // Use full config for all tests to ensure consistency
