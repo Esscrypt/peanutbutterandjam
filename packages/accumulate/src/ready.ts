@@ -118,6 +118,7 @@ export function collectAllReadyItems(
   epochLength: number,
   currentSlot: bigint,
   readyService: IReadyService,
+  excludeHashes?: Set<Hex>,
 ): ReadyItem[] {
   const allReadyItems: ReadyItem[] = []
   const m = Number(currentSlot) % epochLength
@@ -129,7 +130,16 @@ export function collectAllReadyItems(
   for (let i = 0; i < epochLength; i++) {
     const slotIdx = (m + i) % epochLength
     const slotItems = readyService.getReadyItemsForSlot(BigInt(slotIdx))
-    allReadyItems.push(...slotItems)
+
+    if (excludeHashes && excludeHashes.size > 0) {
+      for (const item of slotItems) {
+        if (!excludeHashes.has(item.workReport.package_spec.hash)) {
+          allReadyItems.push(item)
+        }
+      }
+    } else {
+      allReadyItems.push(...slotItems)
+    }
   }
 
   return allReadyItems

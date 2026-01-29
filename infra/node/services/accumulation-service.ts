@@ -391,15 +391,31 @@ export class AccumulationService extends BaseService {
     batchInvocationIndex: number,
   ): Promise<AccumulationIterationResult> {
     // Step 1: Collect all ready items from ALL slots (in rotated order: [m:] then [:m])
-    const allReadyItems = collectAllReadyItems(
+    // Gray Paper equation 89: q = E(concat{ready[m:]} concat concat{ready[:m]} concat justbecameavailable^Q, ...)
+    // IMPORTANT: We must exclude justbecameavailable^Q (newQueuedItemsForSlotM) from the initial collection
+    // because they are currently in ready[m] but must come AFTER all other ready items.
+    const oldReadyItems = collectAllReadyItems(
       this.configService.epochDuration,
       currentSlot,
       this.readyService,
+      this.newQueuedItemsForSlotM,
     )
+
+    // Step 1b: Get justbecameavailable^Q items (new queued items for this slot)
+    // These are in ready[m] but were excluded above. We need to append them at the end.
+    const m = Number(currentSlot) % this.configService.epochDuration
+    const slotMItems = this.readyService.getReadyItemsForSlot(BigInt(m))
+    const newQueuedItems = slotMItems.filter((item) =>
+      this.newQueuedItemsForSlotM.has(item.workReport.package_spec.hash),
+    )
+
+    // Combine: OldReady + NewQueued
+    // This ensures correct order: Existing Ready Items -> New Queued Items
+    const combinedQueue = [...oldReadyItems, ...newQueuedItems]
 
     // Step 2: Use Q function to get all currently accumulatable items from ready queue
     const readyQueueAccumulatable = getAccumulatableItemsQ(
-      allReadyItems,
+      combinedQueue,
       this.accumulated,
     )
 
@@ -517,21 +533,12 @@ export class AccumulationService extends BaseService {
       }
     }
 
-    // Pass only immediate items that were in this batch (for fullyProcessedPackageHashes)
-    const immediateInBatch = immediateItems.filter((ii) =>
-      batchItems.some((bi) => {
-        const [e1, h1] = calculateWorkReportHash(ii.workReport)
-        const [e2, h2] = calculateWorkReportHash(bi.workReport)
-        return !e1 && !e2 && h1 === h2
-      }),
-    )
     this.updateGlobalState(
       results,
       processedWorkReports,
       workReportsByService,
       currentSlot,
       partialStateAccountsPerInvocation,
-      immediateInBatch,
       accumulatedServiceIds,
     )
 
@@ -928,7 +935,6 @@ export class AccumulationService extends BaseService {
     workReportsByService: Map<number, WorkReport[]>,
     currentSlot: bigint,
     partialStateAccountsPerInvocation?: Map<number, Set<bigint>>,
-    immediateItems?: readonly ReadyItem[], // Add immediate items to ensure their packages are added
     accumulatedServiceIds?: bigint[], // Service ID for each invocation (needed for transfer-only)
   ): void {
     // Collect poststates from all services for privilege computation
@@ -948,11 +954,9 @@ export class AccumulationService extends BaseService {
     // means that all work reports containing work items with this package hash have been processed
     const fullyProcessedPackageHashes = new Set<Hex>()
 
-    if (immediateItems) {
-      for (const item of immediateItems) {
-        fullyProcessedPackageHashes.add(item.workReport.package_spec.hash)
-      }
-    }
+    // CRITICAL FIX: Do NOT add immediateItems unconditionally.
+    // Only add packages from work reports that were ACTUALLY processed (in processedWorkReports).
+    // processedWorkReports contains ALL processed reports (both immediate and queued).
 
     for (let serviceIdx = 0; serviceIdx < results.length; serviceIdx++) {
       const serviceWorkReports = workReportsByService.get(serviceIdx) || []

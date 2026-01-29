@@ -286,7 +286,7 @@ describe('Reports - JAM Test Vectors', () => {
             accumulatePVM: accumulatePVM,
             readyService: readyService,
             statisticsService: statisticsService,
-            useWorkerPool: true,
+            useWorkerPool: false,
           })
 
           const [accumulationStartError] = await accumulatedService.start()

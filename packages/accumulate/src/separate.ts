@@ -49,8 +49,7 @@ export function separateReportsIntoImmediateAndQueued(
       immediateItems.push({
         workReport: report,
         dependencies: new Set<Hex>(),
-        originallyImmediate: true, // Internal flag for ordering
-      } as ReadyItem & { originallyImmediate: boolean })
+      })
     } else {
       // Gray Paper equation 40-44: D(r) = (r, set{prerequisites} ∪ keys{segment_root_lookup})
       // Gray Paper equation 45: justbecameavailable^Q = E(D(r) for r with dependencies, accumulatedcup)
@@ -75,39 +74,22 @@ export function separateReportsIntoImmediateAndQueued(
         }
       }
 
-      // If all dependencies are satisfied (filtered to empty), treat as immediate
-      // Gray Paper: Items with no remaining dependencies can be accumulated immediately
-      // This ensures work items for the same service are combined into a single invocation
-      if (filteredDependencies.size === 0) {
-        // Items that originally had prerequisites should come AFTER true immediate items
-        immediateItems.push({
-          workReport: report,
-          dependencies: new Set<Hex>(),
-          originallyImmediate: false, // Was originally queued, now immediate
-        } as ReadyItem & { originallyImmediate: boolean })
-      } else {
-        // Queue items that still have unsatisfied dependencies
-        queuedItems.push({
-          workReport: report,
-          dependencies: filteredDependencies,
-        })
-      }
+      // If all dependencies are satisfied (filtered to empty), they are still QUEUED items
+      // Gray Paper equation 40: justbecameavailable^Q includes ALL items with prerequisites
+      // Gray Paper equation 88: justbecameavailable* = justbecameavailable^! concat Q(q)
+      // where q includes justbecameavailable^Q.
+      // This ensures that even if dependencies are satisfied, these items must wait in the queue
+      // behind existing ready items (Ready #1 -> Imm #2).
+      queuedItems.push({
+        workReport: report,
+        dependencies: filteredDependencies,
+      })
     }
   }
 
-  // Sort immediate items: true immediate (no original prerequisites) first,
-  // then items that were originally queued but now have empty dependencies
-  // This ensures correct ordering for accumulate inputs
+  // Sort immediate items by core index for determinism
+  // Gray Paper equation 39: justbecameavailable^! is a sequence (ordered)
   const sortedImmediateItems = immediateItems.sort((a, b) => {
-    const aOrigImmediate =
-      (a as ReadyItem & { originallyImmediate?: boolean })
-        .originallyImmediate ?? false
-    const bOrigImmediate =
-      (b as ReadyItem & { originallyImmediate?: boolean })
-        .originallyImmediate ?? false
-    if (aOrigImmediate && !bOrigImmediate) return -1
-    if (!aOrigImmediate && bOrigImmediate) return 1
-    // Within same category, sort by core index for determinism
     return Number(a.workReport.core_index - b.workReport.core_index)
   })
 

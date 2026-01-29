@@ -19,6 +19,7 @@ import {
 import {
   createCoreServices,
   startCoreServices,
+  stopCoreServices,
   type ServiceContext,
   type ConfigServiceSizeType,
 } from '../services/service-factory'
@@ -297,7 +298,13 @@ export async function initializeServices(options?: {
   }
 
   // Start the services
-  await startCoreServices(context)
+  try {
+    await startCoreServices(context)
+  } catch (error) {
+    // Ensure services are stopped if startup fails to prevent resource leaks (e.g. worker pool)
+    await stopCoreServices(context)
+    throw error
+  }
 
   return {
     stateService: context.stateService,

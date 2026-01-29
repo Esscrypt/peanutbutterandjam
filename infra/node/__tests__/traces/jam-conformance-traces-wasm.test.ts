@@ -290,6 +290,31 @@ describe('JAM Conformance Traces', () => {
         }
       }
 
+      // Set accumulationService.lastProcessedSlot from pre_state's thetime (Chapter 11)
+      // This is critical because lastProcessedSlot is NOT part of the state trie -
+      // it's an internal variable used to calculate slot delta for ready queue shifting.
+      // Without this, shiftStateForBlockTransition() uses stale lastProcessedSlot from
+      // previous block processing, causing incorrect ready queue state.
+      // Chapter 11 key: 0x0b followed by 29 zero bytes
+      const thetimeKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x0b000000000000000000000000000000000000000000000000000000000000'
+      )
+      if (thetimeKeyval) {
+        // thetime is encoded as a little-endian u32 (4 bytes)
+        const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
+        // Read as little-endian u32
+        const thetime = BigInt(
+          thetimeBytes[0] |
+          (thetimeBytes[1] << 8) |
+          (thetimeBytes[2] << 16) |
+          (thetimeBytes[3] << 24)
+        )
+        fullContext.accumulationService.setLastProcessedSlot(thetime)
+      } else {
+        // No thetime in pre_state - reset to null for fresh start
+        fullContext.accumulationService.setLastProcessedSlot(null)
+      }
+
       // Store initial state snapshot in ChainManagerService for fork rollback
       // This allows rolling back to initial state if block import fails
       const [initTrieError, initTrie] = stateService.generateStateTrie()
