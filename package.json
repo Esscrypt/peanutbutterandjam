@@ -10,16 +10,16 @@
     "scripts"
   ],
   "scripts": {
-    "build": "turbo run build --output-logs=full --log-order=stream",
-    "check": "turbo run check --cache=local:r,remote:r --output-logs=full",
+    "build": "TURBO_TELEMETRY_DISABLED=1 turbo run build --output-logs=full --log-order=stream",
+    "check": "TURBO_TELEMETRY_DISABLED=1 turbo run check --cache=local:r,remote:r --output-logs=full",
     "build:main": "bun build ./infra/node/services/main-service.ts --compile --outfile ./bin/main-service --sourcemap --minify-whitespace --minify-syntax --target bun ",
     "build:fuzzer": "bun build ./infra/node/fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --minify --target bun ",
-    "clean": "turbo run clean && rm -rf node_modules",
+    "clean": "TURBO_TELEMETRY_DISABLED=1 turbo run clean && rm -rf node_modules",
     "format": "biome format . --write",
-    "generate": "turbo run generate --cache:local:r,remote:r --parallel --continue",
+    "generate": "TURBO_TELEMETRY_DISABLED=1 turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "test": "turbo run test --parallel",
+    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test --parallel",
     "prepare": "lefthook install",
     "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
@@ -43,6 +43,9 @@
     "lefthook": "1.12.2",
     "turbo": "2.5.5",
     "typescript": "5.9.2"
+  },
+  "optionalDependencies": {
+    "@infisical/quic-linux-arm": "1.0.8"
   },
   "catalog": {
     "@noble/hashes": "2.0.1",
