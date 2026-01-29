@@ -16,9 +16,8 @@ import {
   getServiceRequestValue,
   setServiceRequestValue,
   getServiceStorageValue,
-  setServiceStorageValue,
-  type ServiceAccount,
 } from '@pbnjam/codec'
+import type { ServiceAccount } from '@pbnjam/types'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

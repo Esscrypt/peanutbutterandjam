@@ -7,7 +7,7 @@ import { join } from 'node:path'
 // import { instantiate } from '@assemblyscript/loader'
 import { instantiate } from './wasmAsInit'
 import { logger } from '@pbnjam/core'
-import { PVMParser } from '@pbnjam/pvm'
+import { InstructionRegistry, PVMParser } from '@pbnjam/pvm'
 
 // PVM page size (4KB)
 const PAGE_SIZE = 4096

@@ -1,6 +1,7 @@
 {
   "extends": "@pbnjam/typescript-config/base.json",
   "exclude": [
-    "assembly/**/*"
+    "assembly/**/*",
+    "build/**"
   ]
 }
