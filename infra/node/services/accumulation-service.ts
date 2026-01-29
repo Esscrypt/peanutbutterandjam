@@ -111,6 +111,8 @@ export class AccumulationService extends BaseService {
   /** When useWorkerPool, required so worker receives main-process entropy and gas matches in-process. */
   private readonly entropyService: IEntropyService | undefined
   private workerPool: PVMWorkerPool | null = null
+
+  private readonly useWasm: boolean
   // Track the last processed slot (for determining shift delta)
   private lastProcessedSlot: bigint | null = null
   // Track local_fnservouts (accumulation output pairings) for the latest accumulation
@@ -161,6 +163,7 @@ export class AccumulationService extends BaseService {
     this.statisticsService = options.statisticsService
     this.useWorkerPool = options.useWorkerPool
     this.entropyService = options.entropyService
+    this.useWasm = options.accumulatePVM.useWasm
     // Worker pool will be initialized in start() method if useWorkerPool is enabled
     if (this.useWorkerPool) {
       if (!this.entropyService) {
@@ -581,55 +584,74 @@ export class AccumulationService extends BaseService {
     accumulatedServiceIds: bigint[]
     partialStateAccountsPerInvocation: Map<number, Set<bigint>>
   }> {
-    const batchResults = await Promise.all(
-      batchInvocations.map(async (inv, idx) => {
-        const transfers = this.filterDefxfersFromInputs(inv.inputs).length
-        const operands = inv.inputs.filter((inp) => inp.type === 0).length
-        logger.info(
-          `[accumulate] Accumulating service ${inv.serviceId}, transfers: ${transfers} operands: ${operands} at slot: ${currentSlot}`,
-        )
-
-        const isFirstInvocationOfBatch = idx === 0
-        const useWorker =
-          this.useWorkerPool &&
-          this.workerPool !== null &&
-          !isFirstInvocationOfBatch
-
-        if (!useWorker) {
-          return this.executeAccumulateInvocation(
+    let batchResults: AccumulateInvocationResult[] = []
+    if (!this.useWorkerPool && !this.useWasm) {
+      for (let i = 0; i < batchInvocations.length; i++) {
+        const inv = batchInvocations[i]!
+        batchResults.push(
+          await this.executeAccumulateInvocation(
             inv.partialState,
             currentSlot,
             inv.serviceId,
             inv.gasLimit,
             inv.inputs,
             batchInvocationIndex,
-          )
-        }
-
-        if (!this.entropyService && this.useWorkerPool) {
-          logger.warn(
-            '[AccumulationService] useWorkerPool but no entropyService – worker gas may diverge',
-            {
-              serviceId: inv.serviceId.toString(),
-              batchInvocationIndex,
-            },
-          )
-        }
-        const entropySnapshot = this.entropyService
-          ?.getEntropyAccumulator()
-          ?.slice(0)
-
-        return this.workerPool!.execute(
-          inv.partialState,
-          currentSlot,
-          inv.serviceId,
-          inv.gasLimit,
-          inv.inputs,
-          batchInvocationIndex,
-          entropySnapshot ? { entropyAccumulator: entropySnapshot } : undefined,
+          ),
         )
-      }),
-    )
+      }
+    } else {
+      batchResults = await Promise.all(
+        batchInvocations.map(async (inv, idx) => {
+          const transfers = this.filterDefxfersFromInputs(inv.inputs).length
+          const operands = inv.inputs.filter((inp) => inp.type === 0).length
+          logger.info(
+            `[accumulate] Accumulating service ${inv.serviceId}, transfers: ${transfers} operands: ${operands} at slot: ${currentSlot}`,
+          )
+
+          const isFirstInvocationOfBatch = idx === 0
+          const useWorker =
+            this.useWorkerPool &&
+            this.workerPool !== null &&
+            !isFirstInvocationOfBatch
+
+          if (!useWorker) {
+            return this.executeAccumulateInvocation(
+              inv.partialState,
+              currentSlot,
+              inv.serviceId,
+              inv.gasLimit,
+              inv.inputs,
+              batchInvocationIndex,
+            )
+          }
+
+          if (!this.entropyService && this.useWorkerPool) {
+            logger.warn(
+              '[AccumulationService] useWorkerPool but no entropyService – worker gas may diverge',
+              {
+                serviceId: inv.serviceId.toString(),
+                batchInvocationIndex,
+              },
+            )
+          }
+          const entropySnapshot = this.entropyService
+            ?.getEntropyAccumulator()
+            ?.slice(0)
+
+          return this.workerPool!.execute(
+            inv.partialState,
+            currentSlot,
+            inv.serviceId,
+            inv.gasLimit,
+            inv.inputs,
+            batchInvocationIndex,
+            entropySnapshot
+              ? { entropyAccumulator: entropySnapshot }
+              : undefined,
+          )
+        }),
+      )
+    }
 
     const results: AccumulateInvocationResult[] = []
     const processedWorkReports: WorkReport[] = []

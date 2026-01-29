@@ -32,7 +32,6 @@ import {
 export class TransferHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.TRANSFER
   readonly name = 'transfer'
-  readonly gasCost = 10n // Base cost, actual cost is 10 + gasLimit on success (Gray Paper: g = 10 + t)
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
     const { registers, ram, implications } = context

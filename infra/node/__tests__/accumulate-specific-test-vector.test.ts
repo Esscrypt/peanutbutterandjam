@@ -145,7 +145,7 @@ describe('Accumulate Test Vector Execution', () => {
               // Gray Paper: Cmaxblockgas is the total gas available per block for accumulation
               // The accumulation service's calculateTotalGasLimit() also uses configService.maxBlockGas
               pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-              useWasm: false,
+              useWasm: true,
               traceSubfolder: `accumulate-stf/${configType}/${name}`, // Write traces to separate folder for STF tests
             })
             const privilegesService = new PrivilegesService({
@@ -180,7 +180,7 @@ describe('Accumulate Test Vector Execution', () => {
               accumulatePVM: pvm,
               readyService: readyService,
               statisticsService: statisticsService, 
-              useWorkerPool: true,
+              useWorkerPool: false,
             })
 
             const [accumulationStartError] = await accumulationService.start()

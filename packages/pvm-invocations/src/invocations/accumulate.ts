@@ -51,7 +51,7 @@ export class AccumulatePVM {
   private readonly entropyService: IEntropyService
   private readonly configService: IConfigService
   private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
-  private readonly useWasm: boolean
+  readonly useWasm: boolean
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry | null
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry | null

@@ -13,7 +13,7 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "cli": "tsx src/cli.ts",
     "cli:build": "tsc && node dist/cli.js",
-    "test": "bun test __tests__ --ignore __tests__/traces"
+    "test": "bun test __tests__/*.test.ts"
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",

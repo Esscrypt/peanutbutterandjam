@@ -74,7 +74,7 @@ describe('Genesis Parse Tests', () => {
       }))
 
       // Initialize services using shared utility
-      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false })
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: true })
       const { stateService,chainManagerService, recentHistoryService, configService: servicesConfigService } = services
       
       // Set ancestryEnabled = false on the actual configService used by chainManagerService

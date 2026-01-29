@@ -153,9 +153,20 @@ describe('Statistics Service - JAM Test Vectors', () => {
             body,
           })
 
-          // Update guarantees separately (applyBlockDeltas doesn't call this)
-          // This must happen AFTER epoch transition to ensure stats go into correct epoch
-          statsService.updateGuarantees(body.guarantees)
+          // Update guarantees separately (applyBlockDeltas doesn't call this).
+          // updateGuarantees(reporterKeys, activeValidators) expects ED25519 keys of signers and the current validator set.
+          const numValidators = configService.numValidators
+          const activeValidators = Array.from({ length: numValidators }, (_, i) => ({
+            ed25519: ('0x' + i.toString().padStart(64, '0')) as Hex,
+          }))
+          const reporterIndices = new Set<number>()
+          for (const g of body.guarantees) {
+            for (const s of g.signatures) {
+              reporterIndices.add(s.validator_index)
+            }
+          }
+          const reporterKeys = Array.from(reporterIndices).map((i) => activeValidators[i].ed25519)
+          statsService.updateGuarantees(reporterKeys, activeValidators)
 
           // Validate validator statistics against post_state
           const activity = statsService.getActivity()

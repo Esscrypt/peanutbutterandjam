@@ -769,11 +769,17 @@ export function encodeFixedLength(value: u64, length: i32): Uint8Array {
     }
   }
   
-  // Little-endian encoding
-  for (let i = 0; i < length; i++) {
+  // Little-endian encoding. For length > 8, u64 only has 8 bytes of information;
+  // WASM i64.shr_u uses shift count mod 64, so (value >> (i*8)) for i >= 8 would
+  // repeat low bytes instead of zero. Encode value only for indices 0..7; zero-fill rest.
+  const valueBytes = length > 8 ? 8 : length
+  for (let i = 0; i < valueBytes; i++) {
     result[i] = u8((wrappedValue >> (i * 8)) & 0xff)
   }
-  
+  for (let i = valueBytes; i < length; i++) {
+    result[i] = 0
+  }
+
   return result
 }
 
