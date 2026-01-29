@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
+      - name: Checkout jam-test-vectors submodule
+        run: git submodule update --init submodules/jam-test-vectors
 
       - name: Install dependencies
         uses: ./.github/actions/install
@@ -42,6 +44,8 @@ jobs:
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
+      - name: Checkout jam-test-vectors submodule
+        run: git submodule update --init submodules/jam-test-vectors
       - name: Install dependencies
         uses: ./.github/actions/install
       - name: Run PeanutButterAndJam tests
