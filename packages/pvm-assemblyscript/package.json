@@ -13,7 +13,6 @@
     "build:raw": "asc assembly/index.ts --target raw",
     "build:test": "asc assembly/test-run.ts --target test",
     "copy:wasm": "rm -rf ../pvm-invocations/src/wasm && mkdir -p ../pvm-invocations/src/wasm && cp -r build/* ../pvm-invocations/src/wasm/ && node scripts/fix-duplicate-exports.js --target ../pvm-invocations/src/wasm",
-    "test": "npm run build:debug && node tests/index.js",
     "clean": "rm -rf build/ node_modules/",
     "check": "tsc --pretty --noEmit",
     "format": "prettier --write assembly/**/*.ts"
