@@ -54,18 +54,17 @@ export function encodeFixedLength(
   }
 
   const lengthNum = Number(length)
-  const maxValue = 2n ** (8n * BigInt(lengthNum)) - 1n
-  if (value > maxValue) {
-    throw new Error(
-      `Value ${value} exceeds maximum for ${lengthNum}-byte encoding: ${maxValue}`,
-    )
-  }
+  const modulus = 2n ** (8n * BigInt(lengthNum))
+
+  // Wrap value to fit in the encoding space (Gray Paper uses modulo operations)
+  // This matches the mathematical definition: encode[l](x) uses x mod 256, x mod 2^8, etc.
+  const wrappedValue = value % modulus
 
   const result = new Uint8Array(lengthNum)
 
   // Little-endian encoding
   for (let i = 0; i < lengthNum; i++) {
-    result[i] = Number((value >> (8n * BigInt(i))) & 0xffn)
+    result[i] = Number((wrappedValue >> (8n * BigInt(i))) & 0xffn)
   }
 
   return safeResult(result)

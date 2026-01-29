@@ -6,6 +6,21 @@ import { ConfigService } from '../../../../infra/node/services/config-service'
 // Mock config service for testing
 const mockConfigService = new ConfigService('tiny')
 
+/** Zero-filled validator used to pad staging set to numValidators. */
+const ZERO_VALIDATOR: ValidatorPublicKeys = {
+  bandersnatch: '0x' + '0'.repeat(64) as `0x${string}`,
+  ed25519: '0x' + '0'.repeat(64) as `0x${string}`,
+  bls: '0x' + '0'.repeat(288) as `0x${string}`,
+  metadata: '0x' + '0'.repeat(256) as `0x${string}`,
+}
+
+function padStagingSet(set: ValidatorPublicKeys[]): ValidatorPublicKeys[] {
+  const padded = [...set]
+  while (padded.length < mockConfigService.numValidators) {
+    padded.push(ZERO_VALIDATOR)
+  }
+  return padded
+}
 
 describe('Staging Set Serialization', () => {
   const mockValidator: ValidatorPublicKeys = {
@@ -23,7 +38,7 @@ describe('Staging Set Serialization', () => {
   }
 
   it('should encode and decode empty staging set', () => {
-    const stagingSet: ValidatorPublicKeys[] = []
+    const stagingSet = padStagingSet([])
 
     const [encodeError, encodedData] = encodeValidatorSet(stagingSet, mockConfigService)
     expect(encodeError).toBeUndefined()
@@ -32,12 +47,13 @@ describe('Staging Set Serialization', () => {
     const [decodeError, decoded] = decodeValidatorSet(encodedData!, mockConfigService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
-    expect(decoded!.value).toHaveLength(3) // Should be padded to NUM_VALIDATORS
-    expect(decoded!.consumed).toBe(3 * 336) // 3 validators * 336 bytes each
+    const expectedCount = mockConfigService.numValidators
+    expect(decoded!.value).toHaveLength(expectedCount) // Padded to Cvalcount
+    expect(decoded!.consumed).toBe(expectedCount * 336) // 336 bytes per validator
   })
 
   it('should encode and decode single validator', () => {
-    const stagingSet = [mockValidator]
+    const stagingSet = padStagingSet([mockValidator])
 
     const [encodeError, encodedData] = encodeValidatorSet(stagingSet, mockConfigService)
     expect(encodeError).toBeUndefined()
@@ -46,13 +62,14 @@ describe('Staging Set Serialization', () => {
     const [decodeError, decoded] = decodeValidatorSet(encodedData!, mockConfigService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
-    expect(decoded!.value).toHaveLength(3) // Should be padded to NUM_VALIDATORS
+    const expectedCount = mockConfigService.numValidators
+    expect(decoded!.value).toHaveLength(expectedCount)
     expect(decoded!.value[0]).toEqual(mockValidator)
-    expect(decoded!.consumed).toBe(3 * 336) // 3 validators * 336 bytes each
+    expect(decoded!.consumed).toBe(expectedCount * 336)
   })
 
   it('should encode and decode multiple validators', () => {
-    const stagingSet = [mockValidator, mockValidator2]
+    const stagingSet = padStagingSet([mockValidator, mockValidator2])
 
     const [encodeError, encodedData] = encodeValidatorSet(stagingSet, mockConfigService)
     expect(encodeError).toBeUndefined()
@@ -61,10 +78,11 @@ describe('Staging Set Serialization', () => {
     const [decodeError, decoded] = decodeValidatorSet(encodedData!, mockConfigService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
-    expect(decoded!.value).toHaveLength(3) // Should be padded to NUM_VALIDATORS
+    const expectedCount = mockConfigService.numValidators
+    expect(decoded!.value).toHaveLength(expectedCount)
     expect(decoded!.value[0]).toEqual(mockValidator)
     expect(decoded!.value[1]).toEqual(mockValidator2)
-    expect(decoded!.consumed).toBe(3 * 336) // 3 validators * 336 bytes each
+    expect(decoded!.consumed).toBe(expectedCount * 336)
   })
 
   it('should handle round-trip with realistic validator data', () => {
@@ -75,7 +93,7 @@ describe('Staging Set Serialization', () => {
       metadata: '0x' + 'deadbeefcafebabe'.repeat(16) as `0x${string}`, // 128 bytes
     }
 
-    const stagingSet = [realisticValidator]
+    const stagingSet = padStagingSet([realisticValidator])
 
     const [encodeError, encodedData] = encodeValidatorSet(stagingSet, mockConfigService)
     expect(encodeError).toBeUndefined()
@@ -84,7 +102,8 @@ describe('Staging Set Serialization', () => {
     const [decodeError, decoded] = decodeValidatorSet(encodedData!, mockConfigService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
-    expect(decoded!.value).toEqual(stagingSet)
+    expect(decoded!.value).toHaveLength(mockConfigService.numValidators)
+    expect(decoded!.value[0]).toEqual(realisticValidator)
   })
 
   it('should fail with insufficient data', () => {
@@ -111,13 +130,16 @@ describe('Staging Set Serialization', () => {
       metadata: '0x' + 'd'.repeat(256) as `0x${string}`, // 128 bytes
     }
 
-    const [encodeError, encodedData] = encodeValidatorSet([wrongSizeValidator], mockConfigService)
+    const [encodeError, encodedData] = encodeValidatorSet(
+      padStagingSet([wrongSizeValidator]),
+      mockConfigService,
+    )
     expect(encodeError).toBeDefined()
     expect(encodedData).toBeUndefined()
   })
 
   it('should preserve remaining data after decoding', () => {
-    const stagingSet = [mockValidator]
+    const stagingSet = padStagingSet([mockValidator])
     const [encodeError, encodedData] = encodeValidatorSet(stagingSet, mockConfigService)
     expect(encodeError).toBeUndefined()
 
@@ -130,7 +152,8 @@ describe('Staging Set Serialization', () => {
     const [decodeError, decoded] = decodeValidatorSet(combinedData, mockConfigService)
     expect(decodeError).toBeUndefined()
     expect(decoded).toBeDefined()
-    expect(decoded!.value).toEqual(stagingSet)
+    expect(decoded!.value).toHaveLength(mockConfigService.numValidators)
+    expect(decoded!.value[0]).toEqual(mockValidator)
     expect(decoded!.remaining).toEqual(extraData)
   })
 })

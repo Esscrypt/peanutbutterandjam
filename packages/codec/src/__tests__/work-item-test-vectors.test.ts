@@ -14,12 +14,11 @@ import { join } from 'path'
 import { decodeWorkItem, encodeWorkItem } from '../work-package/package'
 import type { WorkItem } from '@pbnjam/types'
 import { describe, it, expect } from 'bun:test'
+import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(
-    __dirname,
-    '../../../../submodules/jamtestvectors/codec/full',
-  )
+  const testVectorsDir = getCodecTestVectorsDir('full')
 
   describe('work_item (Complete Work Item)', () => {
     it('should handle work_item round-trip encoding/decoding', () => {
@@ -30,11 +29,11 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
       const binaryData = new Uint8Array(readFileSync(binaryPath))
       const jsonData = JSON.parse(readFileSync(jsonPath, 'utf8'))
 
-      // Convert JSON data to WorkItem type (numbers to BigInt)
+      // Convert JSON data to WorkItem type (numbers to BigInt). payload is bytes in codec.
       const workItem: WorkItem = {
         serviceindex: BigInt(jsonData.service),
         codehash: jsonData.code_hash,
-        payload: jsonData.payload,
+        payload: hexToBytes(jsonData.payload as `0x${string}`),
         refgaslimit: BigInt(jsonData.refine_gas_limit),
         accgaslimit: BigInt(jsonData.accumulate_gas_limit),
         exportcount: BigInt(jsonData.export_count),
@@ -54,10 +53,10 @@ describe('Work Item Test Vectors - Round Trip Encoding/Decoding', () => {
         throw error
       }
 
-      // Verify structure matches JSON data
+      // Verify structure matches JSON data (decoder returns payload as Uint8Array)
       expect(decodedItem.value.serviceindex).toBe(workItem.serviceindex)
       expect(decodedItem.value.codehash).toBe(workItem.codehash)
-      expect(decodedItem.value.payload).toBe(workItem.payload)
+      expect(bytesToHex(decodedItem.value.payload)).toBe(bytesToHex(workItem.payload))
       expect(decodedItem.value.refgaslimit).toBe(workItem.refgaslimit)
       expect(decodedItem.value.accgaslimit).toBe(workItem.accgaslimit)
       expect(decodedItem.value.exportcount).toBe(workItem.exportcount)

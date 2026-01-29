@@ -43707,6 +43707,9 @@
  (func $assembly/codec/encodeFixedLength (param $0 i64) (param $1 i32) (result i32)
   (local $2 i32)
   (local $3 i32)
+  (local $4 i32)
+  (local $5 i64)
+  (local $6 i32)
   global.get $~lib/memory/__stack_pointer
   i32.const 8
   i32.sub
@@ -43725,12 +43728,126 @@
   global.get $~lib/memory/__stack_pointer
   i64.const 0
   i64.store
+  local.get $1
+  i32.const 0
+  i32.le_s
+  if
+   i32.const 0
+   call $~lib/typedarray/Uint8Array#constructor
+   local.set $1
+   global.get $~lib/memory/__stack_pointer
+   i32.const 8
+   i32.add
+   global.set $~lib/memory/__stack_pointer
+   local.get $1
+   return
+  end
   global.get $~lib/memory/__stack_pointer
   local.get $1
   call $~lib/typedarray/Uint8Array#constructor
   local.tee $3
   i32.store
-  loop $for-loop|0
+  local.get $1
+  i32.const 1
+  i32.eq
+  if (result i64)
+   local.get $0
+   i64.const 255
+   i64.and
+  else
+   local.get $1
+   i32.const 2
+   i32.eq
+   if (result i64)
+    local.get $0
+    i64.const 65535
+    i64.and
+   else
+    local.get $1
+    i32.const 4
+    i32.eq
+    if (result i64)
+     local.get $0
+     i64.const 4294967295
+     i64.and
+    else
+     local.get $1
+     i32.const 8
+     i32.ne
+     if (result i64)
+      local.get $1
+      i32.const 3
+      i32.shl
+      local.tee $6
+      i32.const 64
+      i32.lt_s
+      if (result i64)
+       i64.const 1
+       local.set $5
+       loop $for-loop|0
+        local.get $2
+        local.get $6
+        i32.lt_s
+        if
+         local.get $5
+         i64.const 1
+         i64.shl
+         local.set $5
+         local.get $2
+         i32.const 1
+         i32.add
+         local.set $2
+         br $for-loop|0
+        end
+       end
+       local.get $0
+       local.get $5
+       i64.rem_u
+      else
+       local.get $0
+      end
+     else
+      local.get $0
+     end
+    end
+   end
+  end
+  local.set $0
+  i32.const 8
+  local.get $1
+  local.get $1
+  i32.const 8
+  i32.gt_s
+  select
+  local.set $2
+  loop $for-loop|1
+   local.get $2
+   local.get $4
+   i32.gt_s
+   if
+    global.get $~lib/memory/__stack_pointer
+    local.get $3
+    i32.store offset=4
+    local.get $3
+    local.get $4
+    local.get $0
+    local.get $4
+    i32.const 3
+    i32.shl
+    i64.extend_i32_s
+    i64.shr_u
+    i64.const 255
+    i64.and
+    i32.wrap_i64
+    call $~lib/typedarray/Uint8Array#__uset
+    local.get $4
+    i32.const 1
+    i32.add
+    local.set $4
+    br $for-loop|1
+   end
+  end
+  loop $for-loop|2
    local.get $1
    local.get $2
    i32.gt_s
@@ -43740,21 +43857,13 @@
     i32.store offset=4
     local.get $3
     local.get $2
-    local.get $0
-    local.get $2
-    i32.const 3
-    i32.shl
-    i64.extend_i32_s
-    i64.shr_u
-    i64.const 255
-    i64.and
-    i32.wrap_i64
+    i32.const 0
     call $~lib/typedarray/Uint8Array#__uset
     local.get $2
     i32.const 1
     i32.add
     local.set $2
-    br $for-loop|0
+    br $for-loop|2
    end
   end
   global.get $~lib/memory/__stack_pointer

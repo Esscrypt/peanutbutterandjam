@@ -234,6 +234,7 @@ export class WasmPVMExecutor {
     _inputs: AccumulateInput[],
     serviceId: bigint,
     invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    entropyOverride?: Uint8Array, // When provided (e.g. by worker from main-process snapshot), use instead of entropyService for WASM setup
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -270,7 +271,11 @@ export class WasmPVMExecutor {
     const numCores = this.configService.numCores
     const numValidators = this.configService.numValidators
     const authQueueSize = 80 // Standard auth queue size
-    const entropyAccumulator = this.entropyService.getEntropyAccumulator()
+    // Use override when provided (e.g. worker receives main-process snapshot) so in-process and worker see same entropy in WASM
+    const entropyAccumulator =
+      entropyOverride && entropyOverride.length === 32
+        ? entropyOverride
+        : this.entropyService.getEntropyAccumulator()
 
     if (entropyAccumulator.length !== 32) {
       return safeError(
@@ -751,5 +756,18 @@ export class WasmPVMExecutor {
       faultAddress: null,
       hostCallId: null,
     }
+  }
+
+  /**
+   * Release internal memory (WASM instance and mutable state).
+   * Call before dropping the executor so WASM linear memory can be GC'd.
+   */
+  dispose(): void {
+    this.wasm = null
+    this.currentState = null
+    this.executionLogs = []
+    this.traceHostFunctionLogs = []
+    this.code = new Uint8Array(0)
+    this.bitmask = new Uint8Array(0)
   }
 }

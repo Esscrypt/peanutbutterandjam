@@ -94,7 +94,8 @@ export class TypeScriptPVMExecutor extends PVM {
     timeslot: bigint,
     inputs: AccumulateInput[],
     _serviceId: bigint,
-    invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    invocationIndex: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    _entropyOverride?: Uint8Array, // Unused; TS path uses implicationsPair built with override. Kept for executor signature compatibility.
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -684,5 +685,13 @@ export class TypeScriptPVMExecutor extends PVM {
         `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
       )
     }
+  }
+
+  /**
+   * Release internal mutable state. Call before dropping the executor.
+   */
+  dispose(): void {
+    this.accumulateInputs = null
+    this.traceHostFunctionLogs = []
   }
 }

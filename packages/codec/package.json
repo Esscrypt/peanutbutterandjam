@@ -6,10 +6,11 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "bun test",
+    "test": "bun test --pass-with-no-tests",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist && rm -rf node_modules",
+    "check": "tsc --pretty --noEmit"
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",

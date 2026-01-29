@@ -31,8 +31,18 @@ export class ConfigService extends BaseService implements IConfigService {
   private _ancestryEnabled = true
   private _forkingEnabled = true
 
+  readonly _mode:
+    | 'tiny'
+    | 'small'
+    | 'medium'
+    | 'large'
+    | 'xlarge'
+    | '2xlarge'
+    | '3xlarge'
+    | 'full'
+
   constructor(
-    private readonly mode:
+    readonly mode:
       | 'tiny'
       | 'small'
       | 'medium'
@@ -43,6 +53,7 @@ export class ConfigService extends BaseService implements IConfigService {
       | 'full',
   ) {
     super('safrole-config')
+    this._mode = mode
   }
 
   /**

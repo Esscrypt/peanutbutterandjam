@@ -7,7 +7,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { stateRoot } from '@pbnjam/core'
 
 /**
@@ -16,7 +16,7 @@ import { stateRoot } from '@pbnjam/core'
 async function loadTraceFile(traceDir: string, filename: string): Promise<any> {
   const tracePath = join(
     __dirname,
-    `../../../../submodules/jamtestvectors/traces/${traceDir}/${filename}`
+    `../../../../submodules/jam-test-vectors/traces/${traceDir}/${filename}`
   )
   
   const content = await readFile(tracePath, 'utf8')

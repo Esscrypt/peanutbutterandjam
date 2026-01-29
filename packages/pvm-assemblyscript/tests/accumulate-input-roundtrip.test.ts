@@ -193,7 +193,6 @@ function compareAccumulateInput(a: AccumulateInput, b: AccumulateInput): boolean
     return compareDeferredTransfers(a.value as DeferredTransfer, b.value as DeferredTransfer)
   }
   
-  logger.error(`Unknown type: ${a.type}`)
   return false
 }
 

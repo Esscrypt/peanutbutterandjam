@@ -9,7 +9,9 @@
 
 import path from 'node:path'
 import {
+  RingVRFProverW3F,
   RingVRFProverWasm,
+  RingVRFVerifierW3F,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import { bytesToHex, EventBusService, type Hex, logger } from '@pbnjam/core'
@@ -108,6 +110,10 @@ export interface ServiceFactoryOptions {
   }
   /** Use WASM for PVM */
   useWasm?: boolean
+  /** Use worker pool for accumulation service */
+  useWorkerPool?: boolean
+  /** Use WASM for Ring VRF (true = RingVRFProverWasm/RingVRFVerifierWasm, false = W3F) */
+  useRingVrfWasm?: boolean
   /** Trace subfolder for debugging */
   traceSubfolder?: string
   /** Node ID for metrics (defaults to random) */
@@ -179,8 +185,8 @@ export interface ServiceContext {
   metricsCollector: MetricsCollector | null
 
   // Ring VRF
-  ringProver: RingVRFProverWasm
-  ringVerifier: RingVRFVerifierWasm
+  ringProver: RingVRFProverWasm | RingVRFProverW3F
+  ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
 
   // Networking protocols (may be null)
   protocols: {
@@ -267,8 +273,30 @@ export async function createCoreServices(
   options: ServiceFactoryOptions,
 ): Promise<ServiceContext> {
   const srsFilePath = options.srsFilePath ?? getDefaultSrsFilePath()
-  const { prover: ringProver, verifier: ringVerifier } =
-    await initializeRingVrf(srsFilePath)
+  const useRingVrfWasm = options.useRingVrfWasm ?? true
+
+  let ringProver: RingVRFProverWasm | RingVRFProverW3F
+  let ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
+
+  if (useRingVrfWasm) {
+    const result = await initializeRingVrf(srsFilePath)
+    ringProver = result.prover
+    ringVerifier = result.verifier
+  } else {
+    logger.info('Loading Ring VRF W3F (Rust)...', { srsFilePath })
+    const fs = await import('node:fs/promises')
+    try {
+      await fs.access(srsFilePath)
+    } catch {
+      logger.error(`SRS file not found at ${srsFilePath}`)
+      throw new Error(`SRS file not found: ${srsFilePath}`)
+    }
+    ringProver = new RingVRFProverW3F(srsFilePath)
+    ringVerifier = new RingVRFVerifierW3F(srsFilePath)
+    await ringProver.init()
+    await ringVerifier.init()
+    logger.info('Ring VRF W3F initialized successfully')
+  }
 
   const configService = new ConfigService(options.configSize ?? 'tiny')
   const eventBusService = new EventBusService()
@@ -435,7 +463,6 @@ export async function createCoreServices(
 
   const accumulationService = new AccumulationService({
     configService,
-    clockService,
     serviceAccountsService: serviceAccountService,
     privilegesService,
     validatorSetManager,
@@ -443,6 +470,10 @@ export async function createCoreServices(
     accumulatePVM,
     readyService,
     statisticsService,
+    useWorkerPool: options.useWorkerPool ?? false,
+    traceSubfolder: options.traceSubfolder,
+    // When useWorkerPool, worker must receive main-process entropy so gas matches. Always pass when we have it.
+    entropyService,
   })
 
   const recentHistoryService = new RecentHistoryService({
@@ -668,6 +699,12 @@ export async function startCoreServices(
     }
   }
 
+  logger.info('Starting accumulation service...')
+  const [accumulationStartError] = await context.accumulationService.start()
+  if (accumulationStartError) {
+    throw accumulationStartError
+  }
+
   logger.info('Starting chain manager service...')
   const [chainManagerStartError] = await context.chainManagerService.start()
   if (chainManagerStartError) {
@@ -697,6 +734,7 @@ export async function stopCoreServices(context: ServiceContext): Promise<void> {
   }
 
   await context.blockImporterService.stop()
+  await context.accumulationService.stop()
   context.recentHistoryService.stop()
   await context.validatorSetManager.stop()
   await context.entropyService.stop()

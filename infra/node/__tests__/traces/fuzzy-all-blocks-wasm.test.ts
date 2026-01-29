@@ -74,7 +74,7 @@ describe('Genesis Parse Tests', () => {
       }))
 
       // Initialize services using shared utility
-      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
+      const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: true })
       const { stateService,chainManagerService, recentHistoryService, configService: servicesConfigService } = services
       
       // Set ancestryEnabled = false on the actual configService used by chainManagerService
@@ -375,6 +375,13 @@ describe('Genesis Parse Tests', () => {
               )
             }
             console.log(`📁 Mismatch files dumped to: ${mismatchDir}/${filePrefix}-*`)
+            const partialStateDumpPath = path.join(
+              WORKSPACE_ROOT,
+              'infra/node/__tests__/traces/test-data/partial-state-from-run.json',
+            )
+            console.log(
+              `To capture partial state for serialization tests, re-run with: PARTIAL_STATE_DUMP_PATH=${partialStateDumpPath}`,
+            )
           }
           expect(keyval.value).toBe(expectedValue)
         }

@@ -17,7 +17,7 @@ import { safeError, safeResult } from '@pbnjam/types'
  *
  * Gray Paper Eq. 82:
  * S ≡ edsignature{activeset[v]_vk_ed}{Xannounce ∥ n ∥ x_n ∥ blake{H}}
- * where Xannounce = token("$jam_announce")
+ * where Xannounce = token("jam_announce")
  *
  * This verifies that:
  * 1. The Ed25519 signature is valid for the announcement message
@@ -48,7 +48,7 @@ export function verifyAnnouncementSignature(
   // Step 3: Construct the message according to Gray Paper Eq. 82:
   // message = Xannounce ∥ n ∥ x_n ∥ blake{H}
   // where:
-  // - Xannounce = "$jam_announce" token
+  // - Xannounce = "jam_announce" token
   // - n = tranche number
   // - x_n = encoded work report set
   // - blake{H} = Blake2b hash of block header
@@ -151,7 +151,7 @@ export function generateAnnouncementSignature(
 
   try {
     // Step 1: Construct the message according to Gray Paper Eq. 82
-    const XANNOUNCE = new TextEncoder().encode('$jam_announce')
+    const XANNOUNCE = new TextEncoder().encode('jam_announce')
 
     // Convert tranche number to bytes (8 bytes, little-endian)
     const trancheBytes = new Uint8Array(8)

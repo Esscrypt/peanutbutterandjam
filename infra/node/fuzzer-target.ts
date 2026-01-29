@@ -327,7 +327,6 @@ export async function initializeServices() {
 
     accumulationService = new AccumulationService({
       configService: configService,
-      clockService: clockService,
       serviceAccountsService: serviceAccountsService,
       privilegesService: privilegesService,
       validatorSetManager: validatorSetManager,
@@ -335,6 +334,7 @@ export async function initializeServices() {
       accumulatePVM: accumulatePVM,
       readyService: readyService,
       statisticsService: statisticsService,
+      useWorkerPool: false,
     })
 
     recentHistoryService = new RecentHistoryService({
@@ -424,11 +424,6 @@ export async function initializeServices() {
       workReportService: workReportService,
     })
 
-    // Create chain manager service for fork handling
-    // Must be after blockImporterService and stateService are created
-    // NOTE: Do NOT call chainManagerService.start() here - the fuzzer protocol
-    // initializes genesis state via the Initialize message, not via start()
-    // The test file (minifuzz-ancestry-exact-error.test.ts) also doesn't call start()
     chainManagerService = new ChainManagerService(
       configService,
       blockImporterService,
@@ -461,6 +456,16 @@ export async function initializeServices() {
       logger.error('Failed to start block importer service:', startError)
       throw startError
     }
+
+    const [accumulationStartError] = await accumulationService.start()
+    if (accumulationStartError) {
+      logger.error(
+        'Failed to start accumulation service:',
+        accumulationStartError,
+      )
+      throw accumulationStartError
+    }
+
     logger.info('All services started successfully')
   } catch (error) {
     logger.error('Failed to start services:', error)

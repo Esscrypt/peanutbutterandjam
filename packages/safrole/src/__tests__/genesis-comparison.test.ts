@@ -7,7 +7,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { hexToBytes, bytesToHex, blake2bHash, merklizeBytes } from '@pbnjam/core'
 
 /**

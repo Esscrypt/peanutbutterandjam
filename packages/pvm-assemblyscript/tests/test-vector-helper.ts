@@ -306,7 +306,7 @@ export async function executeTestVectorStepByStep(testVector: PVMTestVector): Pr
   if (parseResult.success) {
     for (const inst of parseResult.instructions) {
       const pc = Number(inst.pc)
-      const handler = registry.getHandler(Number(inst.opcode))
+      const handler = registry.getHandler(BigInt(inst.opcode))
       instructionMap.set(pc, {
         name: handler?.name || `UNKNOWN_${inst.opcode}`,
         opcode: `0x${Number(inst.opcode).toString(16)}`,
@@ -414,8 +414,6 @@ export async function executeTestVectorStepByStep(testVector: PVMTestVector): Pr
 
   while (step < maxSteps) {
     const pcBefore = wasm.getProgramCounter()
-    const gasBefore = wasm.getGasLeft()
-    const statusBefore = wasm.getStatus()
     const registersBefore = wasm.getRegisters()
     
     // Get instruction info

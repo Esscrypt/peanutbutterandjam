@@ -1,4 +1,4 @@
-import { logger } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -113,9 +113,25 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Set success result
     this.setAccumulateSuccess(registers)
 
-    // Log in the requested format: [host-calls] [serviceId] DESIGNATE(validatorsOffset, validatorCount) <- OK
+    // Format validators for logging
+    // Gray Paper: valkey structure - vk[0:32] = bandersnatch, vk[32:32] = ed25519, vk[64:144] = bls, vk[208:128] = metadata
+    const formattedValidators = stagingSet.map((validatorData) => {
+      const bandersnatch = bytesToHex(validatorData.slice(0, 32))
+      const ed25519 = bytesToHex(validatorData.slice(32, 64))
+      const bls = bytesToHex(validatorData.slice(64, 208))
+      const metadata = bytesToHex(validatorData.slice(208, 336))
+      return `ValidatorData {\n  bandersnatch: ${bandersnatch}\n  ed25519: ${ed25519}\n  bls: ${bls}\n  metadata: ${metadata}\n}`
+    })
+
+    // Format array with ellipsis if more than 2 validators
+    const validatorsStr =
+      formattedValidators.length <= 2
+        ? `[${formattedValidators.join(', ')}]`
+        : `[${formattedValidators.slice(0, 2).join(', ')}, ...]`
+
+    // Log in the requested format: TRACE [host-calls] [serviceId] DESIGNATE([ValidatorData {...}, ...]) <- OK
     logger.info(
-      `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- OK`,
+      `TRACE [host-calls] [${logServiceId}] DESIGNATE(${validatorsStr}) <- OK`,
     )
 
     return {

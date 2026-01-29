@@ -13,7 +13,7 @@
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "cli": "tsx src/cli.ts",
     "cli:build": "tsc && node dist/cli.js",
-    "test": "bun test __tests__ --ignore __tests__/traces"
+    "test": "bun test __tests__/*.test.ts"
   },
   "dependencies": {
     "@pbnjam/core": "workspace:*",
@@ -33,6 +33,7 @@
     "@pbnjam/assurance": "workspace:*",
     "@pbnjam/block-importer": "workspace:*",
     "@pbnjam/disputes": "workspace:*",
+    "@pbnjam/accumulate": "workspace:*",
     "commander": "catalog:",
     "@pbnjam/types": "workspace:*",
     "@opentelemetry/api": "^1.7.0",

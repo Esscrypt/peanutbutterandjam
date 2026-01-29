@@ -67,6 +67,13 @@ export function encodeVariableLength(data: Uint8Array): Safe<Uint8Array> {
 }
 
 /**
+ * Maximum allowed byte length for a single variable-length term.
+ * Prevents OOM from corrupt or malicious length prefixes (decodeNatural can
+ * return up to 2^64-1; slicing that many bytes would exhaust memory).
+ */
+const MAX_VARIABLE_LENGTH_BYTES = 32 * 1024 * 1024 // 32 MiB
+
+/**
  * Decode variable-length term with length discriminator
  *
  * @param data - Octet sequence to decode
@@ -89,6 +96,13 @@ export function decodeVariableLength(data: Uint8Array): Safe<{
   }
 
   const lengthNum = Number(length)
+  if (lengthNum > MAX_VARIABLE_LENGTH_BYTES) {
+    return safeError(
+      new Error(
+        `Variable length ${lengthNum} exceeds maximum ${MAX_VARIABLE_LENGTH_BYTES} bytes`,
+      ),
+    )
+  }
   if (lengthRemaining.length < lengthNum) {
     return safeError(
       new Error(

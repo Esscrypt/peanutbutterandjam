@@ -7,7 +7,7 @@
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { hexToBytes, bytesToHex } from '@pbnjam/core'
 import { merklizeState, type Hex , type GenesisJson, type KeyValuePair } from '@pbnjam/core'
   
@@ -17,7 +17,7 @@ import { merklizeState, type Hex , type GenesisJson, type KeyValuePair } from '@
 async function loadGenesisFromFallback(): Promise<GenesisJson> {
   const genesisPath = join(
     __dirname,
-    '../../../../submodules/jamtestvectors/traces/fallback/genesis.json'
+    '../../../../submodules/jam-test-vectors/traces/fallback/genesis.json'
   )
   
   const content = await readFile(genesisPath, 'utf8')

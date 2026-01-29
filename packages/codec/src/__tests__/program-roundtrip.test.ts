@@ -1,7 +1,5 @@
 import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { hexToBytes } from '@pbnjam/core'
 import {
   decodeProgram,
@@ -9,35 +7,24 @@ import {
   encodeProgram,
   encodeServiceCodeToPreimage,
 } from '../pvm/blob'
+import { getJamTestVectorsPath } from './test-vector-dir'
 
 /**
  * Round-trip test for encodeProgram and decodeProgram
- * 
+ *
  * Tests that encoding and decoding program blobs (Y function format) produces
  * identical results when using preimage blobs from jam-test-vectors.
  */
 describe('Program Round-Trip Tests', () => {
-  // Calculate workspace root
-  const currentDir = dirname(fileURLToPath(import.meta.url))
-  // packages/codec/src/__tests__ -> packages -> root
-  const workspaceRoot = join(currentDir, '..', '..', '..', '..')
-
   /**
    * Load preimage blobs from test vectors JSON file
    * The JSON file contains pre_state.keyvals with key-value pairs
    * where values are preimage blobs as hex strings
-   * 
+   *
    * Returns all preimage blobs found in the keyvals that can be decoded
    */
   function loadPreimageBlobs(jsonFilename: string): Uint8Array[] {
-    const jsonPath = join(
-      workspaceRoot,
-      'submodules',
-      'jam-test-vectors',
-      'traces',
-      'preimages',
-      jsonFilename,
-    )
+    const jsonPath = getJamTestVectorsPath('traces', 'preimages', jsonFilename)
     const jsonContent = readFileSync(jsonPath, 'utf-8')
     const testVector = JSON.parse(jsonContent)
     

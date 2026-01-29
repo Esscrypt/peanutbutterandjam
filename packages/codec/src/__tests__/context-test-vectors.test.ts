@@ -1,10 +1,11 @@
-import { describe, it, expect } from 'bun:test' 
+import { describe, it, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { encodeRefineContext, decodeRefineContext } from '../work-package/context'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Context Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
 
   it('should handle refine_context round-trip encoding/decoding', () => {
     const binaryPath = join(testVectorsDir, 'refine_context.bin')
