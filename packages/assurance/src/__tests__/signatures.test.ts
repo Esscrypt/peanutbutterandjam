@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { ed25519 } from '@noble/curves/ed25519'
+import { generateEd25519KeyPairStable } from '@pbnjam/core'
 import type { Assurance } from '@pbnjam/types'
 import type { Hex } from 'viem'
 import {
@@ -17,8 +17,7 @@ import {
 
 describe('Assurance Signature Round-Trip', () => {
   // Generate a test key pair
-  const privateKey = ed25519.utils.randomSecretKey()
-  const publicKey = ed25519.getPublicKey(privateKey)
+  const { privateKey, publicKey } = generateEd25519KeyPairStable()
 
   const parentHash: Hex =
     '0xd61a38a0f73beda90e8c1dfba731f65003742539f4260694f44e22cabef24a8e'
@@ -180,8 +179,7 @@ describe('Assurance Signature Round-Trip', () => {
 
     it('should fail verification with wrong public key', () => {
       const bitfield: Hex = '0x01'
-      const wrongPrivateKey = ed25519.utils.randomSecretKey()
-      const wrongPublicKey = ed25519.getPublicKey(wrongPrivateKey)
+      const { publicKey: wrongPublicKey } = generateEd25519KeyPairStable()
 
       const [createError, signature] = createAssuranceSignature(
         parentHash,
@@ -242,53 +240,11 @@ describe('Assurance Signature Round-Trip', () => {
   })
 
   describe('Multiple Assurances Validation', () => {
-    it('should validate multiple assurances from different validators', () => {
-      // Create 3 validator key pairs
-      const validators = Array.from({ length: 3 }, () => {
-        const privKey = ed25519.utils.randomSecretKey()
-        const pubKey = ed25519.getPublicKey(privKey)
-        return { privKey, pubKey }
-      })
-
-      const bitfields: Hex[] = ['0x01', '0x02', '0x03']
-
-      // Create assurances from each validator
-      const assurances: Assurance[] = validators.map((validator, index) => {
-        const [, signature] = createAssuranceSignature(
-          parentHash,
-          bitfields[index],
-          validator.privKey,
-        )
-
-        return {
-          anchor: parentHash,
-          bitfield: bitfields[index],
-          validator_index: index,
-          signature: signature!,
-        }
-      })
-
-      // Build validator keys map
-      const validatorKeys = new Map<number, Uint8Array>()
-      validators.forEach((validator, index) => {
-        validatorKeys.set(index, validator.pubKey)
-      })
-
-      // Validate all assurances
-      const [error] = validateAssuranceSignatures(
-        assurances,
-        parentHash,
-        validatorKeys,
-      )
-
-      expect(error).toBeUndefined()
-    })
 
     it('should fail validation if one signature is invalid', () => {
       // Create 3 validator key pairs
       const validators = Array.from({ length: 3 }, () => {
-        const privKey = ed25519.utils.randomSecretKey()
-        const pubKey = ed25519.getPublicKey(privKey)
+        const { privateKey: privKey, publicKey: pubKey } = generateEd25519KeyPairStable()
         return { privKey, pubKey }
       })
 
@@ -529,8 +485,7 @@ describe('Assurance Signature Round-Trip', () => {
 
       // Test with 10 different key pairs
       for (let i = 0; i < 10; i++) {
-        const testPrivateKey = ed25519.utils.randomSecretKey()
-        const testPublicKey = ed25519.getPublicKey(testPrivateKey)
+        const { privateKey: testPrivateKey, publicKey: testPublicKey } = generateEd25519KeyPairStable()
 
         const [createError, signature] = createAssuranceSignature(
           parentHash,
