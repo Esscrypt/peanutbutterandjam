@@ -129,6 +129,13 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] PROVIDE(targetServiceId, preimageLength) <- OK
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] PROVIDE(${serviceId}, ${preimageLength}, ${preimageHash} (${preimageHash.length} bytes)) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

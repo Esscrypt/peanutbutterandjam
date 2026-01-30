@@ -148,6 +148,13 @@ export class SolicitHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] SOLICIT(0xhash, preimageLength) <- OK
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] SOLICIT(0x${hashHex}, ${preimageLength}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

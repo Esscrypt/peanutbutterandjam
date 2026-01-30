@@ -339,10 +339,13 @@ export class PVM implements IPVM {
       finalMemory,
     )
 
+    // Return the context parameter (mutated in place), not this.context, so that
+    // concurrent invocations do not overwrite each other's result (this.context
+    // is shared and would be overwritten by a parallel invocation).
     return safeResult({
       gasConsumed,
       result,
-      context: this.context as RefineInvocationContext | ImplicationsPair,
+      context: context as RefineInvocationContext | ImplicationsPair,
     })
   }
 

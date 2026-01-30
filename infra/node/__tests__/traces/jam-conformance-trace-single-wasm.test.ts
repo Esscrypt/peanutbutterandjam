@@ -191,8 +191,8 @@ describe('JAM Conformance Single Trace', () => {
     // Determine which repository was used (jam-conformance or w3f-jam-conformance)
     const repoName = tracesDir!.includes('w3f-jam-conformance') ? 'w3f-jam-conformance' : 'jam-conformance'
     const traceSubfolder = `${repoName}/${JAM_CONFORMANCE_VERSION}/${traceId}`
-    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: false })
     // const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
+    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useRingVrfWasm: false })
 
     const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 

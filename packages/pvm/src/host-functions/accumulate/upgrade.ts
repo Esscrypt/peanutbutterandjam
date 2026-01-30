@@ -79,6 +79,14 @@ export class UpgradeHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] UPGRADE(0xcodeHash, minAccGas, minMemoGas) <- OK
+    const logServiceId = imX.id
+    const codeHashHex = bytesToHex(codeHashData)
+    logger.info(
+      `[host-calls] [${logServiceId}] UPGRADE(0x${codeHashHex}, ${newMinimumAccumulationGas}, ${newMinimumMemoryGas}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

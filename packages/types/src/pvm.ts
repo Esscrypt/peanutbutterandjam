@@ -314,6 +314,7 @@ export interface HostFunctionContext {
   registers: RegisterState
   ram: RAM
   log: (message: string, data?: Record<string, unknown>) => void
+  serviceId?: bigint
 }
 
 /**

@@ -197,6 +197,13 @@ export class ForgetHostFunction extends BaseAccumulateHostFunction {
     // Set success result
     // Gray Paper line 943: OK when otherwise
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] FORGET(0xhash, preimageLength) <- OK
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] FORGET(0x${hashHex}, ${preimageLength}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

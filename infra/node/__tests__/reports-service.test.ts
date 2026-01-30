@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { EventBusService, type Hex } from '@pbnjam/core'
+import { EventBusService, logger, type Hex } from '@pbnjam/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { BlockBody, ReportsTestVector, WorkReport } from '@pbnjam/types'
@@ -277,7 +277,6 @@ describe('Reports - JAM Test Vectors', () => {
 
           const accumulatedService = new AccumulationService({
             configService: configService,
-            clockService: clockService,
             serviceAccountsService: serviceAccountService,
             privilegesService: new PrivilegesService({
               configService: configService,
@@ -287,7 +286,14 @@ describe('Reports - JAM Test Vectors', () => {
             accumulatePVM: accumulatePVM,
             readyService: readyService,
             statisticsService: statisticsService,
+            useWorkerPool: false,
           })
+
+          const [accumulationStartError] = await accumulatedService.start()
+          if (accumulationStartError) {
+            logger.error('Failed to start accumulation service:', accumulationStartError)
+            throw accumulationStartError
+          }
 
           // Step 7: Initialize GuarantorService and process guarantees
           const guarantorService = new GuarantorService({

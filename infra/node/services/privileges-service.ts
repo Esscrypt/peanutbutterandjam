@@ -15,45 +15,12 @@
  */
 
 import { logger } from '@pbnjam/core'
-import { BaseService, type Privileges } from '@pbnjam/types'
+import {
+  BaseService,
+  type IPrivilegesService,
+  type Privileges,
+} from '@pbnjam/types'
 import type { ConfigService } from './config-service'
-
-/**
- * Privileges Service Interface
- */
-export interface IPrivilegesService {
-  getPrivileges(): Privileges
-  setPrivileges(privileges: Privileges): void
-
-  // Manager operations
-  getManager(): bigint
-  setManager(serviceId: bigint): void
-
-  // Delegator operations
-  getDelegator(): bigint
-  setDelegator(serviceId: bigint): void
-
-  // Registrar operations
-  getRegistrar(): bigint
-  setRegistrar(serviceId: bigint): void
-
-  // Assigner operations
-  getAssigners(): bigint[]
-  setAssigners(assigners: bigint[]): void
-  getAssignerForCore(coreIndex: bigint): bigint | undefined
-  setAssignerForCore(coreIndex: bigint, serviceId: bigint): void
-
-  // Always Accers operations
-  getAlwaysAccers(): Map<bigint, bigint>
-  setAlwaysAccers(alwaysAccers: Map<bigint, bigint>): void
-  addAlwaysAccer(serviceId: bigint, gasLimit: bigint): void
-  removeAlwaysAccer(serviceId: bigint): void
-  getGasLimitForService(serviceId: bigint): bigint | undefined
-
-  // Validation
-  validatePrivileges(): boolean
-  isServicePrivileged(serviceId: bigint): boolean
-}
 
 /**
  * Privileges Service Implementation

@@ -40,6 +40,7 @@ import {
 import {
   createCoreServices,
   startCoreServices,
+  stopCoreServices,
   type ServiceContext,
   type ConfigServiceSizeType,
 } from '../services/service-factory'
@@ -424,11 +425,13 @@ export async function initializeServices(options?: {
     configSize: spec,
     traceSubfolder,
     useWasm,
+    useRingVrfWasm: true,
     initialValidators,
-    enableNetworking,
+    enableNetworking: false,
     networking,
     // If a genesis manager is provided, we'll override it after creation
     genesis: genesisManager ? undefined : undefined,
+    useWorkerPool: false,
   })
 
   // If a custom genesis manager is provided, use it in the state service

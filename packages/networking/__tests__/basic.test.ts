@@ -16,7 +16,7 @@ describe('JAMNP-S Networking Implementation', () => {
       expect(keyPair.publicKey).toBeInstanceOf(Uint8Array)
       expect(keyPair.privateKey).toBeInstanceOf(Uint8Array)
       expect(keyPair.publicKey.length).toBe(32)
-      expect(keyPair.privateKey.length).toBe(64) // Ed25519 private key is 64 bytes (32 bytes seed + 32 bytes public key)
+      expect(keyPair.privateKey.length).toBe(32) // Ed25519 private key is 32-byte seed (@noble/ed25519)
     })
 
     it('should sign and verify data with Ed25519', () => {
@@ -27,8 +27,10 @@ describe('JAMNP-S Networking Implementation', () => {
       if (signatureError) {
         throw signatureError
       }
-      const isValid = verifyEd25519(data, signature, keyPair.publicKey)
-      
+      const [verifyError, isValid] = verifyEd25519(data, signature, keyPair.publicKey)
+      if (verifyError) {
+        throw verifyError
+      }
       expect(signature).toBeInstanceOf(Uint8Array)
       expect(signature.length).toBe(64)
       expect(isValid).toBe(true)
@@ -43,8 +45,10 @@ describe('JAMNP-S Networking Implementation', () => {
       if (signatureError) {
         throw signatureError
       }
-      const isValid = verifyEd25519(wrongData, signature, keyPair.publicKey)
-      
+      const [verifyError, isValid] = verifyEd25519(wrongData, signature, keyPair.publicKey)
+      if (verifyError) {
+        throw verifyError
+      }
       expect(isValid).toBe(false)
     })
   })
@@ -58,8 +62,8 @@ describe('JAMNP-S Networking Implementation', () => {
       }
 
       expect(alternativeName).toBeTypeOf('string')
-      expect(alternativeName.startsWith('$e')).toBe(false) // Raw format doesn't have $e prefix
-      expect(alternativeName.length).toBe(52) // 52 characters without $e prefix
+      expect(alternativeName.startsWith('e')).toBe(true) // dev-accounts format: "e" + 52-char base32
+      expect(alternativeName.length).toBe(53) // "e" prefix + 52 characters
     })
 
     it('should generate consistent alternative names for the same key', () => {

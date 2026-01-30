@@ -256,7 +256,7 @@ export class MainService extends BaseService {
     this.registry = new ServiceRegistry()
     const srsFilePath = path.join(
       __dirname,
-      '../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-compressed.bin',
+      '../../../packages/bandersnatch-vrf/test-data/srs/zcash-srs-2-11-uncompressed.bin',
     )
     this.ringProver = new RingVRFProverWasm(srsFilePath)
     this.ringVerifier = new RingVRFVerifierWasm(srsFilePath)
@@ -444,7 +444,6 @@ export class MainService extends BaseService {
     })
     this.accumulationService = new AccumulationService({
       configService: this.configService,
-      clockService: this.clockService,
       serviceAccountsService: this.serviceAccountService,
       privilegesService: this.privilegesService,
       validatorSetManager: this.validatorSetManagerService,
@@ -452,7 +451,8 @@ export class MainService extends BaseService {
       accumulatePVM: this.accumulatePVM,
       readyService: this.readyService,
       statisticsService: this.statisticsService,
-      // entropyService: this.entropyService,
+      useWorkerPool: true,
+      entropyService: this.entropyService,
     })
 
     // Initialize recent history service

@@ -34,11 +34,8 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     // Extract parameters from registers
     const hashOffset = registers[7]
 
-    // Log all input parameters
-    logger.info('YIELD host function invoked', {
-      hashOffset: hashOffset.toString(),
-      currentServiceId: implications[0].id.toString(),
-    })
+    // Get the current implications context
+    const [imX] = implications
 
     // Read hash from memory (32 bytes)
     // Gray Paper pvm_invocations.tex lines 953-956:
@@ -48,18 +45,11 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (faultAddress || !hashData) {
       // DO NOT modify registers[7] - it must remain unchanged on panic
+      logger.info(`[host-calls] [${imX.id}] YIELD(${hashOffset}) <- PANIC`)
       return {
         resultCode: RESULT_CODES.PANIC,
       }
     }
-
-    // Get the current implications context
-    const [imX] = implications
-
-    logger.info('YIELD host function set yield hash', {
-      yieldHash: bytesToHex(hashData),
-      currentServiceId: imX.id.toString(),
-    })
 
     // Set the yield hash in the accumulation context
     // Gray Paper: imX.yield = h
@@ -67,6 +57,11 @@ export class YieldHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] YIELD(0xhash) <- OK
+    const hashHex = bytesToHex(hashData)
+    logger.info(`[host-calls] [${imX.id}] YIELD(${hashHex}) <- OK`)
+
     return {
       resultCode: null, // continue execution
     }

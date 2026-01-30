@@ -2,7 +2,7 @@
  * Helper utilities for PVM test vector loading and execution
  */
 
-import { readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { PVM } from '../../pvm'
 import { EventBusService, logger } from '@pbnjam/core'
@@ -54,14 +54,23 @@ export interface PVMTestVector {
   'expected-page-fault-address'?: number | string
 }
 
+const PVM_TEST_VECTORS_REL = join('submodules', 'pvm-test-vectors', 'pvm', 'programs')
+
 /**
- * Get the test vectors directory path
+ * Get the test vectors directory path.
+ * Resolves monorepo root by walking up from cwd until submodules/pvm-test-vectors exists,
+ * so tests work when run from repo root, packages/, or packages/pvm.
  */
 export function getTestVectorsDir(): string {
-  const projectRoot = process.cwd().includes('/packages/pvm')
-    ? process.cwd().split('/packages/pvm')[0]
-    : process.cwd()
-  return join(projectRoot, 'submodules', 'pvm-test-vectors', 'pvm', 'programs')
+  let dir = process.cwd()
+  for (let i = 0; i < 10; i++) {
+    const candidate = join(dir, PVM_TEST_VECTORS_REL)
+    if (existsSync(candidate)) return candidate
+    const parent = join(dir, '..')
+    if (parent === dir) break
+    dir = parent
+  }
+  return join(process.cwd(), PVM_TEST_VECTORS_REL)
 }
 
 /**

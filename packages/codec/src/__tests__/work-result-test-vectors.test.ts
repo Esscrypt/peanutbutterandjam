@@ -14,12 +14,10 @@ import { join } from 'path'
 import { decodeWorkResult, encodeWorkResult } from '../work-package/work-result'
 import type { WorkExecResultValue, WorkResult } from '@pbnjam/types'
 import { describe, it, expect } from 'bun:test'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Work Result Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(
-    __dirname,
-    '../../../../submodules/jamtestvectors/codec/full',
-  )
+  const testVectorsDir = getCodecTestVectorsDir('full')
 
   describe('work_result_0 (Success Case)', () => {
     it('should handle work_result_0 round-trip encoding/decoding', () => {

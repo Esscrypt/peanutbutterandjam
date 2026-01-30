@@ -1,6 +1,8 @@
 import {
   RingVRFProver,
+  type RingVRFProverW3F,
   type RingVRFProverWasm,
+  type RingVRFVerifierW3F,
   type RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import {
@@ -61,7 +63,7 @@ function generateTickets(
   ringKeys: Uint8Array[],
   proverIndex: number,
   entropy2: Uint8Array,
-  prover: RingVRFProverWasm,
+  prover: RingVRFProverWasm | RingVRFProverW3F,
   configService: IConfigService,
 ): Safe<SafroleTicket[]> {
   const maxTickets = configService.ticketsPerValidator
@@ -159,7 +161,7 @@ export function generateTicketsForEpoch(
   validatorSetManager: IValidatorSetManager,
   keyPairService: IKeyPairService,
   entropyService: IEntropyService,
-  prover: RingVRFProverWasm,
+  prover: RingVRFProverWasm | RingVRFProverW3F,
   configService: IConfigService,
 ): Safe<SafroleTicket[]> {
   // 1. Get validator secret key
@@ -220,7 +222,7 @@ export function verifyTicket(
   ticket: SafroleTicket,
   entropyService: IEntropyService,
   validatorSetManager: IValidatorSetManager,
-  ringVerifier: RingVRFVerifierWasm,
+  ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F,
 ): Safe<boolean> {
   // Gray Paper Eq. 292: Validate proof format - must be 288 bytes per bandersnatch-vrf-spec
   const proofBytes = hexToBytes(ticket.proof)

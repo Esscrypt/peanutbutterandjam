@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -136,6 +137,24 @@ export class InvokeHostFunction extends BaseHostFunction {
       // Gray Paper equation 651: Return HALT
       context.registers[7] = BigInt(RESULT_CODES.HALT)
     }
+
+    // Log in the requested format: [host-calls] [serviceId] INVOKE(machineId, gasLimit) <- resultCode
+    const serviceId = context.serviceId ?? 0n
+    const resultCodeName =
+      resultCode === RESULT_CODES.HALT
+        ? 'HALT'
+        : resultCode === RESULT_CODES.PANIC
+          ? 'PANIC'
+          : resultCode === RESULT_CODES.OOG
+            ? 'OOG'
+            : resultCode === RESULT_CODES.FAULT
+              ? 'FAULT'
+              : resultCode === RESULT_CODES.HOST
+                ? 'HOST'
+                : 'UNKNOWN'
+    logger.info(
+      `[host-calls] [${serviceId}] INVOKE(${machineId}, ${gasLimit}) <- ${resultCodeName}`,
+    )
 
     return {
       resultCode: null, // continue execution

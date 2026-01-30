@@ -32,10 +32,9 @@ import {
 export class TransferHostFunction extends BaseAccumulateHostFunction {
   readonly functionId = ACCUMULATE_FUNCTIONS.TRANSFER
   readonly name = 'transfer'
-  readonly gasCost = 10n // Base cost, actual cost is 10 + gasLimit on success (Gray Paper: g = 10 + t)
 
   execute(context: AccumulateHostFunctionContext): HostFunctionResult {
-    const { registers, ram, implications, gasCounter } = context
+    const { registers, ram, implications } = context
     // Extract parameters from registers
     // Gray Paper pvm_invocations.tex line 818: [dest, amount, l, o] = registers[7:4]
     // registers[7] = dest (destination service ID)
@@ -45,15 +44,7 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const [destinationServiceId, amount, gasLimit, memoOffset] =
       registers.slice(7, 11)
 
-    // Log all input parameters
-    logger.info('TRANSFER host function invoked', {
-      destinationServiceId: destinationServiceId.toString(),
-      amount: amount.toString(),
-      gasLimit: gasLimit.toString(),
-      memoOffset: memoOffset.toString(),
-      gasCounter: gasCounter.toString(),
-      currentServiceId: implications[0].id.toString(),
-    })
+    const logServiceId = implications[0].id
 
     // Read memo from memory (128 bytes - Gray Paper Cmemosize)
     // Gray Paper pvm_invocations.tex lines 820-832:
@@ -66,11 +57,9 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
       // Gray Paper line 832: c = panic when t = error
       // Gray Paper line 839: registers'_7 = registers_7 (unchanged) when c = panic
       // DO NOT modify registers[7] - it must remain unchanged on panic
-      logger.error('TRANSFER host function invoked but memo data read failed', {
-        faultAddress: faultAddress?.toString() ?? 'null',
-        memoOffset: memoOffset.toString(),
-        C_MEMO_SIZE: C_MEMO_SIZE.toString(),
-      })
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -88,11 +77,8 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const currentService = imX.state.accounts.get(imX.id)
     if (!currentService) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn(
-        'TRANSFER host function invoked but current service account not found',
-        {
-          currentServiceId: imX.id.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- HUH`,
       )
       return {
         resultCode: null, // continue execution
@@ -103,11 +89,8 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     const destService = imX.state.accounts.get(destinationServiceId)
     if (!destService) {
       this.setAccumulateError(registers, 'WHO')
-      logger.warn(
-        'TRANSFER host function invoked but destination service account not found',
-        {
-          destinationServiceId: destinationServiceId.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- WHO`,
       )
       return {
         resultCode: null, // continue execution
@@ -118,12 +101,8 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: l < destService.sa_minmemogas
     if (gasLimit < destService.minmemogas) {
       this.setAccumulateError(registers, 'LOW')
-      logger.warn(
-        'TRANSFER host function invoked but gas limit is insufficient for destination',
-        {
-          gasLimit: gasLimit.toString(),
-          destServiceMinmemogas: destService.minmemogas.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- LOW`,
       )
       return {
         resultCode: null, // continue execution
@@ -151,6 +130,9 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
 
     if (balanceAfterTransfer < minbalance) {
       this.setAccumulateError(registers, 'CASH')
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- CASH`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -169,29 +151,14 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
     // Add transfer to xfers list
     imX.xfers.push(deferredTransfer)
 
-    logger.debug('[TransferHostFunction] Added transfer to xfers', {
-      serviceId: imX.id.toString(),
-      destinationServiceId: destinationServiceId.toString(),
-      amount: amount.toString(),
-      xfersLength: imX.xfers.length,
-      xfers: imX.xfers.map((t) => ({
-        source: t.source.toString(),
-        dest: t.dest.toString(),
-        amount: t.amount.toString(),
-      })),
-    })
-
     // Deduct amount from sender's balance
     // CRITICAL: Ensure we're modifying the account that's actually in the state map
     // Get the account directly from the state map to ensure we have the correct reference
     const accountInState = imX.state.accounts.get(imX.id)
     if (!accountInState) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn(
-        'TRANSFER host function invoked but account in state not found',
-        {
-          serviceId: imX.id.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- HUH`,
       )
       return {
         resultCode: null, // continue execution
@@ -208,21 +175,15 @@ export class TransferHostFunction extends BaseAccumulateHostFunction {
       )
     }
 
-    const balanceBefore = accountInState.balance
     accountInState.balance = balanceAfterTransfer
-
-    logger.debug('[TransferHostFunction] Balance deduction', {
-      serviceId: imX.id.toString(),
-      destinationServiceId: destinationServiceId.toString(),
-      amount: amount.toString(),
-      balanceBefore: balanceBefore.toString(),
-      balanceAfter: balanceAfterTransfer.toString(),
-      verifiedBalance: accountInState.balance.toString(),
-      balanceMatches: accountInState.balance === balanceAfterTransfer,
-    })
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] TRANSFER(dest, amount, gasLimit) <- OK
+    logger.info(
+      `[host-calls] [${logServiceId}] TRANSFER(${destinationServiceId}, ${amount}, ${gasLimit}) <- OK`,
+    )
 
     // Gray Paper: On success, gas cost is 10 + l (where l = gasLimit)
     // The base 10 gas is deducted in the context mutator, so we return

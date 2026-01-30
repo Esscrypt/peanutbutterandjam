@@ -32,8 +32,18 @@ export class ConfigService extends BaseService implements IConfigService {
   private _forkingEnabled = true
   private _validatorIndex: number | undefined = undefined
 
+  readonly _mode:
+    | 'tiny'
+    | 'small'
+    | 'medium'
+    | 'large'
+    | 'xlarge'
+    | '2xlarge'
+    | '3xlarge'
+    | 'full'
+
   constructor(
-    private readonly mode:
+    readonly mode:
       | 'tiny'
       | 'small'
       | 'medium'
@@ -45,6 +55,7 @@ export class ConfigService extends BaseService implements IConfigService {
     validatorIndex?: number,
   ) {
     super('safrole-config')
+    this._mode = mode
     this._validatorIndex = validatorIndex
   }
 

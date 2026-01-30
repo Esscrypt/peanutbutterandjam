@@ -1052,8 +1052,6 @@ describe('Component Round-Trip Tests', () => {
         if (tsDecoded!.value.accounts.size > 0 && asDecoded!.value.accounts.size === 0) {
           logger.error('❌ AssemblyScript failed to decode accounts!')
           // Try to decode the first account to see where it fails
-          const firstAccount = Array.from(tsDecoded!.value.accounts.values())[0]
-          logger.info(`First account has: storage=${firstAccount.storage.size}, preimages=${firstAccount.preimages.size}, requests=${firstAccount.requests.size}`)
         }
         
         // Compare values even if sizes differ

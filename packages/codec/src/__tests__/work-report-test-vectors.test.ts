@@ -2,9 +2,10 @@ import { describe, it, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeWorkReport, encodeWorkReport } from '../work-package/work-report'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Work Report Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
 
   it('should handle work_report round-trip encoding/decoding', () => {
     const binaryPath = join(testVectorsDir, 'work_report.bin')

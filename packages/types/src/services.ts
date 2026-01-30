@@ -5,9 +5,14 @@ import type { Extrinsic } from './core'
 import type { AncestryItem, JamVersion } from './fuzz'
 import type {
   Activity,
+  AuthQueue,
   BlockHeader,
   EntropyState,
+  Privileges,
+  Ready,
+  ReadyItem,
   RecentHistoryEntry,
+  ServiceAccounts,
 } from './global-state'
 import type { BlockRequest, StateRequest } from './jamnp'
 import type { ValidatorCredentials } from './keys'
@@ -19,6 +24,7 @@ import type {
   GuaranteeSignature,
   Judgment,
   Preimage,
+  PreimageRequestStatus,
   SafroleTicket,
   SafroleTicketWithoutProof,
   ServiceAccount,
@@ -44,6 +50,8 @@ export interface IValidatorSetManager extends BaseService {
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void
   setPendingSet(validatorSet: ValidatorPublicKeys[]): void
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void
+
+  createNullValidatorSet(count: number): ValidatorPublicKeys[]
 }
 
 export interface ISealKeyService extends BaseService {
@@ -71,6 +79,7 @@ export interface IGenesisManagerService extends BaseService {
 }
 
 export interface IServiceAccountService extends BaseService {
+  getServiceAccounts(): ServiceAccounts
   getServiceAccount(serviceId: bigint): Safe<ServiceAccount>
   setServiceAccount(
     serviceId: bigint,
@@ -81,6 +90,12 @@ export interface IServiceAccountService extends BaseService {
   clearAllServiceAccounts(): void
 
   getServiceAccountStorage(serviceId: bigint, key: Hex): Uint8Array | undefined
+
+  getServiceAccountRequest(
+    serviceId: bigint,
+    hash: Hex,
+    blobLength: bigint,
+  ): PreimageRequestStatus | undefined
   histLookupServiceAccount(
     serviceId: bigint,
     serviceAccount: ServiceAccount,
@@ -225,6 +240,16 @@ export interface IStatisticsService extends BaseService {
    * Get the current activity (statistics) data
    */
   getActivity(): Activity
+
+  updateServiceAccumulationStats(
+    serviceId: bigint,
+    accumulationStats: [number, number],
+  ): void
+
+  updateServiceOnTransfersStats(
+    serviceId: bigint,
+    onTransfersStats: [number, number],
+  ): void
 }
 
 /**
@@ -729,6 +754,80 @@ export interface IAccumulationService extends BaseService {
 
 export interface IBlockImporterService extends BaseService {
   importBlock(block: Block): SafePromise<boolean>
+}
+
+/**
+ * Ready Service Interface
+ */
+export interface IReadyService {
+  getReady(): Ready
+  setReady(ready: Ready): void
+
+  // Epoch slot operations
+  getReadyItemsForSlot(slotIndex: bigint): ReadyItem[]
+  addReadyItemToSlot(slotIndex: bigint, readyItem: ReadyItem): void
+  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): boolean
+  clearSlot(slotIndex: bigint): void
+
+  // Ready item operations
+  addReadyItem(workReport: WorkReport, dependencies: Set<Hex>): void
+  removeReadyItem(workReportHash: Hex): void
+  getReadyItem(workReportHash: Hex): ReadyItem | undefined
+
+  // Dependency management
+  updateDependencies(workReportHash: Hex, dependencies: Set<Hex>): void
+  removeDependency(workReportHash: Hex, dependencyHash: Hex): void
+  addDependency(workReportHash: Hex, dependencyHash: Hex): void
+
+  // Queue editing function E - modifies state directly
+  // Gray Paper equation 50-60: E removes items whose package hash is in accumulated set,
+  // and removes any dependencies which appear in said set
+  applyQueueEditingFunctionEToSlot(
+    slotIndex: bigint,
+    accumulatedPackages: Set<Hex>,
+  ): void
+}
+
+/**
+ * Privileges Service Interface
+ */
+export interface IPrivilegesService {
+  getPrivileges(): Privileges
+  setPrivileges(privileges: Privileges): void
+
+  // Manager operations
+  getManager(): bigint
+  setManager(serviceId: bigint): void
+
+  // Delegator operations
+  getDelegator(): bigint
+  setDelegator(serviceId: bigint): void
+
+  // Registrar operations
+  getRegistrar(): bigint
+  setRegistrar(serviceId: bigint): void
+
+  // Assigner operations
+  getAssigners(): bigint[]
+  setAssigners(assigners: bigint[]): void
+  getAssignerForCore(coreIndex: bigint): bigint | undefined
+  setAssignerForCore(coreIndex: bigint, serviceId: bigint): void
+
+  // Always Accers operations
+  getAlwaysAccers(): Map<bigint, bigint>
+  setAlwaysAccers(alwaysAccers: Map<bigint, bigint>): void
+  addAlwaysAccer(serviceId: bigint, gasLimit: bigint): void
+  removeAlwaysAccer(serviceId: bigint): void
+  getGasLimitForService(serviceId: bigint): bigint | undefined
+
+  // Validation
+  validatePrivileges(): boolean
+  isServicePrivileged(serviceId: bigint): boolean
+}
+
+export interface IAuthQueueService extends BaseService {
+  getAuthQueue(): AuthQueue
+  setAuthQueue(authQueue: AuthQueue): void
 }
 
 /**

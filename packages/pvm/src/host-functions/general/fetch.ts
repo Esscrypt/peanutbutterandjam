@@ -62,13 +62,6 @@ export class FetchHostFunction extends BaseHostFunction {
     const fromOffset = context.registers[8] // start offset in the fetched data
     const length = context.registers[9] // number of bytes to write to memory
 
-    context.log('Fetch host function: Executing', {
-      selector: selector.toString(),
-      outputOffset: outputOffset.toString(),
-      fromOffset: fromOffset.toString(),
-      length: length.toString(),
-    })
-
     // Fetch data based on selector according to Gray Paper specification
     // Note: We always fetch to determine available length, even if requested length is 0
     const fetchedData = this.fetchData(selector, context, params)
@@ -77,9 +70,9 @@ export class FetchHostFunction extends BaseHostFunction {
     if (fetchedData === null) {
       // Return NONE (2^64 - 1) for not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      logger.warn('Fetch host function: Data not found', {
-        selector: selector.toString(),
-      })
+      // Log when data not found
+      const logId = context.serviceId ?? context.gasCounter
+      logger.info(`[host-calls] [${logId}] FETCH(${selector}) <- null`)
     } else {
       // Write data to memory
       // Gray Paper: f = min(registers_8, len(v)), l = min(registers_9, len(v) - f)
@@ -121,10 +114,18 @@ export class FetchHostFunction extends BaseHostFunction {
 
       // Return length of fetched data
       context.registers[7] = BigInt(fetchedData.length)
-      logger.debug('Fetch host function: Data fetched successfully', {
-        selector: selector.toString(),
-        data: `${bytesToHex(fetchedData).slice(0, 50)}...${bytesToHex(fetchedData).slice(-50)}`,
-      })
+
+      // Log in the requested format: TRACE [host-calls] [ID] FETCH(selector) <- hex_data (bytes)
+      const hexData = bytesToHex(fetchedData)
+      // Truncate if longer than 128 hex chars (64 bytes), showing first and last 64 hex chars
+      const truncatedHex =
+        hexData.length > 128
+          ? `${hexData.slice(0, 64)}...${hexData.slice(-64)}`
+          : hexData
+      const logId = context.serviceId ?? context.gasCounter
+      logger.info(
+        `[host-calls] [${logId}] FETCH(${selector}) <- ${truncatedHex} (${fetchedData.length} bytes)`,
+      )
     }
 
     return {

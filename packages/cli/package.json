@@ -28,8 +28,7 @@
     "check": "tsc --pretty --noEmit",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test": "vitest run",
-    "test:watch": "vitest run --watch",
+    "test": "bun test --pass-with-no-tests",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist",
     "dev": "tsx src/index.ts"
   },

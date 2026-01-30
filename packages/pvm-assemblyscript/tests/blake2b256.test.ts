@@ -194,7 +194,6 @@ describe('Blake2b-256 Hash Equivalence', () => {
 
   it('should produce correct known hash for empty input', () => {
     // Known Blake2b-256 hash for empty input
-    const expectedHash = '0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
     // Note: This is actually the SHA-256 hash of empty input
     // Blake2b-256 hash of empty input is:
     // 0x0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8

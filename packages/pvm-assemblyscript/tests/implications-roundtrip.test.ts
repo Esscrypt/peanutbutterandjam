@@ -10,18 +10,14 @@ import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
-  encodeImplications,
-  decodeImplications,
   encodeImplicationsPair,
   decodeImplicationsPair,
   setServiceStorageValue,
   setServicePreimageValue,
   setServiceRequestValue,
-  type Implications,
-  type ImplicationsPair,
 } from '@pbnjam/codec'
-import { logger, hexToBytes, bytesToHex, type Hex } from '@pbnjam/core'
-import type { ServiceAccount, DeferredTransfer, IConfigService } from '@pbnjam/types'
+import { logger, hexToBytes, type Hex } from '@pbnjam/core'
+import type { ServiceAccount, DeferredTransfer, IConfigService, Implications, ImplicationsPair } from '@pbnjam/types'
 import { ConfigService } from '../../../infra/node/services/config-service'
 
 /**
@@ -43,7 +39,7 @@ async function loadWasmModule(): Promise<any> {
 function createTestImplications(configService: IConfigService): Implications {
   const numCores = configService.numCores
   const numValidators = configService.numValidators
-  const authQueueSize = configService.authQueueSize
+  const authQueueSize = 80
   
   // Create mock service accounts
   const accounts = new Map<bigint, ServiceAccount>()
@@ -386,8 +382,8 @@ function compareImplications(a: Implications, b: Implications): boolean {
   console.log(`  state.alwaysaccers types: ${typeof stateA.alwaysaccers} vs ${typeof stateB.alwaysaccers}`)
   console.log(`  state.alwaysaccers isMap: ${stateA.alwaysaccers instanceof Map} vs ${stateB.alwaysaccers instanceof Map}`)
   console.log(`  state.alwaysaccers isArray: ${Array.isArray(stateA.alwaysaccers)} vs ${Array.isArray(stateB.alwaysaccers)}`)
-  const aAlwaysSize = stateA.alwaysaccers instanceof Map ? stateA.alwaysaccers.size : (Array.isArray(stateA.alwaysaccers) ? stateA.alwaysaccers.length : 0)
-  const bAlwaysSize = stateB.alwaysaccers instanceof Map ? stateB.alwaysaccers.size : (Array.isArray(stateB.alwaysaccers) ? stateB.alwaysaccers.length : 0)
+  const aAlwaysSize = stateA.alwaysaccers instanceof Map ? stateA.alwaysaccers.size : (Array.isArray(stateA.alwaysaccers) ? (stateA.alwaysaccers as Array<{serviceId: bigint, gas: bigint}>).length : 0)
+  const bAlwaysSize = stateB.alwaysaccers instanceof Map ? stateB.alwaysaccers.size : (Array.isArray(stateB.alwaysaccers) ? (stateB.alwaysaccers as Array<{serviceId: bigint, gas: bigint}>).length : 0)
   console.log(`  state.alwaysaccers sizes: ${aAlwaysSize} vs ${bAlwaysSize}`)
   if (aAlwaysSize !== bAlwaysSize) {
     console.error(`state.alwaysaccers size mismatch: ${aAlwaysSize} !== ${bAlwaysSize}`)
@@ -529,32 +525,70 @@ function compareImplications(a: Implications, b: Implications): boolean {
   }
   
   // Compare stagingset
-  if (stateA.stagingset.length !== stateB.stagingset.length) return false
+  console.log(`  state.stagingset lengths: ${stateA.stagingset.length} vs ${stateB.stagingset.length}`)
+  if (stateA.stagingset.length !== stateB.stagingset.length) {
+    console.error(`state.stagingset length mismatch: ${stateA.stagingset.length} !== ${stateB.stagingset.length}`)
+    return false
+  }
   for (let i = 0; i < stateA.stagingset.length; i++) {
     const valA = stateA.stagingset[i]
     const valB = stateB.stagingset[i]
-    if (valA.length !== valB.length) return false
-    for (let j = 0; j < valA.length; j++) {
-      if (valA[j] !== valB[j]) return false
+    if (valA.length !== valB.length) {
+      console.error(`state.stagingset[${i}] length mismatch: ${valA.length} !== ${valB.length}`)
+      return false
     }
-  }
-  
-  // Compare authqueue
-  if (stateA.authqueue.length !== stateB.authqueue.length) return false
-  for (let i = 0; i < stateA.authqueue.length; i++) {
-    const queueA = stateA.authqueue[i]
-    const queueB = stateB.authqueue[i]
-    if (queueA.length !== queueB.length) return false
-    for (let j = 0; j < queueA.length; j++) {
-      const hashA = queueA[j]
-      const hashB = queueB[j]
-      if (hashA.length !== hashB.length) return false
-      for (let k = 0; k < hashA.length; k++) {
-        if (hashA[k] !== hashB[k]) return false
+    for (let j = 0; j < valA.length; j++) {
+      if (valA[j] !== valB[j]) {
+        console.error(`state.stagingset[${i}][${j}] byte mismatch: ${valA[j]} !== ${valB[j]}`)
+        return false
       }
     }
   }
-  
+  console.log('  state.stagingset match')
+
+  // Compare authqueue
+  // decodeAuthqueue filters out zero hashes, so compare only non-zero entries (same as component-roundtrip)
+  console.log(`  state.authqueue core count: ${stateA.authqueue.length} vs ${stateB.authqueue.length}`)
+  if (stateA.authqueue.length !== stateB.authqueue.length) {
+    console.error(`state.authqueue length mismatch: ${stateA.authqueue.length} !== ${stateB.authqueue.length}`)
+    return false
+  }
+  for (let i = 0; i < stateA.authqueue.length; i++) {
+    const queueA = stateA.authqueue[i]
+    const queueB = stateB.authqueue[i]
+    const nonZeroA = queueA.filter((hash) => {
+      for (let k = 0; k < hash.length; k++) {
+        if (hash[k] !== 0) return true
+      }
+      return false
+    })
+    const nonZeroB = queueB.filter((hash) => {
+      for (let k = 0; k < hash.length; k++) {
+        if (hash[k] !== 0) return true
+      }
+      return false
+    })
+    if (nonZeroA.length !== nonZeroB.length) {
+      console.error(`state.authqueue[${i}] non-zero length mismatch: ${nonZeroA.length} !== ${nonZeroB.length}`)
+      return false
+    }
+    for (let j = 0; j < nonZeroA.length; j++) {
+      const hashA = nonZeroA[j]
+      const hashB = nonZeroB[j]
+      if (hashA.length !== hashB.length) {
+        console.error(`state.authqueue[${i}][${j}] hash length mismatch: ${hashA.length} !== ${hashB.length}`)
+        return false
+      }
+      for (let k = 0; k < hashA.length; k++) {
+        if (hashA[k] !== hashB[k]) {
+          console.error(`state.authqueue[${i}][${j}][${k}] byte mismatch: ${hashA[k]} !== ${hashB[k]}`)
+          return false
+        }
+      }
+    }
+  }
+  console.log('  state.authqueue match')
+
   return true
 }
 
@@ -568,7 +602,7 @@ async function testTypeScriptToAssemblyScriptRoundTrip(): Promise<boolean> {
   const configService = new ConfigService('tiny')
   const numCores = configService.numCores
   const numValidators = configService.numValidators
-  const authQueueSize = configService.authQueueSize
+  const authQueueSize = 80
   
   // Create test implications pair (regular and exceptional)
   const regular = createTestImplications(configService)
@@ -658,7 +692,7 @@ async function testAssemblyScriptToTypeScriptRoundTrip(): Promise<boolean> {
   const configService = new ConfigService('tiny')
   const numCores = configService.numCores
   const numValidators = configService.numValidators
-  const authQueueSize = configService.authQueueSize
+  const authQueueSize = 80
   
   // Create test implications pair (regular and exceptional)
   const regular = createTestImplications(configService)
@@ -761,4 +795,3 @@ describe('Implications Round-Trip Tests', () => {
 })
 
 export { testTypeScriptToAssemblyScriptRoundTrip, testAssemblyScriptToTypeScriptRoundTrip }
-

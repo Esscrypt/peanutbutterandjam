@@ -1,5 +1,5 @@
 import { getServiceRequestValue } from '@pbnjam/codec'
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -118,6 +118,20 @@ export class QueryHostFunction extends BaseAccumulateHostFunction {
         resultCode: null, // continue execution
       }
     }
+
+    // Log in the requested format: [host-calls] [serviceId] QUERY(0xhash, preimageLength) <- status
+    const logServiceId = imX.id
+    const statusStr =
+      requestValue.length === 0
+        ? '0'
+        : requestValue.length === 1
+          ? `1+2^32*${requestValue[0]}`
+          : requestValue.length === 2
+            ? `2+2^32*${requestValue[0]},${requestValue[1]}`
+            : `3+2^32*${requestValue[0]},${requestValue[1]}+2^32*${requestValue[2]}`
+    logger.info(
+      `[host-calls] [${logServiceId}] QUERY(0x${hashHex}, ${preimageLength}) <- ${statusStr}`,
+    )
 
     return {
       resultCode: null, // continue execution

@@ -26,9 +26,11 @@ import { decodeRecent, decodeStateWorkReports } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
+import { stopCoreServices } from '../../services/service-factory'
 import {
   convertJsonBlockToBlock,
   initializeServices,
+  type FuzzerTargetServices,
 } from '../test-utils'
 
 // Test vectors directory (relative to workspace root)
@@ -216,9 +218,8 @@ describe('JAM Conformance Traces', () => {
       
       it(`should process trace ${relativePathWithoutExt}`, async () => {
         console.log(`\n📋 Processing trace: ${relativePathWithoutExt}`)
-        
+        let services: FuzzerTargetServices | null = null
         try {
-
         // Create accumulation logs directory preserving the subdirectory structure
         // Include version in the path: pvm-traces/jam-conformance/{version}/{relative_path}
         const accumulationLogsDir = path.join(
@@ -250,7 +251,7 @@ describe('JAM Conformance Traces', () => {
         const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
         // Initialize services using shared utility (reuse genesisManager for this directory)
-        const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false, useRingVrfWasm: false })
         const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
@@ -287,6 +288,31 @@ describe('JAM Conformance Traces', () => {
         if (!decodeError && decodeResult) {
           fullContext.workReportService.setPendingReports(decodeResult.value)
         }
+      }
+
+      // Set accumulationService.lastProcessedSlot from pre_state's thetime (Chapter 11)
+      // This is critical because lastProcessedSlot is NOT part of the state trie -
+      // it's an internal variable used to calculate slot delta for ready queue shifting.
+      // Without this, shiftStateForBlockTransition() uses stale lastProcessedSlot from
+      // previous block processing, causing incorrect ready queue state.
+      // Chapter 11 key: 0x0b followed by 29 zero bytes
+      const thetimeKeyval = traceData.pre_state?.keyvals?.find(
+        (kv: { key: string }) => kv.key === '0x0b000000000000000000000000000000000000000000000000000000000000'
+      )
+      if (thetimeKeyval) {
+        // thetime is encoded as a little-endian u32 (4 bytes)
+        const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
+        // Read as little-endian u32
+        const thetime = BigInt(
+          thetimeBytes[0] |
+          (thetimeBytes[1] << 8) |
+          (thetimeBytes[2] << 16) |
+          (thetimeBytes[3] << 24)
+        )
+        fullContext.accumulationService.setLastProcessedSlot(thetime)
+      } else {
+        // No thetime in pre_state - reset to null for fresh start
+        fullContext.accumulationService.setLastProcessedSlot(null)
       }
 
       // Store initial state snapshot in ChainManagerService for fork rollback
@@ -669,6 +695,8 @@ describe('JAM Conformance Traces', () => {
         })
         // Re-throw to fail the test
         throw error
+      } finally {
+        if (services) await stopCoreServices(services.fullContext)
       }
     }, { timeout: 120000 }) // 2 minute timeout
     } // Close inner for loop (trace files)

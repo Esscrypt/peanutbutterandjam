@@ -103,24 +103,50 @@ export class WasmPVMExecutor {
   ) {
     // Resolve path to WASM file in pvm-assemblyscript package
     // Path: packages/pvm-assemblyscript/build/pvm.wasm
+
+    // Find workspace root by looking for turbo.json or package.json
+    // This works both in development and when compiled
+    let workspaceRoot: string
     const currentDir =
       typeof __dirname !== 'undefined'
         ? __dirname
         : dirname(fileURLToPath(import.meta.url))
 
-    // Go up from src/ to packages/, then to pvm-assemblyscript/build/pvm.wasm
-    // currentDir = packages/pvm-invocations/src/
-    // .. = packages/pvm-invocations/
-    // ../.. = packages/
-    // ../../.. = workspace root
-    const packagesDir = join(currentDir, '..', '..')
-    this.workspaceRoot = join(packagesDir, '..')
+    // Try to find workspace root by looking for marker files
+    let searchDir = currentDir
+    let found = false
+    for (let i = 0; i < 10; i++) {
+      // Check if we're at the workspace root (has turbo.json or package.json with workspaces)
+      if (
+        existsSync(join(searchDir, 'turbo.json')) ||
+        (existsSync(join(searchDir, 'package.json')) &&
+          existsSync(join(searchDir, 'packages')))
+      ) {
+        workspaceRoot = searchDir
+        found = true
+        break
+      }
+      const parent = dirname(searchDir)
+      if (parent === searchDir) {
+        // Reached filesystem root
+        break
+      }
+      searchDir = parent
+    }
+
+    // Fallback to process.cwd() if we couldn't find workspace root
+    if (!found) {
+      workspaceRoot = process.cwd()
+    }
+
+    this.workspaceRoot = workspaceRoot!
     this.traceSubfolder = traceSubfolder
 
     // Try to load from pvm-assemblyscript build directory first
     // Path: packages/pvm-assemblyscript/build/pvm.wasm
     const buildWasmPath = join(
-      packagesDir,
+      workspaceRoot!,
+      'packages',
       'pvm-assemblyscript',
       'build',
       'pvm.wasm',
@@ -190,6 +216,7 @@ export class WasmPVMExecutor {
     _inputs: AccumulateInput[],
     serviceId: bigint,
     invocationIndex?: number, // Invocation index (accseq iteration) for trace file naming - same for all services in a batch
+    entropyOverride?: Uint8Array, // When provided (e.g. by worker from main-process snapshot), use instead of entropyService for WASM setup
   ): SafePromise<{
     gasConsumed: bigint
     result: Uint8Array | 'PANIC' | 'OOG'
@@ -226,7 +253,11 @@ export class WasmPVMExecutor {
     const numCores = this.configService.numCores
     const numValidators = this.configService.numValidators
     const authQueueSize = 80 // Standard auth queue size
-    const entropyAccumulator = this.entropyService.getEntropyAccumulator()
+    // Use override when provided (e.g. worker receives main-process snapshot) so in-process and worker see same entropy in WASM
+    const entropyAccumulator =
+      entropyOverride && entropyOverride.length === 32
+        ? entropyOverride
+        : this.entropyService.getEntropyAccumulator()
 
     if (entropyAccumulator.length !== 32) {
       return safeError(
@@ -1092,5 +1123,18 @@ export class WasmPVMExecutor {
       faultAddress: null,
       hostCallId: null,
     }
+  }
+
+  /**
+   * Release internal memory (WASM instance and mutable state).
+   * Call before dropping the executor so WASM linear memory can be GC'd.
+   */
+  dispose(): void {
+    this.wasm = null
+    this.currentState = null
+    this.executionLogs = []
+    this.traceHostFunctionLogs = []
+    this.code = new Uint8Array(0)
+    this.bitmask = new Uint8Array(0)
   }
 }

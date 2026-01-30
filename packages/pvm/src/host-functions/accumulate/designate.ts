@@ -1,4 +1,4 @@
-import { logger } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type { HostFunctionResult, IConfigService } from '@pbnjam/types'
 import { ACCUMULATE_FUNCTIONS, RESULT_CODES } from '../../config'
 import {
@@ -43,6 +43,7 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Get the current implications context
     const [imX] = implications
+    const logServiceId = imX.id
 
     // Read validators array from memory (336 bytes per validator, up to Cvalcount validators)
     // Gray Paper: sequence[Cvalcount]{valkey} where Cvalcount = 1023
@@ -72,14 +73,8 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Check memory read FIRST (before delegator check) per Gray Paper order
     // DO NOT modify registers[7] - it must remain unchanged on panic
     if (faultAddress || !validatorsData) {
-      logger.error(
-        'DESIGNATE host function invoked but validators data read failed',
-        {
-          totalSize: totalSize.toString(),
-          validatorsOffset: validatorsOffset.toString(),
-          C_VALCOUNT: C_VALCOUNT.toString(),
-          VALIDATOR_SIZE: VALIDATOR_SIZE.toString(),
-        },
+      logger.info(
+        `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- PANIC`,
       )
       return {
         resultCode: RESULT_CODES.PANIC,
@@ -101,10 +96,9 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
     // Check delegator AFTER successful memory read per Gray Paper order
     if (imX.id !== imX.state.delegator) {
       this.setAccumulateError(registers, 'HUH')
-      logger.warn('DESIGNATE host function invoked but not the delegator', {
-        currentServiceId: imX.id.toString(),
-        delegator: imX.state.delegator.toString(),
-      })
+      logger.info(
+        `[host-calls] [${logServiceId}] DESIGNATE(${validatorsOffset}, ${C_VALCOUNT}) <- HUH`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -118,6 +112,28 @@ export class DesignateHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Format validators for logging
+    // Gray Paper: valkey structure - vk[0:32] = bandersnatch, vk[32:32] = ed25519, vk[64:144] = bls, vk[208:128] = metadata
+    const formattedValidators = stagingSet.map((validatorData) => {
+      const bandersnatch = bytesToHex(validatorData.slice(0, 32))
+      const ed25519 = bytesToHex(validatorData.slice(32, 64))
+      const bls = bytesToHex(validatorData.slice(64, 208))
+      const metadata = bytesToHex(validatorData.slice(208, 336))
+      return `ValidatorData {\n  bandersnatch: ${bandersnatch}\n  ed25519: ${ed25519}\n  bls: ${bls}\n  metadata: ${metadata}\n}`
+    })
+
+    // Format array with ellipsis if more than 2 validators
+    const validatorsStr =
+      formattedValidators.length <= 2
+        ? `[${formattedValidators.join(', ')}]`
+        : `[${formattedValidators.slice(0, 2).join(', ')}, ...]`
+
+    // Log in the requested format: TRACE [host-calls] [serviceId] DESIGNATE([ValidatorData {...}, ...]) <- OK
+    logger.info(
+      `TRACE [host-calls] [${logServiceId}] DESIGNATE(${validatorsStr}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

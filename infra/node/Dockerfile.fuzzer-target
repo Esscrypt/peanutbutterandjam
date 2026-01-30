@@ -15,6 +15,11 @@ COPY . .
 
 RUN bun install --ignore-scripts
 
+# Build the pvm-assemblyscript package to generate pvm.wasm
+# This is needed at runtime by the fuzzer target
+# Note: Using npm since the build scripts use npm internally
+RUN cd packages/pvm-assemblyscript && bun run build
+
 # Build the fuzzer target binary
 # Note: This compiles TypeScript and needs all workspace dependencies to be available and built
 RUN bun run build:fuzzer
@@ -29,8 +34,16 @@ ENV PINO_LEVEL=debug
 # Ensure /tmp exists and is writable for Unix domain sockets
 RUN mkdir -p /tmp && chmod 1777 /tmp
 
+# Copy workspace marker files for path resolution
+COPY --from=build /app/package.json /app/package.json
+COPY --from=build /app/turbo.json /app/turbo.json
+
 # Copy the compiled binary
 COPY --from=build /app/bin/fuzzer-target /app/bin/fuzzer-target
+
+# Copy PVM WASM file (needed at runtime, not bundled in binary)
+# COPY automatically creates the directory structure
+COPY --from=build /app/packages/pvm-assemblyscript/build/pvm.wasm /app/packages/pvm-assemblyscript/build/pvm.wasm
 
 # Copy WASM file (needed at runtime, not bundled in binary)
 COPY --from=build /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm /app/packages/bandersnatch-vrf/wasm-ark-vrf/ark_vrf_wasm_bg.wasm

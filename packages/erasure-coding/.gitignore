@@ -1,1 +1,3 @@
 src/*.js
+
+rust-reed-solomon/target

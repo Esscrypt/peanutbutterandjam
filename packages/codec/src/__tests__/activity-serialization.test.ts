@@ -36,9 +36,32 @@ describe('Activity Serialization', () => {
       throw decodeError
     }
 
-    expect(decoded.value.validatorStatsAccumulator).toEqual([])
-    expect(decoded.value.validatorStatsPrevious).toEqual([])
-    expect(decoded.value.coreStats).toEqual([])
+    // Encoder pads empty sequences to Cvalcount/Ccorecount; decoder reads fixed count
+    const zeroValidatorStats = {
+      blocks: 0,
+      tickets: 0,
+      preimageCount: 0,
+      preimageSize: 0,
+      guarantees: 0,
+      assurances: 0,
+    }
+    expect(decoded.value.validatorStatsAccumulator).toHaveLength(configService.numValidators)
+    decoded.value.validatorStatsAccumulator.forEach((s) => expect(s).toEqual(zeroValidatorStats))
+    expect(decoded.value.validatorStatsPrevious).toHaveLength(configService.numValidators)
+    decoded.value.validatorStatsPrevious.forEach((s) => expect(s).toEqual(zeroValidatorStats))
+    expect(decoded.value.coreStats).toHaveLength(configService.numCores)
+    decoded.value.coreStats.forEach((s) =>
+      expect(s).toEqual({
+        daLoad: 0,
+        popularity: 0,
+        importCount: 0,
+        extrinsicCount: 0,
+        extrinsicSize: 0,
+        exportCount: 0,
+        bundleLength: 0,
+        gasUsed: 0,
+      }),
+    )
     expect(decoded.value.serviceStats.size).toBe(0)
   })
 
@@ -69,9 +92,10 @@ describe('Activity Serialization', () => {
       throw decodeError
     }
 
-    expect(decoded.value.validatorStatsAccumulator).toHaveLength(1)
+    // Encoder pads to Cvalcount; decoder reads fixed count
+    expect(decoded.value.validatorStatsAccumulator).toHaveLength(configService.numValidators)
     expect(decoded.value.validatorStatsAccumulator[0]).toEqual(validatorStats)
-    expect(decoded.value.validatorStatsPrevious).toHaveLength(1)
+    expect(decoded.value.validatorStatsPrevious).toHaveLength(configService.numValidators)
     expect(decoded.value.validatorStatsPrevious[0]).toEqual(validatorStats)
   })
 
@@ -104,7 +128,8 @@ describe('Activity Serialization', () => {
       throw decodeError
     }
 
-    expect(decoded.value.coreStats).toHaveLength(1)
+    // Encoder pads to Ccorecount; decoder reads fixed count
+    expect(decoded.value.coreStats).toHaveLength(configService.numCores)
     expect(decoded.value.coreStats[0]).toEqual(coreStats)
   })
 
@@ -188,10 +213,10 @@ describe('Activity Serialization', () => {
       throw decodeError
     }
 
-    // Verify all components
-    expect(decoded.value.validatorStatsAccumulator).toHaveLength(1)
-    expect(decoded.value.validatorStatsPrevious).toHaveLength(1)
-    expect(decoded.value.coreStats).toHaveLength(1)
+    // Encoder pads to Cvalcount/Ccorecount
+    expect(decoded.value.validatorStatsAccumulator).toHaveLength(configService.numValidators)
+    expect(decoded.value.validatorStatsPrevious).toHaveLength(configService.numValidators)
+    expect(decoded.value.coreStats).toHaveLength(configService.numCores)
     expect(decoded.value.serviceStats.size).toBe(2)
 
     // Verify data integrity
@@ -263,10 +288,10 @@ describe('Activity Serialization', () => {
       throw decodeError
     }
 
-    // Verify counts
-    expect(decoded.value.validatorStatsAccumulator).toHaveLength(2)
-    expect(decoded.value.validatorStatsPrevious).toHaveLength(1)
-    expect(decoded.value.coreStats).toHaveLength(2)
+    // Encoder pads to Cvalcount/Ccorecount
+    expect(decoded.value.validatorStatsAccumulator).toHaveLength(configService.numValidators)
+    expect(decoded.value.validatorStatsPrevious).toHaveLength(configService.numValidators)
+    expect(decoded.value.coreStats).toHaveLength(configService.numCores)
     expect(decoded.value.serviceStats.size).toBe(2)
 
     // Verify first elements match

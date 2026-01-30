@@ -3,6 +3,7 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeAssurances, encodeAssurances } from '../block/assurance'
 import type { Assurance, IConfigService } from '@pbnjam/types'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Assurances Test Vectors - Comprehensive Round Trip', () => {
   // Create configs for different test vector sizes
@@ -17,7 +18,7 @@ describe('Assurances Test Vectors - Comprehensive Round Trip', () => {
   } as IConfigService
 
   it('should handle tiny assurances_extrinsic round-trip encoding/decoding', () => {
-    const tinyTestVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/tiny')
+    const tinyTestVectorsDir = getCodecTestVectorsDir('tiny')
     const binaryPath = join(tinyTestVectorsDir, 'assurances_extrinsic.bin')
     const binaryData = readFileSync(binaryPath)
     
@@ -54,7 +55,7 @@ describe('Assurances Test Vectors - Comprehensive Round Trip', () => {
   })
 
   it('should handle full assurances_extrinsic round-trip encoding/decoding', () => {
-    const fullTestVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+    const fullTestVectorsDir = getCodecTestVectorsDir('full')
     const binaryPath = join(fullTestVectorsDir, 'assurances_extrinsic.bin')
     const binaryData = readFileSync(binaryPath)
     

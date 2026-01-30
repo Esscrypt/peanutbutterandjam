@@ -213,15 +213,6 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       updateNextFreeId = true
     }
 
-    logger.debug('[NEW Host Function] Determining service ID', {
-      gratis: gratis.toString(),
-      isRegistrar: (imX.id === imX.state.registrar).toString(),
-      desiredId: desiredId.toString(),
-      currentNextFreeId: imX.nextfreeid.toString(),
-      newServiceId: newServiceId.toString(),
-      updateNextFreeId,
-    })
-
     // Create new service account
     // Gray Paper line 770: sa_requests = {(c, l): []}
     // where c = codehash and l = codeHashLength (expected code length)
@@ -259,19 +250,6 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
     // - items = 2 (Gray Paper: 2 * len(requests) + len(storage) = 2 * 1 + 0 = 2)
     // These values don't need to be recalculated because we know the blob length z = expectedCodeLength
 
-    logger.info('[NEW Host Function] Creating new service account', {
-      newServiceId: newServiceId.toString(),
-      parentServiceId: imX.id.toString(),
-      timeslot: timeslot.toString(),
-      codeHash: codeHashHex,
-      minAccGas: minAccGas.toString(),
-      minMemoGas: minMemoGas.toString(),
-      gratis: gratis.toString(),
-      desiredId: desiredId.toString(),
-      balance: minBalance.toString(),
-      currentServiceBalance: currentService.balance.toString(),
-    })
-
     // Deduct balance from current service
     currentService.balance -= minBalance
 
@@ -284,18 +262,15 @@ export class NewHostFunction extends BaseAccumulateHostFunction {
       imX.nextfreeid = calculateNextFreeId(imX.nextfreeid, imX.state.accounts)
     }
 
-    logger.info(
-      '[NEW Host Function] New service account created successfully',
-      {
-        newServiceId: newServiceId.toString(),
-        nextFreeId: imX.nextfreeid.toString(),
-        totalAccounts: imX.state.accounts.size,
-        updateNextFreeId,
-      },
-    )
-
     // Set success result with new service ID
     this.setAccumulateSuccess(registers, newServiceId)
+
+    // Log in the requested format: [host-calls] [serviceId] NEW(codeHash, minAccGas, minMemoGas, gratis) <- OK: newServiceId
+    const logServiceId = imX.id
+    logger.info(
+      `[host-calls] [${logServiceId}] NEW(${codeHashHex}, ${minAccGas}, ${minMemoGas}, ${gratis}) <- OK: ${newServiceId}`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

@@ -1,4 +1,3 @@
-import { logger } from '@pbnjam/core'
 import type { MemoryAccessType, RAM } from '@pbnjam/types'
 import { alignToPage, alignToZone } from './alignment-helpers'
 import { INIT_CONFIG, MEMORY_CONFIG, REGISTER_INIT } from './config'
@@ -223,18 +222,10 @@ export class PVMRAM implements RAM {
       (startPage + count) * MEMORY_CONFIG.PAGE_SIZE - this.heapStartAddress
     if (this.heap.length < required) {
       // Grow rw_data to fit new allocation
-      const oldSize = this.heap.length
       const newData = new Uint8Array(required)
       // copy the old data to the new array
       newData.set(this.heap, 0)
       this.heap = newData
-      logger.debug('PVMRAM: Expanded rw_data', {
-        oldSize,
-        newSize: required,
-        startPage,
-        count,
-        heapStartAddress: this.heapStartAddress,
-      })
     }
 
     // Set page access rights for newly allocated pages
@@ -1205,7 +1196,5 @@ export class PVMRAM implements RAM {
     // Fixed addresses (roDataAddress, argumentDataAddress, stackAddressEnd) are not reset
     // Clear page and address interaction history
     this.addressInteractionHistory.clear()
-
-    logger.debug('PVMRAM cleared')
   }
 }

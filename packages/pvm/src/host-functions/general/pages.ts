@@ -1,3 +1,4 @@
+import { logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -72,12 +73,17 @@ export class PagesHostFunction extends BaseHostFunction {
     const [machineId, pageStart, pageCount, accessRights] =
       context.registers.slice(7, 11)
 
+    const serviceId = context.serviceId ?? 0n
+
     // Gray Paper equation 601-604: Get machine RAM
     // u = m[n].ram if n in keys(m), error otherwise
     const machine = params.refineContext.machines.get(machineId)
     if (!machine) {
       // Gray Paper equation 617: Return WHO if machine doesn't exist
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
+      logger.info(
+        `[host-calls] [${serviceId}] PAGES(${machineId}, ${pageStart}, ${pageCount}, ${accessRights}) <- WHO`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -95,6 +101,9 @@ export class PagesHostFunction extends BaseHostFunction {
     ) {
       // Gray Paper equation 619: Return HUH if invalid parameters
       context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+      logger.info(
+        `[host-calls] [${serviceId}] PAGES(${machineId}, ${pageStart}, ${pageCount}, ${accessRights}) <- HUH`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -110,6 +119,9 @@ export class PagesHostFunction extends BaseHostFunction {
       )
       if (hasInaccessiblePages) {
         context.registers[7] = ACCUMULATE_ERROR_CODES.HUH
+        logger.info(
+          `[host-calls] [${serviceId}] PAGES(${machineId}, ${pageStart}, ${pageCount}, ${accessRights}) <- HUH`,
+        )
         return {
           resultCode: null, // continue execution
         }
@@ -121,6 +133,11 @@ export class PagesHostFunction extends BaseHostFunction {
 
     // Gray Paper equation 620: Return OK for success
     context.registers[7] = ACCUMULATE_ERROR_CODES.OK
+
+    // Log in the requested format: [host-calls] [serviceId] PAGES(machineId, pageStart, pageCount, accessRights) <- OK
+    logger.info(
+      `[host-calls] [${serviceId}] PAGES(${machineId}, ${pageStart}, ${pageCount}, ${accessRights}) <- OK`,
+    )
 
     return {
       resultCode: null, // continue execution

@@ -1,5 +1,5 @@
 import { getServiceStorageValue } from '@pbnjam/codec'
-import { bytesToHex } from '@pbnjam/core'
+import { bytesToHex, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -58,7 +58,7 @@ export class ReadHostFunction extends BaseHostFunction {
     // Read key from memory
     const [key, faultAddress] = context.ram.readOctets(keyOffset, keyLength)
     if (!key) {
-      context.log('Read host function: Memory read fault', {
+      logger.error('Read host function: Memory read fault', {
         keyOffset: keyOffset.toString(),
         keyLength: keyLength.toString(),
         faultAddress: faultAddress?.toString() ?? 'null',
@@ -77,7 +77,7 @@ export class ReadHostFunction extends BaseHostFunction {
 
     // Gray Paper equation 423: Return NONE if service account not found
     if (!serviceAccount) {
-      context.log('Read host function: Service account not found', {
+      logger.error('Read host function: Service account not found', {
         requestedServiceId: requestedServiceId.toString(),
       })
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
@@ -88,15 +88,16 @@ export class ReadHostFunction extends BaseHostFunction {
 
     // Gray Paper equation 414-418: Read storage value by key
     // v = a_storage[k] if a != none and k in keys(a_storage), otherwise none
+    const keyHex = bytesToHex(key)
     const value = getServiceStorageValue(
       serviceAccount,
       requestedServiceId,
-      bytesToHex(key),
+      keyHex,
     )
     if (!value) {
       // Gray Paper equation 423: Return NONE if storage key not found
       context.registers[7] = ACCUMULATE_ERROR_CODES.NONE
-      context.log('Read host function: Storage key not found', {
+      logger.error('Read host function: Storage key not found', {
         requestedServiceId: requestedServiceId.toString(),
         keyLength: key.length.toString(),
       })
@@ -117,7 +118,7 @@ export class ReadHostFunction extends BaseHostFunction {
     const faultAddress2 = context.ram.writeOctets(outputOffset, dataToWrite)
     if (faultAddress2) {
       // Gray Paper equation 422: Return panic if memory not writable
-      context.log('Read host function: Memory write fault', {
+      logger.error('Read host function: Memory write fault', {
         outputOffset: outputOffset.toString(),
         faultAddress: faultAddress2.toString(),
       })
@@ -134,11 +135,11 @@ export class ReadHostFunction extends BaseHostFunction {
     // Gray Paper equation 424: Return len(v) in registers[7]
     context.registers[7] = BigInt(value.length)
 
-    context.log('Read host function: Storage value read successfully', {
-      requestedServiceId: requestedServiceId.toString(),
-      valueLength: value.length.toString(),
-      writtenLength: l.toString(),
-    })
+    const serviceId = context.serviceId ?? params.serviceId
+    const dataToWriteHex = bytesToHex(dataToWrite)
+    logger.info(
+      `TRACE [host-calls] [${serviceId}] READ(${serviceId}, ${keyHex}) <- ${dataToWriteHex} (${dataToWrite.length} bytes)`,
+    )
 
     return {
       resultCode: null, // continue execution

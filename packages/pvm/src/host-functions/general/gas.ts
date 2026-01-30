@@ -21,9 +21,9 @@ export class GasHostFunction extends BaseHostFunction {
   execute(context: HostFunctionContext): HostFunctionResult {
     context.registers[7] = context.gasCounter
 
-    logger.info(`GAS host function executed`, {
-      gasCounter: context.gasCounter.toString(),
-    })
+    // Log in the requested format: [host-calls] [serviceId] GAS <- gasValue
+    const serviceId = context.serviceId ?? 0n
+    logger.info(`[host-calls] [${serviceId}] GAS <- ${context.gasCounter}`)
 
     // Return updated gas counter
     return {

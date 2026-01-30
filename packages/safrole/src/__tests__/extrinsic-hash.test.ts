@@ -5,7 +5,7 @@
  * H_extrinsichash ≡ blake{encode{blakemany{a}}}
  */
 
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { calculateExtrinsicHash } from '@pbnjam/codec'

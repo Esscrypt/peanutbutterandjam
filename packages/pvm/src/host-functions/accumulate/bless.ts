@@ -69,6 +69,8 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // a = decode[4]{memory[a:4*Ccorecount]} when Nrange(a,4*Ccorecount) ⊆ readable(memory), error otherwise
     const assignersLength = BigInt(this.configService.numCores) * 4n
 
+    const logServiceId = implications[0].id
+
     const [assignersData, faultAddress] = ram.readOctets(
       assignersOffset,
       assignersLength,
@@ -78,6 +80,9 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (faultAddress || !assignersData) {
       // DO NOT modify registers[7] - it must remain unchanged on panic
+      logger.info(
+        `[host-calls] [${logServiceId}] BLESS(${managerServiceId}, ${delegatorServiceId}, ${registrarServiceId}, ${numberOfAlwaysAccessors}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -97,6 +102,9 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
     // Gray Paper: registers'_7 = registers_7 (unchanged) when c = panic
     if (!accessorsData || accessorsFaultAddress) {
       // DO NOT modify registers[7] - it must remain unchanged on panic
+      logger.info(
+        `[host-calls] [${logServiceId}] BLESS(${managerServiceId}, ${delegatorServiceId}, ${registrarServiceId}, ${numberOfAlwaysAccessors}) <- PANIC`,
+      )
       return {
         resultCode: RESULT_CODES.PANIC,
       }
@@ -146,6 +154,9 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
       !isValidServiceId(registrarServiceId)
     ) {
       this.setAccumulateError(registers, 'WHO')
+      logger.info(
+        `[host-calls] [${logServiceId}] BLESS(${managerServiceId}, ${delegatorServiceId}, ${registrarServiceId}, ${numberOfAlwaysAccessors}) <- WHO`,
+      )
       return {
         resultCode: null, // continue execution
       }
@@ -161,6 +172,12 @@ export class BlessHostFunction extends BaseAccumulateHostFunction {
 
     // Set success result
     this.setAccumulateSuccess(registers)
+
+    // Log in the requested format: [host-calls] [serviceId] BLESS(manager, delegator, registrar, alwaysAccessorsCount) <- OK
+    logger.info(
+      `[host-calls] [${logServiceId}] BLESS(${managerServiceId}, ${delegatorServiceId}, ${registrarServiceId}, ${numberOfAlwaysAccessors}) <- OK`,
+    )
+
     return {
       resultCode: null, // continue execution
     }

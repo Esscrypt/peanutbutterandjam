@@ -2,9 +2,11 @@ import { describe, it, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeWorkPackage, encodeWorkPackage, decodeWorkItem, encodeWorkItem } from '../work-package/package'
+import { bytesToHex } from '@pbnjam/core'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('Work Package Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
 
   it('should handle work_package round-trip encoding/decoding', () => {
     const binaryPath = join(testVectorsDir, 'work_package.bin')
@@ -60,10 +62,10 @@ describe('Work Package Test Vectors - Round Trip Encoding/Decoding', () => {
       throw error
     }
     
-     // Verify the decoded item matches the JSON structure
+     // Verify the decoded item matches the JSON structure (decoder returns payload as Uint8Array)
      expect(decodedItem.value.serviceindex).toBe(BigInt(jsonData.service))
     expect(decodedItem.value.codehash).toBe(jsonData.code_hash)
-    expect(decodedItem.value.payload).toBe(jsonData.payload)
+    expect(bytesToHex(decodedItem.value.payload)).toBe(jsonData.payload)
     expect(decodedItem.value.refgaslimit).toBe(BigInt(jsonData.refine_gas_limit))
     expect(decodedItem.value.accgaslimit).toBe(BigInt(jsonData.accumulate_gas_limit))
     expect(decodedItem.value.exportcount).toBe(BigInt(jsonData.export_count))

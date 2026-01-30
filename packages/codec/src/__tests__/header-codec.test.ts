@@ -4,9 +4,10 @@ import { join } from 'path'
 import { hexToBytes } from '@pbnjam/core'
 import { decodeHeader, encodeHeader } from '../block/header'
 import { ConfigService } from '../../../../infra/node/services/config-service'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('JAM Header Codec Tests', () => {
-  const testVectorsDir = join(process.cwd(), 'submodules/jam-test-vectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
   const fullConfig = new ConfigService('full')
   it('should decode and encode header_0 correctly', () => {
     // Load the binary test vector

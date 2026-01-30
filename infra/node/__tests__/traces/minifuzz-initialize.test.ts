@@ -31,11 +31,6 @@ import { SealKeyService } from '../../services/seal-key'
 import { RingVRFProverWasm } from '@pbnjam/bandersnatch-vrf'
 import { RingVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 import { ClockService } from '../../services/clock-service'
-import {
-  AccumulateHostFunctionRegistry,
-  HostFunctionRegistry,
-} from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import { StatisticsService } from '../../services/statistics-service'
 import { NodeGenesisManager } from '../../services/genesis-manager'
 import { FuzzMessageType, safeResult } from '@pbnjam/types'
@@ -186,22 +181,6 @@ describe('Fuzzer Initialize Test', () => {
       preimageRequestProtocol: null,
     })
 
-    const hostFunctionRegistry = new HostFunctionRegistry(
-      serviceAccountsService,
-      configService,
-    )
-    const accumulateHostFunctionRegistry = new AccumulateHostFunctionRegistry(
-      configService,
-    )
-    const accumulatePVM = new AccumulatePVM({
-      hostFunctionRegistry,
-      accumulateHostFunctionRegistry,
-      configService: configService,
-      entropyService: entropyService,
-      pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
-    })
-
     const statisticsService = new StatisticsService({
       eventBusService: eventBusService,
       configService: configService,
@@ -210,15 +189,22 @@ describe('Fuzzer Initialize Test', () => {
 
     const accumulatedService = new AccumulationService({
       configService: configService,
-      clockService: clockService,
       serviceAccountsService: serviceAccountsService,
       privilegesService: privilegesService,
       validatorSetManager: validatorSetManager,
       authQueueService: authQueueService,
-      accumulatePVM: accumulatePVM,
+      entropyService: entropyService,
       readyService: readyService,
       statisticsService: statisticsService,
+      useWorkerPool: true,
+      useWasm: true,
     })
+
+    const [accumulationStartError] = await accumulatedService.start()
+    if (accumulationStartError) {
+      console.error('Failed to start accumulation service:', accumulationStartError)
+      throw accumulationStartError
+    }
 
     const recentHistoryService = new RecentHistoryService({
       eventBusService: eventBusService,

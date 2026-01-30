@@ -18,43 +18,12 @@ import { logger } from '@pbnjam/core'
 import {
   BaseService,
   type IConfigService,
+  type IReadyService,
   type Ready,
   type ReadyItem,
   type WorkReport,
 } from '@pbnjam/types'
 import type { Hex } from 'viem'
-
-/**
- * Ready Service Interface
- */
-export interface IReadyService {
-  getReady(): Ready
-  setReady(ready: Ready): void
-
-  // Epoch slot operations
-  getReadyItemsForSlot(slotIndex: bigint): ReadyItem[]
-  addReadyItemToSlot(slotIndex: bigint, readyItem: ReadyItem): void
-  removeReadyItemFromSlot(slotIndex: bigint, workReportHash: Hex): boolean
-  clearSlot(slotIndex: bigint): void
-
-  // Ready item operations
-  addReadyItem(workReport: WorkReport, dependencies: Set<Hex>): void
-  removeReadyItem(workReportHash: Hex): void
-  getReadyItem(workReportHash: Hex): ReadyItem | undefined
-
-  // Dependency management
-  updateDependencies(workReportHash: Hex, dependencies: Set<Hex>): void
-  removeDependency(workReportHash: Hex, dependencyHash: Hex): void
-  addDependency(workReportHash: Hex, dependencyHash: Hex): void
-
-  // Queue editing function E - modifies state directly
-  // Gray Paper equation 50-60: E removes items whose package hash is in accumulated set,
-  // and removes any dependencies which appear in said set
-  applyQueueEditingFunctionEToSlot(
-    slotIndex: bigint,
-    accumulatedPackages: Set<Hex>,
-  ): void
-}
 
 /**
  * Ready Service Implementation

@@ -1,5 +1,5 @@
 import { encodeServiceAccountForInfo } from '@pbnjam/codec'
-import { calculateMinBalance, logger } from '@pbnjam/core'
+import { bytesToHex, calculateMinBalance, logger } from '@pbnjam/core'
 import type {
   HostFunctionContext,
   HostFunctionResult,
@@ -160,6 +160,13 @@ export class InfoHostFunction extends BaseHostFunction {
     }
 
     context.registers[7] = BigInt(info.length)
+
+    // Log in the requested format: [host-calls] [serviceId] INFO(serviceId, off: offset, len: length) <- 0xhex_data
+    const serviceId = context.serviceId ?? params.serviceId
+    const hexData = bytesToHex(dataToWrite)
+    logger.info(
+      `[host-calls] [${serviceId}] INFO(${serviceId}, off: ${outputOffset}, len: ${dataToWrite.length}) <- 0x${hexData}`,
+    )
 
     return {
       resultCode: null, // continue execution

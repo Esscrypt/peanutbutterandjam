@@ -10,19 +10,16 @@
     "scripts"
   ],
   "scripts": {
-    "build": "turbo run build --output-logs=full --log-order=stream",
-    "check": "turbo run check --cache=local:r,remote:r --output-logs=full",
-    "build:cli": "cd packages/cli && bun run build",
-    "build:cli:binary": "bash scripts/build-quic-native.sh && bun build ./packages/cli/src/index.ts --compile --outfile ./bin/pbnj --sourcemap --minify-whitespace --minify-syntax --target bun && bash scripts/copy-native-bindings.sh",
-    "run:cli": "bun run packages/cli/src/index.ts",
+    "build": "TURBO_TELEMETRY_DISABLED=1 turbo run build --output-logs=full --log-order=stream",
+    "check": "TURBO_TELEMETRY_DISABLED=1 turbo run check --cache=local:r,remote:r --output-logs=full",
     "build:main": "bun build ./infra/node/services/main-service.ts --compile --outfile ./bin/main-service --sourcemap --minify-whitespace --minify-syntax --target bun ",
     "build:fuzzer": "bun build ./infra/node/fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --minify --target bun ",
-    "clean": "turbo run clean && rm -rf node_modules",
+    "clean": "TURBO_TELEMETRY_DISABLED=1 turbo run clean && rm -rf node_modules",
     "format": "biome format . --write",
-    "generate": "turbo run generate --cache:local:r,remote:r --parallel --continue",
+    "generate": "TURBO_TELEMETRY_DISABLED=1 turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "test": "turbo run test --parallel",
+    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test --parallel",
     "prepare": "lefthook install",
     "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
@@ -39,23 +36,26 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.1.3",
-    "@types/bun": "1.3.1",
+    "@types/bun": "1.3.7",
     "@types/hapi": "18.0.14",
     "@types/hapi__shot": "6.0.0",
-    "bun-types": "1.3.1",
+    "bun-types": "1.3.7",
     "lefthook": "1.12.2",
     "turbo": "2.5.5",
     "typescript": "5.9.2"
+  },
+  "optionalDependencies": {
+    "@infisical/quic-linux-arm": "1.0.8"
   },
   "catalog": {
     "@noble/hashes": "2.0.1",
     "@noble/curves": "2.0.1",
     "@noble/ed25519": "3.0.0",
-    "@types/bun": "1.3.2",
-    "bun-types": "1.3.2",
-    "@pbnjam/bandersnatch": "0.7.2-rc1",
-    "@pbnjam/bandersnatch-vrf": "0.7.2-rc2",
-    "@pbnjam/types": "0.7.2",
+    "@types/bun": "1.3.7",
+    "bun-types": "1.3.7",
+    "@pbnjam/bandersnatch": "0.7.2-rc2",
+    "@pbnjam/bandersnatch-vrf": "0.7.2-rc6",
+    "@pbnjam/types": "0.7.2-rc1",
     "viem": "2.32.0",
     "zod": "3.25.76",
     "pino": "10.1.0",
@@ -73,10 +73,9 @@
     "pkijs": "3.2.5",
     "u8a-utils": "1.0.12",
     "@types/node": "25.0.3",
-    "commander": "14.0.2",
-    "radash": "12.1.1"
+    "commander": "14.0.2"
   },
-  "packageManager": "bun@1.3.5",
+  "packageManager": "bun@1.3.7",
   "trustedDependencies": [
     "@biomejs/biome"
   ]

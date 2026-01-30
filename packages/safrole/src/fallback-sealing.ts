@@ -41,7 +41,7 @@ import {
   IETFVRFVerifier,
 } from '@pbnjam/bandersnatch-vrf'
 import { encodeUnsignedHeader } from '@pbnjam/codec'
-import { blake2bHash, bytesToHex, hexToBytes, logger } from '@pbnjam/core'
+import { blake2bHash, hexToBytes, logger } from '@pbnjam/core'
 import type {
   IConfigService,
   IValidatorSetManager,
@@ -263,20 +263,6 @@ export function generateFallbackKeySequence(
     // Ensure index is within bounds (should always be true with modulo)
     const safeIndex = validatorIndex % activeValidatorSize
 
-    // Log phase 0 calculation for debugging
-    if (i === 0) {
-      logger.debug('[generateFallbackKeySequence] Phase 0 calculation', {
-        phase: i,
-        entropy2: bytesToHex(entropy2),
-        indexBytes: Array.from(indexBytes),
-        combinedInput: bytesToHex(combined),
-        hashData,
-        decodedIndex: decodedIndex.toString(),
-        activeValidatorSize,
-        validatorIndex: safeIndex,
-      })
-    }
-
     // Get the validator's Bandersnatch key
     const [bandersnatchKeyError, publicKeys] =
       validatorSetManager.getValidatorAtIndex(safeIndex)
@@ -287,15 +273,6 @@ export function generateFallbackKeySequence(
     // Add the Bandersnatch key to the sequence
     const bandersnatchKey = publicKeys.bandersnatch
     fallbackKeys.push(hexToBytes(bandersnatchKey))
-
-    // Log phase 0 result
-    if (i === 0) {
-      logger.debug('[generateFallbackKeySequence] Phase 0 result', {
-        phase: i,
-        selectedValidatorIndex: safeIndex,
-        sealKey: bandersnatchKey,
-      })
-    }
   }
 
   return safeResult(fallbackKeys)

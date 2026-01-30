@@ -23,13 +23,6 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     const { registers, implications, gasCounter } = context
     const [imX] = implications
 
-    // Log checkpoint invocation
-    logger.debug('CHECKPOINT host function invoked', {
-      currentServiceId: imX.id.toString(),
-      gasCounter: gasCounter.toString(),
-      accountsCount: imX.state.accounts.size,
-    })
-
     // Gray Paper line 752: imY' = imX
     // Deep copy imX to imY to create the checkpoint
     // This creates a rollback point for exceptional termination (OOG or panic)
@@ -60,6 +53,10 @@ export class CheckpointHostFunction extends BaseAccumulateHostFunction {
     // Note: gasCounter passed here is already gascounter' (after gas cost deduction by the executor)
     // So we should return gasCounter directly, not gasCounter - gasCost
     this.setAccumulateSuccess(registers, gasCounter)
+
+    // Log in the requested format: [host-calls] [serviceId] CHECKPOINT()
+    const logServiceId = imX.id
+    logger.info(`[host-calls] [${logServiceId}] CHECKPOINT()`)
 
     return {
       resultCode: null, // continue execution

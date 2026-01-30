@@ -5,7 +5,9 @@
  */
 
 import type {
+  RingVRFProverW3F,
   RingVRFProverWasm,
+  RingVRFVerifierW3F,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import {
@@ -74,10 +76,9 @@ export class TicketService extends BaseService implements ITicketService {
   private ce131TicketDistributionProtocol: CE131TicketDistributionProtocol | null
   private ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
   private clockService: ClockService
-  private prover: RingVRFProverWasm
+  private prover: RingVRFProverWasm | RingVRFProverW3F
   private localValidatorIndex: number | null = null
-  private ringVerifier: RingVRFVerifierWasm
-
+  private ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
   constructor(options: {
     configService: ConfigService
     eventBusService: EventBusService
@@ -88,8 +89,8 @@ export class TicketService extends BaseService implements ITicketService {
     ce132TicketDistributionProtocol: CE132TicketDistributionProtocol | null
     validatorSetManager: ValidatorSetManager | null
     clockService: ClockService
-    prover: RingVRFProverWasm
-    ringVerifier: RingVRFVerifierWasm
+    prover: RingVRFProverWasm | RingVRFProverW3F
+    ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
   }) {
     super('ticket-holder-service')
     this.configService = options.configService

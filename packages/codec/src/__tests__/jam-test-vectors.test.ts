@@ -3,9 +3,10 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { decodeBlock, encodeBlock } from '../block/body'
 import type { IConfigService } from '@pbnjam/types'
+import { getCodecTestVectorsDir } from './test-vector-dir'
 
 describe('JAM Test Vectors - Round Trip Encoding/Decoding', () => {
-  const testVectorsDir = join(__dirname, '../../../../submodules/jamtestvectors/codec/full')
+  const testVectorsDir = getCodecTestVectorsDir('full')
   
   describe('Block Test Vectors', () => {
     // Create a config that matches the jamtestvectors
