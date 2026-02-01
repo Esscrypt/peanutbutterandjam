@@ -37,13 +37,32 @@ export function applyAccumulationResultsToState(
   accumulatedServicesForLastacc: Set<bigint>,
   serviceAccountsService: IServiceAccountService,
   validatorSetManager: IValidatorSetManager,
+  _batchInvocationIndex?: number,
 ): void {
+  // Pass 1: detect all ejected services so we can skip re-adding them in pass 2
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]
+    if (!accumulatedServiceIds || accumulatedServiceIds[i] === undefined) {
+      continue
+    }
+    if (result.ok) {
+      const { poststate } = result.value
+      const partialStateServicesForThisInvocation =
+        partialStateAccountsPerInvocation?.get(i)
+      if (partialStateServicesForThisInvocation) {
+        for (const serviceId of partialStateServicesForThisInvocation) {
+          if (!poststate.accounts.has(serviceId)) {
+            ejectedServices.add(serviceId)
+          }
+        }
+      }
+    }
+  }
+
+  // Pass 2: apply account updates (skip when in ejectedServices or already deleted)
   for (let i = 0; i < results.length; i++) {
     const result = results[i]
 
-    // CRITICAL FIX: Always use accumulatedServiceIds as the source of truth for which service was accumulated
-    // The work report's results[0].service_id may not match the actual accumulated service
-    // (e.g., when a work report has multiple results for different services)
     if (!accumulatedServiceIds || accumulatedServiceIds[i] === undefined) {
       continue
     }
@@ -56,8 +75,13 @@ export function applyAccumulationResultsToState(
       // Only update the accumulated service account directly
       // Other accounts in poststate are from partial state and shouldn't be updated
       // (except newly created services, which are handled below)
+      // Apply accumulated account even when in ejectedServices so transfers and metadata (balance, octets, items)
+      // are applied before we replace with tombstone; tombstone then preserves those and clears keyvals.
       const accumulatedAccount = poststate.accounts.get(accumulatedServiceId)
-      if (accumulatedAccount) {
+      const [existingAccountError] =
+        serviceAccountsService.getServiceAccount(accumulatedServiceId)
+      const alreadyDeleted = !!existingAccountError
+      if (accumulatedAccount && !alreadyDeleted) {
         // Gray Paper equation 410-412: lastacc is updated AFTER all accumulation iterations complete
         // ONLY if service is in accumulationStatistics (i.e., had work items or used gas)
         // Services that only receive transfers without executing code should NOT have lastacc updated
@@ -74,11 +98,19 @@ export function applyAccumulationResultsToState(
       }
 
       // Handle newly created services (services in poststate but not in updatedAccounts)
-      // These are services created during accumulation (e.g., via NEW host function)
+      // These are services created during accumulation (e.g., via NEW host function).
+      // Only set services that were NOT in partial state for this invocation - otherwise we would
+      // re-add services that were ejected in a previous batch (updateGlobalState is called per batch
+      // with a fresh ejectedServices set, so a later batch could re-add an ejected service from poststate).
+      const partialStateForInvocation =
+        partialStateAccountsPerInvocation?.get(i)
       for (const [serviceId, account] of poststate.accounts) {
+        const wasInPartialState = partialStateForInvocation?.has(serviceId)
         if (
           serviceId !== accumulatedServiceId &&
-          !updatedAccounts.has(serviceId)
+          !updatedAccounts.has(serviceId) &&
+          !ejectedServices.has(serviceId) &&
+          !wasInPartialState
         ) {
           // Newly created service - keep lastacc = 0 (they're created, not accumulated)
           // Gray Paper: New services have lastacc = 0
@@ -139,18 +171,7 @@ export function applyAccumulationResultsToState(
         updatedAccounts.add(provisionServiceId)
       }
 
-      // Detect ejected services: If a service was in partial state but is not in poststate.accounts, it was ejected
-      // Gray Paper: EJECT host function removes services from accounts
-      // Use the tracked partial state accounts for this specific invocation
-      const partialStateServicesForThisInvocation =
-        partialStateAccountsPerInvocation?.get(i)
-      if (partialStateServicesForThisInvocation) {
-        for (const serviceId of partialStateServicesForThisInvocation) {
-          if (!poststate.accounts.has(serviceId)) {
-            ejectedServices.add(serviceId)
-          }
-        }
-      }
+      // (Ejected services were detected in pass 1)
 
       // Special case: If the accumulated service is not in poststate.accounts
       // (e.g., it was ejected during accumulation), we still need to track it
@@ -200,5 +221,10 @@ export function applyAccumulationResultsToState(
         accumulatedServicesForLastacc.add(accumulatedServiceId)
       }
     }
+  }
+
+  // Clear keyvals and mark ejected so C(255,s) stays in state trie; keyvals cleared
+  for (const ejectedServiceId of ejectedServices) {
+    serviceAccountsService.clearKeyvalsAndMarkEjected(ejectedServiceId)
   }
 }

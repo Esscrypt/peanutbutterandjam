@@ -83,6 +83,13 @@ export interface IServiceAccountService extends BaseService {
     serviceAccount: ServiceAccount,
   ): Safe<void>
   deleteServiceAccount(serviceId: bigint): Safe<void>
+  /**
+   * Clear keyvals and mark account as ejected (do not delete).
+   * Gray Paper: Ejected services retain a chapter 255 entry; storage/preimages/requests are removed.
+   * Mutates existing account: rawCshKeyvals = {}, codehash = 0, gas fields = 0; preserves balance/octets/items/created/lastacc/parent.
+   * Errors if the service account does not exist.
+   */
+  clearKeyvalsAndMarkEjected(serviceId: bigint): Safe<void>
   /** Clear all service accounts - used for fork switching or state reset */
   clearAllServiceAccounts(): void
 

@@ -704,6 +704,31 @@ export class ServiceAccountService
   }
 
   /**
+   * Clear keyvals and mark account as ejected (do not delete).
+   * Gray Paper: Ejected services retain a chapter 255 entry; storage/preimages/requests are removed.
+   * Mutates existing account in place. Errors if account does not exist.
+   */
+  clearKeyvalsAndMarkEjected(serviceId: bigint): Safe<void> {
+    const ZERO_CODEHASH =
+      '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
+    const existing = this.coreServiceAccounts.get(serviceId)
+    if (!existing) {
+      return safeError(
+        new Error(
+          `Service account ${serviceId} not found; cannot clear keyvals and mark ejected`,
+        ),
+      )
+    }
+    existing.rawCshKeyvals = {}
+    existing.codehash = ZERO_CODEHASH
+    existing.minaccgas = 0n
+    existing.minmemogas = 0n
+    existing.gratis = 0n
+    this.coreServiceAccounts.set(serviceId, existing)
+    return safeResult(undefined)
+  }
+
+  /**
    * Clear all service accounts
    *
    * Used when switching between forks or resetting state for tests.
