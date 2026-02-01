@@ -137,8 +137,13 @@ export class ReadHostFunction extends BaseHostFunction {
 
     const serviceId = context.serviceId ?? params.serviceId
     const dataToWriteHex = bytesToHex(dataToWrite)
+    const maxLoggedBytes = 32
+    const loggedValue =
+      dataToWrite.length > maxLoggedBytes
+        ? `${dataToWriteHex.slice(0, 2 + maxLoggedBytes * 2)}... (${dataToWrite.length} bytes)`
+        : `${dataToWriteHex} (${dataToWrite.length} bytes)`
     logger.info(
-      `TRACE [host-calls] [${serviceId}] READ(${serviceId}, ${keyHex}) <- ${dataToWriteHex} (${dataToWrite.length} bytes)`,
+      `TRACE [host-calls] [${serviceId}] READ(${serviceId}, ${keyHex}) <- ${loggedValue}`,
     )
 
     return {

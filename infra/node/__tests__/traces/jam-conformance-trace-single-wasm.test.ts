@@ -271,12 +271,6 @@ describe('JAM Conformance Single Trace', () => {
       let checkedKeys = 0
       let missingKeys = 0
 
-      // #region agent log - constants for Block 710 mismatch
-      const TARGET_SERVICE_ID_710 = 994117200n
-      const TARGET_KEY_710 = '0x50d7064541b73bfec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
-      const EXPECTED_VALUE_710 = '0x2d61c4a890d9fa31'
-      // #endregion
-
       for (const keyval of blockJsonData.post_state.keyvals) {
         const expectedValue = stateTrie?.[keyval.key]
         
@@ -479,11 +473,6 @@ describe('JAM Conformance Single Trace', () => {
           }
           console.log(`📁 Mismatch files dumped to: ${mismatchDir}/${filePrefix}-*`)
         }
-        // #region agent log - keyval mismatch detection for Block 710
-        if (keyval.key === TARGET_KEY_710) {
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:481',message:'KEYVAL MISMATCH DETECTED Block 710',data:{blockNumber,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),expectedValue:keyval.value,actualValue:expectedValue||null,matches:keyval.value===expectedValue},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-KEYVAL-MISMATCH'})}).catch(()=>{})
-        }
-        // #endregion
         expect(keyval.value).toBe(expectedValue)
       }
 
@@ -518,16 +507,6 @@ describe('JAM Conformance Single Trace', () => {
       stateService.clearState()
 
       // Set pre-state from trace (for each block)
-      // #region agent log - before setState for Block 710
-      const TARGET_SERVICE_ID_710 = 994117200n
-      const TARGET_KEY_710 = '0x50d7064541b73bfec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
-      const EXPECTED_VALUE_710 = '0x2d61c4a890d9fa31'
-      const preStateKeyval710 = traceData.pre_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-      const postStateKeyval710 = traceData.post_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-      if (preStateKeyval710 || postStateKeyval710) {
-        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:515',message:'BEFORE setState Block 710 - trace pre/post_state keyval',data:{blockNum,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),preStateValue:preStateKeyval710?.value||null,postStateValue:postStateKeyval710?.value||null,expectedValue:EXPECTED_VALUE_710,preStateMatchesExpected:preStateKeyval710?.value===EXPECTED_VALUE_710,postStateMatchesExpected:postStateKeyval710?.value===EXPECTED_VALUE_710},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-EXPECTED-VALUE-SOURCE'})}).catch(()=>{})
-      }
-      // #endregion
       if (traceData.pre_state?.keyvals) {
         const [setStateError1] = stateService.setState(
           traceData.pre_state.keyvals,
@@ -535,15 +514,6 @@ describe('JAM Conformance Single Trace', () => {
         if (setStateError1) {
           throw new Error(`Failed to set pre-state for block ${blockNum}: ${setStateError1.message}`)
         }
-        // #region agent log - after setState for Block 710
-        const preStateKeyval710AfterSetState = traceData.pre_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-        if (preStateKeyval710AfterSetState) {
-          const serviceAccounts = fullContext.serviceAccountService.getServiceAccounts()
-          const serviceAccount = serviceAccounts.accounts.get(TARGET_SERVICE_ID_710)
-          const keyvalAfterSetState = serviceAccount?.rawCshKeyvals?.[TARGET_KEY_710]
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:522',message:'AFTER setState Block 710 - service account keyval',data:{blockNum,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),preStateValue:preStateKeyval710AfterSetState.value,keyvalAfterSetState:keyvalAfterSetState||null,expectedValue:EXPECTED_VALUE_710,matches:keyvalAfterSetState===preStateKeyval710AfterSetState.value,matchesExpected:keyvalAfterSetState===EXPECTED_VALUE_710},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-EXPECTED-VALUE-SOURCE'})}).catch(()=>{})
-        }
-        // #endregion
       } else if (genesisJson?.state?.keyvals && isFirstBlock) {
         // Only use genesis state for the first block being processed
         const [setStateError2] = stateService.setState(

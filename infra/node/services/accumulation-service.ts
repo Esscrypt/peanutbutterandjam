@@ -213,21 +213,28 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Get last accumulation outputs
+   * Get last accumulation outputs (lastaccout') for accoutBelt merklization.
    *
-   * Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
-   * Returns the accumulation output pairings (lastaccout') from the most recent accumulation.
+   * Gray Paper accumulation.tex eq 369: lastaccout' ≡ sq{(s, h) ∈ b} where b = local_fnservouts
+   * (protoset). The GP does not specify the order when building the sequence from the set b.
+   * Gray Paper recent_history.tex eq 29: s = [encode[4](s) concat encode(h) : (s, h) orderedin lastaccout'].
+   * We use ascending service-ID order so that the same service's outputs are adjacent (and
+   * duplicate service IDs ordered by insertion order is preserved by a stable sort), matching
+   * the reference implementation (jam-conformance) for conformance tests.
    *
-   * @returns Map of serviceId -> hash from the latest accumulation
-   *          Returns a default Map with zeroHash if no accumulation outputs exist
+   * @returns Sequence of [serviceId, hash] in ascending service-ID order.
    */
   getLastAccumulationOutputs(): [bigint, Hex][] {
-    // Gray Paper: lastaccout' ≡ ⟦(s, h) ∈ b⟧ where b is a SET
-    // Sets are ordered by their key (service ID) in ascending order
-    // So we must sort by service ID before returning
+    // Gray Paper eq 369: lastaccout' from set b; order unspecified. Use service-ID order, then
+    // hash (lexicographic) when service ID is equal, for deterministic merklizewb(s) and to
+    // match reference (jam-conformance).
     return [...this.accumulationOutputs].sort((a, b) => {
       if (a[0] < b[0]) return -1
       if (a[0] > b[0]) return 1
+      const hashA = String(a[1])
+      const hashB = String(b[1])
+      if (hashA < hashB) return -1
+      if (hashA > hashB) return 1
       return 0
     })
   }
@@ -737,7 +744,7 @@ export class AccumulationService extends BaseService {
    *
    * @param readyItems - Work reports to process
    * @param pendingDefxfers - Defxfers from previous accumulations (Gray Paper: t)
-   * @returns Map from serviceId to AccumulateInput[] (i^T concat i^U for each service), with keys in ascending order for deterministic iteration
+   * @returns Map from serviceId to AccumulateInput[] (i^T concat i^U for each service), with keys in first-appearance order (defxfers then readyItems) to match reference accumulation order for lastaccout'
    */
   createAccumulateInputs(
     readyItems: ReadyItem[],

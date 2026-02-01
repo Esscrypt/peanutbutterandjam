@@ -425,32 +425,6 @@ export class BlockImporterService
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
 
-    // #region agent log - Block 710 before updateAccoutBelt
-    if (typeof fetch !== 'undefined') {
-      fetch(
-        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'block-importer-service.ts:410',
-            message: 'Block 710 before updateAccoutBelt',
-            data: {
-              timeslot: block.header.timeslot.toString(),
-              lastAccumulationOutputsLength: lastAccumulationOutputs.length,
-              lastAccumulationOutputs: lastAccumulationOutputs.map(
-                ([s, h]) => ({ serviceId: s.toString(), hash: h }),
-              ),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            hypothesisId: 'H710-RECENT-HISTORY',
-          }),
-        },
-      ).catch(() => {})
-    }
-    // #endregion
-
     // Update accout belt before adding to recent history
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     const [beltError] = this.recentHistoryService.updateAccoutBelt(

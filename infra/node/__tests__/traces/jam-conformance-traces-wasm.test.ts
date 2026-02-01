@@ -251,7 +251,7 @@ describe('JAM Conformance Traces', () => {
         const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
         // Initialize services using shared utility (reuse genesisManager for this directory)
-        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false, useRingVrfWasm: false })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false, useRingVrfWasm: true })
         const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
