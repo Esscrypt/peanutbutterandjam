@@ -585,12 +585,13 @@ export class WasmPVMExecutor {
     // Determine result
     // Status enum from wasm-wrapper.ts:
     // OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
+    // Gray Paper: instruction-level FAULT (e.g. write to read-only region) leads to invocation panic.
     let result: Uint8Array | 'PANIC' | 'OOG'
     if (status === 5) {
       // OOG
       result = 'OOG'
-    } else if (status === 2) {
-      // PANIC
+    } else if (status === 2 || status === 3) {
+      // PANIC (2) or FAULT (3) → treat as PANIC for accumulation (invocation panics)
       result = 'PANIC'
     } else {
       // HALT or OK - extract result from memory using registers[7] and registers[8]
@@ -658,6 +659,9 @@ export class WasmPVMExecutor {
       if (status === 2) {
         // PANIC
         errorCode = RESULT_CODES.PANIC
+      } else if (status === 3) {
+        // FAULT (e.g. write to read-only region)
+        errorCode = RESULT_CODES.FAULT
       } else if (status === 5) {
         // OOG (WASM status 5, not 4!)
         errorCode = RESULT_CODES.OOG
