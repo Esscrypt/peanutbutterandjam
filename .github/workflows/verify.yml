@@ -48,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: [{}]
+        include: [{ suite: default }]
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
