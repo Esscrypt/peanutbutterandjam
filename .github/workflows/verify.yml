@@ -66,3 +66,5 @@ jobs:
         uses: ./.github/actions/install
       - name: Run PeanutButterAndJam tests
         run: bun run test
+      - name: Run Traces tests
+        run: cd infra/node && bun test jam-conformance-traces-wasm.test.ts
