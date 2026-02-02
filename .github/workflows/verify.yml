@@ -50,6 +50,11 @@ jobs:
         uses: actions/checkout@v4
       - name: Checkout jam-test-vectors submodule
         run: git submodule update --init submodules/jam-test-vectors
+      - name: Checkout jam-conformance submodule
+        run: git submodule update --init submodules/jam-conformance
+      - name: Checkout w3f-jam-conformance submodule
+        run: git submodule update --init submodules/w3f-jam-conformance
+
       - name: Checkout pvm-test-vectors submodule
         run: git submodule update --init submodules/pvm-test-vectors
       - name: Checkout bandersnatch submodule
