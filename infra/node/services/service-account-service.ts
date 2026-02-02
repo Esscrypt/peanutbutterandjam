@@ -200,10 +200,15 @@ export class ServiceAccountService
    * @param preimage - The preimage data to store
    * @returns Safe result indicating success
    */
-  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<Hex> {
-    // Validate first (no state changes on failure)
+  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<void> {
+    // Gray Paper accumulation.tex fnprovide: "Preimage provisions into services which
+    // no longer exist or whose relevant request is dropped are disregarded."
+    // So we skip (do not apply) and return success when not providable; we do not fail the block.
     const [validationError] = this.validatePreimageRequest(preimage)
     if (validationError) {
+      if (validationError.message === 'preimage_unneeded') {
+        return safeResult(undefined)
+      }
       return safeError(validationError)
     }
 
@@ -228,7 +233,7 @@ export class ServiceAccountService
       creationSlot,
     ])
 
-    return safeResult(hash)
+    return safeResult(undefined)
   }
 
   /**
@@ -266,7 +271,6 @@ export class ServiceAccountService
     )
 
     if (!requestStatus) {
-      // Return preimage_unneeded when blob is not requested (per test vector expectations)
       return safeError(new Error('preimage_unneeded'))
     }
     return safeResult(undefined)

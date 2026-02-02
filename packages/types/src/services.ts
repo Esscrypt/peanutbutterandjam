@@ -111,7 +111,7 @@ export interface IServiceAccountService extends BaseService {
   getStorageValue(serviceId: bigint, key: Hex): Uint8Array | undefined
 
   /** Store a preimage */
-  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<Hex>
+  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<void>
 
   /** Get list of all service IDs */
   listServiceIds(): bigint[]

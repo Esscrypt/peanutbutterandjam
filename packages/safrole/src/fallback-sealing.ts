@@ -112,8 +112,8 @@ export function generateFallbackSealSignature(
   // where input = message and auxData = context per IETF VRF specification
   const vrfResult = IETFVRFProver.prove(
     validatorSecretKey,
-    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _input parameter
-    context, // Xfallback ∥ entropy'_3 (context) - goes to _auxData parameter
+    context, // encodeunsignedheader{H} (message) - goes to _input parameter
+    encodedUnsignedHeader, // Xfallback ∥ entropy'_3 (context) - goes to _auxData parameter
   )
 
   // Verify the signature is the correct length (96 bytes per Gray Paper)
