@@ -460,70 +460,12 @@ export function validatePreStateRoot(
   header: BlockHeader,
   stateService: IStateService,
 ): Safe<void> {
-  // #region agent log
-  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'header.ts:389',
-      message: 'validatePreStateRoot entry',
-      data: {
-        timeslot: header.timeslot.toString(),
-        expectedPriorStateRoot: header.priorStateRoot,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'pre-import-root',
-      hypothesisId: 'D',
-    }),
-  }).catch(() => {})
-  // #endregion
-
   const [preStateRootError, preStateRoot] = stateService.getStateRoot()
   if (preStateRootError) {
-    // #region agent log
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'header.ts:395',
-          message: 'getStateRoot error',
-          data: { error: preStateRootError.message },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'pre-import-root',
-          hypothesisId: 'E',
-        }),
-      },
-    ).catch(() => {})
-    // #endregion
     return safeError(
       new Error(`Failed to get pre-state root: ${preStateRootError.message}`),
     )
   }
-
-  // #region agent log
-  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      location: 'header.ts:400',
-      message: 'Pre-state root comparison',
-      data: {
-        timeslot: header.timeslot.toString(),
-        computedPreStateRoot: preStateRoot,
-        expectedPriorStateRoot: header.priorStateRoot,
-        match: header.priorStateRoot === preStateRoot,
-      },
-      timestamp: Date.now(),
-      sessionId: 'debug-session',
-      runId: 'pre-import-root',
-      hypothesisId: 'F',
-    }),
-  }).catch(() => {})
-  // #endregion
 
   if (header.priorStateRoot !== preStateRoot) {
     return safeError(

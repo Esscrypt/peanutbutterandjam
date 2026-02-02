@@ -21,6 +21,7 @@ import {
   type Hex,
   hexToBytes,
   logger,
+  zeroHash,
 } from '@pbnjam/core'
 import type { PreimageRequestProtocol } from '@pbnjam/networking'
 import {
@@ -206,9 +207,6 @@ export class ServiceAccountService
     // So we skip (do not apply) and return success when not providable; we do not fail the block.
     const [validationError] = this.validatePreimageRequest(preimage)
     if (validationError) {
-      if (validationError.message === 'preimage_unneeded') {
-        return safeResult(undefined)
-      }
       return safeError(validationError)
     }
 
@@ -713,8 +711,6 @@ export class ServiceAccountService
    * Mutates existing account in place. Errors if account does not exist.
    */
   clearKeyvalsAndMarkEjected(serviceId: bigint): Safe<void> {
-    const ZERO_CODEHASH =
-      '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex
     const existing = this.coreServiceAccounts.get(serviceId)
     if (!existing) {
       return safeError(
@@ -724,7 +720,7 @@ export class ServiceAccountService
       )
     }
     existing.rawCshKeyvals = {}
-    existing.codehash = ZERO_CODEHASH
+    existing.codehash = zeroHash
     existing.minaccgas = 0n
     existing.minmemogas = 0n
     existing.gratis = 0n

@@ -72,11 +72,6 @@ export function applyAccumulationResultsToState(
     if (result.ok) {
       const { poststate } = result.value
 
-      // Only update the accumulated service account directly
-      // Other accounts in poststate are from partial state and shouldn't be updated
-      // (except newly created services, which are handled below)
-      // Apply accumulated account even when in ejectedServices so transfers and metadata (balance, octets, items)
-      // are applied before we replace with tombstone; tombstone then preserves those and clears keyvals.
       const accumulatedAccount = poststate.accounts.get(accumulatedServiceId)
       const [existingAccountError] =
         serviceAccountsService.getServiceAccount(accumulatedServiceId)
@@ -89,12 +84,27 @@ export function applyAccumulationResultsToState(
           accumulatedServicesForLastacc.add(accumulatedServiceId)
         }
 
-        // Update the service account (without modifying lastacc - that's done later)
-        serviceAccountsService.setServiceAccount(
-          accumulatedServiceId,
-          accumulatedAccount,
-        )
-        updatedAccounts.add(accumulatedServiceId)
+        const reusedAfterEject = ejectedServices.has(accumulatedServiceId)
+        if (reusedAfterEject) {
+          // Re-use after eject: apply accumulated poststate (balance, octets, items, etc.)
+          // then clear keyvals so the tombstone has the correct metadata from accumulation.
+          serviceAccountsService.setServiceAccount(
+            accumulatedServiceId,
+            accumulatedAccount,
+          )
+          serviceAccountsService.clearKeyvalsAndMarkEjected(
+            accumulatedServiceId,
+          )
+          updatedAccounts.add(accumulatedServiceId)
+          ejectedServices.delete(accumulatedServiceId)
+        } else {
+          // Normal case: apply accumulated poststate.
+          serviceAccountsService.setServiceAccount(
+            accumulatedServiceId,
+            accumulatedAccount,
+          )
+          updatedAccounts.add(accumulatedServiceId)
+        }
       }
 
       // Handle newly created services (services in poststate but not in updatedAccounts)
@@ -223,8 +233,8 @@ export function applyAccumulationResultsToState(
     }
   }
 
-  // Clear keyvals and mark ejected so C(255,s) stays in state trie; keyvals cleared
+  // Delete only services still in ejectedServices (we removed re-added ones in Pass 2).
   for (const ejectedServiceId of ejectedServices) {
-    serviceAccountsService.clearKeyvalsAndMarkEjected(ejectedServiceId)
+    serviceAccountsService.deleteServiceAccount(ejectedServiceId)
   }
 }

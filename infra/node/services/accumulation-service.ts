@@ -1039,14 +1039,6 @@ export class AccumulationService extends BaseService {
     // R(o, a, b) = b when a = o (manager didn't change), else a (manager changed)
     applyPrivilegesWithRFunction(servicePoststates, this.privilegesService)
 
-    // Step 4: Clear keyvals and mark ejected (after applying transfers)
-    for (const ejectedServiceId of ejectedServices) {
-      this.serviceAccountsService.deleteServiceAccount(ejectedServiceId)
-    }
-
-    // Remove ALL processed work reports from ready queue, regardless of success/failure
-    // Gray Paper: A work report is "processed" once accumulation is attempted, even if it fails
-    // Failed work reports (PANIC/OOG) should NOT be re-processed - they are consumed by the attempt
     for (const processedReport of processedWorkReports) {
       // Log whether this was successfully accumulated (for debugging)
       const [hashError, workReportHash] =

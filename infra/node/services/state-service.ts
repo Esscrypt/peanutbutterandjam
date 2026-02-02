@@ -286,33 +286,6 @@ export class StateService extends BaseService implements IStateService {
           this.validatorSetManager.getStoredEpochRoot() ??
           this.validatorSetManager.getEpochRoot()
 
-        // #region agent log
-        const storedEpochRoot = this.validatorSetManager.getStoredEpochRoot()
-        const computedEpochRoot = this.validatorSetManager.getEpochRoot()
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'state-service.ts:282',
-              message: 'getStateComponent Chapter 4',
-              data: {
-                hasStoredEpochRoot: !!storedEpochRoot,
-                storedEpochRoot: storedEpochRoot?.slice(0, 40),
-                computedEpochRoot: computedEpochRoot?.slice(0, 40),
-                usingStored: !!storedEpochRoot,
-                epochRootsMatch: storedEpochRoot === computedEpochRoot,
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'A',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
-
         return {
           pendingSet: this.validatorSetManager.getPendingValidators(),
           epochRoot: epochRoot,
@@ -654,29 +627,6 @@ export class StateService extends BaseService implements IStateService {
         )
         processedKeys.add(keyval.key)
       } catch (error) {
-        // #region agent log
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'state-service.ts:595',
-              message: 'setStateComponent error caught',
-              data: {
-                chapterIndex: parsedStateKey.chapterIndex,
-                key: keyval.key.slice(0, 40),
-                errorMessage:
-                  error instanceof Error ? error.message : String(error),
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'B',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
         unprocessedKeyvals.push({
           key: keyval.key,
           value: keyval.value,

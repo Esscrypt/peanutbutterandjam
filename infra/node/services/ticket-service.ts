@@ -386,27 +386,6 @@ export class TicketService extends BaseService implements ITicketService {
     // Verify ticket proofs BEFORE checking for duplicates
     // Gray Paper: Verify each ticket proof before processing duplicates
     for (const ticket of newTickets) {
-      // #region agent log
-      fetch(
-        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'ticket-service.ts:363',
-            message: 'Verifying ticket proof',
-            data: {
-              ticketId: ticket.id.slice(0, 20),
-              entryIndex: ticket.entryIndex.toString(),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            runId: 'run1',
-            hypothesisId: 'E',
-          }),
-        },
-      ).catch(() => {})
-      // #endregion
       const [verifyError, isValid] = verifyTicket(
         ticket,
         this.entropyService,
@@ -414,51 +393,9 @@ export class TicketService extends BaseService implements ITicketService {
         this.ringVerifier,
       )
       if (verifyError) {
-        // #region agent log
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'ticket-service.ts:370',
-              message: 'Ticket verification error',
-              data: {
-                ticketId: ticket.id.slice(0, 20),
-                error: verifyError.message,
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'E',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
         return safeError(verifyError)
       }
       if (!isValid) {
-        // #region agent log
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'ticket-service.ts:376',
-              message: 'Returning bad_ticket_proof',
-              data: {
-                ticketId: ticket.id.slice(0, 20),
-                entryIndex: ticket.entryIndex.toString(),
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'E',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
         return safeError(new Error(SAFROLE_ERRORS.BAD_TICKET_PROOF))
       }
     }
@@ -536,55 +473,8 @@ export class TicketService extends BaseService implements ITicketService {
     const existingIds = new Set(existingAccumulator.map((t) => t.id))
     const validTickets: SafroleTicketWithoutProof[] = []
 
-    // #region agent log
-    fetch(
-      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          location: 'ticket-service.ts:472',
-          message: 'filterDuplicateTickets entry',
-          data: {
-            newTicketCount: newTickets.length,
-            existingAccumulatorSize: existingAccumulator.length,
-            newTicketIds: newTickets.map((t) => t.id.slice(0, 20)),
-            existingTicketIds: Array.from(existingIds).map((id) =>
-              id.slice(0, 20),
-            ),
-          },
-          timestamp: Date.now(),
-          sessionId: 'debug-session',
-          runId: 'run1',
-          hypothesisId: 'C',
-        }),
-      },
-    ).catch(() => {})
-    // #endregion
-
     for (const ticket of newTickets) {
       if (existingIds.has(ticket.id)) {
-        // #region agent log
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'ticket-service.ts:477',
-              message: 'Duplicate ticket ID found',
-              data: {
-                duplicateTicketId: ticket.id.slice(0, 40),
-                errorMessage: `Duplicate ticket ID found: ${ticket.id}`,
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'A',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
         return safeError(new Error(`Duplicate ticket ID found: ${ticket.id}`))
       }
       validTickets.push(ticket)

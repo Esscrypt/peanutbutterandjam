@@ -564,7 +564,6 @@ export function setServiceStorageValue(
   const storageStateKey = createServiceStorageKey(serviceId, storageKey)
   const stateKeyHex = bytesToHex(storageStateKey)
 
-  // #region agent log
   if (typeof fetch !== 'undefined') {
     fetch(
       'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
