@@ -21,6 +21,7 @@ import {
   type Hex,
   hexToBytes,
   logger,
+  zeroHash,
 } from '@pbnjam/core'
 import type { PreimageRequestProtocol } from '@pbnjam/networking'
 import {
@@ -200,8 +201,10 @@ export class ServiceAccountService
    * @param preimage - The preimage data to store
    * @returns Safe result indicating success
    */
-  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<Hex> {
-    // Validate first (no state changes on failure)
+  storePreimage(preimage: Preimage, creationSlot: bigint): Safe<void> {
+    // Gray Paper accumulation.tex fnprovide: "Preimage provisions into services which
+    // no longer exist or whose relevant request is dropped are disregarded."
+    // So we skip (do not apply) and return success when not providable; we do not fail the block.
     const [validationError] = this.validatePreimageRequest(preimage)
     if (validationError) {
       return safeError(validationError)
@@ -228,7 +231,7 @@ export class ServiceAccountService
       creationSlot,
     ])
 
-    return safeResult(hash)
+    return safeResult(undefined)
   }
 
   /**
@@ -266,7 +269,6 @@ export class ServiceAccountService
     )
 
     if (!requestStatus) {
-      // Return preimage_unneeded when blob is not requested (per test vector expectations)
       return safeError(new Error('preimage_unneeded'))
     }
     return safeResult(undefined)
@@ -700,6 +702,29 @@ export class ServiceAccountService
    */
   deleteServiceAccount(serviceId: bigint): Safe<void> {
     this.coreServiceAccounts.delete(serviceId)
+    return safeResult(undefined)
+  }
+
+  /**
+   * Clear keyvals and mark account as ejected (do not delete).
+   * Gray Paper: Ejected services retain a chapter 255 entry; storage/preimages/requests are removed.
+   * Mutates existing account in place. Errors if account does not exist.
+   */
+  clearKeyvalsAndMarkEjected(serviceId: bigint): Safe<void> {
+    const existing = this.coreServiceAccounts.get(serviceId)
+    if (!existing) {
+      return safeError(
+        new Error(
+          `Service account ${serviceId} not found; cannot clear keyvals and mark ejected`,
+        ),
+      )
+    }
+    existing.rawCshKeyvals = {}
+    existing.codehash = zeroHash
+    existing.minaccgas = 0n
+    existing.minmemogas = 0n
+    existing.gratis = 0n
+    this.coreServiceAccounts.set(serviceId, existing)
     return safeResult(undefined)
   }
 

@@ -45,11 +45,20 @@ jobs:
     runs-on: ubuntu-latest
     needs:  [lint]
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include: [{ suite: default }]
     steps:
       - name: Clone repository
         uses: actions/checkout@v4
       - name: Checkout jam-test-vectors submodule
         run: git submodule update --init submodules/jam-test-vectors
+      - name: Checkout jam-conformance submodule
+        run: git submodule update --init submodules/jam-conformance
+      - name: Checkout w3f-jam-conformance submodule
+        run: git submodule update --init submodules/w3f-jam-conformance
+
       - name: Checkout pvm-test-vectors submodule
         run: git submodule update --init submodules/pvm-test-vectors
       - name: Checkout bandersnatch submodule
@@ -61,3 +70,5 @@ jobs:
         uses: ./.github/actions/install
       - name: Run PeanutButterAndJam tests
         run: bun run test
+      - name: Run Traces tests
+        run: cd infra/node && bun test jam-conformance-traces-wasm.test.ts

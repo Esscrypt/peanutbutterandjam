@@ -2037,57 +2037,7 @@ export class GuarantorService extends BaseService {
       const pendingReport = this.workReportService.getCoreReport(
         BigInt(coreIndex),
       )
-      // #region agent log
-      fetch(
-        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'guarantor-service.ts:1739',
-            message: 'Core engagement check for guarantee',
-            data: {
-              coreIndex,
-              hasPendingReport: pendingReport !== null,
-              packageHash:
-                pendingReport?.workReport?.package_spec?.hash?.slice(0, 40) ||
-                'none',
-              timeslot: pendingReport?.timeslot?.toString() || 'none',
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            runId: 'run1',
-            hypothesisId: 'A',
-          }),
-        },
-      ).catch(() => {})
-      // #endregion
       if (pendingReport !== null) {
-        // #region agent log
-        fetch(
-          'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              location: 'guarantor-service.ts:1743',
-              message: 'CORE_ENGAGED error - core has pending report',
-              data: {
-                coreIndex,
-                packageHash: pendingReport.workReport.package_spec.hash.slice(
-                  0,
-                  40,
-                ),
-                timeslot: pendingReport.timeslot.toString(),
-              },
-              timestamp: Date.now(),
-              sessionId: 'debug-session',
-              runId: 'run1',
-              hypothesisId: 'A',
-            }),
-          },
-        ).catch(() => {})
-        // #endregion
         return safeResult({ reporters: [], error: REPORTS_ERRORS.CORE_ENGAGED })
       }
 
