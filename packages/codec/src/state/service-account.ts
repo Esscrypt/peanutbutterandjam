@@ -743,14 +743,18 @@ export function extractServiceIdFromStateKey(
  * C(s, encode[4]{l} ∥ h) ↦ encode{var{sequence{encode[4]{x} | x ∈ t}}}
  *
  * @param serviceAccount - Service account to query
- * @returns Map of state keys to {timeslots, blobLength} objects
- * Note: The blob length is obtained from the preimage if it exists, otherwise 0
+ * @returns Map of state keys to {timeslots, blobLength, preimageHash} objects
+ * Note: The blob length is obtained from the preimage if it exists, otherwise 0.
+ * preimageHash is the zero hex for pending requests (no matching preimage).
  */
 export function getAllServiceRequests(
   serviceAccount: ServiceAccount,
   currentTimeslot?: bigint,
-): Map<Hex, { timeslots: bigint[]; blobLength: bigint }> {
-  const requests = new Map<Hex, { timeslots: bigint[]; blobLength: bigint }>()
+): Map<Hex, { timeslots: bigint[]; blobLength: bigint; preimageHash: Hex }> {
+  const requests = new Map<
+    Hex,
+    { timeslots: bigint[]; blobLength: bigint; preimageHash: Hex }
+  >()
 
   // Use determineKeyTypes to classify all keys at once
   const keyTypes = determineKeyTypes(
@@ -774,6 +778,7 @@ export function getAllServiceRequests(
       requests.set(stateKeyHex, {
         timeslots: keyType.timeslots,
         blobLength,
+        preimageHash: keyType.preimageHash,
       })
     }
   }
