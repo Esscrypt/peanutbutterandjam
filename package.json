@@ -18,7 +18,7 @@
     "generate": "TURBO_TELEMETRY_DISABLED=1 turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test --parallel",
+    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test",
     "prepare": "lefthook install",
     "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
