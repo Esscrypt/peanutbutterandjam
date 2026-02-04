@@ -324,9 +324,6 @@ export class WasmPVMExecutor {
     this.bitmask = extendedBitmask
 
     // Encode accumulate inputs sequence for FETCH host function (selectors 14 and 15)
-    // Always encode the sequence, even if empty (to match Rust reference expectations)
-    // An empty sequence is encoded as: encode(0) = 0x00 (length prefix for 0 items)
-    // Gray Paper pvm_invocations.tex lines 359-360: i = sequence{accinput}
     const inputsToEncode = _inputs && _inputs.length > 0 ? _inputs : []
     const [encodeError, encoded] = encodeVariableSequence(
       inputsToEncode,
@@ -646,7 +643,6 @@ export class WasmPVMExecutor {
       const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
       const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
 
-      // Encode full accumulate inputs for comparison with reference traces (same as TypeScript executor)
       const [encodeError, encodedInputs] = encodeVariableSequence(
         _inputs,
         encodeAccumulateInput,
@@ -684,12 +680,6 @@ export class WasmPVMExecutor {
         yieldHash = updatedContext?.[0]?.yield ?? undefined
       }
 
-      // For block-based traces (like preimages-light-all-blocks.test.ts), use reference format (00000043.log)
-      // Don't pass executorType to get reference format when blockNumber is provided
-      // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
-      // Since we always have timeslot (block number), we use reference format by default
-      // If trace format is needed, it can be enabled via a flag or by not passing timeslot
-      // Include serviceId to avoid collisions when multiple services execute in the same slot
       const filepath = writeTraceDump(
         this.executionLogs,
         this.traceHostFunctionLogs.length > 0

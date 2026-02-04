@@ -438,23 +438,6 @@ export function encodeUnsignedHeader(
 
   const result = concatBytes(parts)
 
-  // Instrumentation (block 76): verify our encoding matches Gray Paper serialization.tex eq. 187-197
-  // encodeunsignedheader{H} = encode( H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot},
-  //   maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex}, H_vrfsig, var{H_offendersmark} )
-  if (header.timeslot === 76n) {
-    console.warn(
-      '[GP encodeUnsignedHeader block 76] Gray Paper serialization.tex eq. 187-197',
-      {
-        ref: 'submodules/graypaper/text/serialization.tex',
-        formula:
-          'encodeunsignedheader{H} = encode( H_parent, H_priorstateroot, H_extrinsichash, encode[4]{H_timeslot}, maybe{H_epochmark}, maybe{H_winnersmark}, encode[2]{H_authorindex}, H_vrfsig, var{H_offendersmark} )',
-        totalBytes: result.length,
-        header: header,
-        encodedUnsignedHeaderHexFull: bytesToHex(result),
-      },
-    )
-  }
-
   return safeResult(result)
 }
 
