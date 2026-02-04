@@ -66,8 +66,17 @@ jobs:
       - name: Checkout bandersnatch-vrf submodule
         run: git submodule update --init packages/bandersnatch-vrf
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
       - name: Install dependencies
         uses: ./.github/actions/install
+
+      - name: Build all packages
+        run: bunx turbo run build
+
       - name: Run PeanutButterAndJam tests
         run: bun run test
       - name: Run Traces tests

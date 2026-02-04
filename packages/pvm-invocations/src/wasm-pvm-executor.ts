@@ -700,10 +700,6 @@ export class WasmPVMExecutor {
           `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
         )
       }
-    } else {
-      logger.warning(
-        `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
-      )
     }
 
     return safeResult({
