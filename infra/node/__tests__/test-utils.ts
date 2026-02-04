@@ -263,7 +263,8 @@ export async function initializeServices(options?: {
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
   useWorkerPool?: boolean
-  useRingVrfWasm?: boolean
+  useRingVrfWasm?: boolean,
+  useIetfVrfWasm?: boolean
 }): Promise<FuzzerTargetServices> {
   const {
     spec = 'tiny',
@@ -273,6 +274,7 @@ export async function initializeServices(options?: {
     useWasm = false,
     useWorkerPool = false,
     useRingVrfWasm = true,
+    useIetfVrfWasm = false,
   } = options || {}
 
   // Create services using the factory
@@ -281,6 +283,7 @@ export async function initializeServices(options?: {
     traceSubfolder,
     useWasm,
     useRingVrfWasm,
+    useIetfVrfWasm,
     initialValidators,
     // Don't enable networking for tests
     enableNetworking: false,

@@ -12,6 +12,7 @@ import {
   verifyFallbackSealSignature,
 } from '../fallback-sealing'
 import type { IConfigService, UnsignedBlockHeader } from '@pbnjam/types'
+import { IETFVRFVerifier, IETFVRFVerifierWasm } from '@pbnjam/bandersnatch-vrf'
 
 function createMockConfig(): IConfigService {
   return {
@@ -21,6 +22,8 @@ function createMockConfig(): IConfigService {
     validatorCount: 6,
   } as unknown as IConfigService
 }
+
+const verifier: IETFVRFVerifier | IETFVRFVerifierWasm = new IETFVRFVerifierWasm()
 
 function createSampleUnsignedHeader(timeslot: bigint = 76n): UnsignedBlockHeader {
   return {
@@ -66,6 +69,7 @@ describe('Fallback seal signature verification', () => {
       entropy3,
       unsignedHeader,
       configService,
+      verifier,
     )
     expect(verifyErr).toBeUndefined()
     expect(isValid).toBe(true)
@@ -88,6 +92,7 @@ describe('Fallback seal signature verification', () => {
       wrongEntropy3,
       unsignedHeader,
       configService,
+      verifier,
     )
     expect(verifyErr).toBeUndefined()
     expect(isValid).toBe(false)
@@ -110,6 +115,7 @@ describe('Fallback seal signature verification', () => {
       entropy3,
       otherHeader,
       configService,
+      verifier,
     )
     expect(verifyErr).toBeUndefined()
     expect(isValid).toBe(false)
@@ -136,6 +142,7 @@ describe('Fallback seal signature verification', () => {
       entropy3,
       unsignedHeader,
       configService,
+      verifier,
     )
     expect(verifyErr).toBeUndefined()
     expect(isValid).toBe(false)
@@ -158,6 +165,7 @@ describe('Fallback seal signature verification', () => {
       entropyB,
       unsignedHeader,
       configService,
+      verifier,
     )
     expect(verifyErr).toBeUndefined()
     expect(isValid).toBe(false)

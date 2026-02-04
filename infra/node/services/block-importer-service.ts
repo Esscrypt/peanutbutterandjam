@@ -11,6 +11,10 @@
  * - Provide block import status tracking
  */
 
+import type {
+  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   validateBlockHeader,
   validateEpochMark,
@@ -22,7 +26,6 @@ import {
   calculateExtrinsicHash,
 } from '@pbnjam/codec'
 import { type EventBusService, logger, zeroHash } from '@pbnjam/core'
-
 import type {
   Block,
   BlockHeader,
@@ -83,7 +86,7 @@ export class BlockImporterService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
   private readonly workReportService: WorkReportService
-
+  private readonly verifier: IETFVRFVerifier | IETFVRFVerifierWasm
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -102,6 +105,7 @@ export class BlockImporterService
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
     workReportService: WorkReportService
+    verifier: IETFVRFVerifier | IETFVRFVerifierWasm
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -121,7 +125,7 @@ export class BlockImporterService
     this.authPoolService = options.authPoolService
     this.accumulationService = options.accumulationService
     this.workReportService = options.workReportService
-
+    this.verifier = options.verifier
     // Noop usage to satisfy linter (workReportService may be used in future)
     void this.workReportService
   }
@@ -220,6 +224,7 @@ export class BlockImporterService
       this.validatorSetManagerService,
       this.sealKeyService,
       this.entropyService,
+      this.verifier,
     )
     if (blockHeaderValidationError) {
       return safeError(blockHeaderValidationError)

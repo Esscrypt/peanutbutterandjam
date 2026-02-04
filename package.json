@@ -6,7 +6,8 @@
     "config/*",
     "packages/*",
     "apis/*",
-    "infra/*"
+    "infra/*",
+    "scripts/*"
   ],
   "scripts": {
     "build": "TURBO_TELEMETRY_DISABLED=1 turbo run build --output-logs=full --log-order=stream",
