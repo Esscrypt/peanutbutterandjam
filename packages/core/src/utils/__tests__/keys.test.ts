@@ -5,7 +5,7 @@
  * Verifies Ed25519 and Bandersnatch key generation from known seeds
  */
 
-import { describe, expect, it, beforeAll } from 'vitest'
+import { describe, expect, it, beforeAll } from 'bun:test'
 import {
   generateBLSKeyPairFromSeed,
   generateValidatorKeyPairFromSeed,
@@ -391,7 +391,7 @@ describe('JAM Test Vectors', () => {
         
         expect(error).toBeUndefined()
         expect(altName).toBeDefined()
-        expect(altName).toBe(vector.dns_alt_name)
+        expect(altName).toBe(vector.dns_alt_name as `e${string}`)
       })
     }
 
@@ -407,8 +407,8 @@ describe('JAM Test Vectors', () => {
       expect(aliceAltName).toBeDefined()
       expect(bobAltName).toBeDefined()
       expect(aliceAltName).not.toBe(bobAltName)
-      expect(aliceAltName).toBe(TEST_VECTORS[0].dns_alt_name)
-      expect(bobAltName).toBe(TEST_VECTORS[1].dns_alt_name)
+      expect(aliceAltName).toBe(TEST_VECTORS[0].dns_alt_name as `e${string}`)
+      expect(bobAltName).toBe(TEST_VECTORS[1].dns_alt_name as `e${string}`)
     })
 
     it('should generate deterministic DNS alt names for same public key', () => {
@@ -422,7 +422,7 @@ describe('JAM Test Vectors', () => {
       expect(altName1).toBeDefined()
       expect(altName2).toBeDefined()
       expect(altName1).toBe(altName2)
-      expect(altName1).toBe(TEST_VECTORS[0].dns_alt_name)
+      expect(altName1).toBe(TEST_VECTORS[0].dns_alt_name as `e${string}`)
     })
 
     it('should handle all dev account DNS alt names correctly', () => {
@@ -435,7 +435,7 @@ describe('JAM Test Vectors', () => {
         
         expect(error).toBeUndefined()
         expect(altName).toBeDefined()
-        expect(altName).toBe(vector.dns_alt_name)
+        expect(altName).toBe(vector.dns_alt_name as `e${string}`)
         generatedAltNames.push(altName!)
       }
       

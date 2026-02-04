@@ -5,7 +5,7 @@
  * according to Gray Paper specifications (Equations 213-222, 187-207, 174-182)
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { 
   generateWellBalancedProof, 
   merklizewb, 
