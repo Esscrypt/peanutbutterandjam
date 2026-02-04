@@ -411,6 +411,16 @@ export class BlockImporterService
     // Must be called BEFORE accumulation so accumulation stats are fresh for this block
     this.statisticsService.resetPerBlockStats()
 
+    // Validate preimages before accumulation; apply them after accumulation
+    const [validatePreimagesError, validatedPreimages] =
+      this.serviceAccountService.validatePreimages(
+        block.body.preimages,
+        block.header.timeslot,
+      )
+    if (validatePreimagesError) {
+      return safeError(validatePreimagesError)
+    }
+
     const currentTimeslot = this.clockService.getLatestReportedBlockTimeslot()
     // Run accumulation for available work reports
     const accumulationResult = await this.accumulationService.applyTransition(
@@ -436,14 +446,13 @@ export class BlockImporterService
 
     // Apply preimages to service accounts (MUST happen AFTER accumulation)
     // Gray Paper eq 62: accountspostpreimage ≺ (xt_preimages, accountspostxfer, thetime')
-    // Preimages depend on accountspostxfer, which is produced by accumulation
-    const [serviceAccountValidationError] =
-      this.serviceAccountService.applyPreimages(
-        block.body.preimages,
-        block.header.timeslot,
-      )
-    if (serviceAccountValidationError) {
-      return safeError(serviceAccountValidationError)
+    // Preimages were validated before accumulation; apply without re-validating
+    const [applyPreimagesError] = this.serviceAccountService.applyPreimages(
+      validatedPreimages,
+      block.header.timeslot,
+    )
+    if (applyPreimagesError) {
+      return safeError(applyPreimagesError)
     }
 
     // Update authpool for this block (MUST happen AFTER accumulation)

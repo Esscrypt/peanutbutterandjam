@@ -196,7 +196,9 @@ export class ServiceAccountService
   }
 
   /**
-   * Store actual preimage data
+   * Store actual preimage data (validates then stores).
+   * For batch apply after block-importer validation, use applyPreimages with preimages
+   * already validated via validatePreimages.
    *
    * @param preimage - The preimage data to store
    * @returns Safe result indicating success
@@ -204,13 +206,23 @@ export class ServiceAccountService
   storePreimage(preimage: Preimage, creationSlot: bigint): Safe<void> {
     // Gray Paper accumulation.tex fnprovide: "Preimage provisions into services which
     // no longer exist or whose relevant request is dropped are disregarded."
-    // So we skip (do not apply) and return success when not providable; we do not fail the block.
-    const [validationError] = this.validatePreimageRequest(preimage)
+    const [validationError] = this.validatePreimageRequest(
+      preimage,
+      creationSlot,
+    )
     if (validationError) {
       return safeError(validationError)
     }
+    return this.storePreimageOnly(preimage, creationSlot)
+  }
 
-    // Gray Paper: preimage hash is computed over the blob only
+  /**
+   * Store preimage without validation. Caller must have validated via validatePreimages.
+   */
+  private storePreimageOnly(
+    preimage: Preimage,
+    creationSlot: bigint,
+  ): Safe<void> {
     const blobBytes = hexToBytes(preimage.blob)
     const [hashError, hash] = blake2bHash(blobBytes)
     if (hashError) {
@@ -224,20 +236,20 @@ export class ServiceAccountService
       return safeError(new Error('Service account not found'))
     }
     const serviceId = preimage.requester
-    // Store the preimage
     setServicePreimageValue(serviceAccount, serviceId, hash, blobBytes)
-
     setServiceRequestValue(serviceAccount, serviceId, hash, blobLength, [
       creationSlot,
     ])
-
     return safeResult(undefined)
   }
 
   /**
    * Validate a preimage against current state without mutating it
    */
-  private validatePreimageRequest(preimage: Preimage): Safe<void> {
+  private validatePreimageRequest(
+    preimage: Preimage,
+    currentTimeslot: bigint,
+  ): Safe<void> {
     // Compute hash over blob only
     const [hashError, hash] = blake2bHash(hexToBytes(preimage.blob))
     if (hashError) {
@@ -255,6 +267,11 @@ export class ServiceAccountService
       hash,
     )
     if (existing) {
+      logger.debug('Preimage already present', {
+        serviceId: preimage.requester.toString(),
+        hash: hash.slice(0, 18),
+        blobLength: hexToBytes(preimage.blob).length,
+      })
       return safeError(new Error('preimage_unneeded'))
     }
 
@@ -269,8 +286,22 @@ export class ServiceAccountService
     )
 
     if (!requestStatus) {
+      logger.debug('Preimage not needed', {
+        serviceId: preimage.requester.toString(),
+        hash: hash.slice(0, 18),
+        blobLength: blobLength.toString(),
+      })
       return safeError(new Error('preimage_unneeded'))
     }
+    if (requestStatus.length === 2 && requestStatus[1] < currentTimeslot) {
+      logger.debug('Preimage not needed', {
+        serviceId: preimage.requester.toString(),
+        hash: hash.slice(0, 18),
+        blobLength: blobLength.toString(),
+      })
+      return safeResult(undefined)
+    }
+
     return safeResult(undefined)
   }
 
@@ -282,7 +313,10 @@ export class ServiceAccountService
    * @param preimages - Preimages to validate
    * @returns Safe result with error if validation fails, or validated preimages if successful
    */
-  validatePreimages(preimages: Preimage[]): Safe<Preimage[]> {
+  validatePreimages(
+    preimages: Preimage[],
+    currentTimeslot: bigint,
+  ): Safe<Preimage[]> {
     // Validate sorted by requester asc, then blob asc; and unique
     for (let i = 1; i < preimages.length; i++) {
       const a = preimages[i - 1]
@@ -300,7 +334,7 @@ export class ServiceAccountService
 
     // Pre-validate all items atomically; reject whole batch on first failure
     for (const p of preimages) {
-      const [validationError] = this.validatePreimageRequest(p)
+      const [validationError] = this.validatePreimageRequest(p, currentTimeslot)
       if (validationError) {
         return safeError(validationError)
       }
@@ -310,18 +344,25 @@ export class ServiceAccountService
   }
 
   /**
-   * Apply a batch of preimages for a given slot
-   * This should be called AFTER validatePreimages passes.
+   * Apply a batch of preimages for a given slot. Runs the same validation as
+   * validatePreimageRequest per preimage; invalid preimages are skipped (no error).
+   * Caller must call validatePreimages before accumulation; after accumulation
+   * state may have changed (e.g. FORGET removed a request), so we re-check and skip.
    *
-   * @param preimages - Validated preimages from validatePreimages
+   * @param preimages - Preimages validated by validatePreimages before accumulation
    * @param creationSlot - Slot when preimages are created
    * @returns Safe result indicating success
    */
   applyPreimages(preimages: Preimage[], creationSlot: bigint): Safe<void> {
-    // Apply each preimage
     for (const p of preimages) {
-      const [err] = this.storePreimage(p, creationSlot)
-      if (err) return safeError(err)
+      const [validationError] = this.validatePreimageRequest(p, creationSlot)
+      if (validationError) {
+        continue
+      }
+      const [storeError] = this.storePreimageOnly(p, creationSlot)
+      if (storeError) {
+        return safeError(storeError)
+      }
     }
     return safeResult(undefined)
   }

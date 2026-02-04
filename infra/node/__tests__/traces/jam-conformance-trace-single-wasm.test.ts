@@ -28,7 +28,12 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { decodeRecent, decodeStateWorkReports, calculateBlockHashFromHeader } from '@pbnjam/codec'
+import {
+  decodeRecent,
+  decodeStateWorkReports,
+  calculateBlockHashFromHeader,
+  determineSingleKeyType,
+} from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
@@ -220,7 +225,7 @@ describe('JAM Conformance Single Trace', () => {
     const repoName = tracesDir!.includes('w3f-jam-conformance') ? 'w3f-jam-conformance' : 'jam-conformance'
     const traceSubfolder = `${repoName}/${JAM_CONFORMANCE_VERSION}/${traceId}`
     // const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
-    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useRingVrfWasm: true })
+    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: false, useRingVrfWasm: true })
 
     const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
@@ -549,10 +554,25 @@ describe('JAM Conformance Single Trace', () => {
         console.error(`  ⚠️  ${extraKeysCount} key(s) in our state trie are not in expected post_state (can cause state root mismatch)`)
         console.error(`  Sample extra keys (first 5): ${extraKeys.slice(0, 5).join(', ')}`)
         for (let i = 0; i < extraKeys.length; i++) {
-          const keyInfo = parseStateKeyForDebug(extraKeys[i])
+          const keyHex = extraKeys[i] as Hex
+          const keyInfo = parseStateKeyForDebug(keyHex)
           const chapterName = 'chapterIndex' in keyInfo ? getChapterName(keyInfo.chapterIndex) : 'unknown'
           const serviceId = 'serviceId' in keyInfo ? keyInfo.serviceId : undefined
-          console.error(`  Extra key [${i}]: ${extraKeys[i]} -> chapter: ${chapterName}, serviceId: ${serviceId ?? 'n/a'}`)
+          let keyvalType = ''
+          if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && stateTrie?.[keyHex]) {
+            try {
+              const valueBytes = hexToBytes(stateTrie[keyHex] as Hex)
+              const decoded = determineSingleKeyType(
+                keyHex,
+                valueBytes,
+                BigInt(blockNumber),
+              )
+              keyvalType = `, keyvalType: ${decoded.keyType}`
+            } catch {
+              keyvalType = ', keyvalType: (decode failed)'
+            }
+          }
+          console.error(`  Extra key [${i}]: ${keyHex} -> chapter: ${chapterName}, serviceId: ${serviceId ?? 'n/a'}${keyvalType}`)
         }
       }
 

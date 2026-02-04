@@ -111,7 +111,7 @@ describe('ServiceAccountService - JAM Preimages Test Vectors', () => {
             
             // PRE-VALIDATE preimages BEFORE applying them
             // This checks for errors that should cause the entire batch to be skipped
-            const [validateError, validatedPreimages] = service.validatePreimages(batch)
+            const [validateError, validatedPreimages] = service.validatePreimages(batch, slot)
             if (validateError) {
               // Check if this validation error is expected in the test vector
               if (vector.output && 'err' in vector.output && vector.output.err) {
