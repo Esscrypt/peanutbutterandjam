@@ -112,6 +112,8 @@ export interface ServiceFactoryOptions {
   }
   /** Use WASM for PVM */
   useWasm?: boolean
+  /** Use Rust (native) for PVM */
+  useRust?: boolean
   /** Use worker pool for accumulation service */
   useWorkerPool?: boolean
   /** Use WASM for Ring VRF (true = RingVRFProverWasm/RingVRFVerifierWasm, false = W3F) */
@@ -466,6 +468,7 @@ export async function createCoreServices(
     entropyService,
     pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
     useWasm: options.useWasm ?? false,
+    useRust: options.useRust ?? false,
     traceSubfolder: options.traceSubfolder,
   })
 
@@ -594,7 +597,7 @@ export async function createCoreServices(
     authPoolService,
     accumulationService,
     workReportService,
-    verifier: ietfVerifier,
+    ietfVerifier,
   })
 
   // ChainManagerService for fork handling and state snapshots

@@ -664,7 +664,7 @@ export class TypeScriptPVMExecutor extends PVM {
       encodeAccumulateInput,
     )
 
-    const filepath = writeTraceDump(
+    writeTraceDump(
       executionLogs,
       this.traceHostFunctionLogs.length > 0
         ? this.traceHostFunctionLogs
@@ -679,12 +679,6 @@ export class TypeScriptPVMExecutor extends PVM {
       yieldHash, // accumulate output (yield hash)
       errorCode, // error code
     )
-
-    if (!filepath) {
-      logger.warn(
-        `[TypeScriptPVMExecutor] Failed to write trace dump (executionLogs.length=${executionLogs.length})`,
-      )
-    }
   }
 
   /**

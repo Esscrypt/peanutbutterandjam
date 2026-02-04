@@ -41,7 +41,6 @@ import {
   safeError,
   safeResult,
 } from '@pbnjam/types'
-
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -86,7 +85,7 @@ export class BlockImporterService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
   private readonly workReportService: WorkReportService
-  private readonly verifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  private readonly ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -105,7 +104,7 @@ export class BlockImporterService
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
     workReportService: WorkReportService
-    verifier: IETFVRFVerifier | IETFVRFVerifierWasm
+    ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -125,7 +124,7 @@ export class BlockImporterService
     this.authPoolService = options.authPoolService
     this.accumulationService = options.accumulationService
     this.workReportService = options.workReportService
-    this.verifier = options.verifier
+    this.ietfVerifier = options.ietfVerifier
     // Noop usage to satisfy linter (workReportService may be used in future)
     void this.workReportService
   }
@@ -224,7 +223,7 @@ export class BlockImporterService
       this.validatorSetManagerService,
       this.sealKeyService,
       this.entropyService,
-      this.verifier,
+      this.ietfVerifier,
     )
     if (blockHeaderValidationError) {
       return safeError(blockHeaderValidationError)

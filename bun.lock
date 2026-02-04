@@ -402,11 +402,19 @@
         "@pbnjam/core": "workspace:*",
         "@pbnjam/pvm": "workspace:*",
         "@pbnjam/pvm-assemblyscript": "workspace:*",
+        "@pbnjam/pvm-rust-native": "workspace:*",
         "@pbnjam/types": "workspace:*",
       },
       "devDependencies": {
         "@pbnjam/typescript-config": "workspace:*",
         "bun-types": "1.3.7",
+      },
+    },
+    "packages/pvm-rust": {
+      "name": "@pbnjam/pvm-rust-native",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@napi-rs/cli": "^2.18.0",
       },
     },
     "packages/safrole": {
@@ -840,6 +848,8 @@
     "@pbnjam/pvm-assemblyscript": ["@pbnjam/pvm-assemblyscript@workspace:packages/pvm-assemblyscript"],
 
     "@pbnjam/pvm-invocations": ["@pbnjam/pvm-invocations@workspace:packages/pvm-invocations"],
+
+    "@pbnjam/pvm-rust-native": ["@pbnjam/pvm-rust-native@workspace:packages/pvm-rust"],
 
     "@pbnjam/rpc-server": ["@pbnjam/rpc-server@workspace:apis/rpc-server"],
 

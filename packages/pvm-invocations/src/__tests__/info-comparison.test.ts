@@ -312,5 +312,41 @@ describe('INFO Host Function Comparison', () => {
     expect(tsEncodedData!.length).toBe(96) // Full 96 bytes
     expect(tsDataLength).toBe(BigInt(tsEncodedData!.length))
   })
+
+  test('Rust PVM: INFO without service_id/accounts panics', async () => {
+    let native: {
+      init: (ramType: number) => void
+      reset: () => void
+      getRamTypeSimpleRam: () => number
+      prepareBlob: (program: Buffer) => void
+      setRegisters: (registers: Buffer) => void
+      setGasLeft: (gas: number) => void
+      setNextProgramCounter: (pc: number) => void
+      initPage: (address: number, length: number, accessType: number) => void
+      nextStep: () => boolean
+      getStatus: () => number
+    }
+    try {
+      const { createRequire } = await import('node:module')
+      native = createRequire(import.meta.url)('@pbnjam/pvm-rust-native/native')
+    } catch {
+      return
+    }
+    native.reset()
+    native.init(native.getRamTypeSimpleRam())
+
+    const program = Buffer.alloc(9)
+    program[0] = 0x0a // ECALLI
+    program.writeBigUInt64LE(5n, 1) // INFO
+    native.prepareBlob(program)
+
+    native.setGasLeft(1000)
+    native.setNextProgramCounter(0)
+    native.initPage(0x20000, 4096, 2)
+
+    while (native.nextStep()) {}
+
+    expect(native.getStatus()).toBe(2) // Panic (INFO without params → panic)
+  })
 })
 
