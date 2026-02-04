@@ -633,7 +633,7 @@ export class TypeScriptPVMExecutor extends PVM {
   }
 
   /**
-   * Write trace dump with output/error files for jamduna format
+   * Write trace dump with output/error files for reference format
    */
   private writeTraceDumpWithOutput(
     executionLogs: Array<{
@@ -658,7 +658,7 @@ export class TypeScriptPVMExecutor extends PVM {
     const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
     const traceOutputDir = join(baseTraceDir, this.traceSubfolder!)
 
-    // Encode full accumulate inputs for comparison with jamduna traces
+    // Encode full accumulate inputs for comparison with reference traces
     const [encodeError, encodedInputs] = encodeVariableSequence(
       inputs,
       encodeAccumulateInput,

@@ -2,7 +2,7 @@
 /**
  * Compare Trace Log Files
  *
- * Compares trace log files between our traces and jamduna reference traces.
+ * Compares trace log files between our traces and reference reference traces.
  * Finds the first mismatch and identifies the last host function call before it.
  *
  * Usage:
@@ -10,7 +10,7 @@
  *
  * Options:
  *   --our-dir <path>    Path to our traces directory (default: pvm-traces/fuzzy/v0.7.1)
- *   --ref-dir <path>    Path to jamduna reference traces (default: submodules/jamduna/jam-test-vectors/0.7.1/fuzzy)
+ *   --ref-dir <path>    Path to reference reference traces (default: submodules/reference/jam-test-vectors/0.7.1/fuzzy)
  *   --timeslot <n>      Only compare traces for specific timeslot (optional)
  */
 
@@ -94,7 +94,7 @@ function normalizeInstructionLine(line: TraceLine): string {
     return line.raw.trim()
   }
 
-  // Normalize: remove Load/Store info for comparison (jamduna might not have it)
+  // Normalize: remove Load/Store info for comparison (reference might not have it)
   // Compare: INSTRUCTION STEP PC Gas: GAS Registers:[...]
   const match = line.raw.trim().match(/^(\w+)\s+(\d+)\s+(\d+)\s+Gas:\s+(\d+)\s+Registers:\[([^\]]+)\]/)
   if (match) {
@@ -141,9 +141,9 @@ function discoverTraceFiles(dir: string): TraceFile[] {
       }
 
       // Jamduna format: {timeslot}.log (8-digit padded)
-      const jamdunaMatch = filename.match(/^(\d{8})\.log$/)
-      if (jamdunaMatch) {
-        const timeslot = Number.parseInt(jamdunaMatch[1]!, 10).toString()
+      const referenceMatch = filename.match(/^(\d{8})\.log$/)
+      if (referenceMatch) {
+        const timeslot = Number.parseInt(referenceMatch[1]!, 10).toString()
         files.push({
           filename,
           filepath: join(dir, filename),
@@ -260,7 +260,7 @@ async function main() {
 
   // Parse arguments
   let ourDir = 'pvm-traces/fuzzy/v0.7.1'
-  let refDir = 'submodules/jamduna/jam-test-vectors/0.7.1/fuzzy'
+  let refDir = 'submodules/reference/jam-test-vectors/0.7.1/fuzzy'
   let targetTimeslot: string | undefined
 
   const ourDirIndex = args.indexOf('--our-dir')
@@ -324,7 +324,7 @@ async function main() {
     }
 
     // Find matching reference file by timeslot
-    // For jamduna format, we need to match the 8-digit padded timeslot
+    // For reference format, we need to match the 8-digit padded timeslot
     const paddedTimeslot = ourFile.timeslot.padStart(8, '0')
     const refFile = refFiles.find(
       (f) => f.timeslot === ourFile.timeslot || f.filename === `${paddedTimeslot}.log`,

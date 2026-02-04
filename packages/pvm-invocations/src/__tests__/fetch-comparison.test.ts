@@ -531,14 +531,14 @@ describe('FETCH Host Function Comparison', () => {
 /**
  * Test for round-trip decoding and re-encoding AccumulateInput sequences
  * 
- * The jamduna accumulate_input file contains encoded AccumulateInput data, NOT WorkItem data.
+ * The reference accumulate_input file contains encoded AccumulateInput data, NOT WorkItem data.
  * AccumulateInput has a type discriminator (0 = OperandTuple, 1 = DeferredTransfer)
  * followed by the type-specific encoding.
  */
 describe('AccumulateInput Sequence Round-Trip Encoding', () => {
-  test('should round-trip decode and re-encode accumulate input sequence from jamduna test vector', () => {
-    // This is the 179-byte encoded AccumulateInput sequence from jamduna test vector
-    // Source: submodules/jamduna/jam-test-vectors/0.7.2/preimages_light/00000002/0/0/accumulate_input
+  test('should round-trip decode and re-encode accumulate input sequence from reference test vector', () => {
+    // This is the 179-byte encoded AccumulateInput sequence from reference test vector
+    // Source: submodules/reference/jam-test-vectors/0.7.2/preimages_light/00000002/0/0/accumulate_input
     // Format: var{sequence of AccumulateInput}
     // AccumulateInput = discriminator (0=OperandTuple, 1=DeferredTransfer) + encoded value
     const originalHex = '0x010025d8314884a4162787493635f1da182a6fbc7b31b55c18ce74ea1369a7999f4500000000000000000000000000000000000000000000000000000000000000002357426f2313559a271d6782dc00197b379f79cbe3c6a1e72f61f7b592c509f8b5fd156d32aa8f25a91c80449f4e3bba4ea1e54aa9855b2ff53c32e42e7bc02de0809698002a0106f5d8957422098a7b2f007db98bce1bcf51c34311ab19671e7f5dcaadf54e0d9f370000000000000000'
@@ -552,9 +552,9 @@ describe('AccumulateInput Sequence Round-Trip Encoding', () => {
     
     if (decodeError) {
       console.log('Decode error:', decodeError.message)
-      // This is expected if the jamduna format differs from our codec
+      // This is expected if the reference format differs from our codec
       // Just log and skip the assertions
-      console.log('Note: The jamduna accumulate_input format may differ from our codec expectations')
+      console.log('Note: The reference accumulate_input format may differ from our codec expectations')
       return
     }
     

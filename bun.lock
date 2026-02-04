@@ -162,7 +162,7 @@
     },
     "packages/bandersnatch-vrf": {
       "name": "@pbnjam/bandersnatch-vrf",
-      "version": "0.7.2-rc6",
+      "version": "0.7.2-rc8",
       "dependencies": {
         "@noble/curves": "2.0.1",
         "@noble/ed25519": "3.0.0",
@@ -476,7 +476,7 @@
     "@noble/ed25519": "3.0.0",
     "@noble/hashes": "2.0.1",
     "@pbnjam/bandersnatch": "0.7.2-rc2",
-    "@pbnjam/bandersnatch-vrf": "0.7.2-rc6",
+    "@pbnjam/bandersnatch-vrf": "0.7.2-rc8",
     "@pbnjam/types": "0.7.2-rc1",
     "@peculiar/asn1-pfx": "2.6.0",
     "@peculiar/webcrypto": "1.5.0",

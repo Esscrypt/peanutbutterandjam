@@ -2,7 +2,7 @@
 /**
  * 3-Way PVM Trace Comparison
  *
- * Compares three trace files: expected (jamduna), TypeScript executor, and WASM executor
+ * Compares three trace files: expected (reference), TypeScript executor, and WASM executor
  * Supports both text format and modular binary format (0.7.2+)
  *
  * Usage:
@@ -929,7 +929,7 @@ function printTwoWayComparison(
   )
   console.log()
   console.log(
-    `${colors.cyan}Expected (jamduna):${colors.reset} ${expectedPath}`,
+    `${colors.cyan}Expected (reference):${colors.reset} ${expectedPath}`,
   )
   console.log(
     `${colors.cyan}${executorType === 'typescript' ? 'TypeScript' : 'WASM'}:${colors.reset}        ${actualPath}`,
@@ -1136,7 +1136,7 @@ function printTwoWayComparison(
 }
 
 /**
- * Print comparison of TypeScript vs WASM traces (without expected/jamduna trace)
+ * Print comparison of TypeScript vs WASM traces (without expected/reference trace)
  */
 function printTwoWayComparisonTsVsWasm(
   label: string,
@@ -1316,7 +1316,7 @@ function printComparison(
   )
   console.log()
   console.log(
-    `${colors.cyan}Expected (jamduna):${colors.reset} ${expectedPath}`,
+    `${colors.cyan}Expected (reference):${colors.reset} ${expectedPath}`,
   )
   console.log(
     `${colors.cyan}TypeScript:${colors.reset}        ${typescriptPath}`,
@@ -1647,7 +1647,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'fuzzy',
@@ -1772,7 +1772,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'preimages_light',
@@ -2032,7 +2032,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'storage_light',
@@ -2292,7 +2292,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'preimages',
@@ -2542,7 +2542,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'storage',
@@ -2792,7 +2792,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'fuzzy',
@@ -3060,7 +3060,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'fuzzy_light',
@@ -3303,7 +3303,7 @@ async function main() {
   } else if (formatFlag === '--jam-conformance') {
     // Jam-conformance format
     // Structure: pvm-traces/jam-conformance/{version}/{trace_id}/{block_number}/typescript-{timeslot}-{ordered_index}-{service_id}.log
-    // Expected: submodules/jamduna/jam-conformance/{version}/{trace_id}/{block_number}.log (or modular format)
+    // Expected: submodules/reference/jam-conformance/{version}/{trace_id}/{block_number}.log (or modular format)
     // Get version from environment variable, default to 0.7.2
     const jamConformanceVersion = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
 
@@ -3347,7 +3347,7 @@ async function main() {
     const expectedBaseDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-conformance',
       jamConformanceVersion,
     )
@@ -3687,7 +3687,7 @@ async function main() {
     console.log(`  ${colors.dim}TypeScript: ${typescriptPath}${colors.reset}`)
     console.log(`  ${colors.dim}WASM: ${wasmPath}${colors.reset}`)
 
-    // For accumulate-stf, we don't have expected traces (from jamduna)
+    // For accumulate-stf, we don't have expected traces (from reference)
     // So we'll do a TypeScript vs WASM comparison (2-way without expected)
     expectedLines = []
     expectedPath = ''
@@ -3775,7 +3775,7 @@ async function main() {
     const testVectorsDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'storage',

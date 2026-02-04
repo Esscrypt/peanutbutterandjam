@@ -9,7 +9,7 @@
  *   bun scripts/compare-accumulate-files.ts --fuzzy <timeslot> <ordered_index> <service_id>
  *
  * Examples:
- *   bun scripts/compare-accumulate-files.ts submodules/jamduna/jam-test-vectors/0.7.2/fuzzy/00000030/0/1985398916 pvm-traces/fuzzy/modular/00000030/0/1985398916
+ *   bun scripts/compare-accumulate-files.ts submodules/reference/jam-test-vectors/0.7.2/fuzzy/00000030/0/1985398916 pvm-traces/fuzzy/modular/00000030/0/1985398916
  *   bun scripts/compare-accumulate-files.ts --fuzzy 30 0 1985398916
  */
 
@@ -470,7 +470,7 @@ async function main() {
     console.log()
     console.log('Examples:')
     console.log(
-      '  bun scripts/compare-accumulate-files.ts submodules/jamduna/jam-test-vectors/0.7.2/fuzzy/00000030/0/1985398916 pvm-traces/fuzzy/modular/00000030/0/1985398916',
+      '  bun scripts/compare-accumulate-files.ts submodules/reference/jam-test-vectors/0.7.2/fuzzy/00000030/0/1985398916 pvm-traces/fuzzy/modular/00000030/0/1985398916',
     )
     console.log(
       '  bun scripts/compare-accumulate-files.ts --fuzzy 30 0 1985398916',
@@ -498,7 +498,7 @@ async function main() {
     const expectedBaseDir = join(
       workspaceRoot,
       'submodules',
-      'jamduna',
+      'reference',
       'jam-test-vectors',
       '0.7.2',
       'fuzzy',

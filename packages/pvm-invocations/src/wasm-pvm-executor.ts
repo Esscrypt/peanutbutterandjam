@@ -646,7 +646,7 @@ export class WasmPVMExecutor {
       const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
       const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
 
-      // Encode full accumulate inputs for comparison with jamduna traces (same as TypeScript executor)
+      // Encode full accumulate inputs for comparison with reference traces (same as TypeScript executor)
       const [encodeError, encodedInputs] = encodeVariableSequence(
         _inputs,
         encodeAccumulateInput,
@@ -684,10 +684,10 @@ export class WasmPVMExecutor {
         yieldHash = updatedContext?.[0]?.yield ?? undefined
       }
 
-      // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
-      // Don't pass executorType to get jamduna format when blockNumber is provided
+      // For block-based traces (like preimages-light-all-blocks.test.ts), use reference format (00000043.log)
+      // Don't pass executorType to get reference format when blockNumber is provided
       // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
-      // Since we always have timeslot (block number), we use jamduna format by default
+      // Since we always have timeslot (block number), we use reference format by default
       // If trace format is needed, it can be enabled via a flag or by not passing timeslot
       // Include serviceId to avoid collisions when multiple services execute in the same slot
       const filepath = writeTraceDump(

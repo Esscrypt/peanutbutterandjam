@@ -111,7 +111,7 @@ async function executeRunCommand(
     // Log configuration
     logger.info('Configuration:')
     logger.info(`  Chain: ${options['chain'] || 'chainspec.json'}`)
-    logger.info(`  Data directory: ${options['dataPath'] || '~/.jamduna'}`)
+    logger.info(`  Data directory: ${options['dataPath'] || '~/.pbnj'}`)
     logger.info(`  Node metadata: ${options['metadata'] || 'Alice'}`)
 
     if (options['validatorIndex'] !== undefined) {

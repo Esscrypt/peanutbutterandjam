@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
 /**
- * Compare WASM vs TypeScript vs jamduna PVM Trace Files (3-way comparison)
+ * Compare WASM vs TypeScript vs reference PVM Trace Files (3-way comparison)
  *
- * Analyzes differences between WASM, TypeScript executor traces, and jamduna reference traces
+ * Analyzes differences between WASM, TypeScript executor traces, and reference reference traces
  * for the same block, identifying where they diverge and why.
  *
- * Usage: bun scripts/compare-wasm-typescript-traces.ts [block_number] [--jamduna-block N] [--jamduna-dir path]
+ * Usage: bun scripts/compare-wasm-typescript-traces.ts [block_number] [--reference-block N] [--reference-dir path]
  *        bun scripts/compare-wasm-typescript-traces.ts --jam-conformance <trace_id> <slot> <ordered_index> <service_id>
  *
  * Examples:
  *   bun scripts/compare-wasm-typescript-traces.ts 2    # Compare block 2 traces (2-way)
- *   bun scripts/compare-wasm-typescript-traces.ts 2 --jamduna-block 4    # Compare our block 2 with jamduna trace 4
- *   bun scripts/compare-wasm-typescript-traces.ts 4    # Compare block 4 traces (3-way with jamduna, auto-detects)
- *   bun scripts/compare-wasm-typescript-traces.ts 4 --jamduna-dir submodules/jamduna/jam-test-vectors/0.7.1/preimages_light
+ *   bun scripts/compare-wasm-typescript-traces.ts 2 --reference-block 4    # Compare our block 2 with reference trace 4
+ *   bun scripts/compare-wasm-typescript-traces.ts 4    # Compare block 4 traces (3-way with reference, auto-detects)
+ *   bun scripts/compare-wasm-typescript-traces.ts 4 --reference-dir submodules/reference/jam-test-vectors/0.7.1/preimages_light
  *   bun scripts/compare-wasm-typescript-traces.ts --jam-conformance 1767871405_3616 110 0 759414909
  */
 
@@ -114,17 +114,17 @@ interface ComparisonResult {
   blockNumber: number
   wasmFile: string
   typescriptFile: string
-  jamdunaFile?: string
+  referenceFile?: string
   wasmInstructionCount: number
   typescriptInstructionCount: number
-  jamdunaInstructionCount?: number
+  referenceInstructionCount?: number
   matchingInstructions: number
   matchingWithJamduna?: number
   firstDivergence: {
     step: number
     wasmLine?: TraceLine
     typescriptLine?: TraceLine
-    jamdunaLine?: TraceLine
+    referenceLine?: TraceLine
     reason: string
   } | null
   differences: Array<{
@@ -136,15 +136,15 @@ interface ComparisonResult {
       | 'registers'
       | 'missing_wasm'
       | 'missing_typescript'
-      | 'missing_jamduna'
+      | 'missing_reference'
     wasmValue?: string
     typescriptValue?: string
-    jamdunaValue?: string
+    referenceValue?: string
     details?: string
   }>
   wasmStoppedEarly: boolean
   typescriptStoppedEarly: boolean
-  jamdunaStoppedEarly?: boolean
+  referenceStoppedEarly?: boolean
 }
 
 function compareTraces(
@@ -153,8 +153,8 @@ function compareTraces(
   blockNumber: number,
   wasmFile: string,
   typescriptFile: string,
-  jamdunaLines?: TraceLine[],
-  jamdunaFile?: string,
+  referenceLines?: TraceLine[],
+  referenceFile?: string,
 ): ComparisonResult {
   const wasmInstructions = wasmLines.filter(
     (l) => l.type === 'instruction' || l.type === 'host_function',
@@ -162,8 +162,8 @@ function compareTraces(
   const typescriptInstructions = typescriptLines.filter(
     (l) => l.type === 'instruction' || l.type === 'host_function',
   )
-  const jamdunaInstructions = jamdunaLines
-    ? jamdunaLines.filter(
+  const referenceInstructions = referenceLines
+    ? referenceLines.filter(
         (l) => l.type === 'instruction' || l.type === 'host_function',
       )
     : undefined
@@ -176,13 +176,13 @@ function compareTraces(
   const maxSteps = Math.max(
     wasmInstructions.length,
     typescriptInstructions.length,
-    jamdunaInstructions?.length || 0,
+    referenceInstructions?.length || 0,
   )
 
   for (let i = 0; i < maxSteps; i++) {
     const wasmLine = wasmInstructions[i]
     const typescriptLine = typescriptInstructions[i]
-    const jamdunaLine = jamdunaInstructions?.[i]
+    const referenceLine = referenceInstructions?.[i]
 
     // Check if traces ended early
     if (!wasmLine && typescriptLine) {
@@ -190,7 +190,7 @@ function compareTraces(
         firstDivergence = {
           step: i + 1,
           typescriptLine,
-          jamdunaLine,
+          referenceLine,
           reason: 'WASM trace ended early (stopped before TypeScript)',
         }
       }
@@ -198,8 +198,8 @@ function compareTraces(
         step: i + 1,
         type: 'missing_wasm',
         typescriptValue: `${typescriptLine.instruction || typescriptLine.type} at step ${typescriptLine.step || i + 1}`,
-        jamdunaValue: jamdunaLine
-          ? `${jamdunaLine.instruction || jamdunaLine.type} at step ${jamdunaLine.step || i + 1}`
+        referenceValue: referenceLine
+          ? `${referenceLine.instruction || referenceLine.type} at step ${referenceLine.step || i + 1}`
           : undefined,
         details: `WASM trace stopped at step ${wasmInstructions.length}, TypeScript continues`,
       })
@@ -211,7 +211,7 @@ function compareTraces(
         firstDivergence = {
           step: i + 1,
           wasmLine,
-          jamdunaLine,
+          referenceLine,
           reason: 'TypeScript trace ended early (stopped before WASM)',
         }
       }
@@ -219,33 +219,33 @@ function compareTraces(
         step: i + 1,
         type: 'missing_typescript',
         wasmValue: `${wasmLine.instruction || wasmLine.type} at step ${wasmLine.step || i + 1}`,
-        jamdunaValue: jamdunaLine
-          ? `${jamdunaLine.instruction || jamdunaLine.type} at step ${jamdunaLine.step || i + 1}`
+        referenceValue: referenceLine
+          ? `${referenceLine.instruction || referenceLine.type} at step ${referenceLine.step || i + 1}`
           : undefined,
         details: `TypeScript trace stopped at step ${typescriptInstructions.length}, WASM continues`,
       })
       continue
     }
 
-    if (jamdunaInstructions && !jamdunaLine && (wasmLine || typescriptLine)) {
+    if (referenceInstructions && !referenceLine && (wasmLine || typescriptLine)) {
       if (!firstDivergence) {
         firstDivergence = {
           step: i + 1,
           wasmLine,
           typescriptLine,
-          reason: 'jamduna trace ended early',
+          reason: 'reference trace ended early',
         }
       }
       differences.push({
         step: i + 1,
-        type: 'missing_jamduna',
+        type: 'missing_reference',
         wasmValue: wasmLine
           ? `${wasmLine.instruction || wasmLine.type} at step ${wasmLine.step || i + 1}`
           : undefined,
         typescriptValue: typescriptLine
           ? `${typescriptLine.instruction || typescriptLine.type} at step ${typescriptLine.step || i + 1}`
           : undefined,
-        details: `jamduna trace stopped at step ${jamdunaInstructions.length}`,
+        details: `reference trace stopped at step ${referenceInstructions.length}`,
       })
       continue
     }
@@ -267,7 +267,7 @@ function compareTraces(
           type: 'instruction',
           wasmValue: wasmLine.instruction,
           typescriptValue: typescriptLine.instruction,
-          jamdunaValue: jamdunaLine?.instruction,
+          referenceValue: referenceLine?.instruction,
           details: `Instruction mismatch at step ${wasmLine.step}`,
         })
         hasDiff = true
@@ -276,14 +276,14 @@ function compareTraces(
             step: wasmLine.step || i + 1,
             wasmLine,
             typescriptLine,
-            jamdunaLine,
+            referenceLine,
             reason: `Different instructions: WASM=${wasmLine.instruction}, TypeScript=${typescriptLine.instruction}`,
           }
         }
       } else if (
-        jamdunaLine &&
-        jamdunaLine.type === 'instruction' &&
-        jamdunaLine.instruction === wasmLine.instruction
+        referenceLine &&
+        referenceLine.type === 'instruction' &&
+        referenceLine.instruction === wasmLine.instruction
       ) {
         matchesJamduna = true
       }
@@ -295,7 +295,7 @@ function compareTraces(
           type: 'pc',
           wasmValue: String(wasmLine.pc),
           typescriptValue: String(typescriptLine.pc),
-          jamdunaValue: jamdunaLine?.pc ? String(jamdunaLine.pc) : undefined,
+          referenceValue: referenceLine?.pc ? String(referenceLine.pc) : undefined,
           details: `PC mismatch: WASM=${wasmLine.pc}, TypeScript=${typescriptLine.pc}`,
         })
         hasDiff = true
@@ -304,7 +304,7 @@ function compareTraces(
             step: wasmLine.step || i + 1,
             wasmLine,
             typescriptLine,
-            jamdunaLine,
+            referenceLine,
             reason: `PC mismatch: WASM=${wasmLine.pc}, TypeScript=${typescriptLine.pc}`,
           }
         }
@@ -317,7 +317,7 @@ function compareTraces(
           type: 'gas',
           wasmValue: String(wasmLine.gas),
           typescriptValue: String(typescriptLine.gas),
-          jamdunaValue: jamdunaLine?.gas ? String(jamdunaLine.gas) : undefined,
+          referenceValue: referenceLine?.gas ? String(referenceLine.gas) : undefined,
           details: `Gas diff: ${wasmLine.gas! - typescriptLine.gas!} (WASM=${wasmLine.gas}, TypeScript=${typescriptLine.gas})`,
         })
         hasDiff = true
@@ -326,44 +326,44 @@ function compareTraces(
       // Check registers
       if (wasmLine.registers && typescriptLine.registers) {
         const regDiffs: string[] = []
-        const jamdunaRegDiffs: string[] = []
+        const referenceRegDiffs: string[] = []
         for (
           let r = 0;
           r <
           Math.max(
             wasmLine.registers.length,
             typescriptLine.registers.length,
-            jamdunaLine?.registers?.length || 0,
+            referenceLine?.registers?.length || 0,
           );
           r++
         ) {
           const wasmReg = wasmLine.registers[r] || '0'
           const tsReg = typescriptLine.registers[r] || '0'
-          const jamdunaReg = jamdunaLine?.registers?.[r] || '0'
+          const referenceReg = referenceLine?.registers?.[r] || '0'
 
           if (wasmReg !== tsReg) {
             regDiffs.push(`r${r}: WASM=${wasmReg} vs TS=${tsReg}`)
             if (
-              jamdunaReg !== '0' &&
-              jamdunaReg !== wasmReg &&
-              jamdunaReg !== tsReg
+              referenceReg !== '0' &&
+              referenceReg !== wasmReg &&
+              referenceReg !== tsReg
             ) {
-              jamdunaRegDiffs.push(`r${r}: jamduna=${jamdunaReg}`)
+              referenceRegDiffs.push(`r${r}: reference=${referenceReg}`)
             }
-          } else if (jamdunaReg !== '0' && jamdunaReg !== wasmReg) {
-            jamdunaRegDiffs.push(
-              `r${r}: WASM/TS=${wasmReg} vs jamduna=${jamdunaReg}`,
+          } else if (referenceReg !== '0' && referenceReg !== wasmReg) {
+            referenceRegDiffs.push(
+              `r${r}: WASM/TS=${wasmReg} vs reference=${referenceReg}`,
             )
           }
         }
         if (regDiffs.length > 0) {
-          const details = `Register diffs: ${regDiffs.join('; ')}${jamdunaRegDiffs.length > 0 ? ` [jamduna: ${jamdunaRegDiffs.join('; ')}]` : ''}`
+          const details = `Register diffs: ${regDiffs.join('; ')}${referenceRegDiffs.length > 0 ? ` [reference: ${referenceRegDiffs.join('; ')}]` : ''}`
           differences.push({
             step: wasmLine.step || i + 1,
             type: 'registers',
             wasmValue: wasmLine.registers.join(', '),
             typescriptValue: typescriptLine.registers.join(', '),
-            jamdunaValue: jamdunaLine?.registers?.join(', '),
+            referenceValue: referenceLine?.registers?.join(', '),
             details,
           })
           hasDiff = true
@@ -372,7 +372,7 @@ function compareTraces(
               step: wasmLine.step || i + 1,
               wasmLine,
               typescriptLine,
-              jamdunaLine,
+              referenceLine,
               reason: `Register mismatch: ${regDiffs[0]}`,
             }
           }
@@ -383,10 +383,10 @@ function compareTraces(
         matchingInstructions++
         if (
           matchesJamduna &&
-          jamdunaLine &&
-          jamdunaLine.type === 'instruction' &&
-          jamdunaLine.pc === wasmLine.pc &&
-          jamdunaLine.gas === wasmLine.gas
+          referenceLine &&
+          referenceLine.type === 'instruction' &&
+          referenceLine.pc === wasmLine.pc &&
+          referenceLine.gas === wasmLine.gas
         ) {
           matchingWithJamduna++
         }
@@ -442,28 +442,28 @@ function compareTraces(
     blockNumber,
     wasmFile,
     typescriptFile,
-    jamdunaFile,
+    referenceFile,
     wasmInstructionCount: wasmInstructions.length,
     typescriptInstructionCount: typescriptInstructions.length,
-    jamdunaInstructionCount: jamdunaInstructions?.length,
+    referenceInstructionCount: referenceInstructions?.length,
     matchingInstructions,
-    matchingWithJamduna: jamdunaInstructions ? matchingWithJamduna : undefined,
+    matchingWithJamduna: referenceInstructions ? matchingWithJamduna : undefined,
     firstDivergence,
     differences,
     wasmStoppedEarly: wasmInstructions.length < typescriptInstructions.length,
     typescriptStoppedEarly:
       typescriptInstructions.length < wasmInstructions.length,
-    jamdunaStoppedEarly: jamdunaInstructions
-      ? jamdunaInstructions.length <
+    referenceStoppedEarly: referenceInstructions
+      ? referenceInstructions.length <
         Math.max(wasmInstructions.length, typescriptInstructions.length)
       : undefined,
   }
 }
 
 function printComparison(result: ComparisonResult) {
-  const is3Way = result.jamdunaFile !== undefined
+  const is3Way = result.referenceFile !== undefined
   const title = is3Way
-    ? `📊 WASM vs TypeScript vs jamduna Trace Comparison for Block ${result.blockNumber}`
+    ? `📊 WASM vs TypeScript vs reference Trace Comparison for Block ${result.blockNumber}`
     : `📊 WASM vs TypeScript Trace Comparison for Block ${result.blockNumber}`
 
   console.log(
@@ -478,9 +478,9 @@ function printComparison(result: ComparisonResult) {
   console.log(
     `${colors.cyan}TypeScript trace:${colors.reset} ${result.typescriptFile}`,
   )
-  if (result.jamdunaFile) {
+  if (result.referenceFile) {
     console.log(
-      `${colors.cyan}jamduna trace:${colors.reset} ${result.jamdunaFile}`,
+      `${colors.cyan}reference trace:${colors.reset} ${result.referenceFile}`,
     )
   }
   console.log()
@@ -491,8 +491,8 @@ function printComparison(result: ComparisonResult) {
   console.log(
     `   TypeScript instructions: ${result.typescriptInstructionCount}`,
   )
-  if (result.jamdunaInstructionCount !== undefined) {
-    console.log(`   jamduna instructions:    ${result.jamdunaInstructionCount}`)
+  if (result.referenceInstructionCount !== undefined) {
+    console.log(`   reference instructions:    ${result.referenceInstructionCount}`)
   }
   console.log(`   Matching (WASM/TS):     ${result.matchingInstructions}`)
   if (result.matchingWithJamduna !== undefined) {
@@ -568,9 +568,9 @@ function printComparison(result: ComparisonResult) {
         `   ${colors.cyan}TypeScript:${colors.reset} ${result.firstDivergence.typescriptLine.raw}`,
       )
     }
-    if (result.firstDivergence.jamdunaLine) {
+    if (result.firstDivergence.referenceLine) {
       console.log(
-        `   ${colors.cyan}jamduna:${colors.reset} ${result.firstDivergence.jamdunaLine.raw}`,
+        `   ${colors.cyan}reference:${colors.reset} ${result.firstDivergence.referenceLine.raw}`,
       )
     }
     console.log()
@@ -586,7 +586,7 @@ function printComparison(result: ComparisonResult) {
       const diffColor =
         diff.type === 'missing_wasm' ||
         diff.type === 'missing_typescript' ||
-        diff.type === 'missing_jamduna'
+        diff.type === 'missing_reference'
           ? colors.red
           : colors.yellow
       console.log(
@@ -598,8 +598,8 @@ function printComparison(result: ComparisonResult) {
       if (diff.typescriptValue) {
         console.log(`     TypeScript: ${diff.typescriptValue}`)
       }
-      if (diff.jamdunaValue) {
-        console.log(`     jamduna: ${diff.jamdunaValue}`)
+      if (diff.referenceValue) {
+        console.log(`     reference: ${diff.referenceValue}`)
       }
       if (diff.details) {
         console.log(`     ${colors.dim}${diff.details}${colors.reset}`)
@@ -624,20 +624,20 @@ function printComparison(result: ComparisonResult) {
 function findMatchingTraces(
   tracesDir: string,
   blockNumber?: number,
-  jamdunaDir?: string,
-  jamdunaBlockNumber?: number,
+  referenceDir?: string,
+  referenceBlockNumber?: number,
 ): Array<{
   block: number
   wasm: string
   typescript: string
-  jamduna?: string
+  reference?: string
 }> {
   const files = readdirSync(tracesDir).filter((f) => f.endsWith('.log'))
   const matches: Array<{
     block: number
     wasm: string
     typescript: string
-    jamduna?: string
+    reference?: string
   }> = []
 
   if (blockNumber !== undefined) {
@@ -647,16 +647,16 @@ function findMatchingTraces(
       f.startsWith(`typescript-${blockNumber}.log`),
     )
 
-    let jamdunaFile: string | undefined
-    if (jamdunaDir && existsSync(jamdunaDir)) {
-      // Use jamdunaBlockNumber if provided, otherwise use blockNumber
-      const jamdunaBlock =
-        jamdunaBlockNumber !== undefined ? jamdunaBlockNumber : blockNumber
-      // Look for jamduna trace: 00000004.log format (padded to 8 digits)
-      const paddedBlock = String(jamdunaBlock).padStart(8, '0')
-      const jamdunaPath = join(jamdunaDir, `${paddedBlock}.log`)
-      if (existsSync(jamdunaPath)) {
-        jamdunaFile = jamdunaPath
+    let referenceFile: string | undefined
+    if (referenceDir && existsSync(referenceDir)) {
+      // Use referenceBlockNumber if provided, otherwise use blockNumber
+      const referenceBlock =
+        referenceBlockNumber !== undefined ? referenceBlockNumber : blockNumber
+      // Look for reference trace: 00000004.log format (padded to 8 digits)
+      const paddedBlock = String(referenceBlock).padStart(8, '0')
+      const referencePath = join(referenceDir, `${paddedBlock}.log`)
+      if (existsSync(referencePath)) {
+        referenceFile = referencePath
       }
     }
 
@@ -665,7 +665,7 @@ function findMatchingTraces(
         block: blockNumber,
         wasm: join(tracesDir, wasmFile),
         typescript: join(tracesDir, typescriptFile),
-        jamduna: jamdunaFile,
+        reference: referenceFile,
       })
     }
   } else {
@@ -683,15 +683,15 @@ function findMatchingTraces(
         (f) => f === `typescript-${wasm.block}.log`,
       )
       if (typescriptFile) {
-        let jamdunaFile: string | undefined
-        if (jamdunaDir && existsSync(jamdunaDir)) {
-          // Use jamdunaBlockNumber if provided, otherwise use wasm.block
-          const jamdunaBlock =
-            jamdunaBlockNumber !== undefined ? jamdunaBlockNumber : wasm.block
-          const paddedBlock = String(jamdunaBlock).padStart(8, '0')
-          const jamdunaPath = join(jamdunaDir, `${paddedBlock}.log`)
-          if (existsSync(jamdunaPath)) {
-            jamdunaFile = jamdunaPath
+        let referenceFile: string | undefined
+        if (referenceDir && existsSync(referenceDir)) {
+          // Use referenceBlockNumber if provided, otherwise use wasm.block
+          const referenceBlock =
+            referenceBlockNumber !== undefined ? referenceBlockNumber : wasm.block
+          const paddedBlock = String(referenceBlock).padStart(8, '0')
+          const referencePath = join(referenceDir, `${paddedBlock}.log`)
+          if (existsSync(referencePath)) {
+            referenceFile = referencePath
           }
         }
 
@@ -699,7 +699,7 @@ function findMatchingTraces(
           block: wasm.block,
           wasm: join(tracesDir, wasm.file),
           typescript: join(tracesDir, typescriptFile),
-          jamduna: jamdunaFile,
+          reference: referenceFile,
         })
       }
     }
@@ -1008,8 +1008,8 @@ const tracesDir = join(process.cwd(), 'pvm-traces')
 
 // Parse command line arguments
 let blockNumber: number | undefined
-let jamdunaDir: string | undefined
-let jamdunaBlockNumber: number | undefined
+let referenceDir: string | undefined
+let referenceBlockNumber: number | undefined
 
 // Check for --jam-conformance mode
 if (process.argv[2] === '--jam-conformance') {
@@ -1055,12 +1055,12 @@ if (process.argv[2] === '--jam-conformance') {
 
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i]
-  if (arg === '--jamduna-dir' && i + 1 < process.argv.length) {
-    jamdunaDir = process.argv[++i]
-  } else if (arg === '--jamduna-block' && i + 1 < process.argv.length) {
+  if (arg === '--reference-dir' && i + 1 < process.argv.length) {
+    referenceDir = process.argv[++i]
+  } else if (arg === '--reference-block' && i + 1 < process.argv.length) {
     const parsed = Number.parseInt(process.argv[++i], 10)
     if (!Number.isNaN(parsed)) {
-      jamdunaBlockNumber = parsed
+      referenceBlockNumber = parsed
     }
   } else {
     const parsed = Number.parseInt(arg, 10)
@@ -1070,18 +1070,18 @@ for (let i = 2; i < process.argv.length; i++) {
   }
 }
 
-// Default jamduna directory for preimages_light
-if (!jamdunaDir && blockNumber !== undefined) {
+// Default reference directory for preimages_light
+if (!referenceDir && blockNumber !== undefined) {
   const defaultJamdunaPath = join(
     process.cwd(),
     'submodules',
-    'jamduna',
+    'reference',
     'jam-test-vectors',
     '0.7.1',
     'preimages_light',
   )
   if (existsSync(defaultJamdunaPath)) {
-    jamdunaDir = defaultJamdunaPath
+    referenceDir = defaultJamdunaPath
   }
 }
 
@@ -1095,8 +1095,8 @@ if (!existsSync(tracesDir)) {
 const matches = findMatchingTraces(
   tracesDir,
   blockNumber,
-  jamdunaDir,
-  jamdunaBlockNumber,
+  referenceDir,
+  referenceBlockNumber,
 )
 
 if (matches.length === 0) {
@@ -1112,15 +1112,15 @@ if (matches.length === 0) {
   process.exit(1)
 }
 
-const hasJamduna = matches.some((m) => m.jamduna !== undefined)
+const hasJamduna = matches.some((m) => m.reference !== undefined)
 console.log(
-  `${colors.bold}Found ${matches.length} matching trace pair(s)${hasJamduna ? ' (with jamduna)' : ''}${colors.reset}\n`,
+  `${colors.bold}Found ${matches.length} matching trace pair(s)${hasJamduna ? ' (with reference)' : ''}${colors.reset}\n`,
 )
 
 for (const match of matches) {
   const wasmLines = parseTraceFile(match.wasm)
   const typescriptLines = parseTraceFile(match.typescript)
-  const jamdunaLines = match.jamduna ? parseTraceFile(match.jamduna) : undefined
+  const referenceLines = match.reference ? parseTraceFile(match.reference) : undefined
 
   const result = compareTraces(
     wasmLines,
@@ -1128,8 +1128,8 @@ for (const match of matches) {
     match.block,
     basename(match.wasm),
     basename(match.typescript),
-    jamdunaLines,
-    match.jamduna ? basename(match.jamduna) : undefined,
+    referenceLines,
+    match.reference ? basename(match.reference) : undefined,
   )
 
   printComparison(result)

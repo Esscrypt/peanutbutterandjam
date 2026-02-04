@@ -3,7 +3,7 @@
  * Convert text format PVM traces to JIP-6 modular binary format
  *
  * Converts all text format traces (typescript-{timeslot}.log, wasm-{timeslot}.log)
- * in the pvm-traces folder to the binary modular format used by jamduna for JIP-6 traces.
+ * in the pvm-traces folder to the binary modular format used by reference for JIP-6 traces.
  *
  * Usage:
  *   bun scripts/convert-traces-to-modular.ts [--compress] [--folder <subfolder>] [--jam-conformance]
@@ -228,7 +228,7 @@ function convertTraceToModular(
   writeStream('stores' + (compress ? '.gz' : ''), storesBuffer)
 
   // Copy accumulate_input file if provided
-  // This matches the jamduna format where accumulate_input is in the same directory
+  // This matches the reference format where accumulate_input is in the same directory
   if (accumulateInputPath && existsSync(accumulateInputPath)) {
     const accumulateInputOutputPath = join(outputDir, 'accumulate_input')
     copyFileSync(accumulateInputPath, accumulateInputOutputPath)
@@ -237,7 +237,7 @@ function convertTraceToModular(
   }
 
   // Copy output file (yield hash) if provided
-  // jamduna format: 'output' - 32-byte yield hash
+  // reference format: 'output' - 32-byte yield hash
   if (outputPath && existsSync(outputPath)) {
     const outputOutputPath = join(outputDir, 'output')
     copyFileSync(outputPath, outputOutputPath)
@@ -246,7 +246,7 @@ function convertTraceToModular(
   }
 
   // Copy err file (error code) if provided
-  // jamduna format: 'err' - 1-byte error code
+  // reference format: 'err' - 1-byte error code
   if (errPath && existsSync(errPath)) {
     const errOutputPath = join(outputDir, 'err')
     copyFileSync(errPath, errOutputPath)
@@ -313,7 +313,7 @@ function discoverTraceFiles(
           searchDirectory(fullPath, newSubfolder)
         }
       } else if (entry.isFile()) {
-        // Match patterns (jamduna-compatible format):
+        // Match patterns (reference-compatible format):
         // - typescript-{timeslot}-{invocationIndex}-{serviceId}.log (e.g., typescript-118-0-1985398916.log)
         // - wasm-{timeslot}-{invocationIndex}-{serviceId}.log
         // - typescript-{timeslot}-{serviceId}.log (legacy format, invocationIndex defaults to 0)
@@ -455,7 +455,7 @@ function discoverTraceFiles(
   })
 
   // Use parsed invocationIndex if available, otherwise compute based on position
-  // jamduna structure: {timeslot}/{ordered_index}/{service_id}/
+  // reference structure: {timeslot}/{ordered_index}/{service_id}/
   // ordered_index is the invocation order within a timeslot (0, 1, 2, ...)
   const traceFiles: TraceFile[] = []
   const orderCounters = new Map<string, number>() // Key: "subfolder|timeslot|executorType" (for legacy files without invocationIndex)
@@ -569,8 +569,8 @@ async function main() {
   for (const traceFile of traceFiles) {
     const inputFile = traceFile.filepath
 
-    // Build output directory structure matching jamduna exactly:
-    // jamduna: {timeslot}/{ordered_index}/{service_id}/
+    // Build output directory structure matching reference exactly:
+    // reference: {timeslot}/{ordered_index}/{service_id}/
     // e.g., 00000050/0/1985398916/
     // Our output: pvm-traces/{subfolder}/modular/{timeslot}/{ordered_index}/{service_id}/
     const modularDir =

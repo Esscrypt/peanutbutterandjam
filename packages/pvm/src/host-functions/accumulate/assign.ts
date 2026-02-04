@@ -69,7 +69,7 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
       authQueueLength,
     )
     // Gray Paper line 722: (panic, registers_7, ...) when q = error
-    // Note: jamduna sets OOB on memory faults before PANIC to indicate why it failed
+    // Note: reference sets OOB on memory faults before PANIC to indicate why it failed
     if (faultAddress || !authQueueData) {
       logger.debug('[ASSIGN] OOB+PANIC: memory read fault', {
         authQueueOffset: authQueueOffset.toString(),

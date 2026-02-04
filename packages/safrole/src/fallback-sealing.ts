@@ -38,7 +38,7 @@
 import {
   getBanderoutFromGamma,
   IETFVRFProver,
-  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import { encodeUnsignedHeader } from '@pbnjam/codec'
 import { blake2bHash, hexToBytes, logger } from '@pbnjam/core'
@@ -198,7 +198,7 @@ export function verifyFallbackSealSignature(
   // k = validatorPublicKey, c = context, m = unsignedHeader
   // NOTE: IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
   // where input = message and auxData = context per IETF VRF specification
-  const isValid = IETFVRFVerifier.verify(
+  const isValid = IETFVRFVerifierWasm.verify(
     validatorPublicKey,
     context, // Xfallback ∥ entropy'_3 (context) - goes to _input parameter
     proof,
