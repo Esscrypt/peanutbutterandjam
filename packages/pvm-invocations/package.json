@@ -17,7 +17,8 @@
     "@pbnjam/codec": "workspace:*",
     "@pbnjam/pvm": "workspace:*",
     "@pbnjam/types": "workspace:*",
-    "@pbnjam/pvm-assemblyscript": "workspace:*"
+    "@pbnjam/pvm-assemblyscript": "workspace:*",
+    "@pbnjam/pvm-rust-native": "workspace:*"
   },
   "devDependencies": {
     "@pbnjam/typescript-config": "workspace:*",

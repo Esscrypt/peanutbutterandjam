@@ -169,7 +169,7 @@ describe('JAM Conformance Single Trace', () => {
 
     // Initialize services once for all blocks
     const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${traceId}`
-    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators })
+    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useIetfVrfWasm: true, useWasm: true })
 
     const { stateService, blockImporterService, recentHistoryService } = services
 

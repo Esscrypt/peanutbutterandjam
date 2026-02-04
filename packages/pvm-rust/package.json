@@ -1,0 +1,31 @@
+{
+  "name": "@pbnjam/pvm-rust-native",
+  "version": "0.0.1",
+  "description": "PVM implementation in Rust (NAPI native addon, same API as pvm-assemblyscript)",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "napi": {
+    "name": "pbnjam_pvm_rust",
+    "triples": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "aarch64-unknown-linux-gnu"
+    ]
+  },
+  "exports": {
+    ".": "./package.json",
+    "./native": "./native/index.js"
+  },
+  "scripts": {
+    "artifacts": "bunx @napi-rs/cli artifacts",
+    "build": "bunx @napi-rs/cli build --platform --release -o native",
+    "build:debug": "bunx @napi-rs/cli build --platform -o native",
+    "clean": "rm -rf target/ && rm -rf native/",
+    "prepare": "bun run build || echo 'Native build failed, continuing without native module'",
+    "test": "bun test tests/"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  }
+}

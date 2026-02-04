@@ -9,6 +9,8 @@
 
 import path from 'node:path'
 import {
+  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
   RingVRFProverW3F,
   RingVRFProverWasm,
   RingVRFVerifierW3F,
@@ -110,10 +112,15 @@ export interface ServiceFactoryOptions {
   }
   /** Use WASM for PVM */
   useWasm?: boolean
+  /** Use Rust (native) for PVM */
+  useRust?: boolean
   /** Use worker pool for accumulation service */
   useWorkerPool?: boolean
   /** Use WASM for Ring VRF (true = RingVRFProverWasm/RingVRFVerifierWasm, false = W3F) */
   useRingVrfWasm?: boolean
+
+  /** Use WASM for IETF VRF (true = IETFVRFVerifierWasm, false = IETFVRFVerifier) */
+  useIetfVrfWasm?: boolean
   /** Trace subfolder for debugging */
   traceSubfolder?: string
   /** Node ID for metrics (defaults to random) */
@@ -197,6 +204,9 @@ export interface ServiceContext {
     ce137ShardDistributionProtocol: ShardDistributionProtocol | null
     ce143PreimageRequestProtocol: PreimageRequestProtocol | null
   }
+
+  // IETF VRF
+  ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
 }
 
 /**
@@ -277,7 +287,7 @@ export async function createCoreServices(
 
   let ringProver: RingVRFProverWasm | RingVRFProverW3F
   let ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
-
+  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   if (useRingVrfWasm) {
     const result = await initializeRingVrf(srsFilePath)
     ringProver = result.prover
@@ -296,6 +306,12 @@ export async function createCoreServices(
     await ringProver.init()
     await ringVerifier.init()
     logger.info('Ring VRF W3F initialized successfully')
+  }
+
+  if (options.useIetfVrfWasm) {
+    ietfVerifier = new IETFVRFVerifierWasm()
+  } else {
+    ietfVerifier = new IETFVRFVerifier()
   }
 
   const configService = new ConfigService(options.configSize ?? 'tiny')
@@ -452,6 +468,7 @@ export async function createCoreServices(
     entropyService,
     pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
     useWasm: options.useWasm ?? false,
+    useRust: options.useRust ?? false,
     traceSubfolder: options.traceSubfolder,
   })
 
@@ -580,6 +597,7 @@ export async function createCoreServices(
     authPoolService,
     accumulationService,
     workReportService,
+    ietfVerifier,
   })
 
   // ChainManagerService for fork handling and state snapshots
@@ -639,6 +657,7 @@ export async function createCoreServices(
     metricsCollector,
     ringProver,
     ringVerifier,
+    ietfVerifier,
     protocols,
   }
 }

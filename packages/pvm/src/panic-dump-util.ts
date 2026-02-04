@@ -40,7 +40,7 @@ function getHostFunctionName(hostCallId: bigint): string {
  */
 export function generateTraceFilename(
   blockNumber?: number | bigint | string,
-  executorType?: 'wasm' | 'typescript',
+  executorType?: 'wasm' | 'typescript' | 'rust',
   serviceId?: number | bigint | string,
   invocationIndex?: number, // The accseq iteration index (0-based) - determines directory structure
 ): string {
@@ -125,28 +125,93 @@ export function writeTraceDump(
   outputDir?: string,
   filename?: string,
   blockNumber?: number | bigint | string,
-  executorType?: 'wasm' | 'typescript',
+  executorType?: 'wasm' | 'typescript' | 'rust',
   serviceId?: number | bigint | string,
   accumulateInput?: Uint8Array,
   invocationIndex?: number,
   accumulateOutput?: Uint8Array,
   errorCode?: number,
 ): string | undefined {
+  // #region agent log
+  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'panic-dump-util.ts:writeTraceDump',
+      message: 'writeTraceDump entry',
+      data: {
+        executionLogsLength: executionLogs.length,
+        enableTraceDump: process.env['ENABLE_PVM_TRACE_DUMP'] === 'true',
+        envValue: process.env['ENABLE_PVM_TRACE_DUMP'],
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      hypothesisId: 'H1',
+    }),
+  }).catch(() => {})
+  // #endregion
   // Check if trace dumping is enabled via environment variable
   const enableTraceDump = process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
   if (!enableTraceDump) {
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'panic-dump-util.ts:early return',
+          message: 'early return: trace dump disabled',
+          data: {},
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H1',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
     // Trace dumping is disabled, return early
     return undefined
   }
 
   if (executionLogs.length === 0) {
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'panic-dump-util.ts:early return',
+          message: 'early return: executionLogs empty',
+          data: {},
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H4',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
     // No logs to write
     return undefined
   }
 
   const defaultDir = join(process.cwd(), 'pvm-traces')
   const targetDir = outputDir ?? defaultDir
-
+  // #region agent log
+  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'panic-dump-util.ts:writing',
+      message: 'writeTraceDump writing',
+      data: { targetDir, outputDir: outputDir ?? null },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      hypothesisId: 'H5',
+    }),
+  }).catch(() => {})
+  // #endregion
   try {
     // Create directory if it doesn't exist
     mkdirSync(targetDir, { recursive: true })

@@ -680,7 +680,7 @@ export class WasmPVMExecutor {
         yieldHash = updatedContext?.[0]?.yield ?? undefined
       }
 
-      const filepath = writeTraceDump(
+      writeTraceDump(
         this.executionLogs,
         this.traceHostFunctionLogs.length > 0
           ? this.traceHostFunctionLogs
@@ -695,11 +695,6 @@ export class WasmPVMExecutor {
         yieldHash, // accumulate output (yield hash, same as TypeScript)
         errorCode, // error code for PANIC/OOG
       )
-      if (!filepath) {
-        logger.warning(
-          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
-        )
-      }
     }
 
     return safeResult({
