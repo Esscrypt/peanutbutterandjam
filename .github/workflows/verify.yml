@@ -74,9 +74,6 @@ jobs:
       - name: Install dependencies
         uses: ./.github/actions/install
 
-      - name: Build all packages
-        run: bunx turbo run build
-
       - name: Run PeanutButterAndJam tests
         run: bun run test
       - name: Run Traces tests
