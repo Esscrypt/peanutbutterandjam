@@ -71,7 +71,7 @@ Usage:
 Options:
   -b, --bootnode <string>        Specify a bootnode
   -c, --chain <string>           Chain to run. "polkadot", "dev", or the path of a chain spec file (default: "chainspec.json")
-  -d, --data-path <string>       Specifies the directory for the blockchain, keystore, and other data (default: "/Users/tanyageorgieva/.jamduna")
+  -d, --data-path <string>       Specifies the directory for the blockchain, keystore, and other data (default: "/Users/tanyageorgieva/.pbnj")
       --datadir <string>         Alias for --data-path (JAM standard)
       --debug <string>           Specifies debug flags for enhanced logging (default: "r,g")
       --dev-validator <int>      Validator Index (only for development)

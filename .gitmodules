@@ -7,12 +7,6 @@
 [submodule "submodules/bandersnatch-vrf-spec"]
 	path = submodules/bandersnatch-vrf-spec
 	url = https://github.com/davxy/bandersnatch-vrf-spec.git
-[submodule "submodules/jamduna"]
-	path = submodules/jamduna
-	url = https://github.com/jam-duna/jamtestnet.git
-[submodule "submodules/polkavm"]
-	path = submodules/polkavm
-	url = https://github.com/paritytech/polkavm.git
 [submodule "submodules/jam-docs"]
 	path = submodules/jam-docs
 	url = https://github.com/JamBrains/jam-docs.git

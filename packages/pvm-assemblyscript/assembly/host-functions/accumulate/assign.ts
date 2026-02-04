@@ -57,8 +57,8 @@ export class AssignHostFunction extends BaseAccumulateHostFunction {
     )
     const authQueueData = readResult1.data
     const faultAddress = readResult1.faultAddress
-    // Note: jamduna sets OOB on memory faults before PANIC to indicate why it failed
-    // According to GP, registers[7] should be unchanged, but we set OOB to match jamduna behavior
+    // Note: reference sets OOB on memory faults before PANIC to indicate why it failed
+    // According to GP, registers[7] should be unchanged, but we set OOB to match reference behavior
     if (faultAddress !== 0 || authQueueData === null) {
       this.setAccumulateError(registers, ACCUMULATE_ERROR_OOB)
       return new HostFunctionResult(RESULT_CODE_PANIC)

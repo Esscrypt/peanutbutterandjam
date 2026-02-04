@@ -5,7 +5,7 @@
  * the correct values for each dev account based on their Ed25519 public keys.
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { generateAlternativeName } from '@pbnjam/core'
 import { decodeFixedLength } from '@pbnjam/codec'
 
@@ -50,7 +50,7 @@ describe('generateAlternativeName', () => {
       if (resultError) {
         throw resultError
       }
-      expect(result).toBe(testCase.expected)
+      expect(result).toBe(testCase.expected as `e${string}`)
     }
   })
 

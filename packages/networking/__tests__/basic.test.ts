@@ -2,7 +2,7 @@
  * Basic tests for JAMNP-S networking implementation
  */
 
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect } from 'bun:test'
 import { generateEd25519KeyPairStable as generateEd25519KeyPair, signEd25519, verifyEd25519 } from '@pbnjam/core'
 import { generateAlternativeName } from '@pbnjam/core'
 import { generateALPNProtocol, parseALPNProtocol } from '../src/crypto/tls'

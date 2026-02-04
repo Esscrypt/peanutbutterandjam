@@ -1,52 +1,221 @@
-# PeanutButterAndJAM Monorepo
+# PeanutButterAndJam (PBNJ)
 
-A TypeScript implementation of the JAM (Just Another Machine) protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper).
+A production-grade TypeScript/JavaScript implementation of the **JAM (Just Another Machine)** protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). This monorepo provides a full JAM node: consensus (Safrole), PVM execution, networking, block authoring and import, and CLI tooling.
 
-## Specification Compliance
+## Table of Contents
 
-This project strictly adheres to the [JAM Gray Paper](https://graypaper.com/) specification:
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+- [Building](#building)
+- [Running the Node](#running-the-node)
+- [Packages](#packages)
+- [Specification Compliance](#specification-compliance)
+- [Documentation](#documentation)
 
-- **Gray Paper**: `submodules/graypaper/` submodule - The authoritative JAM protocol specification
-- **Test Vectors**: `submodules/jamtestvectors/` submodule - Official test vectors for validation
-- **Bandersnatch VRF**: `submodules/ark-vrf/` and `submodules/bandersnatch-vrf-spec/` - VRF implementation and specification
-- **Implementation Guide**: [JAM Implementation Guide](.cursor/rules/jam-implementation-guide.mdc)
-- **Adherence Rules**: [Gray Paper Adherence Rules](.cursor/rules/graypaper-adherence.mdc)
-- **VRF Implementation**: [Bandersnatch VRF Implementation Guide](.cursor/rules/bandersnatch-vrf-implementation.mdc)
+---
 
-## 📚 Documentation
+## Prerequisites
 
-- **[Documentation Index](docs/README.md)** - Complete documentation overview
-- **[Development Guide](docs/DEVELOPMENT.md)** - Development setup and guidelines
-- **[Testing Guide](docs/TESTING.md)** - Testing against JAM test vectors
-- **[Release Guide](docs/RELEASE.md)** - Release procedures and CLI downloads
+- **[Bun](https://bun.sh/)** (v1.3.x recommended) — primary runtime and package manager
+- **Git** — for cloning and submodules
 
-## 🚀 Quick Start
+Initialize submodules (required for Gray Paper and test vectors):
 
-### Testnet Setup
 ```bash
-# Run hybrid testnet (Polkajam + PBNJ)
-./scripts/hybrid-testnet.sh
-
-# Or run simple testnet
-./scripts/simple-testnet.sh
+git submodule update --init --recursive
 ```
 
-### Multi-Node Setup
-```bash
-# Start multiple nodes with observability
-./scripts/start-nodes.sh
+---
 
-# Test single node
-./scripts/test-single-node.sh
+## Getting Started
+
+```bash
+# Clone the repository
+git clone https://github.com/peanutbutterandjam/peanutbutterandjam.git
+cd peanutbutterandjam
+
+# Install dependencies (Bun)
+bun install
+
+# Initialize submodules
+git submodule update --init --recursive
+
+# Build all packages
+bun run build
 ```
 
-See **[Testnet Documentation](docs/TESTNET_README.md)** for detailed setup instructions.
+Copy environment defaults and adjust if needed:
+
+```bash
+cp .env.example .env
+```
+
+---
+
+## Building
+
+### Build all workspace packages
+
+Builds every package in the monorepo:
+
+```bash
+bun run build
+```
+
+### Build the node binary (standalone executable)
+
+Produces a single compiled binary for the JAM node:
+
+```bash
+bun run build:main
+```
+
+Output: `./bin/main-service` (Bun-compiled executable).
+
+### Build the CLI binary (multi-platform)
+
+Produces standalone CLI binaries for running the node, generating keys, and chain spec:
+
+```bash
+./scripts/build-cli.sh
+```
+
+Or from the CLI package:
+
+```bash
+cd packages/cli && bun run build:binary
+```
+
+Binaries are written to `packages/cli/dist/bin/` (e.g. `pbnj-macos`, `pbnj-linux`, `pbnj-win.exe`).
+
+### Build the fuzzer target (optional)
+
+For fuzz testing:
+
+```bash
+bun run build:fuzzer
+```
+
+Output: `./bin/fuzzer-target`.
+
+---
+
+## Running the Node
+
+### Option 1: Run with Bun (development)
+
+From repo root, run the main service entry point:
+
+```bash
+bun run infra/node/services/main-service.ts
+```
+
+Or use the compiled binary after `bun run build:main`:
+
+```bash
+./bin/main-service
+```
+
+### Option 2: Run via CLI binary
+
+After building the CLI (`./scripts/build-cli.sh`):
+
+```bash
+# Generate validator keys (if needed)
+./packages/cli/dist/bin/pbnj-macos gen-keys   # or pbnj-linux / pbnj-win.exe
+
+# Run node (default: port 40000, RPC 19800)
+./packages/cli/dist/bin/pbnj-macos run
+
+# Run with a specific validator index (dev)
+./packages/cli/dist/bin/pbnj-macos run --dev-validator 0
+
+# Custom ports
+./packages/cli/dist/bin/pbnj-macos run --port 40001 --rpc-port 19801
+```
+
+### Environment variables
+
+- `LOG_LEVEL` — `trace` | `debug` | `info` | `warn` | `error`
+- `DATA_PATH` / `--datadir` — Data directory for chain state
+- `OTEL_EXPORTER_OTLP_ENDPOINT` — OpenTelemetry endpoint (optional)
+- See `.env.example` and [packages/cli/README.md](packages/cli/README.md) for more.
+
+---
 
 ## Packages
 
-- `@pbnjam/core` - Core types and utilities
-- `@pbnjam/cli` - Command-line interface
-- `@pbnjam/safrole` - Safrole consensus protocol implementation
-- `@pbnjam/bandersnatch-vrf` - Bandersnatch VRF implementation
-- `@pbnjam/pvm` - Polkadot Virtual Machine
-- `@pbnjam/rpc-server` - RPC server implementation
+| Package | Purpose |
+|---------|---------|
+| **@pbnjam/core** | Shared utilities, hashing, crypto, logging |
+| **@pbnjam/types** | Centralized JAM protocol types and interfaces |
+| **@pbnjam/codec** | Gray Paper–compliant serialization (blocks, headers, state, PVM) |
+| **@pbnjam/cli** | Command-line interface: `run`, `gen-keys`, `gen-spec`, `print-spec`, `test-stf`, `test-refine` |
+| **@pbnjam/safrole** | Safrole consensus: tickets, fallback sealing, epoch markers, VRF-based block sealing |
+| **@pbnjam/bandersnatch** | Bandersnatch curve primitives |
+| **@pbnjam/bandersnatch-vrf** | Bandersnatch VRF (IETF, Pedersen, Ring) — provers/verifiers, WASM bindings |
+| **@pbnjam/pvm** | PVM (Para Virtual Machine) host and execution orchestration |
+| **@pbnjam/pvm-assemblyscript** | PVM implementation in AssemblyScript (compiles to WebAssembly) |
+| **@pbnjam/pvm-invocations** | PVM invocations (accumulate, refine, etc.) and WASM/TS execution adapters |
+| **@pbnjam/block-importer** | Block and header validation, seal and VRF verification |
+| **@pbnjam/block-authoring** | Block authoring: entropy signature, ticket extrinsics |
+| **@pbnjam/networking** | JAM Simple Networking Protocol (JAMNP-S) |
+| **@pbnjam/genesis** | Genesis state and chain spec handling |
+| **@pbnjam/events** | Event bus for node services |
+| **@pbnjam/erasure-coding** | Erasure coding for JAM data availability |
+| **@pbnjam/accumulate** | Accumulation logic for JAM protocol |
+| **@pbnjam/assurance** | Assurance-related types and logic |
+| **@pbnjam/audit** | Audit and audit-signature utilities |
+| **@pbnjam/disputes** | Dispute handling and signatures |
+| **@pbnjam/guarantor** | JAM Guarantor implementation |
+| **@pbnjam/telemetry** | JIP-3 telemetry for JAM nodes |
+
+Additional workspace roots: `config/*`, `apis/*`, `infra/*`, `scripts`. The runnable node and services live under **infra/node** (e.g. `main-service.ts`).
+
+---
+
+## Specification Compliance
+
+This project follows the [JAM Gray Paper](https://graypaper.com/) and related specs:
+
+- **Gray Paper** — `submodules/graypaper/` (authoritative protocol specification)
+- **Test vectors** — `submodules/jamtestvectors/` (official validation)
+- **Bandersnatch VRF** — `submodules/ark-vrf/`, `submodules/bandersnatch-vrf-spec/`
+- **Implementation and adherence** — see `.cursor/rules/` (e.g. Gray Paper adherence, JAM implementation guide, Bandersnatch VRF guide)
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [docs/README.md](docs/README.md) | Documentation index |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Development workflow and Gray Paper usage |
+| [docs/TESTING.md](docs/TESTING.md) | Testing and test vectors |
+| [docs/RELEASE.md](docs/RELEASE.md) | Release and CLI distribution |
+| [packages/cli/README.md](packages/cli/README.md) | CLI usage, commands, and JAM arguments |
+
+---
+
+## Scripts Reference
+
+| Command | Description |
+|---------|-------------|
+| `bun run build` | Build all workspace packages (Turbo) |
+| `bun run build:main` | Compile node binary to `./bin/main-service` |
+| `bun run build:fuzzer` | Compile fuzzer to `./bin/fuzzer-target` |
+| `bun run test` | Run tests across packages |
+| `bun run lint` | Run Biome lint |
+| `bun run format` | Format code with Biome |
+| `./scripts/build-cli.sh` | Build CLI binaries in `packages/cli/dist/bin/` |
+
+---
+
+## License
+
+Same license as the root repository. See [LICENSE](LICENSE) if present.
+
+## Support and references
+
+- **JAM protocol**: [Gray Paper](https://graypaper.com), [community docs](https://docs.jamcha.in)
+- **Issues**: [GitHub Issues](https://github.com/peanutbutterandjam/peanutbutterandjam/issues)

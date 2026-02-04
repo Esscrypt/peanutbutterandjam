@@ -106,7 +106,6 @@ impl ReedSolomonCoder {
         let k = padded_data.len() / W_E as usize;
 
         // JAM Test Vectors approach: Match the reference implementation exactly
-        // This follows the same approach as submodules/jamduna/erasurecoding/src/lib.rs
         // Note: This does NOT follow Gray Paper H.6 exactly, but matches the test vectors
         
         let shard_size = padded_data.len() / C as usize;

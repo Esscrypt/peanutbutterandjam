@@ -34,7 +34,6 @@
     "build": "napi build --platform --release native",
     "build:debug": "napi build --platform native",
     "prepublishOnly": "napi prepublish -t npm",
-    "test": "vitest",
     "version": "napi version",
     "clean": "rm -rf target/ && rm -rf native/"
   },

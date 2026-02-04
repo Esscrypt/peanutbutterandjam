@@ -46,8 +46,7 @@
     "esbuild": "^0.20.0",
     "pkg": "^5.8.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.8.3",
-    "vitest": "^2.1.9"
+    "typescript": "^5.8.3"
   },
   "exports": {
     ".": "./src/index.ts"

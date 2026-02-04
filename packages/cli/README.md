@@ -135,14 +135,6 @@ packages/cli/
 
 ## Configuration
 
-### Default Data Directory
-```
-~/.jamduna/
-├── keys/           # Validator keys
-├── chainspec.json  # Chain specification
-└── database/       # Blockchain data
-```
-
 ### Environment Variables
 ```bash
 export LOG_LEVEL=info

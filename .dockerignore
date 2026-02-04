@@ -142,3 +142,5 @@ Thumbs.db
 dist/
 build/
 *.tsbuildinfo
+
+remark-wallet.json

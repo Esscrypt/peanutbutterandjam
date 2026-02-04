@@ -6,8 +6,7 @@
     "config/*",
     "packages/*",
     "apis/*",
-    "infra/*",
-    "scripts"
+    "infra/*"
   ],
   "scripts": {
     "build": "TURBO_TELEMETRY_DISABLED=1 turbo run build --output-logs=full --log-order=stream",
@@ -19,7 +18,7 @@
     "generate": "TURBO_TELEMETRY_DISABLED=1 turbo run generate --cache:local:r,remote:r --parallel --continue",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
-    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test --parallel",
+    "test": "TURBO_TELEMETRY_DISABLED=1 turbo run test",
     "prepare": "lefthook install",
     "drizzle-studio": "cd ./packages/state && bun drizzle-kit studio"
   },
@@ -54,7 +53,7 @@
     "@types/bun": "1.3.7",
     "bun-types": "1.3.7",
     "@pbnjam/bandersnatch": "0.7.2-rc2",
-    "@pbnjam/bandersnatch-vrf": "0.7.2-rc6",
+    "@pbnjam/bandersnatch-vrf": "0.7.2-rc8",
     "@pbnjam/types": "0.7.2-rc1",
     "viem": "2.32.0",
     "zod": "3.25.76",

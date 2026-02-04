@@ -4,7 +4,7 @@
  * Tests the Gray Paper merklization implementation against test vectors
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import { merklizeState, type TrieInput } from '../src/merklization'
 import { bytesToHex } from '../src/utils/crypto'
 import trieTestVectors from './trie.json'

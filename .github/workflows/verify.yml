@@ -66,8 +66,25 @@ jobs:
       - name: Checkout bandersnatch-vrf submodule
         run: git submodule update --init packages/bandersnatch-vrf
 
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
       - name: Install dependencies
         uses: ./.github/actions/install
+
       - name: Run PeanutButterAndJam tests
         run: bun run test
       - name: Run Traces tests

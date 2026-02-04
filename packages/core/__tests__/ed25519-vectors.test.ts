@@ -24,7 +24,7 @@
  * - It's 25519AM: https://hdevalence.ca/blog/2020-10-04-its-25519am/
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import {
   signEd25519,
   verifyEd25519,
