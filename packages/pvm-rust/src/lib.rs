@@ -387,6 +387,12 @@ pub fn get_yield_hash() -> Buffer {
 }
 
 #[napi]
+pub fn get_last_opcode() -> u32 {
+    let g = get_state();
+    g.as_ref().map_or(0, |s| s.last_opcode as u32)
+}
+
+#[napi]
 pub fn get_last_load_address() -> u32 {
     let g = get_state();
     g.as_ref().map_or(0, |s| s.last_load_address)

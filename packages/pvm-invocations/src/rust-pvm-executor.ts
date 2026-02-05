@@ -10,6 +10,7 @@
  */
 
 import { createRequire } from 'node:module'
+import { join } from 'node:path'
 
 const require = createRequire(import.meta.url)
 
@@ -19,6 +20,7 @@ import {
   encodeImplicationsPair,
   encodeVariableSequence,
 } from '@pbnjam/codec'
+import { getInstructionName, writeTraceDump } from '@pbnjam/pvm'
 import type {
   AccumulateInput,
   IConfigService,
@@ -26,7 +28,7 @@ import type {
   ImplicationsPair,
   SafePromise,
 } from '@pbnjam/types'
-import { safeError, safeResult } from '@pbnjam/types'
+import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 
 /** NAPI binding: camelCase exports from @pbnjam/pvm-rust-native (matches lib.rs). */
 export type NativeBinding = {
@@ -59,6 +61,14 @@ export type NativeBinding = {
   nextStep: () => boolean
   getStatus: () => number
   getGasLeft: () => number
+  getProgramCounter?: () => number
+  getRegisters?: () => Buffer
+  getLastOpcode?: () => number
+  getHostCallId?: () => number
+  getLastLoadAddress?: () => number
+  getLastLoadValue?: () => bigint
+  getLastStoreAddress?: () => number
+  getLastStoreValue?: () => bigint
   getResult: () => Buffer
   getYieldHash: () => Buffer
   getAccumulationContext: (
@@ -83,14 +93,16 @@ export class RustPVMExecutor {
   private readonly native: NativeBinding | null
   private readonly configService: IConfigService
   private readonly entropyService: IEntropyService
+  private readonly traceSubfolder: string | undefined
 
   constructor(
     configService: IConfigService,
     entropyService: IEntropyService,
-    _traceSubfolder?: string,
+    traceSubfolder?: string,
   ) {
     this.configService = configService
     this.entropyService = entropyService
+    this.traceSubfolder = traceSubfolder
     const binding = loadNative()
     if (
       !binding?.setupAccumulateInvocation ||
@@ -206,10 +218,80 @@ export class RustPVMExecutor {
     const initialGas = gasLimit
     const maxSteps = Number(this.configService.maxBlockGas)
     let steps = 0
+    const enableTrace =
+      this.traceSubfolder && process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+    const executionLogs: Array<{
+      step: number
+      pc: bigint
+      instructionName: string
+      opcode: string
+      gas: bigint
+      registers: string[]
+      loadAddress?: number
+      loadValue?: bigint
+      storeAddress?: number
+      storeValue?: bigint
+    }> = []
+    const hostFunctionLogs: Array<{
+      step: number
+      hostCallId: bigint
+      gasBefore: bigint
+      gasAfter: bigint
+      serviceId?: bigint
+    }> = []
+
     while (steps < maxSteps) {
+      const gasBeforeStep = this.native.getGasLeft()
       const shouldContinue = this.native.nextStep()
       steps++
       const status = this.native.getStatus()
+
+      if (enableTrace) {
+        const gasRaw = this.native.getGasLeft()
+        const gasAfter =
+          gasRaw >>> 0 === gasRaw
+            ? BigInt(gasRaw)
+            : BigInt(gasRaw >>> 0) + 0x1_0000_0000n
+        const pc = this.native.getProgramCounter
+          ? BigInt(this.native.getProgramCounter())
+          : 0n
+        const registers: string[] = []
+        if (this.native.getRegisters) {
+          const buf = this.native.getRegisters()
+          for (let i = 0; i < 13; i++) {
+            registers.push((buf as Buffer).readBigUInt64LE(i * 8).toString())
+          }
+        }
+        const loadAddress = this.native.getLastLoadAddress?.() ?? 0
+        const loadValue = this.native.getLastLoadValue?.() ?? 0n
+        const storeAddress = this.native.getLastStoreAddress?.() ?? 0
+        const storeValue = this.native.getLastStoreValue?.() ?? 0n
+        const opcodeNum = this.native.getLastOpcode?.() ?? 0
+        const instructionName = getInstructionName(opcodeNum)
+        executionLogs.push({
+          step: steps,
+          pc,
+          instructionName,
+          opcode: instructionName,
+          gas: gasAfter,
+          registers,
+          loadAddress,
+          loadValue,
+          storeAddress,
+          storeValue,
+        })
+        const hostCallId = this.native.getHostCallId?.() ?? 0
+        if (hostCallId !== 0) {
+          hostFunctionLogs.push({
+            step: steps,
+            hostCallId: BigInt(hostCallId),
+            gasBefore: BigInt(gasBeforeStep >>> 0),
+            gasAfter,
+            serviceId: _serviceId,
+          })
+        }
+      }
+
       if (!shouldContinue) {
         if (status === 4) continue
         break
@@ -217,7 +299,11 @@ export class RustPVMExecutor {
       if (status !== 0 && status !== 4) break
     }
 
-    const finalGas = BigInt(this.native.getGasLeft())
+    const finalGasRaw = this.native.getGasLeft()
+    const finalGas =
+      finalGasRaw >>> 0 === finalGasRaw
+        ? BigInt(finalGasRaw)
+        : BigInt(finalGasRaw >>> 0) + 0x1_0000_0000n
     const status = this.native.getStatus()
 
     let gasConsumed: bigint
@@ -257,6 +343,62 @@ export class RustPVMExecutor {
       )
     }
     const updatedContext = decodeResult.value
+
+    // Trace dump: per-step executionLogs when enableTrace, else single synthetic line. writeTraceDump requires executionLogs.length > 0.
+    if (
+      this.traceSubfolder &&
+      process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+    ) {
+      const traceOutputDir = join(
+        process.cwd(),
+        'pvm-traces',
+        this.traceSubfolder,
+      )
+      const logsToWrite =
+        executionLogs.length > 0
+          ? executionLogs
+          : [
+              {
+                step: steps,
+                pc: 0n,
+                instructionName: 'rust-summary',
+                opcode: '',
+                gas: gasConsumed,
+                registers: [] as string[],
+              },
+            ]
+      const hostLogsToWrite =
+        executionLogs.length > 0 ? hostFunctionLogs : undefined
+      let errorCode: number | undefined
+      if (status === 2) errorCode = RESULT_CODES.PANIC
+      else if (status === 3) errorCode = RESULT_CODES.FAULT
+      else if (status === 5) errorCode = RESULT_CODES.OOG
+      let yieldHash: Uint8Array | undefined
+      if (result === 'PANIC' || result === 'OOG') {
+        yieldHash = updatedContext[1]?.yield ?? undefined
+      } else if (result instanceof Uint8Array && result.length === 32) {
+        yieldHash = result
+      } else {
+        yieldHash = updatedContext[0]?.yield ?? undefined
+      }
+      const [encodeError, encodedInputs] = encodeVariableSequence(
+        _inputs,
+        encodeAccumulateInput,
+      )
+      writeTraceDump(
+        logsToWrite,
+        hostLogsToWrite,
+        traceOutputDir,
+        undefined,
+        _timeslot,
+        'rust',
+        _serviceId,
+        encodeError ? undefined : encodedInputs,
+        _invocationIndex ?? 0,
+        yieldHash,
+        errorCode,
+      )
+    }
 
     return safeResult({
       gasConsumed,

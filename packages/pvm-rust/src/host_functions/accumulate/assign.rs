@@ -81,6 +81,10 @@ impl HostFunction for AssignHostFunction {
         }
         if current_service_id != u64::from(state.assigners[core_idx]) {
             base::set_accumulate_error(context.registers, codes::HUH);
+            crate::host_log_error!(
+                "[hostfn] assign: HUH (currentServiceId={} is not assigner for core {}, assigner={})",
+                current_service_id, core_index, state.assigners[core_idx]
+            );
             return HostFunctionResult::continue_execution();
         }
 
@@ -88,6 +92,10 @@ impl HostFunction for AssignHostFunction {
         // service_id is invalid even if context lacks service_id/assign_state (matches AS outcome).
         if service_id_to_assign >= MAX_SERVICE_ID {
             base::set_accumulate_error(context.registers, codes::WHO);
+            crate::host_log_error!(
+                "[hostfn] assign: WHO (invalid serviceIdToAssign={}, max={})",
+                service_id_to_assign, MAX_SERVICE_ID
+            );
             return HostFunctionResult::continue_execution();
         }
 

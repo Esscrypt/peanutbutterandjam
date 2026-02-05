@@ -53,6 +53,10 @@ impl HostFunction for LookupHostFunction {
                         (Some(a), sid as u32)
                     }
                     None => {
+                        crate::host_log_error!(
+                            "[hostfn] lookup: Service account not found (queryServiceId={})",
+                            query_service_id
+                        );
                         context.registers[7] = REG_NONE;
                         return HostFunctionResult::continue_execution();
                     }
@@ -75,6 +79,10 @@ impl HostFunction for LookupHostFunction {
         let preimage = match preimage {
             Some(p) => p,
             None => {
+                crate::host_log_error!(
+                    "[hostfn] lookup: Preimage not found (serviceId={}, hashOffset={})",
+                    actual_service_id, hash_offset
+                );
                 context.registers[7] = REG_NONE;
                 return HostFunctionResult::continue_execution();
             }

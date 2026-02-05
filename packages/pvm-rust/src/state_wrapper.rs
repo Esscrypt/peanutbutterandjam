@@ -215,6 +215,8 @@ pub struct PvmState {
     pub last_load_value: u64,
     pub last_store_address: u32,
     pub last_store_value: u64,
+    /// Opcode (code byte) of the last executed instruction; for trace dump use pvm package getInstructionName(opcode).
+    pub last_opcode: u8,
     pub has_accumulation_context: bool,
     /// Set by YIELD host (25) in accumulation; 32-byte hash for accumulation result. Returned by get_accumulation_context.
     pub yield_hash: Option<Vec<u8>>,
@@ -277,6 +279,7 @@ impl PvmState {
         self.result_code = RESULT_CODE_HALT;
         self.registers = [0u64; 13];
         self.ram.reset();
+        self.last_opcode = 0;
         self.host_call_id = 0;
         self.yield_hash = None;
         self.checkpoint_requested = false;
@@ -322,6 +325,7 @@ impl Default for PvmState {
             last_load_value: 0,
             last_store_address: 0,
             last_store_value: 0,
+            last_opcode: 0,
             has_accumulation_context: false,
             yield_hash: None,
             host_call_id: 0,
@@ -620,6 +624,7 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
         return false;
     };
 
+    state.last_opcode = opcode as u8;
     state.gas_left = state.gas_left.saturating_sub(1);
 
     // Do not clear last memory op here so ECALLI (and other non-memory steps) retain the previous

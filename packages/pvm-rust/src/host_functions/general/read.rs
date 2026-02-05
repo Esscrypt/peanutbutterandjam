@@ -24,23 +24,23 @@ impl HostFunction for ReadHostFunction {
             return HostFunctionResult::continue_execution();
         }
 
+        let params_service_id = context.service_id.unwrap();
+        let accounts = context.accounts.as_ref().unwrap();
+
+        // Gray Paper equation 404-407: Determine service account
+        // s^* = s when registers[7] = 2^64 - 1 (NONE), otherwise registers[7]
         let requested_service_id = if context.registers[7] == REG_NONE {
-            context.service_id.unwrap()
+            params_service_id
         } else {
             context.registers[7]
         };
 
-        let accounts = context.accounts.as_ref().unwrap();
-        let service_account = match accounts.get(&requested_service_id) {
-            Some(a) => a,
-            None => {
-                crate::host_log_error!(
-                    "[hostfn] read: Service account not found (serviceId={}, requestedServiceId={})",
-                    _log_service_id, requested_service_id
-                );
-                context.registers[7] = REG_NONE;
-                return HostFunctionResult::continue_execution();
-            }
+        // Gray Paper equation 408-412: Select service account
+        // a = s when s^* = s, otherwise d[s^*] if s^* in keys(d), otherwise none
+        let service_account = if requested_service_id == params_service_id {
+            accounts.get(&params_service_id)
+        } else {
+            accounts.get(&requested_service_id)
         };
 
         let key_offset = context.registers[8];
@@ -59,6 +59,13 @@ impl HostFunction for ReadHostFunction {
         }
         let key = read_key.data.unwrap();
 
+        let service_account = match service_account {
+            Some(a) => a,
+            None => {
+                context.registers[7] = REG_NONE;
+                return HostFunctionResult::continue_execution();
+            }
+        };
         let value = get_storage_value(service_account, requested_service_id as u32, &key);
         let value = match value {
             Some(v) => v,
