@@ -1,4 +1,4 @@
-//! LOG host function (JIP-1). Gray Paper: function ID 100, gas cost 0.
+//! LOG host function (JIP-1). Gray Paper: function ID 100. Base 10 gas (charged in state_wrapper).
 //! level=ω7, target=μ[ω8..ω9], message=μ[ω10..ω11]. Log to operator; invalid memory → no side-effect, continue.
 //! Matches TypeScript: UTF-8 decode (lossy), all levels logged, invalid access → continue.
 
@@ -51,6 +51,8 @@ impl HostFunction for LogHostFunction {
             Some(t) => format!("{} [{}] {}", level_str, t, message),
             None => format!("{} {}", level_str, message),
         };
+        #[cfg(feature = "log_host_call_logging")]
+        eprintln!("{}", formatted);
         if let Some(log_messages) = context.log_messages.as_mut() {
             log_messages.push(formatted);
         }

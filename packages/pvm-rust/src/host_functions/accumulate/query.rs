@@ -23,25 +23,31 @@ impl HostFunction for QueryHostFunction {
         let preimage_offset = context.registers[7] as u32;
         let preimage_length = context.registers[8];
 
+        let _log_service_id = context.service_id.unwrap_or(0);
+        crate::host_log!(
+            "[hostfn] QUERY host function invoked preimageOffset={} preimageLength={} currentServiceId={}",
+            preimage_offset, preimage_length, _log_service_id
+        );
+
         // Read hash from memory (32 bytes). Gray Paper: panic when read fails; r7 unchanged.
         let read_result = context.ram.read_octets(preimage_offset, HASH_LEN);
         if read_result.fault_address != 0 || read_result.data.is_none() {
+            crate::host_log!(
+                "[hostfn] query PANIC: hash read fault (offset={}, fault_address={})",
+                preimage_offset, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let hash_data = read_result.data.unwrap();
         if hash_data.len() != HASH_LEN as usize {
+            crate::host_log!(
+                "[hostfn] query PANIC: hash length mismatch (got {}, expected {})",
+                hash_data.len(),
+                HASH_LEN as usize
+            );
             return HostFunctionResult::panic();
         }
 
-        // Current service account (imX). None → NONE, r8=0.
-        let service_account = match &context.service_account {
-            Some(acc) => acc,
-            None => {
-                base::set_accumulate_error(context.registers, codes::NONE);
-                context.registers[8] = 0;
-                return HostFunctionResult::continue_execution();
-            }
-        };
         let service_id = match context.service_id {
             Some(id) => id as u32,
             None => {
@@ -49,6 +55,25 @@ impl HostFunction for QueryHostFunction {
                 context.registers[8] = 0;
                 return HostFunctionResult::continue_execution();
             }
+        };
+        // Current service account (imX). Resolve from context.service_account or context.accounts + service_id.
+        let service_account = match &context.service_account {
+            Some(acc) => acc,
+            None => match &context.accounts {
+                Some(accounts) => match accounts.get(&(service_id as u64)) {
+                    Some(acc) => acc,
+                    None => {
+                        base::set_accumulate_error(context.registers, codes::NONE);
+                        context.registers[8] = 0;
+                        return HostFunctionResult::continue_execution();
+                    }
+                },
+                None => {
+                    base::set_accumulate_error(context.registers, codes::NONE);
+                    context.registers[8] = 0;
+                    return HostFunctionResult::continue_execution();
+                }
+            },
         };
 
         let request_value = get_request_value(service_account, service_id, &hash_data, preimage_length);
@@ -98,6 +123,7 @@ impl HostFunction for QueryHostFunction {
             }
         }
 
+        crate::host_log!("[host-calls] [{}] QUERY({}, {}) <- OK", _log_service_id, preimage_offset, preimage_length);
         HostFunctionResult::continue_execution()
     }
 }

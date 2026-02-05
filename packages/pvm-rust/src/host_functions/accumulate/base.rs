@@ -53,3 +53,32 @@ pub const DEFAULT_NUM_VALIDATORS: u32 = 1023;
 
 /// Max service ID (2^32). Gray Paper: serviceid ≡ Nbits{32}.
 pub const MAX_SERVICE_ID: u64 = 4_294_967_296;
+
+/// Map accumulate register outcome (r7) to string for [host-calls] logging. Matches TS logger format.
+#[inline]
+pub fn accumulate_code_to_str(code: u64) -> &'static str {
+    use crate::config::{
+        REG_CASH, REG_CORE, REG_FULL, REG_HUH, REG_LOW, REG_NONE, REG_OOB, REG_OK, REG_WHO,
+    };
+    if code == REG_OK {
+        "OK"
+    } else if code == REG_WHO {
+        "WHO"
+    } else if code == REG_HUH {
+        "HUH"
+    } else if code == REG_CORE {
+        "CORE"
+    } else if code == REG_CASH {
+        "CASH"
+    } else if code == REG_LOW {
+        "LOW"
+    } else if code == REG_OOB {
+        "OOB"
+    } else if code == REG_FULL {
+        "FULL"
+    } else if code == REG_NONE {
+        "NONE"
+    } else {
+        "?"
+    }
+}

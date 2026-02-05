@@ -537,7 +537,7 @@ export class MainService extends BaseService {
       authPoolService: this.authPoolService,
       accumulationService: this.accumulationService,
       workReportService: this.workReportService,
-      verifier: this.ietfVerifier,
+      ietfVerifier: this.ietfVerifier,
     })
 
     // Register created services with the registry

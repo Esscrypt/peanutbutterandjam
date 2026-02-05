@@ -44,33 +44,51 @@ impl HostFunction for ForgetHostFunction {
         "forget"
     }
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
-        let hash_offset = context.registers[7];
+        let hash_offset = context.registers[7] as u32;
         let preimage_length = context.registers[8];
 
-        let read_result = context.ram.read_octets(hash_offset as u32, HASH_LEN);
+        let _log_service_id = context.service_id.unwrap_or(0);
+        crate::host_log!(
+            "[hostfn] FORGET host function invoked hashOffset={} preimageLength={} currentServiceId={}",
+            hash_offset, preimage_length, _log_service_id
+        );
+
+        let read_result = context.ram.read_octets(hash_offset, HASH_LEN);
         if read_result.fault_address != 0 || read_result.data.is_none() {
+            crate::host_log_error!(
+                "[hostfn] forget PANIC: hash read fault (serviceId={}, offset={}, fault_address={})",
+                _log_service_id, hash_offset, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let hash_data = read_result.data.unwrap();
-        if hash_data.len() != HASH_LEN as usize {
-            return HostFunctionResult::panic();
-        }
         let mut hash_bytes = [0u8; 32];
-        hash_bytes.copy_from_slice(&hash_data);
+        let n = hash_data.len().min(32);
+        hash_bytes[..n].copy_from_slice(&hash_data[..n]);
 
-        let service_account = match context.service_account.as_deref_mut() {
-            Some(a) => a,
-            None => {
-                base::set_accumulate_error(context.registers, codes::HUH);
-                return HostFunctionResult::continue_execution();
-            }
-        };
         let service_id = match context.service_id {
             Some(id) => id as u32,
             None => {
                 base::set_accumulate_error(context.registers, codes::HUH);
                 return HostFunctionResult::continue_execution();
             }
+        };
+        // Current service account (imX). Resolve from context.service_account or context.accounts + service_id.
+        let service_account = match &mut context.service_account {
+            Some(a) => a,
+            None => match &mut context.accounts {
+                Some(accounts) => match accounts.get_mut(&(service_id as u64)) {
+                    Some(acc) => acc,
+                    None => {
+                        base::set_accumulate_error(context.registers, codes::HUH);
+                        return HostFunctionResult::continue_execution();
+                    }
+                },
+                None => {
+                    base::set_accumulate_error(context.registers, codes::HUH);
+                    return HostFunctionResult::continue_execution();
+                }
+            },
         };
 
         let request_value = match get_request_value(
@@ -155,6 +173,7 @@ impl HostFunction for ForgetHostFunction {
         }
 
         base::set_accumulate_success(context.registers, codes::OK);
+        crate::host_log!("[host-calls] [{}] FORGET({}, {}) <- OK", _log_service_id, hash_offset, preimage_length);
         HostFunctionResult::continue_execution()
     }
 }

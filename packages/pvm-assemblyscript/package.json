@@ -27,6 +27,7 @@
     "@pbnjam/types": "workspace:*",
     "@pbnjam/typescript-config": "workspace:*",
     "@pbnjam/pvm": "workspace:*",
+    "@pbnjam/pvm-rust-native": "workspace:*",
     "prettier": "^3.0.0"
   },
   "exports": {

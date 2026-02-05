@@ -1000,16 +1000,22 @@ pub fn encode_implications(
     let mut out = implications.id.to_le_bytes().to_vec();
     out.extend_from_slice(&encode_partial_state(&implications.state, num_cores, num_validators, auth_queue_size));
     out.extend_from_slice(&implications.nextfreeid.to_le_bytes());
-    let xfers_enc: Vec<Vec<u8>> = implications.xfers.iter().map(encode_deferred_transfer).collect();
-    out.extend_from_slice(&encode_variable_sequence(&xfers_enc));
+    // Gray Paper var{sequence{defxfer}}: encode(count) || encode(defxfer)_0 || ... (no per-element length)
+    out.extend_from_slice(&encode_natural(implications.xfers.len() as u64));
+    for t in &implications.xfers {
+        out.extend_from_slice(&encode_deferred_transfer(t));
+    }
     if let Some(ref h) = implications.yield_hash {
         out.push(1);
         out.extend_from_slice(h);
     } else {
         out.push(0);
     }
-    let prov_enc: Vec<Vec<u8>> = implications.provisions.iter().map(encode_provision_entry).collect();
-    out.extend_from_slice(&encode_variable_sequence(&prov_enc));
+    // Gray Paper var{sequence{...}} for provisions: encode(count) || encode(provision)_0 || ... (no per-element length)
+    out.extend_from_slice(&encode_natural(implications.provisions.len() as u64));
+    for p in &implications.provisions {
+        out.extend_from_slice(&encode_provision_entry(p));
+    }
     out
 }
 
@@ -1202,13 +1208,15 @@ pub fn delete_preimage_value(
 }
 
 /// Encode request timeslots to value format. Gray Paper: encode{var{sequence{encode[4]{x} | x ∈ t}}}.
+/// Format is var(count) || encode[4](t0) || encode[4](t1) || ... with no per-element length prefix.
 #[must_use]
 pub fn encode_request_timeslots(timeslots: &[u32]) -> Vec<u8> {
-    let elements: Vec<Vec<u8>> = timeslots
-        .iter()
-        .map(|&t| encode_fixed_length(t as u64, 4))
-        .collect();
-    encode_variable_sequence(&elements)
+    let mut out = encode_natural(timeslots.len() as u64);
+    for &t in timeslots {
+        out.extend_from_slice(&encode_fixed_length(t as u64, 4));
+    }
+
+    out
 }
 
 /// Decode request timeslots: variable sequence of encode[4](u32).

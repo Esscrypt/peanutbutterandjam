@@ -27,6 +27,10 @@ impl HostFunction for LookupHostFunction {
 
         let read_hash = context.ram.read_octets(hash_offset as u32, 32);
         if read_hash.data.is_none() || read_hash.fault_address != 0 {
+            crate::host_log!(
+                "[hostfn] lookup PANIC: hash read fault (offset={}, fault_address={})",
+                hash_offset, read_hash.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let hash_data = read_hash.data.as_ref().unwrap();
@@ -86,6 +90,10 @@ impl HostFunction for LookupHostFunction {
             let data_to_write = preimage[f as usize..end].to_vec();
             let write_result = context.ram.write_octets(output_offset as u32, &data_to_write);
             if write_result.has_fault {
+                crate::host_log!(
+                    "[hostfn] lookup PANIC: output write fault (offset={}, len={})",
+                    output_offset, data_to_write.len()
+                );
                 return HostFunctionResult::panic();
             }
         }

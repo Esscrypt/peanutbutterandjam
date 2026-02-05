@@ -1,6 +1,6 @@
 //! Host function base types and trait (mirrors assembly/host-functions/general/base.ts and accumulate/base.ts).
 
-use crate::codec::{AlwaysAccerEntry, CompleteServiceAccount, ProvisionEntry};
+use crate::codec::{CompleteServiceAccount, DeferredTransfer, PartialState, ProvisionEntry};
 use crate::config::{FetchSystemConstantsConfig, RESULT_CODE_FAULT, RESULT_CODE_HALT, RESULT_CODE_OOG, RESULT_CODE_PANIC};
 use crate::host_functions::refine::RefineContext;
 use crate::types::{RegisterState, Ram};
@@ -57,24 +57,6 @@ impl HostFunctionResult {
     }
 }
 
-/// State slice for BLESS (Ω_B). When provided, host updates manager, delegator, registrar, assigners, alwaysaccers.
-#[derive(Default)]
-pub struct BlessState {
-    pub manager: u32,
-    pub delegator: u32,
-    pub registrar: u32,
-    pub assigners: Vec<u32>,
-    pub alwaysaccers: Vec<AlwaysAccerEntry>,
-}
-
-/// State slice for ASSIGN (Ω_A). assigners[c] = service ID for core c; authqueue[c] = 80 entries of 32 bytes each.
-#[derive(Default)]
-pub struct AssignState {
-    pub assigners: Vec<u32>,
-    /// Per core: 80 entries of 32 bytes (Cauthqueuesize × 32).
-    pub authqueue: Vec<Vec<Vec<u8>>>,
-}
-
 /// Context passed to host functions (registers, ram, gas). Mirrors HostFunctionContext.
 /// Optional params (service_id, service_account, accounts) are set by refine/accumulate executors for LOOKUP/READ/WRITE/INFO/HISTORICAL_LOOKUP.
 pub struct HostFunctionContext<'a> {
@@ -105,20 +87,18 @@ pub struct HostFunctionContext<'a> {
     pub yield_hash: Option<&'a mut Option<Vec<u8>>>,
     /// Accumulation provisions (PROVIDE adds (service_id, preimage) when provided).
     pub provisions: Option<&'a mut Vec<ProvisionEntry>>,
+    /// Deferred transfers (TRANSFER pushes (source, dest, amount, memo, gas_limit) when provided).
+    pub xfers: Option<&'a mut Vec<DeferredTransfer>>,
     /// Delegator service ID (imX.state.delegator). Only delegator can DESIGNATE; when provided.
     pub delegator_id: Option<u64>,
     /// Cvalcount from config. Used by DESIGNATE for validators array size; when provided.
     pub num_validators: Option<u32>,
-    /// Staging set (imX.state.stagingset). DESIGNATE updates with new validators; when provided.
-    pub stagingset: Option<&'a mut Vec<Vec<u8>>>,
+    /// Accumulation state (imX.state). Single struct like AS: BLESS/ASSIGN/DESIGNATE read/write manager, assigners, delegator, registrar, alwaysaccers, authqueue, stagingset; when provided.
+    pub accumulation_state: Option<&'a mut PartialState>,
     /// Set to true by CHECKPOINT host when accumulation context present; executor copies regular → exceptional.
     pub checkpoint_requested: Option<&'a mut bool>,
     /// Ccorecount from config. Used by BLESS/ASSIGN for assigners array size; when provided.
     pub num_cores: Option<u32>,
-    /// State slice for BLESS. Host writes manager, delegator, registrar, assigners, alwaysaccers; when provided.
-    pub bless_state: Option<&'a mut BlessState>,
-    /// State slice for ASSIGN. Host updates assigners[c] and authqueue[c]; when provided.
-    pub assign_state: Option<&'a mut AssignState>,
     /// FETCH selector 1: entropy accumulator (n); when provided.
     pub fetch_entropy_accumulator: Option<&'a [u8]>,
     /// FETCH selector 2: authorizer trace (r); when provided.

@@ -23,33 +23,41 @@ impl HostFunction for EjectHostFunction {
         let service_id_to_eject = context.registers[7];
         let hash_offset = context.registers[8];
 
+        let _log_service_id = context.service_id.unwrap_or(0);
+        crate::host_log!(
+            "[hostfn] EJECT host function invoked serviceIdToEject={} hashOffset={} currentServiceId={}",
+            service_id_to_eject, hash_offset, _log_service_id
+        );
+
         let read_result = context.ram.read_octets(hash_offset as u32, HASH_LEN);
         if read_result.fault_address != 0 || read_result.data.is_none() {
+            crate::host_log!(
+                "[hostfn] eject PANIC: hash read fault (offset={}, fault_address={})",
+                hash_offset, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let hash_data = read_result.data.unwrap();
         if hash_data.len() != HASH_LEN as usize {
+            crate::host_log!(
+                "[hostfn] eject PANIC: hash length mismatch (got {}, expected {})",
+                hash_data.len(),
+                HASH_LEN as usize
+            );
             return HostFunctionResult::panic();
         }
         let mut hash_bytes = [0u8; 32];
         hash_bytes.copy_from_slice(&hash_data);
 
-        let accounts = match context.accounts.as_deref_mut() {
-            Some(a) => a,
-            None => {
-                base::set_accumulate_error(context.registers, codes::WHO);
-                return HostFunctionResult::continue_execution();
-            }
-        };
-        let current_service = match context.service_account.as_deref_mut() {
-            Some(s) => s,
-            None => {
-                base::set_accumulate_error(context.registers, codes::WHO);
-                return HostFunctionResult::continue_execution();
-            }
-        };
         let current_service_id = match context.service_id {
             Some(id) => id,
+            None => {
+                base::set_accumulate_error(context.registers, codes::WHO);
+                return HostFunctionResult::continue_execution();
+            }
+        };
+        let accounts = match context.accounts.as_deref_mut() {
+            Some(a) => a,
             None => {
                 base::set_accumulate_error(context.registers, codes::WHO);
                 return HostFunctionResult::continue_execution();
@@ -117,9 +125,21 @@ impl HostFunction for EjectHostFunction {
 
         let balance_to_transfer = target.balance;
         accounts.remove(&service_id_to_eject);
+        // Resolve current service account (imX) for balance update; from context.service_account or accounts.
+        let current_service = match &mut context.service_account {
+            Some(s) => s,
+            None => match accounts.get_mut(&current_service_id) {
+                Some(s) => s,
+                None => {
+                    base::set_accumulate_error(context.registers, codes::WHO);
+                    return HostFunctionResult::continue_execution();
+                }
+            },
+        };
         current_service.balance += balance_to_transfer;
 
         base::set_accumulate_success(context.registers, codes::OK);
+        crate::host_log!("[host-calls] [{}] EJECT({}, {}) <- OK", _log_service_id, service_id_to_eject, hash_offset);
         HostFunctionResult::continue_execution()
     }
 }

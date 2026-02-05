@@ -85,10 +85,10 @@ impl Ram for PvmRam {
         if !check.success {
             return ReadResult::new(None, check.fault_address);
         }
+        let end_addr = address + count;
         let mut result = vec![0u8; count as usize];
         let mut result_offset = 0usize;
         let mut current_addr = address;
-        let end_addr = address + count;
 
         while current_addr < end_addr {
             let page_index = self.get_page_index(current_addr);
@@ -177,6 +177,10 @@ impl Ram for PvmRam {
         if size == 0 {
             return FaultCheckResult::new(true, 0);
         }
+        // u32 overflow: address + size wrapping past u32::MAX is invalid (Gray Paper: range not readable).
+        if address.wrapping_add(size) < address {
+            return FaultCheckResult::new(false, address);
+        }
         let end_address = address + size;
         let start_page = self.get_page_index(address);
         let end_page = self.get_page_index(end_address.saturating_sub(1));
@@ -252,6 +256,9 @@ impl Ram for PvmRam {
     fn is_writable_with_fault(&self, address: u32, size: u32) -> FaultCheckResult {
         if size == 0 {
             return FaultCheckResult::new(true, 0);
+        }
+        if address.wrapping_add(size) < address {
+            return FaultCheckResult::new(false, address);
         }
         let end_address = address + size;
         let start_page = self.get_page_index(address);

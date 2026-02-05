@@ -21,10 +21,10 @@ import {
  *   - z: preimage data length
  * - Returns: registers[7] = OK or error code
  *
- * Gray Paper Logic:
+ * Gray Paper Logic (check order: WHO before RAM read so missing service returns WHO even with invalid preimage params):
  * 1. Determine target service ID (current service if s = 2^64-1)
- * 2. Read preimage data from memory
- * 3. Check if service account exists
+ * 2. Check if service account exists (WHO)
+ * 3. Read preimage data from memory (fault → panic)
  * 4. Check if there's a matching request for this hash and size
  * 5. Check if the preimage hasn't already been provided
  * 6. Add the preimage to provisions
@@ -59,7 +59,19 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
       currentServiceId: implications[0].id.toString(),
     })
 
-    // Read preimage data from memory
+    // Get the current implications context
+    const [imX] = implications
+
+    // Check if service account exists (WHO) before RAM read so missing service returns WHO even with invalid preimage params
+    const serviceAccount = imX.state.accounts.get(serviceId)
+    if (!serviceAccount) {
+      this.setAccumulateError(registers, 'WHO')
+      return {
+        resultCode: null, // continue execution
+      }
+    }
+
+    // Read preimage data from memory (fault → panic)
     const [preimageData, faultAddress] = ram.readOctets(
       preimageOffset,
       preimageLength,
@@ -67,18 +79,6 @@ export class ProvideHostFunction extends BaseAccumulateHostFunction {
     if (faultAddress || !preimageData) {
       return {
         resultCode: RESULT_CODES.PANIC,
-      }
-    }
-
-    // Get the current implications context
-    const [imX] = implications
-
-    // Check if service account exists
-    const serviceAccount = imX.state.accounts.get(serviceId)
-    if (!serviceAccount) {
-      this.setAccumulateError(registers, 'WHO')
-      return {
-        resultCode: null, // continue execution
       }
     }
 

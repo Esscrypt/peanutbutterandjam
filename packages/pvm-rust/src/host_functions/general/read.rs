@@ -17,6 +17,8 @@ impl HostFunction for ReadHostFunction {
         "read"
     }
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
+        let _log_service_id = context.service_id.unwrap_or(0);
+
         if context.service_id.is_none() || context.accounts.is_none() {
             context.registers[7] = REG_NONE;
             return HostFunctionResult::continue_execution();
@@ -32,6 +34,10 @@ impl HostFunction for ReadHostFunction {
         let service_account = match accounts.get(&requested_service_id) {
             Some(a) => a,
             None => {
+                crate::host_log_error!(
+                    "[hostfn] read: Service account not found (serviceId={}, requestedServiceId={})",
+                    _log_service_id, requested_service_id
+                );
                 context.registers[7] = REG_NONE;
                 return HostFunctionResult::continue_execution();
             }
@@ -45,6 +51,10 @@ impl HostFunction for ReadHostFunction {
 
         let read_key = context.ram.read_octets(key_offset as u32, key_length as u32);
         if read_key.data.is_none() || read_key.fault_address != 0 {
+            crate::host_log_error!(
+                "[hostfn] read PANIC: key read fault (serviceId={}, offset={}, len={}, fault_address={})",
+                _log_service_id, key_offset, key_length, read_key.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let key = read_key.data.unwrap();
@@ -53,6 +63,10 @@ impl HostFunction for ReadHostFunction {
         let value = match value {
             Some(v) => v,
             None => {
+                crate::host_log_error!(
+                    "[hostfn] read: Storage key not found (serviceId={}, requestedServiceId={}, keyLength={})",
+                    _log_service_id, requested_service_id, key.len()
+                );
                 context.registers[7] = REG_NONE;
                 return HostFunctionResult::continue_execution();
             }
@@ -67,6 +81,10 @@ impl HostFunction for ReadHostFunction {
         if !data_to_write.is_empty() {
             let write_result = context.ram.write_octets(output_offset as u32, &data_to_write);
             if write_result.has_fault {
+                crate::host_log_error!(
+                    "[hostfn] read PANIC: output write fault (serviceId={}, offset={}, len={})",
+                    _log_service_id, output_offset, data_to_write.len()
+                );
                 return HostFunctionResult::panic();
             }
         }

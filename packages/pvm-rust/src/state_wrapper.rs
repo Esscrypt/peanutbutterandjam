@@ -4,10 +4,11 @@
 use crate::codec::{
     decode_blob, decode_accumulate_args, decode_implications_pair, decode_program_from_preimage,
     encode_implications_pair,
-    AccountEntry, CompleteServiceAccount, Implications, ImplicationsPair,
+    AccountEntry, CompleteServiceAccount, DeferredTransfer, Implications, ImplicationsPair,
+    PartialState, ProvisionEntry,
 };
 use crate::config::{
-    FetchSystemConstantsConfig, ARGS_SEGMENT_START, DEFAULT_GAS_LIMIT, FUNC_LOG, HALT_ADDRESS,
+    FetchSystemConstantsConfig, ARGS_SEGMENT_START, DEFAULT_GAS_LIMIT, HALT_ADDRESS,
     RESULT_CODE_FAULT, RESULT_CODE_HALT, RESULT_CODE_HOST, RESULT_CODE_OOG, RESULT_CODE_PANIC,
     STACK_SEGMENT_END,
 };
@@ -221,7 +222,7 @@ pub struct PvmState {
     pub host_call_id: u32,
     /// Set by CHECKPOINT host (17) when has_accumulation_context; executor copies regular → exceptional.
     pub checkpoint_requested: bool,
-    /// Accumulate inputs for FETCH selectors 14,15: each element is encoded AccumulateInput bytes. Set via set_accumulate_inputs.
+    /// Accumulate inputs for FETCH selectors 14,15: each element is encoded AccumulateInput bytes. Set via setup_accumulate_invocation(encoded_accumulate_inputs) or set_accumulate_inputs.
     pub accumulate_inputs_encoded: Vec<Vec<u8>>,
     /// FETCH selector 7: encoded work package. Set via set_fetch_work_package.
     pub work_package_encoded: Option<Vec<u8>>,
@@ -257,6 +258,14 @@ pub struct PvmState {
     pub accumulation_implications_regular: Option<Implications>,
     /// Full decoded exceptional implications at setup (for re-encoding).
     pub accumulation_implications_exceptional: Option<Implications>,
+    /// Deferred transfers from TRANSFER host during this invocation; merged into regular.xfers when encoding.
+    pub accumulation_pending_xfers: Vec<DeferredTransfer>,
+    /// Regular implications state (imX.state). One struct like AS: manager, assigners, delegator, registrar, alwaysaccers, authqueue, stagingset, accounts. Populated from setup; BLESS/ASSIGN/DESIGNATE mutate it; merged into regular when encoding.
+    pub accumulation_regular_state: PartialState,
+    /// imX.nextfreeid. Updated by NEW when allocating public ID; merged into regular when encoding.
+    pub accumulation_nextfreeid: u32,
+    /// Provisions (PROVIDE adds (service_id, preimage)). Initialized from implications at setup; merged into regular.provisions when encoding.
+    pub accumulation_provisions: Vec<ProvisionEntry>,
 }
 
 impl PvmState {
@@ -289,6 +298,9 @@ impl PvmState {
         self.accumulation_accounts = None;
         self.accumulation_implications_regular = None;
         self.accumulation_implications_exceptional = None;
+        self.accumulation_pending_xfers.clear();
+        self.accumulation_regular_state = PartialState::default();
+        self.accumulation_provisions.clear();
     }
 }
 
@@ -332,6 +344,10 @@ impl Default for PvmState {
             accumulation_accounts: None,
             accumulation_implications_regular: None,
             accumulation_implications_exceptional: None,
+            accumulation_pending_xfers: vec![],
+            accumulation_regular_state: PartialState::default(),
+            accumulation_nextfreeid: 0,
+            accumulation_provisions: vec![],
         }
     }
 }
@@ -340,6 +356,34 @@ static STATE: Mutex<Option<PvmState>> = Mutex::new(None);
 
 pub fn get_state() -> std::sync::MutexGuard<'static, Option<PvmState>> {
     STATE.lock().expect("pvm state lock")
+}
+
+/// Build current regular implications from state (merge accounts, bless, assign, xfers, etc.).
+/// Used for CHECKPOINT snapshot (imY' = imX) and for get_accumulation_context_encoded.
+/// Accounts are sorted by service_id so the encoded context matches TypeScript (codec sorts before encode).
+fn build_current_regular_implications(state: &PvmState) -> Option<Implications> {
+    let mut regular = state.accumulation_implications_regular.clone()?;
+    let mut accounts_vec: Vec<AccountEntry> = state
+        .accumulation_accounts
+        .as_ref()?
+        .iter()
+        .map(|(id, acc)| AccountEntry {
+            service_id: *id as u32,
+            account: acc.clone(),
+        })
+        .collect();
+    accounts_vec.sort_by_key(|e| e.service_id);
+    let yield_hash = state.yield_hash.clone();
+    let pending_xfers = state.accumulation_pending_xfers.clone();
+    let nextfreeid = state.accumulation_nextfreeid;
+
+    regular.nextfreeid = nextfreeid;
+    regular.state = state.accumulation_regular_state.clone();
+    regular.state.accounts = accounts_vec;
+    regular.xfers.extend(pending_xfers);
+    regular.provisions = state.accumulation_provisions.clone();
+    regular.yield_hash = yield_hash;
+    Some(regular)
 }
 
 /// Build updated implications pair from current state (accounts + yield) and return encoded buffer.
@@ -354,23 +398,13 @@ pub fn get_accumulation_context_encoded(
     if !state.has_accumulation_context {
         return None;
     }
-    let mut regular = state.accumulation_implications_regular.clone()?;
-    let mut exceptional = state.accumulation_implications_exceptional.clone()?;
-    let accounts_vec: Vec<AccountEntry> = state
-        .accumulation_accounts
-        .as_ref()?
-        .iter()
-        .map(|(id, acc)| AccountEntry {
-            service_id: *id as u32,
-            account: acc.clone(),
-        })
-        .collect();
+    let mut regular = build_current_regular_implications(state)?;
+    let exceptional = state.accumulation_implications_exceptional.clone()?;
     let yield_hash = state.yield_hash.clone();
     drop(g);
 
-    regular.state.accounts = accounts_vec;
-    regular.yield_hash = yield_hash.clone();
-    exceptional.yield_hash = yield_hash;
+    // imX (regular) gets current yield; imY (exceptional) keeps snapshot yield from CHECKPOINT (Gray Paper; match AS).
+    regular.yield_hash = yield_hash;
 
     let pair = ImplicationsPair {
         regular,
@@ -417,6 +451,8 @@ pub struct SetupAccumulateParams<'a> {
     pub auth_queue_size: u32,
     pub entropy_accumulator: &'a [u8],
     pub encoded_work_items: &'a [u8],
+    /// Per-item encoded accumulate inputs for FETCH 14/15. When present, sets accumulate_inputs_encoded (unified with setup).
+    pub encoded_accumulate_inputs: Option<Vec<Vec<u8>>>,
     pub config_preimage_expunge_period: u32,
     pub config_epoch_duration: u32,
     pub config_max_block_gas: u64,
@@ -429,9 +465,6 @@ pub struct SetupAccumulateParams<'a> {
     pub config_contest_duration: u32,
     pub config_max_lookup_anchorage: u32,
     pub config_ec_piece_size: u32,
-    pub _jam_version_major: u8,
-    pub _jam_version_minor: u8,
-    pub _jam_version_patch: u8,
 }
 
 /// Setup state for accumulation invocation from preimage blob and args (Gray Paper Y function).
@@ -518,15 +551,35 @@ pub fn setup_accumulate_from_preimage(params: SetupAccumulateParams<'_>) -> bool
         auth_queue_size_i,
     ) {
         let pair = &pair_result.value;
+        let _account_count = pair.regular.state.accounts.len();
+        crate::host_log!(
+            "[setup_accumulate] decoded implications pair: regular.accounts.len()={}",
+            _account_count
+        );
         state.accumulation_implications_regular = Some(pair.regular.clone());
         state.accumulation_implications_exceptional = Some(pair.exceptional.clone());
         let regular = &pair.regular;
         state.accumulation_service_id = Some(regular.id as u64);
         let mut accounts = HashMap::new();
         for entry in &regular.state.accounts {
-            accounts.insert(entry.service_id as u64, entry.account.clone());
+            accounts
+                .entry(entry.service_id as u64)
+                .or_insert_with(|| entry.account.clone());
         }
         state.accumulation_accounts = Some(accounts);
+        state.accumulation_pending_xfers.clear();
+        state.accumulation_regular_state = regular.state.clone();
+        state.accumulation_nextfreeid = regular.nextfreeid;
+        state.accumulation_provisions = regular.provisions.clone();
+    } else {
+        crate::host_log!(
+            "[setup_accumulate] decode_implications_pair returned None (context_len={}); accumulation_accounts will stay None",
+            params.encoded_context.len()
+        );
+    }
+
+    if let Some(ref inputs) = params.encoded_accumulate_inputs {
+        state.accumulate_inputs_encoded = inputs.clone();
     }
 
     true
@@ -569,7 +622,8 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
 
     state.gas_left = state.gas_left.saturating_sub(1);
 
-    state.ram.clear_last_memory_op();
+    // Do not clear last memory op here so ECALLI (and other non-memory steps) retain the previous
+    // instruction's load/store for trace; matches WASM trace (Store:[addr,value] at ECALLI).
     let pc_before = state.program_counter;
     let mut host_call_id_out = state.host_call_id;
     let mut context = InstructionContext {
@@ -598,15 +652,29 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
     state.last_store_value = last_store_value;
 
     if result.result_code == RESULT_CODE_HOST as i32 {
+        // During accumulation invocation, only allow host IDs from AS pvm.ts handleAccumulationHostCall:
+        // general 0-5, log 100, accumulation 14-26. Others: deduct 10 gas, set r7=WHAT, advance PC, continue.
+        if state.has_accumulation_context {
+            let id = state.host_call_id as u64;
+            let allowed = (id <= 5) || (id == 100) || (id >= 14 && id <= 26);
+            if !allowed {
+                const HOST_BASE_GAS: u32 = 10;
+                if state.gas_left < HOST_BASE_GAS {
+                    state.status = Status::Oog;
+                    state.result_code = RESULT_CODE_OOG;
+                    return false;
+                }
+                state.gas_left = state.gas_left.saturating_sub(HOST_BASE_GAS);
+                use crate::config::REG_WHAT;
+                state.registers[7] = REG_WHAT;
+                state.program_counter = pc + instruction_length as u32;
+                return true;
+            }
+        }
         if let Some(handler) = get_host_function(state.host_call_id) {
-            // JIP-1 / Gray Paper: LOG (function ID 100) has gas cost 0; all other hosts use base 10.
-            // Match TypeScript executor (gasCost = 0 for LOG when JAM 0.7.1).
+            // All host functions (including LOG) use base 10 gas to match jamtestnet / expected traces.
             const HOST_BASE_GAS: u32 = 10;
-            let host_base_gas = if state.host_call_id == u32::from(FUNC_LOG) {
-                0u32
-            } else {
-                HOST_BASE_GAS
-            };
+            let host_base_gas = HOST_BASE_GAS;
             if state.gas_left < host_base_gas {
                 state.status = Status::Oog;
                 state.result_code = RESULT_CODE_OOG;
@@ -621,9 +689,21 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
                 service_id: state.accumulation_service_id,
                 service_account: None,
                 accounts: state.accumulation_accounts.as_mut(),
-                manager_id: None,
-                registrar_id: None,
-                nextfreeid: None,
+                manager_id: if state.has_accumulation_context {
+                    Some(state.accumulation_regular_state.manager as u64)
+                } else {
+                    None
+                },
+                registrar_id: if state.has_accumulation_context {
+                    Some(state.accumulation_regular_state.registrar as u64)
+                } else {
+                    None
+                },
+                nextfreeid: if state.has_accumulation_context {
+                    Some(&mut state.accumulation_nextfreeid)
+                } else {
+                    None
+                },
                 lookup_timeslot: None,
                 timeslot: state.timeslot,
                 expunge_period: state
@@ -636,14 +716,31 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
                 } else {
                     None
                 },
-                provisions: None,
-                delegator_id: None,
+                provisions: if state.has_accumulation_context {
+                    Some(&mut state.accumulation_provisions)
+                } else {
+                    None
+                },
+                xfers: if state.has_accumulation_context {
+                    Some(&mut state.accumulation_pending_xfers)
+                } else {
+                    None
+                },
+                delegator_id: if state.has_accumulation_context {
+                    Some(state.accumulation_regular_state.delegator as u64)
+                } else {
+                    None
+                },
                 num_validators: if state.accumulation_num_validators > 0 {
                     Some(state.accumulation_num_validators)
                 } else {
                     None
                 },
-                stagingset: None,
+                accumulation_state: if state.has_accumulation_context {
+                    Some(&mut state.accumulation_regular_state)
+                } else {
+                    None
+                },
                 checkpoint_requested: if state.has_accumulation_context {
                     Some(&mut state.checkpoint_requested)
                 } else {
@@ -654,8 +751,6 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
                 } else {
                     None
                 },
-                bless_state: None,
-                assign_state: None,
                 fetch_entropy_accumulator: state.entropy_accumulator.as_deref(),
                 fetch_authorizer_trace: None,
                 fetch_export_segments: None,
@@ -676,6 +771,14 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
                 fetch_system_constants_config: state.accumulation_fetch_config.as_ref(),
             };
             let host_result = handler.execute(&mut host_ctx);
+            // Gray Paper line 752: imY' = imX. When CHECKPOINT (17) ran it set checkpoint_requested.
+            // Snapshot current regular into exceptional so panic/OOG reverts to this checkpoint.
+            if state.checkpoint_requested {
+                if let Some(snapshot) = build_current_regular_implications(state) {
+                    state.accumulation_implications_exceptional = Some(snapshot);
+                }
+                state.checkpoint_requested = false;
+            }
             if host_result.should_continue() {
                 state.program_counter = pc + instruction_length as u32;
                 return true;
@@ -690,9 +793,11 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
             state.result_code = host_result.result_code;
             return false;
         }
-        // Unknown host function (Gray Paper pvm_invocations.tex 206-210). Match TypeScript executor: set r7 = WHAT.
+        // Unknown host function (Gray Paper pvm_invocations.tex 206-210). Match AS: set r7 = WHAT, advance PC, continue.
         use crate::config::REG_WHAT;
         state.registers[7] = REG_WHAT;
+        state.program_counter = pc + instruction_length as u32;
+        return true;
     }
 
     if result.result_code != InstructionResult::CONTINUE {

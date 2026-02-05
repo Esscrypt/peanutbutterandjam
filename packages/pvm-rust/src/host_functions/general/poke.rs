@@ -18,6 +18,7 @@ impl HostFunction for PokeHostFunction {
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
         let Some(refine) = context.refine_context.as_mut() else {
             context.registers[7] = REG_WHO;
+            crate::host_log!("[hostfn] poke PANIC: no refine_context");
             return HostFunctionResult::panic();
         };
 
@@ -28,9 +29,17 @@ impl HostFunction for PokeHostFunction {
 
         let read_result = context.ram.read_octets(source_offset, length);
         let Some(data) = read_result.data else {
+            crate::host_log!(
+                "[hostfn] poke PANIC: source read returned no data (offset={}, len={})",
+                source_offset, length
+            );
             return HostFunctionResult::panic();
         };
         if read_result.fault_address != 0 {
+            crate::host_log!(
+                "[hostfn] poke PANIC: source read fault (offset={}, len={}, fault_address={})",
+                source_offset, length, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
 

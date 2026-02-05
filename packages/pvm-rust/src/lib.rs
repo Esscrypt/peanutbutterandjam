@@ -3,6 +3,24 @@
 
 #![allow(dead_code)]
 
+/// Compile-time removable logging for host calls other than LOG(100). No-op unless built with `--features host_calls_logging`.
+#[macro_export]
+macro_rules! host_log {
+    ($($t:tt)*) => {
+        #[cfg(feature = "host_calls_logging")]
+        eprintln!($($t)*);
+    };
+}
+
+/// Log only on error paths (PANIC, HUH, FULL). Prints when `host_calls_errors_only` or `host_calls_logging` is enabled.
+#[macro_export]
+macro_rules! host_log_error {
+    ($($t:tt)*) => {
+        #[cfg(any(feature = "host_calls_logging", feature = "host_calls_errors_only"))]
+        eprintln!($($t)*);
+    };
+}
+
 mod config;
 mod codec;
 mod crypto;
@@ -16,9 +34,10 @@ mod simple_ram;
 mod state_wrapper;
 mod types;
 
-use napi::bindgen_prelude::*;
+use napi::bindgen_prelude::{BigInt, *};
 use napi_derive::napi;
 
+use crate::codec::{decode_implications_pair, encode_implications_pair};
 use crate::config::DEFAULT_GAS_LIMIT;
 use crate::types::Ram;
 use state_wrapper::{
@@ -157,7 +176,7 @@ pub fn setup_accumulate_invocation(
     auth_queue_size: i32,
     entropy_accumulator: Buffer,
     encoded_work_items: Buffer,
-    _config_num_cores: i32,
+    encoded_accumulate_inputs: Option<Vec<Buffer>>,
     config_preimage_expunge_period: u32,
     config_epoch_duration: u32,
     config_max_block_gas: i64,
@@ -166,15 +185,13 @@ pub fn setup_accumulate_invocation(
     config_tickets_per_validator: u16,
     config_slot_duration: u16,
     config_rotation_period: u16,
-    _config_num_validators: u16,
     config_num_ec_pieces_per_segment: u32,
     config_contest_duration: u32,
     config_max_lookup_anchorage: u32,
     config_ec_piece_size: u32,
-    jam_version_major: u8,
-    jam_version_minor: u8,
-    jam_version_patch: u8,
 ) {
+    let encoded_inputs = encoded_accumulate_inputs
+        .map(|v| v.into_iter().map(|b| b.as_ref().to_vec()).collect());
     let params = SetupAccumulateParams {
         program: program.as_ref(),
         args: args.as_ref(),
@@ -185,6 +202,7 @@ pub fn setup_accumulate_invocation(
         auth_queue_size: auth_queue_size.max(0) as u32,
         entropy_accumulator: entropy_accumulator.as_ref(),
         encoded_work_items: encoded_work_items.as_ref(),
+        encoded_accumulate_inputs: encoded_inputs,
         config_preimage_expunge_period,
         config_epoch_duration,
         config_max_block_gas: config_max_block_gas.max(0) as u64,
@@ -197,9 +215,6 @@ pub fn setup_accumulate_invocation(
         config_contest_duration,
         config_max_lookup_anchorage,
         config_ec_piece_size,
-        _jam_version_major: jam_version_major,
-        _jam_version_minor: jam_version_minor,
-        _jam_version_patch: jam_version_patch,
     };
     setup_accumulate_from_preimage(params);
 }
@@ -339,17 +354,36 @@ pub fn get_result_code() -> u32 {
     g.as_ref().map_or(1, |s| s.result_code as u32)
 }
 
+/// Gray Paper equation 831: When HALT, result is the memory range [registers[7], registers[7]+registers[8]].
 #[napi]
 pub fn get_result() -> Buffer {
-    let g = get_state();
-    if let Some(s) = g.as_ref() {
-        let _offset = s.registers.get(7).copied().unwrap_or(0) as u32;
-        let length = s.registers.get(8).copied().unwrap_or(0) as u32;
-        if length > 0 {
-            return vec![0u8; length as usize].into();
+    let mut g = get_state();
+    if let Some(state) = g.as_mut() {
+        let offset = state.registers.get(7).copied().unwrap_or(0) as u32;
+        let length = state.registers.get(8).copied().unwrap_or(0) as u32;
+        if length == 0 {
+            return Vec::new().into();
         }
+        let read_result = state.ram.read_octets(offset, length);
+        if read_result.fault_address != 0 || read_result.data.is_none() {
+            return Vec::new().into();
+        }
+        return read_result.data.unwrap().into();
     }
     Vec::new().into()
+}
+
+/// Returns the 32-byte accumulation yield hash when set (e.g. by YIELD host).
+/// Used when get_result() is empty (r7/r8 not set) but the run halted successfully with a yield.
+#[napi]
+pub fn get_yield_hash() -> Buffer {
+    let g = get_state();
+    g.as_ref()
+        .and_then(|s| s.yield_hash.as_ref())
+        .filter(|h| h.len() == 32)
+        .cloned()
+        .unwrap_or_default()
+        .into()
 }
 
 #[napi]
@@ -358,10 +392,11 @@ pub fn get_last_load_address() -> u32 {
     g.as_ref().map_or(0, |s| s.last_load_address)
 }
 
+/// Returns last load value as BigInt so JS gets full u64 precision (see docs.rs/napi/struct.BigInt).
 #[napi]
-pub fn get_last_load_value() -> i64 {
+pub fn get_last_load_value() -> BigInt {
     let g = get_state();
-    g.as_ref().map_or(0, |s| s.last_load_value as i64)
+    BigInt::from(g.as_ref().map_or(0, |s| s.last_load_value))
 }
 
 #[napi]
@@ -370,10 +405,11 @@ pub fn get_last_store_address() -> u32 {
     g.as_ref().map_or(0, |s| s.last_store_address)
 }
 
+/// Returns last store value as BigInt so JS gets full u64 precision (see docs.rs/napi/struct.BigInt).
 #[napi]
-pub fn get_last_store_value() -> i64 {
+pub fn get_last_store_value() -> BigInt {
     let g = get_state();
-    g.as_ref().map_or(0, |s| s.last_store_value as i64)
+    BigInt::from(g.as_ref().map_or(0, |s| s.last_store_value))
 }
 
 #[napi]
@@ -440,24 +476,29 @@ pub fn set_registers(registers: Buffer) {
     }
 }
 
+/// Single-register get; returns BigInt to match AS (getRegister returns u64 → bigint). i64 would become Number and lose precision.
 #[napi]
-pub fn get_register(index: u8) -> i64 {
+pub fn get_register(index: u8) -> BigInt {
     if index >= 13 {
-        return 0;
+        return BigInt::from(0u64);
     }
     let g = get_state();
-    g.as_ref()
-        .map_or(0, |s| s.registers[index as usize] as i64)
+    BigInt::from(g.as_ref().map_or(0, |s| s.registers[index as usize]))
 }
 
+/// Single-register set; accepts BigInt to match AS (setRegister takes u64/bigint). i64 would truncate values above 2^53.
 #[napi]
-pub fn set_register(index: u8, value: i64) {
+pub fn set_register(index: u8, value: BigInt) {
     if index >= 13 {
         return;
     }
+    let (_, val, lossless) = value.get_u64();
+    if !lossless {
+        return; // value out of u64 range; ignore or could panic
+    }
     let mut g = get_state();
     if let Some(s) = g.as_mut() {
-        s.registers[index as usize] = value as u64;
+        s.registers[index as usize] = val;
     }
 }
 
@@ -533,4 +574,37 @@ pub fn initialize_program(_program: Buffer, _args: Buffer) {
     if g.is_none() {
         init_state(RAMType::PvmRam as i32);
     }
+}
+
+// --- Codec helpers for equivalence tests (TS/AS vs Rust) ---
+
+/// Encode value as little-endian fixed length (1, 2, 4, 8, 16, or 32 bytes). Matches @pbnjam/codec encodeFixedLength.
+/// Value is passed as i64 (NAPI does not support u64); interpreted as u64 bit pattern.
+#[napi]
+pub fn encode_fixed_length(value: i64, length: i32) -> Buffer {
+    let bytes = crate::codec::encode_fixed_length(value as u64, length);
+    bytes.into()
+}
+
+/// Decode implications pair from bytes, re-encode to bytes. For round-trip equivalence tests (TS encode -> Rust decode+encode -> TS decode).
+#[napi]
+pub fn round_trip_implications(
+    data: Buffer,
+    num_cores: i32,
+    num_validators: i32,
+    auth_queue_size: i32,
+) -> Option<Buffer> {
+    let pair_result = decode_implications_pair(
+        data.as_ref(),
+        num_cores,
+        num_validators,
+        auth_queue_size,
+    )?;
+    let encoded = encode_implications_pair(
+        &pair_result.value,
+        num_cores,
+        num_validators,
+        auth_queue_size,
+    );
+    Some(encoded.into())
 }

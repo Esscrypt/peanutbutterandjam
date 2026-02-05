@@ -16,6 +16,7 @@ impl HostFunction for MachineHostFunction {
     }
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
         let Some(refine) = context.refine_context.as_mut() else {
+            crate::host_log!("[hostfn] machine PANIC: no refine_context");
             return HostFunctionResult::panic();
         };
         // Base 10 gas already deducted in state_wrapper before host dispatch.
@@ -26,9 +27,17 @@ impl HostFunction for MachineHostFunction {
 
         let read_result = context.ram.read_octets(program_offset, program_length);
         let Some(program_data) = read_result.data else {
+            crate::host_log!(
+                "[hostfn] machine FAULT: program read returned no data (offset={}, len={})",
+                program_offset, program_length
+            );
             return HostFunctionResult::fault();
         };
         if read_result.fault_address != 0 {
+            crate::host_log!(
+                "[hostfn] machine FAULT: program read fault (offset={}, len={}, fault_address={})",
+                program_offset, program_length, read_result.fault_address
+            );
             return HostFunctionResult::fault();
         }
 

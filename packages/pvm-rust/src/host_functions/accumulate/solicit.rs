@@ -33,30 +33,52 @@ impl HostFunction for SolicitHostFunction {
         let hash_offset = context.registers[7] as u32;
         let preimage_length = context.registers[8];
 
+        let _log_service_id = context.service_id.unwrap_or(0);
+
         // Read hash from memory (32 bytes). Gray Paper: panic when h = error; r7 unchanged.
         let read_result = context.ram.read_octets(hash_offset, HASH_LEN);
         if read_result.fault_address != 0 || read_result.data.is_none() {
+            crate::host_log_error!(
+                "[hostfn] solicit PANIC: hash read fault (serviceId={}, offset={}, fault_address={})",
+                _log_service_id, hash_offset, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let hash_data = read_result.data.unwrap();
         if hash_data.len() != HASH_LEN as usize {
+            crate::host_log_error!(
+                "[hostfn] solicit PANIC: hash length mismatch (serviceId={}, got {}, expected {})",
+                _log_service_id, hash_data.len(), HASH_LEN as usize
+            );
             return HostFunctionResult::panic();
         }
 
-        // Current service account (imX). None → HUH.
-        let service_account = match &mut context.service_account {
-            Some(acc) => acc,
-            None => {
-                base::set_accumulate_error(context.registers, codes::HUH);
-                return HostFunctionResult::continue_execution();
-            }
-        };
+        // Current service account (imX). Resolve from context.service_account or context.accounts + service_id.
         let service_id = match context.service_id {
             Some(id) => id as u32,
             None => {
                 base::set_accumulate_error(context.registers, codes::HUH);
+                crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
                 return HostFunctionResult::continue_execution();
             }
+        };
+        let service_account = match &mut context.service_account {
+            Some(acc) => acc,
+            None => match &mut context.accounts {
+                Some(accounts) => match accounts.get_mut(&(service_id as u64)) {
+                    Some(acc) => acc,
+                    None => {
+                        base::set_accumulate_error(context.registers, codes::HUH);
+                        crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
+                        return HostFunctionResult::continue_execution();
+                    }
+                },
+                None => {
+                    base::set_accumulate_error(context.registers, codes::HUH);
+                    crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
+                    return HostFunctionResult::continue_execution();
+                }
+            },
         };
 
         let existing_request_value = get_request_value(service_account, service_id, &hash_data, preimage_length);
@@ -71,6 +93,7 @@ impl HostFunction for SolicitHostFunction {
                     Some(t) => t,
                     None => {
                         base::set_accumulate_error(context.registers, codes::HUH);
+                        crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
                         return HostFunctionResult::continue_execution();
                     }
                 };
@@ -80,6 +103,7 @@ impl HostFunction for SolicitHostFunction {
                         Some(t) => t as u32,
                         None => {
                             base::set_accumulate_error(context.registers, codes::HUH);
+                            crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
                             return HostFunctionResult::continue_execution();
                         }
                     };
@@ -88,6 +112,7 @@ impl HostFunction for SolicitHostFunction {
                     (nt, false)
                 } else {
                     base::set_accumulate_error(context.registers, codes::HUH);
+                    crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- HUH", _log_service_id, hash_offset, preimage_length);
                     return HostFunctionResult::continue_execution();
                 }
             }
@@ -102,11 +127,13 @@ impl HostFunction for SolicitHostFunction {
                 Some(v) => v,
                 None => {
                     base::set_accumulate_error(context.registers, codes::FULL);
+                    crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- FULL", _log_service_id, hash_offset, preimage_length);
                     return HostFunctionResult::continue_execution();
                 }
             };
             if Self::would_overflow_u64(service_account.octets, octets_increment) {
                 base::set_accumulate_error(context.registers, codes::FULL);
+                crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- FULL", _log_service_id, hash_offset, preimage_length);
                 return HostFunctionResult::continue_execution();
             }
             let new_octets = service_account.octets + octets_increment;
@@ -122,6 +149,7 @@ impl HostFunction for SolicitHostFunction {
             || Self::would_overflow_u64(C_BASE_DEPOSIT + item_deposit, byte_deposit)
         {
             base::set_accumulate_error(context.registers, codes::FULL);
+            crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- FULL", _log_service_id, hash_offset, preimage_length);
             return HostFunctionResult::continue_execution();
         }
         let total_deposit = C_BASE_DEPOSIT + item_deposit + byte_deposit;
@@ -129,6 +157,7 @@ impl HostFunction for SolicitHostFunction {
 
         if new_min_balance > service_account.balance {
             base::set_accumulate_error(context.registers, codes::FULL);
+            crate::host_log_error!("[host-calls] [{}] SOLICIT({}, {}) <- FULL", _log_service_id, hash_offset, preimage_length);
             return HostFunctionResult::continue_execution();
         }
 
@@ -146,6 +175,7 @@ impl HostFunction for SolicitHostFunction {
         }
 
         base::set_accumulate_success(context.registers, codes::OK);
+        crate::host_log!("[host-calls] [{}] SOLICIT({}, {}) <- OK", _log_service_id, hash_offset, preimage_length);
         HostFunctionResult::continue_execution()
     }
 }

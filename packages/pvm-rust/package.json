@@ -20,6 +20,10 @@
   "scripts": {
     "artifacts": "bunx @napi-rs/cli artifacts",
     "build": "bunx @napi-rs/cli build --platform --release -o native",
+    "build:with-log-host": "bunx @napi-rs/cli build --platform --release -o native --features log_host_call_logging",
+    "build:with-logs": "bunx @napi-rs/cli build --platform --release -o native --features host_calls_logging",
+    "build:with-logs-errors": "bunx @napi-rs/cli build --platform --release -o native --features host_calls_errors_only,log_host_call_logging",
+    "build:with-all-logs": "bunx @napi-rs/cli build --platform --release -o native --features log_host_call_logging,host_calls_logging",
     "build:debug": "bunx @napi-rs/cli build --platform -o native",
     "clean": "rm -rf target/ && rm -rf native/",
     "prepare": "bun run build || echo 'Native build failed, continuing without native module'",

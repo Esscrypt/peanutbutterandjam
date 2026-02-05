@@ -27,14 +27,23 @@ impl HostFunction for WriteHostFunction {
         // Resolve current service account from accounts + service_id (same as AS WriteParams.serviceAccount).
         let service_id = match context.service_id {
             Some(id) => id,
-            None => return HostFunctionResult::panic(),
+            None => {
+                crate::host_log!("[hostfn] write PANIC: no service_id in context");
+                return HostFunctionResult::panic();
+            }
         };
         let service_account = match &mut context.accounts {
             Some(accounts) => match accounts.get_mut(&service_id) {
                 Some(acc) => acc,
-                None => return HostFunctionResult::panic(),
+                None => {
+                    crate::host_log!("[hostfn] write PANIC: service {} not in accounts", service_id);
+                    return HostFunctionResult::panic();
+                }
             },
-            None => return HostFunctionResult::panic(),
+            None => {
+                crate::host_log!("[hostfn] write PANIC: no accounts in context");
+                return HostFunctionResult::panic();
+            }
         };
 
         let key_offset = context.registers[7];
@@ -44,6 +53,10 @@ impl HostFunction for WriteHostFunction {
 
         let read_key = context.ram.read_octets(key_offset as u32, key_length as u32);
         if read_key.data.is_none() || read_key.fault_address != 0 {
+            crate::host_log!(
+                "[hostfn] write PANIC: key read fault (offset={}, len={}, fault_address={})",
+                key_offset, key_length, read_key.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let key = read_key.data.unwrap();
@@ -79,6 +92,10 @@ impl HostFunction for WriteHostFunction {
 
         let read_value = context.ram.read_octets(value_offset as u32, value_length as u32);
         if read_value.data.is_none() || read_value.fault_address != 0 {
+            crate::host_log!(
+                "[hostfn] write PANIC: value read fault (offset={}, len={}, fault_address={})",
+                value_offset, value_length, read_value.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let value = read_value.data.unwrap();

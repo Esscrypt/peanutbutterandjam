@@ -1,7 +1,47 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Rust native binding surface used by FETCH comparison tests.
+ * Must match @pbnjam/pvm-rust-native NAPI exports (camelCase).
+ */
+export type RustFetchNativeBinding = {
+  init: (ramType: number) => void;
+  reset: () => void;
+  getRamTypePvmRam: () => number;
+  prepareBlob: (program: Buffer) => void;
+  initMemoryLayout?: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
+  init_memory_layout?: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
+  setRegisters: (registers: Buffer) => void;
+  setGasLeft: (gas: number) => void;
+  setNextProgramCounter: (pc: number) => void;
+  nextStep: () => boolean;
+  getRegisters: () => Buffer;
+  getStatus: () => number;
+};
+
+function loadRustNative(): RustFetchNativeBinding {
+  let binding: RustFetchNativeBinding | null = null;
+  let loadError: unknown = null;
+  try {
+    binding = require("@pbnjam/pvm-rust-native/native") as RustFetchNativeBinding;
+  } catch (err) {
+    loadError = err;
+  }
+  if (!binding?.init || !binding?.reset) {
+    const reason = loadError instanceof Error ? loadError.message : String(loadError);
+    const hint = binding && (!binding.init || !binding.reset)
+      ? "Binding loaded but init/reset missing; rebuild: cd packages/pvm-rust && bun run build"
+      : `Load failed: ${reason}. Build: cd packages/pvm-rust && bun run build`;
+    throw new Error(`@pbnjam/pvm-rust-native required for this test. ${hint}`);
+  }
+  return binding;
+}
 import { instantiate } from "@pbnjam/pvm-assemblyscript/wasmAsInit";
 import { FetchHostFunction, PVMRAM } from "@pbnjam/pvm";
 import { ConfigService } from "../../../../infra/node/services/config-service";
@@ -629,25 +669,7 @@ describe("FETCH Host Function Comparison", () => {
 
   test("Rust PVM: FETCH selector 14 without accumulate context returns NONE", async () => {
     // Use PvmRam (as in accumulation). prepareBlob resets RAM; initMemoryLayout sets heap at 0x20000.
-    let native: {
-      init: (ramType: number) => void;
-      reset: () => void;
-      getRamTypePvmRam: () => number;
-      prepareBlob: (program: Buffer) => void;
-      initMemoryLayout: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
-      setRegisters: (registers: Buffer) => void;
-      setGasLeft: (gas: number) => void;
-      setNextProgramCounter: (pc: number) => void;
-      nextStep: () => boolean;
-      getRegisters: () => Buffer;
-      getStatus: () => number;
-    };
-    try {
-      const { createRequire } = await import("node:module");
-      native = createRequire(import.meta.url)("@pbnjam/pvm-rust-native/native");
-    } catch {
-      return; // Rust native not built, skip
-    }
+    const native = loadRustNative();
     native.reset();
     native.init(native.getRamTypePvmRam());
 
@@ -683,25 +705,7 @@ describe("FETCH Host Function Comparison", () => {
 
   test("Rust PVM: FETCH selector 0 (system constants) with writable output succeeds", async () => {
     // Use PvmRam; initMemoryLayout sets heap at 0x20000 so FETCH write succeeds.
-    let native: {
-      init: (ramType: number) => void;
-      reset: () => void;
-      getRamTypePvmRam: () => number;
-      prepareBlob: (program: Buffer) => void;
-      initMemoryLayout: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
-      setRegisters: (registers: Buffer) => void;
-      setGasLeft: (gas: number) => void;
-      setNextProgramCounter: (pc: number) => void;
-      nextStep: () => boolean;
-      getRegisters: () => Buffer;
-      getStatus: () => number;
-    };
-    try {
-      const { createRequire } = await import("node:module");
-      native = createRequire(import.meta.url)("@pbnjam/pvm-rust-native/native");
-    } catch {
-      return; // Rust native not built, skip
-    }
+    const native = loadRustNative();
     native.reset();
     native.init(native.getRamTypePvmRam());
 
@@ -744,23 +748,7 @@ describe("FETCH Host Function Comparison", () => {
 
   test("Rust PVM: FETCH selector 0 with non-writable output returns panic", async () => {
     // Use PvmRam but do NOT call initMemoryLayout; 0x20000 has no page → write faults → panic.
-    let native: {
-      init: (ramType: number) => void;
-      reset: () => void;
-      getRamTypePvmRam: () => number;
-      prepareBlob: (program: Buffer) => void;
-      setRegisters: (registers: Buffer) => void;
-      setGasLeft: (gas: number) => void;
-      setNextProgramCounter: (pc: number) => void;
-      nextStep: () => boolean;
-      getStatus: () => number;
-    };
-    try {
-      const { createRequire } = await import("node:module");
-      native = createRequire(import.meta.url)("@pbnjam/pvm-rust-native/native");
-    } catch {
-      return;
-    }
+    const native = loadRustNative();
     native.reset();
     native.init(native.getRamTypePvmRam());
 

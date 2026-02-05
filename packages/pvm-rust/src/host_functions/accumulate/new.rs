@@ -67,52 +67,59 @@ impl HostFunction for NewHostFunction {
         let gratis = context.registers[11];
         let desired_id = context.registers[12];
 
+        let _log_service_id = context.service_id.unwrap_or(0);
+        crate::host_log!(
+            "[hostfn] NEW host function invoked codeHashOffset={} expectedCodeLength={} minAccGas={} minMemoGas={} gratis={} desiredId={} currentServiceId={}",
+            code_hash_offset, expected_code_length, min_acc_gas, min_memo_gas, gratis, desired_id, _log_service_id
+        );
+
         if expected_code_length > 0xFFFF_FFFF {
+            crate::host_log_error!(
+                "[hostfn] new PANIC: expected_code_length overflow (serviceId={}, value={})",
+                _log_service_id, expected_code_length
+            );
             return HostFunctionResult::panic();
         }
 
         let read_result = context.ram.read_octets(code_hash_offset as u32, CODE_HASH_LEN);
         if read_result.fault_address != 0 || read_result.data.is_none() {
+            crate::host_log_error!(
+                "[hostfn] new PANIC: code_hash read fault (serviceId={}, offset={}, fault_address={})",
+                _log_service_id, code_hash_offset, read_result.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let code_hash_data = read_result.data.unwrap();
         if code_hash_data.len() != CODE_HASH_LEN as usize {
+            crate::host_log_error!(
+                "[hostfn] new PANIC: code_hash length mismatch (serviceId={}, got {}, expected {})",
+                _log_service_id, code_hash_data.len(), CODE_HASH_LEN as usize
+            );
             return HostFunctionResult::panic();
         }
         let mut code_hash = [0u8; 32];
         code_hash.copy_from_slice(&code_hash_data);
 
-        let (current_service, service_id, accounts, nextfreeid, manager_id, registrar_id, timeslot) = (
-            context.service_account.as_deref_mut(),
-            context.service_id,
-            context.accounts.as_deref_mut(),
-            context.nextfreeid.as_deref_mut(),
-            context.manager_id,
-            context.registrar_id,
-            context.timeslot,
-        );
-
-        let current_service = match current_service {
-            Some(s) => s,
-            None => {
-                base::set_accumulate_error(context.registers, codes::HUH);
-                return HostFunctionResult::continue_execution();
-            }
-        };
-        let service_id = match service_id {
+        let service_id = match context.service_id {
             Some(id) => id,
             None => {
                 base::set_accumulate_error(context.registers, codes::HUH);
                 return HostFunctionResult::continue_execution();
             }
         };
-        let accounts = match accounts {
+        let accounts = match context.accounts.as_deref_mut() {
             Some(a) => a,
             None => {
                 base::set_accumulate_error(context.registers, codes::HUH);
                 return HostFunctionResult::continue_execution();
             }
         };
+        let (nextfreeid, manager_id, registrar_id, timeslot) = (
+            context.nextfreeid.as_deref_mut(),
+            context.manager_id,
+            context.registrar_id,
+            context.timeslot,
+        );
 
         if gratis != 0 {
             let is_manager = manager_id.map_or(false, |m| m == service_id);
@@ -125,20 +132,33 @@ impl HostFunction for NewHostFunction {
         let new_service_octets = OCTETS_BASE + expected_code_length;
         let min_balance = Self::minbalance(NEW_SERVICE_ITEMS as u64, new_service_octets, gratis);
 
-        if current_service.balance < min_balance {
-            base::set_accumulate_error(context.registers, codes::CASH);
-            return HostFunctionResult::continue_execution();
-        }
-        let balance_after = current_service.balance - min_balance;
-        let current_min = Self::minbalance(
-            current_service.items as u64,
-            current_service.octets,
-            current_service.gratis,
-        );
-        if balance_after < current_min {
-            base::set_accumulate_error(context.registers, codes::CASH);
-            return HostFunctionResult::continue_execution();
-        }
+        let balance_after = {
+            let current_service = match &mut context.service_account {
+                Some(s) => s,
+                None => match accounts.get_mut(&service_id) {
+                    Some(s) => s,
+                    None => {
+                        base::set_accumulate_error(context.registers, codes::HUH);
+                        return HostFunctionResult::continue_execution();
+                    }
+                },
+            };
+            if current_service.balance < min_balance {
+                base::set_accumulate_error(context.registers, codes::CASH);
+                return HostFunctionResult::continue_execution();
+            }
+            let b = current_service.balance - min_balance;
+            let current_min = Self::minbalance(
+                current_service.items as u64,
+                current_service.octets,
+                current_service.gratis,
+            );
+            if b < current_min {
+                base::set_accumulate_error(context.registers, codes::CASH);
+                return HostFunctionResult::continue_execution();
+            }
+            b
+        };
 
         let min_pub = u64::from(MIN_PUBLIC_INDEX);
         let is_registrar = registrar_id.map_or(false, |r| r == service_id);
@@ -185,7 +205,19 @@ impl HostFunction for NewHostFunction {
             encode_request_timeslots(&[]),
         );
 
-        current_service.balance = balance_after;
+        {
+            let current_service = match &mut context.service_account {
+                Some(s) => s,
+                None => match accounts.get_mut(&service_id) {
+                    Some(s) => s,
+                    None => {
+                        base::set_accumulate_error(context.registers, codes::HUH);
+                        return HostFunctionResult::continue_execution();
+                    }
+                },
+            };
+            current_service.balance = balance_after;
+        }
 
         let next_id_to_set = {
             accounts.insert(new_service_id, new_account);
@@ -202,6 +234,7 @@ impl HostFunction for NewHostFunction {
                 *n = next_id as u32;
             }
         }
+        crate::host_log!("[host-calls] [{}] NEW({}) <- OK (newServiceId={})", _log_service_id, code_hash_offset, new_service_id);
         HostFunctionResult::continue_execution()
     }
 }

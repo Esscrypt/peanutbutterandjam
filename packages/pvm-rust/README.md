@@ -21,12 +21,28 @@ Mirrors `packages/pvm-assemblyscript`:
 ## Build
 
 ```bash
-bun run build          # release native addon
-bun run build:debug    # debug build
-bun run artifacts      # emit napi artifacts
+bun run build            # release native addon (no extra logging)
+bun run build:with-log-host  # eprintln when LOG host call (selector 100) runs
+bun run build:with-logs  # eprintln for other host calls (SOLICIT, etc.)
+bun run build:with-logs-errors  # eprintln only on error paths (PANIC, HUH, FULL)
+bun run build:with-all-logs  # both features above
+bun run build:debug      # debug build
+bun run artifacts        # emit napi artifacts
 ```
 
 Requires Rust toolchain and `@napi-rs/cli` (via `bunx napi build`). Output goes to `native/` for the current platform.
+
+### Host-call logging (feature flags)
+
+Logging is **compile-time removed** by default: no runtime cost when features are off.
+
+- **`log_host_call_logging`** — eprintln when the LOG host function (selector 100) runs.  
+  Script: `bun run build:with-log-host`.
+- **`host_calls_logging`** — eprintln for all other host-call sites (SOLICIT, etc.) via the `host_log!` macro.  
+  Script: `bun run build:with-logs`.
+- **`host_calls_errors_only`** — eprintln only on error paths (PANIC, HUH, FULL) via the `host_log_error!` macro.  
+  Script: `bun run build:with-logs-errors`.
+- **Both (full + LOG):** `bun run build:with-all-logs` (or `--features log_host_call_logging,host_calls_logging`).
 
 ## Usage
 

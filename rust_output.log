@@ -1,0 +1,14 @@
+bun test v1.3.7 (ba426210)
+
+infra/node/__tests__/traces/jam-conformance-trace-single-rust.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+error: Cannot find module './rust-pvm-executor' from '/Users/tanyageorgieva/Repos/peanutbutterandjam/packages/pvm-invocations/src/pvm-executor-adapters.ts'
+-------------------------------
+
+
+ 0 pass
+ 1 fail
+ 1 error
+Ran 1 test across 1 file. [528.00ms]

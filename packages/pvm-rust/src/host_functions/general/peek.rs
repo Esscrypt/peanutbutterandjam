@@ -18,6 +18,7 @@ impl HostFunction for PeekHostFunction {
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
         let Some(refine) = context.refine_context.as_mut() else {
             context.registers[7] = REG_WHO;
+            crate::host_log!("[hostfn] peek PANIC: no refine_context");
             return HostFunctionResult::panic();
         };
 
@@ -43,10 +44,18 @@ impl HostFunction for PeekHostFunction {
 
         let writable = context.ram.is_writable_with_fault(dest_offset, length);
         if !writable.success {
+            crate::host_log!(
+                "[hostfn] peek PANIC: dest not writable (offset={}, len={}, fault_address={})",
+                dest_offset, length, writable.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let write_result = context.ram.write_octets(dest_offset, &data);
         if write_result.has_fault {
+            crate::host_log!(
+                "[hostfn] peek PANIC: dest write fault (offset={}, len={})",
+                dest_offset, data.len()
+            );
             return HostFunctionResult::panic();
         }
 

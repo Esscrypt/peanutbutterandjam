@@ -16,6 +16,8 @@
  *   bun scripts/compare-3way-traces.ts --fuzzy <timeslot> [ordered_index] [service_id]
  *   bun scripts/compare-3way-traces.ts --fuzzy-light <timeslot> [ordered_index] [service_id]
  *   bun scripts/compare-3way-traces.ts --jam-conformance <trace_id> <block_number> [timeslot] [ordered_index] [service_id]
+ *   bun scripts/compare-3way-traces.ts --wasm-vs-rust [format] [format_args...]   (compare WASM and Rust only)
+ *   bun scripts/compare-3way-traces.ts --wasm-vs-rust --files <wasm_trace_path> <rust_trace_path>   (arbitrary trace files; text format)
  *
  * Examples:
  *   bun scripts/compare-3way-traces.ts 2
@@ -27,6 +29,9 @@
  *   bun scripts/compare-3way-traces.ts --storage-all 2 0 0
  *   bun scripts/compare-3way-traces.ts --fuzzy 2 0 0
  *   bun scripts/compare-3way-traces.ts --fuzzy-light 2 0 0
+ *   bun scripts/compare-3way-traces.ts --wasm-vs-rust --fuzzy-light 69 0 1852356513
+ *   bun scripts/compare-3way-traces.ts --wasm-vs-rust 69
+ *   bun scripts/compare-3way-traces.ts --wasm-vs-rust --files ./pvm-traces/wasm-2.log ./pvm-traces/rust-2.log
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -912,15 +917,22 @@ function compareThreeTraces(
   }
 }
 
+const EXECUTOR_LABELS: Record<'typescript' | 'wasm' | 'rust', string> = {
+  typescript: 'TypeScript',
+  wasm: 'WASM',
+  rust: 'Rust',
+}
+
 function printTwoWayComparison(
   label: string | number,
   expectedPath: string,
   actualPath: string,
-  executorType: 'typescript' | 'wasm',
+  executorType: 'typescript' | 'wasm' | 'rust',
   result: TwoWayComparisonResult,
   expectedDir?: string,
   actualDir?: string,
 ) {
+  const executorLabel = EXECUTOR_LABELS[executorType]
   console.log(
     `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
   )
@@ -935,7 +947,7 @@ function printTwoWayComparison(
     `${colors.cyan}Expected (jamtestnet):${colors.reset} ${expectedPath}`,
   )
   console.log(
-    `${colors.cyan}${executorType === 'typescript' ? 'TypeScript' : 'WASM'}:${colors.reset}        ${actualPath}`,
+    `${colors.cyan}${executorLabel}:${colors.reset}        ${actualPath}`,
   )
   console.log()
 
@@ -949,7 +961,7 @@ function printTwoWayComparison(
   console.log(`${colors.bold}📈 Summary${colors.reset}`)
   console.log(`   Expected instructions:  ${result.stats.totalExpected}`)
   console.log(
-    `   ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} instructions: ${result.stats.totalActual}`,
+    `   ${executorLabel} instructions: ${result.stats.totalActual}`,
   )
   console.log(`   Matching:                ${result.stats.matching}`)
   console.log(`   Differences:              ${result.differences.length}`)
@@ -1069,11 +1081,14 @@ function printTwoWayComparison(
         )
       }
       if (diff.typescript) {
-        const label = executorType === 'typescript' ? 'TypeScript' : 'WASM'
         const color =
-          executorType === 'typescript' ? colors.blue : colors.magenta
+          executorType === 'typescript'
+            ? colors.blue
+            : executorType === 'wasm'
+              ? colors.magenta
+              : colors.yellow
         console.log(
-          `      ${color}${label}:${colors.reset} ${diff.typescript.raw.substring(0, 100)}`,
+          `      ${color}${executorLabel}:${colors.reset} ${diff.typescript.raw.substring(0, 100)}`,
         )
       }
       console.log()
@@ -1098,10 +1113,10 @@ function printTwoWayComparison(
 
     if (expectedOnly.length > 0) {
       console.log(
-        `${colors.yellow}⚠️  Expected trace continues beyond ${executorType} trace${colors.reset}`,
+        `${colors.yellow}⚠️  Expected trace continues beyond ${executorLabel} trace${colors.reset}`,
       )
       console.log(
-        `   ${expectedOnly.length} instructions in expected but not in ${executorType}`,
+        `   ${expectedOnly.length} instructions in expected but not in ${executorLabel}`,
       )
       if (expectedOnly[0]?.expected) {
         console.log(
@@ -1111,8 +1126,14 @@ function printTwoWayComparison(
     }
 
     if (actualOnly.length > 0) {
+      const color =
+        executorType === 'typescript'
+          ? colors.blue
+          : executorType === 'wasm'
+            ? colors.magenta
+            : colors.yellow
       console.log(
-        `${executorType === 'typescript' ? colors.blue : colors.magenta}ℹ️  ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace has ${actualOnly.length} extra instructions${colors.reset}`,
+        `${color}ℹ️  ${executorLabel} trace has ${actualOnly.length} extra instructions${colors.reset}`,
       )
     }
 
@@ -1130,7 +1151,7 @@ function printTwoWayComparison(
       }
       if (firstMissing.typescript) {
         console.log(
-          `   ${executorType === 'typescript' ? 'TypeScript' : 'WASM'}: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
+          `   ${executorLabel}: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
         )
       }
     }
@@ -1294,6 +1315,191 @@ function printTwoWayComparisonTsVsWasm(
       if (firstMissing.typescript) {
         console.log(
           `   WASM: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
+        )
+      }
+    }
+    console.log()
+  }
+}
+
+/**
+ * Print comparison of WASM vs Rust traces (without expected/jamtestnet trace)
+ */
+function printTwoWayComparisonWasmVsRust(
+  label: string,
+  wasmPath: string,
+  rustPath: string,
+  result: TwoWayComparisonResult,
+) {
+  console.log()
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}📊 WASM vs Rust Comparison: ${label}${colors.reset}`,
+  )
+  console.log(
+    `${colors.bold}═══════════════════════════════════════════════════════════════${colors.reset}`,
+  )
+  console.log()
+  console.log(`${colors.magenta}WASM:${colors.reset} ${wasmPath}`)
+  console.log(`${colors.yellow}Rust:${colors.reset} ${rustPath}`)
+  console.log()
+
+  // Summary (result.expected = WASM, result.typescript = Rust)
+  console.log(`${colors.bold}📈 Summary${colors.reset}`)
+  console.log(`   WASM instructions: ${result.stats.totalExpected}`)
+  console.log(`   Rust instructions: ${result.stats.totalActual}`)
+  console.log(`   Matching:         ${result.stats.matching}`)
+  console.log(`   Differences:      ${result.differences.length}`)
+  console.log()
+
+  const maxInstructions = Math.max(
+    result.stats.totalExpected,
+    result.stats.totalActual,
+  )
+  const matchPercent =
+    maxInstructions > 0
+      ? ((result.stats.matching / maxInstructions) * 100).toFixed(2)
+      : '0'
+  const matchColor =
+    Number.parseFloat(matchPercent) >= 99
+      ? colors.green
+      : Number.parseFloat(matchPercent) >= 90
+        ? colors.yellow
+        : colors.red
+  console.log(`   ${matchColor}Match rate: ${matchPercent}%${colors.reset}`)
+  console.log()
+
+  const maxDiffsToShow = 30
+  if (result.differences.length > 0) {
+    console.log(
+      `${colors.bold}🔍 First ${Math.min(result.differences.length, maxDiffsToShow)} Differences${colors.reset}`,
+    )
+    console.log()
+
+    for (
+      let i = 0;
+      i < Math.min(result.differences.length, maxDiffsToShow);
+      i++
+    ) {
+      const diff = result.differences[i]!
+      const stepLabel = `Step ${diff.step}`.padEnd(12)
+
+      if (diff.type === 'instruction') {
+        console.log(
+          `   ${colors.red}${stepLabel} Instruction mismatch:${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.magenta}WASM: ${diff.expected?.instruction?.padEnd(20) ?? 'N/A'} PC: ${diff.expected?.pc?.toString().padEnd(8) ?? 'N/A'} Gas: ${diff.expected?.gas ?? 'N/A'}${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.yellow}Rust: ${diff.typescript?.instruction?.padEnd(20) ?? 'N/A'} PC: ${diff.typescript?.pc?.toString().padEnd(8) ?? 'N/A'} Gas: ${diff.typescript?.gas ?? 'N/A'}${colors.reset}`,
+        )
+      } else if (diff.type === 'pc') {
+        console.log(
+          `   ${colors.yellow}${stepLabel} PC mismatch: WASM=${diff.expected?.pc}, Rust=${diff.typescript?.pc}${colors.reset}`,
+        )
+      } else if (diff.type === 'gas') {
+        console.log(
+          `   ${colors.cyan}${stepLabel} Gas mismatch: WASM=${diff.expected?.gas}, Rust=${diff.typescript?.gas}${colors.reset}`,
+        )
+      } else if (diff.type === 'registers') {
+        console.log(
+          `   ${colors.cyan}${stepLabel} Register mismatch:${colors.reset}`,
+        )
+        console.log(`      ${colors.dim}${diff.details ?? 'N/A'}${colors.reset}`)
+        console.log(
+          `      ${colors.magenta}WASM: ${diff.expected?.instruction ?? 'N/A'} PC: ${diff.expected?.pc ?? 'N/A'} [${diff.expected?.registers?.join(', ') ?? ''}]${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.yellow}Rust: ${diff.typescript?.instruction ?? 'N/A'} PC: ${diff.typescript?.pc ?? 'N/A'} [${diff.typescript?.registers?.join(', ') ?? ''}]${colors.reset}`,
+        )
+      } else if (diff.type === 'host_function') {
+        console.log(
+          `   ${colors.red}${stepLabel} Host function mismatch:${colors.reset}`,
+        )
+        console.log(`      ${colors.dim}${diff.details ?? 'N/A'}${colors.reset}`)
+        console.log(
+          `      ${colors.magenta}WASM: ${diff.expected?.hostFunction?.name ?? 'N/A'} id=${diff.expected?.hostFunction?.id ?? 'N/A'}${colors.reset}`,
+        )
+        console.log(
+          `      ${colors.yellow}Rust: ${diff.typescript?.hostFunction?.name ?? 'N/A'} id=${diff.typescript?.hostFunction?.id ?? 'N/A'}${colors.reset}`,
+        )
+      } else if (diff.type === 'missing') {
+        if (diff.expected && !diff.typescript) {
+          console.log(
+            `   ${colors.magenta}${stepLabel} Only in WASM: ${diff.expected.instruction ?? diff.expected.hostFunction?.name ?? '?'} at PC ${diff.expected.pc ?? 'N/A'}${colors.reset}`,
+          )
+        } else if (diff.typescript && !diff.expected) {
+          console.log(
+            `   ${colors.yellow}${stepLabel} Only in Rust: ${diff.typescript.instruction ?? diff.typescript.hostFunction?.name ?? '?'} at PC ${diff.typescript.pc ?? 'N/A'}${colors.reset}`,
+          )
+        }
+      } else {
+        console.log(
+          `   ${stepLabel} ${diff.type}: ${diff.details ?? JSON.stringify({ expected: !!diff.expected, typescript: !!diff.typescript })}`,
+        )
+      }
+    }
+
+    if (result.differences.length > maxDiffsToShow) {
+      console.log(
+        `   ${colors.dim}... and ${result.differences.length - maxDiffsToShow} more differences${colors.reset}`,
+      )
+    }
+    console.log()
+  } else {
+    console.log(`${colors.green}✅ Traces match perfectly!${colors.reset}`)
+    console.log()
+  }
+
+  const missingDiffs = result.differences.filter((d) => d.type === 'missing')
+  if (missingDiffs.length > 0) {
+    console.log(`${colors.bold}🔍 Termination Analysis${colors.reset}`)
+    console.log()
+
+    const wasmOnly = missingDiffs.filter((d) => d.expected && !d.typescript)
+    const rustOnly = missingDiffs.filter((d) => d.typescript && !d.expected)
+
+    if (wasmOnly.length > 0) {
+      console.log(
+        `${colors.magenta}ℹ️  WASM has ${wasmOnly.length} more instructions than Rust${colors.reset}`,
+      )
+      const last = wasmOnly[wasmOnly.length - 1]?.expected
+      if (last) {
+        console.log(
+          `   Last WASM-only instruction: ${last.instruction} at PC ${last.pc} (step ${last.step})`,
+        )
+      }
+    }
+
+    if (rustOnly.length > 0) {
+      console.log(
+        `${colors.yellow}ℹ️  Rust has ${rustOnly.length} more instructions than WASM${colors.reset}`,
+      )
+      const last = rustOnly[rustOnly.length - 1]?.typescript
+      if (last) {
+        console.log(
+          `   Last Rust-only instruction: ${last.instruction} at PC ${last.pc} (step ${last.step})`,
+        )
+      }
+    }
+
+    const firstMissing = missingDiffs[0]
+    if (firstMissing) {
+      console.log()
+      console.log(
+        `${colors.bold}📍 First divergence at step ${firstMissing.step}${colors.reset}`,
+      )
+      if (firstMissing.expected) {
+        console.log(
+          `   WASM: ${firstMissing.expected.instruction || 'host_function'} at PC ${firstMissing.expected.pc}`,
+        )
+      }
+      if (firstMissing.typescript) {
+        console.log(
+          `   Rust: ${firstMissing.typescript.instruction || 'host_function'} at PC ${firstMissing.typescript.pc}`,
         )
       }
     }
@@ -1474,38 +1680,42 @@ function printComparison(
 }
 
 async function main() {
-  const args = process.argv.slice(2)
+  let args = process.argv.slice(2)
+  const isWasmVsRust = args.includes('--wasm-vs-rust')
+  if (isWasmVsRust) {
+    args = args.filter((a) => a !== '--wasm-vs-rust')
+  }
 
   if (args.length === 0) {
     console.log(`${colors.bold}PVM Trace Comparison Tool${colors.reset}`)
     console.log()
     console.log('Usage (2-way comparison):')
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] [block_number]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] [block_number]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --modular <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --modular <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --preimages-light <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --preimages-light <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --preimages-all <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --preimages-all <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --storage-light <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --storage-light <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --storage-all <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --storage-all <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --fuzzy <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --fuzzy <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --fuzzy-light <timeslot> [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --fuzzy-light <timeslot> [ordered_index] [service_id]',
     )
     console.log(
-      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm] --jam-conformance <trace_id> <block_number> [timeslot] [ordered_index] [service_id]',
+      '  bun scripts/compare-3way-traces.ts --2way [--typescript|--wasm|--rust] --jam-conformance <trace_id> <block_number> [timeslot] [ordered_index] [service_id]',
     )
     console.log()
     console.log('Usage (3-way comparison):')
@@ -1574,17 +1784,26 @@ async function main() {
     console.log(
       '  bun scripts/compare-3way-traces.ts --jam-conformance 1766243315_8065 00000035 11 0 0',
     )
+    console.log(
+      '  bun scripts/compare-3way-traces.ts --wasm-vs-rust --fuzzy-light 69 0 1852356513',
+    )
+    console.log('  bun scripts/compare-3way-traces.ts --wasm-vs-rust 69')
+    console.log(
+      '  bun scripts/compare-3way-traces.ts --wasm-vs-rust --files <wasm_path> <rust_path>',
+    )
     return
   }
 
   const workspaceRoot = join(__dirname, '..')
   let expectedLines: TraceLine[]
-  let typescriptLines: TraceLine[] = []
-  let wasmLines: TraceLine[] = []
   let expectedPath: string
   let typescriptPath: string
   let wasmPath: string
+  let rustPath: string = ''
   let comparisonLabel: string
+  let typescriptLines: TraceLine[] = []
+  let wasmLines: TraceLine[] = []
+  let rustLines: TraceLine[] = []
 
   // Track modular trace directories for output/err comparison
   let modularExpectedDir: string | undefined
@@ -1592,7 +1811,7 @@ async function main() {
 
   // Check for 2-way comparison mode
   const isTwoWay = args[0] === '--2way'
-  let executorType: 'typescript' | 'wasm' | undefined
+  let executorType: 'typescript' | 'wasm' | 'rust' | undefined
   let formatArgs: string[] = args
 
   if (isTwoWay) {
@@ -1602,6 +1821,9 @@ async function main() {
       formatArgs = args.slice(2)
     } else if (args[1] === '--wasm') {
       executorType = 'wasm'
+      formatArgs = args.slice(2)
+    } else if (args[1] === '--rust') {
+      executorType = 'rust'
       formatArgs = args.slice(2)
     } else {
       // Default to typescript if not specified
@@ -1614,7 +1836,7 @@ async function main() {
 
     if (formatArgs.length === 0) {
       console.error(
-        `${colors.red}Error: Format and arguments required after --2way [--typescript|--wasm]${colors.reset}`,
+        `${colors.red}Error: Format and arguments required after --2way [--typescript|--wasm|--rust]${colors.reset}`,
       )
       process.exit(1)
     }
@@ -1622,7 +1844,39 @@ async function main() {
 
   // Check for modular format flags (use formatArgs if in 2-way mode)
   const formatFlag = isTwoWay ? formatArgs[0] : args[0]
-  if (formatFlag === '--modular') {
+
+  // Arbitrary trace files (WASM vs Rust only; text format)
+  if (formatFlag === '--files' && !isWasmVsRust) {
+    console.error(
+      `${colors.red}Error: --files is only supported with --wasm-vs-rust. Use: --wasm-vs-rust --files <wasm_path> <rust_path>${colors.reset}`,
+    )
+    process.exit(1)
+  }
+  if (isWasmVsRust && formatFlag === '--files') {
+    if (args.length < 3) {
+      console.error(
+        `${colors.red}Error: --wasm-vs-rust --files requires <wasm_path> <rust_path>${colors.reset}`,
+      )
+      process.exit(1)
+    }
+    wasmPath = args[1]
+    rustPath = args[2]
+    comparisonLabel = 'Arbitrary (WASM vs Rust)'
+    if (!existsSync(wasmPath)) {
+      console.error(
+        `${colors.red}Error: WASM trace not found: ${wasmPath}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+    if (!existsSync(rustPath)) {
+      console.error(
+        `${colors.red}Error: Rust trace not found: ${rustPath}${colors.reset}`,
+      )
+      process.exit(1)
+    }
+    wasmLines = parseTraceFile(wasmPath, false)
+    rustLines = parseTraceFile(rustPath, false)
+  } else if (formatFlag === '--modular') {
     // Modular accumulate format
     const timeslot = isTwoWay ? formatArgs[1] : args[1]
     const orderedIndex = isTwoWay
@@ -1659,6 +1913,7 @@ async function main() {
     expectedPath = testVectorsDir
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'modular')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'modular-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'modular-rust')
 
     comparisonLabel = `Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -1676,7 +1931,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -1687,24 +1946,30 @@ async function main() {
           )
           if (executorType === 'typescript') {
             typescriptLines = actualLines
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
+          } else {
+            rustLines = actualLines
           }
         } catch {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, skipping...${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, skipping...${colors.reset}`,
           )
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       } else {
         if (executorType === 'typescript') {
           typescriptLines = []
-        } else {
+        } else if (executorType === 'wasm') {
           wasmLines = []
+        } else {
+          rustLines = []
         }
       }
     } else {
@@ -1794,6 +2059,12 @@ async function main() {
       'preimages_light',
       'modular-wasm',
     )
+    rustPath = join(
+      workspaceRoot,
+      'pvm-traces',
+      'preimages_light',
+      'modular-rust',
+    )
 
     comparisonLabel = `Preimages Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -1811,7 +2082,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -1828,9 +2103,17 @@ async function main() {
               String(orderedIndex ?? 0),
               String(serviceId ?? 0),
             )
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
+          } else {
+            rustLines = actualLines
+            rustPath = join(
               actualPath,
               timeslot.padStart(8, '0'),
               String(orderedIndex ?? 0),
@@ -1847,24 +2130,29 @@ async function main() {
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
@@ -1878,21 +2166,26 @@ async function main() {
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       }
@@ -2054,6 +2347,12 @@ async function main() {
       'storage_light',
       'modular-wasm',
     )
+    rustPath = join(
+      workspaceRoot,
+      'pvm-traces',
+      'storage_light',
+      'modular-rust',
+    )
 
     comparisonLabel = `Storage Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -2071,7 +2370,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -2088,7 +2391,7 @@ async function main() {
               String(orderedIndex ?? 0),
               String(serviceId ?? 0),
             )
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
               actualPath,
@@ -2096,63 +2399,93 @@ async function main() {
               String(orderedIndex ?? 0),
               String(serviceId ?? 0),
             )
+          } else {
+            rustLines = actualLines
+            rustPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
           }
         } catch {
-          // Fall back to text format
+          // Fall back to text format (rust: try rust-{timeslot}-{orderedIndex}-{serviceId}.log)
+          const textBasename =
+            executorType === 'rust' &&
+            orderedIndex !== undefined &&
+            serviceId !== undefined
+              ? `rust-${timeslot}-${orderedIndex}-${serviceId}.log`
+              : `${executorType}-${timeslot}.log`
           const textPath = join(
             workspaceRoot,
             'pvm-traces',
             'storage_light',
-            `${executorType}-${timeslot}.log`,
+            textBasename,
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
       } else {
-        // Try text format directly
+        // Try text format directly (rust: try rust-{timeslot}-{orderedIndex}-{serviceId}.log)
+        const textBasename =
+          executorType === 'rust' &&
+          orderedIndex !== undefined &&
+          serviceId !== undefined
+            ? `rust-${timeslot}-${orderedIndex}-${serviceId}.log`
+            : `${executorType}-${timeslot}.log`
         const textPath = join(
           workspaceRoot,
           'pvm-traces',
           'storage_light',
-          `${executorType}-${timeslot}.log`,
+          textBasename,
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       }
@@ -2304,6 +2637,7 @@ async function main() {
     expectedPath = testVectorsDir
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'preimages', 'modular')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'preimages', 'modular-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'preimages', 'modular-rust')
 
     comparisonLabel = `Preimages Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -2321,7 +2655,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -2338,9 +2676,17 @@ async function main() {
               String(orderedIndex ?? 0),
               String(serviceId ?? 0),
             )
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
+          } else {
+            rustLines = actualLines
+            rustPath = join(
               actualPath,
               timeslot.padStart(8, '0'),
               String(orderedIndex ?? 0),
@@ -2357,24 +2703,29 @@ async function main() {
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
@@ -2388,21 +2739,26 @@ async function main() {
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       }
@@ -2554,6 +2910,7 @@ async function main() {
     expectedPath = testVectorsDir
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'storage', 'modular')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'storage', 'modular-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'storage', 'modular-rust')
 
     comparisonLabel = `Storage Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -2571,7 +2928,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -2588,9 +2949,17 @@ async function main() {
               String(orderedIndex ?? 0),
               String(serviceId ?? 0),
             )
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
+          } else {
+            rustLines = actualLines
+            rustPath = join(
               actualPath,
               timeslot.padStart(8, '0'),
               String(orderedIndex ?? 0),
@@ -2607,24 +2976,29 @@ async function main() {
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
@@ -2638,21 +3012,26 @@ async function main() {
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       }
@@ -2806,6 +3185,7 @@ async function main() {
     const traceVersion = 'v0.7.2'
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', traceVersion, 'modular')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', traceVersion, 'modular-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'fuzzy', traceVersion, 'modular-rust')
 
     comparisonLabel = `Fuzzy Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -2831,7 +3211,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -2849,7 +3233,7 @@ async function main() {
               String(serviceId ?? 0),
             )
             modularActualDir = typescriptPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
               actualPath,
@@ -2858,6 +3242,15 @@ async function main() {
               String(serviceId ?? 0),
             )
             modularActualDir = wasmPath
+          } else {
+            rustLines = actualLines
+            rustPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
+            modularActualDir = rustPath
           }
         } catch {
           // Fall back to text format
@@ -2870,24 +3263,29 @@ async function main() {
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
@@ -2902,21 +3300,26 @@ async function main() {
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = []
+          } else {
+            rustLines = []
           }
         }
       }
@@ -3074,6 +3477,7 @@ async function main() {
     const traceVersion = 'v0.7.2'
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', traceVersion, 'modular')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', traceVersion, 'modular-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'fuzzy_light', traceVersion, 'modular-rust')
 
     comparisonLabel = `Fuzzy Light Timeslot ${timeslot}${orderedIndex !== undefined ? `, Index ${orderedIndex}` : ''}${serviceId !== undefined ? `, Service ${serviceId}` : ''}`
 
@@ -3099,7 +3503,11 @@ async function main() {
     // In 2-way mode, only load the selected executor
     if (isTwoWay && executorType) {
       const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
       if (existsSync(actualPath)) {
         try {
           const actualLines = await readModularTraceDirectory(
@@ -3117,7 +3525,7 @@ async function main() {
               String(serviceId ?? 0),
             )
             modularActualDir = typescriptPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = join(
               actualPath,
@@ -3126,6 +3534,15 @@ async function main() {
               String(serviceId ?? 0),
             )
             modularActualDir = wasmPath
+          } else {
+            rustLines = actualLines
+            rustPath = join(
+              actualPath,
+              timeslot.padStart(8, '0'),
+              String(orderedIndex ?? 0),
+              String(serviceId ?? 0),
+            )
+            modularActualDir = rustPath
           }
         } catch {
           // Fall back to text format
@@ -3138,24 +3555,29 @@ async function main() {
           )
           if (existsSync(textPath)) {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular trace not found, using text format: ${textPath}${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, using text format: ${textPath}${colors.reset}`,
             )
             const actualLines = parseTraceFile(textPath, false)
             if (executorType === 'typescript') {
               typescriptLines = actualLines
               typescriptPath = textPath
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = actualLines
               wasmPath = textPath
+            } else {
+              rustLines = actualLines
+              rustPath = textPath
             }
           } else {
             console.log(
-              `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found (tried modular and text format), skipping...${colors.reset}`,
+              `${colors.yellow}${EXECUTOR_LABELS[executorType]} trace not found (tried modular and text format), skipping...${colors.reset}`,
             )
             if (executorType === 'typescript') {
               typescriptLines = []
-            } else {
+            } else if (executorType === 'wasm') {
               wasmLines = []
+            } else {
+              rustLines = []
             }
           }
         }
@@ -3170,22 +3592,117 @@ async function main() {
         )
         if (existsSync(textPath)) {
           console.log(
-            `${colors.yellow}${executorType === 'typescript' ? 'TypeScript' : 'WASM'} modular directory not found, using text format: ${textPath}${colors.reset}`,
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular directory not found, using text format: ${textPath}${colors.reset}`,
           )
           const actualLines = parseTraceFile(textPath, false)
           if (executorType === 'typescript') {
             typescriptLines = actualLines
             typescriptPath = textPath
-          } else {
+          } else if (executorType === 'wasm') {
             wasmLines = actualLines
             wasmPath = textPath
+          } else {
+            rustLines = actualLines
+            rustPath = textPath
           }
         } else {
           if (executorType === 'typescript') {
             typescriptLines = []
+          } else if (executorType === 'wasm') {
+            wasmLines = []
+          } else {
+            rustLines = []
+          }
+        }
+      }
+    } else if (isWasmVsRust) {
+      // WASM vs Rust only: load both
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularTraceDirectory(
+            wasmPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          wasmPath = join(
+            wasmPath,
+            timeslot.padStart(8, '0'),
+            String(orderedIndex ?? 0),
+            String(serviceId ?? 0),
+          )
+        } catch {
+          const textPath = join(
+            workspaceRoot,
+            'pvm-traces',
+            'fuzzy_light',
+            traceVersion,
+            `wasm-${timeslot}.log`,
+          )
+          if (existsSync(textPath)) {
+            wasmLines = parseTraceFile(textPath, false)
+            wasmPath = textPath
           } else {
             wasmLines = []
           }
+        }
+      } else {
+        const textPath = join(
+          workspaceRoot,
+          'pvm-traces',
+          'fuzzy_light',
+          traceVersion,
+          `wasm-${timeslot}.log`,
+        )
+        if (existsSync(textPath)) {
+          wasmLines = parseTraceFile(textPath, false)
+          wasmPath = textPath
+        } else {
+          wasmLines = []
+        }
+      }
+      if (existsSync(rustPath)) {
+        try {
+          rustLines = await readModularTraceDirectory(
+            rustPath,
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          rustPath = join(
+            rustPath,
+            timeslot.padStart(8, '0'),
+            String(orderedIndex ?? 0),
+            String(serviceId ?? 0),
+          )
+        } catch {
+          const textPath = join(
+            workspaceRoot,
+            'pvm-traces',
+            'fuzzy_light',
+            traceVersion,
+            `rust-${timeslot}.log`,
+          )
+          if (existsSync(textPath)) {
+            rustLines = parseTraceFile(textPath, false)
+            rustPath = textPath
+          } else {
+            rustLines = []
+          }
+        }
+      } else {
+        const textPath = join(
+          workspaceRoot,
+          'pvm-traces',
+          'fuzzy_light',
+          traceVersion,
+          `rust-${timeslot}.log`,
+        )
+        if (existsSync(textPath)) {
+          rustLines = parseTraceFile(textPath, false)
+          rustPath = textPath
+        } else {
+          rustLines = []
         }
       }
     } else {
@@ -3465,6 +3982,23 @@ async function main() {
             `wasm-${timeslot}-${orderedIndex ?? 0}-${serviceId ?? 0}.log`,
           )
         : undefined
+      const rustModularPath = timeslot
+        ? join(
+            ourBaseDir,
+            traceId,
+            blockNumber,
+            'modular-rust',
+            timeslot.padStart(8, '0'),
+            String(orderedIndex ?? 0),
+            String(serviceId ?? 0),
+          )
+        : undefined
+      const rustTextPath = timeslot
+        ? join(
+            ourTraceDir,
+            `rust-${timeslot}-${orderedIndex ?? 0}-${serviceId ?? 0}.log`,
+          )
+        : undefined
 
       if (
         executorType === 'typescript' &&
@@ -3529,6 +4063,36 @@ async function main() {
           }
         }
       } else if (
+        executorType === 'rust' &&
+        rustModularPath &&
+        existsSync(rustModularPath)
+      ) {
+        try {
+          const actualLines = await readModularTraceDirectory(
+            join(ourBaseDir, traceId, blockNumber, 'modular-rust'),
+            timeslot,
+            orderedIndex,
+            serviceId,
+          )
+          rustLines = actualLines
+          rustPath = rustModularPath
+          modularActualDir = rustModularPath
+        } catch {
+          if (rustTextPath && existsSync(rustTextPath)) {
+            console.log(
+              `${colors.yellow}Rust modular trace not found, using text format: ${rustTextPath}${colors.reset}`,
+            )
+            const actualLines = parseTraceFile(rustTextPath, false)
+            rustLines = actualLines
+            rustPath = rustTextPath
+          } else {
+            console.log(
+              `${colors.yellow}Rust trace not found (tried modular and text format), skipping...${colors.reset}`,
+            )
+            rustLines = []
+          }
+        }
+      } else if (
         executorType === 'typescript' &&
         ourTextPath &&
         existsSync(ourTextPath)
@@ -3550,11 +4114,24 @@ async function main() {
         const actualLines = parseTraceFile(wasmTextPath, false)
         wasmLines = actualLines
         wasmPath = wasmTextPath
+      } else if (
+        executorType === 'rust' &&
+        rustTextPath &&
+        existsSync(rustTextPath)
+      ) {
+        console.log(
+          `${colors.yellow}Rust modular directory not found, using text format: ${rustTextPath}${colors.reset}`,
+        )
+        const actualLines = parseTraceFile(rustTextPath, false)
+        rustLines = actualLines
+        rustPath = rustTextPath
       } else {
         if (executorType === 'typescript') {
           typescriptLines = []
-        } else {
+        } else if (executorType === 'wasm') {
           wasmLines = []
+        } else {
+          rustLines = []
         }
       }
     } else {
@@ -3787,6 +4364,7 @@ async function main() {
     expectedPath = testVectorsDir
     typescriptPath = join(workspaceRoot, 'pvm-traces', 'modular-refine')
     wasmPath = join(workspaceRoot, 'pvm-traces', 'modular-refine-wasm')
+    rustPath = join(workspaceRoot, 'pvm-traces', 'modular-refine-rust')
 
     comparisonLabel = `Work Package ${workPackageHash.substring(0, 16)}...`
 
@@ -3803,44 +4381,91 @@ async function main() {
       childInstance,
     )
 
-    if (existsSync(typescriptPath)) {
-      try {
-        typescriptLines = await readModularRefineTraceDirectory(
-          typescriptPath,
-          workPackageHash,
-          workItemIndex,
-          serviceId,
-          childSlot,
-          childInstance,
-        )
-      } catch {
-        console.log(
-          `${colors.yellow}TypeScript modular trace not found, skipping...${colors.reset}`,
-        )
+    if (isTwoWay && executorType) {
+      const actualPath =
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
+      if (existsSync(actualPath)) {
+        try {
+          const actualLines = await readModularRefineTraceDirectory(
+            actualPath,
+            workPackageHash,
+            workItemIndex,
+            serviceId,
+            childSlot,
+            childInstance,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = actualLines
+          } else if (executorType === 'wasm') {
+            wasmLines = actualLines
+          } else {
+            rustLines = actualLines
+          }
+        } catch {
+          console.log(
+            `${colors.yellow}${EXECUTOR_LABELS[executorType]} modular trace not found, skipping...${colors.reset}`,
+          )
+          if (executorType === 'typescript') {
+            typescriptLines = []
+          } else if (executorType === 'wasm') {
+            wasmLines = []
+          } else {
+            rustLines = []
+          }
+        }
+      } else {
+        if (executorType === 'typescript') {
+          typescriptLines = []
+        } else if (executorType === 'wasm') {
+          wasmLines = []
+        } else {
+          rustLines = []
+        }
+      }
+    } else {
+      if (existsSync(typescriptPath)) {
+        try {
+          typescriptLines = await readModularRefineTraceDirectory(
+            typescriptPath,
+            workPackageHash,
+            workItemIndex,
+            serviceId,
+            childSlot,
+            childInstance,
+          )
+        } catch {
+          console.log(
+            `${colors.yellow}TypeScript modular trace not found, skipping...${colors.reset}`,
+          )
+          typescriptLines = []
+        }
+      } else {
         typescriptLines = []
       }
-    } else {
-      typescriptLines = []
-    }
 
-    if (existsSync(wasmPath)) {
-      try {
-        wasmLines = await readModularRefineTraceDirectory(
-          wasmPath,
-          workPackageHash,
-          workItemIndex,
-          serviceId,
-          childSlot,
-          childInstance,
-        )
-      } catch {
-        console.log(
-          `${colors.yellow}WASM modular trace not found, skipping...${colors.reset}`,
-        )
+      if (existsSync(wasmPath)) {
+        try {
+          wasmLines = await readModularRefineTraceDirectory(
+            wasmPath,
+            workPackageHash,
+            workItemIndex,
+            serviceId,
+            childSlot,
+            childInstance,
+          )
+        } catch {
+          console.log(
+            `${colors.yellow}WASM modular trace not found, skipping...${colors.reset}`,
+          )
+          wasmLines = []
+        }
+      } else {
         wasmLines = []
       }
-    } else {
-      wasmLines = []
     }
   } else {
     // Legacy text format
@@ -3865,22 +4490,43 @@ async function main() {
       `typescript-${blockNumber}.log`,
     )
     wasmPath = join(workspaceRoot, 'pvm-traces', `wasm-${blockNumber}.log`)
+    rustPath = join(workspaceRoot, 'pvm-traces', `rust-${blockNumber}.log`)
     comparisonLabel = `Block ${blockNumber}`
 
-    if (!existsSync(expectedPath)) {
+    if (!isWasmVsRust && !existsSync(expectedPath)) {
       console.error(
         `${colors.red}Error: Expected trace not found: ${expectedPath}${colors.reset}`,
       )
       process.exit(1)
     }
 
-    // In 2-way mode, only check and load the selected executor
-    if (isTwoWay && executorType) {
-      const actualPath =
-        executorType === 'typescript' ? typescriptPath : wasmPath
-      if (!existsSync(actualPath)) {
+    // WASM vs Rust only (legacy block)
+    if (isWasmVsRust) {
+      if (!existsSync(wasmPath)) {
         console.error(
-          `${colors.red}Error: ${executorType === 'typescript' ? 'TypeScript' : 'WASM'} trace not found: ${actualPath}${colors.reset}`,
+          `${colors.red}Error: WASM trace not found: ${wasmPath}${colors.reset}`,
+        )
+        process.exit(1)
+      }
+      if (!existsSync(rustPath)) {
+        console.error(
+          `${colors.red}Error: Rust trace not found: ${rustPath}${colors.reset}`,
+        )
+        process.exit(1)
+      }
+      wasmLines = parseTraceFile(wasmPath, false)
+      rustLines = parseTraceFile(rustPath, false)
+    } else if (isTwoWay && executorType) {
+      const actualPath =
+        executorType === 'typescript'
+          ? typescriptPath
+          : executorType === 'wasm'
+            ? wasmPath
+            : rustPath
+      if (!existsSync(actualPath)) {
+        const executorLabel = EXECUTOR_LABELS[executorType]
+        console.error(
+          `${colors.red}Error: ${executorLabel} trace not found: ${actualPath}${colors.reset}`,
         )
         process.exit(1)
       }
@@ -3890,8 +4536,10 @@ async function main() {
       const actualLines = parseTraceFile(actualPath, false)
       if (executorType === 'typescript') {
         typescriptLines = actualLines
-      } else {
+      } else if (executorType === 'wasm') {
         wasmLines = actualLines
+      } else {
+        rustLines = actualLines
       }
     } else {
       // 3-way mode: check and load both
@@ -3917,11 +4565,31 @@ async function main() {
   }
 
   // Compare and print results
+  if (isWasmVsRust) {
+    const result = compareTwoTraces(wasmLines, rustLines)
+    printTwoWayComparisonWasmVsRust(
+      comparisonLabel,
+      wasmPath,
+      rustPath,
+      result,
+    )
+    return
+  }
+
   if (isTwoWay && executorType) {
     // 2-way comparison
     const actualLines =
-      executorType === 'typescript' ? typescriptLines : wasmLines
-    const actualPath = executorType === 'typescript' ? typescriptPath : wasmPath
+      executorType === 'typescript'
+        ? typescriptLines
+        : executorType === 'wasm'
+          ? wasmLines
+          : rustLines
+    const actualPath =
+      executorType === 'typescript'
+        ? typescriptPath
+        : executorType === 'wasm'
+          ? wasmPath
+          : rustPath
     const result = compareTwoTraces(expectedLines, actualLines)
 
     // Extract directories for output/err comparison

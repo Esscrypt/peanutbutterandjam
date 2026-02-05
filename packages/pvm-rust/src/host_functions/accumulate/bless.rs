@@ -74,20 +74,38 @@ impl HostFunction for BlessHostFunction {
         let assigners_length = (u64::from(num_cores) * u64::from(BYTES_PER_ASSIGNER)) as u32;
         let read_assigners = context.ram.read_octets(assigners_offset as u32, assigners_length);
         if read_assigners.fault_address != 0 || read_assigners.data.is_none() {
+            crate::host_log!(
+                "[hostfn] bless PANIC: assigners read fault (offset={}, len={}, fault_address={})",
+                assigners_offset, assigners_length, read_assigners.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let assigners_data = read_assigners.data.unwrap();
         if assigners_data.len() != assigners_length as usize {
+            crate::host_log!(
+                "[hostfn] bless PANIC: assigners length mismatch (got {}, expected {})",
+                assigners_data.len(),
+                assigners_length as usize
+            );
             return HostFunctionResult::panic();
         }
 
         let accessors_length = (number_of_always_accessors * u64::from(BYTES_PER_ALWAYS_ACCER)) as u32;
         let read_accessors = context.ram.read_octets(always_accessors_offset as u32, accessors_length);
         if read_accessors.fault_address != 0 || read_accessors.data.is_none() {
+            crate::host_log!(
+                "[hostfn] bless PANIC: accessors read fault (offset={}, len={}, fault_address={})",
+                always_accessors_offset, accessors_length, read_accessors.fault_address
+            );
             return HostFunctionResult::panic();
         }
         let accessors_data = read_accessors.data.unwrap();
         if accessors_data.len() != accessors_length as usize {
+            crate::host_log!(
+                "[hostfn] bless PANIC: accessors length mismatch (got {}, expected {})",
+                accessors_data.len(),
+                accessors_length as usize
+            );
             return HostFunctionResult::panic();
         }
 
@@ -102,19 +120,17 @@ impl HostFunction for BlessHostFunction {
         let assigners = Self::parse_assigners(&assigners_data, num_cores);
         let alwaysaccers = Self::parse_always_accessors(&accessors_data, number_of_always_accessors);
 
-        let bless_state = match context.bless_state.as_deref_mut() {
-            Some(s) => s,
-            None => {
-                base::set_accumulate_error(context.registers, codes::HUH);
-                return HostFunctionResult::continue_execution();
-            }
-        };
+        // AS always has implications.regular; single imX.state (accumulation_state).
+        let state = context
+            .accumulation_state
+            .as_deref_mut()
+            .expect("bless: accumulation context must have accumulation_state");
 
-        bless_state.manager = manager_service_id as u32;
-        bless_state.delegator = delegator_service_id as u32;
-        bless_state.registrar = registrar_service_id as u32;
-        bless_state.assigners = assigners;
-        bless_state.alwaysaccers = alwaysaccers;
+        state.manager = manager_service_id as u32;
+        state.delegator = delegator_service_id as u32;
+        state.registrar = registrar_service_id as u32;
+        state.assigners = assigners;
+        state.alwaysaccers = alwaysaccers;
 
         base::set_accumulate_success(context.registers, codes::OK);
         HostFunctionResult::continue_execution()

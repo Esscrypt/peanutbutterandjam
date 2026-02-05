@@ -29,6 +29,7 @@ impl HostFunction for InvokeHostFunction {
     }
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
         let Some(refine) = context.refine_context.as_mut() else {
+            crate::host_log!("[hostfn] invoke PANIC: no refine_context");
             return HostFunctionResult::panic();
         };
 
@@ -37,9 +38,17 @@ impl HostFunction for InvokeHostFunction {
 
         let read_result = context.ram.read_octets(memory_offset, INVOKE_HEADER_SIZE);
         let Some(data) = read_result.data else {
+            crate::host_log!(
+                "[hostfn] invoke PANIC: header read returned no data (offset={})",
+                memory_offset
+            );
             return HostFunctionResult::panic();
         };
         if read_result.fault_address != 0 || data.len() < INVOKE_HEADER_SIZE as usize {
+            crate::host_log!(
+                "[hostfn] invoke PANIC: header read fault (offset={}, fault_address={}, len={})",
+                memory_offset, read_result.fault_address, data.len()
+            );
             return HostFunctionResult::panic();
         }
 
