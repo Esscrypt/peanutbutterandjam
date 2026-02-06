@@ -8,6 +8,7 @@ A production-grade TypeScript/JavaScript implementation of the **JAM (Just Anoth
 - [Getting Started](#getting-started)
 - [Building](#building)
 - [Running the Node](#running-the-node)
+- [Running the Fuzzer](#running-the-fuzzer)
 - [Packages](#packages)
 - [Specification Compliance](#specification-compliance)
 - [Documentation](#documentation)
@@ -18,6 +19,7 @@ A production-grade TypeScript/JavaScript implementation of the **JAM (Just Anoth
 
 - **[Bun](https://bun.sh/)** (v1.3.x recommended) — primary runtime and package manager
 - **Git** — for cloning and submodules
+- **[Rust](https://rustup.rs/)** (stable) — required for the Rust PVM native addon (`@pbnjam/pvm-rust-native`) and for building/running the fuzzer with the Rust executor
 
 Initialize submodules (required for Gray Paper and test vectors):
 
@@ -31,7 +33,7 @@ git submodule update --init --recursive
 
 ```bash
 # Clone the repository
-git clone https://github.com/peanutbutterandjam/peanutbutterandjam.git
+git clone https://github.com/Esscrypt/peanutbutterandjam.git
 cd peanutbutterandjam
 
 # Install dependencies (Bun)
@@ -124,23 +126,6 @@ Or use the compiled binary after `bun run build:main`:
 ./bin/main-service
 ```
 
-### Option 2: Run via CLI binary
-
-After building the CLI (`./scripts/build-cli.sh`):
-
-```bash
-# Generate validator keys (if needed)
-./packages/cli/dist/bin/pbnj-macos gen-keys   # or pbnj-linux / pbnj-win.exe
-
-# Run node (default: port 40000, RPC 19800)
-./packages/cli/dist/bin/pbnj-macos run
-
-# Run with a specific validator index (dev)
-./packages/cli/dist/bin/pbnj-macos run --dev-validator 0
-
-# Custom ports
-./packages/cli/dist/bin/pbnj-macos run --port 40001 --rpc-port 19801
-```
 
 ### Environment variables
 
@@ -148,6 +133,35 @@ After building the CLI (`./scripts/build-cli.sh`):
 - `DATA_PATH` / `--datadir` — Data directory for chain state
 - `OTEL_EXPORTER_OTLP_ENDPOINT` — OpenTelemetry endpoint (optional)
 - See `.env.example` and [packages/cli/README.md](packages/cli/README.md) for more.
+
+---
+
+## Running the Fuzzer
+
+The fuzzer target uses the **Rust PVM** by default. Ensure the Rust native addon is built (see [Build the fuzzer target](#build-the-fuzzer-target-optional)), then run from the repo root.
+
+### Run with Bun (development)
+
+```bash
+# Build Rust PVM addon and fuzzer binary (one step)
+bun run build
+
+# Run the fuzzer (e.g. with a Unix socket for the conformance harness)
+bun run infra/node/fuzzer-target.ts --socket /tmp/jam_target.sock --spec tiny
+```
+
+Or run the compiled binary:
+
+```bash
+./bin/fuzzer-target --socket /tmp/jam_target.sock --spec tiny
+```
+
+Common options:
+
+- `--socket <path>` — Unix socket path for the fuzzer harness
+- `--spec tiny` | `small` | `medium` — chain spec size
+
+See [infra/node/FUZZER_TARGET_DOCKER_QUICKSTART.md](infra/node/FUZZER_TARGET_DOCKER_QUICKSTART.md) for Docker and conformance setup.
 
 ---
 
