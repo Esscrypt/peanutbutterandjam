@@ -63,11 +63,11 @@ export class AccumulatePVM {
     configService: IConfigService
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
-    useWasm: boolean
+    useWasm?: boolean
     useRust?: boolean
     traceSubfolder?: string
   }) {
-    this.useWasm = options.useWasm
+    this.useWasm = options.useWasm ?? false
     this.useRust = options.useRust ?? false
     if (this.useRust) {
       this.pvmExecutor = new RustPVMExecutor(

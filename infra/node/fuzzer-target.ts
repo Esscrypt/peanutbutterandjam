@@ -16,8 +16,8 @@ import { mkdirSync, unlinkSync } from 'node:fs'
 import { Server as UnixServer, type Socket as UnixSocket } from 'node:net'
 import * as path from 'node:path'
 import {
-  IETFVRFVerifier,
-  type IETFVRFVerifierWasm,
+  type IETFVRFVerifier,
+  IETFVRFVerifierWasm,
   RingVRFProverWasm,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
@@ -168,7 +168,7 @@ export async function initializeServices() {
 
     ringProver = new RingVRFProverWasm(srsFilePath)
     ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-    ietfVerifier = new IETFVRFVerifier()
+    ietfVerifier = new IETFVRFVerifierWasm()
 
     try {
       // Add timeout to prevent hanging - WASM initialization can take time but shouldn't hang indefinitely
@@ -318,7 +318,7 @@ export async function initializeServices() {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
+      useRust: true,
       traceSubfolder: 'fuzzer-target',
     })
 

@@ -24,7 +24,6 @@ impl HostFunction for WriteHostFunction {
         "write"
     }
     fn execute(&self, context: &mut HostFunctionContext<'_>) -> HostFunctionResult {
-        // Resolve current service account from accounts + service_id (same as AS WriteParams.serviceAccount).
         let service_id = match context.service_id {
             Some(id) => id,
             None => {
@@ -32,19 +31,10 @@ impl HostFunction for WriteHostFunction {
                 return HostFunctionResult::panic();
             }
         };
-        let service_account = match &mut context.accounts {
-            Some(accounts) => match accounts.get_mut(&service_id) {
-                Some(acc) => acc,
-                None => {
-                    crate::host_log!("[hostfn] write PANIC: service {} not in accounts", service_id);
-                    return HostFunctionResult::panic();
-                }
-            },
-            None => {
-                crate::host_log!("[hostfn] write PANIC: no accounts in context");
-                return HostFunctionResult::panic();
-            }
-        };
+        let service_account = context
+            .accounts
+            .as_mut()
+            .and_then(|accounts| accounts.get_mut(&service_id));
 
         let key_offset = context.registers[7];
         let key_length = context.registers[8];
@@ -60,6 +50,14 @@ impl HostFunction for WriteHostFunction {
             return HostFunctionResult::panic();
         }
         let key = read_key.data.unwrap();
+
+        let service_account = match service_account {
+            Some(acc) => acc,
+            None => {
+                context.registers[7] = REG_NONE;
+                return HostFunctionResult::continue_execution();
+            }
+        };
 
         if value_length == 0 {
             let has_key = get_storage_value(service_account, service_id as u32, &key).is_some();
