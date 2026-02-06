@@ -36,7 +36,7 @@ describe('Fuzzer Traces Test', () => {
 
   beforeAll(async () => {
         // Initialize services using the exact same function as fuzzer-target.ts
-        services = await initializeServices({ spec: 'tiny', traceSubfolder: 'fuzzer-traces', useWasm: true })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder: 'fuzzer-traces', useWasm: true, useIetfVrfWasm: true })
 
         stateService = services.stateService
         blockImporterService = services.blockImporterService

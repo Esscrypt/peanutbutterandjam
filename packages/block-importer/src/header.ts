@@ -1,5 +1,7 @@
 import {
   banderout,
+  type IETFVRFVerifier,
+  type IETFVRFVerifierWasm,
   verifyEntropyVRFSignature,
   verifyEpochRoot,
 } from '@pbnjam/bandersnatch-vrf'
@@ -38,6 +40,7 @@ export async function validateBlockHeader(
   validatorSetManagerService: IValidatorSetManager,
   sealKeyService: ISealKeyService,
   entropyService: IEntropyService,
+  verifier: IETFVRFVerifier | IETFVRFVerifierWasm,
 ): SafePromise<void> {
   // pre-state root already validated in validatePreStateRoot (before emitting and processing the epoch transition event)
   // so we don't need to validate it again here
@@ -161,6 +164,7 @@ export async function validateBlockHeader(
   const [vrfValidationError, isValid] = validateVRFSignature(
     header,
     validatorSetManagerService,
+    verifier,
   )
   if (vrfValidationError) {
     return safeError(vrfValidationError)
@@ -176,6 +180,7 @@ export async function validateBlockHeader(
     validatorSetManagerService,
     entropyService,
     configService,
+    verifier,
   )
   if (sealValidationError) {
     return safeError(sealValidationError)
@@ -207,6 +212,7 @@ export function validateSealSignature(
   validatorSetManagerService: IValidatorSetManager,
   entropyService: IEntropyService,
   configService: IConfigService,
+  verifier: IETFVRFVerifier | IETFVRFVerifierWasm,
 ): Safe<void> {
   // Use thetime from state (C(11)) to determine the block's timeslot
   // Gray Paper: thetime' ≡ H_timeslot, so the new block's timeslot = thetime + 1
@@ -265,6 +271,7 @@ export function validateSealSignature(
       unsignedHeader,
       sealKey as SafroleTicketWithoutProof,
       configService,
+      verifier,
     )
     if (verificationError) {
       return safeError(verificationError)
@@ -315,6 +322,7 @@ export function validateSealSignature(
       entropy3,
       unsignedHeader,
       configService,
+      verifier,
     )
     if (verificationError) {
       return safeError(verificationError)
@@ -347,6 +355,7 @@ export function validateSealSignature(
 export function validateVRFSignature(
   header: BlockHeader,
   validatorSetManagerService: IValidatorSetManager,
+  verifier: IETFVRFVerifier | IETFVRFVerifierWasm,
 ): Safe<boolean> {
   // Get validator's Bandersnatch public key from active set
   // On epoch transition, use pending validators (which become the new active set)
@@ -375,6 +384,7 @@ export function validateVRFSignature(
     authorPublicKey,
     hexToBytes(header.vrfSig),
     sealOutput,
+    verifier,
   )
   if (verifyError) {
     return safeError(verifyError)

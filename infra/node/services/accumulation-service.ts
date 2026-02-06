@@ -189,6 +189,7 @@ export class AccumulationService extends BaseService {
         {
           configMode: this.configService._mode,
           traceSubfolder: this.traceSubfolder,
+          useRust: this.accumulatePVM.useRust,
         },
         workerPoolMaxWorkers,
       )

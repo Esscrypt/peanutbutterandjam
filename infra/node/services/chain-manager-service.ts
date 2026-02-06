@@ -676,9 +676,6 @@ export class ChainManagerService
     } else {
       this.blockNodes.get(blockHash)!.stateSnapshot = snapshot
     }
-    logger.debug('State snapshot saved', {
-      blockHash: `${blockHash.substring(0, 18)}...`,
-    })
   }
 
   /**

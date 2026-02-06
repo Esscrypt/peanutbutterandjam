@@ -98,6 +98,14 @@ bun run build:fuzzer
 
 Output: `./bin/fuzzer-target`.
 
+The fuzzer uses the **Rust PVM** by default (`useRust: true`). The `build:fuzzer` script only compiles the fuzzer TypeScript; it does **not** build the Rust native addon. To avoid "Rust native module not available" when running the fuzzer, build the native module first:
+
+```bash
+cd packages/pvm-rust && bun run build
+```
+
+Then run the fuzzer from the repo root (e.g. `./bin/fuzzer-target` or `bun run infra/node/fuzzer-target.ts`) so `require('@pbnjam/pvm-rust-native/native')` can resolve to the built `.node` file in `packages/pvm-rust/native/`. To build both in one step: `bun run build:fuzzer:with-rust`.
+
 ---
 
 ## Running the Node

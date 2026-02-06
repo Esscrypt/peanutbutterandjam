@@ -16,6 +16,8 @@ import { mkdirSync, unlinkSync } from 'node:fs'
 import { Server as UnixServer, type Socket as UnixSocket } from 'node:net'
 import * as path from 'node:path'
 import {
+  type IETFVRFVerifier,
+  IETFVRFVerifierWasm,
   RingVRFProverWasm,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
@@ -146,7 +148,7 @@ export function getConfigService(): ConfigService {
 export async function initializeServices() {
   let ringProver: RingVRFProverWasm
   let ringVerifier: RingVRFVerifierWasm
-
+  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   try {
     logger.info('Loading SRS file...')
     const srsFilePath = path.join(
@@ -166,6 +168,7 @@ export async function initializeServices() {
 
     ringProver = new RingVRFProverWasm(srsFilePath)
     ringVerifier = new RingVRFVerifierWasm(srsFilePath)
+    ietfVerifier = new IETFVRFVerifierWasm()
 
     try {
       // Add timeout to prevent hanging - WASM initialization can take time but shouldn't hang indefinitely
@@ -315,7 +318,7 @@ export async function initializeServices() {
       configService: configService,
       entropyService: entropyService,
       pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-      useWasm: true,
+      useRust: true,
       traceSubfolder: 'fuzzer-target',
     })
 
@@ -422,6 +425,7 @@ export async function initializeServices() {
       authPoolService: authPoolService,
       accumulationService: accumulationService,
       workReportService: workReportService,
+      ietfVerifier: ietfVerifier,
     })
 
     chainManagerService = new ChainManagerService(

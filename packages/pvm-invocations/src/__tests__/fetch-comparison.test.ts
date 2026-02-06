@@ -1,7 +1,47 @@
 import { describe, test, expect, beforeEach } from "bun:test";
+import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Rust native binding surface used by FETCH comparison tests.
+ * Must match @pbnjam/pvm-rust-native NAPI exports (camelCase).
+ */
+export type RustFetchNativeBinding = {
+  init: (ramType: number) => void;
+  reset: () => void;
+  getRamTypePvmRam: () => number;
+  prepareBlob: (program: Buffer) => void;
+  initMemoryLayout?: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
+  init_memory_layout?: (args: Buffer, ro: Buffer, rw: Buffer, stackSize: number, heapZeroPadding: number) => void;
+  setRegisters: (registers: Buffer) => void;
+  setGasLeft: (gas: number) => void;
+  setNextProgramCounter: (pc: number) => void;
+  nextStep: () => boolean;
+  getRegisters: () => Buffer;
+  getStatus: () => number;
+};
+
+function loadRustNative(): RustFetchNativeBinding {
+  let binding: RustFetchNativeBinding | null = null;
+  let loadError: unknown = null;
+  try {
+    binding = require("@pbnjam/pvm-rust-native/native") as RustFetchNativeBinding;
+  } catch (err) {
+    loadError = err;
+  }
+  if (!binding?.init || !binding?.reset) {
+    const reason = loadError instanceof Error ? loadError.message : String(loadError);
+    const hint = binding && (!binding.init || !binding.reset)
+      ? "Binding loaded but init/reset missing; rebuild: cd packages/pvm-rust && bun run build"
+      : `Load failed: ${reason}. Build: cd packages/pvm-rust && bun run build`;
+    throw new Error(`@pbnjam/pvm-rust-native required for this test. ${hint}`);
+  }
+  return binding;
+}
 import { instantiate } from "@pbnjam/pvm-assemblyscript/wasmAsInit";
 import { FetchHostFunction, PVMRAM } from "@pbnjam/pvm";
 import { ConfigService } from "../../../../infra/node/services/config-service";
@@ -40,7 +80,49 @@ import {
  *
  * This test calls FETCH with selector 0 (system constants) from both implementations
  * and compares the returned binary values to ensure they match.
+ *
+ * Rust FETCH returns panic when the output write faults: r7 must point to writable memory
+ * (e.g. heap or an initPage'd region); otherwise write_octets fails and the host returns panic.
+ *
+ * Rust prepareBlob expects a blob in deblob format (encodeBlob output), not raw code.
+ * Passing raw bytes causes decode_blob to fail, so code is never loaded and FETCH never runs; r7 stays unchanged.
  */
+function makeEcalliFetchBlob(hostFunctionId: bigint): Buffer {
+  const program = Buffer.alloc(9);
+  program[0] = 0x0a; // ECALLI
+  program.writeBigUint64LE(hostFunctionId, 1);
+  const bitmask = new Uint8Array(9);
+  bitmask[0] = 1; // opcode at 0, bytes 1..8 are operands
+  const [err, blob] = encodeBlob({
+    code: new Uint8Array(program),
+    bitmask,
+    jumpTable: [],
+    elementSize: 8,
+  });
+  if (err || !blob) throw new Error(`encodeBlob failed: ${err?.message}`);
+  return Buffer.from(blob);
+}
+
+/** ECALLI(hostFunctionId) then JUMP_IND(r0). Use when r0 = HALT_ADDRESS so the program halts after the host call instead of running into padding (TRAP). */
+function makeEcalliFetchThenHaltBlob(hostFunctionId: bigint): Buffer {
+  const program = Buffer.alloc(11);
+  program[0] = 0x0a; // ECALLI
+  program.writeBigUint64LE(hostFunctionId, 1);
+  program[9] = 0x32; // JUMP_IND (50)
+  program[10] = 0; // r0
+  const bitmask = new Uint8Array(11);
+  bitmask[0] = 1;
+  bitmask[9] = 1;
+  const [err, blob] = encodeBlob({
+    code: new Uint8Array(program),
+    bitmask,
+    jumpTable: [],
+    elementSize: 8,
+  });
+  if (err || !blob) throw new Error(`encodeBlob failed: ${err?.message}`);
+  return Buffer.from(blob);
+}
+
 describe("FETCH Host Function Comparison", () => {
   let configService: ConfigService;
   let entropyService: EntropyService;
@@ -583,6 +665,108 @@ describe("FETCH Host Function Comparison", () => {
     // Empty sequence is encoded as single byte 0x00 (length prefix = 0)
     expect(tsHex).toBe("0x00");
     expect(tsFetchedData!.length).toBe(1);
+  });
+
+  test("Rust PVM: FETCH selector 14 without accumulate context returns NONE", async () => {
+    // Use PvmRam (as in accumulation). prepareBlob resets RAM; initMemoryLayout sets heap at 0x20000.
+    const native = loadRustNative();
+    native.reset();
+    native.init(native.getRamTypePvmRam());
+
+    native.prepareBlob(makeEcalliFetchBlob(1n)); // FETCH = 1
+    const initMemoryLayoutFn = native.initMemoryLayout ?? (native as { init_memory_layout?: typeof native.initMemoryLayout }).init_memory_layout;
+    if (typeof initMemoryLayoutFn !== "function") {
+      throw new Error("Rust native missing initMemoryLayout. Rebuild: cd packages/pvm-rust && bun run build");
+    }
+    initMemoryLayoutFn(
+      Buffer.alloc(0),
+      Buffer.alloc(0),
+      Buffer.alloc(4096),
+      0,
+      0,
+    );
+
+    const regs = new Uint8Array(104);
+    const view = new DataView(regs.buffer);
+    view.setBigUint64(7 * 8, 0x20000n, true);
+    view.setBigUint64(10 * 8, 14n, true); // selector 14
+    native.setRegisters(Buffer.from(regs));
+    native.setGasLeft(1000);
+    native.setNextProgramCounter(0);
+
+    while (native.nextStep()) {}
+
+    const outRegs = native.getRegisters();
+    const outView = new DataView(outRegs.buffer, outRegs.byteOffset, outRegs.byteLength);
+    const r7 = outView.getBigUint64(7 * 8, true);
+    // REG_NONE = 2^64 - 1 (Rust returns NONE for selector != 0 when no fetch params)
+    expect(r7).toBe(0xffff_ffff_ffff_ffffn);
+  });
+
+  test("Rust PVM: FETCH selector 0 (system constants) with writable output succeeds", async () => {
+    // Use PvmRam; initMemoryLayout sets heap at 0x20000 so FETCH write succeeds.
+    const native = loadRustNative();
+    native.reset();
+    native.init(native.getRamTypePvmRam());
+
+    // Use ECALLI then JUMP_IND(r0) so we halt after FETCH instead of running into padding (opcode 0 = TRAP).
+    native.prepareBlob(makeEcalliFetchThenHaltBlob(1n));
+    const initMemoryLayoutFn = native.initMemoryLayout ?? (native as { init_memory_layout?: typeof native.initMemoryLayout }).init_memory_layout;
+    if (typeof initMemoryLayoutFn !== "function") {
+      throw new Error("Rust native missing initMemoryLayout. Rebuild: cd packages/pvm-rust && bun run build");
+    }
+    initMemoryLayoutFn(
+      Buffer.alloc(0),
+      Buffer.alloc(0),
+      Buffer.alloc(4096),
+      0,
+      0,
+    );
+
+    const HALT_ADDRESS = 0xffff0000n;
+    const outputAddr = 0x20000;
+    const regs = new Uint8Array(104);
+    const view = new DataView(regs.buffer);
+    view.setBigUint64(0, HALT_ADDRESS, true); // r0 = halt so JUMP_IND(r0) halts after FETCH
+    view.setBigUint64(7 * 8, BigInt(outputAddr), true); // r7 = output address
+    view.setBigUint64(8 * 8, 0n, true); // from offset
+    view.setBigUint64(9 * 8, 512n, true); // length (system constants are 134 bytes)
+    view.setBigUint64(10 * 8, 0n, true); // selector 0 = system constants
+    native.setRegisters(Buffer.from(regs));
+    native.setGasLeft(1000);
+    native.setNextProgramCounter(0);
+
+    while (native.nextStep()) {}
+
+    const status = native.getStatus();
+    expect(status).not.toBe(2); // 2 = Panic; FETCH should not panic when output is writable
+    const outRegs = native.getRegisters();
+    const outView = new DataView(outRegs.buffer, outRegs.byteOffset, outRegs.byteLength);
+    const r7 = outView.getBigUint64(7 * 8, true);
+    expect(r7).toBe(134n); // system constants blob length
+  });
+
+  test("Rust PVM: FETCH selector 0 with non-writable output returns panic", async () => {
+    // Use PvmRam but do NOT call initMemoryLayout; 0x20000 has no page → write faults → panic.
+    const native = loadRustNative();
+    native.reset();
+    native.init(native.getRamTypePvmRam());
+
+    native.prepareBlob(makeEcalliFetchBlob(1n));
+    const regs = new Uint8Array(104);
+    const view = new DataView(regs.buffer);
+    view.setBigUint64(7 * 8, 0x20000n, true);
+    view.setBigUint64(8 * 8, 0n, true);
+    view.setBigUint64(9 * 8, 512n, true);
+    view.setBigUint64(10 * 8, 0n, true);
+    native.setRegisters(Buffer.from(regs));
+    native.setGasLeft(1000);
+    native.setNextProgramCounter(0);
+    // Do NOT call initPage: 0x20000 is not writable → write_octets faults → panic
+
+    while (native.nextStep()) {}
+
+    expect(native.getStatus()).toBe(2); // 2 = Panic
   });
 });
 

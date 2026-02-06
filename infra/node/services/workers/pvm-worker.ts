@@ -116,9 +116,9 @@ function initializePVM(): AccumulatePVM {
   const eventBusService = new EventBusService()
   const entropyService = new EntropyService(eventBusService)
 
-  // WASM execution doesn't need host function registries - host functions are handled internally in AssemblyScript
-  // See wasm-pvm-executor.ts: "Host function handling is now done internally in AssemblyScript, so no registries are needed."
+  // Use same PVM backend as main process so all accumulations (including deferred-transfer-only services) run on same engine.
   const traceSubfolder = data.traceSubfolder
+  const useRust = data.useRust === true
 
   return new AccumulatePVM({
     hostFunctionRegistry: null,
@@ -126,7 +126,8 @@ function initializePVM(): AccumulatePVM {
     configService,
     entropyService,
     pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
-    useWasm: true, // Always use WASM
+    useWasm: !useRust,
+    useRust,
     traceSubfolder,
   })
 }

@@ -79,17 +79,6 @@ export class ReadyService extends BaseService implements IReadyService {
 
     const slotItems = this.ready.epochSlots[Number(slotIndex)]!
     slotItems.push(readyItem)
-
-    const [hashError, workReportHash] = calculateWorkReportHash(
-      readyItem.workReport,
-    )
-    const hash = hashError ? 'unknown' : workReportHash
-
-    logger.debug('Ready item added to slot', {
-      slotIndex: slotIndex.toString(),
-      workReportHash: hash,
-      dependenciesCount: readyItem.dependencies.size,
-    })
   }
 
   /**

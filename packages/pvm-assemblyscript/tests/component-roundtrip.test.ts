@@ -6,12 +6,15 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
+import { createRequire } from 'node:module'
 import { logger } from '@pbnjam/core'
 import type { Implications, ImplicationsPair, PartialState, ServiceAccount, IConfigService, DeferredTransfer } from '@pbnjam/types'
 import { hexToBytes, type Hex } from '@pbnjam/core'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+const require = createRequire(import.meta.url)
 import {
   encodeImplications,
   decodeImplications,
@@ -1086,6 +1089,55 @@ describe('Component Round-Trip Tests', () => {
 
     expect(tsEncoded!.length).toBeGreaterThan(0)
     expect(asEncoded.length).toBeGreaterThan(0)
+  })
+
+  it('should pass TypeScript -> Rust round-trip (ImplicationsPair, when native built)', async () => {
+    type RustImplicationsBinding = {
+      roundTripImplications: (data: Buffer, numCores: number, numValidators: number, authQueueSize: number) => Buffer | null
+    }
+    let rustNative: RustImplicationsBinding | null = null
+    let loadError: unknown = null
+    try {
+      rustNative = require('@pbnjam/pvm-rust-native/native') as RustImplicationsBinding
+    } catch (err) {
+      loadError = err
+      rustNative = null
+    }
+    if (!rustNative?.roundTripImplications) {
+      const reason = loadError instanceof Error ? loadError.message : String(loadError)
+      const hint = rustNative && !rustNative.roundTripImplications
+        ? 'Binding loaded but roundTripImplications is missing; rebuild: cd packages/pvm-rust && bun run build'
+        : `Load failed: ${reason}. Build the addon: cd packages/pvm-rust && bun run build`
+      throw new Error(`@pbnjam/pvm-rust-native required for this test. ${hint}`)
+    }
+    logger.info('Testing TypeScript -> Rust round-trip (component implications pair)')
+    const regular = createTestImplications(configService)
+    const exceptional = createTestImplications(configService)
+    const original: ImplicationsPair = [regular, exceptional]
+    const [encodeError, encoded] = encodeImplicationsPair(original, configService)
+    if (encodeError || !encoded) {
+      throw encodeError ?? new Error('encode failed')
+    }
+    const numCores = configService.numCores
+    const numValidators = configService.numValidators
+    const authQueueSize = 80
+    const rustReencoded = rustNative.roundTripImplications(
+      Buffer.from(encoded),
+      numCores,
+      numValidators,
+      authQueueSize,
+    )
+    if (!rustReencoded || rustReencoded.length === 0) {
+      throw new Error('Rust round_trip_implications returned null or empty')
+    }
+    const [decodeError, decodeResult] = decodeImplicationsPair(new Uint8Array(rustReencoded), configService)
+    if (decodeError) {
+      throw decodeError
+    }
+    const final = decodeResult.value
+    expect(compareImplications(original[0], final[0])).toBe(true)
+    expect(compareImplications(original[1], final[1])).toBe(true)
+    logger.info('✅ TypeScript -> Rust round-trip (ImplicationsPair) passed')
   })
 
   // TODO: Re-enable when build issues are fixed

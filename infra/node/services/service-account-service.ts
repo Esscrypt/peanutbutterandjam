@@ -579,6 +579,11 @@ export class ServiceAccountService
       serviceAccount = newServiceAccount
     }
 
+    // Instrumentation: log when the known mismatch state key is updated for service 1852356513
+    const STATE_KEY_INSTRUMENT =
+      '0xa129b72c68d16e40bc50d602526f4b46e8aca90eb8c77c165b6497cae7625f' as Hex
+    const SERVICE_ID_INSTRUMENT = 1852356513n
+
     // Merge new keyvals with existing rawCshKeyvals
     // Deep copy existing values to prevent mutations from affecting stored state
     // Then merge in new keyvals (new values overwrite existing ones for the same key)
@@ -587,6 +592,21 @@ export class ServiceAccountService
     )
     // Merge: add new keyvals, overwriting existing ones if the same key appears
     for (const key in keyvals) {
+      if (
+        serviceId === SERVICE_ID_INSTRUMENT &&
+        (key as Hex) === STATE_KEY_INSTRUMENT
+      ) {
+        const previousValue = newRawCshKeyvals[STATE_KEY_INSTRUMENT]
+        logger.info(
+          '[ServiceAccountService] setServiceAccountKeyvals: updating instrumented key',
+          {
+            serviceId: serviceId.toString(),
+            key: STATE_KEY_INSTRUMENT,
+            previousValue: previousValue ?? '(none)',
+            newValue: keyvals[key as Hex],
+          },
+        )
+      }
       newRawCshKeyvals[key as Hex] = keyvals[key as Hex]
     }
 

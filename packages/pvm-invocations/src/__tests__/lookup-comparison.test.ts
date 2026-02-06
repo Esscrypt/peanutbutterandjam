@@ -479,5 +479,53 @@ describe('LOOKUP Host Function', () => {
     expect(fetchedData).not.toBeNull()
     expect(Array.from(fetchedData!)).toEqual([3, 4, 5, 6]) // bytes from offset 3, length 4
   })
+
+  test('Rust PVM: LOOKUP without accounts returns NONE', async () => {
+    let native: {
+      init: (ramType: number) => void
+      reset: () => void
+      getRamTypeSimpleRam: () => number
+      prepareBlob: (program: Buffer) => void
+      setRegisters: (registers: Buffer) => void
+      setGasLeft: (gas: number) => void
+      setNextProgramCounter: (pc: number) => void
+      initPage: (address: number, length: number, accessType: number) => void
+      nextStep: () => boolean
+      getRegisters: () => Buffer
+      getStatus: () => number
+    }
+    try {
+      const { createRequire } = await import('node:module')
+      native = createRequire(import.meta.url)('@pbnjam/pvm-rust-native/native')
+    } catch {
+      return
+    }
+    native.reset()
+    native.init(native.getRamTypeSimpleRam())
+
+    const program = Buffer.alloc(9)
+    program[0] = 0x0a // ECALLI
+    program.writeBigUInt64LE(2n, 1) // LOOKUP
+    native.prepareBlob(program)
+
+    const regs = new Uint8Array(104)
+    const view = new DataView(regs.buffer)
+    view.setBigUint64(7 * 8, 0n, true)
+    view.setBigUint64(8 * 8, 0x20000n, true)
+    view.setBigUint64(9 * 8, 0x20040n, true)
+    view.setBigUint64(10 * 8, 0n, true)
+    view.setBigUint64(11 * 8, 32n, true)
+    native.setRegisters(Buffer.from(regs))
+    native.setGasLeft(1000)
+    native.setNextProgramCounter(0)
+    native.initPage(0x20000, 4096, 2)
+
+    while (native.nextStep()) {}
+
+    const outRegs = native.getRegisters()
+    const outView = new DataView(outRegs.buffer, outRegs.byteOffset, outRegs.byteLength)
+    const r7 = outView.getBigUint64(7 * 8, true)
+    expect(r7).toBe(0xffff_ffff_ffff_ffffn) // REG_NONE when no accounts
+  })
 })
 

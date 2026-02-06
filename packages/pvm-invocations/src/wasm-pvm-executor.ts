@@ -569,10 +569,11 @@ export class WasmPVMExecutor {
     // Calculate gas consumed based on status
     // Gray Paper equation 834: u = gascounter - max(gascounter', 0)
     // For OOG (status === 5): All gas is consumed, including what was left before the failed operation
-    // This matches TypeScript behavior where gasCounter is decremented before OOG check
+    // This matches TypeScript and rust-pvm-executor: OOG → gasConsumed = initialGas, result = 'OOG',
+    // errorCode = RESULT_CODES.OOG (4). We still call getAccumulationContext and return updated context.
     let gasConsumed: bigint
     if (status === 5) {
-      // OOG: All initial gas is consumed
+      // OOG: All initial gas is consumed (aligned with rust-pvm-executor)
       gasConsumed = initialGas
     } else {
       // Normal execution: subtract remaining gas
@@ -648,9 +649,11 @@ export class WasmPVMExecutor {
         encodeAccumulateInput,
       )
 
-      // Determine error code based on status (same as TypeScript executor)
+      // Determine error code based on status (same as Rust and TypeScript executors).
       // WASM status enum: OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
-      // Error codes for trace files match Gray Paper: HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
+      // Error codes for trace files (RESULT_CODES): HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
+      // FAULT treatment (aligned with rust-pvm-executor): status 2 and 3 both → result 'PANIC';
+      // errorCode distinguishes: 2 → PANIC (1), 3 → FAULT (2). So trace records which VM status ended the run.
       let errorCode: number | undefined
       if (status === 2) {
         // PANIC
@@ -680,7 +683,7 @@ export class WasmPVMExecutor {
         yieldHash = updatedContext?.[0]?.yield ?? undefined
       }
 
-      const filepath = writeTraceDump(
+      writeTraceDump(
         this.executionLogs,
         this.traceHostFunctionLogs.length > 0
           ? this.traceHostFunctionLogs
@@ -695,11 +698,6 @@ export class WasmPVMExecutor {
         yieldHash, // accumulate output (yield hash, same as TypeScript)
         errorCode, // error code for PANIC/OOG
       )
-      if (!filepath) {
-        logger.warning(
-          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
-        )
-      }
     }
 
     return safeResult({
