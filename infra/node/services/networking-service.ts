@@ -575,16 +575,18 @@ export class NetworkingService extends BaseService {
       return safeError(new Error(`Validator ${publicKey} not found`))
     }
 
-    // Use primary stream for sending (first stream created/received)
-    if (!peer.primaryStream) {
-      logger.error('❌ No stream available for peer', {
-        publicKey: publicKey,
-        totalStreams: peer.streams.size,
+    // UP streams: one stream per kind per connection; initiator opens one stream per kind on first send
+    let stream = peer.getStreamForKind(kindByte)
+    if (!stream) {
+      const newStream = peer.connection.newStream('bidi')
+      peer.addStream(newStream)
+      peer.streamByKind.set(kindByte, {
+        stream: newStream,
+        streamId: this.getStreamId(newStream),
       })
-      return safeError(new Error(`No stream available for peer ${publicKey}`))
+      this.setupStreamDataListener(newStream, publicKey)
+      stream = newStream
     }
-
-    const stream = peer.primaryStream
     const writer = stream.writable.getWriter()
     try {
       // Check if this is the first message on this stream
@@ -621,15 +623,17 @@ export class NetworkingService extends BaseService {
   }
 
   /**
-   * Close the writable side of a stream for a peer
-   *
-   * This sends FIN to indicate we're done sending data on this stream.
-   * Used after sending requests (e.g., CE129 state requests) to signal completion.
+   * Close the writable side of the UP stream for a given kind for a peer.
+   * Sends FIN to indicate we're done sending on that stream (e.g. after CE129/CE128 request).
    *
    * @param publicKey - Public key of the peer
+   * @param kind - Stream kind (e.g. CE129_STREAM_KIND, 128 for CE128)
    * @returns Safe result indicating success or failure
    */
-  async closeStreamForPeer(publicKey: Hex): SafePromise<void> {
+  async closeStreamForPeer(
+    publicKey: Hex,
+    kind: StreamKind,
+  ): SafePromise<void> {
     const peer = this.getPeer(publicKey)
     if (!peer) {
       logger.warn('No peer found to close stream', {
@@ -640,26 +644,27 @@ export class NetworkingService extends BaseService {
       )
     }
 
-    // Close primary stream
-    if (!peer.primaryStream) {
-      logger.warn('No primary stream found to close', {
+    const stream = peer.getStreamForKind(kind)
+    if (!stream) {
+      logger.warn('No stream for kind found to close', {
         publicKey: `${publicKey.substring(0, 20)}...`,
-        totalStreams: peer.streams.size,
+        kind,
+        streamKinds: Array.from(peer.streamByKind.keys()),
       })
       return safeError(
         new Error(
-          `No primary stream for peer ${publicKey.substring(0, 20)}...`,
+          `No stream for kind ${kind} for peer ${publicKey.substring(0, 20)}...`,
         ),
       )
     }
 
-    const stream = peer.primaryStream
     const writer = stream.writable.getWriter()
     try {
       await writer.close()
     } catch (error) {
       logger.error('Failed to close stream', {
         publicKey: `${publicKey.substring(0, 20)}...`,
+        kind,
         error: error instanceof Error ? error.message : String(error),
       })
       return safeError(
@@ -736,6 +741,43 @@ export class NetworkingService extends BaseService {
       }
       kindByte = networkingMessage.value.kindByte
     }
+
+    // Unique Persistent (UP) streams: only one stream per kind per connection.
+    // If acceptor sees multiple streams with same kind (e.g. packet loss), keep greatest stream ID.
+    if (kindByte !== undefined && this.protocolRegistry.has(kindByte)) {
+      const streamId = this.getStreamId(stream)
+      const upResult = peer.registerOrCompareUPStream(
+        kindByte,
+        stream,
+        streamId,
+      )
+      if (upResult.action === 'reject') {
+        logger.debug(
+          '[NetworkingService] UP stream duplicate rejected (keeping stream with greater ID)',
+          {
+            kindByte,
+            streamId,
+            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          },
+        )
+        this.resetQuicStream(stream)
+        peer.removeStream(stream)
+        return
+      }
+      if (upResult.previousStream) {
+        logger.debug(
+          '[NetworkingService] UP stream duplicate: resetting older stream, keeping greater ID',
+          {
+            kindByte,
+            streamId,
+            peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+          },
+        )
+        this.resetQuicStream(upResult.previousStream)
+        peer.removeStream(upResult.previousStream)
+      }
+    }
+
     const { value: messageData } = await reader.read()
     if (!messageData) {
       logger.error('[NetworkingService] No message data read from stream', {
@@ -764,6 +806,37 @@ export class NetworkingService extends BaseService {
       networkingMessage.value,
       peerPublicKey,
     )
+  }
+
+  /**
+   * Get QUIC stream ID for Unique Persistent (UP) stream comparison.
+   * Per QUIC spec, when multiple streams exist for the same kind, keep the one with greatest ID.
+   */
+  private getStreamId(stream: QUICStream): number {
+    const s = stream as { id?: number; streamId?: number }
+    const id = s.id ?? s.streamId
+    return typeof id === 'number' && Number.isFinite(id) ? id : 0
+  }
+
+  /**
+   * Reset a QUIC stream (e.g. to enforce UP: only one stream per kind; reset duplicates).
+   */
+  private resetQuicStream(stream: QUICStream): void {
+    try {
+      const s = stream as { reset?: (code?: number) => void; stop?: () => void }
+      if (typeof s.reset === 'function') {
+        s.reset(0)
+      } else if (typeof s.stop === 'function') {
+        s.stop()
+      }
+    } catch (err) {
+      logger.debug(
+        '[NetworkingService] Stream reset/stop failed (may already be closed)',
+        {
+          error: err instanceof Error ? err.message : String(err),
+        },
+      )
+    }
   }
 
   /**
@@ -969,7 +1042,9 @@ export class NetworkingService extends BaseService {
 
     // Only set up essential events: stream creation and connection close
 
-    // Set up connection events for streams and cleanup
+    // Set up connection events for streams and cleanup.
+    // Unique Persistent (UP) streams: we add every new stream here; when the first byte is read
+    // we learn the kind and enforce one stream per kind (keep greatest stream ID) in readStreamData.
     connection.addEventListener(
       'EventQUICConnectionStream',
       async (streamEvent: events.EventQUICConnectionStream) => {
@@ -1305,22 +1380,15 @@ export class NetworkingService extends BaseService {
       )
       this.setPeer(peer)
 
-      // As client (initiator), create the first stream
-      const stream = quicConnection.newStream('bidi')
-      peer.addStream(stream)
-
       logger.info(
-        '[NetworkingService] New peer created (client/initiator, stream created)',
+        '[NetworkingService] New peer created (client/initiator); streams created on first send per kind',
         {
           peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
           connectionId: `${connectionId.slice(0, 20)}...`,
         },
       )
 
-      // Set up data listener on the stream
-      this.setupStreamDataListener(stream, peerPublicKey)
-
-      // Listen for EventQUICConnectionStream in case remote creates additional streams
+      // Listen for EventQUICConnectionStream when remote opens streams
       quicConnection.addEventListener(
         'EventQUICConnectionStream',
         async (streamEvent: events.EventQUICConnectionStream) => {

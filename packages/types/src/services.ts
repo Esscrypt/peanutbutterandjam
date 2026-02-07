@@ -951,7 +951,7 @@ export interface INetworkingService {
     streamKind: StreamKind,
     message: Uint8Array,
   ): SafePromise<void>
-  closeStreamForPeer(publicKey: Hex): SafePromise<void>
+  closeStreamForPeer(publicKey: Hex, kind: StreamKind): SafePromise<void>
 }
 
 /**

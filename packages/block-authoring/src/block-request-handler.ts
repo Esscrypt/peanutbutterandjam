@@ -63,8 +63,10 @@ export async function handleBlockRequest(
     })
 
     // Close the stream to send FIN after the request
-    const [closeError] =
-      await networkingService.closeStreamForPeer(peerPublicKey)
+    const [closeError] = await networkingService.closeStreamForPeer(
+      peerPublicKey,
+      128 as StreamKind,
+    )
     if (closeError) {
       logger.error('Failed to close stream after block request', {
         error: closeError.message,

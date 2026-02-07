@@ -6,7 +6,7 @@
 import type { QUICConnection } from '@infisical/quic'
 import type QUICStream from '@infisical/quic/dist/QUICStream'
 import type { Hex } from '@pbnjam/core'
-import type { ConnectionEndpoint } from '@pbnjam/types'
+import type { ConnectionEndpoint, StreamKind } from '@pbnjam/types'
 
 /**
  * Reader interface for QUIC stream readable
@@ -31,8 +31,13 @@ export class Peer {
   endpoint: ConnectionEndpoint
   /** Set of streams for this peer (multiple streams per connection allowed) */
   streams: Set<QUICStream> = new Set()
-  /** Primary stream for sending (first stream created/received) */
-  primaryStream: QUICStream | null = null
+  /**
+   * Unique Persistent (UP) streams: at most one active stream per StreamKind per connection.
+   * When the acceptor sees multiple streams with the same kind (e.g. after packet loss),
+   * the stream with the greatest ID is kept; others are reset.
+   */
+  streamByKind: Map<StreamKind, { stream: QUICStream; streamId: number }> =
+    new Map()
   /** Stream readers per stream */
   readers: Map<QUICStream, StreamReader> = new Map()
   /** Whether we initiated this connection (client side) */
@@ -57,9 +62,6 @@ export class Peer {
    */
   addStream(stream: QUICStream): void {
     this.streams.add(stream)
-    if (!this.primaryStream) {
-      this.primaryStream = stream
-    }
   }
 
   /**
@@ -67,15 +69,46 @@ export class Peer {
    */
   removeStream(stream: QUICStream): void {
     this.streams.delete(stream)
+    for (const [kind, entry] of this.streamByKind.entries()) {
+      if (entry.stream === stream) {
+        this.streamByKind.delete(kind)
+        break
+      }
+    }
     const reader = this.readers.get(stream)
     if (reader) {
       reader.releaseLock()
       this.readers.delete(stream)
     }
-    if (this.primaryStream === stream) {
-      // Set a new primary stream if available
-      this.primaryStream =
-        this.streams.size > 0 ? Array.from(this.streams)[0] : null
+  }
+
+  /**
+   * Unique Persistent (UP) stream rule: only one stream per kind per connection.
+   * When the acceptor observes multiple streams with the same kind, keep the one
+   * with the greatest stream ID (per QUIC spec) and reject the others.
+   * Caller must have already added the stream to this peer (e.g. via addStream).
+   * @returns 'keep' and optional previousStream to reset, or 'reject' (caller should reset this stream)
+   */
+  registerOrCompareUPStream(
+    kind: StreamKind,
+    stream: QUICStream,
+    streamId: number,
+  ): { action: 'keep'; previousStream?: QUICStream } | { action: 'reject' } {
+    const existing = this.streamByKind.get(kind)
+    if (!existing) {
+      this.streamByKind.set(kind, { stream, streamId })
+      return { action: 'keep' }
     }
+    if (streamId > existing.streamId) {
+      this.streams.delete(existing.stream)
+      this.streamByKind.set(kind, { stream, streamId })
+      return { action: 'keep', previousStream: existing.stream }
+    }
+    return { action: 'reject' }
+  }
+
+  /** Get the active UP stream for a kind, if any */
+  getStreamForKind(kind: StreamKind): QUICStream | null {
+    return this.streamByKind.get(kind)?.stream ?? null
   }
 }
