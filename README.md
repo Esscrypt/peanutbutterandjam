@@ -1,5 +1,9 @@
 # PeanutButterAndJam (PBNJ)
 
+[![Peanut Butter AND JAM – Live site](https://img.shields.io/badge/Peanut_Butter_AND_JAM-Live_site-7b2cbf?style=for-the-badge&labelColor=2d1f17)](https://www.peanutbutterandjam.xyz/)
+
+**[→ Visit the live site: peanutbutterandjam.xyz](https://www.peanutbutterandjam.xyz/)**
+
 A production-grade TypeScript/JavaScript implementation of the **JAM** protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). This monorepo provides a full JAM node: consensus (Safrole), PVM execution, networking, block authoring and import, and CLI tooling.
 
 ## Table of Contents
