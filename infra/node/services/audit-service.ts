@@ -21,6 +21,10 @@ import {
   verifyTrancheNAuditSignature,
   verifyWorkReportSelection,
 } from '@pbnjam/audit'
+import type {
+  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   type AuditTrancheEvent,
   bytesToHex,
@@ -55,6 +59,7 @@ export class AuditService extends BaseService {
   private readonly auditAnnouncementProtocol: AuditAnnouncementProtocol | null
   private readonly configService: IConfigService
   private readonly keyPairService: KeyPairService | null
+  private readonly verifier: IETFVRFVerifier | IETFVRFVerifierWasm
   private currentTranche = 0
 
   constructor(options: {
@@ -65,6 +70,7 @@ export class AuditService extends BaseService {
     auditAnnouncementProtocol?: AuditAnnouncementProtocol | null
     configService: IConfigService
     keyPairService?: KeyPairService | null
+    verifier: IETFVRFVerifier | IETFVRFVerifierWasm
   }) {
     super('audit-service')
     this.eventBusService = options.eventBusService
@@ -74,6 +80,7 @@ export class AuditService extends BaseService {
     this.auditAnnouncementProtocol = options.auditAnnouncementProtocol ?? null
     this.configService = options.configService
     this.keyPairService = options.keyPairService ?? null
+    this.verifier = options.verifier
     this.eventBusService.addAuditTrancheCallback(
       this.handleAuditTranche.bind(this),
     )
@@ -278,6 +285,7 @@ export class AuditService extends BaseService {
       announcement,
       hexToBytes(peerPublicKey),
       workReports[0],
+      this.verifier,
     )
     if (vrfError) {
       logger.error('Failed to verify Bandersnatch VRF evidence', {
@@ -637,6 +645,7 @@ export class AuditService extends BaseService {
           hexToBytes(announcerKey.ed25519),
           announcement.evidence,
           blockHeaderVrfOutput,
+          this.verifier,
         )
 
         if (error) {
@@ -673,6 +682,7 @@ export class AuditService extends BaseService {
           blockHeaderVrfOutput,
           firstWorkReport,
           announcement.tranche,
+          this.verifier,
         )
 
         if (error) {

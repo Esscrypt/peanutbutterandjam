@@ -168,6 +168,8 @@ bun run ./apis/rpc-server/src/index.ts --validator-index 0 --telemetry 127.0.0.1
 
 ## Running Polkajam
 ```
+./submodules/polkajam/polkajam --chain=config/spec-tiny.json run --dev-validator 0 --temp
+
 # if not there already
 cd submodules/polkajam
 

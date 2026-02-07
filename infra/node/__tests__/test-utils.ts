@@ -404,13 +404,14 @@ export async function initializeServices(options?: {
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
   useRust?: boolean
-  enableNetworking?: boolean
+  enableNetworking?: boolean,
+  useIetfVrfWasm?: boolean,
+  useRingVrfWasm?: boolean,
   networking?: {
     listenAddress: string
     listenPort: number
     nodeType: 'validator' | 'full' | 'builder'
     isBuilder?: boolean
-  useIetfVrfWasm?: boolean
   }
 }): Promise<FuzzerTargetServices> {
   const {
@@ -422,7 +423,8 @@ export async function initializeServices(options?: {
     useRust = false,
     enableNetworking = false,
     networking,
-    useIetfVrfWasm = false,
+    useIetfVrfWasm,
+    useRingVrfWasm,
   } = options || {}
 
   // Create services using the factory
@@ -431,7 +433,7 @@ export async function initializeServices(options?: {
     traceSubfolder,
     useWasm,
     useRust,
-    useRingVrfWasm: true,
+    useRingVrfWasm,
     useIetfVrfWasm,
     initialValidators,
     enableNetworking: false,

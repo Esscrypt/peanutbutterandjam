@@ -59,7 +59,7 @@ export class NetworkingService extends BaseService {
     NetworkingProtocol<unknown, unknown>
   > = new Map()
 
-  // Track peers - 1 peer per connection, 1 stream per peer
+  // Track peers: 1 Peer per remote (per QUIC connection); each Peer can have multiple streams
   /** Map of peer public key to Peer object */
   private readonly peers: Map<Hex, Peer> = new Map()
   /** Map of connection ID to peer public key (for reverse lookup) */
@@ -255,6 +255,11 @@ export class NetworkingService extends BaseService {
 
     await this.server.start({ host: listenAddress, port: listenPort })
 
+    logger.info('[NetworkingService.start] Server started', {
+      listenAddress: listenAddress,
+      listenPort: listenPort,
+    })
+
     // Start periodic status logging every 2 seconds
     this.startStatusLogging()
 
@@ -265,9 +270,9 @@ export class NetworkingService extends BaseService {
     )
     // Listen to conectivityChange event from clock-service (after delay)
     // TODO: this causes us to initiate connections. double check
-    // this.eventBusService.addConectivityChangeCallback(
-    //   this.handleConectivityChange.bind(this),
-    // )
+    this.eventBusService.addConectivityChangeCallback(
+      this.handleConectivityChange.bind(this),
+    )
 
     return safeResult(true)
   }
@@ -375,11 +380,25 @@ export class NetworkingService extends BaseService {
       !this.validatorSetManagerService ||
       !this.clockService
     ) {
+      logger.error(
+        '[NetworkingService.handleConectivityChange] Missing dependencies',
+        {
+          recentHistoryService: !!this.recentHistoryService,
+          validatorSetManagerService: !!this.validatorSetManagerService,
+          clockService: !!this.clockService,
+        },
+      )
       return
     }
 
     // Skip if we've already connected this epoch
     if (this.hasConnectedThisEpoch) {
+      logger.debug(
+        '[NetworkingService.handleConectivityChange] Already connected this epoch',
+        {
+          hasConnectedThisEpoch: this.hasConnectedThisEpoch,
+        },
+      )
       return
     }
 
@@ -393,6 +412,12 @@ export class NetworkingService extends BaseService {
     // Check condition: First block in epoch has been finalized
     const recentHistory = this.recentHistoryService.getRecentHistory()
     if (recentHistory.length === 0) {
+      logger.debug(
+        '[NetworkingService.handleConectivityChange] No recent history',
+        {
+          recentHistoryLength: recentHistory.length,
+        },
+      )
       return
     }
 
@@ -404,6 +429,14 @@ export class NetworkingService extends BaseService {
     const firstBlockInEpochFinalized = oldestBlockSlot <= this.epochStartSlot
 
     if (!firstBlockInEpochFinalized) {
+      logger.debug(
+        '[NetworkingService.handleConectivityChange] First block in epoch not finalized',
+        {
+          oldestBlockSlot: oldestBlockSlot,
+          currentSlot: currentSlot,
+          epochStartSlot: this.epochStartSlot,
+        },
+      )
       return
     }
 

@@ -992,15 +992,16 @@ export class ChainManagerService
    * rolling back to this state when importing sibling blocks (forks).
    * Includes service-specific state that's not part of the state trie.
    */
-  saveStateSnapshot(blockHash: Hex, snapshot: StateTrie): void {
-    if (!this.blockNodes.has(blockHash)) {
-      this.blockNodes.set(blockHash, {
+  saveStateSnapshot(header: BlockHeader, snapshot: StateTrie): void {
+    if (!this.blockNodes.has(header.parent)) {
+      this.blockNodes.set(header.parent, {
+        slot: header.timeslot,
         children: new Set(),
         block: null,
         stateSnapshot: snapshot,
       })
     } else {
-      this.blockNodes.get(blockHash)!.stateSnapshot = snapshot
+      this.blockNodes.get(header.parent)!.stateSnapshot = snapshot
     }
   }
 

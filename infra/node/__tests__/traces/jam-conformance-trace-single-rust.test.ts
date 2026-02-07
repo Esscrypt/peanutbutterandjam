@@ -36,6 +36,7 @@ import {
 } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
+  BlockHeader,
 } from '@pbnjam/types'
 import {
   convertJsonBlockToBlock,
@@ -668,7 +669,7 @@ describe('JAM Conformance Single Trace', () => {
         // This allows rolling back to initial state if first block fails
         const [initTrieError, initTrie] = stateService.generateStateTrie()
         if (!initTrieError && initTrie) {
-          chainManagerService.saveStateSnapshot(traceData.block.header.parent, initTrie)
+          chainManagerService.saveStateSnapshot(convertJsonBlockToBlock(traceData.block).header as BlockHeader, initTrie)
         }
         isFirstBlock = false
       }

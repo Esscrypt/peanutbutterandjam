@@ -1003,11 +1003,11 @@ if (import.meta.main) {
           ? Number.parseInt(validatorIndexEnv, 10)
           : undefined
 
-      // Parse telemetry endpoint from environment or arguments
+      // Parse telemetry endpoint from environment or arguments; only enable telemetry when explicitly set
       const telemetryEndpoint =
         process.env['TELEMETRY_ENDPOINT'] ||
         parseArg('--telemetry') ||
-        'localhost:9000'
+        undefined
 
       // Connection endpoint will be extracted from validator metadata in init()
       // listenAddress and listenPort are no longer needed as they come from validators
@@ -1018,7 +1018,7 @@ if (import.meta.main) {
         genesisJsonPath,
         nodeId,
         validatorIndex,
-        telemetryEndpoint,
+        ...(telemetryEndpoint && { telemetryEndpoint }),
       })
 
       // Create MainService instance
@@ -1033,10 +1033,12 @@ if (import.meta.main) {
         },
         nodeId,
         ...(validatorIndex !== undefined && { validatorIndex }),
-        telemetry: {
-          endpoint: telemetryEndpoint,
-          enabled: true,
-        },
+        ...(telemetryEndpoint && {
+          telemetry: {
+            endpoint: telemetryEndpoint,
+            enabled: true,
+          },
+        }),
       })
 
       // Initialize and start the service

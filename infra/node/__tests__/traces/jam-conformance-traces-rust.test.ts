@@ -25,6 +25,7 @@ import {
 import { decodeRecent, decodeStateWorkReports } from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
+  BlockHeader,
 } from '@pbnjam/types'
 import { stopCoreServices } from '../../services/service-factory'
 import {
@@ -251,7 +252,7 @@ describe('JAM Conformance Traces', () => {
         const traceSubfolder = `jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
         // Initialize services using shared utility (reuse genesisManager for this directory)
-        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useRust: true, useWorkerPool: false, useRingVrfWasm: false })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useRust: true, useRingVrfWasm: false })
         const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
@@ -319,7 +320,7 @@ describe('JAM Conformance Traces', () => {
       // This allows rolling back to initial state if block import fails
       const [initTrieError, initTrie] = stateService.generateStateTrie()
       if (!initTrieError && initTrie) {
-        chainManagerService.saveStateSnapshot(traceData.block.header.parent, initTrie)
+        chainManagerService.saveStateSnapshot(convertJsonBlockToBlock(traceData.block).header as BlockHeader, initTrie)
       }
 
       // Check if block import is expected to fail (pre_state == post_state)
