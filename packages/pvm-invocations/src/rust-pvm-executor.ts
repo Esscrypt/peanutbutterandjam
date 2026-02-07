@@ -9,8 +9,9 @@
  * Build with: cd packages/pvm-rust && bun run build
  */
 
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 const require = createRequire(import.meta.url)
 
@@ -78,10 +79,35 @@ export type NativeBinding = {
   ) => Buffer
 }
 
+/** Paths to try so the addon resolves when running the compiled fuzzer binary (./bin/fuzzer-target). */
+function getNativeAddonFallbackPaths(): string[] {
+  const execDir = dirname(process.execPath)
+  const cwd = process.cwd()
+  return [
+    // Same folder as the binary: drop the `native` folder (index.js + .node) next to fuzzer-target
+    join(execDir, 'native'),
+    // Same folder as the binary: node_modules layout next to the binary
+    join(execDir, 'node_modules', '@pbnjam', 'pvm-rust-native', 'native'),
+    // Repo root when running ./bin/fuzzer-target from workspace
+    join(execDir, '..', 'node_modules', '@pbnjam', 'pvm-rust-native', 'native'),
+    join(cwd, 'node_modules', '@pbnjam', 'pvm-rust-native', 'native'),
+    join(cwd, 'packages', 'pvm-rust', 'native'),
+  ]
+}
+
 function loadNative(): NativeBinding | null {
   try {
     return require('@pbnjam/pvm-rust-native/native') as NativeBinding
   } catch {
+    for (const nativeDir of getNativeAddonFallbackPaths()) {
+      if (existsSync(join(nativeDir, 'index.js'))) {
+        try {
+          return require(nativeDir) as NativeBinding
+        } catch {
+          // continue to next path
+        }
+      }
+    }
     return null
   }
 }

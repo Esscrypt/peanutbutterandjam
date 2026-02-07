@@ -15,6 +15,12 @@
 import { mkdirSync, unlinkSync } from 'node:fs'
 import { Server as UnixServer, type Socket as UnixSocket } from 'node:net'
 import * as path from 'node:path'
+import { config as loadEnv } from 'dotenv'
+
+// Load .env so ENABLE_LOGGER etc. work when running outside monorepo (e.g. compiled binary in bin/)
+loadEnv()
+loadEnv({ path: path.join(path.dirname(process.execPath), '.env') })
+
 import {
   type IETFVRFVerifier,
   IETFVRFVerifierWasm,
