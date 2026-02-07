@@ -1,17 +1,27 @@
 # PeanutButterAndJam (PBNJ)
 
-A production-grade TypeScript/JavaScript implementation of the **JAM (Just Another Machine)** protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). This monorepo provides a full JAM node: consensus (Safrole), PVM execution, networking, block authoring and import, and CLI tooling.
+A production-grade TypeScript/JavaScript implementation of the **JAM** protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). This monorepo provides a full JAM node: consensus (Safrole), PVM execution, networking, block authoring and import, and CLI tooling.
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Getting Started](#getting-started)
-- [Building](#building)
-- [Running the Node](#running-the-node)
-- [Running the Fuzzer](#running-the-fuzzer)
-- [Packages](#packages)
-- [Specification Compliance](#specification-compliance)
-- [Documentation](#documentation)
+- [PeanutButterAndJam (PBNJ)](#peanutbutterandjam-pbnj)
+  - [Table of Contents](#table-of-contents)
+  - [Prerequisites](#prerequisites)
+  - [Getting Started](#getting-started)
+  - [Building](#building)
+    - [Build all workspace packages](#build-all-workspace-packages)
+    - [Build the node binary (standalone executable)](#build-the-node-binary-standalone-executable)
+    - [Build the fuzzer target (optional)](#build-the-fuzzer-target-optional)
+  - [Running the Node](#running-the-node)
+    - [Option 1: Run with Bun (development)](#option-1-run-with-bun-development)
+  - [Running the Fuzzer](#running-the-fuzzer)
+    - [Run with Bun (development)](#run-with-bun-development)
+  - [Packages](#packages)
+  - [Specification Compliance](#specification-compliance)
+  - [Documentation](#documentation)
+  - [Scripts Reference](#scripts-reference)
+  - [License](#license)
+  - [Support and references](#support-and-references)
 
 ---
 
@@ -74,22 +84,6 @@ bun run build:main
 
 Output: `./bin/main-service` (Bun-compiled executable).
 
-### Build the CLI binary (multi-platform)
-
-Produces standalone CLI binaries for running the node, generating keys, and chain spec:
-
-```bash
-./scripts/build-cli.sh
-```
-
-Or from the CLI package:
-
-```bash
-cd packages/cli && bun run build:binary
-```
-
-Binaries are written to `packages/cli/dist/bin/` (e.g. `pbnj-macos`, `pbnj-linux`, `pbnj-win.exe`).
-
 ### Build the fuzzer target (optional)
 
 For fuzz testing:
@@ -125,14 +119,6 @@ Or use the compiled binary after `bun run build:main`:
 ```bash
 ./bin/main-service
 ```
-
-
-### Environment variables
-
-- `LOG_LEVEL` — `trace` | `debug` | `info` | `warn` | `error`
-- `DATA_PATH` / `--datadir` — Data directory for chain state
-- `OTEL_EXPORTER_OTLP_ENDPOINT` — OpenTelemetry endpoint (optional)
-- See `.env.example` and [packages/cli/README.md](packages/cli/README.md) for more.
 
 ---
 
