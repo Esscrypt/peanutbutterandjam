@@ -436,7 +436,9 @@ export function encodeUnsignedHeader(
   }
   parts.push(encoded5)
 
-  return safeResult(concatBytes(parts))
+  const result = concatBytes(parts)
+
+  return safeResult(result)
 }
 
 /**

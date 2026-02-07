@@ -393,6 +393,7 @@ export function createProtocols(
  * @param options.genesisManager - Optional genesis manager (if not provided, uses empty state)
  * @param options.initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
  * @param options.useWasm - Whether to use WebAssembly PVM implementation (default: false)
+ * @param options.useRust - Whether to use Rust (native) PVM implementation (default: false)
  * @param options.enableNetworking - Whether to enable networking and protocols (default: false)
  * @param options.networking - Networking configuration (required if enableNetworking is true)
  */
@@ -402,12 +403,14 @@ export async function initializeServices(options?: {
   genesisManager?: NodeGenesisManager
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
+  useRust?: boolean
   enableNetworking?: boolean
   networking?: {
     listenAddress: string
     listenPort: number
     nodeType: 'validator' | 'full' | 'builder'
     isBuilder?: boolean
+  useIetfVrfWasm?: boolean
   }
 }): Promise<FuzzerTargetServices> {
   const {
@@ -416,8 +419,10 @@ export async function initializeServices(options?: {
     genesisManager,
     initialValidators = [],
     useWasm = false,
+    useRust = false,
     enableNetworking = false,
     networking,
+    useIetfVrfWasm = false,
   } = options || {}
 
   // Create services using the factory
@@ -425,7 +430,9 @@ export async function initializeServices(options?: {
     configSize: spec,
     traceSubfolder,
     useWasm,
+    useRust,
     useRingVrfWasm: true,
+    useIetfVrfWasm,
     initialValidators,
     enableNetworking: false,
     networking,

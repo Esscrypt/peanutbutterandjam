@@ -4,7 +4,7 @@
  * Tests the Gray Paper merklization methods: merklizewb, merklizecd, mmrappend, mmrsuperpeak
  */
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import {
   merklizewb,
   merklizecd,
@@ -144,7 +144,7 @@ describe('Merkle Mountain Range (MMR)', () => {
     const range: MMRRange = [hexToBytes('0x1234567890abcdef')]
     const [error, result] = mmrsuperpeak(range)
     expect(error).toBeUndefined()
-    expect(result).toEqual(range[0])
+    expect(result).toEqual(range[0] as Uint8Array)
   })
 
   it('should create super-peak from multiple peaks', () => {

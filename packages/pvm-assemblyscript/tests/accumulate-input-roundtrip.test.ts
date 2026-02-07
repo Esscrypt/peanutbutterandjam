@@ -337,14 +337,14 @@ async function testAssemblyScriptToTypeScriptRoundTrip(): Promise<boolean> {
 
 /**
  * Test: Jamduna test vector round-trip
- * Uses the 179-byte accumulate_input from jamduna test vectors
+ * Uses the 179-byte accumulate_input from reference test vectors
  */
 async function testJamdunaTestVectorRoundTrip(): Promise<boolean> {
   logger.info('Testing Jamduna test vector AccumulateInputs round-trip')
   
   const wasm = await loadWasmModule()
   
-  // The 179-byte hex from jamduna test vectors
+  // The 179-byte hex from reference test vectors
   const expectedHex = '0x010025d8314884a4162787493635f1da182a6fbc7b31b55c18ce74ea1369a7999f4500000000000000000000000000000000000000000000000000000000000000002357426f2313559a271d6782dc00197b379f79cbe3c6a1e72f61f7b592c509f8b5fd156d32aa8f25a91c80449f4e3bba4ea1e54aa9855b2ff53c32e42e7bc02de0809698002a0106f5d8957422098a7b2f007db98bce1bcf51c34311ab19671e7f5dcaadf54e0d9f370000000000000000'
   const expectedBytes = hexToBytes(expectedHex)
   
@@ -353,7 +353,7 @@ async function testJamdunaTestVectorRoundTrip(): Promise<boolean> {
   // Step 1: Decode with TypeScript
   const [decodeError, decodeResult] = decodeVariableSequence(expectedBytes, decodeAccumulateInput)
   if (decodeError) {
-    logger.error('TypeScript decode of jamduna vector failed:', decodeError)
+    logger.error('TypeScript decode of reference vector failed:', decodeError)
     return false
   }
   
@@ -364,7 +364,7 @@ async function testJamdunaTestVectorRoundTrip(): Promise<boolean> {
   const asRoundTripped = wasm.roundTripAccumulateInputs(expectedBytes)
   
   if (asRoundTripped.length === 0) {
-    logger.error('AssemblyScript round-trip of jamduna vector failed (returned empty array)')
+    logger.error('AssemblyScript round-trip of reference vector failed (returned empty array)')
     return false
   }
   

@@ -23,6 +23,8 @@ export interface WorkerData {
     | '3xlarge'
     | 'full'
   traceSubfolder?: string
+  /** When true, workers use Rust PVM so all accumulations (including defxfer-only) match main process. */
+  useRust?: boolean
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Trace Dump Utility
  *
- * Utility function for writing PVM execution traces in jamduna format.
+ * Utility function for writing PVM execution traces in PBNJ format.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -36,18 +36,16 @@ function getHostFunctionName(hostCallId: bigint): string {
  * Priority:
  * 1. If both executorType and blockNumber are provided: {executorType}-{blockNumber}.log (e.g., wasm-4.log)
  * 2. If only executorType is provided: {executorType}-{timestamp}.log
- * 3. If only blockNumber is provided: jamduna format 00000004.log
  * 4. Otherwise: trace-{timestamp}.log
  */
 export function generateTraceFilename(
   blockNumber?: number | bigint | string,
-  executorType?: 'wasm' | 'typescript',
+  executorType?: 'wasm' | 'typescript' | 'rust',
   serviceId?: number | bigint | string,
-  invocationIndex?: number, // The accseq iteration index (0-based) - determines directory structure in jamduna format
+  invocationIndex?: number, // The accseq iteration index (0-based) - determines directory structure
 ): string {
   // If executor type is provided with block number, use {executorType}-{blockNumber}-{invocationIndex}-{serviceId}.log
   // This format enables the converter to group services by invocation index (accseq iteration)
-  // jamduna structure: {timeslot}/{invocation_index}/{service_id}/
   if (executorType !== undefined && blockNumber !== undefined) {
     const blockNum =
       typeof blockNumber === 'string'
@@ -70,7 +68,7 @@ export function generateTraceFilename(
     return `${executorType}-${timestamp}.log`
   }
 
-  // If only blockNumber is provided (and executorType is not), use jamduna format
+  // If only blockNumber is provided (and executorType is not)
   if (blockNumber !== undefined) {
     const blockNum =
       typeof blockNumber === 'string'
@@ -84,9 +82,9 @@ export function generateTraceFilename(
 }
 
 /**
- * Write PVM execution trace in jamduna format
+ * Write PVM execution trace in PBNJ format
  *
- * Format matches jamduna exactly:
+ * Format matches PBNJ exactly:
  * - Instruction lines: <INSTRUCTION> <STEP> <PC> Gas: <GAS> Registers:[<REG0>, <REG1>, ...]
  * - Host function calls: Calling host function: <NAME> <ID> [gas used: <GAS_USED>, gas remaining: <GAS_REMAINING>] [service: <SERVICE_ID>]
  *
@@ -94,11 +92,11 @@ export function generateTraceFilename(
  * @param hostFunctionLogs - Optional array of host function call logs
  * @param outputDir - Optional output directory (defaults to 'pvm-traces' in process.cwd())
  * @param filename - Optional filename (overrides all other filename generation options)
- * @param blockNumber - Optional block number for jamduna-style filename (e.g., 4 -> "00000004.log")
+ * @param blockNumber - Optional block number for filename (e.g., 4 -> "00000004.log")
  * @param executorType - Optional executor type ('wasm' or 'ts') for trace-style filename
  * @param serviceId - Optional service ID to include in trace-style filename
  * @param accumulateInput - Optional accumulate input bytes (encoded args) to write alongside trace
- * @param invocationIndex - Optional invocation index (accseq iteration) for jamduna directory structure
+ * @param invocationIndex - Optional invocation index (accseq iteration)
  * @param accumulateOutput - Optional accumulate output (yield hash, 32 bytes) to write as 'output' file
  * @param errorCode - Optional error code to write as 'err' file (1 byte)
  * @returns The filepath where the trace was written, or undefined if writing failed
@@ -127,28 +125,93 @@ export function writeTraceDump(
   outputDir?: string,
   filename?: string,
   blockNumber?: number | bigint | string,
-  executorType?: 'wasm' | 'typescript',
+  executorType?: 'wasm' | 'typescript' | 'rust',
   serviceId?: number | bigint | string,
   accumulateInput?: Uint8Array,
   invocationIndex?: number,
   accumulateOutput?: Uint8Array,
   errorCode?: number,
 ): string | undefined {
+  // #region agent log
+  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'panic-dump-util.ts:writeTraceDump',
+      message: 'writeTraceDump entry',
+      data: {
+        executionLogsLength: executionLogs.length,
+        enableTraceDump: process.env['ENABLE_PVM_TRACE_DUMP'] === 'true',
+        envValue: process.env['ENABLE_PVM_TRACE_DUMP'],
+      },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      hypothesisId: 'H1',
+    }),
+  }).catch(() => {})
+  // #endregion
   // Check if trace dumping is enabled via environment variable
   const enableTraceDump = process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
   if (!enableTraceDump) {
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'panic-dump-util.ts:early return',
+          message: 'early return: trace dump disabled',
+          data: {},
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H1',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
     // Trace dumping is disabled, return early
     return undefined
   }
 
   if (executionLogs.length === 0) {
+    // #region agent log
+    fetch(
+      'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'panic-dump-util.ts:early return',
+          message: 'early return: executionLogs empty',
+          data: {},
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          hypothesisId: 'H4',
+        }),
+      },
+    ).catch(() => {})
+    // #endregion
     // No logs to write
     return undefined
   }
 
   const defaultDir = join(process.cwd(), 'pvm-traces')
   const targetDir = outputDir ?? defaultDir
-
+  // #region agent log
+  fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location: 'panic-dump-util.ts:writing',
+      message: 'writeTraceDump writing',
+      data: { targetDir, outputDir: outputDir ?? null },
+      timestamp: Date.now(),
+      sessionId: 'debug-session',
+      hypothesisId: 'H5',
+    }),
+  }).catch(() => {})
+  // #endregion
   try {
     // Create directory if it doesn't exist
     mkdirSync(targetDir, { recursive: true })
@@ -177,7 +240,7 @@ export function writeTraceDump(
     // Track which steps have execution logs to ensure host function logs appear
     const executionLogSteps = new Set(executionLogs.map((log) => log.step))
 
-    // Format trace lines in jamduna format
+    // Format trace lines in reference format
     for (const log of executionLogs) {
       // Check if there's a host function call before this instruction
       const hostLog = hostLogsByStep.get(log.step)
@@ -192,7 +255,7 @@ export function writeTraceDump(
         hostLogsByStep.delete(log.step)
       }
 
-      // Format registers as comma-separated values (jamduna format)
+      // Format registers as comma-separated values (reference format)
       const registersStr = log.registers.join(', ')
       const gasValue = log.gas.toString()
 
@@ -236,7 +299,7 @@ export function writeTraceDump(
     writeFileSync(filepath, `${traceLines.join('\n')}\n`, 'utf-8')
 
     // Write accumulate_input file if provided
-    // This matches the jamduna format where accumulate_input is a binary file
+    // This matches the reference format where accumulate_input is a binary file
     // alongside the trace log with the same naming pattern
     if (accumulateInput && accumulateInput.length > 0) {
       // Generate accumulate_input filename based on trace filename
@@ -253,7 +316,7 @@ export function writeTraceDump(
     }
 
     // Write accumulate output or error file if provided
-    // jamduna format: 'output' (32-byte yield hash) or 'err' (1-byte error code)
+    // reference format: 'output' (32-byte yield hash) or 'err' (1-byte error code)
     if (accumulateOutput && accumulateOutput.length > 0) {
       const outputFilename = traceFilename.replace('.log', '-output.bin')
       const outputPath = join(targetDir, outputFilename)

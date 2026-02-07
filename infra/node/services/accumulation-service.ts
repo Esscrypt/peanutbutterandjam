@@ -189,6 +189,7 @@ export class AccumulationService extends BaseService {
         {
           configMode: this.configService._mode,
           traceSubfolder: this.traceSubfolder,
+          useRust: this.accumulatePVM.useRust,
         },
         workerPoolMaxWorkers,
       )
@@ -213,21 +214,28 @@ export class AccumulationService extends BaseService {
   }
 
   /**
-   * Get last accumulation outputs
+   * Get last accumulation outputs (lastaccout') for accoutBelt merklization.
    *
-   * Gray Paper: local_fnservouts ≡ protoset{tuple{serviceid, hash}}
-   * Returns the accumulation output pairings (lastaccout') from the most recent accumulation.
+   * Gray Paper accumulation.tex eq 369: lastaccout' ≡ sq{(s, h) ∈ b} where b = local_fnservouts
+   * (protoset). The GP does not specify the order when building the sequence from the set b.
+   * Gray Paper recent_history.tex eq 29: s = [encode[4](s) concat encode(h) : (s, h) orderedin lastaccout'].
+   * We use ascending service-ID order so that the same service's outputs are adjacent (and
+   * duplicate service IDs ordered by insertion order is preserved by a stable sort), matching
+   * the reference implementation (jam-conformance) for conformance tests.
    *
-   * @returns Map of serviceId -> hash from the latest accumulation
-   *          Returns a default Map with zeroHash if no accumulation outputs exist
+   * @returns Sequence of [serviceId, hash] in ascending service-ID order.
    */
   getLastAccumulationOutputs(): [bigint, Hex][] {
-    // Gray Paper: lastaccout' ≡ ⟦(s, h) ∈ b⟧ where b is a SET
-    // Sets are ordered by their key (service ID) in ascending order
-    // So we must sort by service ID before returning
+    // Gray Paper eq 369: lastaccout' from set b; order unspecified. Use service-ID order, then
+    // hash (lexicographic) when service ID is equal, for deterministic merklizewb(s) and to
+    // match reference (jam-conformance).
     return [...this.accumulationOutputs].sort((a, b) => {
       if (a[0] < b[0]) return -1
       if (a[0] > b[0]) return 1
+      const hashA = String(a[1])
+      const hashB = String(b[1])
+      if (hashA < hashB) return -1
+      if (hashA > hashB) return 1
       return 0
     })
   }
@@ -362,6 +370,9 @@ export class AccumulationService extends BaseService {
     let processedImmediateHashes = new Set<Hex>()
     let batchInvocationIndex = 0
 
+    // Track ejected services across all batches so we do not re-add them in a later batch
+    const ejectedServices = new Set<bigint>()
+
     // IMPORTANT: MAIN ACCUMULATION LOOP - DO NOT REMOVE THIS LOOP
     while (true) {
       const outcome = await this.runAccumulationIteration(
@@ -371,6 +382,7 @@ export class AccumulationService extends BaseService {
         pendingDefxfers,
         totalGasUsed,
         batchInvocationIndex,
+        ejectedServices,
       )
       if (outcome.done) break
       processedImmediateHashes = outcome.processedImmediateHashes
@@ -392,6 +404,7 @@ export class AccumulationService extends BaseService {
     pendingDefxfers: DeferredTransfer[],
     totalGasUsed: bigint,
     batchInvocationIndex: number,
+    ejectedServices: Set<bigint>,
   ): Promise<AccumulationIterationResult> {
     // Step 1: Collect all ready items from ALL slots (in rotated order: [m:] then [:m])
     // Gray Paper equation 89: q = E(concat{ready[m:]} concat concat{ready[:m]} concat justbecameavailable^Q, ...)
@@ -543,6 +556,8 @@ export class AccumulationService extends BaseService {
       currentSlot,
       partialStateAccountsPerInvocation,
       accumulatedServiceIds,
+      ejectedServices,
+      batchInvocationIndex,
     )
 
     return {
@@ -665,10 +680,8 @@ export class AccumulationService extends BaseService {
     for (let i = 0; i < batchInvocations.length; i++) {
       const inv = batchInvocations[i]!
       const result = batchResults[i]!
-      partialStateAccountsPerInvocation.set(
-        batchInvocationIndex,
-        inv.partialStateServiceIds,
-      )
+      // Key must be invocation index i within this batch so pass 1 can check each invocation's partial state
+      partialStateAccountsPerInvocation.set(i, inv.partialStateServiceIds)
       const defxfersForService = this.filterDefxfersFromInputs(inv.inputs)
       const workItemCount = inv.inputs.filter((inp) => inp.type === 0).length
       if (defxfersForService.length > 0) {
@@ -737,7 +750,7 @@ export class AccumulationService extends BaseService {
    *
    * @param readyItems - Work reports to process
    * @param pendingDefxfers - Defxfers from previous accumulations (Gray Paper: t)
-   * @returns Map from serviceId to AccumulateInput[] (i^T concat i^U for each service), with keys in ascending order for deterministic iteration
+   * @returns Map from serviceId to AccumulateInput[] (i^T concat i^U for each service), with keys in first-appearance order (defxfers then readyItems) to match reference accumulation order for lastaccout'
    */
   createAccumulateInputs(
     readyItems: ReadyItem[],
@@ -956,8 +969,10 @@ export class AccumulationService extends BaseService {
     processedWorkReports: WorkReport[],
     workReportsByService: Map<number, WorkReport[]>,
     currentSlot: bigint,
-    partialStateAccountsPerInvocation?: Map<number, Set<bigint>>,
-    accumulatedServiceIds?: bigint[], // Service ID for each invocation (needed for transfer-only)
+    partialStateAccountsPerInvocation: Map<number, Set<bigint>> | undefined,
+    accumulatedServiceIds: bigint[] | undefined,
+    ejectedServices: Set<bigint>,
+    batchInvocationIndex: number,
   ): void {
     // Collect poststates from all services for privilege computation
     // Gray Paper accpar equation 220-238: privileges use R function which needs manager and holder poststates
@@ -1000,7 +1015,8 @@ export class AccumulationService extends BaseService {
     // Gray Paper: When a service is accumulated at slot s, update its lastacc to s
     // Track which accounts have been updated to prevent overwriting with stale data
     const updatedAccounts = new Set<bigint>()
-    const ejectedServices = new Set<bigint>()
+    // ejectedServices is passed in so it is shared across all batches in processAccumulation
+    // and we do not re-add in a later batch a service that was ejected in an earlier batch
 
     applyAccumulationResultsToState(
       results,
@@ -1015,6 +1031,7 @@ export class AccumulationService extends BaseService {
       this.accumulatedServicesForLastacc,
       this.serviceAccountsService,
       this.validatorSetManager,
+      batchInvocationIndex,
     )
 
     // Step 2b: Compute final privileges using Gray Paper R function
@@ -1023,15 +1040,6 @@ export class AccumulationService extends BaseService {
     // R(o, a, b) = b when a = o (manager didn't change), else a (manager changed)
     applyPrivilegesWithRFunction(servicePoststates, this.privilegesService)
 
-    // Step 4: Delete ejected services (after applying transfers)
-    // This ensures any transfers to ejected services are attempted before deletion
-    for (const ejectedServiceId of ejectedServices) {
-      this.serviceAccountsService.deleteServiceAccount(ejectedServiceId)
-    }
-
-    // Remove ALL processed work reports from ready queue, regardless of success/failure
-    // Gray Paper: A work report is "processed" once accumulation is attempted, even if it fails
-    // Failed work reports (PANIC/OOG) should NOT be re-processed - they are consumed by the attempt
     for (const processedReport of processedWorkReports) {
       // Log whether this was successfully accumulated (for debugging)
       const [hashError, workReportHash] =

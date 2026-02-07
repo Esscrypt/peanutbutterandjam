@@ -1,7 +1,8 @@
 import {
   getBanderoutFromGamma,
   IETFVRFProver,
-  IETFVRFVerifier,
+  type IETFVRFVerifier,
+  type IETFVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import { encodeUnsignedHeader } from '@pbnjam/codec'
 import { bytesToHex, logger } from '@pbnjam/core'
@@ -129,6 +130,7 @@ export function verifyTicketBasedSealSignature(
   unsignedHeader: UnsignedBlockHeader,
   ticket: SafroleTicketWithoutProof,
   config: IConfigService,
+  verifier: IETFVRFVerifier | IETFVRFVerifierWasm,
 ): Safe<boolean> {
   // Validate inputs
   if (validatorPublicKey.length !== 32) {
@@ -176,7 +178,7 @@ export function verifyTicketBasedSealSignature(
   // k = validatorPublicKey, c = context, m = encodedUnsignedHeader
   // NOTE: IETFVRFVerifier.verify parameter order is (publicKey, input, proof, auxData)
   // where input = message and auxData = context per IETF VRF specification
-  const isValid = IETFVRFVerifier.verify(
+  const isValid = verifier.verify(
     validatorPublicKey,
     context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (message) - goes to _input parameter
     signature,

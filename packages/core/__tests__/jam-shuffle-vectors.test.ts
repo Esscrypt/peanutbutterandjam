@@ -8,7 +8,7 @@
 import { logger } from '../src/logger'
 import { jamShuffle, shuffleValidatorIndices } from '../src/shuffle'
 import { readFileSync } from 'fs'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'bun:test'
 import type { Hex } from 'viem'
 
 beforeAll(() => {

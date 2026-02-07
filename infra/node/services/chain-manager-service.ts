@@ -986,6 +986,25 @@ export class ChainManagerService
   // ============================================================================
 
   /**
+   * Save state snapshot for a block
+   *
+   * Called after a block is successfully imported. The snapshot allows
+   * rolling back to this state when importing sibling blocks (forks).
+   * Includes service-specific state that's not part of the state trie.
+   */
+  saveStateSnapshot(blockHash: Hex, snapshot: StateTrie): void {
+    if (!this.blockNodes.has(blockHash)) {
+      this.blockNodes.set(blockHash, {
+        children: new Set(),
+        block: null,
+        stateSnapshot: snapshot,
+      })
+    } else {
+      this.blockNodes.get(blockHash)!.stateSnapshot = snapshot
+    }
+  }
+
+  /**
    * Get state snapshot for a block
    *
    * Returns the complete snapshot that was saved after this block was imported.

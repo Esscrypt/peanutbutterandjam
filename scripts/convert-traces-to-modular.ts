@@ -2,7 +2,7 @@
 /**
  * Convert text format PVM traces to JIP-6 modular binary format
  *
- * Converts all text format traces (typescript-{timeslot}.log, wasm-{timeslot}.log)
+ * Converts all text format traces (typescript-{timeslot}.log, wasm-{timeslot}.log, rust-{timeslot}.log)
  * in the pvm-traces folder to the binary modular format used by jamduna for JIP-6 traces.
  *
  * Usage:
@@ -27,7 +27,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { OPCODES } from '@pbnjam/pvm'
+import { OPCODES } from '../packages/pvm/src/config'
 
 // Create opcode mapping from instruction names to opcodes from OPCODES
 const OPCODE_MAP: Record<string, number> = {}
@@ -262,7 +262,7 @@ function convertTraceToModular(
 interface TraceFile {
   filename: string
   filepath: string
-  executorType: 'typescript' | 'wasm'
+  executorType: 'typescript' | 'wasm' | 'rust'
   timeslot: string
   serviceId: string
   orderedIndex: number // Computed based on order within timeslot
@@ -285,7 +285,7 @@ function discoverTraceFiles(
   interface RawTraceFile {
     filename: string
     filepath: string
-    executorType: 'typescript' | 'wasm'
+    executorType: 'typescript' | 'wasm' | 'rust'
     timeslot: string
     serviceId: string
     invocationIndex?: number // Parsed from new filename format (if present)
@@ -320,11 +320,15 @@ function discoverTraceFiles(
         // - wasm-{timeslot}-{serviceId}.log (legacy format, invocationIndex defaults to 0)
         // - typescript-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
         // - wasm-{timeslot}.log (legacy format, serviceId and invocationIndex default to 0)
+        // - rust-{timeslot}-{invocationIndex}-{serviceId}.log and legacy variants
         const tsMatch = entry.name.match(
           /^typescript-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/,
         )
         const wasmMatch = entry.name.match(
           /^wasm-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/,
+        )
+        const rustMatch = entry.name.match(
+          /^rust-(\d+)(?:-(\d+)(?:-(\d+))?)?\.log$/,
         )
 
         if (tsMatch) {
@@ -415,6 +419,49 @@ function discoverTraceFiles(
             filename: entry.name,
             filepath: fullPath,
             executorType: 'wasm',
+            timeslot,
+            serviceId,
+            invocationIndex,
+            subfolder: currentSubfolder,
+            accumulateInputPath: existsSync(accumulateInputPath)
+              ? accumulateInputPath
+              : undefined,
+            outputPath: existsSync(outputPath) ? outputPath : undefined,
+            errPath: existsSync(errPath) ? errPath : undefined,
+          })
+        } else if (rustMatch) {
+          const timeslot = rustMatch[1]!
+          let invocationIndex: number | undefined
+          let serviceId: string
+          if (rustMatch[3] !== undefined) {
+            invocationIndex = Number.parseInt(rustMatch[2]!, 10)
+            serviceId = rustMatch[3]
+          } else {
+            invocationIndex = undefined
+            serviceId = rustMatch[2] ?? '0'
+          }
+          const accumulateInputFilename =
+            invocationIndex !== undefined
+              ? `rust-${timeslot}-${invocationIndex}-${serviceId}-accumulate_input.bin`
+              : `rust-${timeslot}-${serviceId}-accumulate_input.bin`
+          const accumulateInputPath = join(dir, accumulateInputFilename)
+
+          const outputFilename =
+            invocationIndex !== undefined
+              ? `rust-${timeslot}-${invocationIndex}-${serviceId}-output.bin`
+              : `rust-${timeslot}-${serviceId}-output.bin`
+          const outputPath = join(dir, outputFilename)
+
+          const errFilename =
+            invocationIndex !== undefined
+              ? `rust-${timeslot}-${invocationIndex}-${serviceId}-err.bin`
+              : `rust-${timeslot}-${serviceId}-err.bin`
+          const errPath = join(dir, errFilename)
+
+          rawTraceFiles.push({
+            filename: entry.name,
+            filepath: fullPath,
+            executorType: 'rust',
             timeslot,
             serviceId,
             invocationIndex,
@@ -542,7 +589,7 @@ async function main() {
   if (traceFiles.length === 0) {
     console.log('No trace files found in pvm-traces/')
     console.log(
-      'Expected files matching: typescript-{timeslot}.log or wasm-{timeslot}.log',
+      'Expected files matching: typescript-{timeslot}.log, wasm-{timeslot}.log, or rust-{timeslot}.log',
     )
     console.log(
       'Searches recursively in all subfolders (except modular output directories)',
@@ -572,9 +619,13 @@ async function main() {
     // Build output directory structure matching jamduna exactly:
     // jamduna: {timeslot}/{ordered_index}/{service_id}/
     // e.g., 00000050/0/1985398916/
-    // Our output: pvm-traces/{subfolder}/modular/{timeslot}/{ordered_index}/{service_id}/
+    // Our output: pvm-traces/{subfolder}/modular|modular-wasm|modular-rust/{timeslot}/{ordered_index}/{service_id}/
     const modularDir =
-      traceFile.executorType === 'wasm' ? 'modular-wasm' : 'modular'
+      traceFile.executorType === 'wasm'
+        ? 'modular-wasm'
+        : traceFile.executorType === 'rust'
+          ? 'modular-rust'
+          : 'modular'
     const outputDirParts = [tracesDir]
 
     // Include subfolder in output path if present

@@ -7,11 +7,14 @@
  */
 
 import { describe, it, expect, beforeAll } from 'bun:test'
+import { createRequire } from 'node:module'
 import { logger, bytesToHex, hexToBytes, type Hex } from '@pbnjam/core'
-import type { ServiceAccount } from '@pbnjam/types'
+import type { ServiceAccount, ImplicationsPair, Implications, PartialState, IConfigService } from '@pbnjam/types'
 import {
   encodeCompleteServiceAccount,
   decodeCompleteServiceAccount,
+  encodeImplicationsPair,
+  decodeImplicationsPair,
 } from '@pbnjam/codec'
 import {
   createServiceStorageKey,
@@ -20,6 +23,68 @@ import {
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ConfigService } from '../../../infra/node/services/config-service'
+
+const require = createRequire(import.meta.url)
+
+const AUTH_QUEUE_SIZE = 80
+const VALIDATOR_KEY_SIZE = 336
+
+/**
+ * Build a minimal ImplicationsPair containing a single service account for Rust round-trip testing.
+ * Service account is stored under serviceId 1n in regular (and exceptional) state.
+ */
+function buildMinimalImplicationsPairWithAccount(
+  account: ServiceAccount,
+  serviceId: bigint,
+  configService: IConfigService,
+): ImplicationsPair {
+  const numCores = configService.numCores
+  const numValidators = configService.numValidators
+  const accounts = new Map<bigint, ServiceAccount>([[serviceId, account]])
+  const stagingset = Array.from({ length: numValidators }, () => new Uint8Array(VALIDATOR_KEY_SIZE))
+  const authqueue = Array.from({ length: numCores }, () =>
+    Array.from({ length: AUTH_QUEUE_SIZE }, () => new Uint8Array(32)),
+  )
+  const assigners = Array.from({ length: numCores }, (_, i) => BigInt((i % 3) + 1))
+  const partialState: PartialState = {
+    accounts,
+    stagingset,
+    authqueue,
+    manager: 1n,
+    assigners,
+    delegator: 2n,
+    registrar: 1n,
+    alwaysaccers: new Map([[1n, 10000n]]),
+  }
+  const regular: Implications = {
+    id: serviceId,
+    state: partialState,
+    nextfreeid: serviceId + 1n,
+    xfers: [],
+    yield: null,
+    provisions: new Set(),
+  }
+  const exceptionalState: PartialState = {
+    accounts: new Map(accounts),
+    stagingset,
+    authqueue,
+    manager: partialState.manager,
+    assigners,
+    delegator: partialState.delegator,
+    registrar: partialState.registrar,
+    alwaysaccers: partialState.alwaysaccers,
+  }
+  const exceptional: Implications = {
+    id: serviceId,
+    state: exceptionalState,
+    nextfreeid: serviceId + 1n,
+    xfers: [],
+    yield: null,
+    provisions: new Set(),
+  }
+  return [regular, exceptional]
+}
 
 let wasm: any = null
 
@@ -274,6 +339,59 @@ describe('ServiceAccount Round-Trip Tests', () => {
     const matches = compareServiceAccount(original, finalDecoded!.value)
     expect(matches).toBe(true)
     logger.info('✅ TypeScript -> AssemblyScript -> TypeScript round-trip passed')
+  })
+
+  it('should pass TypeScript -> Rust round-trip (ServiceAccount in ImplicationsPair, when native built)', async () => {
+    type RustImplicationsBinding = {
+      roundTripImplications: (data: Buffer, numCores: number, numValidators: number, authQueueSize: number) => Buffer | null
+    }
+    let rustNative: RustImplicationsBinding | null = null
+    let loadError: unknown = null
+    try {
+      rustNative = require('@pbnjam/pvm-rust-native/native') as RustImplicationsBinding
+    } catch (err) {
+      loadError = err
+      rustNative = null
+    }
+    if (!rustNative?.roundTripImplications) {
+      const reason = loadError instanceof Error ? loadError.message : String(loadError)
+      const hint = rustNative && !rustNative.roundTripImplications
+        ? 'Binding loaded but roundTripImplications is missing; rebuild: cd packages/pvm-rust && bun run build'
+        : `Load failed: ${reason}. Build the addon: cd packages/pvm-rust && bun run build`
+      throw new Error(`@pbnjam/pvm-rust-native required for this test. ${hint}`)
+    }
+    logger.info('Testing TypeScript -> Rust round-trip (ServiceAccount via ImplicationsPair)')
+    const configService = new ConfigService('tiny')
+    const serviceId = 1n
+    const originalAccount = createTestServiceAccount()
+    const pair = buildMinimalImplicationsPairWithAccount(originalAccount, serviceId, configService)
+    const [encodeError, encoded] = encodeImplicationsPair(pair, configService)
+    if (encodeError || !encoded) {
+      throw encodeError ?? new Error('encodeImplicationsPair failed')
+    }
+    const numCores = configService.numCores
+    const numValidators = configService.numValidators
+    const authQueueSize = AUTH_QUEUE_SIZE
+    const rustReencoded = rustNative.roundTripImplications(
+      Buffer.from(encoded),
+      numCores,
+      numValidators,
+      authQueueSize,
+    )
+    if (!rustReencoded || rustReencoded.length === 0) {
+      throw new Error('Rust round_trip_implications returned null or empty')
+    }
+    const [decodeError, decodeResult] = decodeImplicationsPair(new Uint8Array(rustReencoded), configService)
+    if (decodeError) {
+      throw decodeError
+    }
+    const final = decodeResult.value
+    const decodedAccount = final[0].state.accounts.get(serviceId)
+    if (!decodedAccount) {
+      throw new Error(`Decoded implications pair missing account for serviceId ${serviceId}`)
+    }
+    expect(compareServiceAccount(originalAccount, decodedAccount)).toBe(true)
+    logger.info('✅ TypeScript -> Rust round-trip (ServiceAccount in ImplicationsPair) passed')
   })
 })
 

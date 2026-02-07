@@ -1,3 +1,19 @@
-* text=auto
-*.sol linguist-language=Solidity
-*.vy linguist-language=Python
+# Primarily TypeScript and AssemblyScript (.ts in assembly/ compiles to WASM)
+* text=auto eol=lf
+
+# Binary files
+*.wasm binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff2 binary
+
+# Language / Linguist (.ts is either TypeScript or AssemblyScript; no single override)
+*.tex linguist-documentation
+
+# Lockfiles: exclude from repo language stats
+*.lock linguist-generated=true
+bun.lock linguist-generated=true

@@ -6,6 +6,7 @@
  * 2. AssemblyScript encode -> TypeScript decode -> TypeScript encode -> AssemblyScript decode
  */
 
+import { createRequire } from 'node:module'
 import { instantiate } from './wasmAsInit'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -16,6 +17,8 @@ import {
   setServicePreimageValue,
   setServiceRequestValue,
 } from '@pbnjam/codec'
+
+const require = createRequire(import.meta.url)
 import { logger, hexToBytes, type Hex } from '@pbnjam/core'
 import type { ServiceAccount, DeferredTransfer, IConfigService, Implications, ImplicationsPair } from '@pbnjam/types'
 import { ConfigService } from '../../../infra/node/services/config-service'
@@ -791,6 +794,51 @@ describe('Implications Round-Trip Tests', () => {
     logger.info('Testing AssemblyScript -> TypeScript round-trip')
     const result = await testAssemblyScriptToTypeScriptRoundTrip()
     expect(result).toBe(true)
+  })
+
+  it('should pass TypeScript -> Rust round-trip (when native built)', async () => {
+    type RustImplicationsBinding = {
+      roundTripImplications: (data: Buffer, numCores: number, numValidators: number, authQueueSize: number) => Buffer | null
+    }
+    let rustNative: RustImplicationsBinding | null = null
+    try {
+      rustNative = require('@pbnjam/pvm-rust-native/native') as RustImplicationsBinding
+    } catch {
+      rustNative = null
+    }
+    if (!rustNative?.roundTripImplications) {
+      return
+    }
+    logger.info('Testing TypeScript -> Rust round-trip')
+    const configService = new ConfigService('tiny')
+    const numCores = configService.numCores
+    const numValidators = configService.numValidators
+    const authQueueSize = 80
+    const regular = createTestImplications(configService)
+    const exceptional = createTestImplications(configService)
+    const original: ImplicationsPair = [regular, exceptional]
+    const [encodeError, encoded] = encodeImplicationsPair(original, configService)
+    if (encodeError || !encoded) {
+      throw encodeError ?? new Error('encode failed')
+    }
+    const rustReencoded = rustNative.roundTripImplications(
+      Buffer.from(encoded),
+      numCores,
+      numValidators,
+      authQueueSize,
+    )
+    if (!rustReencoded || rustReencoded.length === 0) {
+      throw new Error('Rust round_trip_implications returned null or empty')
+    }
+    const [decodeError, decodeResult] = decodeImplicationsPair(new Uint8Array(rustReencoded), configService)
+    if (decodeError) {
+      throw decodeError
+    }
+    const final = decodeResult.value
+    const regularMatches = compareImplications(original[0], final[0])
+    const exceptionalMatches = compareImplications(original[1], final[1])
+    expect(regularMatches).toBe(true)
+    expect(exceptionalMatches).toBe(true)
   })
 })
 

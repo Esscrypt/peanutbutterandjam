@@ -1,0 +1,31 @@
+[package]
+name = "pbnjam-pvm-rust"
+version = "0.0.1"
+edition = "2021"
+description = "PVM implementation in Rust (NAPI, same API as pvm-assemblyscript)"
+
+[features]
+default = []
+# Enable eprintln when the LOG host function (selector 100) runs. Build with: --features log_host_call_logging
+log_host_call_logging = []
+# Enable eprintln for all other host-call sites (SOLICIT, etc.) via host_log! macro. Build with: --features host_calls_logging
+host_calls_logging = []
+# Enable eprintln only on error paths (PANIC, HUH, FULL) via host_log_error! macro. Build with: --features host_calls_errors_only
+host_calls_errors_only = []
+
+[lib]
+name = "pbnjam_pvm_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+blake2 = { version = "0.10", default-features = false }
+# napi6 (or higher) required so bindgen_prelude::BigInt is available for returning u64 as JS BigInt
+napi = { version = "3.8.2", features = ["napi6"] }
+napi-derive = "3.5.1"
+
+[build-dependencies]
+napi-build = "2.3.1"
+
+[profile.release]
+lto = true
+codegen-units = 1

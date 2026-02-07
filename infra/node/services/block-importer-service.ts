@@ -11,6 +11,10 @@
  * - Provide block import status tracking
  */
 
+import type {
+  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
+} from '@pbnjam/bandersnatch-vrf'
 import {
   validateBlockHeader,
   validateEpochMark,
@@ -43,7 +47,6 @@ import {
   safeError,
   safeResult,
 } from '@pbnjam/types'
-
 import type { AccumulationService } from './accumulation-service'
 import type { AssuranceService } from './assurance-service'
 import type { AuthPoolService } from './auth-pool-service'
@@ -88,7 +91,7 @@ export class BlockImporterService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
   private readonly workReportService: WorkReportService
-
+  private readonly ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -107,6 +110,7 @@ export class BlockImporterService
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
     workReportService: WorkReportService
+    ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
@@ -126,7 +130,7 @@ export class BlockImporterService
     this.authPoolService = options.authPoolService
     this.accumulationService = options.accumulationService
     this.workReportService = options.workReportService
-
+    this.ietfVerifier = options.ietfVerifier
     // Noop usage to satisfy linter (workReportService may be used in future)
     void this.workReportService
   }
@@ -225,6 +229,7 @@ export class BlockImporterService
       this.validatorSetManagerService,
       this.sealKeyService,
       this.entropyService,
+      this.ietfVerifier,
     )
     if (blockHeaderValidationError) {
       return safeError(blockHeaderValidationError)
@@ -409,6 +414,16 @@ export class BlockImporterService
     // Must be called BEFORE accumulation so accumulation stats are fresh for this block
     this.statisticsService.resetPerBlockStats()
 
+    // Validate preimages before accumulation; apply them after accumulation
+    const [validatePreimagesError, validatedPreimages] =
+      this.serviceAccountService.validatePreimages(
+        block.body.preimages,
+        block.header.timeslot,
+      )
+    if (validatePreimagesError) {
+      return safeError(validatePreimagesError)
+    }
+
     const currentTimeslot = this.clockService.getLatestReportedBlockTimeslot()
     // Run accumulation for available work reports
     const accumulationResult = await this.accumulationService.applyTransition(
@@ -423,32 +438,6 @@ export class BlockImporterService
     const lastAccumulationOutputs =
       this.accumulationService.getLastAccumulationOutputs()
 
-    // #region agent log - Block 710 before updateAccoutBelt
-    if (typeof fetch !== 'undefined') {
-      fetch(
-        'http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            location: 'block-importer-service.ts:410',
-            message: 'Block 710 before updateAccoutBelt',
-            data: {
-              timeslot: block.header.timeslot.toString(),
-              lastAccumulationOutputsLength: lastAccumulationOutputs.length,
-              lastAccumulationOutputs: lastAccumulationOutputs.map(
-                ([s, h]) => ({ serviceId: s.toString(), hash: h }),
-              ),
-            },
-            timestamp: Date.now(),
-            sessionId: 'debug-session',
-            hypothesisId: 'H710-RECENT-HISTORY',
-          }),
-        },
-      ).catch(() => {})
-    }
-    // #endregion
-
     // Update accout belt before adding to recent history
     // Gray Paper: accoutBelt' = mmrappend(accoutBelt, merklizewb(s, keccak), keccak)
     const [beltError] = this.recentHistoryService.updateAccoutBelt(
@@ -460,14 +449,13 @@ export class BlockImporterService
 
     // Apply preimages to service accounts (MUST happen AFTER accumulation)
     // Gray Paper eq 62: accountspostpreimage ≺ (xt_preimages, accountspostxfer, thetime')
-    // Preimages depend on accountspostxfer, which is produced by accumulation
-    const [serviceAccountValidationError] =
-      this.serviceAccountService.applyPreimages(
-        block.body.preimages,
-        block.header.timeslot,
-      )
-    if (serviceAccountValidationError) {
-      return safeError(serviceAccountValidationError)
+    // Preimages were validated before accumulation; apply without re-validating
+    const [applyPreimagesError] = this.serviceAccountService.applyPreimages(
+      validatedPreimages,
+      block.header.timeslot,
+    )
+    if (applyPreimagesError) {
+      return safeError(applyPreimagesError)
     }
 
     // Update authpool for this block (MUST happen AFTER accumulation)

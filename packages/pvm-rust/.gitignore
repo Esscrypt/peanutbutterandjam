@@ -1,0 +1,7 @@
+target/
+native/
+Cargo.lock
+*.so
+*.dylib
+*.dll
+node_modules/

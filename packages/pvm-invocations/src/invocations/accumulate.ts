@@ -38,6 +38,7 @@ import {
   safeResult,
 } from '@pbnjam/types'
 import {
+  RustPVMExecutor,
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
 } from '../pvm-executor-adapters'
@@ -50,22 +51,31 @@ import {
 export class AccumulatePVM {
   private readonly entropyService: IEntropyService
   private readonly configService: IConfigService
-  private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
+  private readonly pvmExecutor:
+    | TypeScriptPVMExecutor
+    | WasmPVMExecutor
+    | RustPVMExecutor
   readonly useWasm: boolean
+  readonly useRust: boolean
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry | null
     accumulateHostFunctionRegistry: AccumulateHostFunctionRegistry | null
     configService: IConfigService
     entropyService: IEntropyService
     pvmOptions?: PVMOptions
-    useWasm: boolean
+    useWasm?: boolean
+    useRust?: boolean
     traceSubfolder?: string
   }) {
-    this.useWasm = options.useWasm
-    // Create PVM executor based on useWasm flag
-    if (options.useWasm) {
-      // Create WASM executor - module will be loaded from pvm-assemblyscript/build/pvm.wasm
-      // and instantiated lazily on first use
+    this.useWasm = options.useWasm ?? false
+    this.useRust = options.useRust ?? false
+    if (this.useRust) {
+      this.pvmExecutor = new RustPVMExecutor(
+        options.configService,
+        options.entropyService,
+        options.traceSubfolder,
+      )
+    } else if (options.useWasm) {
       this.pvmExecutor = new WasmPVMExecutor(
         options.configService,
         options.entropyService,
@@ -301,8 +311,22 @@ export class AccumulatePVM {
         }
       | undefined
 
-    if (this.useWasm) {
-      // WASM executor - use direct accumulation method
+    if (this.useRust) {
+      const [rustError, rustResult] =
+        await this.pvmExecutor.executeAccumulationInvocation(
+          serviceCode,
+          gas,
+          encodedArgs,
+          implicationsPair,
+          timeslot,
+          inputs,
+          serviceId,
+          orderedIndex,
+          entropyOverride,
+        )
+      error = rustError
+      marshallingResult = rustResult
+    } else if (this.useWasm) {
       const [wasmError, wasmResult] =
         await this.pvmExecutor.executeAccumulationInvocation(
           serviceCode,
@@ -318,7 +342,6 @@ export class AccumulatePVM {
       error = wasmError
       marshallingResult = wasmResult
     } else {
-      // TypeScript executor - use executeAccumulationInvocation
       const [tsError, tsResult] =
         await this.pvmExecutor.executeAccumulationInvocation(
           serviceCode,

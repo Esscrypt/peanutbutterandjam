@@ -17,7 +17,6 @@ import pino from 'pino'
  * @description ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️ !IMPORTANT! Before using the logger, it must be initialized with this method at the top of the entry point file of a service.
  */
 export class LoggerProvider {
-  private readonly isEnabled: boolean
   private pino = pino(
     {
       level: process.env['PINO_LEVEL'] || 'info',
@@ -27,15 +26,17 @@ export class LoggerProvider {
         { level: 'error', stream: process.stderr },
         { level: 'fatal', stream: process.stderr },
         { level: 'debug', stream: process.stdout },
+        { level: 'info', stream: process.stdout },
+        { level: 'warn', stream: process.stdout },
       ],
       { dedupe: true },
     ),
   )
   private hasBeenInitialized = false
 
-  constructor() {
-    // Check if logging is disabled via environment variable
-    this.isEnabled = process.env['ENABLE_LOGGER'] === 'true'
+  /** Read at runtime so .env loaded after import (e.g. in fuzzer-target) still enables logging. */
+  private get isEnabled(): boolean {
+    return process.env['ENABLE_LOGGER'] === 'true'
   }
 
   get hasBeenInitializedValue() {

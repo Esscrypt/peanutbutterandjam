@@ -1,6 +1,6 @@
 # PeanutButterAndJam CLI
 
-A command-line interface for the PeanutButterAndJam node, implementing the JAM (Just Another Machine) protocol.
+A command-line interface for the PeanutButterAndJam node, implementing the JAM protocol.
 
 ## Features
 
@@ -135,14 +135,6 @@ packages/cli/
 
 ## Configuration
 
-### Default Data Directory
-```
-~/.jamduna/
-├── keys/           # Validator keys
-├── chainspec.json  # Chain specification
-└── database/       # Blockchain data
-```
-
 ### Environment Variables
 ```bash
 export LOG_LEVEL=info
@@ -187,8 +179,6 @@ bun run test:watch
 
 ## Documentation
 
-- **[Usage Guide](USAGE_GUIDE.md)** - Comprehensive usage examples
-- **[JAM Implementation](JAM_CLI_IMPLEMENTATION.md)** - JAM standard compliance details
 - **[JAM Protocol](https://graypaper.com)** - Official JAM specification
 - **[JAM Documentation](https://docs.jamcha.in)** - Community documentation
 

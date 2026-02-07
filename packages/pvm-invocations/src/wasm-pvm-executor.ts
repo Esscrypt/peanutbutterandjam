@@ -306,9 +306,6 @@ export class WasmPVMExecutor {
     this.bitmask = extendedBitmask
 
     // Encode accumulate inputs sequence for FETCH host function (selectors 14 and 15)
-    // Always encode the sequence, even if empty (to match Rust reference expectations)
-    // An empty sequence is encoded as: encode(0) = 0x00 (length prefix for 0 items)
-    // Gray Paper pvm_invocations.tex lines 359-360: i = sequence{accinput}
     const inputsToEncode = _inputs && _inputs.length > 0 ? _inputs : []
     const [encodeError, encoded] = encodeVariableSequence(
       inputsToEncode,
@@ -554,10 +551,11 @@ export class WasmPVMExecutor {
     // Calculate gas consumed based on status
     // Gray Paper equation 834: u = gascounter - max(gascounter', 0)
     // For OOG (status === 5): All gas is consumed, including what was left before the failed operation
-    // This matches TypeScript behavior where gasCounter is decremented before OOG check
+    // This matches TypeScript and rust-pvm-executor: OOG → gasConsumed = initialGas, result = 'OOG',
+    // errorCode = RESULT_CODES.OOG (4). We still call getAccumulationContext and return updated context.
     let gasConsumed: bigint
     if (status === 5) {
-      // OOG: All initial gas is consumed
+      // OOG: All initial gas is consumed (aligned with rust-pvm-executor)
       gasConsumed = initialGas
     } else {
       // Normal execution: subtract remaining gas
@@ -567,12 +565,13 @@ export class WasmPVMExecutor {
     // Determine result
     // Status enum from wasm-wrapper.ts:
     // OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
+    // Gray Paper: instruction-level FAULT (e.g. write to read-only region) leads to invocation panic.
     let result: Uint8Array | 'PANIC' | 'OOG'
     if (status === 5) {
       // OOG
       result = 'OOG'
-    } else if (status === 2) {
-      // PANIC
+    } else if (status === 2 || status === 3) {
+      // PANIC (2) or FAULT (3) → treat as PANIC for accumulation (invocation panics)
       result = 'PANIC'
     } else {
       // HALT or OK - extract result from memory using registers[7] and registers[8]
@@ -627,19 +626,23 @@ export class WasmPVMExecutor {
       const baseTraceDir = join(this.workspaceRoot, 'pvm-traces')
       const traceOutputDir = join(baseTraceDir, this.traceSubfolder)
 
-      // Encode full accumulate inputs for comparison with jamduna traces (same as TypeScript executor)
       const [encodeError, encodedInputs] = encodeVariableSequence(
         _inputs,
         encodeAccumulateInput,
       )
 
-      // Determine error code based on status (same as TypeScript executor)
+      // Determine error code based on status (same as Rust and TypeScript executors).
       // WASM status enum: OK = 0, HALT = 1, PANIC = 2, FAULT = 3, HOST = 4, OOG = 5
-      // Error codes for trace files match Gray Paper: HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
+      // Error codes for trace files (RESULT_CODES): HALT = 0, PANIC = 1, FAULT = 2, HOST = 3, OOG = 4
+      // FAULT treatment (aligned with rust-pvm-executor): status 2 and 3 both → result 'PANIC';
+      // errorCode distinguishes: 2 → PANIC (1), 3 → FAULT (2). So trace records which VM status ended the run.
       let errorCode: number | undefined
       if (status === 2) {
         // PANIC
         errorCode = RESULT_CODES.PANIC
+      } else if (status === 3) {
+        // FAULT (e.g. write to read-only region)
+        errorCode = RESULT_CODES.FAULT
       } else if (status === 5) {
         // OOG (WASM status 5, not 4!)
         errorCode = RESULT_CODES.OOG
@@ -662,13 +665,7 @@ export class WasmPVMExecutor {
         yieldHash = updatedContext?.[0]?.yield ?? undefined
       }
 
-      // For block-based traces (like preimages-light-all-blocks.test.ts), use jamduna format (00000043.log)
-      // Don't pass executorType to get jamduna format when blockNumber is provided
-      // For comparison traces, pass executorType to get trace-wasm-{serviceId}-{timestamp}.log format
-      // Since we always have timeslot (block number), we use jamduna format by default
-      // If trace format is needed, it can be enabled via a flag or by not passing timeslot
-      // Include serviceId to avoid collisions when multiple services execute in the same slot
-      const filepath = writeTraceDump(
+      writeTraceDump(
         this.executionLogs,
         this.traceHostFunctionLogs.length > 0
           ? this.traceHostFunctionLogs
@@ -682,15 +679,6 @@ export class WasmPVMExecutor {
         invocationIndex ?? 0, // invocation index (same as TypeScript)
         yieldHash, // accumulate output (yield hash, same as TypeScript)
         errorCode, // error code for PANIC/OOG
-      )
-      if (!filepath) {
-        logger.warning(
-          `[WasmPVMExecutor] Failed to write trace dump (executionLogs.length=${this.executionLogs.length})`,
-        )
-      }
-    } else {
-      logger.warning(
-        `[WasmPVMExecutor] No execution logs to write (executionLogs.length=${this.executionLogs.length}, steps=${steps})`,
       )
     }
 

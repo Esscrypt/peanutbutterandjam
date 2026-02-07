@@ -123,10 +123,10 @@ export class InfoHostFunction extends BaseHostFunction {
     // Gray Paper equation 480: Extract slice v[f:f+l]
     const dataSlice = info.slice(f, f + l)
 
-    // Pad to requested length if needed (to match jamduna behavior)
+    // Pad to requested length if needed (to match reference behavior)
     // Gray Paper equation 478: Write to memory[o:o+l]
     // Note: l is the actual slice length, but if requested length > actual length,
-    // jamduna pads with zeros to the requested length
+    // reference pads with zeros to the requested length
     const requestedWriteLength = Number(length)
     let dataToWrite: Uint8Array
     if (requestedWriteLength > dataSlice.length) {

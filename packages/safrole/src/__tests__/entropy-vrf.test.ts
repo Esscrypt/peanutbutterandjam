@@ -11,6 +11,8 @@ import {
   verifyEntropyVRFSignature,
   banderout,
   IETFVRFProver,
+  IETFVRFVerifier,
+  IETFVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import { generateBandersnatchKeyPairFromSeed } from '@pbnjam/core'
 import { encodeUnsignedHeader } from '@pbnjam/codec'
@@ -19,6 +21,8 @@ import { join } from 'node:path'
 import type { BlockTraceTestVector, IConfigService, UnsignedBlockHeader } from '@pbnjam/types'
 import { hexToBytes } from '@pbnjam/core'
 
+const verifier: IETFVRFVerifier | IETFVRFVerifierWasm = new IETFVRFVerifierWasm()
+  
 describe('Entropy VRF Functions', () => {
   test('generateEntropyVRFSignature should create valid 96-byte signature', () => {
     // Test data
@@ -49,7 +53,8 @@ describe('Entropy VRF Functions', () => {
     const [verifyError, isValid] = verifyEntropyVRFSignature(
       validatorPublicKey,
       genResult!.signature,
-      sealOutput
+      sealOutput,
+      verifier,
     )
 
     // Must not report valid: either an error or isValid === false
@@ -91,7 +96,7 @@ describe('Entropy VRF Functions', () => {
       validatorSecretKey,
       new Uint8Array(64), // Wrong size
       sealOutput
-    )
+    , verifier)
     expect(error3).toBeDefined()
     expect(error3!.message).toContain('96 bytes')
 
@@ -251,6 +256,7 @@ describe('Entropy VRF Functions', () => {
       keyPair!.publicKey,
       genResult!.signature,
       sealOutput!,
+      verifier,
     )
 
     expect(verifyError).toBeUndefined()
@@ -265,6 +271,7 @@ describe('Entropy VRF Functions', () => {
       keyPair!.publicKey,
       tamperedSignature,
       sealOutput!,
+      verifier,
     )
 
     expect(tamperVerifyError !== undefined || isTamperedValid === false).toBe(true)
@@ -275,6 +282,7 @@ describe('Entropy VRF Functions', () => {
       keyPair!.publicKey,
       genResult!.signature,
       wrongSealOutput,
+      verifier,
     )
 
     expect(wrongSealError).toBeUndefined()

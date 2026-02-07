@@ -28,7 +28,12 @@ import {
   Hex,
   hexToBytes,
 } from '@pbnjam/core'
-import { decodeRecent, decodeStateWorkReports, calculateBlockHashFromHeader } from '@pbnjam/codec'
+import {
+  decodeRecent,
+  decodeStateWorkReports,
+  calculateBlockHashFromHeader,
+  determineSingleKeyType,
+} from '@pbnjam/codec'
 import {
   type BlockTraceTestVector,
 } from '@pbnjam/types'
@@ -40,6 +45,34 @@ import {
 } from '../test-utils'
 // Test vectors directory (relative to workspace root)
 const WORKSPACE_ROOT = path.join(__dirname, '../../../../')
+
+const MISMATCH_LOGS_DIR = path.join(WORKSPACE_ROOT, 'mismatch-logs/jam-conformance')
+
+function ensureMismatchLogsDir(): void {
+  if (!existsSync(MISMATCH_LOGS_DIR)) {
+    mkdirSync(MISMATCH_LOGS_DIR, { recursive: true })
+  }
+}
+
+function logMismatchesToFile(
+  traceOrBlockLabel: string,
+  mismatches: Array<{ key: string; expected: string; actual: string | undefined }>,
+  stateRootMismatch?: { expected: string; actual: string | undefined },
+  extraKeysInfo?: { count: number; sampleKeys: string[] },
+): void {
+  ensureMismatchLogsDir()
+  const sanitized = traceOrBlockLabel.replace(/[^a-zA-Z0-9]/g, '_')
+  const logFile = path.join(MISMATCH_LOGS_DIR, `${sanitized}.json`)
+  const logData = {
+    traceOrBlock: traceOrBlockLabel,
+    timestamp: new Date().toISOString(),
+    keyvalMismatches: mismatches,
+    stateRootMismatch: stateRootMismatch,
+    extraKeysInOurState: extraKeysInfo,
+  }
+  writeFileSync(logFile, JSON.stringify(logData, null, 2), 'utf-8')
+  console.log(`📝 Mismatches logged to: ${logFile}`)
+}
 
 // Get JAM conformance version from environment variable, default to 0.7.2
 const JAM_CONFORMANCE_VERSION = process.env.JAM_CONFORMANCE_VERSION || '0.7.2'
@@ -192,7 +225,7 @@ describe('JAM Conformance Single Trace', () => {
     const repoName = tracesDir!.includes('w3f-jam-conformance') ? 'w3f-jam-conformance' : 'jam-conformance'
     const traceSubfolder = `${repoName}/${JAM_CONFORMANCE_VERSION}/${traceId}`
     // const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true })
-    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useRingVrfWasm: false })
+    const services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: false, useRingVrfWasm: true, useIetfVrfWasm: true })
 
     const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
@@ -261,29 +294,24 @@ describe('JAM Conformance Single Trace', () => {
       }
     }
 
-    // Helper function to verify post-state
-    const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector) => {
+    // Helper function to verify post-state (same pattern as jam-conformance-traces-wasm.test.ts:
+    // collect all mismatches, log/dump everything, then assert so failures show full context)
+    const verifyPostState = (blockNumber: number, blockJsonData: BlockTraceTestVector, traceLabel: string) => {
       const [stateTrieError, stateTrie] = stateService.generateStateTrie()
       expect(stateTrieError).toBeUndefined()
       expect(stateTrie).toBeDefined()
 
-      // Track which keys are checked vs missing
+      const mismatches: Array<{ key: string; expected: string; actual: string | undefined }> = []
       let checkedKeys = 0
       let missingKeys = 0
-
-      // #region agent log - constants for Block 710 mismatch
-      const TARGET_SERVICE_ID_710 = 994117200n
-      const TARGET_KEY_710 = '0x50d7064541b73bfec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
-      const EXPECTED_VALUE_710 = '0x2d61c4a890d9fa31'
-      // #endregion
 
       for (const keyval of blockJsonData.post_state.keyvals) {
         const expectedValue = stateTrie?.[keyval.key]
         
         // Check if key exists in generated state trie
         if (expectedValue === undefined) {
-          // Key is missing from generated state trie - this is a failure
           missingKeys++
+          mismatches.push({ key: keyval.key, expected: keyval.value, actual: undefined })
           const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
           
           console.error(`\n❌ [Block ${blockNumber}] Missing State Key Detected:`)
@@ -320,9 +348,9 @@ describe('JAM Conformance Single Trace', () => {
           continue
         }
 
-        // Key exists - check if value matches
         checkedKeys++
         if (keyval.value !== expectedValue) {
+          mismatches.push({ key: keyval.key, expected: keyval.value, actual: expectedValue })
           // Parse the state key to get chapter information
           const keyInfo = parseStateKeyForDebug(keyval.key as Hex)
           
@@ -479,28 +507,85 @@ describe('JAM Conformance Single Trace', () => {
           }
           console.log(`📁 Mismatch files dumped to: ${mismatchDir}/${filePrefix}-*`)
         }
-        // #region agent log - keyval mismatch detection for Block 710
-        if (keyval.key === TARGET_KEY_710) {
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:481',message:'KEYVAL MISMATCH DETECTED Block 710',data:{blockNumber,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),expectedValue:keyval.value,actualValue:expectedValue||null,matches:keyval.value===expectedValue},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-KEYVAL-MISMATCH'})}).catch(()=>{})
-        }
-        // #endregion
-        expect(keyval.value).toBe(expectedValue)
       }
 
-      // Log summary
-      console.log(`\n✅ [Block ${blockNumber}] State Key Verification Summary:`)
-      console.log(`  Total keys in post_state: ${blockJsonData.post_state.keyvals.length}`)
-      console.log(`  Keys checked (found in state trie): ${checkedKeys}`)
-      console.log(`  Keys missing (not in state trie): ${missingKeys}`)
-      if (missingKeys > 0) {
-        console.error(`  ⚠️  ${missingKeys} key(s) are missing from the generated state trie`)
-      }
+      // Check for extra keys: keys in our state trie that are not in expected post_state.
+      // We only loop over expected keyvals above, so we never assert on our key set.
+      // Extra keys would pass keyval checks but cause state root mismatch.
+      const expectedKeySet = new Set(blockJsonData.post_state.keyvals.map((kv) => kv.key))
+      const ourKeys = Object.keys(stateTrie ?? {}) as Hex[]
+      const extraKeys = ourKeys.filter((k) => !expectedKeySet.has(k))
+      const extraKeysCount = extraKeys.length
 
       // Compare state root with expected post_state
       const [stateRootError, computedStateRoot] = stateService.getStateRoot()
       expect(stateRootError).toBeUndefined()
       expect(computedStateRoot).toBeDefined()
       const expectedStateRoot = blockJsonData.post_state.state_root
+      let stateRootMismatch: { expected: string; actual: string | undefined } | undefined
+      if (computedStateRoot !== expectedStateRoot) {
+        stateRootMismatch = { expected: expectedStateRoot, actual: computedStateRoot }
+      }
+
+      if (mismatches.length > 0 || stateRootMismatch) {
+        const extraKeysInfo =
+          extraKeysCount > 0
+            ? { count: extraKeysCount, sampleKeys: extraKeys.slice(0, 10) }
+            : undefined
+        logMismatchesToFile(
+          `${traceLabel}-block-${blockNumber}`,
+          mismatches,
+          stateRootMismatch,
+          extraKeysInfo,
+        )
+      }
+
+      // Log summary (include extra keys so state root mismatch can be diagnosed)
+      console.log(`\n✅ [Block ${blockNumber}] State Key Verification Summary:`)
+      console.log(`  Total keys in post_state (expected): ${blockJsonData.post_state.keyvals.length}`)
+      console.log(`  Total keys in our state trie: ${ourKeys.length}`)
+      console.log(`  Keys checked (found in state trie): ${checkedKeys}`)
+      console.log(`  Keys missing (not in state trie): ${missingKeys}`)
+      console.log(`  Extra keys (in our trie, not in expected): ${extraKeysCount}`)
+      if (missingKeys > 0) {
+        console.error(`  ⚠️  ${missingKeys} key(s) are missing from the generated state trie`)
+      }
+      if (extraKeysCount > 0) {
+        console.error(`  ⚠️  ${extraKeysCount} key(s) in our state trie are not in expected post_state (can cause state root mismatch)`)
+        console.error(`  Sample extra keys (first 5): ${extraKeys.slice(0, 5).join(', ')}`)
+        for (let i = 0; i < extraKeys.length; i++) {
+          const keyHex = extraKeys[i] as Hex
+          const keyInfo = parseStateKeyForDebug(keyHex)
+          const chapterName = 'chapterIndex' in keyInfo ? getChapterName(keyInfo.chapterIndex) : 'unknown'
+          const serviceId = 'serviceId' in keyInfo ? keyInfo.serviceId : undefined
+          let keyvalType = ''
+          if ('chapterIndex' in keyInfo && keyInfo.chapterIndex === 0 && stateTrie?.[keyHex]) {
+            try {
+              const valueBytes = hexToBytes(stateTrie[keyHex] as Hex)
+              const decoded = determineSingleKeyType(
+                keyHex,
+                valueBytes,
+                BigInt(blockNumber),
+              )
+              keyvalType = `, keyvalType: ${decoded.keyType}`
+            } catch {
+              keyvalType = ', keyvalType: (decode failed)'
+            }
+          }
+          console.error(`  Extra key [${i}]: ${keyHex} -> chapter: ${chapterName}, serviceId: ${serviceId ?? 'n/a'}${keyvalType}`)
+        }
+      }
+
+      // Assert all keyvals match (same as jam-conformance-traces-wasm.test.ts)
+      for (const keyval of blockJsonData.post_state.keyvals) {
+        const expectedValue = stateTrie?.[keyval.key]
+        expect(expectedValue).toBeDefined()
+        if (expectedValue === undefined) {
+          throw new Error(`State key ${keyval.key} not found in state trie`)
+        }
+        expect(keyval.value).toBe(expectedValue)
+      }
+
       expect(computedStateRoot).toBe(expectedStateRoot)
     }
 
@@ -518,16 +603,6 @@ describe('JAM Conformance Single Trace', () => {
       stateService.clearState()
 
       // Set pre-state from trace (for each block)
-      // #region agent log - before setState for Block 710
-      const TARGET_SERVICE_ID_710 = 994117200n
-      const TARGET_KEY_710 = '0x50d7064541b73bfec13e507a95e86ec03add50794acc76edd9370aca5ecbf2'
-      const EXPECTED_VALUE_710 = '0x2d61c4a890d9fa31'
-      const preStateKeyval710 = traceData.pre_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-      const postStateKeyval710 = traceData.post_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-      if (preStateKeyval710 || postStateKeyval710) {
-        fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:515',message:'BEFORE setState Block 710 - trace pre/post_state keyval',data:{blockNum,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),preStateValue:preStateKeyval710?.value||null,postStateValue:postStateKeyval710?.value||null,expectedValue:EXPECTED_VALUE_710,preStateMatchesExpected:preStateKeyval710?.value===EXPECTED_VALUE_710,postStateMatchesExpected:postStateKeyval710?.value===EXPECTED_VALUE_710},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-EXPECTED-VALUE-SOURCE'})}).catch(()=>{})
-      }
-      // #endregion
       if (traceData.pre_state?.keyvals) {
         const [setStateError1] = stateService.setState(
           traceData.pre_state.keyvals,
@@ -535,15 +610,6 @@ describe('JAM Conformance Single Trace', () => {
         if (setStateError1) {
           throw new Error(`Failed to set pre-state for block ${blockNum}: ${setStateError1.message}`)
         }
-        // #region agent log - after setState for Block 710
-        const preStateKeyval710AfterSetState = traceData.pre_state?.keyvals?.find((kv: { key: string }) => kv.key === TARGET_KEY_710)
-        if (preStateKeyval710AfterSetState) {
-          const serviceAccounts = fullContext.serviceAccountService.getServiceAccounts()
-          const serviceAccount = serviceAccounts.accounts.get(TARGET_SERVICE_ID_710)
-          const keyvalAfterSetState = serviceAccount?.rawCshKeyvals?.[TARGET_KEY_710]
-          fetch('http://127.0.0.1:10000/ingest/3fca1dc3-0561-4f6b-af77-e67afc81f2d7',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'jam-conformance-trace-single-wasm.test.ts:522',message:'AFTER setState Block 710 - service account keyval',data:{blockNum,key:TARGET_KEY_710,serviceId:TARGET_SERVICE_ID_710.toString(),preStateValue:preStateKeyval710AfterSetState.value,keyvalAfterSetState:keyvalAfterSetState||null,expectedValue:EXPECTED_VALUE_710,matches:keyvalAfterSetState===preStateKeyval710AfterSetState.value,matchesExpected:keyvalAfterSetState===EXPECTED_VALUE_710},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H710-EXPECTED-VALUE-SOURCE'})}).catch(()=>{})
-        }
-        // #endregion
       } else if (genesisJson?.state?.keyvals && isFirstBlock) {
         // Only use genesis state for the first block being processed
         const [setStateError2] = stateService.setState(
@@ -638,7 +704,7 @@ describe('JAM Conformance Single Trace', () => {
       expect(importError).toBeUndefined()
       
       // Verify post-state matches expected post_state from trace
-      verifyPostState(blockNum, traceData)
+      verifyPostState(blockNum, traceData, traceId)
 
       console.log(`✅ Trace ${traceId} block ${blockNum} processed successfully`)
 

@@ -105,14 +105,6 @@ export function shiftAccumulatedPackagesHistory(
  *
  * Gray Paper equation 89: q = E(concatall{ready[m:]} concat concatall{ready[:m]} ...)
  * This processes items from ALL slots, but only those with satisfied dependencies (via Q function).
- *
- * However, according to equation 419-423, items expire when their slot is cleared after time advancement.
- * Items should only be processed when their slot comes around again (after a full epoch rotation).
- *
- * According to jamduna reference implementation, accumulation only happens when items have been in the queue
- * for a full epoch (when their slot comes around again). So we should only process items from the current slot.
- *
- * FIX: Only process items from the current epoch slot to match jamduna behavior.
  */
 export function collectAllReadyItems(
   epochLength: number,

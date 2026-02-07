@@ -440,3 +440,21 @@ export class InstructionRegistry {
     this.handlers.clear()
   }
 }
+
+let defaultRegistry: InstructionRegistry | null = null
+
+function getDefaultRegistry(): InstructionRegistry {
+  if (defaultRegistry === null) {
+    defaultRegistry = new InstructionRegistry()
+  }
+  return defaultRegistry
+}
+
+/**
+ * Get instruction mnemonic by opcode (e.g. for trace dumps).
+ * Uses the same registry as the TypeScript PVM; returns 'UNKNOWN' if opcode is not registered.
+ */
+export function getInstructionName(opcode: number | bigint): string {
+  const handler = getDefaultRegistry().getHandler(BigInt(opcode))
+  return handler?.name ?? 'UNKNOWN'
+}

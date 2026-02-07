@@ -7,12 +7,6 @@
 [submodule "submodules/bandersnatch-vrf-spec"]
 	path = submodules/bandersnatch-vrf-spec
 	url = https://github.com/davxy/bandersnatch-vrf-spec.git
-[submodule "submodules/jamduna"]
-	path = submodules/jamduna
-	url = https://github.com/jam-duna/jamtestnet.git
-[submodule "submodules/polkavm"]
-	path = submodules/polkavm
-	url = https://github.com/paritytech/polkavm.git
 [submodule "submodules/jam-docs"]
 	path = submodules/jam-docs
 	url = https://github.com/JamBrains/jam-docs.git
@@ -50,9 +44,3 @@
 [submodule "submodules/JIPs"]
 	path = submodules/JIPs
 	url = https://github.com/polkadot-fellows/JIPs.git
-[submodule "submodules/quic"]
-	path = submodules/quic
-	url = https://github.com/Infisical/js-quic.git
-[submodule "submodules/quiche"]
-	path = submodules/quiche
-	url = https://github.com/cloudflare/quiche.git

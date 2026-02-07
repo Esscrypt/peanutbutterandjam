@@ -23,7 +23,7 @@ docker buildx build --platform linux/amd64,linux/arm64 -f infra/node/Dockerfile.
 # Test the image locally
 docker run --rm \
   -v /tmp:/tmp \
-  pbnjam-fuzzer-target:latest \
+  shimonchick/pbnjam-fuzzer-target:latest \
   --socket /tmp/jam_target.sock
 ```
 
