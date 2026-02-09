@@ -1,10 +1,25 @@
-# PeanutButterAndJam (PBNJ)
+# Peanut Butter AND JAM (PBNJ)
 
-A production-grade TypeScript/JavaScript implementation of the **JAM** protocol as specified in the [Gray Paper](https://github.com/gavofyork/graypaper). This monorepo provides a full JAM node: consensus (Safrole), PVM execution, networking, block authoring and import, and CLI tooling.
+[![Tests](https://github.com/Esscrypt/peanutbutterandjam/actions/workflows/verify.yml/badge.svg)](https://github.com/Esscrypt/peanutbutterandjam/actions/workflows/verify.yml) [![Live site](https://img.shields.io/badge/Website-peanutbutterandjam.xyz-7b2cbf?style=for-the-badge&labelColor=2d1f17)](https://www.peanutbutterandjam.xyz/) [![Gray Paper](https://img.shields.io/badge/Gray_Paper-0.7.2-2d1f17?style=flat)](https://graypaper.com/) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
+**Production-grade TypeScript/JavaScript implementation of the [JAM](https://graypaper.com/) (Join-Accumulate Machine) protocol.** This monorepo delivers a full JAM node: Safrole consensus, PVM execution, JAMNP-S networking, block authoring and import, and CLI tooling—aligned with the [Gray Paper](https://github.com/gavofyork/graypaper) and validated by official test vectors.
+
+**→ [Documentation & getting started](https://www.peanutbutterandjam.xyz/getting-started)**
+
+### Highlights
+
+- **Gray Paper–aligned** — Safrole consensus, PVM, codec, and networking per the authoritative spec (GP 0.7.2)
+- **TypeScript everywhere** — One codebase for Node, Bun, and the browser; type-safe and toolable
+- **Production-ready** — Full node services (validator, guarantor, builder, networking), JIP-2 RPC, and CLI
+- **Verifiable** — Official [jamtestvectors](https://github.com/gavofyork/jamtestvectors) and erasure/assurance tooling
+
+**Quick start:** `git clone https://github.com/Esscrypt/peanutbutterandjam.git && cd peanutbutterandjam && git submodule update --init --recursive && bun install && bun run build` — then run the node with `bun run infra/node/services/main-service.ts` or the fuzzer with `bun run infra/node/fuzzer-target.ts --socket /tmp/jam_target.sock --spec tiny`. See [Getting Started](#getting-started) and the [live docs](https://www.peanutbutterandjam.xyz/getting-started) for Docker and binaries.
+
+---
 
 ## Table of Contents
 
-- [PeanutButterAndJam (PBNJ)](#peanutbutterandjam-pbnj)
+- [Peanut Butter AND JAM (PBNJ)](#peanut-butter-and-jam-pbnj)
   - [Table of Contents](#table-of-contents)
   - [Prerequisites](#prerequisites)
   - [Getting Started](#getting-started)
@@ -24,6 +39,8 @@ A production-grade TypeScript/JavaScript implementation of the **JAM** protocol 
   - [Specification Compliance](#specification-compliance)
   - [Documentation](#documentation)
   - [Scripts Reference](#scripts-reference)
+  - [Contributing](#contributing)
+  - [Repository guidelines](#repository-guidelines)
   - [License](#license)
   - [Support and references](#support-and-references)
 
@@ -243,11 +260,36 @@ This project follows the [JAM Gray Paper](https://graypaper.com/) and related sp
 
 ---
 
+## Contributing
+
+> **NOTE:** We are taking part in the JAM Prize. We do not accept external PRs unless the contributor waives any claims to the prize and copyright for the submitted code. By opening a PR you accept this requirement. See [CONTRIBUTING.md](CONTRIBUTING.md) for full details.
+
+We welcome contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up your environment, run tests, and submit pull requests. The [Gray Paper](https://graypaper.com/) and `.cursor/rules/` in this repo are the authoritative references for protocol and implementation decisions.
+
+---
+
+## Repository guidelines
+
+This repository follows common open-source practices:
+
+- **CI** — Lint, type-check, and tests run on every pull request ([`.github/workflows/verify.yml`](.github/workflows/verify.yml)).
+- **Code style** — [Biome](https://biomejs.dev/) for formatting and linting; run `bun run format` and `bun run lint` before committing.
+- **Submodules** — Gray Paper, test vectors, and some packages live in submodules; run `git submodule update --init --recursive` after clone.
+- **Documentation** — In-repo docs are under [docs/](docs/README.md); live docs and getting started are at [peanutbutterandjam.xyz](https://www.peanutbutterandjam.xyz/getting-started).
+- **Issues** — Use [GitHub Issues](https://github.com/Esscrypt/peanutbutterandjam/issues) for bugs and feature requests; use the [Bug report](.github/ISSUE_TEMPLATE/bug_report.md) or [Feature request](.github/ISSUE_TEMPLATE/feature_request.md) templates when opening an issue.
+- **Pull requests** — Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md); ensure CI passes before requesting review.
+- **Changelog** — User-facing changes are documented in [CHANGELOG.md](CHANGELOG.md).
+- **Code of conduct** — [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) outlines community expectations.
+- **Editor** — [.editorconfig](.editorconfig) keeps indentation and line endings consistent across editors.
+- **Security** — See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
+
+---
+
 ## License
 
-Same license as the root repository. See [LICENSE](LICENSE) if present.
+Licensed under the [Apache License 2.0](LICENSE). See [LICENSE](LICENSE) in the repository root.
 
 ## Support and references
 
 - **JAM protocol**: [Gray Paper](https://graypaper.com), [community docs](https://docs.jamcha.in)
-- **Issues**: [GitHub Issues](https://github.com/peanutbutterandjam/peanutbutterandjam/issues)
+- **Issues and discussions**: [GitHub](https://github.com/Esscrypt/peanutbutterandjam/issues)
