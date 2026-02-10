@@ -28,7 +28,7 @@
     "u8a-utils": "catalog:"
   },
   "devDependencies": {
-    "@pbnjam/bandersnatch-vrf": "workspace:*",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
     "typescript": "^5.8.2",
     "biome": "^0.3.3",
     "@pbnjam/typescript-config": "workspace:*",
