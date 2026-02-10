@@ -191,18 +191,25 @@ function encodeInitialize(
   return concatBytes([headerEncoded, keyvalsEncoded, ancestryEncoded])
 }
 
+const MAX_INITIAL_STATE_LENGTH = 50 * 1024 * 1024 // 50MB
+
 function encodeImportBlock(
   msg: ImportBlock,
   config: IConfigService,
 ): Uint8Array {
-  // Encode block using JAM codec
-  // According to ASN.1 spec: ImportBlock ::= Block
-  // So ImportBlock is just the block directly, NOT length-prefixed
   const [blockError, blockEncoded] = encodeBlock(msg.block, config)
   if (blockError) throw blockError
 
-  // Return block directly without length prefix
-  return blockEncoded
+  if (!msg.initial_state) {
+    return blockEncoded
+  }
+
+  const keyvalsEncoded = encodeKeyValueSequence(msg.initial_state.keyvals)
+  const ancestryEncoded = encodeAncestry(msg.initial_state.ancestry ?? [])
+  const initEncoded = concatBytes([keyvalsEncoded, ancestryEncoded])
+  const lenBytes = new Uint8Array(4)
+  new DataView(lenBytes.buffer).setUint32(0, initEncoded.length, true)
+  return concatBytes([lenBytes, initEncoded, blockEncoded])
 }
 
 function encodeGetState(msg: GetState): Uint8Array {
@@ -407,43 +414,47 @@ function decodeImportBlock(
   data: Uint8Array,
   config: IConfigService,
 ): ImportBlock {
-  // Debug logging if enabled
-  if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(`[decodeImportBlock] Decoding from ${data.length} bytes`)
-    console.log(
-      `[decodeImportBlock] First 20 bytes: ${Array.from(data.slice(0, 20))
-        .map((b) => `0x${b.toString(16).padStart(2, '0')}`)
-        .join(' ')}`,
-    )
-  }
-
-  // According to ASN.1 spec: ImportBlock ::= Block
-  // So ImportBlock is just the block directly, NOT length-prefixed
-  // Decode the entire data as a block
   if (data.length === 0) {
     throw new Error(`ImportBlock has zero-length block data`)
   }
 
-  if (process.env['DEBUG_FUZZ_DECODE']) {
-    console.log(
-      `[decodeImportBlock] Decoding entire ${data.length} bytes as block (no length prefix)`,
-    )
+  if (data.length >= 4) {
+    const len = new DataView(
+      data.buffer,
+      data.byteOffset,
+      data.byteLength,
+    ).getUint32(0, true)
+    if (len > 0 && len <= data.length - 4 && len <= MAX_INITIAL_STATE_LENGTH) {
+      const initSlice = data.subarray(4, 4 + len)
+      const blockSlice = data.subarray(4 + len)
+      if (blockSlice.length > 0) {
+        try {
+          const { keyvals, consumed: keyvalsConsumed } =
+            decodeKeyValueSequenceWithConsumed(initSlice)
+          const { ancestry, consumed: ancestryConsumed } =
+            decodeAncestryWithConsumed(initSlice.subarray(keyvalsConsumed))
+          if (keyvalsConsumed + ancestryConsumed === len) {
+            const [blockError, blockResult] = decodeBlock(blockSlice, config)
+            if (!blockError && blockResult) {
+              return {
+                block: blockResult.value,
+                initial_state: { keyvals, ancestry },
+              }
+            }
+          }
+        } catch {
+          // Fall through to decode as block only
+        }
+      }
+    }
   }
 
-  // Decode block using JAM codec
   const [blockError, blockResult] = decodeBlock(data, config)
   if (blockError) {
-    if (process.env['DEBUG_FUZZ_DECODE']) {
-      console.error(
-        `[decodeImportBlock] Block decode error: ${blockError.message}`,
-      )
-      console.error(`[decodeImportBlock] Data length: ${data.length} bytes`)
-    }
     throw new Error(
       `Failed to decode block in ImportBlock: ${blockError.message}`,
     )
   }
-
   return { block: blockResult.value }
 }
 

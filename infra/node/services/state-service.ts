@@ -26,7 +26,13 @@ import {
   decodeTheTime,
   decodeValidatorSet,
 } from '@pbnjam/codec'
-import { bytesToHex, hexToBytes, logger, merklizeState } from '@pbnjam/core'
+import {
+  bytesToHex,
+  hexToBytes,
+  logger,
+  merklizeState,
+  zeroHash,
+} from '@pbnjam/core'
 import type {
   Accumulated,
   Activity,
@@ -559,6 +565,55 @@ export class StateService extends BaseService implements IStateService {
 
     // Clear pending work reports - these can accumulate from failed block attempts
     this.workReportService.clearPendingReports()
+  }
+
+  /**
+   * Full state reset for fuzzer multi-trace runs.
+   * Clears every component that feeds into generateStateTrie() so each trace
+   * starts from a clean slate and setState(init.keyvals) is the only source of truth.
+   */
+  clearAllStateForFuzzer(): void {
+    this.clearState()
+    this.recentHistoryService.clearHistory()
+    this.accumulationService.setLastProcessedSlot(null)
+    this.accumulationService.setLastAccumulationOutputs([])
+    this.accumulationService.setAccumulated({
+      packages: Array.from(
+        { length: this.configService.epochDuration },
+        () => new Set<Hex>(),
+      ),
+    })
+    const numCores = this.configService.numCores
+    this.authPoolService.setAuthPool(
+      Array.from({ length: numCores }, () => []) as AuthPool,
+    )
+    this.authQueueService.setAuthQueue(
+      Array.from({ length: numCores }, () => []) as AuthQueue,
+    )
+    this.validatorSetManager.setPendingSet([])
+    this.validatorSetManager.setStagingSet([])
+    this.validatorSetManager.setActiveSet([])
+    this.validatorSetManager.setPreviousSet([])
+    this.validatorSetManager.setEpochRoot(`0x${'00'.repeat(144)}` as Hex)
+    this.ticketService.setTicketAccumulator([])
+    this.sealKeyService.setSealKeys([])
+    this.disputesService.clearDisputes()
+    const z = zeroHash as Hex
+    this.entropyService.setEntropy({
+      accumulator: z,
+      entropy1: z,
+      entropy2: z,
+      entropy3: z,
+    })
+    this.clockService.setLatestReportedBlockTimeslot(0n)
+    this.privilegesService.setPrivileges({} as Privileges)
+    this.statisticsService.setActivity({
+      validatorStatsAccumulator: [],
+      validatorStatsPrevious: [],
+      coreStats: [],
+      serviceStats: new Map(),
+    } as Activity)
+    this.readyService.setReady({ epochSlots: [] } as Ready)
   }
 
   /**

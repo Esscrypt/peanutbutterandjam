@@ -27,14 +27,19 @@ import {
   RingVRFProverWasm,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
-import { decodeFuzzMessage, encodeFuzzMessage } from '@pbnjam/codec'
-import { EventBusService, type Hex, logger } from '@pbnjam/core'
+import {
+  decodeFuzzMessage,
+  decodeStateWorkReports,
+  encodeFuzzMessage,
+} from '@pbnjam/codec'
+import { EventBusService, type Hex, hexToBytes, logger } from '@pbnjam/core'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
 import { AccumulatePVM } from '@pbnjam/pvm-invocations'
 import {
+  type BlockHeader,
   DEFAULT_JAM_VERSION,
   type FuzzMessage,
   FuzzMessageType,
@@ -126,6 +131,7 @@ let blockImporterService: BlockImporterService
 let recentHistoryService: RecentHistoryService
 let chainManagerService: ChainManagerService
 let accumulationService: AccumulationService
+let workReportService: WorkReportService
 let clockService: ClockService
 let entropyService: EntropyService
 let initialized = false
@@ -289,7 +295,7 @@ export async function initializeServices() {
       configService: configService,
     })
 
-    const workReportService = new WorkReportService({
+    workReportService = new WorkReportService({
       eventBus: eventBusService,
       networkingService: null,
       ce136WorkReportRequestProtocol: null,
@@ -593,12 +599,25 @@ function handlePeerInfo(socket: UnixSocket, peerInfo: FuzzPeerInfo): void {
   sendMessage(socket, encoded)
 }
 
+/**
+ * Reset chain, state, and recent history for a new trace.
+ * Required when running multiple traces over the same connection (e.g. multi-trace driver)
+ * so each trace starts from a clean slate and does not see previous trace's chain/state.
+ */
+function resetForNewTrace(): void {
+  chainManagerService.clear()
+  stateService.clearAllStateForFuzzer()
+  recentHistoryService.clearHistory()
+  workReportService.clearPendingReports()
+}
+
 // Handle Initialize request
 async function handleInitialize(
   socket: UnixSocket,
   init: Initialize,
 ): Promise<void> {
   try {
+    resetForNewTrace()
     logger.info(
       `Initialize: Setting state with ${init.keyvals.length} keyvals, ${init.ancestry?.length || 0} ancestry items`,
     )
@@ -615,6 +634,44 @@ async function handleInitialize(
       logger.warn(`Warning during setState: ${setStateError.message}`)
     }
     logger.debug(`Initialize: State set successfully`)
+
+    // Initialize pending work reports from C(10) (same as jam-conformance-trace-single-rust.test.ts).
+    // Gray Paper Eq. 296-298: Core must not be engaged (no pending report). Critical for CORE_ENGAGED validation.
+    const chapter10Key =
+      '0x0a000000000000000000000000000000000000000000000000000000000000' as Hex
+    const reportsKeyval = init.keyvals.find(
+      (kv: { key: string }) => kv.key === chapter10Key,
+    )
+    if (reportsKeyval?.value) {
+      const reportsData = hexToBytes(reportsKeyval.value as Hex)
+      const [decodeError, decodeResult] = decodeStateWorkReports(
+        reportsData,
+        configService,
+      )
+      if (!decodeError && decodeResult) {
+        workReportService.setPendingReports(decodeResult.value)
+      }
+    }
+
+    // Sync accumulationService.lastProcessedSlot from C(11) thetime (same as in-process trace tests).
+    // lastProcessedSlot is not part of the state trie; shiftStateForBlockTransition uses it for ready queue.
+    const chapter11Key =
+      '0x0b000000000000000000000000000000000000000000000000000000000000' as Hex
+    const thetimeKeyval = init.keyvals.find(
+      (kv: { key: string }) => kv.key === chapter11Key,
+    )
+    if (thetimeKeyval?.value) {
+      const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
+      const thetime = BigInt(
+        thetimeBytes[0] |
+          (thetimeBytes[1]! << 8) |
+          (thetimeBytes[2]! << 16) |
+          (thetimeBytes[3]! << 24),
+      )
+      accumulationService.setLastProcessedSlot(thetime)
+    } else {
+      accumulationService.setLastProcessedSlot(null)
+    }
 
     // Generate state trie for genesis header initialization
     const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
@@ -739,19 +796,119 @@ async function handleImportBlock(
   socket: UnixSocket,
   importBlock: ImportBlock,
 ): Promise<void> {
-  if (!initialized) {
+  // When driver sends initial_state, always treat as start of a new trace (multi-trace driver
+  // reuses the same connection; initialized stays true from previous trace otherwise).
+  if (importBlock.initial_state) {
+    try {
+      resetForNewTrace()
+      const [setStateError] = stateService.setState(
+        importBlock.initial_state.keyvals,
+      )
+      if (setStateError) {
+        logger.warn(
+          `Implicit init from ImportBlock.initial_state: setState warning: ${setStateError.message}`,
+        )
+      }
+      const chapter10Key =
+        '0x0a000000000000000000000000000000000000000000000000000000000000' as Hex
+      const reportsKeyval = importBlock.initial_state.keyvals.find(
+        (kv: { key: string }) => kv.key === chapter10Key,
+      )
+      if (reportsKeyval?.value) {
+        const reportsData = hexToBytes(reportsKeyval.value as Hex)
+        const [decodeError, decodeResult] = decodeStateWorkReports(
+          reportsData,
+          configService,
+        )
+        if (!decodeError && decodeResult) {
+          workReportService.setPendingReports(decodeResult.value)
+        }
+      }
+      const chapter11Key =
+        '0x0b000000000000000000000000000000000000000000000000000000000000' as Hex
+      const thetimeKeyval = importBlock.initial_state.keyvals.find(
+        (kv: { key: string }) => kv.key === chapter11Key,
+      )
+      if (thetimeKeyval?.value) {
+        const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
+        const thetime = BigInt(
+          thetimeBytes[0]! |
+            (thetimeBytes[1]! << 8) |
+            (thetimeBytes[2]! << 16) |
+            (thetimeBytes[3]! << 24),
+        )
+        accumulationService.setLastProcessedSlot(thetime)
+      } else {
+        accumulationService.setLastProcessedSlot(null)
+      }
+      const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
+      if (genesisTrieError || !genesisTrie) {
+        const err =
+          genesisTrieError?.message ?? 'generateStateTrie returned null'
+        const response: FuzzMessage = {
+          type: FuzzMessageType.Error,
+          payload: { error: `Implicit init failed: ${err}` },
+        }
+        sendMessage(socket, encodeFuzzMessage(response, configService))
+        return
+      }
+      const block = importBlock.block
+      const parentSlot =
+        block.header.timeslot > 0n ? block.header.timeslot - 1n : 0n
+      const syntheticParentHeader: BlockHeader = {
+        parent: block.header.parent,
+        priorStateRoot: block.header.priorStateRoot,
+        extrinsicHash: block.header.extrinsicHash,
+        timeslot: parentSlot,
+        epochMark: null,
+        winnersMark: null,
+        offendersMark: [],
+        authorIndex: 0n,
+        vrfSig: `0x${'00'.repeat(96)}` as Hex,
+        sealSig: `0x${'00'.repeat(96)}` as Hex,
+      }
+      chainManagerService.saveStateSnapshot(syntheticParentHeader, genesisTrie)
+      if (
+        importBlock.initial_state.ancestry &&
+        importBlock.initial_state.ancestry.length > 0
+      ) {
+        configService.ancestryEnabled = true
+        const ancestorHashes = importBlock.initial_state.ancestry.map(
+          (item) => item.header_hash,
+        )
+        recentHistoryService.initializeAncestry(ancestorHashes)
+        chainManagerService.initializeAncestry(
+          importBlock.initial_state.ancestry,
+        )
+      } else {
+        configService.ancestryEnabled = false
+      }
+      initialized = true
+      logger.info(
+        `Implicit init from ImportBlock.initial_state: parent node for ${block.header.parent.slice(0, 18)}..., ${importBlock.initial_state.keyvals.length} keyvals`,
+      )
+    } catch (implicitInitError) {
+      const message =
+        implicitInitError instanceof Error
+          ? implicitInitError.message
+          : String(implicitInitError)
+      const response: FuzzMessage = {
+        type: FuzzMessageType.Error,
+        payload: { error: `Implicit init failed: ${message}` },
+      }
+      sendMessage(socket, encodeFuzzMessage(response, configService))
+      return
+    }
+  } else if (!initialized) {
     const response: FuzzMessage = {
       type: FuzzMessageType.Error,
       payload: { error: 'Not initialized. Send Initialize first.' },
     }
-    const encoded = encodeFuzzMessage(response, configService)
-    sendMessage(socket, encoded)
+    sendMessage(socket, encodeFuzzMessage(response, configService))
     return
   }
 
   try {
-    // Import the block via chain manager (it coordinates the import and checks finalized chain)
-    // This matches the test file behavior and ensures proper validation order
     const [importError] = await chainManagerService.importBlock(
       importBlock.block,
     )
@@ -777,8 +934,6 @@ async function handleImportBlock(
             : String(importError),
         formattedError,
         formattedErrorType: typeof formattedError,
-        expectedForBlock26:
-          'Local chain error: block execution failure: reports error: bad validator index',
         matchesExpected:
           formattedError ===
           'Local chain error: block execution failure: reports error: bad validator index',
