@@ -5,14 +5,35 @@
  * Uses the service factory for consistent service initialization
  */
 
-import { hexToBytes, type Hex } from '@pbnjam/core'
+import { hexToBytes, type Hex, EventBusService } from '@pbnjam/core'
 import { getTicketIdFromProof } from '@pbnjam/safrole'
+import {
+  AuditAnnouncementProtocol,
+  AuditShardRequestProtocol,
+  BlockAnnouncementProtocol,
+  BlockRequestProtocol,
+  CE131TicketDistributionProtocol,
+  CE132TicketDistributionProtocol,
+  CE134WorkPackageSharingProtocol,
+  PreimageAnnouncementProtocol,
+  PreimageRequestProtocol,
+  SegmentShardRequestProtocol,
+  ShardDistributionProtocol,
+  StateRequestProtocol,
+  WorkPackageSubmissionProtocol,
+  WorkReportDistributionProtocol,
+  WorkReportRequestProtocol,
+  type NetworkingProtocol,
+} from '@pbnjam/networking'
 import {
   DEFAULT_JAM_VERSION,
   type Block,
   type BlockBody,
   type BlockHeader,
+  type IChainManagerService,
+  type IConfigService,
   type JamVersion,
+  type StreamKind,
   type ValidatorPublicKeys,
   type WorkReport,
 } from '@pbnjam/types'
@@ -23,8 +44,9 @@ import {
   type ServiceContext,
   type ConfigServiceSizeType,
 } from '../services/service-factory'
-import type { NodeGenesisManager } from '../services/genesis-manager'
+import { NodeGenesisManager } from '../services/genesis-manager'
 import type { ConfigService } from '../services/config-service'
+import { NetworkingService } from '../services/networking-service'
 
 /**
  * Helper function to parse CLI arguments or environment variable for starting block
@@ -229,6 +251,23 @@ export function convertJsonBlockToBlock(jsonBlock: any): Block {
 }
 
 /**
+ * Networking protocols created by createProtocols
+ */
+export interface NetworkingProtocols {
+  ce131TicketDistributionProtocol: CE131TicketDistributionProtocol
+  ce132TicketDistributionProtocol: CE132TicketDistributionProtocol
+  ce134WorkPackageSharingProtocol: CE134WorkPackageSharingProtocol
+  ce136WorkReportRequestProtocol: WorkReportRequestProtocol
+  ce137ShardDistributionProtocol: ShardDistributionProtocol
+  ce143PreimageRequestProtocol: PreimageRequestProtocol
+  blockAnnouncementProtocol: BlockAnnouncementProtocol
+  blockRequestProtocol: BlockRequestProtocol
+  stateRequestProtocol: StateRequestProtocol
+  auditAnnouncementProtocol: AuditAnnouncementProtocol
+  protocolRegistry: Map<StreamKind, NetworkingProtocol<unknown, unknown>>
+}
+
+/**
  * Services context returned by initializeServices
  * This is a subset of ServiceContext for backward compatibility
  */
@@ -239,8 +278,108 @@ export interface FuzzerTargetServices {
   recentHistoryService: ServiceContext['recentHistoryService']
   configService: ServiceContext['configService']
   validatorSetManager: ServiceContext['validatorSetManager']
+  // Networking services (optional)
+  networkingService?: NetworkingService | null
+  protocols?: NetworkingProtocols
   // Full context for advanced use cases
   fullContext: ServiceContext
+}
+
+/**
+ * Create networking protocols
+ *
+ * Creates all networking protocols used by the node.
+ * Based on MainService.initNetworkingProtocols() and initProtocolRegistry()
+ *
+ * @param eventBusService - Event bus service for protocol events
+ * @param configService - Config service for protocol configuration
+ * @param chainManagerService - Chain manager service (optional, for block request protocol)
+ * @returns Object containing all protocols and the protocol registry
+ */
+export function createProtocols(
+  eventBusService: EventBusService,
+  configService: IConfigService,
+  chainManagerService?: IChainManagerService,
+): NetworkingProtocols {
+  const ce131TicketDistributionProtocol = new CE131TicketDistributionProtocol(
+    eventBusService,
+    configService,
+  )
+  const ce132TicketDistributionProtocol = new CE132TicketDistributionProtocol(
+    eventBusService,
+    configService,
+  )
+  const ce134WorkPackageSharingProtocol = new CE134WorkPackageSharingProtocol(
+    eventBusService,
+  )
+  const ce136WorkReportRequestProtocol = new WorkReportRequestProtocol(
+    eventBusService,
+  )
+  const ce137ShardDistributionProtocol = new ShardDistributionProtocol(
+    eventBusService,
+  )
+  const ce143PreimageRequestProtocol = new PreimageRequestProtocol(
+    eventBusService,
+  )
+  const blockAnnouncementProtocol = new BlockAnnouncementProtocol(
+    configService,
+    eventBusService,
+  )
+  const blockRequestProtocol = chainManagerService
+    ? new BlockRequestProtocol(
+        eventBusService,
+        configService,
+        chainManagerService,
+      )
+    : (null as unknown as BlockRequestProtocol) // Will be created later if needed
+  const stateRequestProtocol = new StateRequestProtocol(eventBusService)
+  const auditAnnouncementProtocol = new AuditAnnouncementProtocol(
+    eventBusService,
+  )
+
+  // Create protocol registry
+  const protocolRegistry = new Map<StreamKind, NetworkingProtocol<unknown, unknown>>()
+  protocolRegistry.set(0, blockAnnouncementProtocol)
+  if (blockRequestProtocol) {
+    protocolRegistry.set(128, blockRequestProtocol)
+  }
+  protocolRegistry.set(129, stateRequestProtocol)
+  protocolRegistry.set(131, ce131TicketDistributionProtocol)
+  protocolRegistry.set(132, ce132TicketDistributionProtocol)
+  protocolRegistry.set(
+    133,
+    new WorkPackageSubmissionProtocol(eventBusService),
+  )
+  protocolRegistry.set(134, ce134WorkPackageSharingProtocol)
+  protocolRegistry.set(
+    135,
+    new WorkReportDistributionProtocol(eventBusService),
+  )
+  protocolRegistry.set(136, ce136WorkReportRequestProtocol)
+  protocolRegistry.set(137, ce137ShardDistributionProtocol)
+  protocolRegistry.set(138, new AuditShardRequestProtocol(eventBusService))
+  protocolRegistry.set(139, new SegmentShardRequestProtocol(eventBusService))
+  protocolRegistry.set(140, new SegmentShardRequestProtocol(eventBusService))
+  protocolRegistry.set(
+    142,
+    new PreimageAnnouncementProtocol(eventBusService),
+  )
+  protocolRegistry.set(143, ce143PreimageRequestProtocol)
+  protocolRegistry.set(144, auditAnnouncementProtocol)
+
+  return {
+    ce131TicketDistributionProtocol,
+    ce132TicketDistributionProtocol,
+    ce134WorkPackageSharingProtocol,
+    ce136WorkReportRequestProtocol,
+    ce137ShardDistributionProtocol,
+    ce143PreimageRequestProtocol,
+    blockAnnouncementProtocol,
+    blockRequestProtocol,
+    stateRequestProtocol,
+    auditAnnouncementProtocol,
+    protocolRegistry,
+  }
 }
 
 /**
@@ -255,7 +394,8 @@ export interface FuzzerTargetServices {
  * @param options.initialValidators - Optional initial validators for ValidatorSetManager (defaults to empty array)
  * @param options.useWasm - Whether to use WebAssembly PVM implementation (default: false)
  * @param options.useRust - Whether to use Rust (native) PVM implementation (default: false)
- * @param options.useRingVrfWasm - Use WASM Ring VRF (true) or W3F (false) (default: true)
+ * @param options.enableNetworking - Whether to enable networking and protocols (default: false)
+ * @param options.networking - Networking configuration (required if enableNetworking is true)
  */
 export async function initializeServices(options?: {
   spec?: ConfigServiceSizeType
@@ -264,9 +404,15 @@ export async function initializeServices(options?: {
   initialValidators?: ValidatorPublicKeys[]
   useWasm?: boolean
   useRust?: boolean
-  useWorkerPool?: boolean
-  useRingVrfWasm?: boolean
-  useIetfVrfWasm?: boolean
+  enableNetworking?: boolean,
+  useIetfVrfWasm?: boolean,
+  useRingVrfWasm?: boolean,
+  networking?: {
+    listenAddress: string
+    listenPort: number
+    nodeType: 'validator' | 'full' | 'builder'
+    isBuilder?: boolean
+  }
 }): Promise<FuzzerTargetServices> {
   const {
     spec = 'tiny',
@@ -275,9 +421,10 @@ export async function initializeServices(options?: {
     initialValidators = [],
     useWasm = false,
     useRust = false,
-    useWorkerPool = false,
-    useRingVrfWasm = true,
-    useIetfVrfWasm = false,
+    enableNetworking = false,
+    networking,
+    useIetfVrfWasm,
+    useRingVrfWasm,
   } = options || {}
 
   // Create services using the factory
@@ -289,11 +436,11 @@ export async function initializeServices(options?: {
     useRingVrfWasm,
     useIetfVrfWasm,
     initialValidators,
-    // Don't enable networking for tests
     enableNetworking: false,
+    networking,
     // If a genesis manager is provided, we'll override it after creation
     genesis: genesisManager ? undefined : undefined,
-    useWorkerPool,
+    useWorkerPool: false,
   })
 
   // If a custom genesis manager is provided, use it in the state service
@@ -305,12 +452,37 @@ export async function initializeServices(options?: {
   }
 
   // Start the services
-  try {
-    await startCoreServices(context)
-  } catch (error) {
-    // Ensure services are stopped if startup fails to prevent resource leaks (e.g. worker pool)
-    await stopCoreServices(context)
-    throw error
+  await startCoreServices(context)
+
+  // Create protocols and networking service if enabled
+  let protocols: NetworkingProtocols | undefined
+  if (enableNetworking && context.eventBusService && context.configService) {
+    protocols = createProtocols(
+      context.eventBusService,
+      context.configService,
+      context.chainManagerService,
+    )
+
+    // If networking service wasn't created by factory, create it now with protocols
+    if (!context.networkingService && context.keyPairService && networking) {
+      const genesisManagerForChainHash = genesisManager
+        ? genesisManager
+        : new NodeGenesisManager(context.configService, {})
+      const [chainHashError, chainHash] =
+        genesisManagerForChainHash.getGenesisHeaderHash()
+      if (chainHashError) {
+        throw new Error('Failed to get chain hash for networking')
+      }
+
+      context.networkingService = new NetworkingService({
+        configService: context.configService,
+        keyPairService: context.keyPairService,
+        chainHash,
+        protocolRegistry: protocols.protocolRegistry,
+        validatorIndex: undefined,
+        eventBusService: context.eventBusService,
+      })
+    }
   }
 
   return {
@@ -320,6 +492,8 @@ export async function initializeServices(options?: {
     recentHistoryService: context.recentHistoryService,
     configService: context.configService,
     validatorSetManager: context.validatorSetManager,
+    networkingService: context.networkingService ?? null,
+    protocols,
     fullContext: context,
   }
 }

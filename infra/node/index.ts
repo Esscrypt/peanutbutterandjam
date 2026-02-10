@@ -19,25 +19,11 @@ const defaultConfig: MainServiceConfig = {
   },
   networking: {
     nodeType: (process.env['NODE_TYPE'] as NodeType) || 'validator',
-    listenAddress: process.env['LISTEN_ADDRESS'] || '0.0.0.0',
-    listenPort: BigInt(process.env['LISTEN_PORT'] || '30333'),
     isBuilder: process.env['IS_BUILDER'] === 'true',
   },
   nodeId: process.env['NODE_ID'] || 'jam-node-1',
   telemetry: {
     enabled: true,
-    nodeInfo: {
-      protocolVersion: 0n,
-      jamParameters: new Uint8Array(0), // Will be populated from config service
-      genesisHeaderHash: new Uint8Array(32), // Will be populated from chain spec
-      peerId: new Uint8Array(32),
-      peerAddress: { address: new Uint8Array(16), port: 30303n },
-      nodeFlags: 1n,
-      implementationName: 'PeanutButterAndJam',
-      implementationVersion: '0.1.0',
-      grayPaperVersion: '0.7.2', // Gray Paper version implemented
-      additionalInfo: 'JAM node CLI implementation',
-    },
   },
 }
 
@@ -49,8 +35,6 @@ async function main(): Promise<void> {
     logger.info('Starting JAM node...', {
       nodeId: defaultConfig.nodeId,
       nodeType: defaultConfig.networking.nodeType,
-      listenAddress: defaultConfig.networking.listenAddress,
-      listenPort: defaultConfig.networking.listenPort,
     })
 
     // Create and run the main service

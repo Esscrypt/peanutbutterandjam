@@ -6,14 +6,14 @@
  */
 
 import { existsSync } from 'node:fs'
-import { calculateBlockHashFromHeader } from '@pbnjam/codec'
+import { calculateBlockHashFromHeader, decodeHeader } from '@pbnjam/codec'
 import type {
   ChainSpecJson,
-  ChainSpecValidator,
   GenesisHeaderState,
   GenesisJson,
   Hex,
 } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, merklizeState } from '@pbnjam/core'
 import {
   computeGenesisHeaderHash,
   convertGenesisToBlockHeader,
@@ -26,10 +26,10 @@ import type {
   BlockHeader,
   IConfigService,
   ParsedBootnode,
+  StateTrie,
   ValidatorKeyPair,
 } from '@pbnjam/types'
 import { BaseService, type Safe, safeError, safeResult } from '@pbnjam/types'
-
 /**
  * Node Genesis Manager Service
  *
@@ -62,19 +62,24 @@ export class NodeGenesisManager extends BaseService {
     this.parsedBootnodes = []
     this.genesisBlockHeaderHash = null
 
-    // Load chain spec (required)
+    // Load chain spec (optional - if it fails, we can still use genesis.json)
     if (options?.chainSpecPath) {
       if (!existsSync(options.chainSpecPath)) {
-        throw new Error(`Chain spec file not found: ${options.chainSpecPath}`)
+        console.warn(
+          `Chain spec file not found: ${options.chainSpecPath}, will try other genesis sources`,
+        )
+      } else {
+        const [chainSpecError, chainSpecResult] = loadChainSpec(
+          options?.chainSpecPath,
+        )
+        if (chainSpecError) {
+          console.warn(
+            `Failed to load chain spec from ${options.chainSpecPath}: ${chainSpecError.message}. Will try other genesis sources.`,
+          )
+        } else {
+          this.chainSpecJson = chainSpecResult
+        }
       }
-
-      const [chainSpecError, chainSpecResult] = loadChainSpec(
-        options?.chainSpecPath,
-      )
-      if (chainSpecError) {
-        throw new Error('Failed to load chain spec')
-      }
-      this.chainSpecJson = chainSpecResult
     }
     if (options?.genesisJsonPath) {
       if (!existsSync(options.genesisJsonPath)) {
@@ -120,10 +125,49 @@ export class NodeGenesisManager extends BaseService {
   }
 
   getState(): Safe<GenesisHeaderState> {
-    if (!this.genesisJson) {
-      return safeError(new Error('Genesis result not found'))
+    // Try genesis.json first (highest priority)
+    if (this.genesisJson) {
+      return safeResult(this.genesisJson.state)
     }
-    return safeResult(this.genesisJson.state)
+
+    // Try chain spec in JIP-4 format (state trie)
+    // Check for genesis_header presence as indicator for JIP-4 format
+    // (schema transformation adds 0x prefix to keys, making isJIP4Format unreliable)
+    if (
+      this.chainSpecJson?.genesis_header &&
+      this.chainSpecJson.genesis_state
+    ) {
+      const stateTrie = this.chainSpecJson.genesis_state as StateTrie
+      if (!stateTrie || typeof stateTrie !== 'object') {
+        return safeError(new Error('JIP-4 genesis_state not found or invalid'))
+      }
+
+      // Convert state trie to keyvals format (keys are already normalized to Hex with 0x prefix by schema)
+      const keyvals = Object.entries(stateTrie).map(([key, value]) => ({
+        key: key as Hex,
+        value: value as Hex,
+      }))
+
+      // Calculate state root from state trie (merklizeState expects Record<string, string>)
+      const [trieError, stateRoot] = merklizeState(stateTrie)
+
+      if (trieError || !stateRoot) {
+        return safeError(
+          new Error(
+            `Failed to compute state root from state trie: ${trieError?.message || 'Unknown error'}`,
+          ),
+        )
+      }
+
+      return safeResult({
+        state_root: bytesToHex(stateRoot) as Hex,
+        keyvals,
+      })
+    }
+
+    return safeError(
+      new Error('Genesis state not found - JIP-4 chainspec required'),
+    )
   }
 
   /**
@@ -138,7 +182,8 @@ export class NodeGenesisManager extends BaseService {
 
   /**
    * Get genesis header hash
-   * Calculates from genesis header if available, otherwise from genesis JSON
+   * Calculates from genesis header if available, otherwise from genesis JSON or JIP-4 chain spec
+   * Priority: 1. Loaded genesis header, 2. JIP-4 chain spec genesis_header, 3. Genesis JSON
    */
   getGenesisHeaderHash(): Safe<Hex> {
     // If already computed, return it
@@ -146,7 +191,7 @@ export class NodeGenesisManager extends BaseService {
       return safeResult(this.genesisBlockHeaderHash)
     }
 
-    // Try to compute from genesis header if available
+    // Priority 1: Try to compute from loaded genesis header if available
     if (this.genesisBlockHeader) {
       try {
         const hash = computeGenesisHeaderHash(
@@ -164,7 +209,62 @@ export class NodeGenesisManager extends BaseService {
       }
     }
 
-    // Try to compute from genesis JSON if available
+    // Priority 2: Try to compute from JIP-4 chain spec (genesis_header is JAM-serialized)
+    // JIP-4 format: chainspec has genesis_header as a hex string containing JAM-serialized header
+    // Note: We check for genesis_header directly since schema transformation may modify genesis_state keys
+    if (this.chainSpecJson?.genesis_header) {
+      try {
+        // Ensure genesis_header has 0x prefix for hexToBytes
+        const genesisHeaderHex: Hex =
+          this.chainSpecJson.genesis_header.startsWith('0x')
+            ? (this.chainSpecJson.genesis_header as Hex)
+            : (`0x${this.chainSpecJson.genesis_header}` as Hex)
+
+        // Convert hex string to bytes
+        const serializedHeader = hexToBytes(genesisHeaderHex)
+
+        // Decode the JAM-serialized header
+        const [decodeError, decodeResult] = decodeHeader(
+          serializedHeader,
+          this.config,
+        )
+        if (decodeError || !decodeResult) {
+          return safeError(
+            new Error(
+              `Failed to decode JIP-4 genesis header: ${decodeError?.message || 'Unknown error'}`,
+            ),
+          )
+        }
+
+        const genesisHeader = decodeResult.value
+
+        // Calculate hash from decoded header
+        const [hashError, hash] = calculateBlockHashFromHeader(
+          genesisHeader,
+          this.config,
+        )
+        if (hashError || !hash) {
+          return safeError(
+            new Error(
+              `Failed to calculate genesis hash from JIP-4 header: ${hashError?.message || 'Unknown error'}`,
+            ),
+          )
+        }
+
+        // Cache the results
+        this.genesisBlockHeaderHash = hash
+        this.genesisBlockHeader = genesisHeader
+        return safeResult(hash)
+      } catch (error) {
+        return safeError(
+          new Error(
+            `Failed to compute genesis hash from JIP-4 chain spec: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        )
+      }
+    }
+
+    // Priority 3: Try to compute from genesis JSON if available
     if (this.genesisJson) {
       try {
         const genesisHeader = convertGenesisToBlockHeader(this.genesisJson)
@@ -191,7 +291,9 @@ export class NodeGenesisManager extends BaseService {
     }
 
     return safeError(
-      new Error('Genesis header hash not found and cannot be computed'),
+      new Error(
+        'Genesis header hash not found and cannot be computed. Ensure chainspec has genesis_header (JIP-4 format) or provide genesis.json',
+      ),
     )
   }
 
@@ -216,13 +318,20 @@ export class NodeGenesisManager extends BaseService {
 
   /**
    * Get initial validators from the loaded genesis data
+   * Note: JIP-4 format doesn't have structured validators in genesis_state
+   * Validators must be extracted from the decoded genesis header
    */
-  getInitialValidatorsFromChainSpec(): Safe<ChainSpecValidator[]> {
-    if (!this.genesisJson) {
-      return safeError(new Error('Genesis result not found'))
+  getInitialValidatorsFromChainSpec(): Safe<ValidatorKeyPair[]> {
+    // For JIP-4 format, validators are in the decoded genesis header
+    if (this.genesisBlockHeader) {
+      const validators = this.genesisBlockHeader.epochMark?.validators || []
+      return safeResult(validators)
     }
-    const validators = this.chainSpecJson?.genesis_state?.validators || []
-    return safeResult(validators)
+    return safeError(
+      new Error(
+        'Genesis block header not found - cannot extract validators from JIP-4 format',
+      ),
+    )
   }
 
   getInitialValidatorsFromBlockHeader(): Safe<ValidatorKeyPair[]> {
@@ -235,18 +344,23 @@ export class NodeGenesisManager extends BaseService {
 
   /**
    * Get genesis entropy
+   * Note: JIP-4 format doesn't have structured entropy in genesis_state
+   * Entropy must be extracted from the decoded genesis header or state trie
    */
   getGenesisEntropy(): Safe<Hex> {
-    if (!this.chainSpecJson) {
-      return safeError(new Error('Chain spec not found'))
+    // Try to get entropy from genesis block header
+    if (this.genesisBlockHeader?.epochMark?.entropy1) {
+      return safeResult(this.genesisBlockHeader.epochMark.entropy1)
     }
-    if (!this.chainSpecJson.genesis_state) {
-      return safeError(new Error('Genesis state not found'))
+    // Try to get entropy from genesis JSON
+    if (this.genesisJson?.header?.epoch_mark?.entropy) {
+      return safeResult(this.genesisJson.header.epoch_mark.entropy)
     }
-    if (!this.chainSpecJson.genesis_state.entropy) {
-      return safeError(new Error('Entropy not found'))
-    }
-    return safeResult(this.chainSpecJson.genesis_state.entropy)
+    return safeError(
+      new Error(
+        'Genesis entropy not found - JIP-4 format requires decoded header',
+      ),
+    )
   }
 
   getGenesisHeader(): Safe<BlockHeader> {
@@ -258,66 +372,23 @@ export class NodeGenesisManager extends BaseService {
 
   /**
    * Get genesis time
+   * Note: JIP-4 format doesn't have structured genesis_time in genesis_state
+   * Genesis time must be extracted from the decoded genesis header
    */
   getGenesisTime(): Safe<bigint> {
-    if (!this.chainSpecJson) {
-      return safeError(new Error('Chain spec not found'))
+    // Try to get genesis time from genesis block header
+    if (this.genesisBlockHeader) {
+      return safeResult(this.genesisBlockHeader.timeslot)
     }
-    if (!this.chainSpecJson.genesis_state) {
-      return safeError(new Error('Genesis state not found'))
+    // Try to get genesis time from genesis JSON
+    if (this.genesisJson?.header?.slot) {
+      return safeResult(BigInt(this.genesisJson.header.slot))
     }
-    if (!this.chainSpecJson.genesis_state.genesis_time) {
-      return safeError(new Error('Genesis time not found'))
-    }
-    return safeResult(BigInt(this.chainSpecJson.genesis_state.genesis_time))
-  }
-
-  /**
-   * Get slot duration
-   */
-  getSlotDuration(): Safe<bigint> {
-    if (!this.chainSpecJson) {
-      return safeError(new Error('Chain spec not found'))
-    }
-    if (!this.chainSpecJson.network) {
-      return safeError(new Error('Network not found'))
-    }
-    if (!this.chainSpecJson.network.slot_duration) {
-      return safeError(new Error('Slot duration not found'))
-    }
-    return safeResult(BigInt(this.chainSpecJson.network.slot_duration))
-  }
-
-  /**
-   * Get epoch length
-   */
-  getEpochLength(): Safe<bigint> {
-    if (!this.chainSpecJson) {
-      return safeError(new Error('Chain spec not found'))
-    }
-    if (!this.chainSpecJson.network) {
-      return safeError(new Error('Network not found'))
-    }
-    if (!this.chainSpecJson.network.epoch_length) {
-      return safeError(new Error('Epoch length not found'))
-    }
-    return safeResult(BigInt(this.chainSpecJson.network.epoch_length))
-  }
-
-  /**
-   * Get core count
-   */
-  getCoreCount(): Safe<bigint> {
-    if (!this.chainSpecJson) {
-      return safeError(new Error('Chain spec not found'))
-    }
-    if (!this.chainSpecJson.network) {
-      return safeError(new Error('Network not found'))
-    }
-    if (!this.chainSpecJson.network.core_count) {
-      return safeError(new Error('Core count not found'))
-    }
-    return safeResult(BigInt(this.chainSpecJson.network.core_count))
+    return safeError(
+      new Error(
+        'Genesis time not found - JIP-4 format requires decoded header',
+      ),
+    )
   }
 
   /**

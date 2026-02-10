@@ -18,19 +18,21 @@ import {
 } from '@pbnjam/bandersnatch-vrf'
 import { bytesToHex, EventBusService, type Hex, logger } from '@pbnjam/core'
 import type {
+  BlockRequestProtocol,
   CE131TicketDistributionProtocol,
   CE132TicketDistributionProtocol,
   CE134WorkPackageSharingProtocol,
   NetworkingProtocol,
   PreimageRequestProtocol,
   ShardDistributionProtocol,
+  StateRequestProtocol,
   WorkReportRequestProtocol,
 } from '@pbnjam/networking'
 import {
   AccumulateHostFunctionRegistry,
   HostFunctionRegistry,
 } from '@pbnjam/pvm'
-import { AccumulatePVM } from '@pbnjam/pvm-invocations'
+import { AccumulatePVM, RefinePVM } from '@pbnjam/pvm-invocations'
 import type { StreamKind, ValidatorPublicKeys } from '@pbnjam/types'
 import { safeResult } from '@pbnjam/types'
 
@@ -59,7 +61,6 @@ import { EntropyService } from './entropy'
 import { ErasureCodingService } from './erasure-coding-service'
 import { NodeGenesisManager } from './genesis-manager'
 import { GuarantorService } from './guarantor-service'
-import { HeaderConstructor } from './header-constructor'
 import {
   KeyPairService,
   type ValidatorKeyServiceConfig,
@@ -127,6 +128,8 @@ export interface ServiceFactoryOptions {
   nodeId?: string
   /** Initial validators for ValidatorSetManager */
   initialValidators?: ValidatorPublicKeys[]
+  /** Validator index (optional, for getting connection endpoint from staging set) */
+  validatorIndex?: number
   /** Networking protocols (optional, for advanced use) */
   protocols?: {
     ce131TicketDistributionProtocol?: CE131TicketDistributionProtocol | null
@@ -138,6 +141,10 @@ export interface ServiceFactoryOptions {
   }
   /** Protocol registry for networking (optional, for advanced use) */
   protocolRegistry?: Map<StreamKind, NetworkingProtocol<unknown, unknown>>
+  /** Block request protocol (optional, for advanced use) */
+  blockRequestProtocol?: BlockRequestProtocol | null
+  /** State request protocol (optional, for advanced use) */
+  stateRequestProtocol?: StateRequestProtocol | null
 }
 
 /**
@@ -188,7 +195,6 @@ export interface ServiceContext {
   // Optional services (may be null depending on configuration)
   keyPairService: KeyPairService | null
   networkingService: NetworkingService | null
-  headerConstructorService: HeaderConstructor | null
   metricsCollector: MetricsCollector | null
 
   // Ring VRF
@@ -332,11 +338,6 @@ export async function createCoreServices(
         bytesToHex(crypto.getRandomValues(new Uint8Array(32))),
       enableDevAccounts: options.keyPair?.enableDevAccounts ?? true,
       devAccountCount: options.keyPair?.devAccountCount ?? 6,
-      connectionEndpoint: {
-        host: options.networking?.listenAddress ?? '127.0.0.1',
-        port: options.networking?.listenPort ?? 9000,
-        publicKey: new Uint8Array(32), // Will be set after key generation
-      },
     }
     keyPairService = new KeyPairService(keyPairConfig)
   }
@@ -372,11 +373,12 @@ export async function createCoreServices(
     }
 
     networkingService = new NetworkingService({
-      listenAddress: options.networking.listenAddress,
-      listenPort: options.networking.listenPort,
+      configService,
       keyPairService,
       chainHash,
       protocolRegistry: options.protocolRegistry ?? new Map(),
+      validatorIndex: options.validatorIndex,
+      eventBusService,
     })
   }
 
@@ -413,6 +415,11 @@ export async function createCoreServices(
   // Wire up circular dependencies
   ticketService.setValidatorSetManager(validatorSetManager)
   sealKeyService.setValidatorSetManager(validatorSetManager)
+  // TicketService epoch callbacks registered after SealKeyService so SealKeyService can use accumulator first (Gray Paper Eq. 202-207)
+  const [ticketInitError] = ticketService.init()
+  if (ticketInitError) {
+    throw ticketInitError
+  }
   if (networkingService) {
     networkingService.setValidatorSetManager(validatorSetManager)
   }
@@ -469,6 +476,16 @@ export async function createCoreServices(
     pvmOptions: { gasCounter: BigInt(configService.maxBlockGas) },
     useWasm: options.useWasm ?? false,
     useRust: options.useRust ?? false,
+    traceSubfolder: options.traceSubfolder,
+  })
+
+  // Create RefinePVM for work package processing
+  const refinePVM = new RefinePVM({
+    hostFunctionRegistry,
+    accumulateHostFunctionRegistry,
+    serviceAccountService,
+    configService,
+    useWasm: options.useWasm ?? false,
     traceSubfolder: options.traceSubfolder,
   })
 
@@ -577,6 +594,8 @@ export async function createCoreServices(
     serviceAccountService,
     statisticsService,
     stateService,
+    refinePVM,
+    hostFunctionRegistry,
   })
 
   const blockImporterService = new BlockImporterService({
@@ -602,23 +621,30 @@ export async function createCoreServices(
 
   // ChainManagerService for fork handling and state snapshots
   // Chain manager always has block importer and coordinates imports
-  // Pass accumulationService for fork rollback - resets lastProcessedSlot for sibling blocks
+  // Get protocols from options or protocol registry
+  const stateRequestProtocolFromRegistry = options.protocolRegistry?.get(129) as
+    | StateRequestProtocol
+    | undefined
+  const blockRequestProtocolFromRegistry = options.protocolRegistry?.get(128) as
+    | BlockRequestProtocol
+    | undefined
+
+  const stateRequestProtocol =
+    options.stateRequestProtocol ?? stateRequestProtocolFromRegistry ?? null
+  const blockRequestProtocol =
+    options.blockRequestProtocol ?? blockRequestProtocolFromRegistry ?? null
+
   const chainManagerService = new ChainManagerService(
     configService,
     blockImporterService,
     stateService,
     accumulationService,
+    sealKeyService,
+    eventBusService,
+    stateRequestProtocol,
+    blockRequestProtocol,
+    networkingService,
   )
-
-  // Optional services
-  let headerConstructorService: HeaderConstructor | null = null
-  if (keyPairService) {
-    headerConstructorService = new HeaderConstructor({
-      keyPairService,
-      validatorSetManagerService: validatorSetManager,
-      genesisManagerService,
-    })
-  }
 
   let metricsCollector: MetricsCollector | null = null
   if (options.nodeId) {
@@ -653,7 +679,6 @@ export async function createCoreServices(
     shardService,
     keyPairService,
     networkingService,
-    headerConstructorService,
     metricsCollector,
     ringProver,
     ringVerifier,

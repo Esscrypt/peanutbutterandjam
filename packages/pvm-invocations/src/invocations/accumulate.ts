@@ -79,6 +79,7 @@ export class AccumulatePVM {
       this.pvmExecutor = new WasmPVMExecutor(
         options.configService,
         options.entropyService,
+        null, // serviceAccountService not needed for accumulate
         options.traceSubfolder,
       )
     } else {
@@ -95,6 +96,7 @@ export class AccumulatePVM {
         options.accumulateHostFunctionRegistry,
         options.configService,
         options.entropyService,
+        null, // serviceAccountService not needed for accumulate
         {
           ...options.pvmOptions,
           gasCounter:

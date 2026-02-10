@@ -128,7 +128,7 @@ export interface NodeInfo {
   jamParameters: Uint8Array // Encoded JAM parameters (as returned by fetch host call)
   genesisHeaderHash: Uint8Array // Genesis header hash (32 bytes)
   peerId: Uint8Array // Ed25519 public key (32 bytes)
-  peerAddress: { address: Uint8Array; port: bigint } // IPv6 address + port
+  peerAddress: { host: string; port: number } // IPv6 address + port
   nodeFlags: bigint // Bitmask (Bit 0: PVM recompiler if 1, interpreter if 0)
   implementationName: string // Max 32 UTF-8 bytes
   implementationVersion: string // Max 32 UTF-8 bytes
@@ -197,12 +197,16 @@ export interface SyncStatusChangedEvent extends BaseEvent {
  */
 export interface ConnectionRefusedEvent extends BaseEvent {
   eventType: 20n
-  peerAddress: { address: Uint8Array; port: bigint }
+  peerAddress:
+    | { address: Uint8Array; port: bigint }
+    | { host: string; port: bigint }
 }
 
 export interface ConnectingInEvent extends BaseEvent {
   eventType: 21n
-  peerAddress: { address: Uint8Array; port: bigint }
+  peerAddress:
+    | { address: Uint8Array; port: bigint }
+    | { host: string; port: bigint }
 }
 
 export interface ConnectInFailedEvent extends BaseEvent {
@@ -220,7 +224,9 @@ export interface ConnectedInEvent extends BaseEvent {
 export interface ConnectingOutEvent extends BaseEvent {
   eventType: 24n
   peerId: Uint8Array
-  peerAddress: { address: Uint8Array; port: bigint }
+  peerAddress:
+    | { address: Uint8Array; port: bigint }
+    | { host: string; port: bigint }
 }
 
 export interface ConnectOutFailedEvent extends BaseEvent {
@@ -1014,8 +1020,6 @@ export interface TelemetryConfig {
   endpoint?: string
   /** Whether telemetry is enabled */
   enabled: boolean
-  /** Node information */
-  nodeInfo: NodeInfo
   /** Maximum buffer size for events before dropping */
   maxBufferSize?: bigint
   /** Connection retry settings */

@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  # OpenTelemetry Collector
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./config/otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics exposed by the collector
+      - "8889:8889"   # Prometheus exporter metrics
+    networks:
+      - pbnj-network
+
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - pbnj-network
+    depends_on:
+      - otel-collector
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - pbnj-network
+    depends_on:
+      - prometheus
+
+  # PBNJ Nodes (multiple instances)
+  pbnj-node-1:
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
+    environment:
+      - NODE_ID=node-1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=pbnj-node-1
+      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=node-1
+      - LOG_LEVEL=info
+    ports:
+      - "40001:40000"  # P2P port
+      - "19801:19800"  # RPC port
+    volumes:
+      - node1_data:/data
+    networks:
+      - pbnj-network
+    depends_on:
+      - otel-collector
+
+  pbnj-node-2:
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
+    environment:
+      - NODE_ID=node-2
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=pbnj-node-2
+      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=node-2
+      - LOG_LEVEL=info
+    ports:
+      - "40002:40000"  # P2P port
+      - "19802:19800"  # RPC port
+    volumes:
+      - node2_data:/data
+    networks:
+      - pbnj-network
+    depends_on:
+      - otel-collector
+
+  pbnj-node-3:
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
+    environment:
+      - NODE_ID=node-3
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=pbnj-node-3
+      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=node-3
+      - LOG_LEVEL=info
+    ports:
+      - "40003:40000"  # P2P port
+      - "19803:19800"  # RPC port
+    volumes:
+      - node3_data:/data
+    networks:
+      - pbnj-network
+    depends_on:
+      - otel-collector
+
+  pbnj-node-4:
+    build:
+      context: .
+      dockerfile: infra/node/Dockerfile
+    environment:
+      - NODE_ID=node-4
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_SERVICE_NAME=pbnj-node-4
+      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=node-4
+      - LOG_LEVEL=info
+    ports:
+      - "40004:40000"  # P2P port
+      - "19804:19800"  # RPC port
+    volumes:
+      - node4_data:/data
+    networks:
+      - pbnj-network
+    depends_on:
+      - otel-collector
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  node1_data:
+  node2_data:
+  node3_data:
+  node4_data:
+  postgres_data:
+  jamtart_data:
+
+networks:
+  pbnj-network:
+    driver: bridge 

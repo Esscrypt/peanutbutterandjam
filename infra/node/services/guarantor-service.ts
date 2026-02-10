@@ -19,10 +19,14 @@
 
 import { calculateWorkPackageHash } from '@pbnjam/codec'
 import {
+  blake2bHash,
   bytesToHex,
+  concatBytes,
   type EventBusService,
+  getEd25519KeyPairWithFallback,
   hexToBytes,
   logger,
+  merklizecd,
 } from '@pbnjam/core'
 import {
   createGuaranteeSignature,
@@ -33,19 +37,25 @@ import {
   verifyWorkReportDistributionSignature,
 } from '@pbnjam/guarantor'
 import type { CE134WorkPackageSharingProtocol } from '@pbnjam/networking'
+import type { HostFunctionRegistry } from '@pbnjam/pvm'
+import { IsAuthorizedPVM, type RefinePVM } from '@pbnjam/pvm-invocations'
 import type {
   Guarantee,
   GuaranteeSignature,
   IClockService,
   IConfigService,
   IEntropyService,
+  IGuarantorService,
   Safe,
   SafePromise,
   StreamKind,
+  WorkError,
+  WorkExecResultValue,
   WorkPackage,
   WorkPackageSharing,
   WorkPackageSharingResponse,
   WorkReport,
+  WorkResult,
 } from '@pbnjam/types'
 import {
   BaseService,
@@ -76,7 +86,7 @@ import type { WorkReportService } from './work-report-service'
  *
  * Barebones implementation of the guarantor role
  */
-export class GuarantorService extends BaseService {
+export class GuarantorService extends BaseService implements IGuarantorService {
   private readonly configService: IConfigService
   private readonly clockService: IClockService
   private readonly entropyService: IEntropyService
@@ -100,7 +110,10 @@ export class GuarantorService extends BaseService {
   private readonly statisticsService: StatisticsService | null
   private readonly stateService: StateService | null
   // private readonly shardService: ShardService | null
-  private validatorIndex = 0
+  private readonly refinePVM: RefinePVM | null
+  private readonly isAuthorizedPVM: IsAuthorizedPVM | null
+  private validatorIndex: number | null = null
+  private pendingGuarantees: Guarantee[] = []
 
   constructor(options: {
     configService: ConfigService
@@ -120,6 +133,9 @@ export class GuarantorService extends BaseService {
     // erasureCodingService: ErasureCodingService | null
     // shardService: ShardService | null
     accumulationService: AccumulationService | null
+    refinePVM?: RefinePVM | null
+    isAuthorizedPVM?: IsAuthorizedPVM | null
+    hostFunctionRegistry?: HostFunctionRegistry | null
   }) {
     super('guarantor-service')
     this.configService = options.configService
@@ -139,6 +155,26 @@ export class GuarantorService extends BaseService {
     // this.erasureCodingService = options.erasureCodingService
     // this.shardService = options.shardService
     this.accumulationService = options.accumulationService
+    this.refinePVM = options.refinePVM ?? null
+
+    // Create IsAuthorizedPVM if not provided but we have the required services
+    if (options.isAuthorizedPVM) {
+      this.isAuthorizedPVM = options.isAuthorizedPVM
+    } else if (
+      options.hostFunctionRegistry &&
+      this.serviceAccountService &&
+      this.configService
+    ) {
+      this.isAuthorizedPVM = new IsAuthorizedPVM({
+        hostFunctionRegistry: options.hostFunctionRegistry,
+        serviceAccountService: this.serviceAccountService,
+        configService: this.configService,
+        useWasm: false, // Use TypeScript executor by default
+      })
+    } else {
+      this.isAuthorizedPVM = null
+    }
+
     // Register event handlers
     this.eventBusService.addWorkPackageSubmissionReceivedCallback(
       this.handleWorkPackageSubmission.bind(this),
@@ -153,15 +189,29 @@ export class GuarantorService extends BaseService {
   }
 
   start(): Safe<boolean> | SafePromise<boolean> {
-    if (!this.keyPairService) {
-      return safeError(new Error('Key pair service not found'))
+    // Get Ed25519 public key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      return safeError(keyPairError || new Error('Key pair service not found'))
     }
-    const publicKey =
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.publicKey
+    const publicKey = ed25519KeyPair.publicKey
     const [validatorIndexError, validatorIndex] =
       this.validatorSetManager.getValidatorIndex(bytesToHex(publicKey))
     if (validatorIndexError) {
-      return safeError(validatorIndexError)
+      // If the local node is not a validator, log a warning and continue
+      // This allows non-validator nodes to run (e.g., for development/testing)
+      logger.warn(
+        'Local node is not a validator in the genesis state. Guarantor service will operate in non-validator mode.',
+        {
+          publicKey: bytesToHex(publicKey),
+          error: validatorIndexError.message,
+        },
+      )
+      this.validatorIndex = null
+      return safeResult(true)
     }
     this.validatorIndex = validatorIndex
     return safeResult(true)
@@ -317,6 +367,11 @@ export class GuarantorService extends BaseService {
     const entropy2 = this.entropyService.getEntropy2()
     const currentSlot = this.clockService.getCurrentSlot()
     // TODO: Step 1: Get co-guarantors for this core
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const [coGuarantorsError, coGuarantors] = getCoGuarantors(
       coreIndex,
       this.validatorIndex,
@@ -430,24 +485,6 @@ export class GuarantorService extends BaseService {
   //     return safeError(error as Error)
   //   }
   // }
-
-  /**
-   * Send guarantee to block author
-   */
-  sendToBlockAuthor(_guarantee: Guarantee): Safe<void> {
-    try {
-      // TODO: Step 1: Get current block author from Safrole state
-      // TODO: Step 2: Package guarantee into network message
-      // TODO: Step 3: Send to block author
-      // TODO: Step 4: Track inclusion status
-      // TODO: Step 5: Resend if not included within timeout
-
-      // Placeholder: Return error (not implemented)
-      return safeError(new Error('Send to block author not implemented'))
-    } catch (error) {
-      return safeError(error as Error)
-    }
-  }
 
   /**
    * Distribute Guaranteed Work Report to Validators (CE135)
@@ -724,6 +761,11 @@ export class GuarantorService extends BaseService {
     // STEP 1: Verify Assignment & Anti-Spam
     // ═══════════════════════════════════════════════════════════════════
     const entropy2 = this.entropyService.getEntropy2()
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const currentSlot = this.clockService.getCurrentSlot()
     const [coreError, assignedCore] = getAssignedCore(
       this.validatorIndex,
@@ -745,9 +787,11 @@ export class GuarantorService extends BaseService {
 
     // Check anti-spam limit (max 2 signatures per timeslot)
     const validatorSignatures =
-      this.validatorSignaturesForTimeslot
-        .get(currentSlot)
-        ?.get(this.validatorIndex) ?? 0
+      this.validatorIndex === null
+        ? 0
+        : (this.validatorSignaturesForTimeslot
+            .get(currentSlot)
+            ?.get(this.validatorIndex) ?? 0)
     if (validatorSignatures && validatorSignatures > 2) {
       return safeError(
         new Error(
@@ -777,18 +821,51 @@ export class GuarantorService extends BaseService {
     // ═══════════════════════════════════════════════════════════════════
     // STEP 3: Work Package Evaluation (Refine Invocation)
     // ═══════════════════════════════════════════════════════════════════
-    // TODO: Execute Refine (Ψ_R) function on each work item
-    // Service needed: IPVMService
-    //
-    // const [refineError, refineResult] = await this.pvmService.executeRefine({
-    //   workPackage,
-    //   extrinsics: data.extrinsics,
-    //   importedSegments: await this.fetchImportedSegments(workPackage.workItems),
-    //   context: workPackage.context,
-    // })
-    // if (refineError) {
-    //   return safeError(new Error(`Refine execution failed: ${refineError.message}`))
-    // }
+    // Execute Refine (Ψ_R) function on each work item
+    if (!this.refinePVM) {
+      return safeError(
+        new Error('RefinePVM not available for work package evaluation'),
+      )
+    }
+
+    const workPackage = data.workPackage
+    const authorizerTrace = new Uint8Array() // TODO: Extract from work package or compute
+    const importSegments: Uint8Array[][] = [] // TODO: Fetch imported segments from availability system
+    let exportSegmentOffset = 0n
+
+    // Execute refine for each work item
+    const refineResults: Array<{
+      result: Uint8Array | WorkError
+      exportSegments: Uint8Array[]
+      gasUsed: bigint
+    }> = []
+
+    for (let i = 0; i < workPackage.workItems.length; i++) {
+      const refineResult = await this.refinePVM.executeRefine(
+        data.coreIndex,
+        BigInt(i),
+        workPackage,
+        authorizerTrace,
+        importSegments,
+        exportSegmentOffset,
+      )
+
+      if (refineResult.result === 'BAD') {
+        logger.error(
+          '[GuarantorService] Refine execution failed for work item',
+          {
+            workItemIndex: i,
+            coreIndex: data.coreIndex.toString(),
+          },
+        )
+        return safeError(
+          new Error(`Refine execution failed for work item ${i}`),
+        )
+      }
+
+      refineResults.push(refineResult)
+      exportSegmentOffset += BigInt(refineResult.exportSegments.length)
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // STEP 4: Compute Work Report
@@ -861,6 +938,11 @@ export class GuarantorService extends BaseService {
     // }
     //
     // Record signature in history (anti-spam tracking)
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const currentSignatures =
       this.validatorSignaturesForTimeslot.get(currentSlot) ?? new Map()
     const currentValidatorSignatures =
@@ -1010,6 +1092,11 @@ export class GuarantorService extends BaseService {
     // const workReportHash = blake2bHash(encode(workReport))
 
     // Step 5: Verify we can sign (anti-spam check - max 2 per timeslot)
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     const validatorSignatures =
       this.validatorSignaturesForTimeslot.get(currentSlot) ?? new Map()
     const currentValidatorSignatures =
@@ -1028,6 +1115,11 @@ export class GuarantorService extends BaseService {
     // const signature = createGuaranteeSignature(workReportHash, edPrivateKey)
 
     // Step 7: Record that we signed this timeslot
+    if (this.validatorIndex === null) {
+      return safeError(
+        new Error('Guarantor service is not configured for a validator node'),
+      )
+    }
     currentValidatorSignatures.set(
       this.validatorIndex,
       currentValidatorSignatures + 1,
@@ -1203,11 +1295,26 @@ export class GuarantorService extends BaseService {
     }
 
     // Add our own signature to the collection
+    if (this.validatorIndex === null) {
+      return // Cannot sign if not a validator
+    }
     const localValidatorIndex = this.validatorIndex
+    // Get Ed25519 private key using helper with fallback logic
+    const [keyPairError, ed25519KeyPair] = getEd25519KeyPairWithFallback(
+      this.configService,
+      this.keyPairService || undefined,
+    )
+    if (keyPairError || !ed25519KeyPair) {
+      logger.error(
+        '[GuarantorService] Failed to get Ed25519 key pair for signing',
+        { error: keyPairError?.message },
+      )
+      return
+    }
     const [ourSignatureError, _ourSignature] = createGuaranteeSignature(
       pending.workReport,
       localValidatorIndex,
-      this.keyPairService.getLocalKeyPair().ed25519KeyPair.privateKey,
+      ed25519KeyPair.privateKey,
     )
     if (ourSignatureError) {
       return
@@ -2305,5 +2412,430 @@ export class GuarantorService extends BaseService {
 
     // Convert Set to array for return (reporters should be unique)
     return safeResult({ reporters: Array.from(reporters) })
+  }
+
+  // ============================================================================
+  // IGuarantorService Interface Implementation
+  // ============================================================================
+
+  /**
+   * Step 1: Determine Core Assignment
+   * Implements IGuarantorService.getAssignedCore
+   */
+  getAssignedCore(
+    validatorIndex: number,
+    entropyService: IEntropyService,
+    clockService: IClockService,
+  ): Safe<number> {
+    const entropy2 = entropyService.getEntropy2()
+    const currentSlot = clockService.getCurrentSlot()
+    return getAssignedCore(
+      validatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
+    )
+  }
+
+  /**
+   * Step 2: Evaluate Work-Package Authorization
+   * Implements IGuarantorService.evaluateAuthorization
+   *
+   * Gray Paper Reference: authorization.tex, work_packages_and_reports.tex
+   *
+   * Evaluates if a work package is authorized for execution on a specific core.
+   *
+   * Process:
+   * 1. Compute authorizer hash: blake{authcodehash ∥ authconfig}
+   * 2. Check if authorizer is in auth pool for the assigned core
+   * 3. Optionally verify via Is-Authorized PVM invocation
+   *
+   * Gray Paper Equation 154-159: Authorizer computation
+   * wp_authorizer ≡ blake{wp_authcodehash ∥ wp_authconfig}
+   */
+  evaluateAuthorization(
+    workPackage: WorkPackage,
+    coreIndex: number,
+  ): Safe<boolean> {
+    try {
+      // Step 1: Compute authorizer hash
+      // Gray Paper: wp_authorizer ≡ blake{wp_authcodehash ∥ wp_authconfig}
+      const [hashError, authorizerHash] = blake2bHash(
+        concatBytes([
+          hexToBytes(workPackage.authCodeHash),
+          hexToBytes(workPackage.authConfig),
+        ]),
+      )
+      if (hashError) {
+        return safeError(hashError)
+      }
+      if (!authorizerHash) {
+        return safeError(new Error('Failed to compute authorizer hash'))
+      }
+
+      // Step 2: Check if authorizer is in auth pool for this core
+      const authPool = this.authPoolService.getAuthPool()
+      if (coreIndex < 0 || coreIndex >= authPool.length) {
+        return safeError(
+          new Error(`Core index ${coreIndex} out of range for auth pool`),
+        )
+      }
+
+      const coreAuthPool = authPool[coreIndex]
+      const isAuthorized = coreAuthPool.includes(authorizerHash)
+
+      // Step 3: Optionally verify via Is-Authorized PVM invocation
+      // This provides additional validation beyond just checking the auth pool
+      // For now, we rely on the auth pool check as the primary validation
+      // The Is-Authorized PVM is called during computeWorkReport for trace generation
+
+      return safeResult(isAuthorized)
+    } catch (error) {
+      return safeError(error as Error)
+    }
+  }
+
+  /**
+   * Step 3: Compute Work-Report
+   * Implements IGuarantorService.computeWorkReport
+   *
+   * Gray Paper Reference: work_packages_and_reports.tex
+   * Computes work report by:
+   * 1. First executing Is-Authorized PVM invocation (Ψ_I) to get authorizer trace
+   * 2. Then executing Refine PVM invocation (Ψ_R) for each work item
+   *
+   * Gray Paper Equations:
+   * - 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+   * - 186-241: Ψ_R(workpackage, workitem, ...) → (result, gas, exports)
+   */
+  async computeWorkReport(
+    workPackage: WorkPackage,
+    coreIndex: number,
+  ): Promise<Safe<WorkReport>> {
+    if (!this.refinePVM) {
+      return safeError(new Error('RefinePVM not available'))
+    }
+
+    if (!this.isAuthorizedPVM) {
+      return safeError(new Error('IsAuthorizedPVM not available'))
+    }
+
+    // Step 1: Execute Is-Authorized PVM invocation (Ψ_I)
+    // Gray Paper equation 37-38: Ψ_I(workpackage, coreindex) → (blob | workerror, gas)
+    // This generates the authorizer trace and auth output
+    const isAuthorizedResult = await this.isAuthorizedPVM.executeIsAuthorized(
+      workPackage,
+      BigInt(coreIndex),
+    )
+
+    // Check if authorization failed
+    if (
+      isAuthorizedResult.result === 'BAD' ||
+      isAuthorizedResult.result === 'BIG'
+    ) {
+      return safeError(
+        new Error(
+          `Work package authorization failed: ${isAuthorizedResult.result}`,
+        ),
+      )
+    }
+
+    // Extract authorizer trace and auth output from Is-Authorized result
+    // Gray Paper: The result blob is the authorizer trace
+    const authorizerTrace =
+      typeof isAuthorizedResult.result === 'string'
+        ? new Uint8Array(0) // Error case (shouldn't happen here)
+        : isAuthorizedResult.result
+
+    // Auth output is the same as authorizer trace (the blob returned by Is-Authorized)
+    const authOutput = authorizerTrace
+
+    // Auth gas used is the gas consumed by Is-Authorized invocation
+    const authGasUsed = isAuthorizedResult.gasUsed
+
+    // Step 2: Fetch import segments for work items
+    // TODO: Fetch imported segments from availability system
+    // For now, use empty import segments
+    const importSegments: Uint8Array[][] = workPackage.workItems.map(() => [])
+
+    // Step 3: Execute refine for each work item
+    const workResults: WorkResult[] = []
+    let exportSegmentOffset = 0n
+    const allExportSegments: Uint8Array[] = []
+
+    for (let i = 0; i < workPackage.workItems.length; i++) {
+      const workItemIndex = BigInt(i)
+      const refineResult = await this.refinePVM.executeRefine(
+        BigInt(coreIndex),
+        workItemIndex,
+        workPackage,
+        authorizerTrace,
+        importSegments,
+        exportSegmentOffset,
+      )
+
+      // Check if refine failed
+      if (refineResult.result === 'BAD') {
+        return safeError(
+          new Error(`Refine failed for work item ${i}: ${refineResult.result}`),
+        )
+      }
+
+      // Collect export segments
+      allExportSegments.push(...refineResult.exportSegments)
+      exportSegmentOffset += BigInt(refineResult.exportSegments.length)
+
+      // Build work result
+      // TODO: Compute refine_load properly (imports, exports, extrinsic_count, etc.)
+      // Convert refine result to WorkExecResultValue format
+      let workResultValue: WorkExecResultValue
+      if (typeof refineResult.result === 'string') {
+        // Error case: convert to appropriate format
+        if (refineResult.result === 'PANIC') {
+          workResultValue = { panic: null }
+        } else if (refineResult.result === 'OOG') {
+          // OOG maps to 'out_of_gas' in WorkExecResultValue
+          workResultValue = 'out_of_gas'
+        } else if (refineResult.result === 'BADEXPORTS') {
+          workResultValue = 'bad_exports'
+        } else if (refineResult.result === 'OVERSIZE') {
+          workResultValue = 'oversize'
+        } else if (refineResult.result === 'BIG') {
+          workResultValue = 'code_oversize'
+        } else {
+          // Unknown error - treat as panic
+          workResultValue = { panic: null }
+        }
+      } else {
+        // Success case: result is Uint8Array, convert to Hex
+        workResultValue = bytesToHex(refineResult.result)
+      }
+
+      const workResult: WorkResult = {
+        service_id: workPackage.workItems[i].serviceindex,
+        code_hash: workPackage.workItems[i].codehash,
+        payload_hash: workPackage.workItems[i].payload
+          ? bytesToHex(workPackage.workItems[i].payload)
+          : ('0x' as Hex),
+        accumulate_gas: workPackage.workItems[i].accgaslimit,
+        result: workResultValue,
+        refine_load: {
+          imports: BigInt(importSegments[i]?.length || 0),
+          exports: BigInt(refineResult.exportSegments.length),
+          extrinsic_count: BigInt(0), // TODO: Extract from work item
+          extrinsic_size: BigInt(0), // TODO: Extract from work item
+          gas_used: refineResult.gasUsed,
+        },
+      }
+
+      workResults.push(workResult)
+    }
+
+    // Compute package spec
+    const [packageHashError, packageHash] =
+      calculateWorkPackageHash(workPackage)
+    if (packageHashError) {
+      return safeError(packageHashError)
+    }
+
+    // Compute exports root using merklizecd
+    const [exportsRootError, exportsRoot] = merklizecd(allExportSegments)
+    if (exportsRootError) {
+      return safeError(exportsRootError)
+    }
+
+    // TODO: Compute erasure root (requires erasure coding)
+    const erasureRoot = `0x${'00'.repeat(32)}` as Hex
+
+    // TODO: Compute package length (encode work package)
+    const packageLength = BigInt(0) // TODO: Calculate actual length
+
+    // Compute segments root lookup from work package
+    const segmentRootLookup = this.computeSegmentsRootMappings(workPackage, [])
+    const [mappingsError, mappings] = segmentRootLookup
+    if (mappingsError) {
+      return safeError(mappingsError)
+    }
+
+    const segmentRootLookupItems = mappings.map((m) => ({
+      work_package_hash: bytesToHex(m.workPackageHash),
+      segment_tree_root: bytesToHex(m.segmentsRoot),
+    }))
+
+    // Build work report
+    const workReport: WorkReport = {
+      package_spec: {
+        hash: packageHash,
+        length: packageLength,
+        erasure_root: erasureRoot,
+        exports_root: bytesToHex(exportsRoot),
+        exports_count: BigInt(allExportSegments.length),
+      },
+      context: workPackage.context,
+      core_index: BigInt(coreIndex),
+      authorizer_hash: workPackage.authCodeHash,
+      auth_gas_used: authGasUsed,
+      auth_output: bytesToHex(authOutput),
+      segment_root_lookup: segmentRootLookupItems,
+      results: workResults,
+    }
+
+    return safeResult(workReport)
+  }
+
+  /**
+   * Step 4: Sign Work-Report
+   * Implements IGuarantorService.signWorkReport
+   */
+  signWorkReport(
+    workReport: WorkReport,
+    validatorIndex: number,
+  ): Safe<GuaranteeSignature> {
+    if (!this.keyPairService) {
+      return safeError(new Error('Key pair service not available'))
+    }
+    const [keyPairError, keyPair] = this.keyPairService.getLocalKeyPair()
+    if (keyPairError || !keyPair) {
+      return safeError(
+        keyPairError || new Error('Failed to get local key pair'),
+      )
+    }
+    const edPrivateKey = keyPair.ed25519KeyPair.privateKey
+    return createGuaranteeSignature(workReport, validatorIndex, edPrivateKey)
+  }
+
+  /**
+   * Step 6: Perform Erasure Coding
+   * Implements IGuarantorService.performErasureCoding
+   *
+   * TODO: Implement erasure coding logic
+   */
+  performErasureCoding(
+    _workPackage: WorkPackage,
+    _exportedData: Uint8Array[],
+  ): Safe<{ chunks: Uint8Array[]; segmentRoot: Hex }> {
+    // TODO: Implement erasure coding
+    // 1. Chunk work-package data into segments
+    // 2. Apply erasure coding to create redundant chunks
+    // 3. Calculate segment root (Merkle root of chunks)
+    return safeError(new Error('Not implemented'))
+  }
+
+  /**
+   * Step 7: Distribute Chunks to Validators
+   * Implements IGuarantorService.distributeChunksToValidators
+   *
+   * TODO: Implement chunk distribution logic
+   */
+  distributeChunksToValidators(
+    _chunks: Uint8Array[],
+    _segmentRoot: Hex,
+  ): Safe<void> {
+    // TODO: Implement chunk distribution
+    // 1. Get list of all validators in active set
+    // 2. Assign specific chunks to each validator
+    // 3. Send assigned chunks to each validator
+    return safeError(new Error('Not implemented'))
+  }
+
+  /**
+   * Step 8: Create Guarantee Extrinsic
+   * Implements IGuarantorService.createGuaranteeExtrinsic
+   */
+  createGuaranteeExtrinsic(
+    workReport: WorkReport,
+    timeslot: bigint,
+    signatures: GuaranteeSignature[],
+  ): Safe<Guarantee> {
+    return this.createGuarantee(workReport, signatures, timeslot)
+  }
+
+  /**
+   * Step 8: Create Guarantee
+   * Implements IGuarantorService.createGuarantee
+   */
+  createGuarantee(
+    workReport: WorkReport,
+    signatures: GuaranteeSignature[],
+    timeslot: bigint,
+  ): Safe<Guarantee> {
+    // Sort signatures by validator index (ascending order)
+    const sortedSignatures = sortGuaranteeSignatures(signatures)
+
+    // Validate we have 2-3 signatures
+    if (sortedSignatures.length < 2 || sortedSignatures.length > 3) {
+      return safeError(
+        new Error(
+          `Invalid number of signatures: ${sortedSignatures.length}, expected 2-3`,
+        ),
+      )
+    }
+
+    // Create guarantee tuple: (work-report, slot, signatures)
+    const guarantee: Guarantee = {
+      report: workReport,
+      slot: timeslot,
+      signatures: sortedSignatures,
+    }
+
+    return safeResult(guarantee)
+  }
+
+  /**
+   * Helper: Get Co-Guarantors
+   * Implements IGuarantorService.getCoGuarantors
+   */
+  getCoGuarantors(
+    coreIndex: number,
+    currentValidatorIndex: number,
+  ): Safe<number[]> {
+    const entropy2 = this.entropyService.getEntropy2()
+    const currentSlot = this.clockService.getCurrentSlot()
+    return getCoGuarantors(
+      coreIndex,
+      currentValidatorIndex,
+      entropy2,
+      currentSlot,
+      this.configService,
+    )
+  }
+
+  /**
+   * Helper: Rate Limit Check
+   * Implements IGuarantorService.canSignWorkReport
+   */
+  canSignWorkReport(timeslot: bigint): Safe<boolean> {
+    // Check if we've already signed 2 work-reports this timeslot
+    const signaturesForTimeslot =
+      this.validatorSignaturesForTimeslot.get(timeslot)
+    const signatureCount =
+      signaturesForTimeslot?.get(this.validatorIndex ?? -1) ?? 0
+
+    // Can sign if we've signed fewer than 2 reports
+    return safeResult(signatureCount < 2)
+  }
+
+  /**
+   * Get pending guarantees ready for block inclusion
+   *
+   * @returns Array of pending guarantees
+   */
+  getPendingGuarantees(): Guarantee[] {
+    // Return a copy to prevent external modification
+    return [...this.pendingGuarantees]
+  }
+
+  /**
+   * Remove guarantees that have been included in a block
+   *
+   * @param includedGuarantees - Guarantees that were included in a block
+   */
+  removeIncludedGuarantees(includedGuarantees: Guarantee[]): void {
+    const includedHashes = new Set(
+      includedGuarantees.map((g) => g.report.package_spec.hash),
+    )
+    this.pendingGuarantees = this.pendingGuarantees.filter(
+      (g) => !includedHashes.has(g.report.package_spec.hash),
+    )
   }
 }

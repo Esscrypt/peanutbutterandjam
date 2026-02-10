@@ -14,6 +14,7 @@ import {
   bytesToHex,
   type EpochTransitionEvent,
   type EventBusService,
+  getConnectionEndpointFromMetadata as getConnectionEndpointFromMetadataCore,
   type Hex,
   hexToBytes,
   logger,
@@ -103,11 +104,15 @@ export class ValidatorSetManager
         validatorCount,
       )
 
-      this.activeSet = [...paddedValidators]
+      // Parse connection endpoints from metadata for each validator
+      const validatorsWithEndpoints =
+        this.parseConnectionEndpoints(paddedValidators)
+
+      this.activeSet = [...validatorsWithEndpoints]
       // At genesis, pendingSet should also be initialized from initialValidators
       // Gray Paper: pendingSet' is set during epoch transitions, but at genesis
       // we need to initialize it from the initial validators
-      this.pendingSet = [...paddedValidators]
+      this.pendingSet = [...validatorsWithEndpoints]
       // Staging set and previous set should be initialized with null keys at genesis
       // They will be populated during epoch transitions
       const nullValidators = this.createNullValidatorSet(validatorCount)
@@ -244,12 +249,19 @@ export class ValidatorSetManager
 
         // If found, use the full validator info; otherwise use null keys for BLS and metadata
         if (foundValidator) {
-          return {
+          const validator: ValidatorPublicKeys = {
             bandersnatch: v.bandersnatch,
             ed25519: v.ed25519,
             bls: foundValidator.bls,
             metadata: foundValidator.metadata,
+            connectionEndpoint: foundValidator.connectionEndpoint,
           }
+          // Parse connection endpoint from metadata if not already set
+          // Use the helper method to ensure consistency
+          const validatorsWithEndpoint = this.parseConnectionEndpoints([
+            validator,
+          ])
+          return validatorsWithEndpoint[0]
         }
 
         // Validator not found in staging set
@@ -340,15 +352,60 @@ export class ValidatorSetManager
    * @returns index of the validator
    */
   getValidatorIndex(ed25519PublicKey: Hex): Safe<number> {
+    // First, try the fast map lookup
     const validatorIndex = this.publicKeysToValidatorIndex.get(ed25519PublicKey)
-    if (!validatorIndex) {
-      return safeError(
-        new Error(
-          `Validator index not found for ed25519 public key ${ed25519PublicKey}`,
-        ),
-      )
+    if (validatorIndex !== undefined) {
+      return safeResult(validatorIndex)
     }
-    return safeResult(validatorIndex)
+
+    // Fallback: search through active set one by one
+    logger.debug(
+      `[ValidatorSetManager] getValidatorIndex: Map lookup failed, falling back to linear search`,
+      {
+        publicKey: ed25519PublicKey,
+        activeSetSize: this.activeSet.length,
+        mapSize: this.publicKeysToValidatorIndex.size,
+      },
+    )
+
+    for (let index = 0; index < this.activeSet.length; index++) {
+      const validator = this.activeSet[index]
+      if (validator && validator.ed25519 === ed25519PublicKey) {
+        // Found it! Update the map for future lookups
+        this.publicKeysToValidatorIndex.set(ed25519PublicKey, index)
+        logger.debug(
+          `[ValidatorSetManager] getValidatorIndex: Found validator at index ${index} via linear search, updated map`,
+          {
+            publicKey: ed25519PublicKey,
+            index,
+          },
+        )
+        return safeResult(index)
+      }
+    }
+
+    // Also check pending set as a fallback
+    for (let index = 0; index < this.pendingSet.length; index++) {
+      const validator = this.pendingSet[index]
+      if (validator && validator.ed25519 === ed25519PublicKey) {
+        // Found it! Update the map for future lookups
+        this.publicKeysToValidatorIndex.set(ed25519PublicKey, index)
+        logger.debug(
+          `[ValidatorSetManager] getValidatorIndex: Found validator at index ${index} in pending set, updated map`,
+          {
+            publicKey: ed25519PublicKey,
+            index,
+          },
+        )
+        return safeResult(index)
+      }
+    }
+
+    return safeError(
+      new Error(
+        `Validator index not found for ed25519 public key ${ed25519PublicKey} (searched active set and pending set)`,
+      ),
+    )
   }
 
   /**
@@ -392,27 +449,55 @@ export class ValidatorSetManager
     return [...this.stagingSet]
   }
 
+  /**
+   * Parse connection endpoints from metadata for validators that don't already have them
+   * @param validatorSet - The validator set to parse endpoints for
+   * @returns Validator set with connection endpoints parsed from metadata
+   */
+  private parseConnectionEndpoints(
+    validatorSet: ValidatorPublicKeys[],
+  ): ValidatorPublicKeys[] {
+    return validatorSet.map((validator, index) => {
+      if (validator.connectionEndpoint) {
+        // Already has endpoint, use it
+        return validator
+      }
+      // Parse endpoint from metadata
+      const zeroMetadata = `0x${'00'.repeat(128)}` as Hex
+      if (validator.metadata !== zeroMetadata) {
+        const [endpointError, endpoint] = getConnectionEndpointFromMetadataCore(
+          index,
+          validator,
+        )
+        if (!endpointError && endpoint) {
+          return { ...validator, connectionEndpoint: endpoint }
+        }
+      }
+      return validator
+    })
+  }
+
   setStagingSet(validatorSet: ValidatorPublicKeys[]): void {
-    this.stagingSet = [...validatorSet]
+    this.stagingSet = [...this.parseConnectionEndpoints(validatorSet)]
 
     // Populate publicKeysToValidatorIndex map for offender lookups
     this.updatePublicKeysToValidatorIndex(this.stagingSet)
   }
 
   setPendingSet(validatorSet: ValidatorPublicKeys[]): void {
-    this.pendingSet = [...validatorSet]
+    this.pendingSet = [...this.parseConnectionEndpoints(validatorSet)]
     // Populate publicKeysToValidatorIndex map for offender lookups
     this.updatePublicKeysToValidatorIndex(this.pendingSet)
   }
 
   setActiveSet(validatorSet: ValidatorPublicKeys[]): void {
-    this.activeSet = [...validatorSet]
+    this.activeSet = [...this.parseConnectionEndpoints(validatorSet)]
     // Populate publicKeysToValidatorIndex map for offender lookups
     this.updatePublicKeysToValidatorIndex(this.activeSet)
   }
 
   setPreviousSet(validatorSet: ValidatorPublicKeys[]): void {
-    this.previousSet = [...validatorSet]
+    this.previousSet = [...this.parseConnectionEndpoints(validatorSet)]
     // Populate publicKeysToValidatorIndex for previous validators
     // Only add entries that don't already exist (prioritize active set)
     // This ensures offenders are mapped to the correct index from the active set
@@ -924,14 +1009,6 @@ export class ValidatorSetManager
       )
     }
     const validator = allValidators[validatorIndex]
-    // first 16 bytes of metadata are the ipv6 address
-    // last 2 bytes of metadata are the port
-    const ipv6Address = validator.metadata.slice(0, 16)
-    const port = validator.metadata.slice(16, 18)
-    return safeResult({
-      host: ipv6Address.toString(),
-      port: Number.parseInt(port.toString()),
-      publicKey: hexToBytes(validator.ed25519),
-    })
+    return getConnectionEndpointFromMetadataCore(validatorIndex, validator)
   }
 }

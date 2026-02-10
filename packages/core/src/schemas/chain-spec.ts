@@ -25,6 +25,12 @@ const hex32Schema = z
   .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a 32-byte hex string')
   .transform((val) => val as Hex)
 
+/** Variable-length hex string (for JIP-4 genesis_header) */
+const variableHexSchema = z
+  .string()
+  .regex(/^(0x)?[a-fA-F0-9]+$/, 'Must be a valid hex string')
+  .transform((val) => (val.startsWith('0x') ? val : `0x${val}`) as Hex)
+
 /** 64-character hex string (no 0x prefix for validator keys) */
 const hex64NoPrefix = z
   .string()
@@ -227,23 +233,56 @@ export const chainSpecConfigSchema = z.object({
 })
 
 /**
- * Chain specification JSON schema for full format
+ * State trie schema (JIP-4 format)
+ * Keys are 62-character hex strings (31 bytes, no 0x prefix in JIP-4), normalized to Hex with 0x prefix
+ * Values are arbitrary hex strings (with or without 0x), normalized to Hex with 0x prefix
+ * Reference: JIP-4 - https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md
+ */
+const stateTrieSchema = z
+  .record(
+    z
+      .string()
+      .regex(
+        /^[a-fA-F0-9]{62}$/,
+        'State key must be 62-character hex string (31 bytes)',
+      ),
+    z
+      .string()
+      .regex(/^(0x)?[a-fA-F0-9]+$/, 'State value must be a valid hex string')
+      .transform((val) => (val.startsWith('0x') ? val : `0x${val}`) as Hex),
+  )
+  .transform((record) => {
+    // Normalize keys to Hex format (add 0x prefix) to match StateTrie type
+    const normalized: Record<Hex, Hex> = {}
+    for (const [key, value] of Object.entries(record)) {
+      const normalizedKey = key.startsWith('0x') ? key : `0x${key}`
+      normalized[normalizedKey as Hex] = value
+    }
+    return normalized
+  })
+
+/**
+ * Chain specification JSON schema for JIP-4 format
+ * Reference: JIP-4 - https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md
+ *
+ * JIP-4 format specification:
+ * - id: machine-readable identifier (required)
+ * - bootnodes: optional list of nodes in format "name@ip:port"
+ * - genesis_header: hex string containing JAM-serialized genesis block header
+ * - genesis_state: object with 62-char hex keys (31 bytes) and hex values
+ * - protocol_parameters: hex string containing JAM-serialized protocol parameters (optional)
  */
 export const chainSpecJsonSchema = z.object({
-  /** Chain identifier */
+  /** Chain identifier - machine-readable identifier for the network */
   id: z.string().min(1, 'Chain ID is required'),
-  /** Chain name */
-  name: z.string().optional(),
-  /** Bootstrap nodes */
+  /** Bootstrap nodes - optional list of nodes accepting connections in format "name@ip:port" */
   bootnodes: z.array(z.string()).optional(),
-  /** Genesis header hash */
-  genesis_header: hex32Schema.optional(),
-  /** Genesis state configuration */
-  genesis_state: genesisStateSchema.optional(),
-  /** Protocol version (optional) */
-  protocol_version: z.string().optional(),
-  /** Network configuration (optional) */
-  network: chainSpecNetworkSchema.optional(),
+  /** Genesis header - hex string containing JAM-serialized genesis block header */
+  genesis_header: variableHexSchema,
+  /** Genesis state - object with 62-character hex keys (31 bytes) and arbitrary hex values */
+  genesis_state: stateTrieSchema,
+  /** Protocol parameters - hex string containing JAM-serialized protocol parameters (optional) */
+  protocol_parameters: variableHexSchema.optional(),
 })
 
 // ============================================================================
@@ -305,9 +344,37 @@ export function isChainSpecConfig(
 }
 
 /**
+ * Check if chain spec is in JIP-4 format (binary state trie)
+ * JIP-4 format has genesis_state as a Record<string, string> with hex keys (62 chars) and hex values
+ * Reference: JIP-4 - https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md
+ */
+// biome-ignore lint/suspicious/noExplicitAny: type guard function accepts unknown input
+export function isJIP4Format(chainSpec: any): boolean {
+  if (
+    !chainSpec ||
+    typeof chainSpec !== 'object' ||
+    !('genesis_state' in chainSpec)
+  ) {
+    return false
+  }
+  const genesisState = chainSpec.genesis_state
+  if (!genesisState || typeof genesisState !== 'object') {
+    return false
+  }
+  // Check if it's a binary state trie (all keys are 62-char hex strings)
+  const keys = Object.keys(genesisState)
+  if (keys.length === 0) {
+    return false
+  }
+  // JIP-4 format: keys are 62-character hex strings (31 bytes), not structured objects
+  return keys.every((key) => /^[a-fA-F0-9]{62}$/.test(key))
+}
+
+/**
  * Check if chain spec is in full JSON format (has genesis_state)
+ * All chain specs now use JIP-4 format, so this is equivalent to checking for genesis_state
  */
 // biome-ignore lint/suspicious/noExplicitAny: type guard function accepts unknown input
 export function isChainSpecJson(chainSpec: any): chainSpec is ChainSpecJson {
-  return 'genesis_state' in chainSpec
+  return 'genesis_state' in chainSpec && isJIP4Format(chainSpec)
 }

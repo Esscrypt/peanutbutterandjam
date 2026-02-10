@@ -37,15 +37,13 @@ import { BaseHostFunction } from './base'
 export class PokeHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.POKE
   readonly name = 'poke'
-  readonly gasCost = 10n
-
   execute(
     context: HostFunctionContext,
     refineContext: RefineInvocationContext | null,
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Poke host function: No refine context available')
+      logger.error('Poke host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }

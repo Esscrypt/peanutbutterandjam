@@ -11,9 +11,11 @@ import {
   generateValidatorKeyPairFromSeed,
   generateDevAccountValidatorKeyPair,
   generateDevAccountSeed,
+  getConnectionEndpointFromMetadata,
 } from '../keys'
 import { generateEd25519KeyPairFromSeed, generateAlternativeName } from '../..'
 import { decodeFixedLength } from '../../../../../packages/codec/src/core/fixed-length'
+import type { AlternativeName, ValidatorPublicKeys } from '@pbnjam/types'
 
 // Test vectors from JAM documentation
 const TEST_VECTORS = [
@@ -391,7 +393,7 @@ describe('JAM Test Vectors', () => {
         
         expect(error).toBeUndefined()
         expect(altName).toBeDefined()
-        expect(altName).toBe(vector.dns_alt_name as `e${string}`)
+        expect(altName).toBe(vector.dns_alt_name as AlternativeName)
       })
     }
 
@@ -407,8 +409,8 @@ describe('JAM Test Vectors', () => {
       expect(aliceAltName).toBeDefined()
       expect(bobAltName).toBeDefined()
       expect(aliceAltName).not.toBe(bobAltName)
-      expect(aliceAltName).toBe(TEST_VECTORS[0].dns_alt_name as `e${string}`)
-      expect(bobAltName).toBe(TEST_VECTORS[1].dns_alt_name as `e${string}`)
+      expect(aliceAltName).toBe(TEST_VECTORS[0].dns_alt_name as AlternativeName)
+      expect(bobAltName).toBe(TEST_VECTORS[1].dns_alt_name as AlternativeName)
     })
 
     it('should generate deterministic DNS alt names for same public key', () => {
@@ -422,7 +424,7 @@ describe('JAM Test Vectors', () => {
       expect(altName1).toBeDefined()
       expect(altName2).toBeDefined()
       expect(altName1).toBe(altName2)
-      expect(altName1).toBe(TEST_VECTORS[0].dns_alt_name as `e${string}`)
+      expect(altName1).toBe(TEST_VECTORS[0].dns_alt_name as AlternativeName)
     })
 
     it('should handle all dev account DNS alt names correctly', () => {
@@ -435,7 +437,7 @@ describe('JAM Test Vectors', () => {
         
         expect(error).toBeUndefined()
         expect(altName).toBeDefined()
-        expect(altName).toBe(vector.dns_alt_name as `e${string}`)
+        expect(altName).toBe(vector.dns_alt_name as AlternativeName)
         generatedAltNames.push(altName!)
       }
       
@@ -447,6 +449,89 @@ describe('JAM Test Vectors', () => {
       for (const expectedAltName of expectedAltNames) {
         expect(generatedAltNames).toContain(expectedAltName)
       }
+    })
+  })
+
+  describe('getConnectionEndpointFromMetadata', () => {
+    it('should parse metadata and extract IP and port correctly', () => {
+      // Test metadata: 0x00000000000000000000ffff7f000001409c...
+      // First 16 bytes: 00000000000000000000ffff7f000001 = IPv4-mapped IPv6 ::ffff:127.0.0.1
+      // Bytes 16-18: 409c = port 40000 in little-endian (0x9c40 = 40000)
+      const metadataHex =
+        '0x00000000000000000000ffff7f000001409c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+      
+      // Create a mock ValidatorPublicKeys with the metadata
+      const validatorKeys: ValidatorPublicKeys = {
+        bandersnatch: '0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
+        ed25519: '0x4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace',
+        bls: `0x${'0'.repeat(288)}` as `0x${string}`, // 144 bytes = 288 hex chars
+        metadata: metadataHex,
+      }
+      
+      const [error, endpoint] = getConnectionEndpointFromMetadata(0, validatorKeys)
+      
+      expect(error).toBeUndefined()
+      expect(endpoint).toBeDefined()
+      expect(endpoint!.host).toBe('127.0.0.1')
+      expect(endpoint!.port).toBe(40000)
+      expect(endpoint!.publicKey).toEqual(hexToBytes(validatorKeys.ed25519))
+    })
+
+    it('should handle full IPv6 addresses', () => {
+      // Test with a full IPv6 address (not IPv4-mapped)
+      // 2001:0db8:85a3:0000:0000:8a2e:0370:7334
+      const ipv6Bytes = new Uint8Array(16)
+      ipv6Bytes[0] = 0x20
+      ipv6Bytes[1] = 0x01
+      ipv6Bytes[2] = 0x0d
+      ipv6Bytes[3] = 0xb8
+      ipv6Bytes[4] = 0x85
+      ipv6Bytes[5] = 0xa3
+      // Rest are zeros
+      ipv6Bytes[14] = 0x03
+      ipv6Bytes[15] = 0x70
+      
+      // Port: 30333 = 0x767d in little-endian = 0x7d76
+      const portBytes = new Uint8Array([0x7d, 0x76])
+      
+      // Create metadata: 16 bytes IPv6 + 2 bytes port + padding
+      const metadataBytes = new Uint8Array(128)
+      metadataBytes.set(ipv6Bytes, 0)
+      metadataBytes.set(portBytes, 16)
+      
+      const metadataHex = `0x${Array.from(metadataBytes)
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')}` as `0x${string}`
+      
+      const validatorKeys: ValidatorPublicKeys = {
+        bandersnatch: '0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
+        ed25519: '0x4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace',
+        bls: `0x${'0'.repeat(288)}` as `0x${string}`,
+        metadata: metadataHex,
+      }
+      
+      const [error, endpoint] = getConnectionEndpointFromMetadata(0, validatorKeys)
+      
+      expect(error).toBeUndefined()
+      expect(endpoint).toBeDefined()
+      expect(endpoint!.port).toBe(30333)
+      // IPv6 format may vary, but should contain the address
+      expect(endpoint!.host).toContain('2001')
+    })
+
+    it('should return error for invalid metadata length', () => {
+      const validatorKeys: ValidatorPublicKeys = {
+        bandersnatch: '0xff71c6c03ff88adb5ed52c9681de1629a54e702fc14729f6b50d2f0a76f185b3',
+        ed25519: '0x4418fb8c85bb3985394a8c2756d3643457ce614546202a2f50b093d762499ace',
+        bls: `0x${'0'.repeat(288)}` as `0x${string}`,
+        metadata: '0x0000', // Too short
+      }
+      
+      const [error, endpoint] = getConnectionEndpointFromMetadata(0, validatorKeys)
+      
+      expect(error).toBeDefined()
+      expect(endpoint).toBeUndefined()
+      expect(error!.message).toContain('Invalid metadata length')
     })
   })
 

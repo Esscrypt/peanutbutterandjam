@@ -14,25 +14,33 @@ import type { GenesisResult, GenesisState } from './genesis'
 // ============================================================================
 
 /**
- * Chain specification JSON format
- * This matches the actual chain-spec.json file structure
+ * Chain specification JSON format (JIP-4)
+ * Reference: https://github.com/polkadot-fellows/JIPs/blob/main/JIP-4.md
+ *
+ * JIP-4 format specification:
+ * - id: machine-readable identifier (required)
+ * - bootnodes: optional list of nodes in format "name@ip:port"
+ * - genesis_header: hex string containing JAM-serialized genesis block header
+ * - genesis_state: object with 62-char hex keys (31 bytes) and hex values
+ * - protocol_parameters: hex string containing JAM-serialized protocol parameters (optional)
  */
 export interface ChainSpecJson {
-  /** Chain identifier */
+  /** Chain identifier - machine-readable identifier for the network */
   readonly id: string
-  /** Chain name */
-  readonly name: string
-  /** Bootstrap nodes */
-  readonly bootnodes: readonly string[]
-  /** Genesis header hash */
+  /** Bootstrap nodes - optional list of nodes accepting connections in format "name@ip:port" */
+  readonly bootnodes?: readonly string[]
+  /** Genesis header - hex string containing JAM-serialized genesis block header */
   readonly genesis_header: Hex
-  /** Genesis state configuration */
-  readonly genesis_state: ChainSpecGenesisState
-  /** Protocol version (optional) */
-  readonly protocol_version?: string
-  /** Network configuration (optional) */
-  readonly network?: ChainSpecNetwork
+  /** Genesis state - object with 62-character hex keys (31 bytes) and arbitrary hex values */
+  readonly genesis_state: import('./serialization').StateTrie
+  /** Protocol parameters - hex string containing JAM-serialized protocol parameters (optional) */
+  readonly protocol_parameters?: Hex
 }
+
+// BinaryStateTrie is deprecated - use StateTrie from @pbnjam/types instead
+// This type is kept for backward compatibility but will be removed
+/** @deprecated Use StateTrie from @pbnjam/types instead */
+export type BinaryStateTrie = Record<string, Hex>
 
 /**
  * Genesis state section from chain-spec.json

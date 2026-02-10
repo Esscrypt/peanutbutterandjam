@@ -190,23 +190,23 @@ export class StateService extends BaseService implements IStateService {
     this.sealKeyService = options.sealKeyService
     this.clockService = options.clockService
 
-    // Initialize state from genesis if available, otherwise start with empty state
-    // This allows StateService to work without genesis (e.g., when using trace pre_state)
-    if (this.genesisManagerService) {
-      const [genesisHeaderError, genesisHeader] =
-        this.genesisManagerService.getState()
-      if (genesisHeaderError) {
-        // Genesis not available - start with empty state
-        // The state will be set from trace pre_state or other sources
-        this.setState([])
-      } else {
-        this.setState(genesisHeader.keyvals)
-      }
-    } else {
-      // No genesis manager - start with empty state
-      // The state will be set from trace pre_state or Initialize message
-      this.setState([])
-    }
+    // // Initialize state from genesis if available, otherwise start with empty state
+    // // This allows StateService to work without genesis (e.g., when using trace pre_state)
+    // if (this.genesisManagerService) {
+    //   const [genesisHeaderError, genesisHeader] =
+    //     this.genesisManagerService.getState()
+    //   if (genesisHeaderError) {
+    //     // Genesis not available - start with empty state
+    //     // The state will be set from trace pre_state or other sources
+    //     this.setState([])
+    //   } else {
+    //     this.setState(genesisHeader.keyvals)
+    //   }
+    // } else {
+    //   // No genesis manager - start with empty state
+    //   // The state will be set from trace pre_state or Initialize message
+    //   this.setState([])
+    // }
   }
 
   /**
@@ -616,21 +616,6 @@ export class StateService extends BaseService implements IStateService {
       }
       const serviceId =
         'serviceId' in parsedStateKey ? parsedStateKey.serviceId : undefined
-
-      // Instrumentation: log when the known mismatch state key is written (C(s,h) keyvals)
-      const STATE_KEY_INSTRUMENT =
-        '0xa129b72c68d16e40bc50d602526f4b46e8aca90eb8c77c165b6497cae7625f' as Hex
-      if (keyval.key === STATE_KEY_INSTRUMENT) {
-        logger.info(
-          '[StateService] setState: writing instrumented C(s,h) key',
-          {
-            key: keyval.key,
-            value: keyval.value,
-            serviceId: serviceId?.toString(),
-            chapterIndex: parsedStateKey.chapterIndex,
-          },
-        )
-      }
 
       // For C(255, s) keys, serviceId is required and should be present
       try {

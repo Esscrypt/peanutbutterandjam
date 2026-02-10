@@ -67,10 +67,12 @@ export function generateTicketBasedSealSignature(
 
   // Generate IETF VRF signature using ticket context
   // Gray Paper Eq. 148: bssignature{H_authorbskey}{Xticket ∥ entropy'_3 ∥ i_st_entryindex}{encodeunsignedheader{H}}
+  // Must match verification: IETFVRFVerifier.verify(validatorPublicKey, context, signature, encodedUnsignedHeader)
+  // where input = context and auxData = message per IETF VRF specification
   const vrfResult = IETFVRFProver.prove(
     authorPrivateKey,
-    encodedUnsignedHeader, // message
-    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex
+    context, // Xticket ∥ entropy'_3 ∥ i_st_entryindex (context) - goes to _input parameter
+    encodedUnsignedHeader, // encodeunsignedheader{H} (message) - goes to _auxData parameter
   )
 
   // Gray Paper Eq. 147: Validate ticket ID matches VRF output

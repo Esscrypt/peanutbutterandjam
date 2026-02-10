@@ -7,7 +7,7 @@
  */
 
 import type { EventBusService, Hex } from '@pbnjam/core'
-import { bytesToHex, hexToBytes } from '@pbnjam/core'
+import { bytesToHex, hexToBytes, logger } from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
@@ -25,6 +25,8 @@ export class SegmentShardRequestProtocol extends NetworkingProtocol<
   SegmentShardResponse
 > {
   private readonly eventBus: EventBusService
+  // Track event IDs for request/response linking
+  private readonly requestEventIds: Map<string, bigint> = new Map()
 
   constructor(eventBus: EventBusService) {
     super()
@@ -34,12 +36,54 @@ export class SegmentShardRequestProtocol extends NetworkingProtocol<
   }
 
   /**
+   * Generate a unique key for tracking request event IDs
+   */
+  private getRequestKey(peerPublicKey: Hex, requestIndex: number): string {
+    return `${peerPublicKey}:${requestIndex}`
+  }
+
+  /**
    * Process segment shard request and generate response
    */
   async processRequest(
     request: SegmentShardRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    const totalSegmentIndices = request.requests.reduce(
+      (sum, req) => sum + req.segmentIndices.length,
+      0,
+    )
+
+    logger.info('[CE139-140] Processing segment shard request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      requestsCount: request.requests.length,
+      totalSegmentIndices,
+    })
+
+    // Emit JIP-3 receiving segment shard request event (JIP-3: 163)
+    // Determine if CE 140 is used - we'll check this when processing the response
+    // For now, set to false (will be corrected when response is processed)
+    const eventId = await this.eventBus.emitReceivingSegmentShardRequest(
+      hexToBytes(peerPublicKey),
+      false, // Will be determined from response justifications
+    )
+
+    // Store event ID for linking with response (use first request as key)
+    if (request.requests.length > 0) {
+      const requestKey = this.getRequestKey(peerPublicKey, 0)
+      this.requestEventIds.set(requestKey, eventId)
+    }
+
+    // Calculate total number of segment shards requested
+    const shardCount = request.requests.reduce(
+      (sum, req) => sum + BigInt(req.segmentIndices.length),
+      0n,
+    )
+
+    // Emit JIP-3 segment shard request received event (JIP-3: 166)
+    await this.eventBus.emitSegmentShardRequestReceived(eventId, shardCount)
+
+    // Legacy event for backwards compatibility
     this.eventBus.emitSegmentShardRequest(request, peerPublicKey)
     return safeResult(undefined)
   }
@@ -48,6 +92,32 @@ export class SegmentShardRequestProtocol extends NetworkingProtocol<
     response: SegmentShardResponse,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    // Note: CE 140 can be determined from presence of justifications in response
+    // CE 140 includes justifications, CE 139 does not
+    // However, the receivingSegmentShardRequest event was already emitted in processRequest
+    // with usingCE140=false. In a full implementation, we'd either:
+    // 1. Know the protocol kind (139 vs 140) at request time, or
+    // 2. Emit a correction event when we determine CE 140 was used
+
+    // Look up event ID from the original request
+    let eventId: bigint | undefined
+    for (const [key, id] of this.requestEventIds.entries()) {
+      if (key.startsWith(`${peerPublicKey}:`)) {
+        eventId = id
+        this.requestEventIds.delete(key)
+        break
+      }
+    }
+
+    // If no event ID found, generate a new one (fallback)
+    if (eventId === undefined) {
+      eventId = BigInt(Date.now())
+    }
+
+    // Emit JIP-3 segment shards transferred event (JIP-3: 167)
+    await this.eventBus.emitSegmentShardsTransferred(eventId)
+
+    // Legacy event for backwards compatibility
     this.eventBus.emitSegmentShardResponse(response, peerPublicKey)
     return safeResult(undefined)
   }

@@ -11,7 +11,13 @@ import {
   encodeFixedLength,
   encodeNatural,
 } from '@pbnjam/codec'
-import { bytesToHex, concatBytes, type Hex, hexToBytes } from '@pbnjam/core'
+import {
+  bytesToHex,
+  concatBytes,
+  type Hex,
+  hexToBytes,
+  logger,
+} from '@pbnjam/core'
 import type {
   IJudgmentHolderService,
   JudgmentPublicationRequest,
@@ -41,8 +47,16 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
    */
   async processRequest(
     judgmentPublication: JudgmentPublicationRequest,
-    _peerPublicKey: Hex,
+    peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE145] Processing judgment publication request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      epochIndex: judgmentPublication.epochIndex.toString(),
+      validatorIndex: judgmentPublication.validatorIndex.toString(),
+      validity: judgmentPublication.validity,
+      workReportHash: judgmentPublication.workReportHash,
+    })
+
     const [error, _result] = await this.judgmentHolderService.addJudgement(
       {
         vote: judgmentPublication.validity !== 0,
@@ -53,6 +67,10 @@ export class JudgmentPublicationProtocol extends NetworkingProtocol<
       judgmentPublication.workReportHash,
     )
     if (error) {
+      logger.error('[CE145] Failed to add judgment', {
+        error: error.message,
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      })
       return safeError(error)
     }
     return safeResult(undefined)

@@ -34,12 +34,19 @@ export class TelemetryEventEmitterService extends BaseService {
   constructor(options: {
     client: TelemetryClient
     eventBusService: EventBusService
+    nodeInfo?: import('@pbnjam/types').NodeInfo
   }) {
     super('telemetry-event-emitter')
     this.client = options.client
     this.eventBusService = options.eventBusService
   }
-  override start(): Safe<boolean> {
+  override async start(): SafePromise<boolean> {
+    // Start the telemetry client first
+    const clientStarted = await this.client.start()
+    if (!clientStarted) {
+      return safeError(new Error('Failed to start telemetry client'))
+    }
+
     this.eventBusService.addConnectionRefusedCallback(
       this.emitConnectionRefused,
     )
@@ -365,7 +372,7 @@ export class TelemetryEventEmitterService extends BaseService {
     return await this.sendEvent({
       eventType: 20n,
       timestamp: this.getCurrentTimestamp(),
-      peerAddress: { address: new TextEncoder().encode(peerAddress), port: 0n },
+      peerAddress: { host: peerAddress, port: 0n },
     })
   }
 
@@ -376,7 +383,7 @@ export class TelemetryEventEmitterService extends BaseService {
     const [error] = await this.sendEvent({
       eventType: 21n,
       timestamp: this.getCurrentTimestamp(),
-      peerAddress: { address: new TextEncoder().encode(peerAddress), port: 0n },
+      peerAddress: { host: peerAddress, port: 0n },
     })
     if (error) {
       return safeError(error)

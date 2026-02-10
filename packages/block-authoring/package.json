@@ -16,7 +16,9 @@
   "dependencies": {
     "@pbnjam/types": "workspace:*",
     "@pbnjam/core": "workspace:*",
-    "@pbnjam/bandersnatch-vrf": "catalog:"
+    "@pbnjam/codec": "workspace:*",
+    "@pbnjam/bandersnatch-vrf": "catalog:",
+    "@pbnjam/safrole": "workspace:*"
   },
   "devDependencies": {
     "typescript": "5.8.2",

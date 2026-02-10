@@ -7,7 +7,6 @@
  */
 
 import {
-  bytesToHex,
   generateDevAccountValidatorKeyPair,
   generateValidatorKeyPairFromSeed,
   type Hex,
@@ -15,12 +14,7 @@ import {
   signEd25519,
   verifyEd25519,
 } from '@pbnjam/core'
-import type {
-  ConnectionEndpoint,
-  Safe,
-  ValidatorCredentials,
-  ValidatorPublicKeys,
-} from '@pbnjam/types'
+import type { Safe, ValidatorCredentials } from '@pbnjam/types'
 import { BaseService, safeError, safeResult } from '@pbnjam/types'
 
 /**
@@ -53,11 +47,9 @@ export interface ValidatorKeyServiceConfig {
   enableDevAccounts: boolean
   /** Number of dev accounts to generate (default: 6 for Alice, Bob, Carol, David, Eve, Fergie) */
   devAccountCount: number
-  /** Our own Connection endpoint */
-  connectionEndpoint: ConnectionEndpoint
 
   /** Optional list of validator seed configurations */
-  customSeed: Hex
+  customSeed?: Hex
 }
 
 /**
@@ -73,15 +65,12 @@ export class KeyPairService extends BaseService {
 
   private readonly enableDevAccounts: boolean | undefined = undefined
   private readonly devAccountCount: number | undefined = undefined
-  private readonly connectionEndpoint: ConnectionEndpoint | undefined =
-    undefined
   private readonly customSeed: Hex | undefined = undefined
 
   constructor(config: ValidatorKeyServiceConfig) {
     super('KeyPairService')
     this.enableDevAccounts = config.enableDevAccounts
     this.devAccountCount = config.devAccountCount
-    this.connectionEndpoint = config.connectionEndpoint
     this.customSeed = config.customSeed
   }
 
@@ -90,11 +79,6 @@ export class KeyPairService extends BaseService {
       this.generateValidatorKeys(
         this.enableDevAccounts || false,
         this.devAccountCount || 0,
-        this.connectionEndpoint || {
-          host: '127.0.0.1',
-          port: 9000,
-          publicKey: new Uint8Array(32),
-        },
         this.customSeed,
       )
     if (generateValidatorKeysError) {
@@ -127,7 +111,6 @@ export class KeyPairService extends BaseService {
   private generateValidatorKeys(
     enableDevAccounts: boolean,
     devAccountCount: number,
-    connectionEndpoint: ConnectionEndpoint,
     customSeed?: Hex,
   ): Safe<void> {
     if (enableDevAccounts) {
@@ -141,7 +124,6 @@ export class KeyPairService extends BaseService {
       // Generate from main seed
       const [keyPairError, keyPairs] = generateValidatorKeyPairFromSeed(
         hexToBytes(customSeed),
-        connectionEndpoint,
       )
       if (keyPairError) {
         return safeError(keyPairError)
@@ -150,33 +132,6 @@ export class KeyPairService extends BaseService {
     }
 
     return safeResult(undefined)
-  }
-
-  /**
-   * Generate a single validator key pair
-   */
-  private walletToPublicKeys(
-    validatorWallet: ValidatorCredentials,
-  ): Safe<ValidatorPublicKeys> {
-    return safeResult({
-      bandersnatch: bytesToHex(validatorWallet.bandersnatchKeyPair.publicKey),
-      ed25519: bytesToHex(validatorWallet.ed25519KeyPair.publicKey),
-      bls: bytesToHex(validatorWallet.blsKeyPair.publicKey),
-      metadata: bytesToHex(new Uint8Array(256)),
-    })
-  }
-
-  /**
-   * Get validator key by index
-   */
-  getValidatorAtIndex(validatorIndex: bigint): Safe<ValidatorPublicKeys> {
-    const keyPair = this.keyPairs.get(validatorIndex)
-    if (!keyPair) {
-      return safeError(
-        new Error(`Validator key pair not found for index ${validatorIndex}`),
-      )
-    }
-    return this.walletToPublicKeys(keyPair)
   }
 
   /**
@@ -219,10 +174,10 @@ export class KeyPairService extends BaseService {
   /**
    * Get local key pair
    */
-  getLocalKeyPair(): ValidatorCredentials {
+  getLocalKeyPair(): Safe<ValidatorCredentials> {
     if (!this.localKeyPair) {
-      throw new Error('Local key pair not found')
+      return safeError(new Error('Local key pair not found'))
     }
-    return this.localKeyPair
+    return safeResult(this.localKeyPair)
   }
 }

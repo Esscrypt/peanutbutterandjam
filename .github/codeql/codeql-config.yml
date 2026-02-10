@@ -1,0 +1,7 @@
+# CodeQL configuration
+# https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning#using-a-custom-configuration-file
+name: 'CodeQL config'
+paths-ignore:
+  - '**/*.test.ts'
+  - '**/*.test.js'
+  - '**/node_modules'

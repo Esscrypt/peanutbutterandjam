@@ -201,7 +201,7 @@ export function decodeNatural(data: Uint8Array): Safe<DecodingResult<bigint>> {
       value |= BigInt(data[1 + i]) << BigInt(8 * i)
     }
 
-    return safeResult({ value, remaining: data.slice(8), consumed: 8 })
+    return safeResult({ value, remaining: data.slice(9), consumed: 9 })
   }
 
   // Special case for single-byte values (1-127): direct decoding

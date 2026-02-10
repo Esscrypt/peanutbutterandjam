@@ -17,6 +17,7 @@ import {
 import {
   blake2bHash,
   bytesToHex,
+  checkPreimageAvailability,
   type EventBusService,
   type Hex,
   hexToBytes,
@@ -57,8 +58,11 @@ export class ServiceAccountService
   /** Map from preimage hash to preimage data */
   private readonly coreServiceAccounts: Map<bigint, ServiceAccount>
 
+  /** Pending preimages that have been received but not yet applied to service account through accumulation */
+  private readonly pendingPreimages: Map<string, Preimage> = new Map()
+
   private readonly eventBusService: EventBusService
-  private readonly clockService: ClockService
+  //   private readonly clockService: ClockService
   private readonly networkingService: NetworkingService | null
   private readonly preimageRequestProtocol: PreimageRequestProtocol | null
 
@@ -71,7 +75,7 @@ export class ServiceAccountService
     super('preimage-holder-service')
     this.networkingService = options.networkingService
     this.eventBusService = options.eventBusService
-    this.clockService = options.clockService
+    //     this.clockService = options.clockService
     this.preimageRequestProtocol = options.preimageRequestProtocol
 
     this.coreServiceAccounts = new Map<bigint, ServiceAccount>()
@@ -164,7 +168,12 @@ export class ServiceAccountService
   }
 
   handlePreimageReceived(preimage: Preimage, _peerPublicKey: Hex): void {
-    this.storePreimage(preimage, this.clockService.getCurrentSlot())
+    // Add to pending preimages - these will be applied during accumulation
+    const [hashError, preimageHash] = blake2bHash(hexToBytes(preimage.blob))
+    if (!hashError && preimageHash) {
+      const key = `${preimage.requester}:${preimageHash}:${BigInt(hexToBytes(preimage.blob).length)}`
+      this.pendingPreimages.set(key, preimage)
+    }
   }
 
   handlePreimageAnnouncement(
@@ -174,6 +183,28 @@ export class ServiceAccountService
     // Announcement of possession of a requested preimage. This should be used by non-validator nodes to introduce preimages, and by validators to gossip these preimages to other validators.
     // The recipient of the announcement is expected to follow up by requesting the preimage using protocol 143, provided the preimage has been requested on chain by the given service and the recipient is not already in possession of it. In the case where the sender of the announcement is a non-validator node, it is expected to keep the connection open for a reasonable time (eg 10 seconds) to allow this request to be made; if the connection is closed before the request can be made, the recipient is not expected to reopen it.
     // Once a validator has obtained a requested preimage, it should announce possession to its neighbours in the grid structure.
+
+    // Check if we already have this preimage stored in service account
+    let alreadyHavePreimage = false
+    for (const [
+      serviceId,
+      serviceAccount,
+    ] of this.coreServiceAccounts.entries()) {
+      const preimage = getServicePreimageValue(
+        serviceAccount,
+        serviceId,
+        announcement.hash,
+      )
+      if (preimage) {
+        alreadyHavePreimage = true
+        break
+      }
+    }
+
+    // Check if we already have it in pending preimages
+    const pendingKey = `${announcement.serviceId}:${announcement.hash}:${announcement.preimageLength}`
+    const alreadyPending = this.pendingPreimages.has(pendingKey)
+
     if (!this.preimageRequestProtocol) {
       return safeError(new Error('Preimage request protocol not found'))
     }
@@ -182,16 +213,21 @@ export class ServiceAccountService
       return safeError(new Error('Networking service not found'))
     }
 
-    const [error, preimageRequestMessage] =
-      this.preimageRequestProtocol.serializeRequest({ hash: announcement.hash })
-    if (error) {
-      return safeError(error)
+    // Only request if we don't already have it stored or pending
+    if (!alreadyHavePreimage && !alreadyPending) {
+      const [error, preimageRequestMessage] =
+        this.preimageRequestProtocol.serializeRequest({
+          hash: announcement.hash,
+        })
+      if (error) {
+        return safeError(error)
+      }
+      this.networkingService.sendMessageByPublicKey(
+        peerPublicKey,
+        143,
+        preimageRequestMessage,
+      )
     }
-    this.networkingService.sendMessageByPublicKey(
-      peerPublicKey,
-      143,
-      preimageRequestMessage,
-    )
     return safeResult(undefined)
   }
 
@@ -579,11 +615,6 @@ export class ServiceAccountService
       serviceAccount = newServiceAccount
     }
 
-    // Instrumentation: log when the known mismatch state key is updated for service 1852356513
-    const STATE_KEY_INSTRUMENT =
-      '0xa129b72c68d16e40bc50d602526f4b46e8aca90eb8c77c165b6497cae7625f' as Hex
-    const SERVICE_ID_INSTRUMENT = 1852356513n
-
     // Merge new keyvals with existing rawCshKeyvals
     // Deep copy existing values to prevent mutations from affecting stored state
     // Then merge in new keyvals (new values overwrite existing ones for the same key)
@@ -592,21 +623,6 @@ export class ServiceAccountService
     )
     // Merge: add new keyvals, overwriting existing ones if the same key appears
     for (const key in keyvals) {
-      if (
-        serviceId === SERVICE_ID_INSTRUMENT &&
-        (key as Hex) === STATE_KEY_INSTRUMENT
-      ) {
-        const previousValue = newRawCshKeyvals[STATE_KEY_INSTRUMENT]
-        logger.info(
-          '[ServiceAccountService] setServiceAccountKeyvals: updating instrumented key',
-          {
-            serviceId: serviceId.toString(),
-            key: STATE_KEY_INSTRUMENT,
-            previousValue: previousValue ?? '(none)',
-            newValue: keyvals[key as Hex],
-          },
-        )
-      }
       newRawCshKeyvals[key as Hex] = keyvals[key as Hex]
     }
 
@@ -859,5 +875,70 @@ export class ServiceAccountService
       return undefined
     }
     return getServiceRequestValue(serviceAccount, serviceId, hash, length)
+  }
+
+  /**
+   * Get pending preimages that have been received but not yet applied to service account through accumulation
+   *
+   * @returns Array of pending preimages
+   */
+  getPendingPreimages(): Preimage[] {
+    return Array.from(this.pendingPreimages.values())
+  }
+
+  /**
+   * Remove preimage from pending state when it's been applied to service account through accumulation
+   *
+   * @param preimage - The preimage that was applied
+   */
+  removePendingPreimage(preimage: Preimage): void {
+    const [hashError, preimageHash] = blake2bHash(hexToBytes(preimage.blob))
+    if (!hashError && preimageHash) {
+      const key = `${preimage.requester}:${preimageHash}:${BigInt(hexToBytes(preimage.blob).length)}`
+      this.pendingPreimages.delete(key)
+    }
+  }
+
+  /**
+   * Get pending preimages that are requested on-chain but not yet in state
+   *
+   * Returns pending preimages that:
+   * - Have been received (are in pending preimages)
+   * - Are requested on-chain (have a request status)
+   * - Are available at the given slot (using Gray Paper function I(l, t))
+   *
+   * @param slot - Current slot to check availability
+   * @returns Array of pending preimages that are requested and available
+   */
+  getRequestedPendingPreimages(slot: bigint): Preimage[] {
+    const requestedPending: Preimage[] = []
+
+    for (const preimage of this.pendingPreimages.values()) {
+      const blobLength = BigInt(hexToBytes(preimage.blob).length)
+
+      // Calculate hash from blob to check request status
+      const [hashError, preimageHash] = blake2bHash(hexToBytes(preimage.blob))
+      if (hashError) {
+        continue
+      }
+
+      // Check if this preimage is requested on-chain
+      const requestStatus = this.getPreimageRequestStatus(
+        preimage.requester,
+        preimageHash,
+        blobLength,
+      )
+
+      // A preimage is ready if it exists and has a request status with entries
+      if (requestStatus !== undefined && requestStatus.length > 0) {
+        // Check if preimage is available at this slot using Gray Paper function I(l, t)
+        const isAvailable = checkPreimageAvailability(requestStatus, slot)
+        if (isAvailable) {
+          requestedPending.push(preimage)
+        }
+      }
+    }
+
+    return requestedPending
   }
 }

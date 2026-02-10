@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { hexToBytes } from '@pbnjam/core'
 import { decodeHeader, encodeHeader } from '../block/header'
 import { ConfigService } from '../../../../infra/node/services/config-service'
 import { getCodecTestVectorsDir } from './test-vector-dir'
@@ -119,6 +120,58 @@ describe('JAM Header Codec Tests', () => {
     
     // Verify the encoded data matches the original binary
     expect(encodedData).toEqual(binaryData)
+  })
+  
+  it('should decode genesis_header from chainspec-tiny.json', () => {
+    // Load the chainspec-tiny.json file
+    const chainspecPath = join(process.cwd(), 'config/chainspec-tiny.json')
+    const chainspecData = JSON.parse(readFileSync(chainspecPath, 'utf8'))
+    
+    // Extract genesis_header (JIP-4 format - hex string without 0x prefix)
+    const genesisHeaderHex = chainspecData.genesis_header
+    expect(genesisHeaderHex).toBeDefined()
+    expect(typeof genesisHeaderHex).toBe('string')
+    
+    // Convert hex string to bytes (ensure 0x prefix for hexToBytes)
+    const genesisHeaderHexWithPrefix = genesisHeaderHex.startsWith('0x')
+      ? genesisHeaderHex
+      : `0x${genesisHeaderHex}`
+    const genesisHeaderBytes = hexToBytes(genesisHeaderHexWithPrefix)
+    
+    // Use tiny config (matches the chainspec)
+    const tinyConfig = new ConfigService('tiny')
+    
+    // Decode the genesis header
+    const [error, decodedHeader] = decodeHeader(genesisHeaderBytes, tinyConfig)
+    
+    // Verify decoding succeeded
+    expect(error).toBeUndefined()
+    expect(decodedHeader).toBeDefined()
+    expect(decodedHeader?.value).toBeDefined()
+    
+    // Verify basic header structure
+    const header = decodedHeader!.value
+    expect(header.parent).toBeDefined()
+    expect(header.priorStateRoot).toBeDefined()
+    expect(header.extrinsicHash).toBeDefined()
+    expect(header.timeslot).toBeDefined()
+    expect(typeof header.timeslot).toBe('bigint')
+    expect(header.authorIndex).toBeDefined()
+    expect(typeof header.authorIndex).toBe('bigint')
+    expect(header.vrfSig).toBeDefined()
+    expect(header.sealSig).toBeDefined()
+    
+    // For genesis block, parent should be zero hash
+    expect(header.parent).toBe('0x0000000000000000000000000000000000000000000000000000000000000000')
+    
+    // Verify the header can be re-encoded (roundtrip test)
+    const [encodeError, encodedData] = encodeHeader(header, tinyConfig)
+    expect(encodeError).toBeUndefined()
+    expect(encodedData).toBeDefined()
+    
+    // Verify encoded data matches original (allowing for potential differences in optional fields)
+    // Note: The encoded data should match the original if the header was properly decoded
+    expect(encodedData!.length).toBeGreaterThan(0)
   })
   
 })

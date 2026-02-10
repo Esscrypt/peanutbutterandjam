@@ -319,7 +319,7 @@ describe('JAM Conformance Traces', () => {
       // This allows rolling back to initial state if block import fails
       const [initTrieError, initTrie] = stateService.generateStateTrie()
       if (!initTrieError && initTrie) {
-        chainManagerService.saveStateSnapshot(traceData.block.header.parent, initTrie)
+        chainManagerService.initializeGenesisHeader(convertJsonBlockToBlock(traceData.block).header, initTrie)
       }
 
       // Check if block import is expected to fail (pre_state == post_state)

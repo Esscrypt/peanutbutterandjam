@@ -1,2 +1,5 @@
+export * from './block-body-construction'
+export * from './block-request-handler'
 export * from './entropy-signature'
+export * from './header-construction'
 export * from './ticket-extrinsics'

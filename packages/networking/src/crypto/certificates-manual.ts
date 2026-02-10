@@ -606,10 +606,10 @@ export function extractPublicKeyFromDERCertificate(
       return safeResult(publicKeyBytes)
     } else {
       // Handle potential 33-byte key (32 bytes + unused bits byte)
-      if (publicKeyBytes.length === 33) {
-        const trimmedKey = publicKeyBytes.slice(1) // Skip unused bits byte
-        return safeResult(trimmedKey)
-      }
+      // if (publicKeyBytes.length === 33) {
+      //   const trimmedKey = publicKeyBytes.slice(1) // Skip unused bits byte
+      //   return safeResult(trimmedKey)
+      // }
 
       return safeError(
         new Error(

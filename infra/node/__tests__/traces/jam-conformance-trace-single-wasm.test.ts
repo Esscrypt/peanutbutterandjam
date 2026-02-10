@@ -668,7 +668,7 @@ describe('JAM Conformance Single Trace', () => {
         // This allows rolling back to initial state if first block fails
         const [initTrieError, initTrie] = stateService.generateStateTrie()
         if (!initTrieError && initTrie) {
-          chainManagerService.saveStateSnapshot(traceData.block.header.parent, initTrie)
+          chainManagerService.initializeGenesisHeader(convertJsonBlockToBlock(traceData.block).header, initTrie)
         }
         isFirstBlock = false
       }

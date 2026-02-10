@@ -2,12 +2,13 @@ import {
   banderout,
   generateEntropyVRFSignature,
 } from '@pbnjam/bandersnatch-vrf'
-import {
-  type IKeyPairService,
-  type SafePromise,
-  safeError,
-  safeResult,
+import { getValidatorCredentialsWithFallback } from '@pbnjam/core'
+import type {
+  IConfigService,
+  IKeyPairService,
+  SafePromise,
 } from '@pbnjam/types'
+import { safeError, safeResult } from '@pbnjam/types'
 
 /**
  * Generate VRF signature (H_vrfsig) using safrole helper function
@@ -16,16 +17,27 @@ import {
  * Where Xentropy = "$jam_entropy"
  *
  * @param sealSignature - Full 96-byte seal signature (H_sealsig)
- * @param keyPairService - Key pair service for author's Bandersnatch key
+ * @param configService - Config service with optional validatorIndex
+ * @param keyPairService - Key pair service (required if validatorIndex is not set)
  * @returns 96-byte VRF signature (H_vrfsig)
  */
 export async function generateVRFSignature(
   sealSignature: Uint8Array,
-  keyPairService: IKeyPairService,
+  configService: IConfigService,
+  keyPairService?: IKeyPairService,
 ): SafePromise<Uint8Array> {
-  // Get author's Bandersnatch key
+  // Get author's Bandersnatch key using helper with fallback logic
+  const [credentialsError, validatorCredentials] =
+    getValidatorCredentialsWithFallback(configService, keyPairService)
+  if (credentialsError || !validatorCredentials) {
+    return safeError(
+      credentialsError ||
+        new Error('No validator credentials available for VRF generation'),
+    )
+  }
+
   const authorBandersnatchKey =
-    keyPairService.getLocalKeyPair().bandersnatchKeyPair.privateKey
+    validatorCredentials.bandersnatchKeyPair.privateKey
   if (!authorBandersnatchKey) {
     return safeError(
       new Error('No Bandersnatch secret key available for VRF generation'),

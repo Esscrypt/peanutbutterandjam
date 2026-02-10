@@ -31,6 +31,10 @@
     - [Option 1: Run with Bun (development)](#option-1-run-with-bun-development)
   - [Running the Fuzzer](#running-the-fuzzer)
     - [Run with Bun (development)](#run-with-bun-development)
+- [Running the Node](#running-the-node-1)
+- [Running with RPC server](#running-with-rpc-server)
+  - [Running Polkajam](#running-polkajam)
+- [if not there already](#if-not-there-already)
   - [Packages](#packages)
   - [Specification Compliance](#specification-compliance)
   - [Documentation](#documentation)
@@ -167,6 +171,26 @@ Common options:
 See [infra/node/FUZZER_TARGET_DOCKER_QUICKSTART.md](infra/node/FUZZER_TARGET_DOCKER_QUICKSTART.md) for Docker and conformance setup.
 
 ---
+
+# Running the Node
+
+```
+bun run ./infra/node/services/main-service.ts --validator-index 0 --telemetry 127.0.0.1:9000 --chain config/spec-tiny.json
+```
+
+# Running with RPC server
+```
+bun run ./apis/rpc-server/src/index.ts --validator-index 0 --telemetry 127.0.0.1:9000 --chain config/spec-tiny.json | bunx pino-pretty
+```
+
+## Running Polkajam
+```
+./submodules/polkajam/polkajam --chain=config/spec-tiny.json run --dev-validator 0 --temp
+
+# if not there already
+cd submodules/polkajam
+
+./polkajam --chain dev run --telemetry tart-backend:9000 --dev-validator 0 --temp
 
 ## Packages
 

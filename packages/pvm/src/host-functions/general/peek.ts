@@ -39,7 +39,6 @@ import { BaseHostFunction } from './base'
 export class PeekHostFunction extends BaseHostFunction {
   readonly functionId = GENERAL_FUNCTIONS.PEEK
   readonly name = 'peek'
-  readonly gasCost = 10n
 
   execute(
     context: HostFunctionContext,
@@ -47,7 +46,7 @@ export class PeekHostFunction extends BaseHostFunction {
   ): HostFunctionResult {
     if (!refineContext) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Peek host function: No refine context available')
+      logger.error('Peek host function: No refine context available')
       return {
         resultCode: RESULT_CODES.HALT,
       }
@@ -64,7 +63,7 @@ export class PeekHostFunction extends BaseHostFunction {
     const machine = this.getPVMMachine(refineContext, machineId)
     if (!machine) {
       context.registers[7] = ACCUMULATE_ERROR_CODES.WHO
-      context.log('Peek host function: Machine not found', {
+      logger.error('Peek host function: Machine not found', {
         machineId: machineId.toString(),
       })
       return {

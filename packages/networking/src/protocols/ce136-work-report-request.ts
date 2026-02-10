@@ -11,6 +11,7 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type {
   Safe,
@@ -44,6 +45,11 @@ export class WorkReportRequestProtocol extends NetworkingProtocol<
     request: WorkReportRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE136] Processing work report request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      workReportHash: request.workReportHash,
+    })
+
     this.eventBus.emitWorkReportRequest(request, peerPublicKey)
     return safeResult(undefined)
   }

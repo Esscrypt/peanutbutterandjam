@@ -29,6 +29,7 @@ import {
   concatBytes,
   type EventBusService,
   type Hex,
+  logger,
 } from '@pbnjam/core'
 import type {
   Safe,
@@ -72,24 +73,40 @@ export class WorkPackageSubmissionProtocol extends NetworkingProtocol<
    * 2. Bundle size ≤ C_maxbundlesize
    * 3. Extrinsic data size matches sum of lengths
    * 4. Each extrinsic hash matches blake{data}
+   *
+   * This follows the same flow as RPC handler's submitWorkPackage:
+   * 1. Validates the submission
+   * 2. Emits workPackageReceived event via event bus
+   * 3. GuarantorService handles it via handleWorkPackageSubmission
    */
   async processRequest(
     submission: WorkPackageSubmissionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE133] Processing work package submission request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      coreIndex: submission.coreIndex.toString(),
+      workItemsCount: submission.workPackage.workItems.length,
+      extrinsicsLength: submission.extrinsics.length,
+    })
+
     // Validate the submission
     const [validationError] = this.validateSubmission(submission)
     if (validationError) {
+      logger.error('[CE133] Work package submission validation failed', {
+        error: validationError.message,
+        peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      })
       return safeError(validationError)
     }
 
-    // Emit event for guarantor service to process
-    // The guarantor service will:
-    // 1. Evaluate authorization
-    // 2. Compute work-report
-    // 3. Perform erasure coding
-    // 4. Distribute chunks to validators
-    this.eventBusService.emitWorkPackageReceived(submission, peerPublicKey)
+    // Emit work package submission event via event bus
+    // This follows the same flow as RPC handler's submitWorkPackage
+    // The GuarantorService will handle it via handleWorkPackageSubmission
+    await this.eventBusService.emitWorkPackageReceived(
+      submission,
+      peerPublicKey,
+    )
 
     return safeResult(undefined)
   }

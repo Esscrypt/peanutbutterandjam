@@ -21,6 +21,7 @@ import {
   type EventBusService,
   type Hex,
   hexToBytes,
+  logger,
 } from '@pbnjam/core'
 import type {
   AssuranceDistributionRequest,
@@ -57,6 +58,15 @@ export class AssuranceDistributionProtocol extends NetworkingProtocol<
     assurance: AssuranceDistributionRequest,
     peerPublicKey: Hex,
   ): SafePromise<void> {
+    logger.info('[CE141] Processing assurance distribution request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      anchorHash: assurance.anchorHash,
+    })
+
+    // Note: The legacy emitAssuranceReceived uses a different signature
+    // JIP-3: 131 requires peerId and headerHash (anchor hash)
+    // We'll keep the legacy event for now and add JIP-3 event separately when available
+    // Legacy event for backwards compatibility
     this.eventBusService.emitAssuranceReceived(assurance, peerPublicKey)
 
     return safeResult(undefined)

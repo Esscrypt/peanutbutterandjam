@@ -152,6 +152,11 @@ export interface StateRequest {
   maximumSize: bigint
 }
 
+/**
+ * CE 129: State Response Protocol Types
+ * @param boundaryNodes - Merkle inclusion proofs for the keyValuePairs
+ * @param keyValuePairs - The key-value pairs. The key is the 31 bytes of the key, and the value arbitrary length data
+ */
 export interface StateResponse {
   /** Boundary nodes */
   boundaryNodes: Uint8Array[]

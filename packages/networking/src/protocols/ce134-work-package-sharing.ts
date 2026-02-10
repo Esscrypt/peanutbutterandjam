@@ -18,7 +18,7 @@ import {
   encodeWorkPackage,
 } from '@pbnjam/codec'
 import type { EventBusService } from '@pbnjam/core'
-import { concatBytes } from '@pbnjam/core'
+import { concatBytes, logger } from '@pbnjam/core'
 import type {
   Safe,
   SafePromise,
@@ -53,7 +53,18 @@ export class CE134WorkPackageSharingProtocol extends NetworkingProtocol<
     sharing: WorkPackageSharing,
     peerPublicKey: Hex,
   ): SafePromise<void> {
-    // Emit event for guarantor to act upon
+    logger.info('[CE134] Processing work package sharing request', {
+      peerPublicKey: `${peerPublicKey.slice(0, 20)}...`,
+      coreIndex: sharing.coreIndex.toString(),
+      segmentsRootMappingsCount: sharing.segmentsRootMappings.length,
+    })
+
+    // Note: JIP-3 work package being shared event (JIP-3: 91) should be emitted
+    // when a work-package sharing stream is opened. The event bus has workPackageBeingShared
+    // in the EventMap, but we need to check if the emit method exists.
+    // For now, we'll use the legacy event which handles this.
+
+    // Legacy event for backwards compatibility
     await this.eventBusService.emitWorkPackageSharing(sharing, peerPublicKey)
 
     return safeResult(undefined)

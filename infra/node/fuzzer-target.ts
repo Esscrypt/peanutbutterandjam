@@ -269,6 +269,12 @@ export async function initializeServices() {
     })
 
     ticketService.setValidatorSetManager(validatorSetManager)
+    sealKeyService.setValidatorSetManager(validatorSetManager)
+    // TicketService epoch callbacks after SealKeyService so SealKeyService can use accumulator first (Gray Paper Eq. 202-207)
+    const [ticketInitError] = ticketService.init()
+    if (ticketInitError) {
+      throw ticketInitError
+    }
 
     const authQueueService = new AuthQueueService({
       configService,
@@ -438,10 +444,13 @@ export async function initializeServices() {
       configService,
       blockImporterService,
       stateService,
-      accumulationService, // For fork rollback - resets lastProcessedSlot
+      accumulationService,
+      sealKeyService,
+      eventBusService,
+      null, // stateRequestProtocol
+      null, // blockRequestProtocol
+      null, // networkingService
     )
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
 
     logger.info('Starting entropy service...')
     const [entropyStartError] = await entropyService.start()
@@ -689,8 +698,6 @@ async function handleInitialize(
     logger.debug(`Initialize: State root: ${stateRoot}`)
 
     // Note: initializeGenesisHeader already creates the genesis BlockNode with
-    // the correct state snapshot, so we don't need to call saveStateSnapshot here.
-    // Calling saveStateSnapshot with stateRoot (instead of blockHash) would create
     // an incorrect entry in blockNodes.
     logger.info(
       `Initialize: Genesis block node already has state snapshot (${Object.keys(stateTrie).length} keyvals)`,

@@ -251,7 +251,7 @@ describe('W3F JAM Conformance Traces', () => {
         const traceSubfolder = `w3f-jam-conformance/${JAM_CONFORMANCE_VERSION}/${relativePathWithoutExt}`
 
         // Initialize services using shared utility (reuse genesisManager for this directory)
-        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useWorkerPool: false, useRingVrfWasm: true })
+        services = await initializeServices({ spec: 'tiny', traceSubfolder, genesisManager, initialValidators, useWasm: true, useIetfVrfWasm: false, useRingVrfWasm: true })
         const { stateService, blockImporterService, recentHistoryService, chainManagerService, fullContext } = services
 
       // Disable ancestry validation if ANCESTRY_DISABLED env variable is set
@@ -319,7 +319,7 @@ describe('W3F JAM Conformance Traces', () => {
       // This allows rolling back to initial state if block import fails
       const [initTrieError, initTrie] = stateService.generateStateTrie()
       if (!initTrieError && initTrie) {
-        chainManagerService.saveStateSnapshot(traceData.block.header.parent, initTrie)
+        chainManagerService.saveStateSnapshot(convertJsonBlockToBlock(traceData.block).header, initTrie)
       }
 
       // Check if block import is expected to fail (pre_state == post_state)

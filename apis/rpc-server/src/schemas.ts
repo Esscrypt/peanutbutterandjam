@@ -1,15 +1,42 @@
-import type { Hex } from '@pbnjam/core'
 import { z } from 'zod'
+import type { Blob, Hash } from './types'
 
 /**
  * Zod schemas for RPC method validation
+ * JIP-2: Hash and Blob are Base64-encoded strings per RFC 4648
  */
 
-// Hex string validation (0x-prefixed, 64 hex chars for 32 bytes)
-const hexSchema = z
+// Hash validation (Base64-encoded 32-byte data)
+const hashSchema = z
   .string()
-  .regex(/^0x[a-fA-F0-9]{64}$/, 'Must be a valid 32-byte hex string')
-  .transform((val) => val as Hex)
+  .refine(
+    (val) => {
+      try {
+        const decoded = Buffer.from(val, 'base64')
+        return decoded.length === 32
+      } catch {
+        return false
+      }
+    },
+    { message: 'Must be a valid Base64-encoded 32-byte hash' },
+  )
+  .transform((val) => val as Hash)
+
+// Blob validation (Base64-encoded arbitrary-length data)
+const blobSchema = z
+  .string()
+  .refine(
+    (val) => {
+      try {
+        Buffer.from(val, 'base64')
+        return true
+      } catch {
+        return false
+      }
+    },
+    { message: 'Must be a valid Base64-encoded blob' },
+  )
+  .transform((val) => val as Blob)
 
 // Service ID validation
 const serviceIdSchema = z.number().int().positive()
@@ -19,30 +46,6 @@ const bigintStringSchema = z
   .string()
   .regex(/^\d+$/, 'Must be a numeric string')
   .transform((val) => BigInt(val))
-
-// Uint8Array validation (accepts base64 or hex string)
-const uint8ArraySchema = z
-  .union([
-    z.string().transform((val) => {
-      // Try to parse as hex
-      if (val.startsWith('0x')) {
-        const hex = val.slice(2)
-        if (hex.length % 2 !== 0) {
-          throw new Error('Invalid hex string length')
-        }
-        if (hex.length === 0) {
-          return new Uint8Array(0)
-        }
-        return new Uint8Array(
-          hex.match(/.{1,2}/g)!.map((byte) => Number.parseInt(byte, 16)),
-        )
-      }
-      // Try to parse as base64
-      return new Uint8Array(Buffer.from(val, 'base64'))
-    }),
-    z.instanceof(Uint8Array),
-  ])
-  .transform((val) => (val instanceof Uint8Array ? val : val))
 
 // Chain information methods
 export const parametersSchema = z.object({}) // No parameters
@@ -56,16 +59,16 @@ export const finalizedBlockSchema = z.object({}) // No parameters
 export const subscribeFinalizedBlockSchema = z.object({}) // No parameters
 
 export const parentSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
 })
 
 export const stateRootSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
 })
 
 // Statistics methods
 export const statisticsSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
 })
 
 export const subscribeStatisticsSchema = z.object({
@@ -74,7 +77,7 @@ export const subscribeStatisticsSchema = z.object({
 
 // Service data methods
 export const serviceDataSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
   serviceId: serviceIdSchema,
 })
 
@@ -84,62 +87,200 @@ export const subscribeServiceDataSchema = z.object({
 })
 
 export const serviceValueSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
   serviceId: serviceIdSchema,
-  key: uint8ArraySchema,
+  key: blobSchema,
 })
 
 export const subscribeServiceValueSchema = z.object({
   serviceId: serviceIdSchema,
-  key: uint8ArraySchema,
+  key: blobSchema,
   finalized: z.boolean(),
 })
 
 export const servicePreimageSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
   serviceId: serviceIdSchema,
-  hash: hexSchema,
+  hash: hashSchema,
 })
 
 export const subscribeServicePreimageSchema = z.object({
   serviceId: serviceIdSchema,
-  hash: hexSchema,
+  hash: hashSchema,
   finalized: z.boolean(),
 })
 
 export const serviceRequestSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
   serviceId: serviceIdSchema,
-  hash: hexSchema,
+  hash: hashSchema,
   length: z.number().int().positive(),
 })
 
 export const subscribeServiceRequestSchema = z.object({
   serviceId: serviceIdSchema,
-  hash: hexSchema,
+  hash: hashSchema,
   length: z.number().int().positive(),
   finalized: z.boolean(),
 })
 
 // BEEFY methods
 export const beefyRootSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
 })
 
 // Submission methods
 export const submitWorkPackageSchema = z.object({
   coreIndex: bigintStringSchema,
-  workPackage: uint8ArraySchema,
-  extrinsics: z.array(uint8ArraySchema),
+  workPackage: blobSchema,
+  extrinsics: z.array(blobSchema),
 })
 
 export const submitPreimageSchema = z.object({
   serviceId: bigintStringSchema,
-  preimage: uint8ArraySchema,
-  blockHash: hexSchema,
+  preimage: blobSchema,
+  blockHash: hashSchema,
 })
 
 // Service listing
 export const listServicesSchema = z.object({
-  blockHash: hexSchema,
+  blockHash: hashSchema,
 })
+
+// JSON-RPC 2.0 base request schema
+// JIP-2: "all method parameters are passed by-position, i.e. the 'params' member of Request objects should be an Array."
+// This means params should always be present as an array (even if empty for methods with no parameters)
+export const jsonRpcRequestSchema = z.object({
+  jsonrpc: z.literal('2.0'),
+  id: z.union([z.string(), z.number(), z.null()]),
+  method: z.string(),
+  params: z.array(z.unknown()),
+})
+
+// Method-specific parameter validation schemas (for params array)
+export const parametersParamsSchema = z.tuple([]) // No parameters
+
+export const bestBlockParamsSchema = z.tuple([]) // No parameters
+
+export const finalizedBlockParamsSchema = z.tuple([]) // No parameters
+
+export const parentParamsSchema = z.tuple([hashSchema])
+
+export const stateRootParamsSchema = z.tuple([hashSchema])
+
+export const statisticsParamsSchema = z.tuple([hashSchema])
+
+export const serviceDataParamsSchema = z.tuple([hashSchema, serviceIdSchema])
+
+export const serviceValueParamsSchema = z.tuple([
+  hashSchema,
+  serviceIdSchema,
+  blobSchema,
+])
+
+export const servicePreimageParamsSchema = z.tuple([
+  hashSchema,
+  serviceIdSchema,
+  hashSchema,
+])
+
+export const serviceRequestParamsSchema = z.tuple([
+  hashSchema,
+  serviceIdSchema,
+  hashSchema,
+  z.number().int().positive(),
+])
+
+export const beefyRootParamsSchema = z.tuple([hashSchema])
+
+export const listServicesParamsSchema = z.tuple([hashSchema])
+
+export const submitWorkPackageParamsSchema = z.tuple([
+  bigintStringSchema,
+  blobSchema,
+  z.array(blobSchema),
+])
+
+export const submitPreimageParamsSchema = z.tuple([
+  bigintStringSchema,
+  blobSchema,
+  hashSchema,
+])
+
+// Helper to convert Uint8Array/string to Blob (Base64 string)
+// For WebSocket, params can come as Uint8Array, Buffer, or base64 string
+const blobFromWebSocketSchema = z
+  .instanceof(Uint8Array)
+  .or(z.instanceof(Buffer))
+  .or(blobSchema)
+  .transform((val) => {
+    if (typeof val === 'string') {
+      // Already a base64 string (validated by blobSchema)
+      return val as Blob
+    }
+    // Convert Uint8Array or Buffer to base64 string
+    const buffer = Buffer.from(val)
+    return buffer.toString('base64') as Blob
+  })
+
+// Subscription method parameter schemas (for WebSocket params array format)
+export const subscribeStatisticsParamsSchema = z
+  .tuple([z.boolean().optional()])
+  .transform(([finalized]) => [finalized ?? false] as const)
+
+export const subscribeServiceDataParamsSchema = z
+  .tuple([serviceIdSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, finalized]) => [serviceId, finalized ?? false] as const,
+  )
+
+export const subscribeServiceValueParamsSchema = z
+  .tuple([serviceIdSchema, blobFromWebSocketSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, key, finalized]) =>
+      [serviceId, key, finalized ?? false] as const,
+  )
+
+export const subscribeServicePreimageParamsSchema = z
+  .tuple([serviceIdSchema, hashSchema, z.boolean().optional()])
+  .transform(
+    ([serviceId, hash, finalized]) =>
+      [serviceId, hash, finalized ?? false] as const,
+  )
+
+export const subscribeServiceRequestParamsSchema = z
+  .tuple([
+    serviceIdSchema,
+    hashSchema,
+    z.number().int().positive(),
+    z.boolean().optional(),
+  ])
+  .transform(
+    ([serviceId, hash, length, finalized]) =>
+      [serviceId, hash, length, finalized ?? false] as const,
+  )
+
+export const unsubscribeParamsSchema = z.tuple([z.string()])
+
+// Schemas for methods that accept Uint8Array (for WebSocket, these come as base64 strings or Uint8Array)
+export const serviceValueParamsWebSocketSchema = z.tuple([
+  hashSchema,
+  serviceIdSchema,
+  blobFromWebSocketSchema,
+])
+
+export const submitWorkPackageParamsWebSocketSchema = z.tuple([
+  z
+    .union([z.number(), bigintStringSchema])
+    .transform((val) => (typeof val === 'number' ? BigInt(val) : val)),
+  blobFromWebSocketSchema,
+  z.array(blobFromWebSocketSchema),
+])
+
+export const submitPreimageParamsWebSocketSchema = z.tuple([
+  z
+    .union([z.number(), bigintStringSchema])
+    .transform((val) => (typeof val === 'number' ? BigInt(val) : val)),
+  blobFromWebSocketSchema,
+  hashSchema,
+])

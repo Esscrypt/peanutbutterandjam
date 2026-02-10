@@ -3,11 +3,15 @@ import { createEnvSchema, loadEnvVariables } from './utils/env'
 
 // Define RPC server specific environment schema
 const rpcServerAdditionalSchema = {
+  PORT: z
+    .string()
+    .transform((val) => Number.parseInt(val, 10))
+    .optional(),
   RPC_PORT: z
     .string()
     .transform((val) => Number.parseInt(val, 10))
-    .default('19800'),
-  RPC_HOST: z.string().default('0.0.0.0'),
+    .optional(),
+  RPC_HOST: z.string().default('localhost'),
   RPC_CORS_ORIGIN: z.string().default('*'),
   RPC_MAX_PAYLOAD_SIZE: z
     .string()
@@ -41,7 +45,7 @@ export interface RpcServerConfig {
 }
 
 export const config: RpcServerConfig = {
-  port: env.RPC_PORT,
+  port: env.PORT ?? env.RPC_PORT ?? 19800,
   host: env.RPC_HOST,
   corsOrigin: env.RPC_CORS_ORIGIN,
   maxPayloadSize: env.RPC_MAX_PAYLOAD_SIZE,

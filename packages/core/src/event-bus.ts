@@ -11,8 +11,10 @@ import type {
   AuditShardRequest,
   AuditShardResponse,
   Block,
+  BlockAnnouncementHandshake,
   BlockBody,
   BlockHeader,
+  BlockOutline,
   BlockRequest,
   EpochMark,
   GuaranteeDiscardReason,
@@ -66,6 +68,8 @@ export interface SlotChangeEvent {
 export interface EpochTransitionEvent {
   slot: bigint
   epochMark: EpochMark | null
+  /** Prior block's timeslot (Gray Paper: thetime). Used to compute m = priorSlot % Cepochlen for Eq. 202-207. */
+  priorSlot: bigint
 }
 
 export interface RevertEpochTransitionEvent {
@@ -254,6 +258,29 @@ export interface EventMap {
   blocksReceived: [Block[], Hex]
   blocksRequested: [BlockRequest, Hex]
 
+  // Block distribution events (JIP-3: 60-68)
+  blockAnnouncementStreamOpened: [Uint8Array, 'local' | 'remote']
+  blockAnnouncementStreamClosed: [Uint8Array, 'local' | 'remote', string]
+  blockAnnounced: [Uint8Array, 'local' | 'remote', bigint, Uint8Array]
+  blockAnnouncementWithHeader: [Uint8Array, BlockHeader]
+  blockAnnouncementHandshake: [Uint8Array, BlockAnnouncementHandshake]
+  sendingBlockRequest: [
+    Uint8Array,
+    Uint8Array,
+    'ascending_exclusive' | 'descending_inclusive',
+    bigint,
+  ]
+  receivingBlockRequest: [Uint8Array]
+  blockRequestFailed: [bigint, string]
+  blockRequestSent: [bigint]
+  blockRequestReceived: [
+    bigint,
+    Uint8Array,
+    'ascending_exclusive' | 'descending_inclusive',
+    bigint,
+  ]
+  blockTransferred: [bigint, bigint, BlockOutline, boolean]
+
   // State request events
   stateRequested: [StateRequest, Hex]
   stateResponse: [StateResponse, Hex]
@@ -267,6 +294,80 @@ export interface EventMap {
 
   // Assurance distribution events
   assuranceDistribution: [AssuranceDistributionEvent]
+
+  // Availability distribution events (JIP-3: 120-131)
+  sendingShardRequest: [Uint8Array, Uint8Array, bigint] // peerId, erasureRoot, shardIndex
+  receivingShardRequest: [Uint8Array] // peerId
+  shardRequestFailed: [bigint, string] // eventId, reason
+  shardRequestSent: [bigint] // eventId
+  shardRequestReceived: [bigint, Uint8Array, bigint] // eventId, erasureRoot, shardIndex
+  shardsTransferred: [bigint] // eventId
+  distributingAssurance: [Uint8Array, Uint8Array] // headerHash, availabilityBitfield
+  assuranceSendFailed: [bigint, Uint8Array, string] // eventId, peerId, reason
+  assuranceSent: [bigint, Uint8Array] // eventId, peerId
+  assuranceDistributed: [bigint] // eventId
+  assuranceReceiveFailed: [Uint8Array, string] // peerId, reason
+  // assuranceReceived already exists
+
+  // Bundle recovery events (JIP-3: 140-153)
+  sendingBundleShardRequest: [bigint, Uint8Array, bigint] // eventId, peerId, shardIndex
+  receivingBundleShardRequest: [Uint8Array] // peerId
+  bundleShardRequestFailed: [bigint, string] // eventId, reason
+  bundleShardRequestSent: [bigint] // eventId
+  bundleShardRequestReceived: [bigint, Uint8Array, bigint] // eventId, erasureRoot, shardIndex
+  bundleShardTransferred: [bigint] // eventId
+  reconstructingBundle: [bigint, boolean] // eventId, isTrivial
+  bundleReconstructed: [bigint] // eventId
+  sendingBundleRequest: [bigint, Uint8Array] // eventId, peerId
+  receivingBundleRequest: [Uint8Array] // peerId
+  bundleRequestFailed: [bigint, string] // eventId, reason
+  bundleRequestSent: [bigint] // eventId
+  bundleRequestReceived: [bigint, Uint8Array] // eventId, erasureRoot
+  bundleTransferred: [bigint] // eventId
+
+  // Segment recovery events (JIP-3: 160-178)
+  workPackageHashMapped: [bigint, Uint8Array, Uint8Array] // eventId, workPackageHash, segmentsRoot
+  segmentsRootMapped: [bigint, Uint8Array, Uint8Array] // eventId, segmentsRoot, erasureRoot
+  sendingSegmentShardRequest: [
+    bigint,
+    Uint8Array,
+    boolean,
+    Array<{ segmentId: bigint; shardIndex: bigint }>,
+  ] // eventId, peerId, usingCE140, requests
+  receivingSegmentShardRequest: [Uint8Array, boolean] // peerId, usingCE140
+  segmentShardRequestFailed: [bigint, string] // eventId, reason
+  segmentShardRequestSent: [bigint] // eventId
+  segmentShardRequestReceived: [bigint, bigint] // eventId, shardCount
+  segmentShardsTransferred: [bigint] // eventId
+  reconstructingSegments: [bigint, bigint[], boolean] // eventId, segmentIds, isTrivial
+  segmentReconstructionFailed: [bigint, string] // eventId, reason
+  segmentsReconstructed: [bigint] // eventId
+  segmentVerificationFailed: [bigint, bigint[], string] // eventId, segmentIndices, reason
+  segmentsVerified: [bigint, bigint[]] // eventId, segmentIndices
+  sendingSegmentRequest: [bigint, Uint8Array, bigint[]] // eventId, peerId, segmentIndices
+  receivingSegmentRequest: [Uint8Array] // peerId
+  segmentRequestFailed: [bigint, string] // eventId, reason
+  segmentRequestSent: [bigint] // eventId
+  segmentRequestReceived: [bigint, bigint] // eventId, segmentCount
+  segmentsTransferred: [bigint] // eventId
+
+  // Preimage distribution events (JIP-3: 190-199)
+  preimageAnnouncementFailed: [Uint8Array, 'local' | 'remote', string] // peerId, connectionSide, reason
+  preimageAnnounced: [
+    Uint8Array,
+    'local' | 'remote',
+    bigint,
+    Uint8Array,
+    bigint,
+  ] // peerId, connectionSide, serviceId, hash, length
+  announcedPreimageForgotten: [bigint, Uint8Array, bigint, number] // serviceId, hash, length, reason
+  sendingPreimageRequest: [Uint8Array, Uint8Array] // peerId, hash
+  receivingPreimageRequest: [Uint8Array] // peerId
+  preimageRequestFailed: [bigint, string] // eventId, reason
+  preimageRequestSent: [bigint] // eventId
+  preimageRequestReceived: [bigint, Uint8Array] // eventId, hash
+  preimageTransferred: [bigint, bigint] // eventId, length
+  preimageDiscarded: [Uint8Array, bigint, number] // hash, length, reason
 
   // Audit tranche events
   auditTranche: [AuditTrancheEvent]
@@ -376,6 +477,12 @@ export class EventBusService extends BaseService {
     callback: EventCallback<EventMap['revertEpochTransition']>,
   ): void {
     this.on('revertEpochTransition', callback)
+  }
+
+  addConectivityChangeCallback(
+    callback: EventCallback<EventMap['conectivityChange']>,
+  ): void {
+    this.on('conectivityChange', callback)
   }
 
   // Aliases for compatibility (addXxxCallback methods)
@@ -495,6 +602,401 @@ export class EventBusService extends BaseService {
 
   addStatusCallback(callback: EventCallback<EventMap['status']>): void {
     this.on('status', callback)
+  }
+
+  // Block distribution event callbacks (JIP-3: 60-68)
+  addBlockAnnouncementStreamOpenedCallback(
+    callback: EventCallback<EventMap['blockAnnouncementStreamOpened']>,
+  ): void {
+    this.on('blockAnnouncementStreamOpened', callback)
+  }
+
+  addBlockAnnouncementStreamClosedCallback(
+    callback: EventCallback<EventMap['blockAnnouncementStreamClosed']>,
+  ): void {
+    this.on('blockAnnouncementStreamClosed', callback)
+  }
+
+  addBlockAnnouncedCallback(
+    callback: EventCallback<EventMap['blockAnnounced']>,
+  ): void {
+    this.on('blockAnnounced', callback)
+  }
+
+  addBlockAnnouncementWithHeaderCallback(
+    callback: EventCallback<EventMap['blockAnnouncementWithHeader']>,
+  ): void {
+    this.on('blockAnnouncementWithHeader', callback)
+  }
+
+  addBlockAnnouncementHandshakeCallback(
+    callback: EventCallback<EventMap['blockAnnouncementHandshake']>,
+  ): void {
+    this.on('blockAnnouncementHandshake', callback)
+  }
+
+  addSendingBlockRequestCallback(
+    callback: EventCallback<EventMap['sendingBlockRequest']>,
+  ): void {
+    this.on('sendingBlockRequest', callback)
+  }
+
+  addReceivingBlockRequestCallback(
+    callback: EventCallback<EventMap['receivingBlockRequest']>,
+  ): void {
+    this.on('receivingBlockRequest', callback)
+  }
+
+  addBlockRequestFailedCallback(
+    callback: EventCallback<EventMap['blockRequestFailed']>,
+  ): void {
+    this.on('blockRequestFailed', callback)
+  }
+
+  addBlockRequestSentCallback(
+    callback: EventCallback<EventMap['blockRequestSent']>,
+  ): void {
+    this.on('blockRequestSent', callback)
+  }
+
+  addBlockRequestReceivedCallback(
+    callback: EventCallback<EventMap['blockRequestReceived']>,
+  ): void {
+    this.on('blockRequestReceived', callback)
+  }
+
+  addBlockTransferredCallback(
+    callback: EventCallback<EventMap['blockTransferred']>,
+  ): void {
+    this.on('blockTransferred', callback)
+  }
+
+  // Availability distribution event callbacks (JIP-3: 120-131)
+  addSendingShardRequestCallback(
+    callback: EventCallback<EventMap['sendingShardRequest']>,
+  ): void {
+    this.on('sendingShardRequest', callback)
+  }
+
+  addReceivingShardRequestCallback(
+    callback: EventCallback<EventMap['receivingShardRequest']>,
+  ): void {
+    this.on('receivingShardRequest', callback)
+  }
+
+  addShardRequestFailedCallback(
+    callback: EventCallback<EventMap['shardRequestFailed']>,
+  ): void {
+    this.on('shardRequestFailed', callback)
+  }
+
+  addShardRequestSentCallback(
+    callback: EventCallback<EventMap['shardRequestSent']>,
+  ): void {
+    this.on('shardRequestSent', callback)
+  }
+
+  addShardRequestReceivedCallback(
+    callback: EventCallback<EventMap['shardRequestReceived']>,
+  ): void {
+    this.on('shardRequestReceived', callback)
+  }
+
+  addShardsTransferredCallback(
+    callback: EventCallback<EventMap['shardsTransferred']>,
+  ): void {
+    this.on('shardsTransferred', callback)
+  }
+
+  addDistributingAssuranceCallback(
+    callback: EventCallback<EventMap['distributingAssurance']>,
+  ): void {
+    this.on('distributingAssurance', callback)
+  }
+
+  addAssuranceSendFailedCallback(
+    callback: EventCallback<EventMap['assuranceSendFailed']>,
+  ): void {
+    this.on('assuranceSendFailed', callback)
+  }
+
+  addAssuranceSentCallback(
+    callback: EventCallback<EventMap['assuranceSent']>,
+  ): void {
+    this.on('assuranceSent', callback)
+  }
+
+  addAssuranceDistributedCallback(
+    callback: EventCallback<EventMap['assuranceDistributed']>,
+  ): void {
+    this.on('assuranceDistributed', callback)
+  }
+
+  addAssuranceReceiveFailedCallback(
+    callback: EventCallback<EventMap['assuranceReceiveFailed']>,
+  ): void {
+    this.on('assuranceReceiveFailed', callback)
+  }
+
+  // Bundle recovery event callbacks (JIP-3: 140-153)
+  addSendingBundleShardRequestCallback(
+    callback: EventCallback<EventMap['sendingBundleShardRequest']>,
+  ): void {
+    this.on('sendingBundleShardRequest', callback)
+  }
+
+  addReceivingBundleShardRequestCallback(
+    callback: EventCallback<EventMap['receivingBundleShardRequest']>,
+  ): void {
+    this.on('receivingBundleShardRequest', callback)
+  }
+
+  addBundleShardRequestFailedCallback(
+    callback: EventCallback<EventMap['bundleShardRequestFailed']>,
+  ): void {
+    this.on('bundleShardRequestFailed', callback)
+  }
+
+  addBundleShardRequestSentCallback(
+    callback: EventCallback<EventMap['bundleShardRequestSent']>,
+  ): void {
+    this.on('bundleShardRequestSent', callback)
+  }
+
+  addBundleShardRequestReceivedCallback(
+    callback: EventCallback<EventMap['bundleShardRequestReceived']>,
+  ): void {
+    this.on('bundleShardRequestReceived', callback)
+  }
+
+  addBundleShardTransferredCallback(
+    callback: EventCallback<EventMap['bundleShardTransferred']>,
+  ): void {
+    this.on('bundleShardTransferred', callback)
+  }
+
+  addReconstructingBundleCallback(
+    callback: EventCallback<EventMap['reconstructingBundle']>,
+  ): void {
+    this.on('reconstructingBundle', callback)
+  }
+
+  addBundleReconstructedCallback(
+    callback: EventCallback<EventMap['bundleReconstructed']>,
+  ): void {
+    this.on('bundleReconstructed', callback)
+  }
+
+  addSendingBundleRequestCallback(
+    callback: EventCallback<EventMap['sendingBundleRequest']>,
+  ): void {
+    this.on('sendingBundleRequest', callback)
+  }
+
+  addReceivingBundleRequestCallback(
+    callback: EventCallback<EventMap['receivingBundleRequest']>,
+  ): void {
+    this.on('receivingBundleRequest', callback)
+  }
+
+  addBundleRequestFailedCallback(
+    callback: EventCallback<EventMap['bundleRequestFailed']>,
+  ): void {
+    this.on('bundleRequestFailed', callback)
+  }
+
+  addBundleRequestSentCallback(
+    callback: EventCallback<EventMap['bundleRequestSent']>,
+  ): void {
+    this.on('bundleRequestSent', callback)
+  }
+
+  addBundleRequestReceivedCallback(
+    callback: EventCallback<EventMap['bundleRequestReceived']>,
+  ): void {
+    this.on('bundleRequestReceived', callback)
+  }
+
+  addBundleTransferredCallback(
+    callback: EventCallback<EventMap['bundleTransferred']>,
+  ): void {
+    this.on('bundleTransferred', callback)
+  }
+
+  // Segment recovery event callbacks (JIP-3: 160-178)
+  addWorkPackageHashMappedCallback(
+    callback: EventCallback<EventMap['workPackageHashMapped']>,
+  ): void {
+    this.on('workPackageHashMapped', callback)
+  }
+
+  addSegmentsRootMappedCallback(
+    callback: EventCallback<EventMap['segmentsRootMapped']>,
+  ): void {
+    this.on('segmentsRootMapped', callback)
+  }
+
+  addSendingSegmentShardRequestCallback(
+    callback: EventCallback<EventMap['sendingSegmentShardRequest']>,
+  ): void {
+    this.on('sendingSegmentShardRequest', callback)
+  }
+
+  addReceivingSegmentShardRequestCallback(
+    callback: EventCallback<EventMap['receivingSegmentShardRequest']>,
+  ): void {
+    this.on('receivingSegmentShardRequest', callback)
+  }
+
+  addSegmentShardRequestFailedCallback(
+    callback: EventCallback<EventMap['segmentShardRequestFailed']>,
+  ): void {
+    this.on('segmentShardRequestFailed', callback)
+  }
+
+  addSegmentShardRequestSentCallback(
+    callback: EventCallback<EventMap['segmentShardRequestSent']>,
+  ): void {
+    this.on('segmentShardRequestSent', callback)
+  }
+
+  addSegmentShardRequestReceivedCallback(
+    callback: EventCallback<EventMap['segmentShardRequestReceived']>,
+  ): void {
+    this.on('segmentShardRequestReceived', callback)
+  }
+
+  addSegmentShardsTransferredCallback(
+    callback: EventCallback<EventMap['segmentShardsTransferred']>,
+  ): void {
+    this.on('segmentShardsTransferred', callback)
+  }
+
+  addReconstructingSegmentsCallback(
+    callback: EventCallback<EventMap['reconstructingSegments']>,
+  ): void {
+    this.on('reconstructingSegments', callback)
+  }
+
+  addSegmentReconstructionFailedCallback(
+    callback: EventCallback<EventMap['segmentReconstructionFailed']>,
+  ): void {
+    this.on('segmentReconstructionFailed', callback)
+  }
+
+  addSegmentsReconstructedCallback(
+    callback: EventCallback<EventMap['segmentsReconstructed']>,
+  ): void {
+    this.on('segmentsReconstructed', callback)
+  }
+
+  addSegmentVerificationFailedCallback(
+    callback: EventCallback<EventMap['segmentVerificationFailed']>,
+  ): void {
+    this.on('segmentVerificationFailed', callback)
+  }
+
+  addSegmentsVerifiedCallback(
+    callback: EventCallback<EventMap['segmentsVerified']>,
+  ): void {
+    this.on('segmentsVerified', callback)
+  }
+
+  addSendingSegmentRequestCallback(
+    callback: EventCallback<EventMap['sendingSegmentRequest']>,
+  ): void {
+    this.on('sendingSegmentRequest', callback)
+  }
+
+  addReceivingSegmentRequestCallback(
+    callback: EventCallback<EventMap['receivingSegmentRequest']>,
+  ): void {
+    this.on('receivingSegmentRequest', callback)
+  }
+
+  addSegmentRequestFailedCallback(
+    callback: EventCallback<EventMap['segmentRequestFailed']>,
+  ): void {
+    this.on('segmentRequestFailed', callback)
+  }
+
+  addSegmentRequestSentCallback(
+    callback: EventCallback<EventMap['segmentRequestSent']>,
+  ): void {
+    this.on('segmentRequestSent', callback)
+  }
+
+  addSegmentRequestReceivedCallback(
+    callback: EventCallback<EventMap['segmentRequestReceived']>,
+  ): void {
+    this.on('segmentRequestReceived', callback)
+  }
+
+  addSegmentsTransferredCallback(
+    callback: EventCallback<EventMap['segmentsTransferred']>,
+  ): void {
+    this.on('segmentsTransferred', callback)
+  }
+
+  // Preimage distribution event callbacks (JIP-3: 190-199)
+  addPreimageAnnouncementFailedCallback(
+    callback: EventCallback<EventMap['preimageAnnouncementFailed']>,
+  ): void {
+    this.on('preimageAnnouncementFailed', callback)
+  }
+
+  addPreimageAnnouncedCallback(
+    callback: EventCallback<EventMap['preimageAnnounced']>,
+  ): void {
+    this.on('preimageAnnounced', callback)
+  }
+
+  addAnnouncedPreimageForgottenCallback(
+    callback: EventCallback<EventMap['announcedPreimageForgotten']>,
+  ): void {
+    this.on('announcedPreimageForgotten', callback)
+  }
+
+  addSendingPreimageRequestCallback(
+    callback: EventCallback<EventMap['sendingPreimageRequest']>,
+  ): void {
+    this.on('sendingPreimageRequest', callback)
+  }
+
+  addReceivingPreimageRequestCallback(
+    callback: EventCallback<EventMap['receivingPreimageRequest']>,
+  ): void {
+    this.on('receivingPreimageRequest', callback)
+  }
+
+  addPreimageRequestFailedCallback(
+    callback: EventCallback<EventMap['preimageRequestFailed']>,
+  ): void {
+    this.on('preimageRequestFailed', callback)
+  }
+
+  addPreimageRequestSentCallback(
+    callback: EventCallback<EventMap['preimageRequestSent']>,
+  ): void {
+    this.on('preimageRequestSent', callback)
+  }
+
+  addPreimageRequestReceivedCallback(
+    callback: EventCallback<EventMap['preimageRequestReceived']>,
+  ): void {
+    this.on('preimageRequestReceived', callback)
+  }
+
+  addPreimageTransferredCallback(
+    callback: EventCallback<EventMap['preimageTransferred']>,
+  ): void {
+    this.on('preimageTransferred', callback)
+  }
+
+  addPreimageDiscardedCallback(
+    callback: EventCallback<EventMap['preimageDiscarded']>,
+  ): void {
+    this.on('preimageDiscarded', callback)
   }
 
   addGeneratingTicketsCallback(
@@ -1716,5 +2218,560 @@ export class EventBusService extends BaseService {
 
   async emitAuditTranche(event: AuditTrancheEvent): Promise<void> {
     await this.emit('auditTranche', event)
+  }
+
+  // Block distribution events (JIP-3: 60-68)
+  async emitBlockAnnouncementStreamOpened(
+    peerId: Uint8Array,
+    connectionSide: 'local' | 'remote',
+  ): Promise<void> {
+    await this.emit('blockAnnouncementStreamOpened', peerId, connectionSide)
+  }
+
+  async emitBlockAnnouncementStreamClosed(
+    peerId: Uint8Array,
+    connectionSide: 'local' | 'remote',
+    reason: string,
+  ): Promise<void> {
+    await this.emit(
+      'blockAnnouncementStreamClosed',
+      peerId,
+      connectionSide,
+      reason,
+    )
+  }
+
+  async emitBlockAnnounced(
+    peerId: Uint8Array,
+    connectionSide: 'local' | 'remote',
+    slot: bigint,
+    headerHash: Uint8Array,
+  ): Promise<void> {
+    await this.emit('blockAnnounced', peerId, connectionSide, slot, headerHash)
+  }
+
+  async emitBlockAnnouncementWithHeader(
+    peerId: Uint8Array,
+    header: BlockHeader,
+  ): Promise<void> {
+    await this.emit('blockAnnouncementWithHeader', peerId, header)
+  }
+
+  async emitBlockAnnouncementHandshake(
+    peerId: Uint8Array,
+    handshake: BlockAnnouncementHandshake,
+  ): Promise<void> {
+    await this.emit('blockAnnouncementHandshake', peerId, handshake)
+  }
+
+  async emitSendingBlockRequest(
+    peerId: Uint8Array,
+    headerHash: Uint8Array,
+    direction: 'ascending_exclusive' | 'descending_inclusive',
+    maxBlocks: bigint,
+  ): Promise<bigint> {
+    // Generate event ID for linking
+    const eventId = BigInt(Date.now())
+    await this.emit(
+      'sendingBlockRequest',
+      peerId,
+      headerHash,
+      direction,
+      maxBlocks,
+    )
+    return eventId
+  }
+
+  async emitReceivingBlockRequest(peerId: Uint8Array): Promise<bigint> {
+    // Generate event ID for linking
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingBlockRequest', peerId)
+    return eventId
+  }
+
+  async emitBlockRequestFailed(eventId: bigint, reason: string): Promise<void> {
+    await this.emit('blockRequestFailed', eventId, reason)
+  }
+
+  async emitBlockRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('blockRequestSent', eventId)
+  }
+
+  async emitBlockRequestReceived(
+    eventId: bigint,
+    headerHash: Uint8Array,
+    direction: 'ascending_exclusive' | 'descending_inclusive',
+    maxBlocks: bigint,
+  ): Promise<void> {
+    await this.emit(
+      'blockRequestReceived',
+      eventId,
+      headerHash,
+      direction,
+      maxBlocks,
+    )
+  }
+
+  async emitBlockTransferred(
+    eventId: bigint,
+    slot: bigint,
+    blockOutline: BlockOutline,
+    isLastBlock: boolean,
+  ): Promise<void> {
+    await this.emit(
+      'blockTransferred',
+      eventId,
+      slot,
+      blockOutline,
+      isLastBlock,
+    )
+  }
+
+  // Availability distribution events (JIP-3: 120-131)
+  async emitSendingShardRequest(
+    peerId: Uint8Array,
+    erasureRoot: Uint8Array,
+    shardIndex: bigint,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('sendingShardRequest', peerId, erasureRoot, shardIndex)
+    return eventId
+  }
+
+  async emitReceivingShardRequest(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingShardRequest', peerId)
+    return eventId
+  }
+
+  async emitShardRequestFailed(eventId: bigint, reason: string): Promise<void> {
+    await this.emit('shardRequestFailed', eventId, reason)
+  }
+
+  async emitShardRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('shardRequestSent', eventId)
+  }
+
+  async emitShardRequestReceived(
+    eventId: bigint,
+    erasureRoot: Uint8Array,
+    shardIndex: bigint,
+  ): Promise<void> {
+    await this.emit('shardRequestReceived', eventId, erasureRoot, shardIndex)
+  }
+
+  async emitShardsTransferred(eventId: bigint): Promise<void> {
+    await this.emit('shardsTransferred', eventId)
+  }
+
+  async emitDistributingAssurance(
+    headerHash: Uint8Array,
+    availabilityBitfield: Uint8Array,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('distributingAssurance', headerHash, availabilityBitfield)
+    return eventId
+  }
+
+  async emitAssuranceSendFailed(
+    eventId: bigint,
+    peerId: Uint8Array,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('assuranceSendFailed', eventId, peerId, reason)
+  }
+
+  async emitAssuranceSent(eventId: bigint, peerId: Uint8Array): Promise<void> {
+    await this.emit('assuranceSent', eventId, peerId)
+  }
+
+  async emitAssuranceDistributed(eventId: bigint): Promise<void> {
+    await this.emit('assuranceDistributed', eventId)
+  }
+
+  async emitAssuranceReceiveFailed(
+    peerId: Uint8Array,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('assuranceReceiveFailed', peerId, reason)
+  }
+
+  // Bundle recovery events (JIP-3: 140-153)
+  async emitSendingBundleShardRequest(
+    auditEventId: bigint,
+    peerId: Uint8Array,
+    shardIndex: bigint,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit(
+      'sendingBundleShardRequest',
+      auditEventId,
+      peerId,
+      shardIndex,
+    )
+    return eventId
+  }
+
+  async emitReceivingBundleShardRequest(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingBundleShardRequest', peerId)
+    return eventId
+  }
+
+  async emitBundleShardRequestFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('bundleShardRequestFailed', eventId, reason)
+  }
+
+  async emitBundleShardRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('bundleShardRequestSent', eventId)
+  }
+
+  async emitBundleShardRequestReceived(
+    eventId: bigint,
+    erasureRoot: Uint8Array,
+    shardIndex: bigint,
+  ): Promise<void> {
+    await this.emit(
+      'bundleShardRequestReceived',
+      eventId,
+      erasureRoot,
+      shardIndex,
+    )
+  }
+
+  async emitBundleShardTransferred(eventId: bigint): Promise<void> {
+    await this.emit('bundleShardTransferred', eventId)
+  }
+
+  async emitReconstructingBundle(
+    auditEventId: bigint,
+    isTrivial: boolean,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('reconstructingBundle', auditEventId, isTrivial)
+    return eventId
+  }
+
+  async emitBundleReconstructed(eventId: bigint): Promise<void> {
+    await this.emit('bundleReconstructed', eventId)
+  }
+
+  async emitSendingBundleRequest(
+    auditEventId: bigint,
+    peerId: Uint8Array,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('sendingBundleRequest', auditEventId, peerId)
+    return eventId
+  }
+
+  async emitReceivingBundleRequest(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingBundleRequest', peerId)
+    return eventId
+  }
+
+  async emitBundleRequestFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('bundleRequestFailed', eventId, reason)
+  }
+
+  async emitBundleRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('bundleRequestSent', eventId)
+  }
+
+  async emitBundleRequestReceived(
+    eventId: bigint,
+    erasureRoot: Uint8Array,
+  ): Promise<void> {
+    await this.emit('bundleRequestReceived', eventId, erasureRoot)
+  }
+
+  async emitBundleTransferred(eventId: bigint): Promise<void> {
+    await this.emit('bundleTransferred', eventId)
+  }
+
+  // Segment recovery events (JIP-3: 160-178)
+  async emitWorkPackageHashMapped(
+    workPackageEventId: bigint,
+    workPackageHash: Uint8Array,
+    segmentsRoot: Uint8Array,
+  ): Promise<void> {
+    await this.emit(
+      'workPackageHashMapped',
+      workPackageEventId,
+      workPackageHash,
+      segmentsRoot,
+    )
+  }
+
+  async emitSegmentsRootMapped(
+    workPackageEventId: bigint,
+    segmentsRoot: Uint8Array,
+    erasureRoot: Uint8Array,
+  ): Promise<void> {
+    await this.emit(
+      'segmentsRootMapped',
+      workPackageEventId,
+      segmentsRoot,
+      erasureRoot,
+    )
+  }
+
+  async emitSendingSegmentShardRequest(
+    workPackageEventId: bigint,
+    peerId: Uint8Array,
+    usingCE140: boolean,
+    requests: Array<{ segmentId: bigint; shardIndex: bigint }>,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit(
+      'sendingSegmentShardRequest',
+      workPackageEventId,
+      peerId,
+      usingCE140,
+      requests,
+    )
+    return eventId
+  }
+
+  async emitReceivingSegmentShardRequest(
+    peerId: Uint8Array,
+    usingCE140: boolean,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingSegmentShardRequest', peerId, usingCE140)
+    return eventId
+  }
+
+  async emitSegmentShardRequestFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('segmentShardRequestFailed', eventId, reason)
+  }
+
+  async emitSegmentShardRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('segmentShardRequestSent', eventId)
+  }
+
+  async emitSegmentShardRequestReceived(
+    eventId: bigint,
+    shardCount: bigint,
+  ): Promise<void> {
+    await this.emit('segmentShardRequestReceived', eventId, shardCount)
+  }
+
+  async emitSegmentShardsTransferred(eventId: bigint): Promise<void> {
+    await this.emit('segmentShardsTransferred', eventId)
+  }
+
+  async emitReconstructingSegments(
+    workPackageEventId: bigint,
+    segmentIds: bigint[],
+    isTrivial: boolean,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit(
+      'reconstructingSegments',
+      workPackageEventId,
+      segmentIds,
+      isTrivial,
+    )
+    return eventId
+  }
+
+  async emitSegmentReconstructionFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('segmentReconstructionFailed', eventId, reason)
+  }
+
+  async emitSegmentsReconstructed(eventId: bigint): Promise<void> {
+    await this.emit('segmentsReconstructed', eventId)
+  }
+
+  async emitSegmentVerificationFailed(
+    workPackageEventId: bigint,
+    segmentIndices: bigint[],
+    reason: string,
+  ): Promise<void> {
+    await this.emit(
+      'segmentVerificationFailed',
+      workPackageEventId,
+      segmentIndices,
+      reason,
+    )
+  }
+
+  async emitSegmentsVerified(
+    workPackageEventId: bigint,
+    segmentIndices: bigint[],
+  ): Promise<void> {
+    await this.emit('segmentsVerified', workPackageEventId, segmentIndices)
+  }
+
+  async emitSendingSegmentRequest(
+    workPackageEventId: bigint,
+    peerId: Uint8Array,
+    segmentIndices: bigint[],
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit(
+      'sendingSegmentRequest',
+      workPackageEventId,
+      peerId,
+      segmentIndices,
+    )
+    return eventId
+  }
+
+  async emitReceivingSegmentRequest(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingSegmentRequest', peerId)
+    return eventId
+  }
+
+  async emitSegmentRequestFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('segmentRequestFailed', eventId, reason)
+  }
+
+  async emitSegmentRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('segmentRequestSent', eventId)
+  }
+
+  async emitSegmentRequestReceived(
+    eventId: bigint,
+    segmentCount: bigint,
+  ): Promise<void> {
+    await this.emit('segmentRequestReceived', eventId, segmentCount)
+  }
+
+  async emitSegmentsTransferred(eventId: bigint): Promise<void> {
+    await this.emit('segmentsTransferred', eventId)
+  }
+
+  // Preimage distribution events (JIP-3: 190-199)
+  async emitPreimageAnnouncementFailed(
+    peerId: Uint8Array,
+    connectionSide: 'local' | 'remote',
+    reason: string,
+  ): Promise<void> {
+    await this.emit(
+      'preimageAnnouncementFailed',
+      peerId,
+      connectionSide,
+      reason,
+    )
+  }
+
+  async emitPreimageAnnounced(
+    peerId: Uint8Array,
+    connectionSide: 'local' | 'remote',
+    serviceId: bigint,
+    hash: Uint8Array,
+    length: bigint,
+  ): Promise<void> {
+    await this.emit(
+      'preimageAnnounced',
+      peerId,
+      connectionSide,
+      serviceId,
+      hash,
+      length,
+    )
+  }
+
+  async emitAnnouncedPreimageForgotten(
+    serviceId: bigint,
+    hash: Uint8Array,
+    length: bigint,
+    reason: number, // AnnouncedPreimageForgetReason enum value
+  ): Promise<void> {
+    await this.emit(
+      'announcedPreimageForgotten',
+      serviceId,
+      hash,
+      length,
+      reason,
+    )
+  }
+
+  async emitSendingPreimageRequest(
+    peerId: Uint8Array,
+    hash: Uint8Array,
+  ): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('sendingPreimageRequest', peerId, hash)
+    return eventId
+  }
+
+  async emitReceivingPreimageRequest(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingPreimageRequest', peerId)
+    return eventId
+  }
+
+  async emitPreimageRequestFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('preimageRequestFailed', eventId, reason)
+  }
+
+  async emitPreimageRequestSent(eventId: bigint): Promise<void> {
+    await this.emit('preimageRequestSent', eventId)
+  }
+
+  async emitPreimageRequestReceived(
+    eventId: bigint,
+    hash: Uint8Array,
+  ): Promise<void> {
+    await this.emit('preimageRequestReceived', eventId, hash)
+  }
+
+  async emitPreimageTransferred(
+    eventId: bigint,
+    length: bigint,
+  ): Promise<void> {
+    await this.emit('preimageTransferred', eventId, length)
+  }
+
+  async emitPreimageDiscarded(
+    hash: Uint8Array,
+    length: bigint,
+    reason: number, // PreimageDiscardReason enum value
+  ): Promise<void> {
+    await this.emit('preimageDiscarded', hash, length, reason)
+  }
+
+  // Guarantee events (JIP-3: 106-113) - missing emit methods
+  async emitReceivingGuarantee(peerId: Uint8Array): Promise<bigint> {
+    const eventId = BigInt(Date.now())
+    await this.emit('receivingGuarantee', peerId)
+    return eventId
+  }
+
+  async emitGuaranteeReceiveFailed(
+    eventId: bigint,
+    reason: string,
+  ): Promise<void> {
+    await this.emit('guaranteeReceiveFailed', eventId, reason)
+  }
+
+  async emitGuaranteeReceived(
+    eventId: bigint,
+    guaranteeOutline: GuaranteeOutline,
+  ): Promise<void> {
+    await this.emit('guaranteeReceived', eventId, guaranteeOutline)
   }
 }

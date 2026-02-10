@@ -1063,6 +1063,33 @@ export class ShardService extends BaseService {
   /**
    * Get received segment shards for an erasure root
    */
+  /**
+   * Get shard statistics for JIP-3 status events
+   * Returns the total count and size of all shards in storage
+   */
+  getShardStats(): { count: bigint; totalSizeBytes: bigint } {
+    let count = 0n
+    let totalSizeBytes = 0n
+
+    // Count bundle shards
+    for (const [, shardData] of this.shardStorage) {
+      count += BigInt(shardData.bundleShards.length)
+      for (const bundleShard of shardData.bundleShards) {
+        totalSizeBytes += BigInt(bundleShard.length)
+      }
+
+      // Count segment shards
+      for (const [, segmentShards] of shardData.segmentShards) {
+        count += BigInt(segmentShards.length)
+        for (const segmentShard of segmentShards) {
+          totalSizeBytes += BigInt(segmentShard.length)
+        }
+      }
+    }
+
+    return { count, totalSizeBytes }
+  }
+
   public getReceivedSegmentShards(
     erasureRootHex: Hex,
   ): Map<number, Uint8Array> | undefined {
