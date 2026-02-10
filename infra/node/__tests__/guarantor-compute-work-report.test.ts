@@ -11,7 +11,7 @@
 import { describe, it, expect, beforeAll } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { blake2bHash, concatBytes, hexToBytes, bytesToHex, type Hex } from '@pbnjam/core'
+import { blake2bHash, concatBytes, hexToBytes, type Hex } from '@pbnjam/core'
 import {
   setServicePreimageValue,
   setServiceRequestValue,
