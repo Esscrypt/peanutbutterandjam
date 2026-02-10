@@ -269,6 +269,12 @@ export async function initializeServices() {
     })
 
     ticketService.setValidatorSetManager(validatorSetManager)
+    sealKeyService.setValidatorSetManager(validatorSetManager)
+    // TicketService epoch callbacks after SealKeyService so SealKeyService can use accumulator first (Gray Paper Eq. 202-207)
+    const [ticketInitError] = ticketService.init()
+    if (ticketInitError) {
+      throw ticketInitError
+    }
 
     const authQueueService = new AuthQueueService({
       configService,
@@ -438,10 +444,13 @@ export async function initializeServices() {
       configService,
       blockImporterService,
       stateService,
-      accumulationService, // For fork rollback - resets lastProcessedSlot
+      accumulationService,
+      sealKeyService,
+      eventBusService,
+      null, // stateRequestProtocol
+      null, // blockRequestProtocol
+      null, // networkingService
     )
-
-    sealKeyService.setValidatorSetManager(validatorSetManager)
 
     logger.info('Starting entropy service...')
     const [entropyStartError] = await entropyService.start()

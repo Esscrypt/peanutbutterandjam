@@ -115,12 +115,18 @@ export class TicketService extends BaseService implements ITicketService {
     this.eventBusService.addTicketDistributionRequestCallback(
       this.handleTicketDistributionRequest.bind(this),
     )
+    // Epoch transition callbacks registered in init() so they run AFTER SealKeyService
+    // (Gray Paper: SealKeyService must use ticket accumulator for sealtickets' = Z(ticketaccumulator) before it is cleared)
+  }
+
+  init(): Safe<boolean> {
     this.eventBusService.addEpochTransitionCallback(
       this.handleEpochTransition.bind(this),
     )
     this.eventBusService.addRevertEpochTransitionCallback(
       this.handleRevertEpochTransition.bind(this),
     )
+    return safeResult(true)
   }
 
   start(): Safe<boolean> {
@@ -625,20 +631,12 @@ export class TicketService extends BaseService implements ITicketService {
    * Handle epoch transition event
    * Clears ticket accumulator according to Gray Paper Eq. 321-329: ticketaccumulator' = ∅ when e' > e
    */
-  private handleEpochTransition(event: EpochTransitionEvent): Safe<void> {
+  private handleEpochTransition(_event: EpochTransitionEvent): Safe<void> {
     // Save state before clearing for potential revert
     this.preTransitionTicketAccumulator = [...this.ticketAccumulator]
 
     // Gray Paper Eq. 321-329: ticketaccumulator' = ∅ when e' > e
     this.clearTicketAccumulator()
-
-    logger.debug(
-      '[TicketService] Epoch transition - ticket accumulator cleared',
-      {
-        slot: event.slot.toString(),
-        previousAccumulatorSize: this.preTransitionTicketAccumulator.length,
-      },
-    )
 
     return safeResult(undefined)
   }

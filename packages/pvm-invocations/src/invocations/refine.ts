@@ -20,6 +20,7 @@ import type {
   WorkPackage,
 } from '@pbnjam/types'
 import {
+  RustPVMExecutor,
   TypeScriptPVMExecutor,
   WasmPVMExecutor,
 } from '../pvm-executor-adapters'
@@ -31,8 +32,12 @@ import {
  */
 export class RefinePVM {
   private readonly serviceAccountService: IServiceAccountService
-  private readonly pvmExecutor: TypeScriptPVMExecutor | WasmPVMExecutor
+  private readonly pvmExecutor:
+    | TypeScriptPVMExecutor
+    | WasmPVMExecutor
+    | RustPVMExecutor
   private readonly useWasm: boolean
+  private readonly useRust: boolean
 
   constructor(options: {
     hostFunctionRegistry: HostFunctionRegistry
@@ -41,15 +46,20 @@ export class RefinePVM {
     configService: IConfigService
     pvmOptions?: PVMOptions
     useWasm: boolean
+    useRust?: boolean
     traceSubfolder?: string
   }) {
     this.useWasm = options.useWasm
+    this.useRust = options.useRust ?? false
     this.serviceAccountService = options.serviceAccountService
 
-    // Create PVM executor based on useWasm flag
-    if (options.useWasm) {
-      // Create WASM executor - module will be loaded from pvm-assemblyscript/build/pvm.wasm
-      // and instantiated lazily on first use
+    if (this.useRust) {
+      this.pvmExecutor = new RustPVMExecutor(
+        options.configService,
+        null, // entropyService not needed for refine
+        options.traceSubfolder,
+      )
+    } else if (options.useWasm) {
       this.pvmExecutor = new WasmPVMExecutor(
         options.configService,
         null, // entropyService not needed for refine
@@ -187,12 +197,41 @@ export class RefinePVM {
     }
 
     // Execute refine invocation
-    // For WASM executor, host functions are handled internally in AssemblyScript
-    // For TypeScript executor, we need to add executeRefinementInvocation method
+    const gasLimit = workItem.refgaslimit
+    if (this.useRust) {
+      const [rustError, rustResult] = await (
+        this.pvmExecutor as RustPVMExecutor
+      ).executeRefinementInvocation(
+        serviceCode,
+        gasLimit,
+        encodedArgs,
+        workPackage,
+        authorizerTrace,
+        importSegments,
+        exportSegmentOffset,
+        serviceAccount,
+        lookupAnchorTimeslot,
+      )
+      if (rustError || !rustResult) {
+        logger.error('[RefinePVM] Rust refine invocation failed', {
+          error: rustError?.message,
+        })
+        return { result: 'BAD', exportSegments: [], gasUsed: 0n }
+      }
+      const {
+        gasConsumed,
+        result: rustResultValue,
+        exportSegments,
+      } = rustResult
+      let result: Uint8Array | WorkError
+      if (rustResultValue === 'PANIC' || rustResultValue === 'OOG') {
+        result = 'BAD'
+        return { result, exportSegments: [], gasUsed: gasConsumed }
+      }
+      result = rustResultValue
+      return { result, exportSegments, gasUsed: gasConsumed }
+    }
     if (this.useWasm) {
-      // WASM executor - use executeRefinementInvocation
-      // Gas limit = w.refgaslimit from work item
-      const gasLimit = workItem.refgaslimit
       const [wasmError, wasmResult] = await (
         this.pvmExecutor as WasmPVMExecutor
       ).executeRefinementInvocation(
@@ -241,9 +280,6 @@ export class RefinePVM {
         }
       }
     } else {
-      // TypeScript executor - use executeRefinementInvocation
-      // Gas limit = w.refgaslimit from work item
-      const gasLimit = workItem.refgaslimit
       const [tsError, tsResult] = await (
         this.pvmExecutor as TypeScriptPVMExecutor
       ).executeRefinementInvocation(

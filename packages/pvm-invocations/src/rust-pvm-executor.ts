@@ -19,6 +19,7 @@ import {
   decodeImplicationsPair,
   encodeAccumulateInput,
   encodeImplicationsPair,
+  encodeRefineContext,
   encodeVariableSequence,
 } from '@pbnjam/codec'
 import { getInstructionName, writeTraceDump } from '@pbnjam/pvm'
@@ -28,6 +29,8 @@ import type {
   IEntropyService,
   ImplicationsPair,
   SafePromise,
+  ServiceAccount,
+  WorkPackage,
 } from '@pbnjam/types'
 import { RESULT_CODES, safeError, safeResult } from '@pbnjam/types'
 
@@ -77,6 +80,14 @@ export type NativeBinding = {
     numValidators: number,
     authQueueSize: number,
   ) => Buffer
+  setupRefineInvocation?: (
+    gasLimit: number,
+    program: Buffer,
+    args: Buffer,
+    refineContextEncoded: Buffer,
+    configMaxRefineGas: number,
+  ) => void
+  getExportSegments?: () => Buffer[]
 }
 
 /** Paths to try so the addon resolves when running the compiled fuzzer binary (./bin/fuzzer-target). */
@@ -118,12 +129,12 @@ const RAM_TYPE_PVM_RAM = 0
 export class RustPVMExecutor {
   private readonly native: NativeBinding | null
   private readonly configService: IConfigService
-  private readonly entropyService: IEntropyService
+  private readonly entropyService: IEntropyService | null
   private readonly traceSubfolder: string | undefined
 
   constructor(
     configService: IConfigService,
-    entropyService: IEntropyService,
+    entropyService: IEntropyService | null,
     traceSubfolder?: string,
   ) {
     this.configService = configService
@@ -180,6 +191,11 @@ export class RustPVMExecutor {
 
     const numCores = this.configService.numCores
     const numValidators = this.configService.numValidators
+    if (!this.entropyService) {
+      return safeError(
+        new Error('Entropy service required for accumulation invocation'),
+      )
+    }
     const entropyAccumulator =
       entropyOverride && entropyOverride.length === 32
         ? Buffer.from(entropyOverride)
@@ -430,6 +446,214 @@ export class RustPVMExecutor {
       gasConsumed,
       result,
       context: updatedContext,
+    })
+  }
+
+  /**
+   * Execute refinement invocation (Ψ_R). Uses native setupRefineInvocation + next_step loop + getResult + getExportSegments.
+   */
+  async executeRefinementInvocation(
+    preimageBlob: Uint8Array,
+    gasLimit: bigint,
+    encodedArgs: Uint8Array,
+    workPackage: WorkPackage,
+    _authorizerTrace: Uint8Array,
+    _importSegments: Uint8Array[][],
+    _exportSegmentOffset: bigint,
+    _serviceAccount: ServiceAccount,
+    _lookupAnchorTimeslot: bigint,
+  ): SafePromise<{
+    gasConsumed: bigint
+    result: Uint8Array | 'PANIC' | 'OOG'
+    exportSegments: Uint8Array[]
+  }> {
+    if (!this.native) {
+      return safeError(
+        new Error(
+          'Rust native module not available. Build with: cd packages/pvm-rust && bun run build',
+        ),
+      )
+    }
+    if (!this.native.setupRefineInvocation || !this.native.getExportSegments) {
+      return safeError(
+        new Error(
+          'Rust native module does not support refine. Rebuild pvm-rust with setupRefineInvocation and getExportSegments.',
+        ),
+      )
+    }
+    const [encodeErr, refineContextEncoded] = encodeRefineContext(
+      workPackage.context,
+    )
+    if (encodeErr || !refineContextEncoded) {
+      return safeError(
+        new Error(
+          `Failed to encode refine context: ${encodeErr?.message ?? 'unknown'}`,
+        ),
+      )
+    }
+    this.native.reset()
+    this.native.setupRefineInvocation(
+      Number(gasLimit),
+      Buffer.from(preimageBlob),
+      Buffer.from(encodedArgs),
+      Buffer.from(refineContextEncoded),
+      Number(this.configService.maxRefineGas),
+    )
+    const initialGas = gasLimit
+    const maxSteps = Number(this.configService.maxBlockGas)
+    let steps = 0
+    const enableTrace =
+      this.traceSubfolder && process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+    const executionLogs: Array<{
+      step: number
+      pc: bigint
+      instructionName: string
+      opcode: string
+      gas: bigint
+      registers: string[]
+      loadAddress?: number
+      loadValue?: bigint
+      storeAddress?: number
+      storeValue?: bigint
+    }> = []
+    const hostFunctionLogs: Array<{
+      step: number
+      hostCallId: bigint
+      gasBefore: bigint
+      gasAfter: bigint
+      serviceId?: bigint
+    }> = []
+
+    while (steps < maxSteps) {
+      const gasBeforeStep = this.native.getGasLeft()
+      const shouldContinue = this.native.nextStep()
+      steps++
+      const status = this.native.getStatus()
+
+      if (enableTrace) {
+        const gasRaw = this.native.getGasLeft()
+        const gasAfter =
+          gasRaw >>> 0 === gasRaw
+            ? BigInt(gasRaw)
+            : BigInt(gasRaw >>> 0) + 0x1_0000_0000n
+        const pc = this.native.getProgramCounter
+          ? BigInt(this.native.getProgramCounter())
+          : 0n
+        const registers: string[] = []
+        if (this.native.getRegisters) {
+          const buf = this.native.getRegisters()
+          for (let i = 0; i < 13; i++) {
+            registers.push((buf as Buffer).readBigUInt64LE(i * 8).toString())
+          }
+        }
+        const loadAddress = this.native.getLastLoadAddress?.() ?? 0
+        const loadValue = this.native.getLastLoadValue?.() ?? 0n
+        const storeAddress = this.native.getLastStoreAddress?.() ?? 0
+        const storeValue = this.native.getLastStoreValue?.() ?? 0n
+        const opcodeNum = this.native.getLastOpcode?.() ?? 0
+        const instructionName = getInstructionName(opcodeNum)
+        executionLogs.push({
+          step: steps,
+          pc,
+          instructionName,
+          opcode: instructionName,
+          gas: gasAfter,
+          registers,
+          loadAddress,
+          loadValue,
+          storeAddress,
+          storeValue,
+        })
+        const hostCallId = this.native.getHostCallId?.() ?? 0
+        if (hostCallId !== 0) {
+          hostFunctionLogs.push({
+            step: steps,
+            hostCallId: BigInt(hostCallId),
+            gasBefore: BigInt(gasBeforeStep >>> 0),
+            gasAfter,
+          })
+        }
+      }
+
+      if (!shouldContinue) {
+        if (status === 4) continue
+        break
+      }
+      if (status !== 0 && status !== 4) break
+    }
+    const finalGasRaw = this.native.getGasLeft()
+    const finalGas =
+      finalGasRaw >>> 0 === finalGasRaw
+        ? BigInt(finalGasRaw)
+        : BigInt(finalGasRaw >>> 0) + 0x1_0000_0000n
+    const status = this.native.getStatus()
+    let gasConsumed: bigint
+    if (status === 5) {
+      gasConsumed = initialGas
+    } else {
+      const remaining = finalGas > initialGas ? 0n : finalGas
+      gasConsumed = initialGas - remaining
+    }
+    if (gasConsumed < 0n) gasConsumed = 0n
+    if (gasConsumed > initialGas) gasConsumed = initialGas
+    let result: Uint8Array | 'PANIC' | 'OOG'
+    if (status === 5) {
+      result = 'OOG'
+    } else if (status === 2 || status === 3) {
+      result = 'PANIC'
+    } else {
+      result = Buffer.from(this.native.getResult())
+    }
+    const segments = this.native.getExportSegments()
+    const exportSegments = segments?.map((b) => new Uint8Array(b)) ?? []
+
+    if (
+      this.traceSubfolder &&
+      process.env['ENABLE_PVM_TRACE_DUMP'] === 'true'
+    ) {
+      const traceOutputDir = join(
+        process.cwd(),
+        'pvm-traces',
+        this.traceSubfolder,
+      )
+      const logsToWrite =
+        executionLogs.length > 0
+          ? executionLogs
+          : [
+              {
+                step: steps,
+                pc: 0n,
+                instructionName: 'rust-refine-summary',
+                opcode: '',
+                gas: gasConsumed,
+                registers: [] as string[],
+              },
+            ]
+      const hostLogsToWrite =
+        executionLogs.length > 0 ? hostFunctionLogs : undefined
+      let errorCode: number | undefined
+      if (status === 2) errorCode = RESULT_CODES.PANIC
+      else if (status === 3) errorCode = RESULT_CODES.FAULT
+      else if (status === 5) errorCode = RESULT_CODES.OOG
+      writeTraceDump(
+        logsToWrite,
+        hostLogsToWrite,
+        traceOutputDir,
+        undefined,
+        undefined,
+        'rust',
+        undefined,
+        undefined,
+        0,
+        result instanceof Uint8Array ? result : undefined,
+        errorCode,
+      )
+    }
+
+    return safeResult({
+      gasConsumed,
+      result,
+      exportSegments,
     })
   }
 

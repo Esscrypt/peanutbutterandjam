@@ -44,3 +44,7 @@
 [submodule "submodules/JIPs"]
 	path = submodules/JIPs
 	url = https://github.com/polkadot-fellows/JIPs.git
+[submodule "submodules/jamtestnet"]
+	path = submodules/jamtestnet
+	url = https://github.com/jam-duna/jamtestnet.git
+	branch = main

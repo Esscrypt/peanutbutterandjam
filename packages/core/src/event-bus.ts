@@ -68,6 +68,8 @@ export interface SlotChangeEvent {
 export interface EpochTransitionEvent {
   slot: bigint
   epochMark: EpochMark | null
+  /** Prior block's timeslot (Gray Paper: thetime). Used to compute m = priorSlot % Cepochlen for Eq. 202-207. */
+  priorSlot: bigint
 }
 
 export interface RevertEpochTransitionEvent {

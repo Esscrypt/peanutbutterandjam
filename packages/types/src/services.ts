@@ -58,7 +58,7 @@ export interface ISealKeyService extends BaseService {
   getSealKeyForSlot(slot: bigint): Safe<SafroleTicketWithoutProof | Uint8Array>
   setSealKeys(sealKeys: (SafroleTicketWithoutProof | Uint8Array)[]): void
   getPendingWinnersMark(): SafroleTicketWithoutProof[] | null
-  calculateNewSealKeySequence(): Safe<undefined>
+  calculateNewSealKeySequence(previousSlotPhase: number): Safe<undefined>
 }
 
 export interface IRecentHistoryService extends BaseService {

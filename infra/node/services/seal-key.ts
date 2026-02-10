@@ -90,8 +90,6 @@ export class SealKeyService extends BaseService implements ISealKeyService {
    * - entropy'_2 = entropy2 AFTER epoch transition = old entropy1 (from Eq. 179-181)
    * - activeset' = active set AFTER epoch transition = old pendingSet (from Eq. 115-118)
    *
-   * However, test vectors may use old entropy2 (before rotation) instead of old entropy1.
-   * We save old entropy2 before entropy rotation to allow testing both interpretations.
    */
   private readonly handleEpochTransition = (
     event: EpochTransitionEvent,
@@ -99,6 +97,8 @@ export class SealKeyService extends BaseService implements ISealKeyService {
     // Save state before clearing for potential revert
     this.preTransitionSealTickets = new Map(this.sealTicketForPhase)
     this.preTransitionFallbackKeys = new Map(this.fallbackKeyForPhase)
+
+    const epochDuration = BigInt(this.configService.epochDuration)
 
     // Clear old seal keys before calculating new ones
     // This ensures we don't have stale keys from the previous epoch
@@ -115,11 +115,10 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       )
     }
 
-    // Calculate new seal key sequence using the updated activeSet'
-    // This must happen after validatorSetManager has updated activeSet' = pendingSet
-    // Note: epochMark contains pendingSet' (for NEXT epoch), NOT activeSet' (for CURRENT epoch)
-    // So we don't pass epochMark - we use validatorSetManager.getActiveValidators() instead
-    const [error] = this.calculateNewSealKeySequence()
+    // Gray Paper Eq. 33-34: e remainder m = thetime/Cepochlen — m is the PRIOR block's phase (thetime = prior slot).
+    const priorSlot = event.priorSlot
+    const previousSlotPhase = Number(priorSlot % epochDuration)
+    const [error] = this.calculateNewSealKeySequence(previousSlotPhase)
     if (error) {
       logger.error('[SealKeyService] Failed to calculate seal key sequence', {
         slot: event.slot.toString(),
@@ -127,18 +126,6 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       })
       return safeError(error)
     }
-
-    // after calculating the sequence for the new epoch, clear the ticket accumulator
-    this.ticketService.clearTicketAccumulator()
-
-    logger.info(
-      '[SealKeyService] Epoch transition - seal key sequence calculated',
-      {
-        slot: event.slot.toString(),
-        fallbackKeysCount: this.fallbackKeyForPhase.size,
-        ticketKeysCount: this.sealTicketForPhase.size,
-      },
-    )
 
     return safeResult(undefined)
   }
@@ -229,13 +216,18 @@ export class SealKeyService extends BaseService implements ISealKeyService {
    * @param overrides.activeValidatorsOverride Optional: Pre-computed active validator set (new active set for epoch transitions)
    * @param overrides.storeInState Optional: Whether to store the computed seal keys in state (default: true)
    * @returns The computed seal key for the specified phase, or all phases if phase is not specified
+   * @param previousSlotPhase Phase m of the previous slot (slot before epoch boundary). Used to enforce m ≥ Cepochtailstart for Z(ticketaccumulator).
    */
-  calculateNewSealKeySequence(): Safe<undefined> {
-    // Priority 1: Use winnersMark from block header if available
+  calculateNewSealKeySequence(previousSlotPhase: number): Safe<undefined> {
+    // Gray Paper Eq. 202-207: Z(ticketaccumulator) only when e' = e + 1 ∧ m ≥ Cepochtailstart ∧ |ticketaccumulator| = Cepochlen
+    const epochReachedTail =
+      previousSlotPhase >= this.configService.contestDuration
+
+    // Priority 1: Use winnersMark from block header if available (only when m ≥ Cepochtailstart)
     // Gray Paper Eq. 202-207: sealtickets' = Z(ticketaccumulator) when e' = e + 1 ∧ m ≥ Cepochtailstart ∧ |ticketaccumulator| = Cepochlen
     // The winnersMark is already Z-sequenced, so we use it directly
     const pendingWinnersMark = this.pendingWinnersMark
-    if (pendingWinnersMark) {
+    if (epochReachedTail && pendingWinnersMark) {
       logger.info(
         '[SealKeyService] Using winnersMark from block header for seal keys',
         {
@@ -269,10 +261,11 @@ export class SealKeyService extends BaseService implements ISealKeyService {
       return safeResult(undefined)
     }
 
-    // Priority 2: Use ticket accumulator if full (fallback if winnersMark not available)
-    const ticketAccumulator = this.ticketService.isAccumulatorFull()
-      ? this.ticketService.getTicketAccumulator()
-      : null
+    // Priority 2: Use ticket accumulator if full, only when m ≥ Cepochtailstart (Gray Paper Eq. 202-207)
+    const ticketAccumulator =
+      epochReachedTail && this.ticketService.isAccumulatorFull()
+        ? this.ticketService.getTicketAccumulator()
+        : null
 
     if (
       ticketAccumulator &&
@@ -352,14 +345,6 @@ export class SealKeyService extends BaseService implements ISealKeyService {
         return safeError(new Error(`Missing fallback key at phase ${phase}`))
       }
       this.fallbackKeyForPhase.set(BigInt(phase), ticket)
-
-      // Log first few phases and phase 12 specifically for debugging
-      if (phase < 3 || phase === 12) {
-        logger.debug('[SealKeyService] Fallback key for phase', {
-          phase,
-          sealKey: bytesToHex(ticket),
-        })
-      }
     }
 
     return safeResult(undefined)

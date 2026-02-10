@@ -41,10 +41,10 @@ use crate::codec::{decode_implications_pair, encode_implications_pair};
 use crate::config::DEFAULT_GAS_LIMIT;
 use crate::types::Ram;
 use state_wrapper::{
-    get_accumulation_context_encoded, get_state, init_memory_layout_impl, init_page_impl, init_state,
-    next_step_impl, prepare_blob_impl, reset_state, run_blob_impl, set_memory_impl,
-    setup_accumulate_from_preimage, SetupAccumulateParams, RAMType,
-    Status,
+    get_accumulation_context_encoded, get_state, init_memory_layout_impl,
+    init_page_impl, init_state, next_step_impl, prepare_blob_impl, reset_state, run_blob_impl,
+    set_memory_impl, setup_accumulate_from_preimage, setup_refine_from_preimage,
+    SetupAccumulateParams, SetupRefineParams, RAMType, Status,
 };
 
 // --- RAMType values (caller can use 0, 1, 2 or these getters) ---
@@ -217,6 +217,32 @@ pub fn setup_accumulate_invocation(
         config_ec_piece_size,
     };
     setup_accumulate_from_preimage(params);
+}
+
+#[napi]
+pub fn setup_refine_invocation(
+    gas_limit: u32,
+    program: Buffer,
+    args: Buffer,
+    refine_context_encoded: Buffer,
+    config_max_refine_gas: i64,
+) {
+    let params = SetupRefineParams {
+        program: program.as_ref(),
+        args: args.as_ref(),
+        refine_context_encoded: refine_context_encoded.as_ref(),
+        gas_limit,
+        config_max_refine_gas: config_max_refine_gas.max(0) as u64,
+    };
+    setup_refine_from_preimage(params);
+}
+
+#[napi]
+pub fn get_export_segments() -> Vec<Buffer> {
+    state_wrapper::get_export_segments()
+        .into_iter()
+        .map(Buffer::from)
+        .collect()
 }
 
 #[napi]

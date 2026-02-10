@@ -135,6 +135,7 @@ describe('Statistics Service - JAM Test Vectors', () => {
             await eventBusService.emitEpochTransition({
               slot: header.timeslot,
               epochMark: header.epochMark || null,
+              priorSlot: header.timeslot - 1n,
             })
           }
 

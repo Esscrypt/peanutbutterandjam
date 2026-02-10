@@ -415,6 +415,11 @@ export async function createCoreServices(
   // Wire up circular dependencies
   ticketService.setValidatorSetManager(validatorSetManager)
   sealKeyService.setValidatorSetManager(validatorSetManager)
+  // TicketService epoch callbacks registered after SealKeyService so SealKeyService can use accumulator first (Gray Paper Eq. 202-207)
+  const [ticketInitError] = ticketService.init()
+  if (ticketInitError) {
+    throw ticketInitError
+  }
   if (networkingService) {
     networkingService.setValidatorSetManager(validatorSetManager)
   }

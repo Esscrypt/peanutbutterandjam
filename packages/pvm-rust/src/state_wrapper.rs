@@ -3,6 +3,7 @@
 
 use crate::codec::{
     decode_blob, decode_accumulate_args, decode_implications_pair, decode_program_from_preimage,
+    decode_service_code_from_preimage,
     encode_implications_pair,
     AccountEntry, CompleteServiceAccount, DeferredTransfer, Implications, ImplicationsPair,
     PartialState, ProvisionEntry,
@@ -14,6 +15,7 @@ use crate::config::{
 };
 use crate::host_functions::base::HostFunctionContext;
 use crate::host_functions::get_host_function;
+use crate::host_functions::refine::RefineContext;
 use crate::instructions::registry::InstructionRegistry;
 use crate::instructions::registry_instructions::register_all_instructions;
 use crate::mock_ram::MockRam;
@@ -268,6 +270,12 @@ pub struct PvmState {
     pub accumulation_nextfreeid: u32,
     /// Provisions (PROVIDE adds (service_id, preimage)). Initialized from implications at setup; merged into regular.provisions when encoding.
     pub accumulation_provisions: Vec<ProvisionEntry>,
+    /// True when running a refinement invocation (setup_refine_from_preimage). Enables refine_context and export segment collection.
+    pub has_refine_context: bool,
+    /// Export segments pushed by EXPORT host during refine invocation. Returned by get_export_segments.
+    pub refine_export_segments: Vec<Vec<u8>>,
+    /// Current segment offset for refine (segoff). Updated by push_export_segment.
+    pub refine_segment_offset: i64,
 }
 
 impl PvmState {
@@ -304,6 +312,9 @@ impl PvmState {
         self.accumulation_pending_xfers.clear();
         self.accumulation_regular_state = PartialState::default();
         self.accumulation_provisions.clear();
+        self.has_refine_context = false;
+        self.refine_export_segments.clear();
+        self.refine_segment_offset = 0;
     }
 }
 
@@ -352,6 +363,9 @@ impl Default for PvmState {
             accumulation_regular_state: PartialState::default(),
             accumulation_nextfreeid: 0,
             accumulation_provisions: vec![],
+            has_refine_context: false,
+            refine_export_segments: vec![],
+            refine_segment_offset: 0,
         }
     }
 }
@@ -422,6 +436,16 @@ pub fn get_accumulation_context_encoded(
     ))
 }
 
+/// Return export segments collected during refine invocation (EXPORT host). Empty if not in refine mode.
+pub fn get_export_segments() -> Vec<Vec<u8>> {
+    let g = STATE.lock().expect("pvm state lock");
+    let state = g.as_ref();
+    match state {
+        Some(s) if s.has_refine_context => s.refine_export_segments.clone(),
+        _ => vec![],
+    }
+}
+
 pub fn init_state(ram_type: i32) {
     let mut g = STATE.lock().expect("pvm state lock");
     let ram = match ram_type {
@@ -469,6 +493,133 @@ pub struct SetupAccumulateParams<'a> {
     pub config_contest_duration: u32,
     pub config_max_lookup_anchorage: u32,
     pub config_ec_piece_size: u32,
+}
+
+/// RefineContext implementation that appends export segments to state. Used during refine invocation.
+/// MACHINE/INVOKE/PEEK/POKE/PAGES/EXPUNGE are stubbed (no sub-machines in this implementation).
+struct RefineContextForState<'a> {
+    segments: &'a mut Vec<Vec<u8>>,
+    segment_offset: &'a mut i64,
+}
+
+impl RefineContext for RefineContextForState<'_> {
+    fn segment_offset(&self) -> i64 {
+        *self.segment_offset
+    }
+    fn push_export_segment(&mut self, segment: Vec<u8>) -> Result<i64, ()> {
+        let len = segment.len() as i64;
+        *self.segment_offset += len;
+        self.segments.push(segment);
+        Ok(*self.segment_offset)
+    }
+    fn add_machine(&mut self, _program: &[u8], _initial_pc: u64) -> u64 {
+        0
+    }
+    fn with_machine(&mut self, _machine_id: u64, _f: &mut dyn FnMut(&mut dyn crate::host_functions::refine::RefineMachine)) -> bool {
+        false
+    }
+    fn remove_machine(&mut self, _machine_id: u64) -> Option<u64> {
+        None
+    }
+}
+
+/// Params for setup_refine_from_preimage (from setup_refine_invocation).
+pub struct SetupRefineParams<'a> {
+    pub program: &'a [u8],
+    pub args: &'a [u8],
+    pub refine_context_encoded: &'a [u8],
+    pub gas_limit: u32,
+    pub config_max_refine_gas: u64,
+}
+
+
+/// Setup state for refinement invocation. Tries two formats: (1) Preimage + Y-format program:
+/// decode_program_from_preimage → decode_blob(decoded.code), init memory from ro/rw. (2) Preimage + raw deblob:
+/// decode_service_code_from_preimage → decode_blob(code_blob), init memory with empty ro/rw. Initial PC=0 per
+/// pvm_invocations.tex eq. refinvocation: Ψ_M(𝐜, 0, …).
+pub fn setup_refine_from_preimage(params: SetupRefineParams<'_>) -> bool {
+    let mut g = STATE.lock().expect("pvm state lock");
+    let Some(state) = g.as_mut() else {
+        return false;
+    };
+
+    let (decoded_blob, ro_data, rw_data, stack_size, heap_zero_padding_size) =
+        if let Some(decoded) = decode_program_from_preimage(params.program) {
+            let Some(blob) = decode_blob(&decoded.code) else {
+                state.status = Status::Panic;
+                state.result_code = RESULT_CODE_PANIC;
+                return false;
+            };
+            (
+                blob,
+                decoded.ro_data,
+                decoded.rw_data,
+                decoded.stack_size,
+                decoded.heap_zero_padding_size,
+            )
+        } else if let Some(preimage_result) = decode_service_code_from_preimage(params.program) {
+            let Some(blob) = decode_blob(&preimage_result.value.code_blob) else {
+                state.status = Status::Panic;
+                state.result_code = RESULT_CODE_PANIC;
+                return false;
+            };
+            // Blob-only: no Y-format ro/rw/stack/heap; use empty and zeros.
+            (blob, vec![], vec![], 0u32, 0u32)
+        } else {
+            state.status = Status::Panic;
+            state.result_code = RESULT_CODE_PANIC;
+            return false;
+        };
+
+    let code_len = decoded_blob.code.len();
+    let ext_len = code_len + 16;
+    let mut extended_code = vec![0u8; ext_len];
+    extended_code[..code_len].copy_from_slice(&decoded_blob.code);
+    let mut extended_bitmask = vec![1u8; ext_len + 25];
+    extended_bitmask[..decoded_blob.bitmask.len().min(ext_len)].copy_from_slice(&decoded_blob.bitmask);
+    state.code = extended_code;
+    state.bitmask = extended_bitmask;
+    state.jump_table = decoded_blob.jump_table;
+    state.ram.reset();
+    state.ram.initialize_memory_layout(
+        params.args,
+        &ro_data,
+        &rw_data,
+        stack_size,
+        heap_zero_padding_size,
+    );
+    state.program_counter = 0;
+    state.gas_left = params.gas_limit;
+    state.status = Status::Ok;
+    state.result_code = RESULT_CODE_HALT;
+    state.registers = [0u64; 13];
+    state.registers[0] = u64::from(HALT_ADDRESS);
+    state.registers[1] = u64::from(STACK_SEGMENT_END);
+    state.registers[7] = u64::from(ARGS_SEGMENT_START);
+    state.registers[8] = params.args.len() as u64;
+    state.exit_arg = 0;
+    state.host_call_id = 0;
+    state.has_refine_context = true;
+    state.refine_context_encoded = Some(params.refine_context_encoded.to_vec());
+    state.refine_export_segments.clear();
+    state.refine_segment_offset = 0;
+    state.accumulation_fetch_config = Some(FetchSystemConstantsConfig {
+        num_cores: 0,
+        preimage_expunge_period: 0,
+        epoch_duration: 0,
+        max_refine_gas: params.config_max_refine_gas,
+        max_block_gas: 0,
+        max_tickets_per_extrinsic: 0,
+        max_lookup_anchorage: 0,
+        tickets_per_validator: 0,
+        slot_duration: 0,
+        rotation_period: 0,
+        num_validators: 0,
+        ec_piece_size: 0,
+        num_ec_pieces_per_segment: 0,
+        contest_duration: 0,
+    });
+    true
 }
 
 /// Setup state for accumulation invocation from preimage blob and args (Gray Paper Y function).
@@ -659,7 +810,24 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
     if result.result_code == RESULT_CODE_HOST as i32 {
         // During accumulation invocation, only allow host IDs from AS pvm.ts handleAccumulationHostCall:
         // general 0-5, log 100, accumulation 14-26. Others: deduct 10 gas, set r7=WHAT, advance PC, continue.
-        if state.has_accumulation_context {
+        // During refine invocation, allow general 0-13 (GAS, FETCH, LOOKUP, READ, WRITE, INFO, HISTORICAL_LOOKUP, EXPORT, MACHINE, PEEK, POKE, PAGES, INVOKE, EXPUNGE) and LOG 100.
+        if state.has_refine_context {
+            let id = state.host_call_id as u64;
+            let allowed = (id <= 13) || (id == 100);
+            if !allowed {
+                const HOST_BASE_GAS: u32 = 10;
+                if state.gas_left < HOST_BASE_GAS {
+                    state.status = Status::Oog;
+                    state.result_code = RESULT_CODE_OOG;
+                    return false;
+                }
+                state.gas_left = state.gas_left.saturating_sub(HOST_BASE_GAS);
+                use crate::config::REG_WHAT;
+                state.registers[7] = REG_WHAT;
+                state.program_counter = pc + instruction_length as u32;
+                return true;
+            }
+        } else if state.has_accumulation_context {
             let id = state.host_call_id as u64;
             let allowed = (id <= 5) || (id == 100) || (id >= 14 && id <= 26);
             if !allowed {
@@ -687,95 +855,143 @@ pub fn next_step_impl(state: &mut PvmState) -> bool {
             }
             state.gas_left = state.gas_left.saturating_sub(host_base_gas);
 
-            let mut host_ctx = HostFunctionContext {
-                registers: &mut state.registers,
-                ram: &mut state.ram,
-                gas_remaining: &mut state.gas_left,
-                service_id: state.accumulation_service_id,
-                service_account: None,
-                accounts: state.accumulation_accounts.as_mut(),
-                manager_id: if state.has_accumulation_context {
-                    Some(state.accumulation_regular_state.manager as u64)
-                } else {
-                    None
-                },
-                registrar_id: if state.has_accumulation_context {
-                    Some(state.accumulation_regular_state.registrar as u64)
-                } else {
-                    None
-                },
-                nextfreeid: if state.has_accumulation_context {
-                    Some(&mut state.accumulation_nextfreeid)
-                } else {
-                    None
-                },
-                lookup_timeslot: None,
-                timeslot: state.timeslot,
-                expunge_period: state
-                    .accumulation_fetch_config
-                    .as_ref()
-                    .map(|c| c.preimage_expunge_period as u64),
-                refine_context: None,
-                yield_hash: if state.has_accumulation_context {
-                    Some(&mut state.yield_hash)
-                } else {
-                    None
-                },
-                provisions: if state.has_accumulation_context {
-                    Some(&mut state.accumulation_provisions)
-                } else {
-                    None
-                },
-                xfers: if state.has_accumulation_context {
-                    Some(&mut state.accumulation_pending_xfers)
-                } else {
-                    None
-                },
-                delegator_id: if state.has_accumulation_context {
-                    Some(state.accumulation_regular_state.delegator as u64)
-                } else {
-                    None
-                },
-                num_validators: if state.accumulation_num_validators > 0 {
-                    Some(state.accumulation_num_validators)
-                } else {
-                    None
-                },
-                accumulation_state: if state.has_accumulation_context {
-                    Some(&mut state.accumulation_regular_state)
-                } else {
-                    None
-                },
-                checkpoint_requested: if state.has_accumulation_context {
-                    Some(&mut state.checkpoint_requested)
-                } else {
-                    None
-                },
-                num_cores: if state.accumulation_num_cores > 0 {
-                    Some(state.accumulation_num_cores)
-                } else {
-                    None
-                },
-                fetch_entropy_accumulator: state.entropy_accumulator.as_deref(),
-                fetch_authorizer_trace: None,
-                fetch_export_segments: None,
-                fetch_import_segments: None,
-                fetch_work_item_index: None,
-                fetch_accumulate_inputs: if state.accumulate_inputs_encoded.is_empty() {
-                    None
-                } else {
-                    Some(state.accumulate_inputs_encoded.as_slice())
-                },
-                fetch_work_package_encoded: state.work_package_encoded.as_deref(),
-                fetch_auth_config: state.auth_config.as_deref(),
-                fetch_auth_token: state.auth_token.as_deref(),
-                fetch_refine_context_encoded: state.refine_context_encoded.as_deref(),
-                fetch_work_item_summaries: state.work_item_summaries.as_deref(),
-                fetch_work_item_payloads: state.work_item_payloads.as_deref(),
-                log_messages: Some(&mut state.log_messages),
-                fetch_system_constants_config: state.accumulation_fetch_config.as_ref(),
+            let host_result = if state.has_refine_context {
+                let mut refine_ctx = RefineContextForState {
+                    segments: &mut state.refine_export_segments,
+                    segment_offset: &mut state.refine_segment_offset,
+                };
+                let mut host_ctx = HostFunctionContext {
+                    registers: &mut state.registers,
+                    ram: &mut state.ram,
+                    gas_remaining: &mut state.gas_left,
+                    service_id: state.accumulation_service_id,
+                    service_account: None,
+                    accounts: state.accumulation_accounts.as_mut(),
+                    manager_id: None,
+                    registrar_id: None,
+                    nextfreeid: None,
+                    lookup_timeslot: None,
+                    timeslot: state.timeslot,
+                    expunge_period: state
+                        .accumulation_fetch_config
+                        .as_ref()
+                        .map(|c| c.preimage_expunge_period as u64),
+                    refine_context: Some(&mut refine_ctx),
+                    yield_hash: None,
+                    provisions: None,
+                    xfers: None,
+                    delegator_id: None,
+                    num_validators: None,
+                    accumulation_state: None,
+                    checkpoint_requested: None,
+                    num_cores: None,
+                    fetch_entropy_accumulator: state.entropy_accumulator.as_deref(),
+                    fetch_authorizer_trace: None,
+                    fetch_export_segments: None,
+                    fetch_import_segments: None,
+                    fetch_work_item_index: None,
+                    fetch_accumulate_inputs: None,
+                    fetch_work_package_encoded: state.work_package_encoded.as_deref(),
+                    fetch_auth_config: state.auth_config.as_deref(),
+                    fetch_auth_token: state.auth_token.as_deref(),
+                    fetch_refine_context_encoded: state.refine_context_encoded.as_deref(),
+                    fetch_work_item_summaries: state.work_item_summaries.as_deref(),
+                    fetch_work_item_payloads: state.work_item_payloads.as_deref(),
+                    log_messages: Some(&mut state.log_messages),
+                    fetch_system_constants_config: state.accumulation_fetch_config.as_ref(),
+                };
+                handler.execute(&mut host_ctx)
+            } else {
+                let mut host_ctx = HostFunctionContext {
+                    registers: &mut state.registers,
+                    ram: &mut state.ram,
+                    gas_remaining: &mut state.gas_left,
+                    service_id: state.accumulation_service_id,
+                    service_account: None,
+                    accounts: state.accumulation_accounts.as_mut(),
+                    manager_id: if state.has_accumulation_context {
+                        Some(state.accumulation_regular_state.manager as u64)
+                    } else {
+                        None
+                    },
+                    registrar_id: if state.has_accumulation_context {
+                        Some(state.accumulation_regular_state.registrar as u64)
+                    } else {
+                        None
+                    },
+                    nextfreeid: if state.has_accumulation_context {
+                        Some(&mut state.accumulation_nextfreeid)
+                    } else {
+                        None
+                    },
+                    lookup_timeslot: None,
+                    timeslot: state.timeslot,
+                    expunge_period: state
+                        .accumulation_fetch_config
+                        .as_ref()
+                        .map(|c| c.preimage_expunge_period as u64),
+                    refine_context: None,
+                    yield_hash: if state.has_accumulation_context {
+                        Some(&mut state.yield_hash)
+                    } else {
+                        None
+                    },
+                    provisions: if state.has_accumulation_context {
+                        Some(&mut state.accumulation_provisions)
+                    } else {
+                        None
+                    },
+                    xfers: if state.has_accumulation_context {
+                        Some(&mut state.accumulation_pending_xfers)
+                    } else {
+                        None
+                    },
+                    delegator_id: if state.has_accumulation_context {
+                        Some(state.accumulation_regular_state.delegator as u64)
+                    } else {
+                        None
+                    },
+                    num_validators: if state.accumulation_num_validators > 0 {
+                        Some(state.accumulation_num_validators)
+                    } else {
+                        None
+                    },
+                    accumulation_state: if state.has_accumulation_context {
+                        Some(&mut state.accumulation_regular_state)
+                    } else {
+                        None
+                    },
+                    checkpoint_requested: if state.has_accumulation_context {
+                        Some(&mut state.checkpoint_requested)
+                    } else {
+                        None
+                    },
+                    num_cores: if state.accumulation_num_cores > 0 {
+                        Some(state.accumulation_num_cores)
+                    } else {
+                        None
+                    },
+                    fetch_entropy_accumulator: state.entropy_accumulator.as_deref(),
+                    fetch_authorizer_trace: None,
+                    fetch_export_segments: None,
+                    fetch_import_segments: None,
+                    fetch_work_item_index: None,
+                    fetch_accumulate_inputs: if state.accumulate_inputs_encoded.is_empty() {
+                        None
+                    } else {
+                        Some(state.accumulate_inputs_encoded.as_slice())
+                    },
+                    fetch_work_package_encoded: state.work_package_encoded.as_deref(),
+                    fetch_auth_config: state.auth_config.as_deref(),
+                    fetch_auth_token: state.auth_token.as_deref(),
+                    fetch_refine_context_encoded: state.refine_context_encoded.as_deref(),
+                    fetch_work_item_summaries: state.work_item_summaries.as_deref(),
+                    fetch_work_item_payloads: state.work_item_payloads.as_deref(),
+                    log_messages: Some(&mut state.log_messages),
+                    fetch_system_constants_config: state.accumulation_fetch_config.as_ref(),
+                };
+                handler.execute(&mut host_ctx)
             };
-            let host_result = handler.execute(&mut host_ctx);
             // Gray Paper line 752: imY' = imX. When CHECKPOINT (17) ran it set checkpoint_requested.
             // Snapshot current regular into exceptional so panic/OOG reverts to this checkpoint.
             if state.checkpoint_requested {

@@ -16,12 +16,12 @@
  * They are passed to Ψ_M as the argument blob and contain all parameters
  * required by the refine invocation.
  *
- * Refine Arguments structure:
- * 1. **Core index (c)** (4 bytes): Core performing the refinement
- * 2. **Work item index (i)** (4 bytes): Index of work item being refined
- * 3. **Service index** (4 bytes): Service executing the work item
- * 4. **Payload** (variable): Authorizer trace data with length discriminator
- * 5. **Work package hash** (32 bytes): Blake hash of the work package
+ * Refine Arguments structure (GP encode = concat of encodings):
+ * 1. **Core index (c)**: encode(c) — variable-length natural (GP eq 29–37)
+ * 2. **Work item index (i)**: encode(i) — variable-length natural
+ * 3. **Service index (w_wi¬serviceindex)**: encode(serviceindex) — variable-length natural
+ * 4. **var{w_wi¬payload}**: encode{var{x}} = encode{len(x)} concat encode{x} — length as variable-length natural, then payload blob
+ * 5. **blake{p}**: 32-byte Blake2b hash of encoded work package
  *
  * Key concepts:
  * - **Core assignment**: Which core is performing the refinement
@@ -30,8 +30,8 @@
  * - **Authorizer trace**: Variable-length authorization data
  * - **Package integrity**: Hash ensures work package hasn't changed
  *
- * Variable encoding:
- * - **var{w_wi¬payload}**: Length discriminator (4 bytes) + payload data
+ * Variable encoding (GP serialization eq 51):
+ * - **var{w_wi¬payload}**: encode{len(payload)} (variable-length natural) + payload data
  * - **blake{p}**: 32-byte Blake2b hash of encoded work package
  *
  * This structure enables the PVM to execute refine operations with
@@ -41,6 +41,7 @@
 import { blake2bHash, concatBytes, hexToBytes } from '@pbnjam/core'
 import type { DecodingResult, Safe, WorkItem, WorkPackage } from '@pbnjam/types'
 import { safeError, safeResult } from '@pbnjam/types'
+import { decodeNatural, encodeNatural } from '../core/natural-number'
 import { encodeWorkPackage } from '../work-package/package'
 
 /**
@@ -77,27 +78,25 @@ export function encodeRefineArguments(
   workPackage: WorkPackage,
 ): Safe<Uint8Array> {
   try {
-    // 1. Core index (c) - encode as 4-byte little-endian
-    const coreIndexBytes = new ArrayBuffer(4)
-    const coreIndexView = new DataView(coreIndexBytes)
-    coreIndexView.setUint32(0, Number(coreIndex), true)
+    // 1. Core index (c) — encode(c) variable-length natural (GP)
+    const [coreErr, coreIndexBytes] = encodeNatural(coreIndex)
+    if (coreErr) return safeError(coreErr)
 
-    // 2. Work item index (i) - encode as 4-byte little-endian
-    const workItemIndexBytes = new ArrayBuffer(4)
-    const workItemIndexView = new DataView(workItemIndexBytes)
-    workItemIndexView.setUint32(0, Number(workItemIndex), true)
+    // 2. Work item index (i) — encode(i) variable-length natural (GP)
+    const [workItemErr, workItemIndexBytes] = encodeNatural(workItemIndex)
+    if (workItemErr) return safeError(workItemErr)
 
-    // 3. Service index from work item (w_wi¬serviceindex) - encode as 4-byte little-endian
-    const serviceIndexBytes = new ArrayBuffer(4)
-    const serviceIndexView = new DataView(serviceIndexBytes)
-    serviceIndexView.setUint32(0, Number(workItem.serviceindex), true)
+    // 3. Service index (w_wi¬serviceindex) — encode(serviceindex) variable-length natural (GP)
+    const [serviceErr, serviceIndexBytes] = encodeNatural(workItem.serviceindex)
+    if (serviceErr) return safeError(serviceErr)
 
-    // 4. Variable-length payload (var{w_wi¬payload}) - length discriminator + payload
-    const payloadLengthBytes = new ArrayBuffer(4)
-    const payloadLengthView = new DataView(payloadLengthBytes)
-    payloadLengthView.setUint32(0, workItem.payload.length, true)
+    // 4. var{w_wi¬payload} = encode{len(payload)} concat payload (GP eq 51)
+    const [payloadLenErr, payloadLengthBytes] = encodeNatural(
+      BigInt(workItem.payload.length),
+    )
+    if (payloadLenErr) return safeError(payloadLenErr)
 
-    // 5. Blake hash of work package (blake{p}) - 32-byte hash
+    // 5. Blake hash of work package (blake{p}) — 32-byte hash
     const [workPackageError, workPackageEncoded] =
       encodeWorkPackage(workPackage)
     if (workPackageError) {
@@ -117,12 +116,12 @@ export function encodeRefineArguments(
     }
     const workPackageHashBytes = hexToBytes(workPackageHash)
 
-    // Concatenate all parts: c + i + serviceIndex + var{payload} + blake{p}
+    // Concatenate all parts: encode(c) || encode(i) || encode(serviceindex) || var{payload} || blake{p}
     const parts = [
-      new Uint8Array(coreIndexBytes),
-      new Uint8Array(workItemIndexBytes),
-      new Uint8Array(serviceIndexBytes),
-      new Uint8Array(payloadLengthBytes),
+      coreIndexBytes,
+      workItemIndexBytes,
+      serviceIndexBytes,
+      payloadLengthBytes,
       workItem.payload,
       workPackageHashBytes,
     ]
@@ -147,44 +146,53 @@ export function decodeRefineArguments(
   data: Uint8Array,
 ): Safe<DecodingResult<RefineArguments>> {
   try {
-    if (data.length < 48) {
-      // Minimum: 4+4+4+4+32 = 48 bytes
+    if (data.length < 1 + 1 + 1 + 1 + 32) {
       return safeError(new Error('Insufficient data for refine arguments'))
     }
 
     let offset = 0
+    let rest = data
 
-    // 1. Core index (4 bytes)
-    const coreIndexView = new DataView(data.buffer, offset, 4)
-    const coreIndex = BigInt(coreIndexView.getUint32(0, true))
-    offset += 4
+    // 1. Core index (c) — variable-length natural
+    const [coreErr, coreDec] = decodeNatural(rest)
+    if (coreErr) return safeError(coreErr)
+    const coreIndex = coreDec!.value
+    offset += coreDec!.consumed
+    rest = coreDec!.remaining
 
-    // 2. Work item index (4 bytes)
-    const workItemIndexView = new DataView(data.buffer, offset, 4)
-    const workItemIndex = BigInt(workItemIndexView.getUint32(0, true))
-    offset += 4
+    // 2. Work item index (i) — variable-length natural
+    const [workItemErr, workItemDec] = decodeNatural(rest)
+    if (workItemErr) return safeError(workItemErr)
+    const workItemIndex = workItemDec!.value
+    offset += workItemDec!.consumed
+    rest = workItemDec!.remaining
 
-    // 3. Service index (4 bytes)
-    const serviceIndexView = new DataView(data.buffer, offset, 4)
-    const serviceIndex = BigInt(serviceIndexView.getUint32(0, true))
-    offset += 4
+    // 3. Service index — variable-length natural
+    const [serviceErr, serviceDec] = decodeNatural(rest)
+    if (serviceErr) return safeError(serviceErr)
+    const serviceIndex = serviceDec!.value
+    offset += serviceDec!.consumed
+    rest = serviceDec!.remaining
 
-    // 4. Payload length discriminator (4 bytes)
-    const payloadLengthView = new DataView(data.buffer, offset, 4)
-    const payloadLength = payloadLengthView.getUint32(0, true)
-    offset += 4
+    // 4. var{payload} — length (variable-length natural) + payload
+    const [lenErr, lenDec] = decodeNatural(rest)
+    if (lenErr) return safeError(lenErr)
+    const payloadLength = Number(lenDec!.value)
+    offset += lenDec!.consumed
+    rest = lenDec!.remaining
 
-    // Validate payload length
-    if (offset + payloadLength + 32 > data.length) {
+    if (payloadLength < 0 || rest.length < payloadLength + 32) {
       return safeError(new Error('Invalid payload length in refine arguments'))
     }
 
-    // 5. Payload data (variable length)
-    const payload = data.slice(offset, offset + payloadLength)
+    const payload = rest.slice(0, payloadLength)
     offset += payloadLength
+    rest = rest.slice(payloadLength)
 
-    // 6. Work package hash (32 bytes)
-    const workPackageHash = data.slice(offset, offset + 32)
+    // 5. Work package hash (32 bytes)
+    const workPackageHash = rest.slice(0, 32)
+    offset += 32
+    rest = rest.slice(32)
 
     const result: RefineArguments = {
       coreIndex,
@@ -196,8 +204,8 @@ export function decodeRefineArguments(
 
     return safeResult({
       value: result,
-      remaining: data.slice(offset + 32),
-      consumed: offset + 32,
+      remaining: rest,
+      consumed: offset,
     })
   } catch (error) {
     return safeError(

@@ -337,6 +337,7 @@ export class ClockService extends BaseService implements IClockService {
       const epochTransitionEvent = {
         slot: this.currentSlot,
         epochMark: null, // Clock service doesn't have epoch mark, only block importer does
+        priorSlot: previousSlot,
       }
 
       await this.eventBusService.emitEpochTransition(epochTransitionEvent)

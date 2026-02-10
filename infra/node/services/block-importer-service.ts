@@ -198,11 +198,12 @@ export class BlockImporterService
     }
 
     // Emit epoch transition before processing if needed
-    // if (isEpochTransition && block.header.epochMark) {
+    // Gray Paper: priorSlot = thetime (last applied block's slot) for m = priorSlot % Cepochlen in Eq. 202-207
     if (block.header.epochMark) {
       const epochTransitionEvent = {
         slot: block.header.timeslot,
         epochMark: block.header.epochMark,
+        priorSlot: previousSlot,
       }
       await this.eventBusService.emitEpochTransition(epochTransitionEvent)
     }
